@@ -633,6 +633,16 @@ enum APIBriefingFirstRunPhase: String, Codable, CaseIterable {
     case waiting_for_content = "waiting_for_content"
 }
 
+enum APIBriefingFirstRunSourceOutcome: String, Codable, CaseIterable {
+    case processed = "processed"
+    case unavailable = "unavailable"
+}
+
+enum APIReadingExperience: String, Codable, CaseIterable {
+    case classic = "classic"
+    case briefing = "briefing"
+}
+
 enum APIBriefingBlockType: String, Codable, CaseIterable {
     case passage = "passage"
     case figure = "figure"

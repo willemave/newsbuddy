@@ -1,4 +1,4 @@
-"""Durable progress for the temporary Start Here briefing page."""
+"""Durable source progress for the temporary Start Here briefing page."""
 
 from __future__ import annotations
 
@@ -9,16 +9,17 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.models.api.briefing import BriefingFirstRunProgress, BriefingFirstRunSourceProgress
-from app.models.contracts import BriefingFirstRunPhase
+from app.models.contracts import BriefingFirstRunPhase, BriefingFirstRunSourceOutcome
 from app.models.db import (
-    BriefingLens,
-    BriefingSegment,
     OnboardingFirstEditionRun,
     OnboardingFirstEditionSource,
     UserScraperConfig,
 )
 
-TERMINAL_SOURCE_STATUSES = {"ready", "empty", "unavailable"}
+TERMINAL_SOURCE_STATUSES = {
+    BriefingFirstRunSourceOutcome.PROCESSED.value,
+    BriefingFirstRunSourceOutcome.UNAVAILABLE.value,
+}
 
 
 @dataclass(frozen=True)
@@ -29,32 +30,21 @@ class FirstEditionSourceSpec:
 
 
 def start_first_edition(db: Session, *, user_id: int) -> OnboardingFirstEditionRun:
-    """Replace any unfinished run with one based on the user's active source configs."""
+    """Replace an unfinished run with one based on the user's active sources."""
 
     now = _now()
-    unfinished = (
-        db.query(OnboardingFirstEditionRun)
-        .filter(OnboardingFirstEditionRun.user_id == user_id)
-        .filter(OnboardingFirstEditionRun.status.in_(("active", "ready")))
-        .all()
-    )
-    for run in unfinished:
-        run.status = "expired"
-        run.completed_at = now
+    unfinished = _active_run(db, user_id=user_id)
+    if unfinished is not None:
+        unfinished.status = "expired"
+        unfinished.completed_at = now
 
     specs = _source_specs(db, user_id=user_id)
-    run = OnboardingFirstEditionRun(
-        user_id=user_id,
-        status="active",
-        revision=1,
-        connected_source_count=len(specs),
-        ready_category_keys=[],
-    )
+    run = OnboardingFirstEditionRun(user_id=user_id, status="active", revision=1)
     db.add(run)
     db.flush()
     run_id = _required_id(run.id)
-    for position, spec in enumerate(specs):
-        db.add(
+    db.add_all(
+        [
             OnboardingFirstEditionSource(
                 run_id=run_id,
                 source_key=spec.key,
@@ -63,12 +53,19 @@ def start_first_edition(db: Session, *, user_id: int) -> OnboardingFirstEditionR
                 position=position,
                 status="queued",
             )
-        )
+            for position, spec in enumerate(specs)
+        ]
+    )
     db.flush()
     return run
 
 
-def get_first_run_progress(db: Session, *, user_id: int) -> BriefingFirstRunProgress | None:
+def get_first_run_progress(
+    db: Session,
+    *,
+    user_id: int,
+    ready_category_keys: list[str] | None = None,
+) -> BriefingFirstRunProgress | None:
     run = _active_run(db, user_id=user_id)
     if run is None:
         return None
@@ -76,8 +73,9 @@ def get_first_run_progress(db: Session, *, user_id: int) -> BriefingFirstRunProg
         db.query(OnboardingFirstEditionSource)
         .filter(OnboardingFirstEditionSource.run_id == run.id)
         .order_by(
-            OnboardingFirstEditionSource.completion_sequence.asc().nullslast(),
+            OnboardingFirstEditionSource.completed_at.asc().nullslast(),
             OnboardingFirstEditionSource.position.asc(),
+            OnboardingFirstEditionSource.id.asc(),
         )
         .all()
     )
@@ -85,83 +83,95 @@ def get_first_run_progress(db: Session, *, user_id: int) -> BriefingFirstRunProg
         BriefingFirstRunSourceProgress(
             display_name=str(source.display_name),
             processed_item_count=max(int(source.processed_item_count or 0), 0),
+            outcome=BriefingFirstRunSourceOutcome(str(source.status)),
         )
         for source in sources
         if source.status in TERMINAL_SOURCE_STATUSES
     ]
     active = [
         str(source.display_name)
-        for source in sources
+        for source in sorted(sources, key=lambda source: int(source.position or 0))
         if source.status not in TERMINAL_SOURCE_STATUSES
     ][:2]
-    ready_keys = [str(key) for key in (run.ready_category_keys or [])]
-    all_sources_done = not sources or len(completed) == len(sources)
-    if all_sources_done and not ready_keys:
-        phase = BriefingFirstRunPhase.WAITING_FOR_CONTENT
-    elif run.status == "ready" or (all_sources_done and ready_keys):
+    category_keys = ready_category_keys or []
+    all_sources_done = len(completed) == len(sources)
+    if all_sources_done and category_keys:
         phase = BriefingFirstRunPhase.READY
+    elif all_sources_done:
+        phase = BriefingFirstRunPhase.WAITING_FOR_CONTENT
     else:
         phase = BriefingFirstRunPhase.ACTIVE
     return BriefingFirstRunProgress(
+        run_id=_required_id(run.id),
         revision=int(run.revision or 0),
         phase=phase,
-        connected_source_count=int(run.connected_source_count or 0),
+        connected_source_count=len(sources),
         completed_sources=completed,
         active_sources=active,
-        ready_category_keys=ready_keys,
+        ready_category_keys=category_keys,
     )
 
 
-def mark_feed_sources_complete(
+def record_feed_source_result(
     db: Session,
     *,
-    user_id: int,
-    config_ids: list[int],
-    processed_item_counts: dict[int, int] | None = None,
-) -> int:
-    keys = {f"feed:{config_id}" for config_id in config_ids}
-    counts_by_key = {
-        f"feed:{config_id}": max(int((processed_item_counts or {}).get(config_id, 0)), 0)
-        for config_id in config_ids
-    }
-    return _mark_sources_complete(
-        db,
-        user_id=user_id,
-        source_keys=keys,
-        processed_item_counts=counts_by_key,
+    run_id: int,
+    config_id: int,
+    processed_item_count: int,
+    outcome: BriefingFirstRunSourceOutcome,
+) -> bool:
+    run = _lock_active_run(db, run_id=run_id)
+    if run is None:
+        return False
+    row = (
+        db.query(OnboardingFirstEditionSource)
+        .filter(
+            OnboardingFirstEditionSource.run_id == run_id,
+            OnboardingFirstEditionSource.source_key == f"feed:{config_id}",
+        )
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        return False
+    return (
+        _record_rows(
+            db,
+            run=run,
+            rows=[row],
+            outcome=outcome,
+            processed_item_counts={str(row.source_key): processed_item_count},
+        )
+        > 0
     )
 
 
-def mark_scraper_sources_complete(
+def record_scraper_source_result(
     db: Session,
     *,
-    scraper_keys: list[str],
-    processed_item_counts: dict[str, int] | None = None,
-    processed_item_counts_by_config_id: dict[int, int] | None = None,
+    run_id: int,
+    scraper_key: str,
+    processed_item_count: int,
+    processed_item_counts_by_config_id: dict[int, int] | None,
+    outcome: BriefingFirstRunSourceOutcome,
 ) -> int:
-    normalized = {_normalized_source_key(key) for key in scraper_keys}
-    if not normalized:
+    run = _lock_active_run(db, run_id=run_id)
+    if run is None:
         return 0
+    normalized_key = _normalized_source_key(scraper_key)
     rows = (
         db.query(OnboardingFirstEditionSource)
-        .join(
-            OnboardingFirstEditionRun,
-            OnboardingFirstEditionRun.id == OnboardingFirstEditionSource.run_id,
-        )
-        .filter(OnboardingFirstEditionRun.status.in_(("active", "ready")))
+        .filter(OnboardingFirstEditionSource.run_id == run_id)
         .filter(OnboardingFirstEditionSource.source_kind.in_(("aggregator", "reddit")))
+        .with_for_update()
         .all()
     )
-    normalized_counts = {
-        _normalized_source_key(key): max(int(value), 0)
-        for key, value in (processed_item_counts or {}).items()
-    }
     matched: list[OnboardingFirstEditionSource] = []
     counts_by_key: dict[str, int] = {}
     for row in rows:
         source_key = str(row.source_key)
         if row.source_kind == "reddit":
-            if "reddit" not in normalized:
+            if normalized_key != "reddit":
                 continue
             matched.append(row)
             config_id = _source_config_id(source_key)
@@ -170,57 +180,17 @@ def mark_scraper_sources_complete(
                 0,
             )
             continue
-
-        scraper_key = _normalized_source_key(source_key.split(":", 1)[-1])
-        if scraper_key not in normalized:
+        if _normalized_source_key(source_key.split(":", 1)[-1]) != normalized_key:
             continue
         matched.append(row)
-        counts_by_key[source_key] = normalized_counts.get(scraper_key, 0)
-    return _complete_rows(db, matched, processed_item_counts=counts_by_key)
-
-
-def sync_ready_categories(db: Session, *, user_id: int) -> int:
-    """Append newly readable categories without reordering prior arrivals."""
-
-    run = _active_run(db, user_id=user_id)
-    if run is None:
-        return 0
-    rows = (
-        db.query(BriefingLens.key, BriefingLens.position)
-        .join(BriefingSegment, BriefingSegment.lens_id == BriefingLens.id)
-        .filter(BriefingLens.user_id == user_id, BriefingLens.status == "active")
-        .filter(BriefingSegment.status.in_(("active", "degraded")))
-        .group_by(BriefingLens.key, BriefingLens.position)
-        .order_by(BriefingLens.position.asc(), BriefingLens.key.asc())
-        .all()
+        counts_by_key[source_key] = max(processed_item_count, 0)
+    return _record_rows(
+        db,
+        run=run,
+        rows=matched,
+        outcome=outcome,
+        processed_item_counts=counts_by_key,
     )
-    existing = [str(key) for key in (run.ready_category_keys or [])]
-    new_keys = [str(key) for key, _ in rows if str(key) not in existing]
-    if new_keys:
-        run.ready_category_keys = [*existing, *new_keys]
-        run.revision = int(run.revision or 0) + 1
-
-    source_count = (
-        db.query(OnboardingFirstEditionSource)
-        .filter(OnboardingFirstEditionSource.run_id == run.id)
-        .count()
-    )
-    terminal_count = (
-        db.query(OnboardingFirstEditionSource)
-        .filter(OnboardingFirstEditionSource.run_id == run.id)
-        .filter(OnboardingFirstEditionSource.status.in_(tuple(TERMINAL_SOURCE_STATUSES)))
-        .count()
-    )
-    if (
-        (source_count == 0 or terminal_count == source_count)
-        and (existing or new_keys)
-        and run.status != "ready"
-    ):
-        run.status = "ready"
-        run.ready_at = _now()
-        run.revision = int(run.revision or 0) + 1
-    db.flush()
-    return len(new_keys)
 
 
 def complete_first_edition(db: Session, *, user_id: int) -> bool:
@@ -247,29 +217,19 @@ def _source_specs(db: Session, *, user_id: int) -> list[FirstEditionSourceSpec]:
         config_data = config.config or {}
         display_name = str(config.display_name or config_data.get("name") or config.scraper_type)
         if config.scraper_type in {"substack", "atom", "podcast_rss"}:
-            specs.append(
-                FirstEditionSourceSpec(
-                    key=f"feed:{config_id}",
-                    display_name=display_name,
-                    kind="feed",
-                )
-            )
+            specs.append(FirstEditionSourceSpec(f"feed:{config_id}", display_name, "feed"))
         elif config.scraper_type == "aggregator":
             scraper_key = str(config_data.get("key") or display_name).strip().lower()
             specs.append(
-                FirstEditionSourceSpec(
-                    key=f"scraper:{scraper_key}",
-                    display_name=display_name,
-                    kind="aggregator",
-                )
+                FirstEditionSourceSpec(f"scraper:{scraper_key}", display_name, "aggregator")
             )
         elif config.scraper_type == "reddit":
             subreddit = str(config_data.get("subreddit") or display_name).strip()
             specs.append(
                 FirstEditionSourceSpec(
-                    key=f"reddit:{config_id}",
-                    display_name=f"r/{subreddit.removeprefix('r/')}",
-                    kind="reddit",
+                    f"reddit:{config_id}",
+                    f"r/{subreddit.removeprefix('r/')}",
+                    "reddit",
                 )
             )
     return specs
@@ -278,74 +238,52 @@ def _source_specs(db: Session, *, user_id: int) -> list[FirstEditionSourceSpec]:
 def _active_run(db: Session, *, user_id: int) -> OnboardingFirstEditionRun | None:
     return (
         db.query(OnboardingFirstEditionRun)
-        .filter(OnboardingFirstEditionRun.user_id == user_id)
-        .filter(OnboardingFirstEditionRun.status.in_(("active", "ready")))
+        .filter(
+            OnboardingFirstEditionRun.user_id == user_id,
+            OnboardingFirstEditionRun.status == "active",
+        )
         .order_by(OnboardingFirstEditionRun.id.desc())
         .first()
     )
 
 
-def _mark_sources_complete(
-    db: Session,
-    *,
-    user_id: int,
-    source_keys: set[str],
-    processed_item_counts: dict[str, int] | None = None,
-) -> int:
-    if not source_keys:
-        return 0
-    run = _active_run(db, user_id=user_id)
-    if run is None:
-        return 0
-    rows = (
-        db.query(OnboardingFirstEditionSource)
-        .filter(OnboardingFirstEditionSource.run_id == run.id)
-        .filter(OnboardingFirstEditionSource.source_key.in_(source_keys))
-        .all()
+def _lock_active_run(db: Session, *, run_id: int) -> OnboardingFirstEditionRun | None:
+    return (
+        db.query(OnboardingFirstEditionRun)
+        .filter(
+            OnboardingFirstEditionRun.id == run_id,
+            OnboardingFirstEditionRun.status == "active",
+        )
+        .with_for_update()
+        .first()
     )
-    return _complete_rows(db, rows, processed_item_counts=processed_item_counts)
 
 
-def _complete_rows(
+def _record_rows(
     db: Session,
-    rows: list[OnboardingFirstEditionSource],
     *,
-    processed_item_counts: dict[str, int] | None = None,
+    run: OnboardingFirstEditionRun,
+    rows: list[OnboardingFirstEditionSource],
+    outcome: BriefingFirstRunSourceOutcome,
+    processed_item_counts: dict[str, int],
 ) -> int:
-    pending = [row for row in rows if row.status not in TERMINAL_SOURCE_STATUSES]
-    if not pending:
-        return 0
-    run_ids = {_required_id(row.run_id) for row in pending}
-    next_sequence = 1
-    if run_ids:
-        current = (
-            db.query(OnboardingFirstEditionSource.completion_sequence)
-            .filter(OnboardingFirstEditionSource.run_id.in_(run_ids))
-            .order_by(OnboardingFirstEditionSource.completion_sequence.desc().nullslast())
-            .first()
-        )
-        if current and current[0] is not None:
-            next_sequence = int(current[0]) + 1
     now = _now()
-    for row in sorted(pending, key=lambda item: (int(item.position or 0), int(item.id or 0))):
-        row.status = "ready"
-        row.completion_sequence = next_sequence
-        row.processed_item_count = max(
-            int((processed_item_counts or {}).get(str(row.source_key), 0)),
-            0,
-        )
-        row.completed_at = now
-        next_sequence += 1
-    for run_id in run_ids:
-        run = (
-            db.query(OnboardingFirstEditionRun)
-            .filter(OnboardingFirstEditionRun.id == run_id)
-            .first()
-        )
-        if run is not None:
-            run.revision = int(run.revision or 0) + 1
-    db.flush()
-    return len(pending)
+    changed = 0
+    for row in rows:
+        item_count = max(int(processed_item_counts.get(str(row.source_key), 0)), 0)
+        if row.status == BriefingFirstRunSourceOutcome.PROCESSED.value:
+            continue
+        if row.status == outcome.value and int(row.processed_item_count or 0) == item_count:
+            continue
+        row.status = outcome.value
+        row.processed_item_count = item_count
+        if row.completed_at is None:
+            row.completed_at = now
+        changed += 1
+    if changed:
+        run.revision = int(run.revision or 0) + 1
+        db.flush()
+    return changed
 
 
 def _now() -> datetime:
@@ -364,4 +302,4 @@ def _normalized_source_key(value: str) -> str:
 
 def _source_config_id(source_key: str) -> int:
     raw_id = source_key.rsplit(":", 1)[-1]
-    return int(raw_id) if raw_id.isdigit() else 0
+    return int(raw_id)

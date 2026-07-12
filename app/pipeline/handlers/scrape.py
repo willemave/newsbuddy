@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from app.core.logging import get_logger
+from app.models.contracts import BriefingFirstRunSourceOutcome
 from app.models.domain.scraper_runs import ScraperStats
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.pipeline.task_specs import ScrapePayload
 from app.scraping.runner import ScraperRunner
-from app.services.briefing.first_run import mark_scraper_sources_complete
+from app.services.briefing.first_run import record_scraper_source_result
 from app.services.queue import TaskType
 
 logger = get_logger(__name__)
@@ -21,73 +23,103 @@ class ScrapeHandler:
     def handle(self, task: TaskEnvelope, context: TaskContext) -> TaskResult:
         """Run configured scrapers."""
         try:
-            payload = task.payload or {}
-            sources = payload.get("sources", ["all"])
+            request = ScrapePayload.model_validate(task.payload or {})
+            sources = request.sources
             runner = ScraperRunner()
-            processed_item_counts: dict[str, int] = {}
-            processed_item_counts_by_config_id: dict[int, int] = {}
 
             if sources == ["all"]:
-                stats_by_source = runner.run_all_with_stats()
-                completed_sources = list(stats_by_source)
-                for source, aggregate_stats in stats_by_source.items():
-                    processed_item_counts[source] = _processed_item_count(aggregate_stats)
-                    processed_item_counts_by_config_id.update(
-                        _processed_config_counts(aggregate_stats)
+                runner.run_all_with_stats()
+                return TaskResult.ok()
+
+            failures: list[str] = []
+            progress_recording_failed = False
+            for source in sources:
+                try:
+                    stats = runner.run_scraper_with_stats(source)
+                    progress_recording_failed |= not _record_progress(
+                        context,
+                        run_id=request.first_edition_run_id,
+                        source=source,
+                        stats=stats,
                     )
-            else:
-                completed_sources = [str(source) for source in sources]
-                for source in sources:
-                    selected_stats = runner.run_scraper_with_stats(source)
-                    if selected_stats is None:
-                        processed_item_counts[str(source)] = 0
-                        continue
-                    if not isinstance(selected_stats, ScraperStats):
-                        legacy_saved_count = runner.run_scraper(source)
-                        processed_item_counts[str(source)] = (
-                            max(legacy_saved_count, 0) if isinstance(legacy_saved_count, int) else 0
-                        )
-                        continue
-                    processed_item_counts[str(source)] = _processed_item_count(selected_stats)
-                    processed_item_counts_by_config_id.update(
-                        _processed_config_counts(selected_stats)
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(source)
+                    progress_recording_failed |= not _record_progress(
+                        context,
+                        run_id=request.first_edition_run_id,
+                        source=source,
+                        stats=None,
                     )
-            try:
-                with context.db_factory() as db:
-                    mark_scraper_sources_complete(
-                        db,
-                        scraper_keys=completed_sources,
-                        processed_item_counts=processed_item_counts,
-                        processed_item_counts_by_config_id=(processed_item_counts_by_config_id),
+                    logger.exception(
+                        "Scraper source failed",
+                        extra={
+                            "component": "scrape",
+                            "operation": "run_source",
+                            "context_data": {
+                                "source": source,
+                                "run_id": request.first_edition_run_id,
+                                "error": str(exc),
+                            },
+                        },
                     )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Could not record onboarding scraper progress",
-                    extra={
-                        "component": "scrape",
-                        "operation": "record_onboarding_progress",
-                    },
-                )
+            if progress_recording_failed:
+                return TaskResult.fail("Could not record onboarding scraper progress")
+            if failures:
+                return TaskResult.fail(f"Scraper sources failed: {', '.join(failures)}")
             return TaskResult.ok()
         except Exception as exc:  # noqa: BLE001
             logger.error("Scraper error: %s", exc, exc_info=True)
             return TaskResult.fail(str(exc))
 
 
-def _processed_item_count(stats: object) -> int:
-    saved = getattr(stats, "saved", 0)
-    duplicates = getattr(stats, "duplicates", 0)
-    if not isinstance(saved, int) or not isinstance(duplicates, int):
+def _processed_item_count(stats: ScraperStats | None) -> int:
+    if stats is None:
         return 0
-    return max(saved + duplicates, 0)
+    return max(stats.saved + stats.duplicates, 0)
 
 
-def _processed_config_counts(stats: object) -> dict[int, int]:
-    raw_counts = getattr(stats, "processed_by_config_id", {})
-    if not isinstance(raw_counts, dict):
+def _processed_config_counts(stats: ScraperStats | None) -> dict[int, int]:
+    if stats is None:
         return {}
     return {
         config_id: max(item_count, 0)
-        for config_id, item_count in raw_counts.items()
-        if isinstance(config_id, int) and isinstance(item_count, int)
+        for config_id, item_count in stats.processed_by_config_id.items()
     }
+
+
+def _record_progress(
+    context: TaskContext,
+    *,
+    run_id: int | None,
+    source: str,
+    stats: ScraperStats | None,
+) -> bool:
+    if run_id is None:
+        return True
+    processed_item_count = _processed_item_count(stats)
+    outcome = (
+        BriefingFirstRunSourceOutcome.UNAVAILABLE
+        if stats is None or (stats.errors > 0 and processed_item_count == 0)
+        else BriefingFirstRunSourceOutcome.PROCESSED
+    )
+    try:
+        with context.db_factory() as db:
+            record_scraper_source_result(
+                db,
+                run_id=run_id,
+                scraper_key=source,
+                processed_item_count=processed_item_count,
+                processed_item_counts_by_config_id=_processed_config_counts(stats),
+                outcome=outcome,
+            )
+        return True
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Could not record onboarding scraper progress",
+            extra={
+                "component": "scrape",
+                "operation": "record_onboarding_progress",
+                "context_data": {"run_id": run_id, "source": source},
+            },
+        )
+        return False

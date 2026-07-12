@@ -221,7 +221,7 @@ def debug_create_user(
     if payload.has_completed_new_user_tutorial is not None:
         user.has_completed_new_user_tutorial = payload.has_completed_new_user_tutorial
     if payload.reading_experience is not None:
-        user.reading_experience = payload.reading_experience
+        user.reading_experience = payload.reading_experience.value
 
     db.commit()
     db.refresh(user)
@@ -357,6 +357,9 @@ def update_current_user_info(
             CouncilPersonaConfig.model_validate(persona).model_dump(mode="json")
             for persona in payload.council_personas
         ]
+
+    if payload.reading_experience is not None:
+        current_user.reading_experience = payload.reading_experience.value
 
     db.commit()
     db.refresh(current_user)

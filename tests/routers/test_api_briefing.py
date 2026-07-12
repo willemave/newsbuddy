@@ -5,6 +5,7 @@ from app.core.settings import get_settings
 from app.models.contracts import ContentClassification, ContentType, TaskType
 from app.models.db import AudioEpisode, ProcessingTask, VendorUsageRecord
 from app.models.db.users import User
+from app.services.briefing.first_run import start_first_edition
 from app.services.briefing.refresh import run_briefing_refresh
 from app.services.exa_client import ExaSearchResult
 
@@ -65,6 +66,34 @@ def test_briefing_etag_is_scoped_to_authenticated_user(
     assert first_response.json()["version"] == second_response.json()["version"] == 0
     assert first_response.headers["etag"] != second_response.headers["etag"]
     assert second_response.status_code == 200
+
+
+def test_briefing_etag_changes_when_first_run_is_replaced(
+    client: TestClient,
+    db_session: Session,
+    test_user: User,
+) -> None:
+    assert test_user.id is not None
+    first_run = start_first_edition(db_session, user_id=test_user.id)
+    db_session.commit()
+
+    first_response = client.get("/api/briefing")
+
+    assert first_response.status_code == 200
+    assert first_response.json()["first_run"]["run_id"] == first_run.id
+
+    replacement_run = start_first_edition(db_session, user_id=test_user.id)
+    db_session.commit()
+
+    replacement_response = client.get(
+        "/api/briefing",
+        headers={"If-None-Match": first_response.headers["etag"]},
+    )
+
+    assert replacement_response.status_code == 200
+    assert replacement_response.json()["first_run"]["run_id"] == replacement_run.id
+    assert replacement_run.id != first_run.id
+    assert replacement_response.headers["etag"] != first_response.headers["etag"]
 
 
 def test_briefing_refresh_endpoint_enqueues_append_task(

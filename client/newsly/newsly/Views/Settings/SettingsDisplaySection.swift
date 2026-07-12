@@ -7,6 +7,8 @@ import SwiftUI
 
 struct SettingsDisplaySection: View {
     let settings: AppSettings
+    let isSavingReadingExperience: Bool
+    let onReadingExperienceChanged: (ReadingExperience) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -61,7 +63,7 @@ struct SettingsDisplaySection: View {
                 "Reading Experience",
                 selection: Binding(
                     get: { settings.readingExperience },
-                    set: { settings.setReadingExperience($0) }
+                    set: onReadingExperienceChanged
                 )
             ) {
                 ForEach(ReadingExperience.allCases) { experience in
@@ -70,6 +72,7 @@ struct SettingsDisplaySection: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 190)
+            .disabled(isSavingReadingExperience)
             .accessibilityIdentifier("settings.reading_experience")
         }
     }

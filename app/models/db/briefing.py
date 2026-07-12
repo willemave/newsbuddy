@@ -107,10 +107,7 @@ class OnboardingFirstEditionRun(Base):
     user_id = Column(Integer, nullable=False, index=True)
     status = Column(String(16), nullable=False, default="active", index=True)
     revision = Column(Integer, nullable=False, default=1)
-    connected_source_count = Column(Integer, nullable=False, default=0)
-    ready_category_keys = Column(JSONB, nullable=False, default=list)
     started_at = Column(DateTime, default=_utcnow, nullable=False)
-    ready_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
@@ -118,7 +115,7 @@ class OnboardingFirstEditionRun(Base):
             "uq_onboarding_first_edition_active_user",
             "user_id",
             unique=True,
-            postgresql_where=text("status IN ('active', 'ready')"),
+            postgresql_where=text("status = 'active'"),
         ),
     )
 
@@ -135,7 +132,6 @@ class OnboardingFirstEditionSource(Base):
     source_kind = Column(String(32), nullable=False)
     position = Column(Integer, nullable=False, default=0)
     status = Column(String(16), nullable=False, default="queued", index=True)
-    completion_sequence = Column(Integer, nullable=True)
     processed_item_count = Column(Integer, nullable=False, default=0)
     completed_at = Column(DateTime, nullable=True)
 

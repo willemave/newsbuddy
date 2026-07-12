@@ -22,7 +22,16 @@ from app.models.db import (  # noqa: E402
     User,
 )
 
-STATES = ("initial", "early", "mid", "delayed", "ready", "resumed", "completed")
+STATES = (
+    "initial",
+    "early",
+    "mid",
+    "partial_failure",
+    "delayed",
+    "ready",
+    "resumed",
+    "completed",
+)
 SOURCE_NAMES = ("Techmeme", "Stratechery", "Decoder", "Hacker News")
 SOURCE_ITEM_COUNTS = (28, 12, 9, 34)
 LENS_KEY = "start-here-technology"
@@ -95,21 +104,25 @@ def seed_state(db, *, user: User, state: str) -> dict[str, object]:
         completed_count = 1
     elif state in {"mid", "resumed"}:
         completed_count = 2
+    elif state == "partial_failure":
+        completed_count = 3
     if state in {"delayed", "ready"}:
         completed_count = len(SOURCE_NAMES)
     ready_keys = [LENS_KEY] if state == "ready" else []
     run = OnboardingFirstEditionRun(
         user_id=user.id,
-        status="ready" if state == "ready" else "active",
-        revision=4 if state == "ready" else 2,
-        connected_source_count=len(SOURCE_NAMES),
-        ready_category_keys=ready_keys,
-        ready_at=now if state == "ready" else None,
+        status="active",
+        revision=completed_count + 1,
     )
     db.add(run)
     db.flush()
     for position, display_name in enumerate(SOURCE_NAMES):
         is_complete = position < completed_count
+        is_unavailable = state == "partial_failure" and position == 2
+        source_status = "queued"
+        if is_complete:
+            source_status = "unavailable" if is_unavailable else "processed"
+        item_count = SOURCE_ITEM_COUNTS[position] if is_complete and not is_unavailable else 0
         db.add(
             OnboardingFirstEditionSource(
                 run_id=run.id,
@@ -117,9 +130,8 @@ def seed_state(db, *, user: User, state: str) -> dict[str, object]:
                 display_name=display_name,
                 source_kind="fixture",
                 position=position,
-                status="ready" if is_complete else "processing",
-                completion_sequence=position + 1 if is_complete else None,
-                processed_item_count=SOURCE_ITEM_COUNTS[position] if is_complete else 0,
+                status=source_status,
+                processed_item_count=item_count,
                 completed_at=now if is_complete else None,
             )
         )

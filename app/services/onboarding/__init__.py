@@ -39,7 +39,12 @@ from app.models.api.onboarding import (
     OnboardingVoiceParseRequest,
     OnboardingVoiceParseResponse,
 )
-from app.models.contracts import ContentStatus, ContentType, OnboardingSuggestionType
+from app.models.contracts import (
+    ContentStatus,
+    ContentType,
+    OnboardingSuggestionType,
+    ReadingExperience,
+)
 from app.models.db import (
     Content,
     ContentStatusEntry,
@@ -652,14 +657,6 @@ def complete_onboarding(
         )
 
     unique_feed_config_ids = list(dict.fromkeys(feed_config_ids_for_backfill))
-    backfill_payload: dict[str, Any] | None = None
-    if unique_feed_config_ids:
-        request_payload = FeedBatchBackfillRequest(
-            user_id=user_id,
-            config_ids=unique_feed_config_ids,
-            count=DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
-        )
-        backfill_payload = request_payload.model_dump()
     sources_to_scrape = _resolve_scraper_sources(created_types - FEED_SUGGESTION_TYPES)
     for aggregator_selection in request.selected_aggregators:
         source = aggregator_selection.key.strip().lower()
@@ -700,27 +697,39 @@ def complete_onboarding(
         )
 
     user = db.query(User).filter(User.id == user_id).first()
-    if user:
-        if should_update_twitter_username and user.twitter_username != normalized_username:
-            user.twitter_username = normalized_username
-        user.has_completed_onboarding = True
-        user.reading_experience = "briefing"
-        start_first_edition(db, user_id=user_id)
-        enqueue_briefing_refresh_task(db, user_id=user_id, mode="append", delay_seconds=0)
+    if user is None:
+        raise ValueError("User not found")
+    if should_update_twitter_username and user.twitter_username != normalized_username:
+        user.twitter_username = normalized_username
+    user.has_completed_onboarding = True
+    user.reading_experience = ReadingExperience.BRIEFING.value
+    first_edition_run = start_first_edition(db, user_id=user_id)
+    if first_edition_run.id is None:
+        raise RuntimeError("First-edition run was not persisted")
+    first_edition_run_id = first_edition_run.id
+    enqueue_briefing_refresh_task(db, user_id=user_id, mode="append", delay_seconds=0)
     db.commit()
 
     queue_gateway = get_task_queue_gateway()
     task_id = None
-    if backfill_payload is not None:
+    if unique_feed_config_ids:
         task_id = queue_gateway.enqueue(
             TaskType.BACKFILL_FEEDS,
-            payload=backfill_payload,
+            payload=FeedBatchBackfillRequest(
+                user_id=user_id,
+                config_ids=unique_feed_config_ids,
+                count=DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
+                first_edition_run_id=first_edition_run_id,
+            ).model_dump(exclude_none=True),
             dedupe=True,
         )
     if sources_to_scrape:
         scrape_task_id = queue_gateway.enqueue(
             TaskType.SCRAPE,
-            payload={"sources": sources_to_scrape},
+            payload={
+                "sources": sources_to_scrape,
+                "first_edition_run_id": first_edition_run_id,
+            },
         )
         if task_id is None:
             task_id = scrape_task_id

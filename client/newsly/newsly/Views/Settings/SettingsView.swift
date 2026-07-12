@@ -31,6 +31,7 @@ struct SettingsView: View {
     @State private var newExpertName = ""
     @State private var hasUnsavedCouncilPersonaEdits = false
     @State private var isSavingCouncilPersonas = false
+    @State private var isSavingReadingExperience = false
     @State private var xConnection: XConnectionResponse?
 
     init(scrollToCouncilOnAppear: Bool = false) {
@@ -46,6 +47,7 @@ struct SettingsView: View {
                     isFeedbackVisible: authViewModel.authState.authenticatedUser != nil,
                     xConnection: xConnection,
                     settings: settings,
+                    isSavingReadingExperience: isSavingReadingExperience,
                     councilPersonas: councilPersonasDraft,
                     newExpertName: $newExpertName,
                     isSavingCouncilPersonas: isSavingCouncilPersonas,
@@ -58,7 +60,8 @@ struct SettingsView: View {
                     onRemoveExpert: removeExpert,
                     onSaveCouncilPersonas: { Task { await saveCouncilPersonas() } },
                     onMarkAll: { showMarkAllDialog = true },
-                    onOpenDebugMenu: { activeSheet = .debugMenu }
+                    onOpenDebugMenu: { activeSheet = .debugMenu },
+                    onReadingExperienceChanged: updateReadingExperience
                 )
             }
             .onAppear {
@@ -203,6 +206,27 @@ struct SettingsView: View {
         } catch {
             alertMessage = "Failed to save experts: \(error.localizedDescription)"
             showingAlert = true
+        }
+    }
+
+    @MainActor
+    private func updateReadingExperience(_ experience: ReadingExperience) {
+        guard !isSavingReadingExperience, settings.readingExperience != experience else { return }
+        let previous = settings.readingExperience
+        settings.setReadingExperience(experience)
+        isSavingReadingExperience = true
+        Task {
+            defer { isSavingReadingExperience = false }
+            do {
+                let user = try await AuthenticationService.shared.updateCurrentUserProfile(
+                    readingExperience: experience
+                )
+                authViewModel.updateUser(user)
+            } catch {
+                settings.setReadingExperience(previous)
+                alertMessage = "Failed to save reading experience: \(error.localizedDescription)"
+                showingAlert = true
+            }
         }
     }
 

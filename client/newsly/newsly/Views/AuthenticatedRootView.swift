@@ -74,8 +74,7 @@ struct AuthenticatedRootView: View {
     }
 
     private func applyServerReadingExperience() {
-        let experience = ReadingExperience(rawValue: user.readingExperience) ?? .classic
-        AppSettings.shared.setReadingExperience(experience)
+        AppSettings.shared.setReadingExperience(user.readingExperience)
     }
 
     private func updatedUserOnboardingFlag(_ completed: Bool) -> User {

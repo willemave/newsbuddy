@@ -57,7 +57,7 @@ struct User: Codable, Identifiable, Equatable {
     let isActive: Bool
     let hasCompletedOnboarding: Bool
     let hasCompletedNewUserTutorial: Bool
-    let readingExperience: String
+    let readingExperience: ReadingExperience
     let createdAt: Date
     let updatedAt: Date
 
@@ -90,7 +90,7 @@ struct User: Codable, Identifiable, Equatable {
         isActive: Bool,
         hasCompletedOnboarding: Bool,
         hasCompletedNewUserTutorial: Bool,
-        readingExperience: String = ReadingExperience.classic.rawValue,
+        readingExperience: ReadingExperience = .classic,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -124,8 +124,10 @@ struct User: Codable, Identifiable, Equatable {
         isActive = try container.decode(Bool.self, forKey: .isActive)
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? true
         hasCompletedNewUserTutorial = try container.decode(Bool.self, forKey: .hasCompletedNewUserTutorial)
-        readingExperience = try container.decodeIfPresent(String.self, forKey: .readingExperience)
-            ?? ReadingExperience.classic.rawValue
+        readingExperience = try container.decodeIfPresent(
+            ReadingExperience.self,
+            forKey: .readingExperience
+        ) ?? .classic
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
@@ -179,20 +181,24 @@ struct UpdateUserProfileRequest: Codable {
     let fullName: String?
     let twitterUsername: String?
     let councilPersonas: [CouncilPersona]?
+    let readingExperience: ReadingExperience?
 
     init(
         fullName: String? = nil,
         twitterUsername: String? = nil,
-        councilPersonas: [CouncilPersona]? = nil
+        councilPersonas: [CouncilPersona]? = nil,
+        readingExperience: ReadingExperience? = nil
     ) {
         self.fullName = fullName
         self.twitterUsername = twitterUsername
         self.councilPersonas = councilPersonas
+        self.readingExperience = readingExperience
     }
 
     enum CodingKeys: String, CodingKey {
         case fullName = "full_name"
         case twitterUsername = "twitter_username"
         case councilPersonas = "council_personas"
+        case readingExperience = "reading_experience"
     }
 }

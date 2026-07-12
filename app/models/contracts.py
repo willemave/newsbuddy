@@ -292,6 +292,20 @@ class BriefingFirstRunPhase(StrEnum):
     WAITING_FOR_CONTENT = "waiting_for_content"
 
 
+class BriefingFirstRunSourceOutcome(StrEnum):
+    """Terminal result of processing one first-edition source."""
+
+    PROCESSED = "processed"
+    UNAVAILABLE = "unavailable"
+
+
+class ReadingExperience(StrEnum):
+    """User-selected primary reading surface."""
+
+    CLASSIC = "classic"
+    BRIEFING = "briefing"
+
+
 class BriefingBlockType(StrEnum):
     """Briefing document block kinds."""
 

@@ -1463,9 +1463,14 @@
           "revision": {
             "title": "Revision",
             "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
           }
         },
         "required": [
+          "run_id",
           "revision",
           "phase",
           "connected_source_count"
@@ -1473,11 +1478,23 @@
         "title": "BriefingFirstRunProgress",
         "type": "object"
       },
+      "BriefingFirstRunSourceOutcome": {
+        "description": "Terminal result of processing one first-edition source.",
+        "enum": [
+          "processed",
+          "unavailable"
+        ],
+        "title": "BriefingFirstRunSourceOutcome",
+        "type": "string"
+      },
       "BriefingFirstRunSourceProgress": {
         "properties": {
           "display_name": {
             "title": "Display Name",
             "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/BriefingFirstRunSourceOutcome"
           },
           "processed_item_count": {
             "minimum": 0.0,
@@ -1487,7 +1504,8 @@
         },
         "required": [
           "display_name",
-          "processed_item_count"
+          "processed_item_count",
+          "outcome"
         ],
         "title": "BriefingFirstRunSourceProgress",
         "type": "object"
@@ -4398,14 +4416,12 @@
           "reading_experience": {
             "anyOf": [
               {
-                "pattern": "^(classic|briefing)$",
-                "type": "string"
+                "$ref": "#/components/schemas/ReadingExperience"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Reading Experience"
+            ]
           },
           "user_id": {
             "anyOf": [
@@ -7389,6 +7405,15 @@
         "title": "ProcessingCountResponse",
         "type": "object"
       },
+      "ReadingExperience": {
+        "description": "User-selected primary reading surface.",
+        "enum": [
+          "classic",
+          "briefing"
+        ],
+        "title": "ReadingExperience",
+        "type": "string"
+      },
       "RecordContentInteractionRequest": {
         "description": "Request to record a user interaction with content.",
         "example": {
@@ -8859,6 +8884,16 @@
             ],
             "title": "Full Name"
           },
+          "reading_experience": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingExperience"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "twitter_username": {
             "anyOf": [
               {
@@ -9049,9 +9084,8 @@
             "type": "boolean"
           },
           "reading_experience": {
-            "default": "classic",
-            "title": "Reading Experience",
-            "type": "string"
+            "$ref": "#/components/schemas/ReadingExperience",
+            "default": "classic"
           },
           "twitter_username": {
             "anyOf": [

@@ -1,25 +1,21 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-from app.models.contracts import BriefingFirstRunPhase
+from app.models.contracts import BriefingFirstRunPhase, BriefingFirstRunSourceOutcome
 from app.models.db import (
-    BriefingLens,
-    BriefingSegment,
     OnboardingFirstEditionRun,
+    OnboardingFirstEditionSource,
     UserScraperConfig,
 )
 from app.services.briefing.first_run import (
     complete_first_edition,
     get_first_run_progress,
-    mark_feed_sources_complete,
-    mark_scraper_sources_complete,
+    record_feed_source_result,
+    record_scraper_source_result,
     start_first_edition,
-    sync_ready_categories,
 )
 
 
-def test_first_edition_progress_appends_sources_and_readable_categories(
+def test_first_edition_progress_appends_sources_and_uses_ready_briefing_categories(
     db_session,
     test_user,
 ) -> None:
@@ -41,78 +37,62 @@ def test_first_edition_progress_appends_sources_and_readable_categories(
     assert feed.id is not None
 
     run = start_first_edition(db_session, user_id=test_user.id)
+    assert run.id is not None
     progress = get_first_run_progress(db_session, user_id=test_user.id)
     assert progress is not None
+    assert progress.run_id == run.id
     assert progress.connected_source_count == 2
     assert progress.completed_sources == []
     assert progress.active_sources == ["Stratechery", "Techmeme"]
 
     assert (
-        mark_scraper_sources_complete(
+        record_scraper_source_result(
             db_session,
-            scraper_keys=["techmeme"],
-            processed_item_counts={"techmeme": 28},
+            run_id=run.id,
+            scraper_key="techmeme",
+            processed_item_count=28,
+            processed_item_counts_by_config_id=None,
+            outcome=BriefingFirstRunSourceOutcome.PROCESSED,
         )
         == 1
     )
-    progress = get_first_run_progress(db_session, user_id=test_user.id)
+    progress = get_first_run_progress(
+        db_session,
+        user_id=test_user.id,
+        ready_category_keys=["technology"],
+    )
     assert progress is not None
-    assert [source.model_dump() for source in progress.completed_sources] == [
-        {"display_name": "Techmeme", "processed_item_count": 28}
+    assert [source.model_dump(mode="json") for source in progress.completed_sources] == [
+        {
+            "display_name": "Techmeme",
+            "processed_item_count": 28,
+            "outcome": "processed",
+        }
     ]
     assert progress.active_sources == ["Stratechery"]
-
-    lens = BriefingLens(
-        user_id=test_user.id,
-        key="technology",
-        tier="news",
-        title="Technology",
-        deck="What changed in technology",
-        position=20,
-        status="active",
-    )
-    db_session.add(lens)
-    db_session.flush()
-    db_session.add(
-        BriefingSegment(
-            lens_id=lens.id,
-            user_id=test_user.id,
-            blocks=[],
-            markdown_raw="Technology moved today.",
-            narration_text="Technology moved today.",
-            source_keys=["news:1"],
-            status="active",
-            model="test",
-            prompt_version="test",
-            created_at=datetime.now(UTC).replace(tzinfo=None),
-        )
-    )
-    db_session.flush()
-
-    assert sync_ready_categories(db_session, user_id=test_user.id) == 1
-    progress = get_first_run_progress(db_session, user_id=test_user.id)
-    assert progress is not None
     assert progress.ready_category_keys == ["technology"]
     assert progress.phase == BriefingFirstRunPhase.ACTIVE
 
-    assert (
-        mark_feed_sources_complete(
-            db_session,
-            user_id=test_user.id,
-            config_ids=[int(feed.id)],
-            processed_item_counts={int(feed.id): 12},
-        )
-        == 1
+    assert record_feed_source_result(
+        db_session,
+        run_id=run.id,
+        config_id=feed.id,
+        processed_item_count=12,
+        outcome=BriefingFirstRunSourceOutcome.PROCESSED,
     )
-    sync_ready_categories(db_session, user_id=test_user.id)
-    progress = get_first_run_progress(db_session, user_id=test_user.id)
+    progress = get_first_run_progress(
+        db_session,
+        user_id=test_user.id,
+        ready_category_keys=["technology"],
+    )
     assert progress is not None
-    assert [source.model_dump() for source in progress.completed_sources] == [
-        {"display_name": "Techmeme", "processed_item_count": 28},
-        {"display_name": "Stratechery", "processed_item_count": 12},
+    assert [source.display_name for source in progress.completed_sources] == [
+        "Techmeme",
+        "Stratechery",
     ]
     assert progress.phase == BriefingFirstRunPhase.READY
-    assert run.status == "ready"
+    assert run.status == "active"
+    assert run.revision == 3
 
 
 def test_first_edition_completion_is_durable(db_session, test_user) -> None:
@@ -124,10 +104,7 @@ def test_first_edition_completion_is_durable(db_session, test_user) -> None:
     assert run.completed_at is not None
 
 
-def test_first_edition_waits_for_content_after_all_sources_finish(
-    db_session,
-    test_user,
-) -> None:
+def test_unavailable_source_is_terminal_while_content_is_pending(db_session, test_user) -> None:
     config = UserScraperConfig(
         user_id=test_user.id,
         scraper_type="substack",
@@ -139,24 +116,91 @@ def test_first_edition_waits_for_content_after_all_sources_finish(
     db_session.flush()
     assert config.id is not None
 
-    start_first_edition(db_session, user_id=test_user.id)
-    assert (
-        mark_feed_sources_complete(
-            db_session,
-            user_id=test_user.id,
-            config_ids=[int(config.id)],
-            processed_item_counts={int(config.id): 7},
-        )
-        == 1
+    run = start_first_edition(db_session, user_id=test_user.id)
+    assert run.id is not None
+    assert record_feed_source_result(
+        db_session,
+        run_id=run.id,
+        config_id=config.id,
+        processed_item_count=0,
+        outcome=BriefingFirstRunSourceOutcome.UNAVAILABLE,
     )
 
     progress = get_first_run_progress(db_session, user_id=test_user.id)
     assert progress is not None
     assert progress.phase == BriefingFirstRunPhase.WAITING_FOR_CONTENT
-    assert [source.model_dump() for source in progress.completed_sources] == [
-        {"display_name": "Platformer", "processed_item_count": 7}
-    ]
-    assert progress.ready_category_keys == []
+    assert progress.completed_sources[0].outcome == BriefingFirstRunSourceOutcome.UNAVAILABLE
+    assert progress.active_sources == []
+    source_row = (
+        db_session.query(OnboardingFirstEditionSource)
+        .filter(OnboardingFirstEditionSource.run_id == run.id)
+        .one()
+    )
+    initial_completed_at = source_row.completed_at
+    assert initial_completed_at is not None
+
+    revision_after_failure = run.revision
+    assert not record_feed_source_result(
+        db_session,
+        run_id=run.id,
+        config_id=config.id,
+        processed_item_count=0,
+        outcome=BriefingFirstRunSourceOutcome.UNAVAILABLE,
+    )
+    assert run.revision == revision_after_failure
+
+    assert record_feed_source_result(
+        db_session,
+        run_id=run.id,
+        config_id=config.id,
+        processed_item_count=5,
+        outcome=BriefingFirstRunSourceOutcome.PROCESSED,
+    )
+    assert not record_feed_source_result(
+        db_session,
+        run_id=run.id,
+        config_id=config.id,
+        processed_item_count=0,
+        outcome=BriefingFirstRunSourceOutcome.UNAVAILABLE,
+    )
+    progress = get_first_run_progress(db_session, user_id=test_user.id)
+    assert progress is not None
+    assert progress.completed_sources[0].outcome == BriefingFirstRunSourceOutcome.PROCESSED
+    assert progress.completed_sources[0].processed_item_count == 5
+    assert source_row.completed_at == initial_completed_at
+
+
+def test_scraper_result_is_scoped_to_the_originating_run(db_session, test_user) -> None:
+    config = UserScraperConfig(
+        user_id=test_user.id,
+        scraper_type="reddit",
+        display_name="Machine Learning",
+        config={"subreddit": "MachineLearning"},
+    )
+    db_session.add(config)
+    db_session.flush()
+    assert config.id is not None
+
+    expired_run = start_first_edition(db_session, user_id=test_user.id)
+    assert expired_run.id is not None
+    active_run = start_first_edition(db_session, user_id=test_user.id)
+    assert active_run.id is not None
+
+    assert (
+        record_scraper_source_result(
+            db_session,
+            run_id=expired_run.id,
+            scraper_key="reddit",
+            processed_item_count=11,
+            processed_item_counts_by_config_id={config.id: 11},
+            outcome=BriefingFirstRunSourceOutcome.PROCESSED,
+        )
+        == 0
+    )
+    progress = get_first_run_progress(db_session, user_id=test_user.id)
+    assert progress is not None
+    assert progress.run_id == active_run.id
+    assert progress.completed_sources == []
 
 
 def test_reddit_source_counts_are_attributed_to_each_config(db_session, test_user) -> None:
@@ -177,23 +221,34 @@ def test_reddit_source_counts_are_attributed_to_each_config(db_session, test_use
     assert machine_learning.id is not None
     assert local_llama.id is not None
 
-    start_first_edition(db_session, user_id=test_user.id)
+    run = start_first_edition(db_session, user_id=test_user.id)
+    assert run.id is not None
     assert (
-        mark_scraper_sources_complete(
+        record_scraper_source_result(
             db_session,
-            scraper_keys=["reddit"],
-            processed_item_counts={"reddit": 19},
+            run_id=run.id,
+            scraper_key="reddit",
+            processed_item_count=19,
             processed_item_counts_by_config_id={
-                int(machine_learning.id): 11,
-                int(local_llama.id): 8,
+                machine_learning.id: 11,
+                local_llama.id: 8,
             },
+            outcome=BriefingFirstRunSourceOutcome.PROCESSED,
         )
         == 2
     )
 
     progress = get_first_run_progress(db_session, user_id=test_user.id)
     assert progress is not None
-    assert [source.model_dump() for source in progress.completed_sources] == [
-        {"display_name": "r/MachineLearning", "processed_item_count": 11},
-        {"display_name": "r/LocalLLaMA", "processed_item_count": 8},
+    assert [source.model_dump(mode="json") for source in progress.completed_sources] == [
+        {
+            "display_name": "r/MachineLearning",
+            "processed_item_count": 11,
+            "outcome": "processed",
+        },
+        {
+            "display_name": "r/LocalLLaMA",
+            "processed_item_count": 8,
+            "outcome": "processed",
+        },
     ]

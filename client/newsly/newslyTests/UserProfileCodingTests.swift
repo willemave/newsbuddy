@@ -76,6 +76,15 @@ final class UserProfileCodingTests: XCTestCase {
         XCTAssertEqual(councilPersonas.first?["display_name"] as? String, "Albert Einstein")
     }
 
+    func testUpdateUserProfileRequestEncodesReadingExperience() throws {
+        let request = UpdateUserProfileRequest(readingExperience: .briefing)
+
+        let data = try JSONEncoder().encode(request)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(json["reading_experience"] as? String, "briefing")
+    }
+
     func testUserFallsBackToDefaultCouncilPersonasWhenMissingFromPayload() throws {
         let json = """
         {

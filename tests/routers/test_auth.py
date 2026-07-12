@@ -358,6 +358,7 @@ def test_update_current_user_info(
         json={
             "full_name": "Updated Name",
             "twitter_username": "@Willem_AW",
+            "reading_experience": "briefing",
             "council_personas": [
                 {
                     "id": "einstein",
@@ -382,6 +383,7 @@ def test_update_current_user_info(
     data = response.json()
     assert data["full_name"] == "Updated Name"
     assert data["twitter_username"] == "willem_aw"
+    assert data["reading_experience"] == "briefing"
     assert [persona["display_name"] for persona in data["council_personas"]] == [
         "Albert Einstein",
         "Alan Turing",
@@ -391,6 +393,7 @@ def test_update_current_user_info(
     db_session.refresh(test_user)
     assert test_user.full_name == "Updated Name"
     assert test_user.twitter_username == "willem_aw"
+    assert test_user.reading_experience == "briefing"
     assert test_user.council_personas[0]["id"] == "einstein"
 
 

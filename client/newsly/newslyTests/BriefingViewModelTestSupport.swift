@@ -26,6 +26,8 @@ final class MockBriefingService: BriefingServicing {
     var narrationWaitsForCancellation = false
     var narrationLensKeys: [String] = []
     private(set) var narrationCancellationCount = 0
+    var firstRunCompletionFailuresRemaining = 0
+    private(set) var firstRunCompletionCount = 0
 
     private var refreshContinuation: CheckedContinuation<Void, Never>?
 
@@ -78,6 +80,14 @@ final class MockBriefingService: BriefingServicing {
             throw refreshError
         }
         return APIBriefingRefreshResponse(enqueued: true, version: 1)
+    }
+
+    func completeFirstRun() async throws {
+        firstRunCompletionCount += 1
+        if firstRunCompletionFailuresRemaining > 0 {
+            firstRunCompletionFailuresRemaining -= 1
+            throw NSError(domain: "MockBriefingService", code: 1)
+        }
     }
 
     func resumeRefreshRequest() {
@@ -145,16 +155,14 @@ extension BriefingViewModel {
         service: BriefingServicing,
         snapshotStore: BriefingSnapshotStoring? = nil,
         refreshPollDelays: [UInt64] = [1_000_000, 2_000_000, 5_000_000],
-        firstRunCompletionRetryDelay: UInt64 = 1_000_000,
-        completeTutorial: @escaping @MainActor () async throws -> Void = {}
+        firstRunCompletionRetryDelay: UInt64 = 1_000_000
     ) {
         self.init(
             service: service,
             audioEpisodeService: MockBriefingAudioEpisodeService(),
             snapshotStore: snapshotStore,
             refreshPollDelays: refreshPollDelays,
-            firstRunCompletionRetryDelay: firstRunCompletionRetryDelay,
-            completeTutorial: completeTutorial
+            firstRunCompletionRetryDelay: firstRunCompletionRetryDelay
         )
     }
 }
@@ -218,6 +226,7 @@ func makeIndex(
 }
 
 func makeFirstRun(
+    runID: Int = 1,
     revision: Int = 1,
     phase: APIBriefingFirstRunPhase = .active,
     connectedSourceCount: Int = 3,
@@ -226,6 +235,7 @@ func makeFirstRun(
     readyCategoryKeys: [String] = []
 ) -> APIBriefingFirstRunProgress {
     APIBriefingFirstRunProgress(
+        runId: runID,
         revision: revision,
         phase: phase,
         connectedSourceCount: connectedSourceCount,

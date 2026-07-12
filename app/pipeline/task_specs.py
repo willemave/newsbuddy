@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.models.contracts import TaskQueue, TaskType
-from app.models.internal.feed_backfill import MAX_BACKFILL_COUNT
+from app.models.internal.feed_backfill import FeedBatchBackfillRequest
 
 
 class TaskPayload(BaseModel):
@@ -42,9 +42,9 @@ class NewsItemIdPayload(TaskPayload):
     news_item_id: int
 
 
-class BackfillFeedsPayload(RequiredUserPayload):
-    config_ids: list[int] = Field(..., min_length=1)
-    count: int = Field(..., ge=1, le=MAX_BACKFILL_COUNT)
+class ScrapePayload(TaskPayload):
+    sources: list[str] = Field(default_factory=lambda: ["all"], min_length=1)
+    first_edition_run_id: int | None = Field(default=None, gt=0)
 
 
 class DigDeeperPayload(RequiredUserPayload):
@@ -81,7 +81,7 @@ class BriefingRefreshPayload(RequiredUserPayload):
 class TaskSpec:
     task_type: TaskType
     queue: TaskQueue
-    payload_model: type[TaskPayload]
+    payload_model: type[BaseModel]
     dedupe_by_content: bool = False
 
     def normalize_payload(self, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -95,11 +95,11 @@ class TaskSpec:
 
 
 TASK_SPECS: dict[TaskType, TaskSpec] = {
-    TaskType.SCRAPE: TaskSpec(TaskType.SCRAPE, TaskQueue.CONTENT, TaskPayload),
+    TaskType.SCRAPE: TaskSpec(TaskType.SCRAPE, TaskQueue.CONTENT, ScrapePayload),
     TaskType.BACKFILL_FEEDS: TaskSpec(
         TaskType.BACKFILL_FEEDS,
         TaskQueue.BACKFILL,
-        BackfillFeedsPayload,
+        FeedBatchBackfillRequest,
     ),
     TaskType.ANALYZE_URL: TaskSpec(TaskType.ANALYZE_URL, TaskQueue.CONTENT, AnalyzeUrlPayload),
     TaskType.PROCESS_CONTENT: TaskSpec(

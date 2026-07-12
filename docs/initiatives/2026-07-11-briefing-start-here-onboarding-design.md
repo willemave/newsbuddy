@@ -1,7 +1,7 @@
 # Briefing Start Here Onboarding Design
 
 **Date:** 2026-07-11
-**Status:** Approved design
+**Status:** Implemented and quality-hardened locally
 **Scope:** onboarding completion, first-edition progress, Briefing index, and iOS Briefing UI
 **Primary goal:** make Briefing the first product experience after onboarding and teach it inside a
 temporary `Start Here` category while the user's first real categories arrive
@@ -165,7 +165,7 @@ User-facing copy should translate internal outcomes:
 | One or more sources actively processing | `Reading <Source list>…` |
 | A lens gained its first readable segment | `<Category> is ready.` |
 | A source is retrying | Keep it in the active tail; do not expose retry jargon |
-| A source is terminally unavailable | Omit a failure sentence and continue; use delayed-state copy only if nothing becomes readable |
+| A source is terminally unavailable | `We couldn’t read <Source> this time.` Continue with every other source. |
 
 The active source list uses normal localized list formatting. When many sources process concurrently,
 show at most three names and summarize the remainder, for example:
@@ -187,9 +187,9 @@ A real category pill becomes visible only when all of the following are true:
 - its `segment_count` is greater than zero;
 - its detail payload can be fetched and rendered.
 
-During first run, `Start Here` remains first. Real category pills follow in first-ready order and
-append at the trailing edge. They do not branch out of the progress paragraph and they never appear
-as placeholders.
+During first run, `Start Here` remains first. Real category pills follow the stable canonical lens
+order supplied by the Briefing index. They do not branch out of the progress paragraph and they
+never appear as placeholders.
 
 When a pill first appears:
 
@@ -231,9 +231,9 @@ After completion:
 
 ### Reading-experience eligibility
 
-The current Briefing backend is allowlisted through `briefing_enabled_user_ids`, while the iOS
-reading experience is a device-local `AppSettings` value. That is insufficient for making Briefing
-the durable default for new users.
+The Briefing backend must not infer eligibility independently at each event site, and the iOS
+reading experience must not remain only a device-local `AppSettings` value. The server-owned user
+preference is the canonical authority.
 
 Add a server-owned user reading-experience field with values `classic` and `briefing`:
 
@@ -258,12 +258,9 @@ Recommended tables:
 
 - `id`
 - `user_id`
-- `status`: `active`, `ready`, `completed`, or `expired`
+- `status`: `active`, `completed`, or `expired`
 - `revision`: monotonically increasing integer for polling/ETag invalidation
-- `connected_source_count`
-- `ready_category_keys`: append-only JSON array in first-ready order
 - `started_at`
-- `first_category_ready_at`
 - `completed_at`
 - unique active-run constraint per user
 
@@ -275,17 +272,17 @@ Recommended tables:
 - `display_name`
 - `source_kind`
 - `position`: original onboarding display order
-- `status`: `queued`, `processing`, `ready`, `empty`, `retrying`, or `unavailable`
-- `completion_sequence`: nullable run-local sequence assigned on the first terminal transition
+- `status`: `queued`, `processed`, or `unavailable`
 - `processed_item_count`: successful saved-or-deduplicated items from the source's first pass
 - `completed_at`
 - unique constraint on `(run_id, source_key)`
 
-Source status updates must be idempotent. A duplicate worker callback cannot append the same source
-twice or advance the run revision more than once for the same transition. Assign
-`completion_sequence` transactionally so `completed_sources` reflects actual completion order and
-remains stable across polling, concurrent workers, snapshots, and relaunches. Use original
-`position` only as a deterministic tie-break for sources completed in the same transaction.
+Do not duplicate values already owned by canonical tables. Connected-source count is derived from
+the run's source rows. Ready category keys are derived from active Briefing lenses with persisted
+segments. Source status updates are idempotent: the run row is locked before a source transition,
+so concurrent workers serialize revision updates. Terminal rows are ordered by `completed_at`, then
+original `position` and row ID as deterministic tie-breakers. A retry may improve `unavailable` to
+`processed`; an identical duplicate callback does not advance the revision.
 
 ### Source-completion meaning
 
@@ -312,17 +309,20 @@ Add an optional `first_run` object to `BriefingIndexResponse`:
   "masthead_deck": "Your sources, shaped into a briefing.",
   "lenses": [],
   "first_run": {
+    "run_id": 83,
     "revision": 7,
     "phase": "active",
     "connected_source_count": 12,
     "completed_sources": [
       {
         "display_name": "Techmeme",
-        "processed_item_count": 28
+        "processed_item_count": 28,
+        "outcome": "processed"
       },
       {
         "display_name": "Hacker News",
-        "processed_item_count": 34
+        "processed_item_count": 34,
+        "outcome": "processed"
       }
     ],
     "active_sources": ["Stratechery"],
@@ -336,16 +336,20 @@ Contract rules:
 - `first_run` is absent after tutorial completion.
 - `phase` is `active` while sources are progressing, `ready` after the first readable category, and
   `waiting_for_content` if initial source work is terminal but no category is readable.
-- `completed_sources` is ordered by `completion_sequence` and append-only for a run.
+- `run_id` identifies the exact onboarding run that produced the progress and scopes worker writes.
+- `completed_sources` is ordered by terminal transition time and is append-only for a run except
+  when a retry improves an `unavailable` outcome to `processed`.
 - each completed source carries its non-negative first-pass `processed_item_count`.
+- each completed source carries a typed `processed` or `unavailable` outcome.
 - `active_sources` may change in place and is not treated as history.
-- `ready_category_keys` is append-only in first-ready order and contains only keys also present as
-  readable entries in `lenses`.
+- `ready_category_keys` is derived from readable entries in `lenses`; it is not separately
+  persisted first-run state.
 - the client derives prose from structured fields; the backend does not send arbitrary UI sentences.
 - adding `first_run` is backward-compatible for older clients.
 
-The Briefing ETag must incorporate both normal Briefing version and first-run revision, for example
-`W/"v42-o7"`. A first-run progress update therefore invalidates the index even when no Briefing
+The Briefing ETag must incorporate the normal Briefing version, first-run ID, and first-run
+revision. Including the run ID prevents a replacement run at revision 1 from reusing the previous
+run's validator. A first-run progress update therefore invalidates the index even when no Briefing
 segment has been persisted yet.
 
 The existing `POST /api/onboarding/tutorial-complete` endpoint can remain the completion write in
@@ -361,14 +365,15 @@ Update the onboarding completion command/service to:
 2. set the user's reading experience to `briefing`;
 3. create the first-edition run and source snapshot;
 4. seed recent and selected-feed content as today;
-5. mark already satisfied source rows ready;
+5. record already satisfied source rows as processed;
 6. enqueue config-aware backfill and scrape work;
 7. enqueue an immediate `briefing_refresh` append after seeded content is committed;
 8. return a response that routes the client directly to Briefing.
 
 ### Progress events
 
-Record first-edition source transitions at the narrowest existing orchestration seam:
+Carry `first_edition_run_id` in the queued payload and record source transitions at the narrowest
+existing orchestration seam:
 
 - config-specific feed backfill completion;
 - per-config Reddit/feed scrape completion;
@@ -376,27 +381,26 @@ Record first-edition source transitions at the narrowest existing orchestration 
 - terminal retry exhaustion.
 
 Do not infer progress by parsing log text or exposing raw `processing_tasks` rows to the client.
-Grouped tasks may process several sources concurrently, so handlers must report per-source outcomes
-rather than treating the whole task as one source event.
+Grouped tasks may process several sources concurrently, so handlers must report and commit each
+source outcome as soon as that source finishes rather than waiting for the whole task. One source
+failure must be recorded as `unavailable` without preventing later sources in the batch from
+running. Retried work remains scoped to its originating run and may improve that outcome.
 
 ### Briefing readiness
 
 Normal ready-content events continue to populate `briefing_pending_sources` and enqueue debounced
-LLM refreshes. When the first active segment for a lens is persisted:
-
-- append the lens key to `ready_category_keys` and increment the first-edition run revision in the
-  same transaction that persists the segment;
-- change the run from `active` to `ready` when this is the first readable lens.
+LLM refreshes. The index derives first-run category readiness from the same active lenses and
+persisted segments it returns to the client. No synchronization hook copies category keys or a
+second readiness status into the onboarding run.
 
 Briefing source coverage still comes from real active segments. The onboarding progress model must
 not manufacture lens counts or mark a category ready based only on queued work.
 
 ### Dynamic Briefing users
 
-`enqueue_news_item_for_briefing_if_ready` currently iterates the static allowlist. Before enabling
-Briefing for every new user, replace that assumption with a query for eligible Briefing users and
-retain a bounded rollout guard. Content-event handling should use the same eligibility authority so
-articles, podcasts, and news do not diverge.
+`enqueue_news_item_for_briefing_if_ready` queries the canonical reading-experience preference and
+retains the rollout allowlist as a bounded override. Content-event handling uses that same
+eligibility authority so articles, podcasts, and news do not diverge.
 
 ## iOS Design
 
@@ -416,16 +420,18 @@ selection screens. This design removes only passive post-selection waiting/tutor
 
 ### View-model ownership
 
-`BriefingViewModel` should own first-run presentation state because it already owns the index, lens
-ordering, selection, ETag refresh, and snapshot behavior.
+`BriefingViewModel` owns the typed destination (`startHere` or `lens(key)`) and integrates first-run
+state with index, lens ordering, ETag refresh, and snapshots. A small
+`BriefingFirstRunCoordinator` owns only polling and retryable completion work so the main view model
+does not grow another long-running task state machine.
 
 Responsibilities:
 
-- synthesize a stable `start-here` presentation item ahead of server lenses;
+- present a stable typed `startHere` destination ahead of server lenses;
 - select it on first entry while `first_run` is present;
-- maintain first-ready ordering for real categories during first run;
+- preserve the server-provided order for readable categories during first run;
 - poll/revalidate the Briefing index while the run is active;
-- diff `completed_sources` by stable key so only new sentences animate;
+- animate response revision changes without manufacturing a fake lens key;
 - never replay the full writing sequence after relaunch or snapshot restoration;
 - complete the tutorial when a real category is selected;
 - remove the synthetic item without disturbing the selected real lens;
@@ -480,7 +486,7 @@ completion.
 ### Category pills
 
 - Use stable identities and interruptible state transitions.
-- Insert at the trailing edge with opacity, slight blur, and a small upward offset.
+- Insert at its canonical position with opacity, slight blur, and a small upward offset.
 - Reflow neighboring pills smoothly.
 - Trigger one light haptic when the first real category appears, not for every category.
 - New pills receive one restrained coral emphasis before settling into the standard pill style.
@@ -513,9 +519,9 @@ Do not display a countdown or imply that the whole run failed.
 
 ### Partial source failures
 
-Continue with successful sources. Do not append red failure sentences to the prose. Keep unavailable
-outcomes in structured state for observability and support, while the user sees only the delayed
-state if failures prevent any category from becoming readable.
+Continue with successful sources and append one neutral sentence for the unavailable source:
+`We couldn’t read <Source> this time.` The outcome stays structured for observability and can
+improve to `processed` if a queued retry succeeds.
 
 ### No categories after terminal processing
 
@@ -562,9 +568,10 @@ window, unavailable sources, and time to first readable category.
 ### Phase 2: Backend orchestration
 
 - Create the run during onboarding completion.
-- Emit idempotent per-source progress from backfill/scrape handlers.
+- Emit and commit idempotent per-source progress from backfill/scrape handlers as each source ends.
 - Enqueue the first Briefing refresh immediately after seeded content commits.
-- Update run revision when first segments make categories readable.
+- Derive readable categories from canonical Briefing segments instead of synchronizing duplicate
+  run fields.
 - Replace static allowlist-only event fanout with durable eligibility.
 - Add service tests for ordering, dedupe, retries, and partial failures.
 
@@ -572,8 +579,9 @@ window, unavailable sources, and time to first readable category.
 
 - Remove the post-onboarding modal route.
 - Reconcile server reading experience into `AppSettings`.
-- Add synthetic Start Here presentation state to `BriefingViewModel`.
-- Add first-run polling, snapshot restore, and completion behavior.
+- Add a typed Start Here destination to `BriefingViewModel` without a fake lens key.
+- Isolate first-run polling and retryable completion in `BriefingFirstRunCoordinator`.
+- Preserve first-run state through the existing index snapshot and ETag.
 - Add unit tests for selection, resume, new-source diffing, and tutorial completion.
 
 ### Phase 4: Start Here UI and motion

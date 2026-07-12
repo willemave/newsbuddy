@@ -81,7 +81,8 @@ struct BriefingStartHereView: View {
         sentences.append(contentsOf: progress.completedSources.map(completedSourceText))
 
         if !progress.activeSources.isEmpty {
-            sentences.append("Now reading \(joined(progress.activeSources))…")
+            let sourceList = ListFormatter.localizedString(byJoining: progress.activeSources)
+            sentences.append("Now reading \(sourceList)…")
         } else if progress.phase == .waiting_for_content {
             sentences.append("The first pass is complete. We’re shaping the first stories into categories now…")
         } else if progress.phase == .ready {
@@ -91,6 +92,9 @@ struct BriefingStartHereView: View {
     }
 
     private func completedSourceText(_ source: APIBriefingFirstRunSourceProgress) -> String {
+        if source.outcome == .unavailable {
+            return "We couldn’t read \(source.displayName) this time."
+        }
         let noun = source.processedItemCount == 1 ? "item" : "items"
         return "\(source.displayName) is in — \(source.processedItemCount) \(noun) processed."
     }
@@ -102,11 +106,6 @@ struct BriefingStartHereView: View {
         return "A category is ready above. You can start reading it while the rest of your sources continue in the background."
     }
 
-    private func joined(_ values: [String]) -> String {
-        guard let last = values.last else { return "" }
-        if values.count == 1 { return last }
-        return "\(values.dropLast().joined(separator: ", ")) and \(last)"
-    }
 }
 
 private struct BriefingStartHereFeatureList: View {

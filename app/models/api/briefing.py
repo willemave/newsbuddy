@@ -7,6 +7,7 @@ from app.models.api.base import UTCDateTime
 from app.models.contracts import (
     BriefingBlockType,
     BriefingFirstRunPhase,
+    BriefingFirstRunSourceOutcome,
     BriefingRunKind,
     BriefingTier,
     ContentType,
@@ -28,9 +29,11 @@ class BriefingLensSummary(BaseModel):
 class BriefingFirstRunSourceProgress(BaseModel):
     display_name: str
     processed_item_count: int = Field(ge=0)
+    outcome: BriefingFirstRunSourceOutcome
 
 
 class BriefingFirstRunProgress(BaseModel):
+    run_id: int
     revision: int
     phase: BriefingFirstRunPhase
     connected_source_count: int

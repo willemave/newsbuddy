@@ -31,18 +31,20 @@ final class BriefingViewModelTests: XCTestCase {
             )
         ]
         service.lensResponses["technology"] = makeLens(key: "technology")
-        var completionCount = 0
-        let viewModel = BriefingViewModel(service: service) {
-            completionCount += 1
-        }
+        let snapshotStore = MockBriefingSnapshotStore(userID: 1)
+        let viewModel = BriefingViewModel(service: service, snapshotStore: snapshotStore)
 
         await viewModel.loadIndexIfNeeded()
         viewModel.selectLens(key: "technology")
-        await waitForBriefingCondition { completionCount == 1 }
+        await waitForBriefingCondition { service.firstRunCompletionCount == 1 }
+        await waitForBriefingCondition(timeoutNanoseconds: 1_500_000_000) {
+            !snapshotStore.savedSnapshots.isEmpty
+        }
 
         XCTAssertEqual(viewModel.selectedLensKey, "technology")
         XCTAssertNil(viewModel.firstRun)
         XCTAssertFalse(viewModel.isStartHereSelected)
+        XCTAssertNil(snapshotStore.savedSnapshots.last?.index.firstRun)
     }
 
     func testOpeningReadyCategoryRetriesCompletionAfterFailure() async {
@@ -58,17 +60,12 @@ final class BriefingViewModelTests: XCTestCase {
             )
         ]
         service.lensResponses["technology"] = makeLens(key: "technology")
-        var completionCount = 0
-        let viewModel = BriefingViewModel(service: service) {
-            completionCount += 1
-            if completionCount == 1 {
-                throw NSError(domain: "BriefingViewModelTests", code: 1)
-            }
-        }
+        service.firstRunCompletionFailuresRemaining = 1
+        let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
         viewModel.selectLens(key: "technology")
-        await waitForBriefingCondition { completionCount == 2 }
+        await waitForBriefingCondition { service.firstRunCompletionCount == 2 }
 
         XCTAssertNil(viewModel.firstRun)
     }

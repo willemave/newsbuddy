@@ -164,9 +164,11 @@ struct BriefingView: View {
             }
 
             if viewModel.firstRun != nil {
-                BriefingFirstRunStrip(viewModel: viewModel) { key in
-                    viewModel.selectLens(key: key)
-                }
+                BriefingFirstRunStrip(
+                    viewModel: viewModel,
+                    onSelectStartHere: viewModel.selectStartHere,
+                    onSelectLens: viewModel.selectLens
+                )
             } else {
                 BriefingTierStrip(
                     viewModel: viewModel,

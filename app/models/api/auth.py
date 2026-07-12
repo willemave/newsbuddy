@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.api.users import UserResponse
+from app.models.contracts import ReadingExperience
 
 
 class AppleSignInRequest(BaseModel):
@@ -21,7 +22,7 @@ class DebugUserSessionRequest(BaseModel):
     user_id: int | None = Field(default=None, ge=1)
     has_completed_onboarding: bool | None = None
     has_completed_new_user_tutorial: bool | None = None
-    reading_experience: str | None = Field(default=None, pattern="^(classic|briefing)$")
+    reading_experience: ReadingExperience | None = None
 
 
 class TokenResponse(BaseModel):

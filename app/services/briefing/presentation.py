@@ -40,16 +40,14 @@ def get_briefing_index(db: Session, *, user_id: int) -> BriefingIndexResponse:
         )
         for lens in lenses
     ]
-    first_run = get_first_run_progress(db, user_id=user_id)
+    readable_summaries = [summary for summary in summaries if summary.segment_count > 0]
+    first_run = get_first_run_progress(
+        db,
+        user_id=user_id,
+        ready_category_keys=[summary.key for summary in readable_summaries],
+    )
     if first_run is not None:
-        summaries_by_key = {
-            summary.key: summary for summary in summaries if summary.segment_count > 0
-        }
-        summaries = [
-            summaries_by_key[key]
-            for key in first_run.ready_category_keys
-            if key in summaries_by_key
-        ]
+        summaries = readable_summaries
     generated_at = max(
         [segment.created_at for segment in active_segments if segment.created_at],
         default=None,

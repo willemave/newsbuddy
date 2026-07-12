@@ -6,7 +6,11 @@ private let briefingReadFlushDebounceNanoseconds: UInt64 = 300_000_000
 private let briefingReadFlushRetryNanoseconds: UInt64 = 2_000_000_000
 private let briefingFirstRunCompletionRetryNanoseconds: UInt64 = 2_000_000_000
 private let briefingRefreshLogger = Logger(subsystem: "com.newsly", category: "BriefingRefresh")
-private let briefingStartHereKey = "start-here"
+
+private enum BriefingDestination: Equatable {
+    case startHere
+    case lens(String)
+}
 
 protocol BriefingAudioEpisodeServicing: AnyObject {
     func waitForCompletedEpisode(
@@ -25,8 +29,6 @@ final class BriefingViewModel: ObservableObject {
         case lens(String)
         case readFlush
         case snapshotSave
-        case firstRunPoll
-        case firstRunCompletion
     }
 
     private enum NarrationPreparationOutcome {
@@ -55,7 +57,7 @@ final class BriefingViewModel: ObservableObject {
     @Published private(set) var state: LoadState = .idle
     @Published private(set) var refreshPhase: RefreshPhase = .idle
     @Published private(set) var lensErrors: [String: String] = [:]
-    @Published var selectedLensKey: String?
+    @Published private var destination: BriefingDestination?
     @Published private(set) var narrationEpisodes: [String: AudioEpisode] = [:]
     /// True while the selected lens is scrolled into reading — the masthead
     /// above the pager collapses to hand the space to the content.
@@ -69,8 +71,7 @@ final class BriefingViewModel: ObservableObject {
     private let audioEpisodeService: any BriefingAudioEpisodeServicing
     private let snapshotStore: BriefingSnapshotStoring?
     private let indexSynchronizer: BriefingIndexSynchronizer
-    private let completeTutorial: @MainActor () async throws -> Void
-    private let firstRunCompletionRetryDelay: UInt64
+    private let firstRunCoordinator: BriefingFirstRunCoordinator
     private let tasks = TaskBag<TaskKey>()
     private var pendingReadKeys: Set<String> = []
     private var staleLensKeys: Set<String> = []
@@ -81,20 +82,22 @@ final class BriefingViewModel: ObservableObject {
     /// Keeps the category strip open after an explicit News tap while the
     /// masthead is compact; cleared on the next scroll-down.
     private var categoryStripPinnedOpen = false
+    private var dismissedFirstRunID: Int?
 
     init(
         service: BriefingServicing,
         audioEpisodeService: any BriefingAudioEpisodeServicing,
         snapshotStore: BriefingSnapshotStoring? = nil,
         refreshPollDelays: [UInt64] = briefingRefreshPollDelaysNanoseconds,
-        firstRunCompletionRetryDelay: UInt64 = briefingFirstRunCompletionRetryNanoseconds,
-        completeTutorial: @escaping @MainActor () async throws -> Void = {}
+        firstRunCompletionRetryDelay: UInt64 = briefingFirstRunCompletionRetryNanoseconds
     ) {
         self.service = service
         self.audioEpisodeService = audioEpisodeService
         self.snapshotStore = snapshotStore
-        self.firstRunCompletionRetryDelay = firstRunCompletionRetryDelay
-        self.completeTutorial = completeTutorial
+        self.firstRunCoordinator = BriefingFirstRunCoordinator(
+            service: service,
+            completionRetryDelay: firstRunCompletionRetryDelay
+        )
         let indexSynchronizer = BriefingIndexSynchronizer(
             service: service,
             refreshPollDelays: refreshPollDelays
@@ -124,9 +127,19 @@ final class BriefingViewModel: ObservableObject {
         refreshPhase == .requesting || refreshPhase == .waitingForVersion
     }
 
-    var firstRun: APIBriefingFirstRunProgress? { index?.firstRun }
+    var selectedLensKey: String? {
+        guard case .lens(let key) = destination else { return nil }
+        return key
+    }
 
-    var isStartHereSelected: Bool { selectedLensKey == briefingStartHereKey }
+    var firstRun: APIBriefingFirstRunProgress? {
+        guard let progress = index?.firstRun, progress.runId != dismissedFirstRunID else {
+            return nil
+        }
+        return progress
+    }
+
+    var isStartHereSelected: Bool { destination == .startHere }
 
     var newsLenses: [APIBriefingLensSummary] {
         orderedLenses.filter { $0.tier == .news }
@@ -165,7 +178,7 @@ final class BriefingViewModel: ObservableObject {
         }
         if !active {
             cancelLensLoads()
-            tasks.cancel(.firstRunPoll)
+            firstRunCoordinator.stopPolling()
         } else {
             scheduleFirstRunPollIfNeeded()
         }
@@ -203,11 +216,18 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func selectLens(key: String) {
-        guard selectedLensKey != key else { return }
-        if key != briefingStartHereKey, index?.firstRun != nil {
+        guard destination != .lens(key) else { return }
+        if firstRun != nil {
             dismissFirstRun()
         }
-        selectedLensKey = key
+        destination = .lens(key)
+        noteSelectionChanged()
+        loadWorkingSet()
+    }
+
+    func selectStartHere() {
+        guard firstRun != nil, destination != .startHere else { return }
+        destination = .startHere
         noteSelectionChanged()
         loadWorkingSet()
     }
@@ -271,7 +291,6 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func loadLensIfNeeded(key: String) {
-        guard key != briefingStartHereKey else { return }
         guard (lenses[key] == nil || staleLensKeys.contains(key)),
               !tasks.isRunning(.lens(key)) else {
             return
@@ -520,7 +539,7 @@ final class BriefingViewModel: ObservableObject {
     private func applyIndexResult(_ result: BriefingIndexFetchResult) {
         switch result {
         case .notModified:
-            state = orderedLenses.isEmpty && index?.firstRun == nil ? .empty : .loaded
+            state = orderedLenses.isEmpty && firstRun == nil ? .empty : .loaded
             loadWorkingSet()
         case .value(let response, _):
             applyIndex(response)
@@ -528,6 +547,9 @@ final class BriefingViewModel: ObservableObject {
     }
 
     private func applyIndex(_ response: APIBriefingIndexResponse) {
+        if response.firstRun == nil {
+            dismissedFirstRunID = nil
+        }
         let versionChanged = index.map { $0.version != response.version } ?? false
         if versionChanged {
             markLensesStale(validLensKeys: Set(response.lenses.map(\.key)))
@@ -537,15 +559,15 @@ final class BriefingViewModel: ObservableObject {
             staleLensKeys.formIntersection(validKeys)
         }
         index = response
-        orderedLenses = response.firstRun == nil
+        orderedLenses = firstRun == nil
             ? Self.sortedLenses(response.lenses)
             : response.lenses
-        state = response.lenses.isEmpty && response.firstRun == nil ? .empty : .loaded
-        if selectedLensKey == nil
-            || (selectedLensKey != briefingStartHereKey
-                && !response.lenses.contains(where: { $0.key == selectedLensKey }))
-            || (selectedLensKey == briefingStartHereKey && response.firstRun == nil) {
-            selectedLensKey = response.firstRun == nil ? orderedLenses.first?.key : briefingStartHereKey
+        state = response.lenses.isEmpty && firstRun == nil ? .empty : .loaded
+        if firstRun != nil {
+            destination = .startHere
+        } else if selectedLensKey == nil
+                    || !response.lenses.contains(where: { $0.key == selectedLensKey }) {
+            destination = orderedLenses.first.map { .lens($0.key) }
         }
         noteSelectionChanged()
         loadWorkingSet()
@@ -599,21 +621,21 @@ final class BriefingViewModel: ObservableObject {
               !snapshot.index.lenses.isEmpty || snapshot.index.firstRun != nil
         else { return false }
         index = snapshot.index
-        orderedLenses = snapshot.index.firstRun == nil
+        orderedLenses = firstRun == nil
             ? Self.sortedLenses(snapshot.index.lenses)
             : snapshot.index.lenses
         lenses = snapshot.lenses
         staleLensKeys.removeAll()
         indexSynchronizer.restore(etag: snapshot.etag)
         state = .loaded
-        if snapshot.index.firstRun != nil {
-            selectedLensKey = briefingStartHereKey
+        if firstRun != nil {
+            destination = .startHere
         } else if let savedKey = snapshot.selectedLensKey,
            snapshot.index.lenses.contains(where: { $0.key == savedKey }) {
-            selectedLensKey = savedKey
+            destination = .lens(savedKey)
         } else if selectedLensKey == nil
                     || !snapshot.index.lenses.contains(where: { $0.key == selectedLensKey }) {
-            selectedLensKey = orderedLenses.first?.key
+            destination = orderedLenses.first.map { .lens($0.key) }
         }
         noteSelectionChanged()
         scheduleFirstRunPollIfNeeded()
@@ -636,7 +658,7 @@ final class BriefingViewModel: ObservableObject {
             await snapshotStore.save(
                 BriefingSnapshot(
                     userID: snapshotStore.userID,
-                    index: index,
+                    index: self.indexForSnapshot(index),
                     etag: self.indexSynchronizer.etag,
                     selectedLensKey: self.selectedLensKey,
                     lenses: snapshotLenses,
@@ -644,6 +666,22 @@ final class BriefingViewModel: ObservableObject {
                 )
             )
         }
+    }
+
+    private func indexForSnapshot(
+        _ currentIndex: APIBriefingIndexResponse
+    ) -> APIBriefingIndexResponse {
+        guard currentIndex.firstRun?.runId == dismissedFirstRunID else {
+            return currentIndex
+        }
+        return APIBriefingIndexResponse(
+            version: currentIndex.version,
+            mastheadTitle: currentIndex.mastheadTitle,
+            mastheadDeck: currentIndex.mastheadDeck,
+            generatedAt: currentIndex.generatedAt,
+            lenses: currentIndex.lenses,
+            firstRun: nil
+        )
     }
 
     private func markLensesStale(validLensKeys: Set<String>) {
@@ -691,7 +729,7 @@ final class BriefingViewModel: ObservableObject {
                     firstRun: currentIndex.firstRun
                 )
                 index = currentIndex
-                orderedLenses = currentIndex.firstRun == nil
+                orderedLenses = firstRun == nil
                     ? Self.sortedLenses(currentIndex.lenses)
                     : currentIndex.lenses
             }
@@ -772,7 +810,7 @@ final class BriefingViewModel: ObservableObject {
                 firstRun: currentIndex.firstRun
             )
             index = currentIndex
-            orderedLenses = currentIndex.firstRun == nil
+            orderedLenses = firstRun == nil
                 ? Self.sortedLenses(currentIndex.lenses)
                 : currentIndex.lenses
         }
@@ -789,52 +827,17 @@ final class BriefingViewModel: ObservableObject {
     }
 
     private func scheduleFirstRunPollIfNeeded() {
-        guard index?.firstRun != nil else {
-            tasks.cancel(.firstRunPoll)
-            return
-        }
-        guard !tasks.isRunning(.firstRunPoll) else { return }
-        tasks.runReplacing(.firstRunPoll) { [weak self] in
-            while !Task.isCancelled, self?.index?.firstRun != nil {
-                do {
-                    try await Task.sleep(nanoseconds: 1_500_000_000)
-                } catch {
-                    return
-                }
-                await self?.refreshIndex()
-            }
+        firstRunCoordinator.setPolling(firstRun != nil) { [weak self] in
+            await self?.refreshIndex()
         }
     }
 
     private func dismissFirstRun() {
-        guard let currentIndex = index, currentIndex.firstRun != nil else { return }
-        index = APIBriefingIndexResponse(
-            version: currentIndex.version,
-            mastheadTitle: currentIndex.mastheadTitle,
-            mastheadDeck: currentIndex.mastheadDeck,
-            generatedAt: currentIndex.generatedAt,
-            lenses: currentIndex.lenses,
-            firstRun: nil
-        )
-        tasks.cancel(.firstRunPoll)
+        guard let progress = firstRun, let currentIndex = index else { return }
+        dismissedFirstRunID = progress.runId
+        orderedLenses = Self.sortedLenses(currentIndex.lenses)
+        firstRunCoordinator.stopPolling()
         scheduleSnapshotSave()
-        tasks.runReplacing(.firstRunCompletion) { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                do {
-                    try await completeTutorial()
-                    return
-                } catch {
-                    briefingRefreshLogger.error(
-                        "Failed to persist Start Here completion; retrying: \(error.localizedDescription, privacy: .private)"
-                    )
-                }
-                do {
-                    try await Task.sleep(nanoseconds: firstRunCompletionRetryDelay)
-                } catch {
-                    return
-                }
-            }
-        }
+        firstRunCoordinator.complete()
     }
 }

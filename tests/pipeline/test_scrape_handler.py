@@ -3,6 +3,7 @@
 from contextlib import nullcontext
 from unittest.mock import Mock
 
+from app.models.contracts import BriefingFirstRunSourceOutcome
 from app.models.domain.scraper_runs import ScraperStats
 from app.pipeline.handlers.scrape import ScrapeHandler
 from app.pipeline.task_context import TaskContext
@@ -11,7 +12,7 @@ from app.services.queue import TaskType
 
 
 def test_scrape_handler_records_processed_items_by_source(monkeypatch) -> None:
-    recorded_progress: dict[str, object] = {}
+    recorded_progress: list[dict[str, object]] = []
     runner = Mock()
     runner.run_scraper_with_stats.side_effect = [
         ScraperStats(saved=18, duplicates=10),
@@ -23,13 +24,13 @@ def test_scrape_handler_records_processed_items_by_source(monkeypatch) -> None:
     ]
     monkeypatch.setattr("app.pipeline.handlers.scrape.ScraperRunner", lambda: runner)
 
-    def fake_mark_complete(_db, **kwargs):
-        recorded_progress.update(kwargs)
-        return len(kwargs["scraper_keys"])
+    def fake_record_result(_db, **kwargs):
+        recorded_progress.append(kwargs)
+        return 1
 
     monkeypatch.setattr(
-        "app.pipeline.handlers.scrape.mark_scraper_sources_complete",
-        fake_mark_complete,
+        "app.pipeline.handlers.scrape.record_scraper_source_result",
+        fake_record_result,
     )
 
     context = TaskContext(
@@ -43,14 +44,105 @@ def test_scrape_handler_records_processed_items_by_source(monkeypatch) -> None:
         id=1,
         task_type=TaskType.SCRAPE,
         retry_count=0,
-        payload={"sources": ["techmeme", "reddit"]},
+        payload={"sources": ["techmeme", "reddit"], "first_edition_run_id": 99},
     )
 
     result = ScrapeHandler().handle(task, context)
 
     assert result.success is True
-    assert recorded_progress == {
-        "scraper_keys": ["techmeme", "reddit"],
-        "processed_item_counts": {"techmeme": 28, "reddit": 19},
-        "processed_item_counts_by_config_id": {41: 11, 42: 8},
-    }
+    assert recorded_progress == [
+        {
+            "run_id": 99,
+            "scraper_key": "techmeme",
+            "processed_item_count": 28,
+            "processed_item_counts_by_config_id": {},
+            "outcome": BriefingFirstRunSourceOutcome.PROCESSED,
+        },
+        {
+            "run_id": 99,
+            "scraper_key": "reddit",
+            "processed_item_count": 19,
+            "processed_item_counts_by_config_id": {41: 11, 42: 8},
+            "outcome": BriefingFirstRunSourceOutcome.PROCESSED,
+        },
+    ]
+
+
+def test_scrape_handler_records_failure_and_continues_remaining_sources(monkeypatch) -> None:
+    recorded_progress: list[dict[str, object]] = []
+    runner = Mock()
+    runner.run_scraper_with_stats.side_effect = [
+        RuntimeError("source unavailable"),
+        ScraperStats(saved=4, duplicates=2),
+    ]
+    monkeypatch.setattr("app.pipeline.handlers.scrape.ScraperRunner", lambda: runner)
+
+    def fake_record_result(_db, **kwargs):
+        recorded_progress.append(kwargs)
+        return 1
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.scrape.record_scraper_source_result",
+        fake_record_result,
+    )
+    context = TaskContext(
+        queue_service=Mock(),
+        settings=Mock(),
+        llm_service=Mock(),
+        worker_id="test",
+        db_factory=lambda: nullcontext(Mock()),
+    )
+    task = TaskEnvelope(
+        id=2,
+        task_type=TaskType.SCRAPE,
+        retry_count=0,
+        payload={"sources": ["techmeme", "reddit"], "first_edition_run_id": 99},
+    )
+
+    result = ScrapeHandler().handle(task, context)
+
+    assert result.success is False
+    assert runner.run_scraper_with_stats.call_count == 2
+    assert recorded_progress == [
+        {
+            "run_id": 99,
+            "scraper_key": "techmeme",
+            "processed_item_count": 0,
+            "processed_item_counts_by_config_id": {},
+            "outcome": BriefingFirstRunSourceOutcome.UNAVAILABLE,
+        },
+        {
+            "run_id": 99,
+            "scraper_key": "reddit",
+            "processed_item_count": 6,
+            "processed_item_counts_by_config_id": {},
+            "outcome": BriefingFirstRunSourceOutcome.PROCESSED,
+        },
+    ]
+
+
+def test_scrape_handler_retries_when_progress_cannot_be_recorded(monkeypatch) -> None:
+    runner = Mock()
+    runner.run_scraper_with_stats.return_value = ScraperStats(saved=4)
+    monkeypatch.setattr("app.pipeline.handlers.scrape.ScraperRunner", lambda: runner)
+    monkeypatch.setattr(
+        "app.pipeline.handlers.scrape.record_scraper_source_result",
+        Mock(side_effect=RuntimeError("database unavailable")),
+    )
+    context = TaskContext(
+        queue_service=Mock(),
+        settings=Mock(),
+        llm_service=Mock(),
+        worker_id="test",
+        db_factory=lambda: nullcontext(Mock()),
+    )
+    task = TaskEnvelope(
+        id=3,
+        task_type=TaskType.SCRAPE,
+        retry_count=0,
+        payload={"sources": ["techmeme"], "first_edition_run_id": 99},
+    )
+
+    result = ScrapeHandler().handle(task, context)
+
+    assert result.success is False

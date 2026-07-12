@@ -100,7 +100,9 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
         .one()
     )
     assert first_run.status == "active"
-    assert first_run.connected_source_count == 3
+    assert backfill_calls[0][1]["first_edition_run_id"] == first_run.id
+    scrape_call = next(call for call in calls if call[0] == TaskType.SCRAPE.value)
+    assert scrape_call[1]["first_edition_run_id"] == first_run.id
     first_run_sources = (
         db_session.query(OnboardingFirstEditionSource)
         .filter(OnboardingFirstEditionSource.run_id == first_run.id)
@@ -230,7 +232,11 @@ def test_onboarding_complete_queues_selected_aggregator_scrapes(
         .all()
     )
     assert {config.config["key"] for config in configs} == {"sciurls", "finurls"}
-    assert (TaskType.SCRAPE.value, {"sources": ["sciurls", "finurls"]}) in calls
+    scrape_payload = next(
+        payload for task_type, payload in calls if task_type == TaskType.SCRAPE.value
+    )
+    assert scrape_payload["sources"] == ["sciurls", "finurls"]
+    assert isinstance(scrape_payload["first_edition_run_id"], int)
 
 
 def test_onboarding_complete_ignores_reddit_aggregator(
@@ -272,7 +278,11 @@ def test_onboarding_complete_ignores_reddit_aggregator(
         .all()
     )
     assert [config.config["key"] for config in configs] == ["sciurls"]
-    assert (TaskType.SCRAPE.value, {"sources": ["sciurls"]}) in calls
+    scrape_payload = next(
+        payload for task_type, payload in calls if task_type == TaskType.SCRAPE.value
+    )
+    assert scrape_payload["sources"] == ["sciurls"]
+    assert isinstance(scrape_payload["first_edition_run_id"], int)
 
 
 def test_onboarding_complete_rejects_invalid_twitter_username(client):
@@ -289,8 +299,6 @@ def test_onboarding_tutorial_complete(client, db_session, test_user):
         user_id=test_user.id,
         status="active",
         revision=1,
-        connected_source_count=0,
-        ready_category_keys=[],
     )
     db_session.add(run)
     db_session.commit()

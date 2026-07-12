@@ -89,10 +89,9 @@ enum ServerConfigurationDefaults {
     }
 }
 
-enum ReadingExperience: String, CaseIterable, Identifiable {
-    case classic
-    case briefing
+typealias ReadingExperience = APIReadingExperience
 
+extension APIReadingExperience: Identifiable {
     var id: String { rawValue }
 
     var title: String {

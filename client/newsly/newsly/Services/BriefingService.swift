@@ -10,6 +10,7 @@ protocol BriefingServicing: AnyObject {
     func fetchLens(key: String) async throws -> APIBriefingLensResponse
     func markRead(sourceKeys: [String]) async throws -> APIBriefingReadMarkResponse
     func requestRefresh() async throws -> APIBriefingRefreshResponse
+    func completeFirstRun() async throws
     func digSearch(fragment: String) async throws -> APIBriefingDigSearchResponse
     func digSummarize(
         fragment: String,
@@ -67,6 +68,10 @@ final class LiveBriefingService: BriefingServicing {
 
     func requestRefresh() async throws -> APIBriefingRefreshResponse {
         try await apiClient.request(APIEndpoints.briefingRefresh, method: "POST")
+    }
+
+    func completeFirstRun() async throws {
+        _ = try await OnboardingService.shared.markTutorialComplete()
     }
 
     func digSearch(fragment: String) async throws -> APIBriefingDigSearchResponse {

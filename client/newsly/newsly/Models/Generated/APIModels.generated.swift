@@ -1952,6 +1952,7 @@ struct APIBriefingIndexResponse: Codable {
 }
 
 struct APIBriefingFirstRunProgress: Codable {
+    let runId: Int
     let revision: Int
     let phase: APIBriefingFirstRunPhase
     let connectedSourceCount: Int
@@ -1960,6 +1961,7 @@ struct APIBriefingFirstRunProgress: Codable {
     let readyCategoryKeys: [String]
 
     init(
+        runId: Int,
         revision: Int,
         phase: APIBriefingFirstRunPhase,
         connectedSourceCount: Int,
@@ -1967,6 +1969,7 @@ struct APIBriefingFirstRunProgress: Codable {
         activeSources: [String] = [],
         readyCategoryKeys: [String] = []
     ) {
+        self.runId = runId
         self.revision = revision
         self.phase = phase
         self.connectedSourceCount = connectedSourceCount
@@ -1976,6 +1979,7 @@ struct APIBriefingFirstRunProgress: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case runId = "run_id"
         case revision = "revision"
         case phase = "phase"
         case connectedSourceCount = "connected_source_count"
@@ -1986,6 +1990,7 @@ struct APIBriefingFirstRunProgress: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        runId = try container.decode(Int.self, forKey: .runId)
         revision = try container.decode(Int.self, forKey: .revision)
         phase = try container.decode(APIBriefingFirstRunPhase.self, forKey: .phase)
         connectedSourceCount = try container.decode(Int.self, forKey: .connectedSourceCount)
@@ -1996,6 +2001,7 @@ struct APIBriefingFirstRunProgress: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(runId, forKey: .runId)
         try container.encode(revision, forKey: .revision)
         try container.encode(phase, forKey: .phase)
         try container.encode(connectedSourceCount, forKey: .connectedSourceCount)
@@ -4086,21 +4092,25 @@ struct APIUpdateUserProfileRequest: Codable {
     let fullName: String?
     let twitterUsername: String?
     let councilPersonas: [APICouncilPersonaConfig]?
+    let readingExperience: APIReadingExperience?
 
     init(
         fullName: String? = nil,
         twitterUsername: String? = nil,
-        councilPersonas: [APICouncilPersonaConfig]? = nil
+        councilPersonas: [APICouncilPersonaConfig]? = nil,
+        readingExperience: APIReadingExperience? = nil
     ) {
         self.fullName = fullName
         self.twitterUsername = twitterUsername
         self.councilPersonas = councilPersonas
+        self.readingExperience = readingExperience
     }
 
     enum CodingKeys: String, CodingKey {
         case fullName = "full_name"
         case twitterUsername = "twitter_username"
         case councilPersonas = "council_personas"
+        case readingExperience = "reading_experience"
     }
 
     init(from decoder: Decoder) throws {
@@ -4108,6 +4118,7 @@ struct APIUpdateUserProfileRequest: Codable {
         fullName = try container.decodeIfPresent(String.self, forKey: .fullName)
         twitterUsername = try container.decodeIfPresent(String.self, forKey: .twitterUsername)
         councilPersonas = try container.decodeIfPresent([APICouncilPersonaConfig].self, forKey: .councilPersonas)
+        readingExperience = try container.decodeIfPresent(APIReadingExperience.self, forKey: .readingExperience)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -4115,6 +4126,7 @@ struct APIUpdateUserProfileRequest: Codable {
         try container.encodeIfPresent(fullName, forKey: .fullName)
         try container.encodeIfPresent(twitterUsername, forKey: .twitterUsername)
         try container.encodeIfPresent(councilPersonas, forKey: .councilPersonas)
+        try container.encodeIfPresent(readingExperience, forKey: .readingExperience)
     }
 }
 
@@ -5713,30 +5725,36 @@ struct APIAssistantScreenContext: Codable {
 struct APIBriefingFirstRunSourceProgress: Codable {
     let displayName: String
     let processedItemCount: Int
+    let outcome: APIBriefingFirstRunSourceOutcome
 
     init(
         displayName: String,
-        processedItemCount: Int
+        processedItemCount: Int,
+        outcome: APIBriefingFirstRunSourceOutcome
     ) {
         self.displayName = displayName
         self.processedItemCount = processedItemCount
+        self.outcome = outcome
     }
 
     enum CodingKeys: String, CodingKey {
         case displayName = "display_name"
         case processedItemCount = "processed_item_count"
+        case outcome = "outcome"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         displayName = try container.decode(String.self, forKey: .displayName)
         processedItemCount = try container.decode(Int.self, forKey: .processedItemCount)
+        outcome = try container.decode(APIBriefingFirstRunSourceOutcome.self, forKey: .outcome)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(displayName, forKey: .displayName)
         try container.encode(processedItemCount, forKey: .processedItemCount)
+        try container.encode(outcome, forKey: .outcome)
     }
 }
 
@@ -6348,7 +6366,7 @@ struct APIUserResponse: Codable {
     let hasXBookmarkSync: Bool
     let hasCompletedOnboarding: Bool
     let hasCompletedNewUserTutorial: Bool
-    let readingExperience: String
+    let readingExperience: APIReadingExperience
     let createdAt: Date
     let updatedAt: Date
 
@@ -6364,7 +6382,7 @@ struct APIUserResponse: Codable {
         hasXBookmarkSync: Bool = false,
         hasCompletedOnboarding: Bool,
         hasCompletedNewUserTutorial: Bool,
-        readingExperience: String = "classic",
+        readingExperience: APIReadingExperience = .classic,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -6414,7 +6432,7 @@ struct APIUserResponse: Codable {
         hasXBookmarkSync = try container.decode(Bool.self, forKey: .hasXBookmarkSync)
         hasCompletedOnboarding = try container.decode(Bool.self, forKey: .hasCompletedOnboarding)
         hasCompletedNewUserTutorial = try container.decode(Bool.self, forKey: .hasCompletedNewUserTutorial)
-        readingExperience = try container.decode(String.self, forKey: .readingExperience)
+        readingExperience = try container.decode(APIReadingExperience.self, forKey: .readingExperience)
         let createdAtRaw = try container.decode(String.self, forKey: .createdAt)
         guard let createdAtParsed = ServerDate.parse(createdAtRaw) else {
             throw DecodingError.dataCorruptedError(forKey: .createdAt, in: container, debugDescription: "Unparseable date for createdAt")

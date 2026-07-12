@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, TypeAdapter, field_validator
 
 from app.models.api.base import UTCDateTime
+from app.models.contracts import ReadingExperience
 from app.models.domain.user_profile import (
     MAX_COUNCIL_EXPERTS,
     MIN_COUNCIL_EXPERTS,
@@ -40,7 +41,7 @@ class UserResponse(UserBase):
     has_x_bookmark_sync: bool = False
     has_completed_onboarding: bool
     has_completed_new_user_tutorial: bool
-    reading_experience: str = "classic"
+    reading_experience: ReadingExperience = ReadingExperience.CLASSIC
     created_at: UTCDateTime
     updated_at: UTCDateTime
 
@@ -70,6 +71,7 @@ class UpdateUserProfileRequest(BaseModel):
         min_length=MIN_COUNCIL_EXPERTS,
         max_length=MAX_COUNCIL_EXPERTS,
     )
+    reading_experience: ReadingExperience | None = None
 
     @field_validator("council_personas")
     @classmethod

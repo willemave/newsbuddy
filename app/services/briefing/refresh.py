@@ -22,7 +22,7 @@ from app.models.db import (
 from app.pipeline.task_specs import get_task_spec
 from app.services.briefing import compaction, window_composition
 from app.services.briefing.composer import compose_window, plan_windows
-from app.services.briefing.first_run import sync_ready_categories
+from app.services.briefing.eligibility import is_briefing_enabled_for_user
 from app.services.briefing.lenses import (
     assign_pending_lenses,
     build_llm_lens_namer,
@@ -65,30 +65,6 @@ class _PreparedWindow:
     sources: tuple[BriefingSource, ...]
 
 
-def is_briefing_enabled_for_user(
-    user_id: int,
-    *,
-    db: Session | None = None,
-    settings: Settings | None = None,
-) -> bool:
-    settings = settings or get_settings()
-    if int(user_id) in {int(value) for value in settings.briefing_enabled_user_ids}:
-        return True
-    from app.models.db.users import User
-
-    if db is not None:
-        return (
-            db.query(User.id)
-            .filter(User.id == user_id, User.reading_experience == "briefing")
-            .first()
-            is not None
-        )
-    from app.core.db import get_db
-
-    with get_db() as owned_db:
-        return is_briefing_enabled_for_user(user_id, db=owned_db, settings=settings)
-
-
 def ensure_state(db: Session, *, user_id: int, settings: Settings | None = None) -> BriefingState:
     settings = settings or get_settings()
     state = db.query(BriefingState).filter(BriefingState.user_id == user_id).first()
@@ -115,11 +91,9 @@ def enqueue_ready_source(
     delay_seconds: int | None = None,
     settings: Settings | None = None,
 ) -> bool:
-    """Insert a pending source and debounce a briefing refresh for enabled users."""
+    """Insert a pending source and debounce a refresh for an eligible user."""
 
     settings = settings or get_settings()
-    if not is_briefing_enabled_for_user(user_id, db=db, settings=settings):
-        return False
     inserted = _insert_pending_source(
         db,
         user_id=user_id,
@@ -208,7 +182,7 @@ def run_briefing_refresh(
 
     state = ensure_state(db, user_id=user_id, settings=settings)
     version = int(state.version or 0)
-    if not is_briefing_enabled_for_user(user_id, db=db, settings=settings):
+    if not is_briefing_enabled_for_user(db, user_id=user_id, settings=settings):
         return BriefingRefreshResult(user_id, version, 0, 0, 0, 0, False)
 
     ensure_base_lenses(db, user_id=user_id)
@@ -268,7 +242,6 @@ def run_briefing_refresh(
     if task_id is not None and mode == "sweep":
         _release_current_sweep_dedupe(db, task_id=task_id)
     sweep_enqueued = _schedule_next_sweep(db, user_id=user_id, settings=settings)
-    sync_ready_categories(db, user_id=user_id)
     db.flush()
     return BriefingRefreshResult(
         user_id=user_id,
@@ -296,7 +269,7 @@ def _run_refresh_releasing_db(
 ) -> BriefingRefreshResult:
     state = ensure_state(db, user_id=user_id, settings=settings)
     version = int(state.version or 0)
-    if not is_briefing_enabled_for_user(user_id, db=db, settings=settings):
+    if not is_briefing_enabled_for_user(db, user_id=user_id, settings=settings):
         return BriefingRefreshResult(user_id, version, 0, 0, 0, 0, False)
 
     ensure_base_lenses(db, user_id=user_id)
@@ -393,7 +366,6 @@ def _run_refresh_releasing_db(
     if task_id is not None and mode == "sweep":
         _release_current_sweep_dedupe(db, task_id=task_id)
     sweep_enqueued = _schedule_next_sweep(db, user_id=user_id, settings=settings)
-    sync_ready_categories(db, user_id=user_id)
     db.flush()
     return BriefingRefreshResult(
         user_id=user_id,
@@ -417,7 +389,6 @@ def _finish_empty_append_refresh(
     state = ensure_state(db, user_id=user_id, settings=settings)
     state.last_sweep_at = datetime.now(UTC).replace(tzinfo=None)
     sweep_enqueued = _schedule_next_sweep(db, user_id=user_id, settings=settings)
-    sync_ready_categories(db, user_id=user_id)
     db.flush()
     return BriefingRefreshResult(
         user_id=user_id,

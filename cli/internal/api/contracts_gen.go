@@ -262,6 +262,38 @@ func (v BriefingFirstRunPhase) Known() bool {
 	}
 }
 
+type BriefingFirstRunSourceOutcome string
+
+const (
+	BriefingFirstRunSourceOutcomeProcessed BriefingFirstRunSourceOutcome = "processed"
+	BriefingFirstRunSourceOutcomeUnavailable BriefingFirstRunSourceOutcome = "unavailable"
+)
+
+func (v BriefingFirstRunSourceOutcome) Known() bool {
+	switch v {
+	case BriefingFirstRunSourceOutcomeProcessed, BriefingFirstRunSourceOutcomeUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+type ReadingExperience string
+
+const (
+	ReadingExperienceClassic ReadingExperience = "classic"
+	ReadingExperienceBriefing ReadingExperience = "briefing"
+)
+
+func (v ReadingExperience) Known() bool {
+	switch v {
+	case ReadingExperienceClassic, ReadingExperienceBriefing:
+		return true
+	default:
+		return false
+	}
+}
+
 type BriefingBlockType string
 
 const (
@@ -459,6 +491,7 @@ type BriefingIndexResponse struct {
 }
 
 type BriefingFirstRunProgress struct {
+	RunID int `json:"run_id"`
 	Revision int `json:"revision"`
 	Phase BriefingFirstRunPhase `json:"phase"`
 	ConnectedSourceCount int `json:"connected_source_count"`
@@ -763,6 +796,7 @@ type SubmissionStatusResponse struct {
 type BriefingFirstRunSourceProgress struct {
 	DisplayName string `json:"display_name"`
 	ProcessedItemCount int `json:"processed_item_count"`
+	Outcome BriefingFirstRunSourceOutcome `json:"outcome"`
 }
 
 type BriefingBlock struct {

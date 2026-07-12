@@ -42,6 +42,7 @@ struct BriefingTierStrip: View {
 /// synthetic Start Here page. The rail never shows placeholder categories.
 struct BriefingFirstRunStrip: View {
     @ObservedObject var viewModel: BriefingViewModel
+    let onSelectStartHere: () -> Void
     let onSelectLens: (String) -> Void
 
     var body: some View {
@@ -53,7 +54,7 @@ struct BriefingFirstRunStrip: View {
                     isSelected: viewModel.isStartHereSelected,
                     accessibilityId: "briefing.start_here.pill"
                 ) {
-                    onSelectLens("start-here")
+                    onSelectStartHere()
                 }
 
                 ForEach(viewModel.orderedLenses, id: \.key) { lens in
@@ -72,7 +73,12 @@ struct BriefingFirstRunStrip: View {
             .padding(.vertical, 10)
             .animation(.easeOut(duration: 0.35), value: viewModel.orderedLenses.map(\.key))
         }
-        .sensoryFeedback(.impact(weight: .light), trigger: viewModel.orderedLenses.count)
+        .sensoryFeedback(
+            .impact(weight: .light),
+            trigger: !viewModel.orderedLenses.isEmpty
+        ) { wasVisible, isVisible in
+            !wasVisible && isVisible
+        }
         .accessibilityIdentifier("briefing.first_run.lenses")
     }
 }

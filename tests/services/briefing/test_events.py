@@ -15,7 +15,9 @@ def test_enqueue_content_for_briefing_accepts_null_classification(
 ) -> None:
     settings = get_settings()
     assert test_user.id is not None
-    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [test_user.id])
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [])
+    test_user.reading_experience = "briefing"
+    db_session.flush()
     content = content_factory(
         content_type=ContentType.PODCAST,
         title="Unclassified episode",

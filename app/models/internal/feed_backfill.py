@@ -19,6 +19,7 @@ class FeedBatchBackfillRequest(BaseModel):
     user_id: int = Field(..., gt=0)
     config_ids: list[int] = Field(..., min_length=1)
     count: int = Field(..., ge=1, le=MAX_BACKFILL_COUNT)
+    first_edition_run_id: int | None = Field(default=None, gt=0)
 
 
 class FeedBackfillResult(BaseModel):

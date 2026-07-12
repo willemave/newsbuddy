@@ -326,10 +326,7 @@ enum RootDependencyFactory {
         let briefingViewModel = BriefingViewModel(
             service: LiveBriefingService(),
             audioEpisodeService: AudioEpisodeService.shared,
-            snapshotStore: userID.map { BriefingSnapshotStore(userID: $0) },
-            completeTutorial: {
-                _ = try await OnboardingService.shared.markTutorialComplete()
-            }
+            snapshotStore: userID.map { BriefingSnapshotStore(userID: $0) }
         )
 
         return TabCoordinatorViewModel(

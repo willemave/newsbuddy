@@ -33,10 +33,13 @@ def test_task_spec_defines_queue_payload_and_dedupe_for_core_tasks() -> None:
     assert audio_episode.queue == TaskQueue.AUDIO_EPISODE
     assert audio_episode.dedupe_by_content is True
     assert backfill.queue == TaskQueue.BACKFILL
-    assert backfill.normalize_payload({"user_id": 1, "config_ids": [2], "count": 10}) == {
+    assert backfill.normalize_payload(
+        {"user_id": 1, "config_ids": [2], "count": 10, "first_edition_run_id": 7}
+    ) == {
         "user_id": 1,
         "config_ids": [2],
         "count": 10,
+        "first_edition_run_id": 7,
     }
     assert image.queue == TaskQueue.IMAGE
     assert sync_integration.normalize_payload({"user_id": 3}) == {
