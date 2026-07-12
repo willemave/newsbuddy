@@ -86,7 +86,7 @@ struct SettingsCouncilSection: View {
     private var addExpertRow: some View {
         if personas.count < CouncilPersona.maxExperts {
             HStack(spacing: 10) {
-                TextField("e.g. Paul Graham, Mariana Mazzucato", text: $newExpertName)
+                TextField("Add an expert…", text: $newExpertName)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
@@ -138,8 +138,8 @@ struct SettingsCouncilSection: View {
             .buttonStyle(.plain)
             .contentShape(Rectangle())
             .accessibilityLabel("Save experts")
-            .disabled(isSaving || !hasUnsavedChanges)
-            .opacity((isSaving || !hasUnsavedChanges) ? 0.4 : 1.0)
+            .disabled(isSaving || (!hasUnsavedChanges && pendingExpertName.isEmpty))
+            .opacity((isSaving || (!hasUnsavedChanges && pendingExpertName.isEmpty)) ? 0.4 : 1.0)
         }
     }
 
@@ -148,6 +148,10 @@ struct SettingsCouncilSection: View {
             return "Add at least \(CouncilPersona.minExperts) experts to enable council chat."
         }
         return "Tap the council button in chat to hear from your experts."
+    }
+
+    private var pendingExpertName: String {
+        newExpertName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var expertColor: Color {

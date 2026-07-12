@@ -11,7 +11,6 @@ struct DetailActionBar: View {
     let content: ContentDetail
     let overlaid: Bool
     let externalURL: URL?
-    let discussionURL: URL?
     let canShowReader: Bool
     let isLoadingReaderBody: Bool
     let isConverting: Bool
@@ -25,7 +24,6 @@ struct DetailActionBar: View {
     @Binding var hasSeenLearningDeckHint: Bool
     @Binding var learningDeckHintBounce: Bool
     let onOpenExternal: (URL) -> Void
-    let onOpenDiscussion: (URL) -> Void
     let onShare: () -> Void
     let readerTransitionNamespace: Namespace.ID?
     let onOpenReader: () -> Void
@@ -49,17 +47,6 @@ struct DetailActionBar: View {
                 .detailActionBarSegment()
                 .accessibilityIdentifier("content.action.open_external")
                 .accessibilityLabel("Open article")
-            }
-
-            if let discussionURL {
-                Button {
-                    onOpenDiscussion(discussionURL)
-                } label: {
-                    actionIcon("bubble.left.and.bubble.right")
-                }
-                .detailActionBarSegment()
-                .accessibilityIdentifier("content.discussion.scroll_to_comments")
-                .accessibilityLabel("Show comments summary")
             }
 
             Button(action: onShare) {
@@ -155,7 +142,7 @@ struct DetailActionBar: View {
                 if isStartingChat {
                     deepDiveStartingIcon
                 } else {
-                    actionIcon("brain.head.profile")
+                    actionIcon("bubble.left.and.text.bubble.right")
                 }
             }
             .disabled(isCheckingChatSession)
@@ -179,7 +166,7 @@ struct DetailActionBar: View {
     }
 
     private var deepDiveStartingIcon: some View {
-        Image(systemName: "brain.head.profile")
+        Image(systemName: "bubble.left.and.text.bubble.right")
             .font(.appSymbol(size: 20, weight: .regular))
             .foregroundColor(overlaid ? .white : .readerBodyText)
             .appShadow(overlaid ? .overlayText : .none)
@@ -199,14 +186,16 @@ struct DetailActionBar: View {
 
     @ViewBuilder
     private func knowledgeActionIcon(isSaved: Bool) -> some View {
-        let iconColor: Color = overlaid ? .white : .readerBodyText
+        let unsavedColor: Color = overlaid ? .white : .readerBodyText
         KnowledgeSaveIcon(
             isSaved: isSaved,
-            savedColor: iconColor,
-            unsavedColor: iconColor,
-            badgeColor: iconColor,
+            savedColor: .brandPrimary,
+            unsavedColor: unsavedColor,
+            badgeColor: unsavedColor,
             badgeForegroundColor: .surfacePrimary
         )
+        .contentTransition(.symbolEffect(.replace))
+        .animation(AppMotion.subtle, value: isSaved)
         .appShadow(overlaid ? .overlayText : .none)
         .frame(width: 44, height: 44)
         .contentShape(Rectangle())

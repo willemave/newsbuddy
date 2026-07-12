@@ -322,8 +322,16 @@ struct MarkdownNSRenderer {
 
             // --- Regular paragraph text ---
             if result.length > 0 && !result.string.hasSuffix("\n") {
-                // Continuation of same paragraph — add space
-                result.append(NSAttributedString(string: " ", attributes: defaultAttrs))
+                let previousLine = i > 0
+                    ? rawLines[i - 1].trimmingCharacters(in: .whitespaces)
+                    : ""
+                let followsList = previousLine.hasPrefix("- ")
+                    || previousLine.hasPrefix("* ")
+                    || previousLine.range(of: #"^(\d+)\.\s+(.+)$"#, options: .regularExpression) != nil
+                result.append(NSAttributedString(
+                    string: followsList ? "\n" : " ",
+                    attributes: defaultAttrs
+                ))
             }
             result.append(renderInline(line))
             i += 1
@@ -674,7 +682,9 @@ struct MarkdownNSRenderer {
     private func applyListStyle(to attrStr: NSMutableAttributedString) {
         let range = NSRange(location: 0, length: attrStr.length)
         let para = NSMutableParagraphStyle()
-        para.headIndent = 25
+        // Match wrapped lines to the first character after the bullet instead
+        // of pushing them an extra word-width to the right.
+        para.headIndent = 15
         para.firstLineHeadIndent = 0
         para.lineSpacing = 3
         para.paragraphSpacing = 6

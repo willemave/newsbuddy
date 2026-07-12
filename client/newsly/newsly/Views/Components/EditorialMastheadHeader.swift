@@ -18,8 +18,9 @@ struct EditorialMastheadHeader: View {
     let title: String
     var subtitle: String? = nil
     var date: Date = AppClock.now
+    var showsDate = true
     var trailingAccessory: AnyView? = nil
-    var accessoryAlignment: MastheadAccessoryAlignment = .top
+    var accessoryAlignment: MastheadAccessoryAlignment = .title
 
     private static let mastheadFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -35,8 +36,10 @@ struct EditorialMastheadHeader: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(dateLabel)
-                    .kicker()
+                if showsDate {
+                    Text(dateLabel)
+                        .kicker()
+                }
 
                 HStack(alignment: .center, spacing: 12) {
                     Text(title)
@@ -58,8 +61,6 @@ struct EditorialMastheadHeader: View {
                 }
             }
 
-            // Pin the accessory to the top-right corner so it reads as an
-            // upper-right affordance rather than sitting on the title baseline.
             if accessoryAlignment == .top, let trailingAccessory {
                 trailingAccessory
             }

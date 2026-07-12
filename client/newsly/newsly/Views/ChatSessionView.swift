@@ -57,15 +57,16 @@ struct ChatSessionView: View {
     }
 
     var body: some View {
-        messageListView
+        VStack(spacing: 0) {
+            chatHeader
+            Divider()
+            messageListView
+        }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomDock
             }
             .overlay(alignment: .leading) {
                 edgeBackSwipeZone
-            }
-            .overlay(alignment: .topLeading) {
-                floatingBackButton
             }
             .offset(x: edgeBackDragOffset)
             .scrollDismissesKeyboard(.interactively)
@@ -143,12 +144,33 @@ struct ChatSessionView: View {
         )
     }
 
-    private var floatingBackButton: some View {
-        FloatingBackButton(style: .surface) {
-            dismiss()
+    private var chatHeader: some View {
+        HStack(spacing: 12) {
+            FloatingBackButton(style: .surface) {
+                dismiss()
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text((viewModel.session ?? route.session)?.displayTitle ?? "Chat")
+                    .font(.appHeadline)
+                    .foregroundStyle(Color.onSurface)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if let session = viewModel.session ?? route.session {
+                    Text(session.displaySubtitle ?? session.providerDisplayName)
+                        .font(.appCaption)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.leading, 16)
-        .padding(.top, 12)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .padding(.vertical, 8)
+        .background(Color.surfacePrimary.opacity(0.98))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("chat.header")
     }
 
     private var edgeBackSwipeZone: some View {

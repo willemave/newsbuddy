@@ -32,7 +32,7 @@ extension View {
         .navigationDestination(for: ChatSessionRoute.self) { route in
             ChatSessionView(
                 route: route,
-                onShowHistory: tab == .knowledge
+                onShowHistory: tab == .learning
                     ? {
                         path.wrappedValue = NavigationPath()
                         path.wrappedValue.append(SessionHistoryRoute())
@@ -51,9 +51,6 @@ extension View {
                 chatTransitionNamespace: chatTransitionNamespace
             )
             .dynamicTypeSize(contentTextSize)
-        }
-        .navigationDestination(for: KnowledgeLibraryRoute.self) { _ in
-            KnowledgeLibraryView(readStateCache: readStateCache)
         }
     }
 }

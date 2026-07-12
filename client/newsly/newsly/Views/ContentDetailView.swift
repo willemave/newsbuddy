@@ -526,7 +526,6 @@ struct ContentDetailView: View {
             content: content,
             overlaid: overlaid,
             externalURL: URL(string: content.url),
-            discussionURL: discussionCoordinator.discussionURL(for: content),
             canShowReader: viewModel.canShowReader(for: content),
             isLoadingReaderBody: viewModel.isLoadingReaderBody,
             isConverting: isConverting,
@@ -540,14 +539,6 @@ struct ContentDetailView: View {
             hasSeenLearningDeckHint: $hasSeenLearningDeckHint,
             learningDeckHintBounce: $learningDeckHintBounce,
             onOpenExternal: openInAppBrowser,
-            onOpenDiscussion: { discussionURL in
-                Task { @MainActor in
-                    await requestCommentsScroll(
-                        content: content,
-                        fallbackURL: discussionURL
-                    )
-                }
-            },
             onShare: { activeSheet = .share },
             readerTransitionNamespace: readerTransitionNamespace,
             onOpenReader: { activeReaderContent = content },

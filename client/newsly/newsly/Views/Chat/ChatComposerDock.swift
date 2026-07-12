@@ -31,6 +31,12 @@ struct ChatComposerDock: View {
         isTranscribing
     }
 
+    private var showsSendAction: Bool {
+        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isRecording
+            && !isTranscribing
+    }
+
     private var showsRecordingStatus: Bool {
         isTranscribing || isRecording
     }
@@ -160,39 +166,54 @@ struct ChatComposerDock: View {
                 .accessibilityLabel("Message")
                 .accessibilityIdentifier("knowledge.chat_input")
 
-            TapToTalkMicButton(
-                isEnabled: !isSending && !isVoiceActionInFlight && !isTranscribing,
-                isRecording: isRecording,
-                isTranscribing: isTranscribing,
-                isBusy: isVoiceActionInFlight && !isRecording,
-                size: 44,
-                action: onToggleVoiceRecording
-            )
-            .opacity(voiceDictationAvailable || isRecording ? 1 : 0.72)
-            .accessibilityLabel(isRecording ? "Stop recording" : "Start recording")
-            .accessibilityHint(isRecording ? "Tap to stop and send this chat message" : "Tap to dictate and send into this chat")
-            .accessibilityIdentifier("knowledge.chat_mic")
-
-            Button(action: onSend) {
-                Group {
-                    if isSending {
-                        ProgressView()
-                            .tint(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
-                    } else {
-                        Image(systemName: "arrow.up")
-                            .font(.appSymbol(size: 16, weight: .medium))
-                    }
+            Group {
+                if showsSendAction || isSending {
+                    sendButton
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                } else {
+                    voiceButton
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
-                .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
-                .frame(width: 44, height: 44, alignment: .center)
-                .background(sendButtonDisabled ? Color.surfaceContainer : Color.chatUserBubble)
-                .clipShape(Circle())
             }
-            .disabled(sendButtonDisabled)
-            .contentShape(Circle())
-            .accessibilityLabel(isSending ? "Sending message" : "Send message")
-            .accessibilityIdentifier("knowledge.chat_send")
+            .animation(AppMotion.subtle, value: showsSendAction)
         }
+    }
+
+    private var voiceButton: some View {
+        TapToTalkMicButton(
+            isEnabled: !isSending && !isVoiceActionInFlight && !isTranscribing,
+            isRecording: isRecording,
+            isTranscribing: isTranscribing,
+            isBusy: isVoiceActionInFlight && !isRecording,
+            size: 44,
+            action: onToggleVoiceRecording
+        )
+        .opacity(voiceDictationAvailable || isRecording ? 1 : 0.72)
+        .accessibilityLabel(isRecording ? "Stop recording" : "Start recording")
+        .accessibilityHint(isRecording ? "Tap to stop and send this chat message" : "Tap to dictate and send into this chat")
+        .accessibilityIdentifier("knowledge.chat_mic")
+    }
+
+    private var sendButton: some View {
+        Button(action: onSend) {
+            Group {
+                if isSending {
+                    ProgressView()
+                        .tint(Color.chatUserBubbleText)
+                } else {
+                    Image(systemName: "arrow.up")
+                        .font(.appSymbol(size: 16, weight: .semibold))
+                }
+            }
+            .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
+            .frame(width: 44, height: 44, alignment: .center)
+            .background(sendButtonDisabled ? Color.surfaceContainer : Color.chatUserBubble)
+            .clipShape(Circle())
+        }
+        .disabled(sendButtonDisabled)
+        .contentShape(Circle())
+        .accessibilityLabel(isSending ? "Sending message" : "Send message")
+        .accessibilityIdentifier("knowledge.chat_send")
     }
 
     private var recordingStatus: some View {

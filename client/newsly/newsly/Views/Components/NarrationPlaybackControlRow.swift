@@ -57,7 +57,7 @@ struct NarrationPlaybackControlRow: View {
             HStack(spacing: 10) {
                 playbackButton
                 speedControls
-                Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
 
             progressScrubber
@@ -194,34 +194,21 @@ private struct PlaybackProgressScrubber: View {
                 let width = max(geometry.size.width, 1)
                 let clampedProgress = min(max(progress, 0), 1)
                 let thumbX = width * clampedProgress
-                let labelX = width > 36 ? min(max(thumbX, 18), width - 18) : width / 2
-
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Color.outlineVariant.opacity(0.28))
                         .frame(height: 3)
-                        .position(x: width / 2, y: 19)
+                        .position(x: width / 2, y: 8)
 
                     Capsule()
                         .fill(Color.terracottaPrimary.opacity(0.8))
                         .frame(width: max(thumbX, 0), height: 3)
-                        .position(x: max(thumbX / 2, 0), y: 19)
-
-                    Text(currentTimeText)
-                        .font(.appSans(size: 10, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(
-                            Capsule()
-                                .fill(Color.surfaceSecondary.opacity(0.95))
-                        )
-                        .position(x: labelX, y: 6)
+                        .position(x: max(thumbX / 2, 0), y: 8)
 
                     Circle()
                         .fill(isEnabled ? Color.terracottaPrimary : Color.onSurfaceSecondary.opacity(0.45))
                         .frame(width: 8, height: 8)
-                        .position(x: thumbX, y: 19)
+                        .position(x: thumbX, y: 8)
                 }
                 .contentShape(Rectangle())
                 .gesture(
@@ -233,10 +220,10 @@ private struct PlaybackProgressScrubber: View {
                         }
                 )
             }
-            .frame(height: 25)
+            .frame(height: 16)
 
             HStack {
-                Text("0:00")
+                Text(currentTimeText)
                 Spacer(minLength: 6)
                 Text(durationText)
             }
