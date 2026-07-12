@@ -75,6 +75,7 @@ struct SettingsView: View {
             }
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
+        .accessibilityIdentifier("settings.screen")
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)

@@ -1,0 +1,50 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+- tapOn:
+    id: tab.long_form
+- extendedWaitUntil:
+    visible:
+      id: long.screen
+    timeout: 15000
+- tapOn:
+    id: tab.more
+- extendedWaitUntil:
+    visible:
+      id: more.screen
+    timeout: 10000
+- tapOn:
+    id: more.settings
+- extendedWaitUntil:
+    visible:
+      id: settings.screen
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: settings.reading_experience
+    direction: DOWN
+    centerElement: true
+- tapOn:
+    id: settings.reading_experience
+    point: "75%,50%"
+- extendedWaitUntil:
+    visible:
+      id: tab.briefing
+    timeout: 15000
+- tapOn:
+    id: tab.briefing
+- extendedWaitUntil:
+    visible:
+      id: briefing.screen
+    timeout: 15000

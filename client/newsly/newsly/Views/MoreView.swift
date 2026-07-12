@@ -31,13 +31,15 @@ struct MoreView: View {
                             viewModel: RootDependencyFactory.makeSearchViewModel()
                         ),
                         icon: "magnifyingglass",
-                        title: "Search"
+                        title: "Search",
+                        accessibilityIdentifier: "more.search"
                     )
 
                     menuRow(
                         destination: RecentlyReadView(readStateCache: readStateCache),
                         icon: "clock",
-                        title: "Recently Read"
+                        title: "Recently Read",
+                        accessibilityIdentifier: "more.recently_read"
                     )
 
                     NavigationLink {
@@ -75,7 +77,8 @@ struct MoreView: View {
                     menuRow(
                         destination: SettingsView(),
                         icon: "gearshape",
-                        title: "Settings"
+                        title: "Settings",
+                        accessibilityIdentifier: "more.settings"
                     )
                 }
             }
@@ -96,7 +99,12 @@ struct MoreView: View {
         }
     }
 
-    private func menuRow<D: View>(destination: D, icon: String, title: String) -> some View {
+    private func menuRow<D: View>(
+        destination: D,
+        icon: String,
+        title: String,
+        accessibilityIdentifier: String
+    ) -> some View {
         NavigationLink {
             destination
         } label: {
@@ -107,6 +115,7 @@ struct MoreView: View {
             }
             .frame(minHeight: RowMetrics.compactHeight)
         }
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     private func minimalIcon(_ name: String) -> some View {

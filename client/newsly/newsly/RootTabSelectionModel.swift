@@ -16,7 +16,11 @@ struct RootTabSelectionModel {
 
     var binding: Binding<RootTab> {
         Binding(
-            get: { @MainActor in tabCoordinator.selectedTab },
+            get: { @MainActor in
+                tabCoordinator.selectedTab.available(
+                    isBriefingExperience: isBriefingExperience
+                )
+            },
             set: { @MainActor requestedTab in select(requestedTab) }
         )
     }

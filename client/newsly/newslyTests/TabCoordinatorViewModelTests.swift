@@ -79,6 +79,24 @@ final class TabCoordinatorViewModelTests: XCTestCase {
         XCTAssertEqual(shortFormRetapCount, 0)
     }
 
+    func testRootTabBindingAlwaysExposesATabAvailableInTheCurrentExperience() {
+        let coordinator = makeTabCoordinator(initialTab: .more)
+        let selection = RootTabSelectionModel(
+            tabCoordinator: coordinator,
+            isBriefingExperience: true,
+            longFormPathIsEmpty: true,
+            shortFormPathIsEmpty: true,
+            onLongFormRetap: {},
+            onShortFormRetap: {}
+        )
+
+        XCTAssertEqual(selection.binding.wrappedValue, .knowledge)
+
+        selection.reconcile()
+
+        XCTAssertEqual(coordinator.selectedTab, .knowledge)
+    }
+
     func testHandleTabChangeKeepsIncomingLongFormStableWhenAlreadyLoaded() {
         let shortRepository = FakeContentRepository()
         let longRepository = FakeContentRepository()

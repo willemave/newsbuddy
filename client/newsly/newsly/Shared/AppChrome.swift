@@ -98,7 +98,6 @@ struct CompactTabBar: View {
         .padding(.top, 6)
         .padding(.bottom, 4)
         .frame(maxWidth: .infinity)
-        .accessibilityIdentifier("tabbar.compact")
     }
 
     private func itemButton(_ item: Item) -> some View {
