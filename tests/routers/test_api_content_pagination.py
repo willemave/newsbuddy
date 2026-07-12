@@ -398,6 +398,94 @@ class TestKnowledgeLibraryPagination:
         assert data["meta"]["has_more"] is False
         assert data["meta"]["next_cursor"] is None
 
+    def test_knowledge_library_search_stays_scoped_to_saved_items(
+        self,
+        client,
+        sample_contents,
+        db_session: Session,
+        test_user,
+    ) -> None:
+        from app.services import knowledge
+
+        saved_match = sample_contents[0]
+        saved_match.title = "A distinctive walkable city essay"
+        unsaved_match = sample_contents[1]
+        unsaved_match.title = "Another walkable city essay"
+        saved_nonmatch = sample_contents[2]
+        saved_nonmatch.title = "A note about interface design"
+        db_session.add_all([saved_match, unsaved_match, saved_nonmatch])
+        db_session.commit()
+        knowledge.save_to_knowledge(db_session, saved_match.id, test_user.id)
+        knowledge.save_to_knowledge(db_session, saved_nonmatch.id, test_user.id)
+
+        response = client.get(
+            "/api/content/knowledge/list",
+            params={"q": "walkable city", "limit": 10},
+        )
+
+        assert response.status_code == 200
+        returned_ids = [item["id"] for item in response.json()["contents"]]
+        assert returned_ids == [saved_match.id]
+
+    def test_knowledge_library_search_ignores_internal_metadata_keys(
+        self,
+        client,
+        sample_contents,
+        db_session: Session,
+        test_user,
+    ) -> None:
+        from app.services import knowledge
+
+        saved_content = sample_contents[0]
+        saved_content.title = "A note about interface design"
+        saved_content.source = "Design Weekly"
+        saved_content.url = "https://example.com/interface-design"
+        saved_content.content_metadata = {
+            "image_url": "/static/images/content/example.png",
+            "summary_type": "long_structured",
+        }
+        db_session.add(saved_content)
+        db_session.commit()
+        knowledge.save_to_knowledge(db_session, saved_content.id, test_user.id)
+
+        response = client.get(
+            "/api/content/knowledge/list",
+            params={"q": "image_url", "limit": 10},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["contents"] == []
+
+    def test_knowledge_library_search_cursor_rejects_a_different_query(
+        self,
+        client,
+        sample_contents,
+        db_session: Session,
+        test_user,
+    ) -> None:
+        from app.services import knowledge
+
+        for index, content in enumerate(sample_contents[:3]):
+            content.title = f"Walkable city study {index}"
+            db_session.add(content)
+            knowledge.save_to_knowledge(db_session, content.id, test_user.id)
+        db_session.commit()
+
+        first_page = client.get(
+            "/api/content/knowledge/list",
+            params={"q": "walkable", "limit": 1},
+        )
+        assert first_page.status_code == 200
+        cursor = first_page.json()["meta"]["next_cursor"]
+        assert cursor
+
+        mismatched_page = client.get(
+            "/api/content/knowledge/list",
+            params={"q": "interface", "limit": 1, "cursor": cursor},
+        )
+
+        assert mismatched_page.status_code == 400
+
     def test_explicit_saves_remain_visible_across_processing_states(
         self,
         client,

@@ -27,13 +27,20 @@ def execute(
     user_id: int,
     cursor: str | None,
     limit: int,
+    query: str | None = None,
 ) -> ContentListResponse:
     """Return the user's saved knowledge library as a content list response."""
+    normalized_query = query.strip() if query else None
+    if normalized_query == "":
+        normalized_query = None
+
     last_id = None
     last_sort_timestamp = None
     if cursor:
         try:
             cursor_data = PaginationCursor.decode_cursor(cursor)
+            if not PaginationCursor.validate_cursor(cursor_data, {"q": normalized_query}):
+                raise ValueError("Invalid pagination cursor for filters")
             last_id = cursor_data.last_id
             last_sort_timestamp = cursor_data.last_created_at
         except ValueError as exc:
@@ -45,6 +52,7 @@ def execute(
         last_id=last_id,
         last_sort_timestamp=last_sort_timestamp,
         limit=limit,
+        search_query=normalized_query,
     )
     has_more = len(rows) > limit
     if has_more:
@@ -82,7 +90,7 @@ def execute(
         next_cursor = PaginationCursor.encode_cursor(
             last_id=last_item.id,
             last_created_at=last_item.created_at,
-            filters={},
+            filters={"q": normalized_query},
         )
 
     return ContentListResponse(

@@ -11,7 +11,7 @@ from app.queries.chat_read_models import (
     extract_messages_for_display,
     require_session_id,
     resolve_active_child_session,
-    resolve_session_article_metadata,
+    resolve_session_article_presentation,
     session_to_summary,
 )
 
@@ -31,10 +31,7 @@ def execute(
     if session.user_id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this session")
 
-    article_title, article_url, article_summary, article_source = resolve_session_article_metadata(
-        db,
-        session,
-    )
+    article_presentation = resolve_session_article_presentation(db, session)
 
     messages = extract_messages_for_display(db, session_id)
     if session.council_mode:
@@ -50,9 +47,6 @@ def execute(
 
     session_summary = session_to_summary(
         session,
-        article_title,
-        article_url,
-        article_summary,
-        article_source,
+        article_presentation,
     )
     return ChatSessionDetailDto(session=session_summary, messages=messages)

@@ -184,6 +184,14 @@ class ChatSessionSummaryDto(BaseModel):
         default=None,
         description="Source name of the article (for empty session display)",
     )
+    article_image_url: str | None = Field(
+        default=None,
+        description="Resolved full-size image URL for the linked content",
+    )
+    article_thumbnail_url: str | None = Field(
+        default=None,
+        description="Resolved thumbnail URL for the linked content",
+    )
     has_pending_message: bool = Field(
         default=False,
         description="True if session has a message currently being processed",

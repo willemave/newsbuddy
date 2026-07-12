@@ -17,6 +17,7 @@ from app.queries.chat_read_models import (
     news_item_article_metadata,
     require_session_id,
     resolve_article_title,
+    resolve_session_article_presentation,
     session_to_summary,
 )
 from app.services.assistant_router import KNOWLEDGE_SESSION_TYPE, build_screen_context_snapshot
@@ -155,12 +156,10 @@ def execute(
         ),
     )
 
+    article_presentation = resolve_session_article_presentation(db, session)
     session_summary = session_to_summary(
         session,
-        article_title,
-        article_url,
-        article_summary,
-        article_source,
+        article_presentation,
     )
     return CreateChatSessionResponse(session=session_summary)
 

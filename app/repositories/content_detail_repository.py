@@ -4,10 +4,23 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.db import Content, ContentBody, ContentDiscussion
-from app.repositories.content_repository import build_visibility_context
+from app.repositories.content_repository import VisibilityContext, build_visibility_context
+
+
+def _is_visible_to_user(context: VisibilityContext) -> ColumnElement[bool]:
+    """Allow inbox content and explicit Knowledge saves to open."""
+    return or_(
+        context.is_saved_to_knowledge,
+        and_(
+            context.is_in_inbox,
+            (Content.classification != "skip") | (Content.classification.is_(None)),
+        ),
+    )
 
 
 def get_content_detail(db: Session, *, user_id: int, content_id: int):
@@ -15,7 +28,7 @@ def get_content_detail(db: Session, *, user_id: int, content_id: int):
     context = build_visibility_context(user_id)
     is_read_expr = cast(Any, context.is_read).label("is_read")
     is_saved_expr = cast(Any, context.is_saved_to_knowledge).label("is_saved_to_knowledge")
-    inbox_expr = cast(Any, context.is_in_inbox)
+    visibility_expr = _is_visible_to_user(context)
     return (
         db.query(
             Content,
@@ -31,8 +44,7 @@ def get_content_detail(db: Session, *, user_id: int, content_id: int):
         .filter(
             Content.id == content_id,
             Content.status == "completed",
-            inbox_expr,
-            (Content.classification != "skip") | (Content.classification.is_(None)),
+            visibility_expr,
         )
         .first()
     )
@@ -41,14 +53,13 @@ def get_content_detail(db: Session, *, user_id: int, content_id: int):
 def get_visible_content(db: Session, *, user_id: int, content_id: int):
     """Return one visible content row for the given user."""
     context = build_visibility_context(user_id)
-    inbox_expr = cast(Any, context.is_in_inbox)
+    visibility_expr = _is_visible_to_user(context)
     return (
         db.query(Content)
         .filter(
             Content.id == content_id,
             Content.status == "completed",
-            inbox_expr,
-            (Content.classification != "skip") | (Content.classification.is_(None)),
+            visibility_expr,
         )
         .first()
     )

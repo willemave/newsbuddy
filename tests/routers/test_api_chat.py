@@ -108,6 +108,8 @@ def test_create_chat_session_with_content(
             },
             "summary_kind": "long_structured",
             "summary_version": 1,
+            "image_url": "/static/images/content/123.png",
+            "thumbnail_url": "/static/images/thumbnails/123.png",
         },
     )
     db_session.add(content)
@@ -134,6 +136,8 @@ def test_create_chat_session_with_content(
     assert session["article_title"] == "Test Article"
     assert session["article_summary"] is not None
     assert session["article_source"] == "Test Source"
+    assert session["article_image_url"] == "/static/images/content/123.png"
+    assert session["article_thumbnail_url"] == "/static/images/thumbnails/123.png"
 
     # Verify session in database
     db_session_record = (

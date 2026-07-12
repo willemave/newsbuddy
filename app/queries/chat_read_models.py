@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import HTTPException
@@ -25,6 +26,8 @@ from app.models.db import (
     NewsItem,
 )
 from app.models.domain.chat_render import ChatMessageRenderMetadata
+from app.models.domain.content_display import resolve_image_urls
+from app.models.domain.content_mapper import content_to_domain
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
 from app.utils.news_titles import resolve_news_display_title
 from app.utils.pagination import PaginationCursor
@@ -43,6 +46,16 @@ INTERNAL_USER_PROMPT_SENTINELS = (
     "You are starting a new conversation about the article described in your context",
     "Turn instructions:",
 )
+
+
+@dataclass(frozen=True)
+class ArticlePresentation:
+    title: str | None = None
+    url: str | None = None
+    summary: str | None = None
+    source: str | None = None
+    image_url: str | None = None
+    thumbnail_url: str | None = None
 
 
 def require_session_id(session: ChatSession) -> int:
@@ -163,10 +176,8 @@ def load_render_metadata(db_message: ChatMessage) -> ChatMessageRenderMetadata |
 
 def session_to_summary(
     session: ChatSession,
-    article_title: str | None = None,
-    article_url: str | None = None,
-    article_summary: str | None = None,
-    article_source: str | None = None,
+    article_presentation: ArticlePresentation | None = None,
+    *,
     has_pending_message: bool = False,
     is_saved_to_knowledge: bool = False,
     has_messages: bool = True,
@@ -176,6 +187,7 @@ def session_to_summary(
     """Convert database ChatSession to API response."""
     session_id = require_session_id(session)
     created_at = require_timestamp(session.created_at, detail="Chat session missing created_at")
+    article = article_presentation or ArticlePresentation()
     return ChatSessionSummaryDto(
         id=session_id,
         content_id=session.content_id,
@@ -188,10 +200,12 @@ def session_to_summary(
         created_at=created_at,
         updated_at=session.updated_at,
         last_message_at=session.last_message_at,
-        article_title=article_title,
-        article_url=article_url,
-        article_summary=article_summary,
-        article_source=article_source,
+        article_title=article.title,
+        article_url=article.url,
+        article_summary=article.summary,
+        article_source=article.source,
+        article_image_url=article.image_url,
+        article_thumbnail_url=article.thumbnail_url,
         is_archived=bool(session.is_archived),
         has_pending_message=has_pending_message,
         is_saved_to_knowledge=is_saved_to_knowledge,
@@ -289,25 +303,47 @@ def extract_short_summary(content: Content) -> str | None:
     return content.short_summary
 
 
-def resolve_session_article_metadata(
+def content_article_presentation(content: Content) -> ArticlePresentation:
+    """Build the chat-list presentation for one linked content row."""
+    image_url = None
+    thumbnail_url = None
+    try:
+        image_url, thumbnail_url = resolve_image_urls(content_to_domain(content))
+    except Exception:
+        logger.exception(
+            "Unable to resolve linked content image for chat presentation",
+            extra={
+                "component": "chat_read_models",
+                "operation": "resolve_session_image",
+                "item_id": content.id,
+            },
+        )
+
+    return ArticlePresentation(
+        title=resolve_article_title(content),
+        url=content.url,
+        summary=extract_short_summary(content),
+        source=content.source,
+        image_url=image_url,
+        thumbnail_url=thumbnail_url,
+    )
+
+
+def resolve_session_article_presentation(
     db: Session,
     session: ChatSession,
-) -> tuple[str | None, str | None, str | None, str | None]:
-    """Resolve article-like metadata for a chat session."""
+) -> ArticlePresentation:
+    """Resolve article metadata and display images for a chat session."""
     if session.content_id:
         content = db.query(Content).filter(Content.id == session.content_id).first()
         if content:
-            return (
-                resolve_article_title(content),
-                content.url,
-                extract_short_summary(content),
-                content.source,
-            )
+            return content_article_presentation(content)
     elif session.news_item_id:
         news_item = db.query(NewsItem).filter(NewsItem.id == session.news_item_id).first()
         if news_item:
-            return news_item_article_metadata(news_item)
-    return None, None, None, None
+            title, url, summary, source = news_item_article_metadata(news_item)
+            return ArticlePresentation(title=title, url=url, summary=summary, source=source)
+    return ArticlePresentation()
 
 
 def extract_last_message_preview(
@@ -502,23 +538,21 @@ def build_session_summaries(
 
     result: list[ChatSessionSummaryDto] = []
     for session in sessions:
-        article_title = None
-        article_url = None
-        article_summary = None
-        article_source = None
+        article_presentation = ArticlePresentation()
 
         if session.content_id:
             content = contents_by_id.get(session.content_id)
             if content:
-                article_title = resolve_article_title(content)
-                article_url = content.url
-                article_summary = extract_short_summary(content)
-                article_source = content.source
+                article_presentation = content_article_presentation(content)
         elif session.news_item_id:
             news_item = news_items_by_id.get(session.news_item_id)
             if news_item:
-                article_title, article_url, article_summary, article_source = (
-                    news_item_article_metadata(news_item)
+                title, url, summary, source = news_item_article_metadata(news_item)
+                article_presentation = ArticlePresentation(
+                    title=title,
+                    url=url,
+                    summary=summary,
+                    source=source,
                 )
 
         preview_session = session
@@ -544,10 +578,7 @@ def build_session_summaries(
         result.append(
             session_to_summary(
                 session,
-                article_title=article_title,
-                article_url=article_url,
-                article_summary=article_summary,
-                article_source=article_source,
+                article_presentation=article_presentation,
                 has_pending_message=has_pending,
                 is_saved_to_knowledge=is_saved_to_knowledge,
                 has_messages=has_messages,

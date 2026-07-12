@@ -233,9 +233,19 @@ def get_knowledge_library_entries(
     last_id: int | None,
     last_sort_timestamp: datetime | None,
     limit: int,
+    search_query: str | None = None,
 ):
     """Return knowledge-library card rows."""
     query = build_user_feed_query(db, user_id, mode="knowledge_library")
+    if search_query:
+        pattern = f"%{search_query}%"
+        query = query.filter(
+            or_(
+                Content.title.ilike(pattern),
+                Content.source.ilike(pattern),
+                Content.url.ilike(pattern),
+            )
+        )
     query = apply_sort_timestamp_cursor(query, last_sort_timestamp, last_id)
     return query.order_by(Content.created_at.desc(), Content.id.desc()).limit(limit + 1).all()
 

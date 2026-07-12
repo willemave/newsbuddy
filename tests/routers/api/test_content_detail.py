@@ -177,6 +177,45 @@ def test_content_body_requires_visible_content(
     assert response.status_code == 404
 
 
+def test_content_detail_returns_saved_content_outside_inbox(
+    client,
+    db_session,
+    create_sample_content,
+    knowledge_save_factory,
+    sample_article_long,
+    test_user,
+):
+    """An explicit Knowledge save remains openable without an inbox row."""
+    content = create_sample_content(sample_article_long, visible=False)
+    knowledge_save_factory(user=test_user, content=content)
+    db_session.commit()
+
+    response = client.get(f"/api/content/{content.id}")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == content.id
+    assert response.json()["is_saved_to_knowledge"] is True
+
+
+def test_content_body_returns_saved_content_outside_inbox(
+    client,
+    db_session,
+    create_sample_content,
+    knowledge_save_factory,
+    sample_article_long,
+    test_user,
+):
+    """Reader/body requests use the same explicit-save visibility rule."""
+    content = create_sample_content(sample_article_long, visible=False)
+    knowledge_save_factory(user=test_user, content=content)
+    db_session.commit()
+
+    response = client.get(f"/api/content/{content.id}/body")
+
+    assert response.status_code == 200
+    assert response.json()["content_id"] == content.id
+
+
 def test_content_body_returns_visible_content(client, create_sample_content, sample_article_long):
     """Canonical body endpoint should serve visible content bodies."""
     content = create_sample_content(sample_article_long)

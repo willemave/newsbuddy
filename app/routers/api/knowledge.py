@@ -76,6 +76,12 @@ def get_knowledge_library(
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
     cursor: str | None = Query(None, description="Pagination cursor for next page"),
+    q: str | None = Query(
+        None,
+        min_length=2,
+        max_length=200,
+        description="Optional saved-Knowledge search query",
+    ),
     limit: int = Query(
         25,
         ge=1,
@@ -89,4 +95,5 @@ def get_knowledge_library(
         user_id=require_user_id(current_user),
         cursor=cursor,
         limit=limit,
+        query=q,
     )

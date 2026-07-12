@@ -45,7 +45,6 @@ from app.models.contracts import ChatMessageRole
 from app.models.db import (
     ChatSession,
     Content,
-    NewsItem,
 )
 from app.models.db.users import User
 from app.models.internal.assistant import AssistantScreenContext
@@ -63,12 +62,6 @@ from app.queries.chat_read_models import (
     extract_messages_for_display as _extract_messages_for_display,
 )
 from app.queries.chat_read_models import (
-    extract_short_summary as _extract_short_summary,
-)
-from app.queries.chat_read_models import (
-    news_item_article_metadata as _news_item_article_metadata,
-)
-from app.queries.chat_read_models import (
     require_message_id as _require_message_id,
 )
 from app.queries.chat_read_models import (
@@ -82,6 +75,9 @@ from app.queries.chat_read_models import (
 )
 from app.queries.chat_read_models import (
     resolve_news_item_title as _resolve_news_item_title,
+)
+from app.queries.chat_read_models import (
+    resolve_session_article_presentation as _resolve_session_article_presentation,
 )
 from app.queries.chat_read_models import (
     session_to_summary as _session_to_summary,
@@ -285,31 +281,11 @@ def update_session(
     db.commit()
     db.refresh(session)
 
-    # Get article title and URL if content_id exists
-    article_title = None
-    article_url = None
-    article_summary = None
-    article_source = None
-    if session.content_id:
-        content = db.query(Content).filter(Content.id == session.content_id).first()
-        if content:
-            article_title = _resolve_article_title(content)
-            article_url = content.url
-            article_summary = _extract_short_summary(content)
-            article_source = content.source
-    elif session.news_item_id:
-        news_item = db.query(NewsItem).filter(NewsItem.id == session.news_item_id).first()
-        if news_item:
-            article_title, article_url, article_summary, article_source = (
-                _news_item_article_metadata(news_item)
-            )
+    article_presentation = _resolve_session_article_presentation(db, session)
 
     return _session_to_summary(
         session,
-        article_title,
-        article_url,
-        article_summary,
-        article_source,
+        article_presentation,
     )
 
 
