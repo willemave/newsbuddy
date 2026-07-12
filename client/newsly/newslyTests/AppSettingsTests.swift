@@ -23,14 +23,34 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testReadingExperienceFallsBackToClassicForUnknownRawValue() {
+    func testReadingExperienceFallsBackToBriefingForUnknownRawValue() {
         let settings = AppSettings.shared
         let original = settings.readingExperienceRaw
         defer { settings.readingExperienceRaw = original }
 
         settings.readingExperienceRaw = "future"
 
-        XCTAssertEqual(settings.readingExperience, .classic)
+        XCTAssertEqual(settings.readingExperience, .briefing)
+    }
+
+    func testProductionPresentationAlwaysUsesBriefing() {
+        XCTAssertEqual(
+            ReadingExperiencePolicy.presentationExperience(
+                serverExperience: .classic,
+                allowsClassicFallback: false
+            ),
+            .briefing
+        )
+    }
+
+    func testClassicPresentationRemainsAvailableAsFallback() {
+        XCTAssertEqual(
+            ReadingExperiencePolicy.presentationExperience(
+                serverExperience: .classic,
+                allowsClassicFallback: true
+            ),
+            .classic
+        )
     }
 
     @MainActor

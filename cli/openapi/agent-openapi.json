@@ -1825,6 +1825,12 @@
             "title": "Active Child Session Id",
             "type": "integer"
           },
+          "article_image_url": {
+            "description": "Resolved full-size image URL for the linked content",
+            "nullable": true,
+            "title": "Article Image Url",
+            "type": "string"
+          },
           "article_source": {
             "description": "Source name of the article (for empty session display)",
             "nullable": true,
@@ -1835,6 +1841,12 @@
             "description": "Short summary of the article (for empty session display)",
             "nullable": true,
             "title": "Article Summary",
+            "type": "string"
+          },
+          "article_thumbnail_url": {
+            "description": "Resolved thumbnail URL for the linked content",
+            "nullable": true,
+            "title": "Article Thumbnail Url",
             "type": "string"
           },
           "article_title": {
@@ -5812,7 +5824,7 @@
         "type": "object"
       },
       "ReadingExperience": {
-        "description": "User-selected primary reading surface.",
+        "description": "Primary reading surface, retaining Classic for fallback compatibility.",
         "enum": [
           "classic",
           "briefing"
@@ -7108,7 +7120,7 @@
           },
           "reading_experience": {
             "$ref": "#/components/schemas/ReadingExperience",
-            "default": "classic"
+            "default": "briefing"
           },
           "twitter_username": {
             "nullable": true,

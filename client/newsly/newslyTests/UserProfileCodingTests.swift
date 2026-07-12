@@ -109,5 +109,6 @@ final class UserProfileCodingTests: XCTestCase {
         let user = try decoder.decode(User.self, from: json)
 
         XCTAssertEqual(user.councilPersonas, CouncilPersona.defaults)
+        XCTAssertEqual(user.readingExperience, .briefing)
     }
 }

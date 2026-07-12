@@ -91,16 +91,12 @@ enum ServerConfigurationDefaults {
 
 typealias ReadingExperience = APIReadingExperience
 
-extension APIReadingExperience: Identifiable {
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .classic:
-            return "Classic"
-        case .briefing:
-            return "Briefing"
-        }
+enum ReadingExperiencePolicy {
+    static func presentationExperience(
+        serverExperience: ReadingExperience,
+        allowsClassicFallback: Bool
+    ) -> ReadingExperience {
+        allowsClassicFallback ? serverExperience : .briefing
     }
 }
 
@@ -157,7 +153,7 @@ final class AppSettings {
     }
 
     var readingExperience: ReadingExperience {
-        ReadingExperience(rawValue: readingExperienceRaw) ?? .classic
+        ReadingExperience(rawValue: readingExperienceRaw) ?? .briefing
     }
 
     func setAppTextSize(_ index: Int) {
@@ -179,7 +175,7 @@ final class AppSettings {
         guard readingExperience != experience else { return }
         readingExperienceRaw = experience.rawValue
     }
-    
+
     private init(userDefaults: UserDefaults = SharedContainer.userDefaults) {
         self.userDefaults = userDefaults
         ServerConfigurationDefaults.applyDebugDefaultsIfNeeded(to: userDefaults)
@@ -190,6 +186,6 @@ final class AppSettings {
         appTextSizeIndex = userDefaults.object(forKey: "appTextSizeIndex") as? Int ?? 1
         contentTextSizeIndex = userDefaults.object(forKey: "contentTextSizeIndex") as? Int ?? 2
         backendTranscriptionAvailable = userDefaults.object(forKey: "backendTranscriptionAvailable") as? Bool ?? false
-        readingExperienceRaw = userDefaults.string(forKey: "readingExperience") ?? ReadingExperience.classic.rawValue
+        readingExperienceRaw = userDefaults.string(forKey: "readingExperience") ?? ReadingExperience.briefing.rawValue
     }
 }

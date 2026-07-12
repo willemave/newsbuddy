@@ -2227,6 +2227,18 @@
             "description": "Currently selected hidden branch session for council chat",
             "title": "Active Child Session Id"
           },
+          "article_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resolved full-size image URL for the linked content",
+            "title": "Article Image Url"
+          },
           "article_source": {
             "anyOf": [
               {
@@ -2250,6 +2262,18 @@
             ],
             "description": "Short summary of the article (for empty session display)",
             "title": "Article Summary"
+          },
+          "article_thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resolved thumbnail URL for the linked content",
+            "title": "Article Thumbnail Url"
           },
           "article_title": {
             "anyOf": [
@@ -7406,7 +7430,7 @@
         "type": "object"
       },
       "ReadingExperience": {
-        "description": "User-selected primary reading surface.",
+        "description": "Primary reading surface, retaining Classic for fallback compatibility.",
         "enum": [
           "classic",
           "briefing"
@@ -9085,7 +9109,7 @@
           },
           "reading_experience": {
             "$ref": "#/components/schemas/ReadingExperience",
-            "default": "classic"
+            "default": "briefing"
           },
           "twitter_username": {
             "anyOf": [
@@ -12302,6 +12326,26 @@
               ],
               "description": "Pagination cursor for next page",
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Optional saved-Knowledge search query",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 2,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional saved-Knowledge search query",
+              "title": "Q"
             }
           },
           {

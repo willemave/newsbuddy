@@ -41,7 +41,7 @@ class UserResponse(UserBase):
     has_x_bookmark_sync: bool = False
     has_completed_onboarding: bool
     has_completed_new_user_tutorial: bool
-    reading_experience: ReadingExperience = ReadingExperience.CLASSIC
+    reading_experience: ReadingExperience = ReadingExperience.BRIEFING
     created_at: UTCDateTime
     updated_at: UTCDateTime
 

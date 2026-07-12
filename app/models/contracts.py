@@ -300,7 +300,7 @@ class BriefingFirstRunSourceOutcome(StrEnum):
 
 
 class ReadingExperience(StrEnum):
-    """User-selected primary reading surface."""
+    """Primary reading surface, retaining Classic for fallback compatibility."""
 
     CLASSIC = "classic"
     BRIEFING = "briefing"

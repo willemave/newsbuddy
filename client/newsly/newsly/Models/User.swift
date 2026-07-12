@@ -90,7 +90,7 @@ struct User: Codable, Identifiable, Equatable {
         isActive: Bool,
         hasCompletedOnboarding: Bool,
         hasCompletedNewUserTutorial: Bool,
-        readingExperience: ReadingExperience = .classic,
+        readingExperience: ReadingExperience = .briefing,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -127,7 +127,7 @@ struct User: Codable, Identifiable, Equatable {
         readingExperience = try container.decodeIfPresent(
             ReadingExperience.self,
             forKey: .readingExperience
-        ) ?? .classic
+        ) ?? .briefing
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
