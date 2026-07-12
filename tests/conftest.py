@@ -121,6 +121,7 @@ def test_user(user_factory):
         apple_id="test_apple_id_12345",
         email="test@example.com",
         full_name="Test User",
+        reading_experience="classic",
     )
 
 

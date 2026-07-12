@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct DebugMenuView: View {
     @Environment(\.dismiss) var dismiss
@@ -15,6 +16,7 @@ struct DebugMenuView: View {
     @State private var forceOnboardingAfterTokenSave = false
     @State private var accessToken = ""
     @State private var refreshToken = ""
+    @State private var localUserID = ""
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var suppressNextAuthenticatedDismiss = false
@@ -104,6 +106,21 @@ struct DebugMenuView: View {
                         } else {
                             Text("None").foregroundColor(.statusDestructive)
                         }
+                    }
+                }
+
+                Section(header: Text("Local User")) {
+                    TextField("User ID", text: $localUserID)
+                        .keyboardType(.numberPad)
+                        .accessibilityLabel("Local user ID")
+
+                    Button("Sign In as Local User") {
+                        signInAsLocalUser()
+                    }
+                    .disabled(parsedLocalUserID == nil)
+
+                    Button("Copy Debug Context") {
+                        copyDebugContext()
                     }
                 }
 
@@ -199,6 +216,27 @@ struct DebugMenuView: View {
             return user
         }
         return nil
+    }
+
+    private var parsedLocalUserID: Int? {
+        guard let value = Int(localUserID), value > 0 else {
+            return nil
+        }
+        return value
+    }
+
+    private func signInAsLocalUser() {
+        guard let userID = parsedLocalUserID else {
+            return
+        }
+        authViewModel.startDebugSession(userID: userID)
+    }
+
+    private func copyDebugContext() {
+        let userDescription = currentUser.map { "\($0.id) \($0.email)" } ?? "unauthenticated"
+        UIPasteboard.general.string = "endpoint=\(appSettings.baseURL) user=\(userDescription)"
+        alertMessage = "Copied endpoint and authenticated user to the clipboard."
+        showingAlert = true
     }
 
     private func signInWithStoredToken() {

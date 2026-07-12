@@ -14,7 +14,7 @@ Features:
 - Includes items in various states (new, processing, completed) by default
 
 Usage:
-    # Generate default amounts (10 articles, 5 podcasts, 15 news items)
+    # Generate default amounts (10 articles, 5 podcasts, 30 news items)
     python scripts/generate_test_data.py
 
     # Custom amounts
@@ -103,12 +103,6 @@ from app.models.metadata.summaries import (
     SummaryBulletPoint,
     SummaryPayload,
     SummaryTextBullet,
-)
-from app.services.briefing.presentation import get_briefing_index
-from app.services.briefing.refresh import (
-    enqueue_ready_source,
-    run_briefing_refresh,
-    status_counts,
 )
 from app.services.news_ingestion import backfill_news_items_from_contents
 from scripts.fixture_discussions import (
@@ -1300,7 +1294,6 @@ def generate_test_data(
     article_summary_format: str = "mixed",
     podcast_summary_format: str = "mixed",
     news_days_back: int = 5,
-    target_user_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Generate a mix of test data across all content types.
@@ -1311,7 +1304,6 @@ def generate_test_data(
         num_news: Number of news items to generate
         include_pending: Include some items in pending/processing states
         news_days_back: Spread generated news across this many recent UTC days
-        target_user_ids: Optional target users for inbox assignment
 
     Returns:
         List of content dictionaries ready for database insertion
@@ -1355,31 +1347,6 @@ def _fetch_user_ids(session: Session) -> list[int]:
     return [row[0] for row in session.query(User.id).all()]
 
 
-def _resolve_logged_in_user_id(session: Session) -> int | None:
-    """Resolve the most likely logged-in user ID.
-
-    This is a best-effort resolver because JWT sessions are stateless and not persisted.
-    It prefers the most recently updated active non-admin user.
-    """
-    user = (
-        session.query(User)
-        .filter(User.is_active.is_(True))
-        .filter(User.is_admin.is_(False))
-        .order_by(User.updated_at.desc())
-        .first()
-    )
-    if user is not None:
-        return user.id
-
-    fallback_user = (
-        session.query(User)
-        .filter(User.is_active.is_(True))
-        .order_by(User.updated_at.desc())
-        .first()
-    )
-    return fallback_user.id if fallback_user is not None else None
-
-
 def _scope_generated_news_items(
     session: Session,
     *,
@@ -1421,7 +1388,7 @@ def _assign_generated_news_topics(session: Session, *, content_ids: list[int]) -
         item.raw_metadata = raw_metadata
 
 
-def _write_placeholder_image(path: Path, *, size: tuple[int, int], seed: int) -> None:
+def write_placeholder_image(path: Path, *, size: tuple[int, int], seed: int) -> None:
     from PIL import Image, ImageDraw
 
     base = PLACEHOLDER_IMAGE_COLORS[seed % len(PLACEHOLDER_IMAGE_COLORS)]
@@ -1467,53 +1434,14 @@ def _write_placeholder_images(session: Session, *, content_ids: list[int]) -> No
         if row.content_type not in (ContentType.ARTICLE.value, ContentType.PODCAST.value):
             continue
         content_id = int(row.id)
-        _write_placeholder_image(
+        write_placeholder_image(
             base_dir / "content" / f"{content_id}.png", size=(1200, 675), seed=content_id
         )
-        _write_placeholder_image(
+        write_placeholder_image(
             base_dir / "thumbnails" / f"{content_id}.png", size=(200, 200), seed=content_id
         )
     # News items intentionally have no images: production only attaches a thumbnail
     # when the image pipeline generates one, and the briefing source gates on that.
-
-
-def _backfill_briefing_segment_images(session: Session, *, user_ids: list[int]) -> int:
-    """Give every source referenced by a rendered briefing segment a placeholder image.
-
-    The briefing is append-only, so segments composed across earlier reseeds still
-    reference content whose generated image was never written (or was overwritten by a
-    later id reuse). Without this, those figures render as broken images in the client.
-    """
-    if not user_ids:
-        return 0
-    from app.models.db.briefing import BriefingSegment
-
-    key_rows = (
-        session.query(BriefingSegment.source_keys)
-        .filter(BriefingSegment.user_id.in_(user_ids))
-        .filter(BriefingSegment.status == "active")
-        .all()
-    )
-    # News sources stay imageless (no figure is composed for them), so only
-    # article/podcast content needs backfilled placeholder images.
-    content_ids: set[int] = set()
-    for (keys,) in key_rows:
-        for key in keys or []:
-            kind, _, raw_id = str(key).partition(":")
-            if kind == "content" and raw_id.isdigit():
-                content_ids.add(int(raw_id))
-
-    base_dir = Path(get_settings().images_base_dir)
-    written = 0
-    for content_id in sorted(content_ids):
-        content_path = base_dir / "content" / f"{content_id}.png"
-        if not content_path.exists():
-            _write_placeholder_image(content_path, size=(1200, 675), seed=content_id)
-            written += 1
-        thumb_path = base_dir / "thumbnails" / f"{content_id}.png"
-        if not thumb_path.exists():
-            _write_placeholder_image(thumb_path, size=(200, 200), seed=content_id)
-    return written
 
 
 def insert_test_data(
@@ -1641,186 +1569,13 @@ def _parse_user_ids(raw_value: str | None) -> list[int] | None:
         if not cleaned:
             continue
         try:
-            user_ids.append(int(cleaned))
-        except ValueError:
-            continue
+            user_id = int(cleaned)
+        except ValueError as exc:
+            raise ValueError(f"Invalid user ID: {cleaned}") from exc
+        if user_id <= 0:
+            raise ValueError(f"User IDs must be positive: {cleaned}")
+        user_ids.append(user_id)
     return user_ids or None
-
-
-def resolve_target_user_ids(
-    session: Session,
-    raw_user_ids: str | None,
-    use_logged_in_user: bool,
-) -> list[int] | None:
-    """Resolve user IDs for content visibility entries.
-
-    Args:
-        session: SQLAlchemy session.
-        raw_user_ids: Optional comma-separated user IDs from CLI.
-        use_logged_in_user: Whether to target the inferred logged-in user.
-
-    Returns:
-        User ID list for inbox entries, or None to target all users.
-
-    Raises:
-        ValueError: If both targeting modes are set or logged-in user can't be resolved.
-    """
-    if raw_user_ids and use_logged_in_user:
-        raise ValueError("Use either --user-ids or --logged-in-user, not both.")
-
-    parsed_user_ids = _parse_user_ids(raw_user_ids)
-    if parsed_user_ids is not None:
-        return parsed_user_ids
-
-    if not use_logged_in_user:
-        return None
-
-    resolved_user_id = _resolve_logged_in_user_id(session)
-    if resolved_user_id is None:
-        raise ValueError("Could not resolve a logged-in user ID from the database.")
-    return [resolved_user_id]
-
-
-def _resolve_briefing_user_ids(session: Session, user_ids: list[int] | None) -> list[int]:
-    """Pick concrete users for generated briefing verification."""
-    if user_ids:
-        return user_ids
-    logged_in_user_id = _resolve_logged_in_user_id(session)
-    if logged_in_user_id is not None:
-        return [logged_in_user_id]
-    return _fetch_user_ids(session)[:1]
-
-
-def run_generated_briefing_verification(
-    session: Session,
-    *,
-    user_ids: list[int],
-    use_llm: bool,
-) -> dict[int, dict[str, Any]]:
-    """Build a deterministic briefing and then verify an incremental append."""
-    results: dict[int, dict[str, Any]] = {}
-    if not user_ids:
-        return results
-
-    settings = get_settings().model_copy(
-        update={
-            "briefing_enabled_user_ids": user_ids,
-            "briefing_window_min": 1,
-            "briefing_debounce_seconds": 0,
-            "briefing_pending_max_age_seconds": 60,
-        }
-    )
-
-    for user_id in user_ids:
-        full_result = run_briefing_refresh(
-            session,
-            user_id=user_id,
-            mode="full",
-            use_llm=use_llm,
-            settings=settings,
-        )
-        session.commit()
-        full_counts = status_counts(session, user_id=user_id)
-
-        incremental_data = generate_test_data(
-            num_articles=1,
-            num_podcasts=0,
-            num_news=1,
-            include_pending=False,
-            article_summary_format="longform_artifact",
-            podcast_summary_format="longform_artifact",
-            news_days_back=1,
-            target_user_ids=[user_id],
-        )
-        incremental_ids = insert_test_data(session, incremental_data, user_ids=[user_id])
-        pending_enqueued = _enqueue_incremental_briefing_sources(
-            session,
-            user_id=user_id,
-            content_ids=incremental_ids,
-            settings=settings,
-        )
-        append_result = run_briefing_refresh(
-            session,
-            user_id=user_id,
-            mode="append",
-            use_llm=use_llm,
-            settings=settings,
-        )
-        session.commit()
-        append_counts = status_counts(session, user_id=user_id)
-        index = get_briefing_index(session, user_id=user_id)
-        results[user_id] = {
-            "full": full_result,
-            "full_counts": full_counts,
-            "incremental_ids": incremental_ids,
-            "pending_enqueued": pending_enqueued,
-            "append": append_result,
-            "append_counts": append_counts,
-            "index_lenses": len(index.lenses),
-            "index_version": index.version,
-        }
-
-    return results
-
-
-def _enqueue_incremental_briefing_sources(
-    session: Session,
-    *,
-    user_id: int,
-    content_ids: list[int],
-    settings: Any,
-) -> int:
-    """Mirror ready-event hooks for generated rows before append verification."""
-    enqueued = 0
-    contents = session.query(Content).filter(Content.id.in_(content_ids)).all()
-    for content in contents:
-        if content.id is None:
-            continue
-        content_id = int(content.id)
-        if content.content_type == ContentType.ARTICLE.value:
-            enqueued += int(
-                enqueue_ready_source(
-                    session,
-                    user_id=user_id,
-                    source_kind="content",
-                    source_id=content_id,
-                    lens_key="articles",
-                    delay_seconds=0,
-                    settings=settings,
-                )
-            )
-            continue
-        if content.content_type == ContentType.PODCAST.value:
-            enqueued += int(
-                enqueue_ready_source(
-                    session,
-                    user_id=user_id,
-                    source_kind="content",
-                    source_id=content_id,
-                    lens_key="podcasts",
-                    delay_seconds=0,
-                    settings=settings,
-                )
-            )
-            continue
-        if content.content_type != ContentType.NEWS.value:
-            continue
-        news_item = session.query(NewsItem).filter(NewsItem.legacy_content_id == content_id).first()
-        if news_item is None or news_item.id is None:
-            continue
-        enqueued += int(
-            enqueue_ready_source(
-                session,
-                user_id=user_id,
-                source_kind="news",
-                source_id=int(news_item.id),
-                lens_key=None,
-                delay_seconds=0,
-                settings=settings,
-            )
-        )
-    session.flush()
-    return enqueued
 
 
 def main():
@@ -1875,26 +1630,6 @@ def main():
         "--user-ids",
         help="Comma-separated user IDs to receive article/podcast inbox entries",
     )
-    parser.add_argument(
-        "--logged-in-user",
-        action="store_true",
-        help=(
-            "Target only the inferred logged-in user (most recently updated active non-admin user)"
-        ),
-    )
-    parser.add_argument(
-        "--briefing",
-        action="store_true",
-        help=(
-            "After inserting content, build a deterministic briefing and verify an "
-            "incremental append"
-        ),
-    )
-    parser.add_argument(
-        "--briefing-use-llm",
-        action="store_true",
-        help="Use the configured briefing LLM during generated-data verification",
-    )
 
     args = parser.parse_args()
 
@@ -1904,64 +1639,43 @@ def main():
     print(f"  - {args.news} news items")
     print(f"  - News spread across {args.news_days_back} day(s)")
 
+    try:
+        user_ids = _parse_user_ids(args.user_ids)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if user_ids is None:
+        print("  - Inbox assignment user IDs: all users")
+    else:
+        print(f"  - Inbox assignment user IDs: {', '.join(map(str, user_ids))}")
+    data = generate_test_data(
+        num_articles=args.articles,
+        num_podcasts=args.podcasts,
+        num_news=args.news,
+        include_pending=not args.no_pending,
+        article_summary_format=args.article_summary_format,
+        podcast_summary_format=args.podcast_summary_format,
+        news_days_back=args.news_days_back,
+    )
+
+    if args.dry_run:
+        print(f"\nDry run - generated {len(data)} items (not inserted)")
+        article_sample = next((d for d in data if d["content_type"] == "article"), None)
+        if article_sample:
+            print("\nSample article:")
+            print(f"  Title: {article_sample['title']}")
+            print(f"  Source: {article_sample['source']}")
+            print(f"  Status: {article_sample['status']}")
+        return
+
     init_db()
     with get_db() as session:
-        try:
-            user_ids = resolve_target_user_ids(
-                session=session,
-                raw_user_ids=args.user_ids,
-                use_logged_in_user=args.logged_in_user,
-            )
-        except ValueError as exc:
-            parser.error(str(exc))
-        if user_ids is None:
-            print("  - Inbox assignment user IDs: all users")
-        else:
-            print(f"  - Inbox assignment user IDs: {', '.join(map(str, user_ids))}")
-        data = generate_test_data(
-            num_articles=args.articles,
-            num_podcasts=args.podcasts,
-            num_news=args.news,
-            include_pending=not args.no_pending,
-            article_summary_format=args.article_summary_format,
-            podcast_summary_format=args.podcast_summary_format,
-            news_days_back=args.news_days_back,
-            target_user_ids=user_ids,
-        )
-
-        if args.dry_run:
-            print(f"\nDry run - generated {len(data)} items (not inserted)")
-            article_sample = next((d for d in data if d["content_type"] == "article"), None)
-            if article_sample:
-                print("\nSample article:")
-                print(f"  Title: {article_sample['title']}")
-                print(f"  Source: {article_sample['source']}")
-                print(f"  Status: {article_sample['status']}")
-            return
-
         # Insert into database
         print("\nInserting data into database...")
         inserted_ids = insert_test_data(session, data, user_ids=user_ids)
 
-        briefing_results: dict[int, dict[str, Any]] = {}
-        if args.briefing:
-            briefing_user_ids = _resolve_briefing_user_ids(session, user_ids)
-            print(
-                "\nBuilding generated briefing data for user ID(s): "
-                + ", ".join(map(str, briefing_user_ids))
-            )
-            briefing_results = run_generated_briefing_verification(
-                session,
-                user_ids=briefing_user_ids,
-                use_llm=args.briefing_use_llm,
-            )
-            backfilled = _backfill_briefing_segment_images(session, user_ids=briefing_user_ids)
-            session.commit()
-            if backfilled:
-                print(f"  Backfilled placeholder images for {backfilled} briefing source(s).")
-
     print(f"\nSuccessfully inserted {len(inserted_ids)} items")
-    print(f"  IDs: {min(inserted_ids)} - {max(inserted_ids)}")
+    if inserted_ids:
+        print(f"  IDs: {min(inserted_ids)} - {max(inserted_ids)}")
 
     # Print summary by type
     articles = sum(1 for d in data if d["content_type"] == "article")
@@ -1972,22 +1686,6 @@ def main():
     print(f"  Articles: {articles}")
     print(f"  Podcasts: {podcasts}")
     print(f"  News: {news}")
-
-    if briefing_results:
-        print("\nBriefing verification:")
-        for user_id, result in briefing_results.items():
-            full = result["full"]
-            append = result["append"]
-            print(
-                "  User "
-                f"{user_id}: full appended={full.appended_segments} "
-                f"pending={full.pending_added} version={full.version}; "
-                f"incremental IDs={result['incremental_ids']}; "
-                f"append appended={append.appended_segments} "
-                f"pending={append.pending_added} version={append.version}; "
-                f"counts={result['append_counts']}; index lenses={result['index_lenses']} "
-                f"index version={result['index_version']}"
-            )
 
 
 if __name__ == "__main__":

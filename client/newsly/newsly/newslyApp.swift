@@ -59,6 +59,17 @@ struct newslyApp: App {
     }
 
     private func handleIncomingURL(_ url: URL) {
+#if DEBUG
+        if let debugLogin = DebugLoginLink(url: url) {
+            let settings = AppSettings.shared
+            settings.serverHost = debugLogin.serverHost
+            settings.serverPort = debugLogin.serverPort
+            settings.useHTTPS = debugLogin.useHTTPS
+            authViewModel.startDebugSession(userID: debugLogin.userID)
+            return
+        }
+#endif
+
         guard CLILinkScanPayload.canHandle(url) else {
             return
         }

@@ -140,6 +140,28 @@ final class AuthenticationViewModel {
         authState = .authenticated(user)
     }
 
+    func startDebugSession(userID: Int) {
+        authService.logout()
+        lastKnownUser = nil
+        errorMessage = nil
+        authState = .loading
+
+        Task {
+            do {
+                let session = try await authService.createDebugSession(
+                    userId: userID,
+                    hasCompletedOnboarding: nil,
+                    hasCompletedNewUserTutorial: nil
+                )
+                lastKnownUser = session.user
+                authState = .authenticated(session.user)
+            } catch {
+                presentAuthError(error)
+                authState = .unauthenticated
+            }
+        }
+    }
+
     // MARK: - Private
 
     private func handleAuthFailure(_ error: AuthError, hasRefreshToken: Bool) async {

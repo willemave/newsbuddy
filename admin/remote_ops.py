@@ -380,7 +380,6 @@ def briefing_refresh(
                 session,
                 user_id=user_id,
                 mode=refresh_mode,
-                release_db_during_compose=True,
             )
             session.commit()
             return {
