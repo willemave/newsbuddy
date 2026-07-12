@@ -10,7 +10,6 @@ import SwiftUI
 private enum AuthenticatedPresentationState {
     case deciding
     case onboarding
-    case tutorial
     case content
 }
 
@@ -19,10 +18,6 @@ struct AuthenticatedRootView: View {
     let user: User
 
     @State private var presentationState: AuthenticatedPresentationState = .deciding
-    @State private var onboardingFeedCount: Int = 0
-
-    private let onboardingService = OnboardingService.shared
-
     var body: some View {
         Group {
             switch presentationState {
@@ -38,16 +33,8 @@ struct AuthenticatedRootView: View {
                             authViewModel.updateUser(updatedUserOnboardingFlag(true))
                         }
                     }
-                    if !response.hasCompletedNewUserTutorial {
-                        onboardingFeedCount = response.configuredSourceCount
-                        presentationState = .tutorial
-                    } else {
-                        presentationState = .content
-                    }
-                }
-            case .tutorial:
-                HowItWorksModal(feedCount: onboardingFeedCount) {
-                    Task { await completeTutorial() }
+                    AppSettings.shared.setReadingExperience(.briefing)
+                    presentationState = .content
                 }
             case .content:
                 ContentView(userId: user.id)
@@ -60,6 +47,7 @@ struct AuthenticatedRootView: View {
             }
         }
         .onAppear {
+            applyServerReadingExperience()
             updatePresentation()
         }
         .onChange(of: user.id) { _, _ in
@@ -71,6 +59,9 @@ struct AuthenticatedRootView: View {
         .onChange(of: user.hasCompletedNewUserTutorial) { _, _ in
             updatePresentation()
         }
+        .onChange(of: user.readingExperience) { _, _ in
+            applyServerReadingExperience()
+        }
     }
 
     private func updatePresentation() {
@@ -79,24 +70,12 @@ struct AuthenticatedRootView: View {
             return
         }
 
-        if !user.hasCompletedNewUserTutorial {
-            presentationState = .tutorial
-            return
-        }
-
         presentationState = .content
     }
 
-    private func completeTutorial() async {
-        presentationState = .content
-        do {
-            let response = try await onboardingService.markTutorialComplete()
-            if response.hasCompletedNewUserTutorial {
-                authViewModel.updateUser(updatedUserTutorialFlag(true))
-            }
-        } catch {
-            ToastService.shared.showError("Failed to save tutorial status: \(error.localizedDescription)")
-        }
+    private func applyServerReadingExperience() {
+        let experience = ReadingExperience(rawValue: user.readingExperience) ?? .classic
+        AppSettings.shared.setReadingExperience(experience)
     }
 
     private func updatedUserOnboardingFlag(_ completed: Bool) -> User {
@@ -111,25 +90,10 @@ struct AuthenticatedRootView: View {
             isActive: user.isActive,
             hasCompletedOnboarding: completed,
             hasCompletedNewUserTutorial: user.hasCompletedNewUserTutorial,
+            readingExperience: user.readingExperience,
             createdAt: user.createdAt,
             updatedAt: user.updatedAt
         )
     }
 
-    private func updatedUserTutorialFlag(_ completed: Bool) -> User {
-        User(
-            id: user.id,
-            appleId: user.appleId,
-            email: user.email,
-            fullName: user.fullName,
-            twitterUsername: user.twitterUsername,
-            hasXBookmarkSync: user.hasXBookmarkSync,
-            isAdmin: user.isAdmin,
-            isActive: user.isActive,
-            hasCompletedOnboarding: user.hasCompletedOnboarding,
-            hasCompletedNewUserTutorial: completed,
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt
-        )
-    }
 }

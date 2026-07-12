@@ -37,6 +37,45 @@ struct BriefingTierStrip: View {
         .accessibilityIdentifier("briefing.lenses")
     }
 }
+
+/// During first-run onboarding, ready categories append directly beside the
+/// synthetic Start Here page. The rail never shows placeholder categories.
+struct BriefingFirstRunStrip: View {
+    @ObservedObject var viewModel: BriefingViewModel
+    let onSelectLens: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                BriefingStripPill(
+                    title: "Start Here",
+                    unreadCount: 0,
+                    isSelected: viewModel.isStartHereSelected,
+                    accessibilityId: "briefing.start_here.pill"
+                ) {
+                    onSelectLens("start-here")
+                }
+
+                ForEach(viewModel.orderedLenses, id: \.key) { lens in
+                    BriefingStripPill(
+                        title: lens.title,
+                        unreadCount: lens.unreadSourceCount,
+                        isSelected: false,
+                        accessibilityId: "briefing.lens.\(lens.key)"
+                    ) {
+                        onSelectLens(lens.key)
+                    }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.vertical, 10)
+            .animation(.easeOut(duration: 0.35), value: viewModel.orderedLenses.map(\.key))
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: viewModel.orderedLenses.count)
+        .accessibilityIdentifier("briefing.first_run.lenses")
+    }
+}
 /// News categories revealed by the News pill, stacked into two packed rows
 /// that scroll together; the pager swipes through exactly these, so the
 /// selected pill follows the swipe.

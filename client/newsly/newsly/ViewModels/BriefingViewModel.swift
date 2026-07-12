@@ -4,7 +4,9 @@ import SwiftUI
 
 private let briefingReadFlushDebounceNanoseconds: UInt64 = 300_000_000
 private let briefingReadFlushRetryNanoseconds: UInt64 = 2_000_000_000
+private let briefingFirstRunCompletionRetryNanoseconds: UInt64 = 2_000_000_000
 private let briefingRefreshLogger = Logger(subsystem: "com.newsly", category: "BriefingRefresh")
+private let briefingStartHereKey = "start-here"
 
 protocol BriefingAudioEpisodeServicing: AnyObject {
     func waitForCompletedEpisode(
@@ -23,6 +25,8 @@ final class BriefingViewModel: ObservableObject {
         case lens(String)
         case readFlush
         case snapshotSave
+        case firstRunPoll
+        case firstRunCompletion
     }
 
     private enum NarrationPreparationOutcome {
@@ -65,6 +69,8 @@ final class BriefingViewModel: ObservableObject {
     private let audioEpisodeService: any BriefingAudioEpisodeServicing
     private let snapshotStore: BriefingSnapshotStoring?
     private let indexSynchronizer: BriefingIndexSynchronizer
+    private let completeTutorial: @MainActor () async throws -> Void
+    private let firstRunCompletionRetryDelay: UInt64
     private let tasks = TaskBag<TaskKey>()
     private var pendingReadKeys: Set<String> = []
     private var staleLensKeys: Set<String> = []
@@ -80,11 +86,15 @@ final class BriefingViewModel: ObservableObject {
         service: BriefingServicing,
         audioEpisodeService: any BriefingAudioEpisodeServicing,
         snapshotStore: BriefingSnapshotStoring? = nil,
-        refreshPollDelays: [UInt64] = briefingRefreshPollDelaysNanoseconds
+        refreshPollDelays: [UInt64] = briefingRefreshPollDelaysNanoseconds,
+        firstRunCompletionRetryDelay: UInt64 = briefingFirstRunCompletionRetryNanoseconds,
+        completeTutorial: @escaping @MainActor () async throws -> Void = {}
     ) {
         self.service = service
         self.audioEpisodeService = audioEpisodeService
         self.snapshotStore = snapshotStore
+        self.firstRunCompletionRetryDelay = firstRunCompletionRetryDelay
+        self.completeTutorial = completeTutorial
         let indexSynchronizer = BriefingIndexSynchronizer(
             service: service,
             refreshPollDelays: refreshPollDelays
@@ -113,6 +123,10 @@ final class BriefingViewModel: ObservableObject {
     var isRefreshing: Bool {
         refreshPhase == .requesting || refreshPhase == .waitingForVersion
     }
+
+    var firstRun: APIBriefingFirstRunProgress? { index?.firstRun }
+
+    var isStartHereSelected: Bool { selectedLensKey == briefingStartHereKey }
 
     var newsLenses: [APIBriefingLensSummary] {
         orderedLenses.filter { $0.tier == .news }
@@ -151,6 +165,9 @@ final class BriefingViewModel: ObservableObject {
         }
         if !active {
             cancelLensLoads()
+            tasks.cancel(.firstRunPoll)
+        } else {
+            scheduleFirstRunPollIfNeeded()
         }
     }
 
@@ -187,6 +204,9 @@ final class BriefingViewModel: ObservableObject {
 
     func selectLens(key: String) {
         guard selectedLensKey != key else { return }
+        if key != briefingStartHereKey, index?.firstRun != nil {
+            dismissFirstRun()
+        }
         selectedLensKey = key
         noteSelectionChanged()
         loadWorkingSet()
@@ -251,6 +271,7 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func loadLensIfNeeded(key: String) {
+        guard key != briefingStartHereKey else { return }
         guard (lenses[key] == nil || staleLensKeys.contains(key)),
               !tasks.isRunning(.lens(key)) else {
             return
@@ -499,7 +520,7 @@ final class BriefingViewModel: ObservableObject {
     private func applyIndexResult(_ result: BriefingIndexFetchResult) {
         switch result {
         case .notModified:
-            state = orderedLenses.isEmpty ? .empty : .loaded
+            state = orderedLenses.isEmpty && index?.firstRun == nil ? .empty : .loaded
             loadWorkingSet()
         case .value(let response, _):
             applyIndex(response)
@@ -516,15 +537,20 @@ final class BriefingViewModel: ObservableObject {
             staleLensKeys.formIntersection(validKeys)
         }
         index = response
-        orderedLenses = Self.sortedLenses(response.lenses)
-        state = response.lenses.isEmpty ? .empty : .loaded
+        orderedLenses = response.firstRun == nil
+            ? Self.sortedLenses(response.lenses)
+            : response.lenses
+        state = response.lenses.isEmpty && response.firstRun == nil ? .empty : .loaded
         if selectedLensKey == nil
-            || !response.lenses.contains(where: { $0.key == selectedLensKey }) {
-            selectedLensKey = orderedLenses.first?.key
+            || (selectedLensKey != briefingStartHereKey
+                && !response.lenses.contains(where: { $0.key == selectedLensKey }))
+            || (selectedLensKey == briefingStartHereKey && response.firstRun == nil) {
+            selectedLensKey = response.firstRun == nil ? orderedLenses.first?.key : briefingStartHereKey
         }
         noteSelectionChanged()
         loadWorkingSet()
         scheduleSnapshotSave()
+        scheduleFirstRunPollIfNeeded()
     }
 
     private func loadWorkingSet() {
@@ -570,15 +596,19 @@ final class BriefingViewModel: ObservableObject {
     /// the network. Returns false when there is nothing usable to restore.
     private func restoreFromSnapshot() async -> Bool {
         guard let snapshot = await snapshotStore?.load(),
-              !snapshot.index.lenses.isEmpty
+              !snapshot.index.lenses.isEmpty || snapshot.index.firstRun != nil
         else { return false }
         index = snapshot.index
-        orderedLenses = Self.sortedLenses(snapshot.index.lenses)
+        orderedLenses = snapshot.index.firstRun == nil
+            ? Self.sortedLenses(snapshot.index.lenses)
+            : snapshot.index.lenses
         lenses = snapshot.lenses
         staleLensKeys.removeAll()
         indexSynchronizer.restore(etag: snapshot.etag)
         state = .loaded
-        if let savedKey = snapshot.selectedLensKey,
+        if snapshot.index.firstRun != nil {
+            selectedLensKey = briefingStartHereKey
+        } else if let savedKey = snapshot.selectedLensKey,
            snapshot.index.lenses.contains(where: { $0.key == savedKey }) {
             selectedLensKey = savedKey
         } else if selectedLensKey == nil
@@ -586,6 +616,7 @@ final class BriefingViewModel: ObservableObject {
             selectedLensKey = orderedLenses.first?.key
         }
         noteSelectionChanged()
+        scheduleFirstRunPollIfNeeded()
         return true
     }
 
@@ -656,10 +687,13 @@ final class BriefingViewModel: ObservableObject {
                     mastheadTitle: currentIndex.mastheadTitle,
                     mastheadDeck: currentIndex.mastheadDeck,
                     generatedAt: currentIndex.generatedAt,
-                    lenses: currentIndex.lenses
+                    lenses: currentIndex.lenses,
+                    firstRun: currentIndex.firstRun
                 )
                 index = currentIndex
-                orderedLenses = Self.sortedLenses(currentIndex.lenses)
+                orderedLenses = currentIndex.firstRun == nil
+                    ? Self.sortedLenses(currentIndex.lenses)
+                    : currentIndex.lenses
             }
             scheduleSnapshotSave()
         } catch {
@@ -734,10 +768,13 @@ final class BriefingViewModel: ObservableObject {
                 mastheadTitle: currentIndex.mastheadTitle,
                 mastheadDeck: currentIndex.mastheadDeck,
                 generatedAt: currentIndex.generatedAt,
-                lenses: currentIndex.lenses.map { updatedSummaries[$0.key] ?? $0 }
+                lenses: currentIndex.lenses.map { updatedSummaries[$0.key] ?? $0 },
+                firstRun: currentIndex.firstRun
             )
             index = currentIndex
-            orderedLenses = Self.sortedLenses(currentIndex.lenses)
+            orderedLenses = currentIndex.firstRun == nil
+                ? Self.sortedLenses(currentIndex.lenses)
+                : currentIndex.lenses
         }
         scheduleSnapshotSave()
     }
@@ -748,6 +785,56 @@ final class BriefingViewModel: ObservableObject {
                 return left.key < right.key
             }
             return left.position < right.position
+        }
+    }
+
+    private func scheduleFirstRunPollIfNeeded() {
+        guard index?.firstRun != nil else {
+            tasks.cancel(.firstRunPoll)
+            return
+        }
+        guard !tasks.isRunning(.firstRunPoll) else { return }
+        tasks.runReplacing(.firstRunPoll) { [weak self] in
+            while !Task.isCancelled, self?.index?.firstRun != nil {
+                do {
+                    try await Task.sleep(nanoseconds: 1_500_000_000)
+                } catch {
+                    return
+                }
+                await self?.refreshIndex()
+            }
+        }
+    }
+
+    private func dismissFirstRun() {
+        guard let currentIndex = index, currentIndex.firstRun != nil else { return }
+        index = APIBriefingIndexResponse(
+            version: currentIndex.version,
+            mastheadTitle: currentIndex.mastheadTitle,
+            mastheadDeck: currentIndex.mastheadDeck,
+            generatedAt: currentIndex.generatedAt,
+            lenses: currentIndex.lenses,
+            firstRun: nil
+        )
+        tasks.cancel(.firstRunPoll)
+        scheduleSnapshotSave()
+        tasks.runReplacing(.firstRunCompletion) { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                do {
+                    try await completeTutorial()
+                    return
+                } catch {
+                    briefingRefreshLogger.error(
+                        "Failed to persist Start Here completion; retrying: \(error.localizedDescription, privacy: .private)"
+                    )
+                }
+                do {
+                    try await Task.sleep(nanoseconds: firstRunCompletionRetryDelay)
+                } catch {
+                    return
+                }
+            }
         }
     }
 }

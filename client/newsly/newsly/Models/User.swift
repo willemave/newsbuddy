@@ -57,6 +57,7 @@ struct User: Codable, Identifiable, Equatable {
     let isActive: Bool
     let hasCompletedOnboarding: Bool
     let hasCompletedNewUserTutorial: Bool
+    let readingExperience: String
     let createdAt: Date
     let updatedAt: Date
 
@@ -72,6 +73,7 @@ struct User: Codable, Identifiable, Equatable {
         case isActive = "is_active"
         case hasCompletedOnboarding = "has_completed_onboarding"
         case hasCompletedNewUserTutorial = "has_completed_new_user_tutorial"
+        case readingExperience = "reading_experience"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -88,6 +90,7 @@ struct User: Codable, Identifiable, Equatable {
         isActive: Bool,
         hasCompletedOnboarding: Bool,
         hasCompletedNewUserTutorial: Bool,
+        readingExperience: String = ReadingExperience.classic.rawValue,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -102,6 +105,7 @@ struct User: Codable, Identifiable, Equatable {
         self.isActive = isActive
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.hasCompletedNewUserTutorial = hasCompletedNewUserTutorial
+        self.readingExperience = readingExperience
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -120,6 +124,8 @@ struct User: Codable, Identifiable, Equatable {
         isActive = try container.decode(Bool.self, forKey: .isActive)
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? true
         hasCompletedNewUserTutorial = try container.decode(Bool.self, forKey: .hasCompletedNewUserTutorial)
+        readingExperience = try container.decodeIfPresent(String.self, forKey: .readingExperience)
+            ?? ReadingExperience.classic.rawValue
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }

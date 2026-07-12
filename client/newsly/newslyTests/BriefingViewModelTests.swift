@@ -3,6 +3,76 @@ import XCTest
 
 @MainActor
 final class BriefingViewModelTests: XCTestCase {
+    func testFirstRunLoadsStartHereWithoutAReadableCategory() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(lenses: [], firstRun: makeFirstRun()), etag: "first-run-1")
+        ]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertTrue(viewModel.isStartHereSelected)
+        XCTAssertEqual(viewModel.firstRun?.connectedSourceCount, 3)
+        XCTAssertTrue(service.fetchLensKeys.isEmpty)
+    }
+
+    func testOpeningReadyCategoryOptimisticallyCompletesFirstRun() async {
+        let service = MockBriefingService()
+        let technology = makeLensSummary(key: "technology", title: "Technology")
+        service.indexResults = [
+            .value(
+                makeIndex(
+                    lenses: [technology],
+                    firstRun: makeFirstRun(readyCategoryKeys: ["technology"])
+                ),
+                etag: "first-run-2"
+            )
+        ]
+        service.lensResponses["technology"] = makeLens(key: "technology")
+        var completionCount = 0
+        let viewModel = BriefingViewModel(service: service) {
+            completionCount += 1
+        }
+
+        await viewModel.loadIndexIfNeeded()
+        viewModel.selectLens(key: "technology")
+        await waitForBriefingCondition { completionCount == 1 }
+
+        XCTAssertEqual(viewModel.selectedLensKey, "technology")
+        XCTAssertNil(viewModel.firstRun)
+        XCTAssertFalse(viewModel.isStartHereSelected)
+    }
+
+    func testOpeningReadyCategoryRetriesCompletionAfterFailure() async {
+        let service = MockBriefingService()
+        let technology = makeLensSummary(key: "technology", title: "Technology")
+        service.indexResults = [
+            .value(
+                makeIndex(
+                    lenses: [technology],
+                    firstRun: makeFirstRun(readyCategoryKeys: ["technology"])
+                ),
+                etag: "first-run-retry"
+            )
+        ]
+        service.lensResponses["technology"] = makeLens(key: "technology")
+        var completionCount = 0
+        let viewModel = BriefingViewModel(service: service) {
+            completionCount += 1
+            if completionCount == 1 {
+                throw NSError(domain: "BriefingViewModelTests", code: 1)
+            }
+        }
+
+        await viewModel.loadIndexIfNeeded()
+        viewModel.selectLens(key: "technology")
+        await waitForBriefingCondition { completionCount == 2 }
+
+        XCTAssertNil(viewModel.firstRun)
+    }
+
     func testLoadIndexSelectsFirstLensAndLoadsIt() async {
         let service = MockBriefingService()
         service.indexResults = [

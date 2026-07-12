@@ -144,13 +144,17 @@ extension BriefingViewModel {
     convenience init(
         service: BriefingServicing,
         snapshotStore: BriefingSnapshotStoring? = nil,
-        refreshPollDelays: [UInt64] = [1_000_000, 2_000_000, 5_000_000]
+        refreshPollDelays: [UInt64] = [1_000_000, 2_000_000, 5_000_000],
+        firstRunCompletionRetryDelay: UInt64 = 1_000_000,
+        completeTutorial: @escaping @MainActor () async throws -> Void = {}
     ) {
         self.init(
             service: service,
             audioEpisodeService: MockBriefingAudioEpisodeService(),
             snapshotStore: snapshotStore,
-            refreshPollDelays: refreshPollDelays
+            refreshPollDelays: refreshPollDelays,
+            firstRunCompletionRetryDelay: firstRunCompletionRetryDelay,
+            completeTutorial: completeTutorial
         )
     }
 }
@@ -200,14 +204,34 @@ func waitForBriefingCondition(
 
 func makeIndex(
     version: Int = 1,
-    lenses: [APIBriefingLensSummary]
+    lenses: [APIBriefingLensSummary],
+    firstRun: APIBriefingFirstRunProgress? = nil
 ) -> APIBriefingIndexResponse {
     APIBriefingIndexResponse(
         version: version,
         mastheadTitle: "Today",
         mastheadDeck: "What matters now",
         generatedAt: Date(timeIntervalSince1970: 1_800_000_000),
-        lenses: lenses
+        lenses: lenses,
+        firstRun: firstRun
+    )
+}
+
+func makeFirstRun(
+    revision: Int = 1,
+    phase: APIBriefingFirstRunPhase = .active,
+    connectedSourceCount: Int = 3,
+    completedSources: [APIBriefingFirstRunSourceProgress] = [],
+    activeSources: [String] = ["Techmeme", "Stratechery"],
+    readyCategoryKeys: [String] = []
+) -> APIBriefingFirstRunProgress {
+    APIBriefingFirstRunProgress(
+        revision: revision,
+        phase: phase,
+        connectedSourceCount: connectedSourceCount,
+        completedSources: completedSources,
+        activeSources: activeSources,
+        readyCategoryKeys: readyCategoryKeys
     )
 }
 

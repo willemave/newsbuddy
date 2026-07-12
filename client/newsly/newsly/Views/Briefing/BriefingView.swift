@@ -81,25 +81,27 @@ struct BriefingView: View {
             headerChrome
             refreshStatus
 
-            TabView(selection: selectedLensBinding) {
-                ForEach(viewModel.pagerLenses, id: \.key) { lens in
-                    BriefingLensPageView(
-                        lensSummary: lens,
-                        lens: viewModel.lenses[lens.key],
-                        viewModel: viewModel,
-                        collapsibleChromeHeight: collapsibleChromeHeight,
-                        onOpenSource: openSource,
-                        onOpenDiscussion: openDiscussion,
-                        onDig: startDig
-                    )
-                    .tag(lens.key)
+            if viewModel.isStartHereSelected, let firstRun = viewModel.firstRun {
+                BriefingStartHereView(progress: firstRun)
+            } else {
+                TabView(selection: selectedLensBinding) {
+                    ForEach(viewModel.pagerLenses, id: \.key) { lens in
+                        BriefingLensPageView(
+                            lensSummary: lens,
+                            lens: viewModel.lenses[lens.key],
+                            viewModel: viewModel,
+                            collapsibleChromeHeight: collapsibleChromeHeight,
+                            onOpenSource: openSource,
+                            onOpenDiscussion: openDiscussion,
+                            onDig: startDig
+                        )
+                        .tag(lens.key)
+                    }
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .id(viewModel.isNewsTierSelected ? "tier:news" : "lens:\(viewModel.selectedLensKey ?? "")")
+                .accessibilityIdentifier("briefing.lens_pager")
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            // Tier switches swap the whole page set; re-identifying the pager
-            // rebuilds it cleanly instead of animating across stale pages.
-            .id(viewModel.isNewsTierSelected ? "tier:news" : "lens:\(viewModel.selectedLensKey ?? "")")
-            .accessibilityIdentifier("briefing.lens_pager")
         }
         .animation(.easeInOut(duration: 0.22), value: viewModel.isMastheadCompact)
         .animation(.easeInOut(duration: 0.22), value: viewModel.isCategoryStripExpanded)
@@ -161,11 +163,17 @@ struct BriefingView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            BriefingTierStrip(
-                viewModel: viewModel,
-                onSelectNews: { viewModel.selectNewsTier() },
-                onSelectLens: { key in viewModel.selectLens(key: key) }
-            )
+            if viewModel.firstRun != nil {
+                BriefingFirstRunStrip(viewModel: viewModel) { key in
+                    viewModel.selectLens(key: key)
+                }
+            } else {
+                BriefingTierStrip(
+                    viewModel: viewModel,
+                    onSelectNews: { viewModel.selectNewsTier() },
+                    onSelectLens: { key in viewModel.selectLens(key: key) }
+                )
+            }
 
             if viewModel.isCategoryStripExpanded {
                 BriefingCategoryStrip(viewModel: viewModel) { key in
@@ -181,7 +189,7 @@ struct BriefingView: View {
                 }
             }
 
-            if let lensKey = viewModel.selectedLensKey {
+            if let lensKey = viewModel.selectedLensKey, !viewModel.isStartHereSelected {
                 listenPanel(lensKey: lensKey)
             }
         }
@@ -196,7 +204,7 @@ struct BriefingView: View {
     }
 
     private var mastheadListenAccessory: AnyView? {
-        viewModel.selectedLensKey.map { lensKey in
+        viewModel.isStartHereSelected ? nil : viewModel.selectedLensKey.map { lensKey in
             AnyView(listenAccessory(lensKey: lensKey))
         }
     }
