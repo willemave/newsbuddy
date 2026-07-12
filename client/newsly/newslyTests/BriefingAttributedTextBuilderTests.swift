@@ -94,7 +94,36 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         XCTAssertEqual(link.absoluteString, "newsly://briefing/news/8")
     }
 
-    func testBuildAppendsDiscussionChipAfterStoredMarkdownSourceLink() throws {
+    func testBuildConvertsStoredMarkdownSourceLinkWhoseTitleContainsBrackets() throws {
+        let result = BriefingAttributedTextBuilder().build(
+            paragraphs: [
+                APIBriefingParagraph(
+                    runs: [
+                        APIBriefingRun(
+                            kind: .text,
+                            text: "Read [[AINews] New AI infra decacorns](newsly://briefing/content/29576)."
+                        )
+                    ]
+                )
+            ],
+            weight: nil
+        )
+
+        XCTAssertEqual(result.plainText, "Read [AINews] New AI infra decacorns.")
+        let titleRange = (result.attributedText.string as NSString).range(of: "[AINews]")
+        let link = try XCTUnwrap(
+            result.attributedText.attribute(.link, at: titleRange.location, effectiveRange: nil) as? URL
+        )
+        XCTAssertEqual(link.absoluteString, "newsly://briefing/content/29576")
+        XCTAssertEqual(
+            BriefingAttributedTextBuilder.sourceKeys(
+                in: "[[AINews] New AI infra decacorns](newsly://briefing/content/29576)"
+            ),
+            ["content:29576"]
+        )
+    }
+
+    func testBuildAppendsClickableDiscussionIconInsideParenthesesAfterStoredMarkdownSourceLink() throws {
         let builder = BriefingAttributedTextBuilder()
         let result = builder.build(
             paragraphs: [
@@ -123,7 +152,17 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         }
 
         XCTAssertEqual(discussionLinkRanges.count, 1)
-        XCTAssertTrue(result.plainText.contains("(64)"))
+        XCTAssertEqual(discussionLinkRanges.first?.length, 1)
+        let countRange = (result.plainText as NSString).range(of: "64")
+        XCTAssertEqual(
+            result.attributedText.attribute(
+                .link,
+                at: countRange.location,
+                effectiveRange: nil
+            ) as? URL,
+            nil
+        )
+        XCTAssertTrue(result.plainText.contains("(\u{FFFC}\u{202F}64)"))
     }
 
     func testBriefingSourceLinkKeysIncludesStoredMarkdownSourceLinks() {
@@ -145,7 +184,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         XCTAssertEqual(block.briefingSourceLinkKeys, ["news:8", "content:42"])
     }
 
-    func testBuildAppendsDiscussionChipAfterFirstSourceLinkOnly() throws {
+    func testBuildAppendsClickableDiscussionIconInsideParenthesesAfterFirstSourceLinkOnly() throws {
         let builder = BriefingAttributedTextBuilder()
         let linkRun = APIBriefingRun(
             kind: .source_link,
@@ -172,8 +211,18 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             discussionLinkRanges.append(range)
         }
 
-        XCTAssertEqual(discussionLinkRanges.count, 1, "Chip should attach to the first link only")
-        XCTAssertTrue(result.plainText.contains("(128)"))
+        XCTAssertEqual(discussionLinkRanges.count, 1, "Only the first discussion icon should be linked")
+        XCTAssertEqual(discussionLinkRanges.first?.length, 1)
+        let countRange = (result.plainText as NSString).range(of: "128")
+        XCTAssertEqual(
+            result.attributedText.attribute(
+                .link,
+                at: countRange.location,
+                effectiveRange: nil
+            ) as? URL,
+            nil
+        )
+        XCTAssertTrue(result.plainText.contains("(\u{FFFC}\u{202F}128)"))
     }
 
     func testBuildStripsLeftoverBoldMarkersAroundSourceLinks() {

@@ -68,11 +68,12 @@ struct StateView: View {
 
             VStack(spacing: 4) {
                 Text(role.title)
-                    .font(.listTitle.weight(.semibold))
+                    .font(.appTitle3)
                     .foregroundStyle(Color.onSurface)
+                    .multilineTextAlignment(.center)
 
                 Text(role.subtitle)
-                    .font(.listSubtitle)
+                    .font(.appSubheadline)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 280)

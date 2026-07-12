@@ -29,7 +29,7 @@ struct SectionHeader: View {
                 }
             }
         }
-        .padding(.horizontal, Spacing.rowHorizontal)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, Spacing.sectionTop)
         .padding(.bottom, Spacing.sectionBottom)
     }

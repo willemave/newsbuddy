@@ -2,8 +2,8 @@ import UIKit
 
 let BriefingInsightAttributeName = NSAttributedString.Key("BriefingInsightID")
 
-/// Inline discussion affordance rendered after a source link: a small
-/// bubble icon plus comment count that links out to the discussion sheet.
+/// Inline discussion marker rendered after a source link: a clickable bubble
+/// icon grouped with a non-linked comment count inside parentheses.
 struct BriefingDiscussionChip: Equatable {
     let sourceKey: String
     let commentCount: Int?
@@ -11,7 +11,7 @@ struct BriefingDiscussionChip: Equatable {
 
 struct BriefingAttributedTextBuilder {
     private static let markdownSourceLinkRegex = try! NSRegularExpression(
-        pattern: #"\[([^\]]+)\]\(((?:newsly|news)://briefing/(content|news)/(\d+))\)"#
+        pattern: #"\[((?:[^\[\]]|\[[^\]]*\])+)\]\(((?:newsly|news)://briefing/(content|news)/(\d+))\)"#
     )
 
     struct Result {
@@ -89,20 +89,22 @@ struct BriefingAttributedTextBuilder {
     ) -> NSAttributedString {
         let chipFont = UIFont.appSans(size: 12, weight: .semibold)
         let output = NSMutableAttributedString()
-        var attributes: [NSAttributedString.Key: Any] = [
+        let attributes: [NSAttributedString.Key: Any] = [
             .font: chipFont,
             .foregroundColor: UIColor.appAccent,
             .paragraphStyle: paragraphStyle
         ]
-        if let link = discussionURL(for: chip.sourceKey) {
-            attributes[.link] = link
-        }
 
         // Non-breaking space keeps the chip glued to the link it annotates.
         output.append(NSAttributedString(string: "\u{00A0}", attributes: [
             .font: chipFont,
             .paragraphStyle: paragraphStyle
         ]))
+
+        let count = chip.commentCount.flatMap { $0 > 0 ? $0 : nil }
+        if count != nil {
+            output.append(NSAttributedString(string: "(", attributes: attributes))
+        }
 
         let symbolConfiguration = UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
         if let icon = UIImage(systemName: "bubble.left.and.bubble.right.fill", withConfiguration: symbolConfiguration)?
@@ -115,18 +117,18 @@ struct BriefingAttributedTextBuilder {
                 height: icon.size.height
             )
             output.append(NSAttributedString(attachment: attachment))
-            // Merge link/paragraph attributes onto the attachment character so
-            // tapping the icon opens the discussion too.
+            var iconAttributes = attributes
+            iconAttributes[.link] = discussionURL(for: chip.sourceKey)
             output.addAttributes(
-                attributes,
+                iconAttributes,
                 range: NSRange(location: output.length - 1, length: 1)
             )
         }
 
-        if let count = chip.commentCount, count > 0 {
-            // Narrow no-break space: the icon and count must wrap as one unit.
+        if let count {
+            // Narrow no-break space keeps the icon and count together.
             output.append(NSAttributedString(
-                string: "\u{202F}(\(Self.compactCount(count)))",
+                string: "\u{202F}\(Self.compactCount(count)))",
                 attributes: attributes
             ))
         }
@@ -257,6 +259,7 @@ struct BriefingAttributedTextBuilder {
         guard parts.count == 2 else { return nil }
         return URL(string: "newsly://briefing/discussion/\(parts[0])/\(parts[1])")
     }
+
 }
 
 private extension UIFont {

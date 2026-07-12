@@ -569,6 +569,33 @@ extension View {
                 .allowsHitTesting(false)
         }
     }
+
+    /// Keeps text and artwork legible as they approach floating bottom chrome.
+    func bottomScreenEdgeFade(fadeHeight: CGFloat = 28) -> some View {
+        overlay(alignment: .bottom) {
+            LinearGradient(
+                colors: [Color.surfacePrimary.opacity(0), Color.surfacePrimary],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: fadeHeight)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Uses the app's serif title treatment even when SwiftUI's navigation-bar
+    /// appearance proxy has not yet been applied to a newly-created stack.
+    func appNavigationTitle(_ title: String) -> some View {
+        navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .font(.appHeadline)
+                        .foregroundStyle(Color.onSurface)
+                }
+            }
+    }
 }
 
 private struct AppShadowModifier: ViewModifier {

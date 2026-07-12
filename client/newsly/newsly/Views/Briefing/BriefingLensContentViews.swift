@@ -1,26 +1,45 @@
 import SwiftUI
 
 struct BriefingLensPageView: View {
+    @Environment(\.displayScale) private var displayScale
+
     let lensSummary: APIBriefingLensSummary
     let lens: APIBriefingLensResponse?
     @ObservedObject var viewModel: BriefingViewModel
+    var chromeCollapse: BriefingChromeCollapseModel
     let collapsibleChromeHeight: CGFloat
+    /// Height of the fully expanded chrome; the scroll content is inset by
+    /// this so its first line starts at the chrome's bottom edge and rides it
+    /// 1:1 while the chrome collapses.
+    let topContentInset: CGFloat
     let onOpenSource: (String) -> Void
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
 
     @State private var isPinned = false
+    @State private var containerHeight: CGFloat = 0
 
-    // Scroll position quantized to 64pt steps: crossing the first step
-    // collapses the masthead, and any step increase collapses a tap-opened
-    // category strip — without streaming raw offsets into the view model.
+    // Steps only gate the discrete signals (retiring a tap-opened category
+    // strip); the chrome collapse itself follows the clamped offset below.
     private static let scrollStep: CGFloat = 64
+    /// Hysteresis so the pinned flag doesn't flicker while the finger rests
+    /// exactly on the collapse boundary.
+    private static let unpinSlack: CGFloat = 12
 
-    /// The scroll facts the chrome cares about, coarse enough that the
-    /// closure below fires on step boundaries instead of every frame.
+    /// The scroll facts the chrome cares about. `collapse` is clamped to the
+    /// collapsible chrome height, so it only streams updates during the
+    /// collapse window and stays constant while reading below it.
     private struct ScrollProbe: Equatable {
+        var collapse: CGFloat = 0
         var step = 0
-        var hasCollapseHeadroom = false
+        var containerHeight: CGFloat = 0
+    }
+
+    /// Guarantees every page can scroll far enough to fully collapse the
+    /// chrome, so short pages never rest half-collapsed.
+    private var minContentHeight: CGFloat? {
+        guard containerHeight > 0 else { return nil }
+        return max(containerHeight - topContentInset + collapsibleChromeHeight, 0)
     }
 
     var body: some View {
@@ -61,25 +80,46 @@ struct BriefingLensPageView: View {
                             .accessibilityHidden(true)
                     }
                     .padding(.top, 4)
+                    .frame(minHeight: minContentHeight, alignment: .top)
                 }
+                .contentMargins(.top, topContentInset)
+                .contentMargins(.bottom, 40)
+                .bottomScreenEdgeFade(fadeHeight: 32)
                 .refreshable {
                     await viewModel.pullToRefresh()
                 }
                 .onScrollGeometryChange(for: ScrollProbe.self) { geometry in
                     let offset = geometry.contentOffset.y + geometry.contentInsets.top
-                    let scrollableRange = geometry.contentSize.height - geometry.containerSize.height
+                    // Pixel-align so the chrome never lands on sub-pixel
+                    // heights (text shimmer), then clamp to the collapse
+                    // window so steady reading streams no updates at all.
+                    let scale = max(displayScale, 1)
+                    let pixelAligned = (offset * scale).rounded() / scale
                     return ScrollProbe(
+                        collapse: min(max(pixelAligned, 0), collapsibleChromeHeight),
                         step: Int((offset / Self.scrollStep).rounded(.down)),
-                        hasCollapseHeadroom: scrollableRange >= collapsibleChromeHeight + 2 * Self.scrollStep
+                        containerHeight: geometry.containerSize.height
                     )
                 } action: { oldProbe, probe in
                     if probe.step > oldProbe.step, probe.step >= 1 {
                         viewModel.noteScrolledDown(forLens: lensSummary.key)
                     }
-                    // Collapse only when the page has enough scrollable
-                    // content to clear the chrome without trapping short pages.
-                    let pinned = probe.step >= 1 && (isPinned || probe.hasCollapseHeadroom)
-                    isPinned = pinned
+                    chromeCollapse.setCollapse(probe.collapse, forLens: lensSummary.key)
+                    if probe.containerHeight != containerHeight {
+                        containerHeight = probe.containerHeight
+                    }
+                    let pinned = if probe.collapse >= collapsibleChromeHeight {
+                        true
+                    } else if probe.collapse <= collapsibleChromeHeight - Self.unpinSlack {
+                        false
+                    } else {
+                        isPinned
+                    }
+                    if pinned != isPinned {
+                        isPinned = pinned
+                    }
+                    // Unconditional so a recreated pager resyncs stale
+                    // view-model pinned state on its initial callback.
                     viewModel.setHeaderPinned(pinned, forLens: lensSummary.key)
                 }
                 .accessibilityIdentifier("briefing.lens_page.\(lensSummary.key)")
@@ -87,9 +127,11 @@ struct BriefingLensPageView: View {
                 ErrorView(message: error) {
                     viewModel.retryLens(key: lensSummary.key)
                 }
+                .padding(.top, topContentInset)
                 .accessibilityIdentifier("briefing.lens_error.\(lensSummary.key)")
             } else {
                 LoadingView()
+                    .padding(.top, topContentInset)
                     .onAppear {
                         viewModel.loadLensIfNeeded(key: lensSummary.key)
                     }
@@ -392,6 +434,8 @@ private extension View {
 }
 
 private struct BriefingFloatingFigurePassage: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     let figure: APIBriefingBlock
     let passage: APIBriefingBlock
     let source: APIBriefingSource?
@@ -407,7 +451,43 @@ private struct BriefingFloatingFigurePassage: View {
     // Exclusion adds the text gutter around the floated image.
     private static let exclusionSize = CGSize(width: 162, height: 160)
 
+    @ViewBuilder
     var body: some View {
+        if horizontalSizeClass == .compact {
+            stackedLayout
+        } else {
+            floatingLayout
+        }
+    }
+
+    private var stackedLayout: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            BriefingFigureView(
+                block: figure,
+                source: source,
+                onOpenSource: onOpenSource
+            )
+            .opacity(figureOpacity)
+            .animation(.easeInOut(duration: 0.35), value: figureOpacity)
+            .briefingSourceReadMarker(
+                sourceKeys: figure.briefingDirectSourceKeys,
+                onSourceKeysSeen: onSourceKeysSeen
+            )
+
+            BriefingPassageReadMarker(
+                block: passage,
+                discussionChips: discussionChips,
+                onOpenSource: onOpenSource,
+                onOpenDiscussion: onOpenDiscussion,
+                onDig: onDig,
+                onSourceKeysSeen: onSourceKeysSeen
+            )
+            .opacity(passageOpacity)
+            .animation(.easeInOut(duration: 0.35), value: passageOpacity)
+        }
+    }
+
+    private var floatingLayout: some View {
         ZStack(alignment: .topTrailing) {
             BriefingPassageReadMarker(
                 block: passage,

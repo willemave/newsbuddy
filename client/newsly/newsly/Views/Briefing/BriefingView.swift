@@ -14,8 +14,10 @@ struct BriefingView: View {
     @State private var activeSource: BriefingSourceSheetItem?
     @State private var preparingNarrationLensKeys: Set<String> = []
     @State private var narrationError: String?
-    @State private var mastheadHeight: CGFloat = 170
-    @State private var categoryStripHeight: CGFloat = 90
+    @State private var chromeCollapse = BriefingChromeCollapseModel()
+    @State private var mastheadHeight: CGFloat = 0
+    @State private var categoryStripHeight: CGFloat = 0
+    @State private var expandedChromeHeight: CGFloat = 0
 
     private var digSheetPresented: Binding<Bool> {
         Binding(
@@ -35,8 +37,20 @@ struct BriefingView: View {
         )
     }
 
+    /// Whether the category strip participates in the chrome at all — it only
+    /// exists while a news category is selected.
+    private var showsCategoryStrip: Bool {
+        viewModel.isNewsTierSelected && !viewModel.newsLenses.isEmpty
+    }
+
     private var collapsibleChromeHeight: CGFloat {
-        mastheadHeight + (viewModel.isCategoryStripExpanded ? categoryStripHeight : 0)
+        mastheadHeight + (showsCategoryStrip ? categoryStripHeight : 0)
+    }
+
+    /// The lens whose scroll position drives the chrome; Start Here never
+    /// collapses the masthead.
+    private var activeCollapseLensKey: String? {
+        viewModel.isStartHereSelected ? nil : viewModel.selectedLensKey
     }
 
     var body: some View {
@@ -76,13 +90,15 @@ struct BriefingView: View {
         }
     }
 
+    /// The chrome overlays the pager instead of stacking above it: the pager's
+    /// frame never changes while the chrome collapses, so scrolling stays
+    /// smooth, and pages inset their content by the expanded chrome height so
+    /// text is never occluded before the chrome has moved out of the way.
     private var briefingContent: some View {
-        VStack(spacing: 0) {
-            headerChrome
-            refreshStatus
-
+        ZStack(alignment: .top) {
             if viewModel.isStartHereSelected, let firstRun = viewModel.firstRun {
                 BriefingStartHereView(progress: firstRun)
+                    .padding(.top, expandedChromeHeight)
             } else {
                 TabView(selection: selectedLensBinding) {
                     ForEach(viewModel.pagerLenses, id: \.key) { lens in
@@ -90,7 +106,9 @@ struct BriefingView: View {
                             lensSummary: lens,
                             lens: viewModel.lenses[lens.key],
                             viewModel: viewModel,
+                            chromeCollapse: chromeCollapse,
                             collapsibleChromeHeight: collapsibleChromeHeight,
+                            topContentInset: expandedChromeHeight,
                             onOpenSource: openSource,
                             onOpenDiscussion: openDiscussion,
                             onDig: startDig
@@ -102,9 +120,9 @@ struct BriefingView: View {
                 .id(viewModel.isNewsTierSelected ? "tier:news" : "lens:\(viewModel.selectedLensKey ?? "")")
                 .accessibilityIdentifier("briefing.lens_pager")
             }
+
+            headerChrome
         }
-        .animation(.easeInOut(duration: 0.22), value: viewModel.isMastheadCompact)
-        .animation(.easeInOut(duration: 0.22), value: viewModel.isCategoryStripExpanded)
     }
 
     @ViewBuilder
@@ -145,56 +163,80 @@ struct BriefingView: View {
 
     /// Everything above the pager — masthead, tier strip, category strip, and
     /// the playback panel — stays pinned while pages swipe underneath. The
-    /// masthead collapses on scroll; today's date (not the generation
-    /// timestamp) keeps the kicker identical to the Knowledge tab's masthead.
+    /// masthead and category strip collapse in lockstep with the scroll
+    /// offset (via `BriefingCollapsibleChromeSlot`), so content is never
+    /// clipped under the chrome before the chrome itself has moved away.
+    /// Today's date (not the generation timestamp) keeps the kicker identical
+    /// to the Knowledge tab's masthead.
     private var headerChrome: some View {
-        VStack(spacing: 0) {
-            if !viewModel.isMastheadCompact {
+        // A tap-opened category strip overlays the content at full height
+        // while the masthead stays collapsed; it is retired on scroll.
+        let stripPinnedOpen = viewModel.isCategoryStripExpanded && viewModel.isMastheadCompact
+
+        return VStack(spacing: 0) {
+            BriefingCollapsibleChromeSlot(
+                model: chromeCollapse,
+                lensKey: activeCollapseLensKey,
+                shrink: { [mastheadHeight] in min($0, mastheadHeight) },
+                naturalHeight: $mastheadHeight
+            ) {
                 EditorialMastheadHeader(
                     title: "Briefing",
                     trailingAccessory: mastheadListenAccessory,
                     accessoryAlignment: .title
                 )
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.height
-                } action: { _, height in
-                    mastheadHeight = max(height, 0)
+            }
+
+            Group {
+                if viewModel.firstRun != nil {
+                    BriefingFirstRunStrip(
+                        viewModel: viewModel,
+                        onSelectStartHere: viewModel.selectStartHere,
+                        onSelectLens: viewModel.selectLens
+                    )
+                } else {
+                    BriefingTierStrip(
+                        viewModel: viewModel,
+                        onSelectNews: { viewModel.selectNewsTier() },
+                        onSelectLens: { key in viewModel.selectLens(key: key) }
+                    )
                 }
-                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            if viewModel.firstRun != nil {
-                BriefingFirstRunStrip(
-                    viewModel: viewModel,
-                    onSelectStartHere: viewModel.selectStartHere,
-                    onSelectLens: viewModel.selectLens
-                )
-            } else {
-                BriefingTierStrip(
-                    viewModel: viewModel,
-                    onSelectNews: { viewModel.selectNewsTier() },
-                    onSelectLens: { key in viewModel.selectLens(key: key) }
-                )
-            }
-
-            if viewModel.isCategoryStripExpanded {
-                BriefingCategoryStrip(viewModel: viewModel) { key in
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        viewModel.selectLens(key: key)
+            if showsCategoryStrip {
+                BriefingCollapsibleChromeSlot(
+                    model: chromeCollapse,
+                    lensKey: activeCollapseLensKey,
+                    shrink: { [mastheadHeight, categoryStripHeight] collapse in
+                        stripPinnedOpen
+                            ? 0
+                            : min(max(collapse - mastheadHeight, 0), categoryStripHeight)
+                    },
+                    naturalHeight: $categoryStripHeight
+                ) {
+                    BriefingCategoryStrip(viewModel: viewModel) { key in
+                        withAnimation(.smooth(duration: 0.28)) {
+                            viewModel.selectLens(key: key)
+                        }
                     }
                 }
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.height
-                } action: { _, height in
-                    categoryStripHeight = max(height, 0)
-                }
             }
 
-            if let lensKey = viewModel.selectedLensKey, !viewModel.isStartHereSelected {
-                listenPanel(lensKey: lensKey)
+            VStack(spacing: 0) {
+                if let lensKey = viewModel.selectedLensKey, !viewModel.isStartHereSelected {
+                    listenPanel(lensKey: lensKey)
+                }
+                refreshStatus
             }
         }
+        .measureBriefingExpandedChromeHeight(
+            model: chromeCollapse,
+            lensKey: activeCollapseLensKey,
+            mastheadHeight: mastheadHeight,
+            categoryStripHeight: showsCategoryStrip ? categoryStripHeight : 0,
+            keepsCategoryStripOpen: stripPinnedOpen,
+            expandedHeight: $expandedChromeHeight
+        )
         .background(Color.surfacePrimary)
         .overlay(alignment: .bottom) {
             Rectangle()
@@ -202,6 +244,9 @@ struct BriefingView: View {
                 .frame(height: 0.5)
         }
         .shadow(color: .black.opacity(viewModel.isMastheadCompact ? 0.12 : 0), radius: 10, y: 5)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.isMastheadCompact)
+        .animation(.smooth(duration: 0.28), value: viewModel.isCategoryStripExpanded)
+        .animation(.smooth(duration: 0.28), value: viewModel.selectedLensKey)
         .zIndex(1)
     }
 
@@ -266,26 +311,10 @@ struct BriefingView: View {
     }
 
     private var emptyState: some View {
-        EmptyStateView(
-            icon: "newspaper",
-            title: "No briefing yet",
-            subtitle: emptyStateSubtitle,
-            actionTitle: viewModel.isRefreshing ? "Refreshing…" : "Refresh",
-            action: {
-                Task { await viewModel.pullToRefresh() }
-            }
+        BriefingEmptyStateView(
+            refreshPhase: viewModel.refreshPhase,
+            onRefresh: viewModel.pullToRefresh
         )
-    }
-
-    private var emptyStateSubtitle: String {
-        switch viewModel.refreshPhase {
-        case .waitingForVersion:
-            "Your refresh is queued. This page will update when the new edition is ready."
-        case .failed(let message):
-            message
-        case .idle, .requesting:
-            "Pull to refresh after new unread sources arrive."
-        }
     }
 
     private func openSource(_ sourceKey: String) {

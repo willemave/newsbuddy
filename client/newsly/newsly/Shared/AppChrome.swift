@@ -273,8 +273,8 @@ enum RootDependencyFactory {
         )
     }
 
-    static func makeKnowledgeHubViewModel() -> KnowledgeHubViewModel {
-        KnowledgeHubViewModel(
+    static func makeLearningHubViewModel() -> LearningHubViewModel {
+        LearningHubViewModel(
             chatService: ChatService.shared,
             transcriptionService: SpeechTranscriberFactory.makeVoiceDictationTranscriber(),
             refreshTranscriptionAvailability: {

@@ -34,6 +34,7 @@ struct BriefingTierStrip: View {
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 10)
         }
+        .briefingTrailingScrollFade()
         .accessibilityIdentifier("briefing.lenses")
     }
 }
@@ -73,6 +74,7 @@ struct BriefingFirstRunStrip: View {
             .padding(.vertical, 10)
             .animation(.easeOut(duration: 0.35), value: viewModel.orderedLenses.map(\.key))
         }
+        .briefingTrailingScrollFade()
         .sensoryFeedback(
             .impact(weight: .light),
             trigger: !viewModel.orderedLenses.isEmpty
@@ -141,7 +143,23 @@ struct BriefingCategoryStrip: View {
                 }
             }
         }
+        .briefingTrailingScrollFade()
         .accessibilityIdentifier("briefing.categories")
+    }
+}
+
+private extension View {
+    func briefingTrailingScrollFade() -> some View {
+        overlay(alignment: .trailing) {
+            LinearGradient(
+                colors: [Color.surfacePrimary.opacity(0), Color.surfacePrimary],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: 24)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
     }
 }
 
@@ -218,6 +236,8 @@ struct BriefingListenButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
         .disabled(isPreparing)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier("briefing.narration.play")
