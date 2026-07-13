@@ -51,26 +51,32 @@ struct BriefingLensPageView: View {
                             lens.sources.map { ($0.sourceKey, $0) },
                             uniquingKeysWith: { current, _ in current }
                         )
-                        ForEach(lens.segments, id: \.id) { segment in
-                            BriefingSegmentView(
-                                segment: segment,
-                                sourcesByKey: sourcesByKey,
-                                onOpenSource: onOpenSource,
-                                onOpenDiscussion: onOpenDiscussion,
-                                onDig: onDig,
-                                onSourceKeysSeen: { sourceKeys in
-                                    viewModel.markSourcesSeen(sourceKeys)
+                        ForEach(Array(lens.segments.enumerated()), id: \.element.id) { index, segment in
+                            VStack(alignment: .leading, spacing: 16) {
+                                if index > 0 {
+                                    BriefingTimelineSeparator(date: segment.createdAt)
                                 }
-                            )
-                            .id(segment.id)
-                            // Segment-level backstop: sources are only seen
-                            // after the whole segment has moved above the
-                            // viewport, unless their own block exited first.
-                            .onGeometryChange(for: Bool.self) { proxy in
-                                proxy.frame(in: .scrollView).maxY < 0
-                            } action: { _, exitedTop in
-                                guard exitedTop else { return }
-                                viewModel.markSegmentSeen(segment)
+
+                                BriefingSegmentView(
+                                    segment: segment,
+                                    sourcesByKey: sourcesByKey,
+                                    onOpenSource: onOpenSource,
+                                    onOpenDiscussion: onOpenDiscussion,
+                                    onDig: onDig,
+                                    onSourceKeysSeen: { sourceKeys in
+                                        viewModel.markSourcesSeen(sourceKeys)
+                                    }
+                                )
+                                .id(segment.id)
+                                // Segment-level backstop: sources are only seen
+                                // after the whole segment has moved above the
+                                // viewport, unless their own block exited first.
+                                .onGeometryChange(for: Bool.self) { proxy in
+                                    proxy.frame(in: .scrollView).maxY < 0
+                                } action: { _, exitedTop in
+                                    guard exitedTop else { return }
+                                    viewModel.markSegmentSeen(segment)
+                                }
                             }
                             .padding(.horizontal, Spacing.appHorizontalMargin)
                         }
@@ -139,6 +145,63 @@ struct BriefingLensPageView: View {
         }
     }
 }
+
+struct BriefingTimelineStamp: Equatable {
+    let day: String
+    let time: String
+
+    static func make(
+        for date: Date,
+        now: Date = AppClock.now,
+        calendar: Calendar = .current,
+        locale: Locale = .autoupdatingCurrent,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> BriefingTimelineStamp {
+        BriefingTimelineStamp(
+            day: TimelineDayLabel.text(for: date, now: now, calendar: calendar),
+            time: timeLabel(for: date, locale: locale, timeZone: timeZone)
+        )
+    }
+
+    private static func timeLabel(
+        for date: Date,
+        locale: Locale,
+        timeZone: TimeZone
+    ) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter.string(from: date)
+    }
+}
+
+private struct BriefingTimelineSeparator: View {
+    private let stamp: BriefingTimelineStamp
+
+    init(date: Date) {
+        self.stamp = .make(for: date)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(stamp.day)
+                .kicker(color: .sectionDelimiter)
+
+            Rectangle()
+                .fill(Color.outlineVariant)
+                .frame(height: 1)
+
+            Text(stamp.time)
+                .monospacedDigit()
+                .kicker(color: .sectionDelimiter)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(stamp.day), \(stamp.time)")
+    }
+}
+
 private struct BriefingSegmentView: View {
     let segment: APIBriefingSegment
     let sourcesByKey: [String: APIBriefingSource]
