@@ -33,8 +33,6 @@ xcodebuild \
   build
 
 xcrun simctl install "$simulator_udid" "$app_path"
-xcrun simctl launch "$simulator_udid" org.willemaw.newsly
 uv run python scripts/dev_user.py setup --launch --simulator "$simulator_udid"
 
 exec npx serve-sim "$simulator_udid"
-
