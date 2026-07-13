@@ -58,7 +58,7 @@ ONBOARDING_SOURCE_ITEM_COUNTS = (28, 12, 9, 34)
 ONBOARDING_LENS_KEY = "start-here-technology"
 
 PROFILE_APPLE_ID = "debug.newsly.showcase"
-PROFILE_EMAIL = "debug+showcase@newsly.local"
+PROFILE_EMAIL = "debug+showcase@example.com"
 PROFILE_NAME = "Newsly Showcase"
 PROFILE_URL_PREFIX = "https://example.com/newsly-dev/showcase"
 

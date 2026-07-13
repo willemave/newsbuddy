@@ -15,7 +15,7 @@ content, prepares Briefing data, and can sign the same user into a booted Simula
 uv run python scripts/dev_user.py setup --launch
 ```
 
-The command is idempotent. Each run resets the stable `debug+showcase@newsly.local`
+The command is idempotent. Each run resets the stable `debug+showcase@example.com`
 identity and creates:
 
 - 8 completed articles and 6 completed podcasts;

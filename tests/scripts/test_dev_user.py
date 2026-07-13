@@ -27,6 +27,7 @@ def test_showcase_profile_is_idempotent(db_session: Session, monkeypatch) -> Non
     second = dev_user.setup_showcase_user(db_session, briefing_mode="deterministic")
 
     assert second["user"]["id"] == first["user"]["id"]
+    assert second["user"]["email"] == "debug+showcase@example.com"
     assert second["content"] == {
         "articles": 8,
         "podcasts": 6,
