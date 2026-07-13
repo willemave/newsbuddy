@@ -46,6 +46,7 @@ build/
 .derived-data/
 *.png
 !docs/assets/newsbuddy-hero.png
+!client/newsly/newsly/Assets.xcassets/AppIcon.appiconset/*.png
 !tests/ios_e2e/baselines/
 !tests/ios_e2e/baselines/**/
 !tests/ios_e2e/baselines/**/*.png
