@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.models.contracts import BriefingFigurePlacement
 from app.services.briefing.figure_placement import canonical_figure_placement
 from app.services.briefing.layout_policy import (
     BriefingBlockRepair,
@@ -58,6 +59,7 @@ def repair_layout(
     repaired: list[dict[str, Any]] = []
     warnings: list[str] = []
     figures_used = 0
+    has_full_figure = False
     repairs_by_index: dict[int, list[BriefingBlockRepair]] = {}
     for block_repair in assessment.block_repairs:
         repairs_by_index.setdefault(block_repair.block_index, []).append(block_repair)
@@ -85,7 +87,13 @@ def repair_layout(
             source = source_by_key.get(source_key)
             if source is None:
                 raise BriefingLayoutRepairError("Layout assessment allowed an unusable figure")
-            block["placement"] = canonical_figure_placement(block.get("placement")).value
+            placement = canonical_figure_placement(block.get("placement"))
+            if placement == BriefingFigurePlacement.FULL and has_full_figure:
+                placement = BriefingFigurePlacement.INSET
+                warnings.append("extra_full_figure_downgraded")
+            elif placement == BriefingFigurePlacement.FULL:
+                has_full_figure = True
+            block["placement"] = placement.value
             block["image_url"] = block.get("image_url") or source.image_url
             block["thumbnail_url"] = block.get("thumbnail_url") or source.thumbnail_url
             strip_caption = next(

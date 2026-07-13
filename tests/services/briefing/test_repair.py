@@ -214,6 +214,28 @@ def test_full_placement_is_preserved() -> None:
     assert [figure["placement"] for figure in figures] == ["full"]
 
 
+def test_only_first_full_figure_is_preserved() -> None:
+    sources = [_source(1), _source(2)]
+    blocks = [
+        _passage("[First](newsly://briefing/content/1) covers agents."),
+        {"type": "figure", "source_key": "content:1", "placement": "full"},
+        _passage("[Second](newsly://briefing/content/2) covers infrastructure."),
+        {"type": "figure", "source_key": "content:2", "placement": "full"},
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+    )
+
+    figures = [block for block in result.blocks if block["type"] == "figure"]
+    assert [figure["placement"] for figure in figures] == ["full", "inset"]
+    assert result.warnings.count("extra_full_figure_downgraded") == 1
+
+
 def test_invalid_placement_is_canonicalized_to_inset() -> None:
     sources = [_source(1)]
     blocks = [
