@@ -68,6 +68,8 @@ enum AppChrome {
 
 /// Floating replacement for the system tab bar in the briefing experience.
 struct CompactTabBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     struct Item: Identifiable {
         let tab: RootTab
         let label: String
@@ -95,7 +97,10 @@ struct CompactTabBar: View {
         .padding(.top, 8)
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity)
-        .animation(.easeOut(duration: 0.2), value: selection)
+        .animation(
+            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle),
+            value: selection
+        )
     }
 
     @available(iOS 26.0, *)
@@ -165,7 +170,7 @@ struct CompactTabBar: View {
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurfaceSecondary)
             .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
-        .buttonStyle(CompactTabButtonStyle())
+        .buttonStyle(CompactTabButtonStyle(reduceMotion: reduceMotion))
         .accessibilityLabel(item.label)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier(item.accessibilityIdentifier)
@@ -173,10 +178,15 @@ struct CompactTabBar: View {
 }
 
 private struct CompactTabButtonStyle: ButtonStyle {
+    let reduceMotion: Bool
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(
+                AppMotion.respectingReduceMotion(reduceMotion, AppMotion.press),
+                value: configuration.isPressed
+            )
     }
 }
 
