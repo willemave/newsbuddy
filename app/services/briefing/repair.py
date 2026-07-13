@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.services.briefing.figure_placement import canonical_figure_placement
 from app.services.briefing.layout_policy import (
     BriefingBlockRepair,
     BriefingBlockRepairAction,
@@ -84,8 +85,7 @@ def repair_layout(
             source = source_by_key.get(source_key)
             if source is None:
                 raise BriefingLayoutRepairError("Layout assessment allowed an unusable figure")
-            # Product decision (2026-07): full-width figures overwhelm the page; inset only.
-            block["placement"] = "inset"
+            block["placement"] = canonical_figure_placement(block.get("placement")).value
             block["image_url"] = block.get("image_url") or source.image_url
             block["thumbnail_url"] = block.get("thumbnail_url") or source.thumbnail_url
             strip_caption = next(

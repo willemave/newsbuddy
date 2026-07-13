@@ -33,8 +33,11 @@ Mark 2 or 3 useful deep-dive fragments with
 window.
 
 Figures carry the page. Add one `figure` block for every article whose payload includes an
-`image_url` or `thumbnail_url`, placed directly after the passage that develops that article,
-always with `inset` placement. Write a specific caption that adds context beyond the title.
+`image_url` or `thumbnail_url`, placed directly after the passage that develops that article.
+Prefer `inset` placement so the image sits inline with the article prose. Use `full` only when an
+image materially establishes the story and deserves a deliberate large treatment, never merely
+because an image is available, and use at most one `full` figure in this window. Write a specific
+caption that adds context beyond the title.
 Add a `pullquote` wherever an article has a genuinely sharp line: as many as the material
 earns, but never two adjacent blocks.
 

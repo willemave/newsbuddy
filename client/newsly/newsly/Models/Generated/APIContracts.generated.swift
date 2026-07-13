@@ -649,6 +649,11 @@ enum APIBriefingBlockType: String, Codable, CaseIterable {
     case pullquote = "pullquote"
 }
 
+enum APIBriefingFigurePlacement: String, Codable, CaseIterable {
+    case inset = "inset"
+    case full = "full"
+}
+
 enum APIBriefingRunKind: String, Codable, CaseIterable {
     case text = "text"
     case source_link = "source_link"

@@ -1,4 +1,4 @@
-from app.models.contracts import BriefingBlockType, BriefingRunKind
+from app.models.contracts import BriefingBlockType, BriefingFigurePlacement, BriefingRunKind
 from app.services.briefing.normalize import (
     close_unpaired_insights,
     markdown_to_narration,
@@ -77,6 +77,36 @@ def test_normalize_layout_accepts_legacy_news_scheme_source_links() -> None:
     runs = layout.blocks[0]["paragraphs"][0]["runs"]
     assert any(run["kind"] == BriefingRunKind.SOURCE_LINK.value for run in runs)
     assert any(run["text"] == "Story" and run["source_key"] == "news:8" for run in runs)
+
+
+def test_normalize_layout_preserves_full_figure_placement() -> None:
+    layout = normalize_layout(
+        [
+            {
+                "type": "figure",
+                "source_key": "content:7",
+                "placement": "full",
+            }
+        ],
+        source_keys={"content:7"},
+    )
+
+    assert layout.blocks[0]["placement"] == BriefingFigurePlacement.FULL.value
+
+
+def test_normalize_layout_defaults_invalid_figure_placement_to_inset() -> None:
+    layout = normalize_layout(
+        [
+            {
+                "type": "figure",
+                "source_key": "content:7",
+                "placement": "wide",
+            }
+        ],
+        source_keys={"content:7"},
+    )
+
+    assert layout.blocks[0]["placement"] == BriefingFigurePlacement.INSET.value
 
 
 def test_close_unpaired_insights_and_source_key_extraction_are_stable() -> None:

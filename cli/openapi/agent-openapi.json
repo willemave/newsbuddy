@@ -912,9 +912,8 @@
             "type": "array"
           },
           "placement": {
-            "nullable": true,
-            "title": "Placement",
-            "type": "string"
+            "$ref": "#/components/schemas/BriefingFigurePlacement",
+            "nullable": true
           },
           "source_key": {
             "nullable": true,
@@ -1119,6 +1118,15 @@
         ],
         "title": "BriefingDiscussionDto",
         "type": "object"
+      },
+      "BriefingFigurePlacement": {
+        "description": "Editorial size hint for a Briefing figure.",
+        "enum": [
+          "inset",
+          "full"
+        ],
+        "title": "BriefingFigurePlacement",
+        "type": "string"
       },
       "BriefingFirstRunPhase": {
         "description": "Visible state of the temporary Start Here briefing.",

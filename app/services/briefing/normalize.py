@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.models.contracts import BriefingBlockType, BriefingRunKind
+from app.services.briefing.figure_placement import canonical_figure_placement
 from app.services.briefing.source_keys import build_source_key
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(((?:newsly|news)://briefing/(content|news)/(\d+))\)")
@@ -321,6 +322,4 @@ def _normalized_weight(value: Any) -> str:
 
 
 def _normalized_placement(value: Any) -> str:
-    # Product decision (2026-07): full-width figures overwhelm the page; inset only.
-    del value
-    return "inset"
+    return canonical_figure_placement(value).value

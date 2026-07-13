@@ -195,11 +195,30 @@ def test_short_real_pullquote_is_not_dropped() -> None:
     assert "low_signal_pullquote_dropped" not in result.warnings
 
 
-def test_full_placement_coerced_to_inset() -> None:
+def test_full_placement_is_preserved() -> None:
     sources = [_source(1)]
     blocks = [
         _passage("[First](newsly://briefing/content/1) covers agents."),
         {"type": "figure", "source_key": "content:1", "placement": "full"},
+    ]
+
+    result = repair_layout(
+        blocks,
+        sources=sources,
+        lens_key="articles",
+        window_index=0,
+        figure_budget=12,
+    )
+
+    figures = [block for block in result.blocks if block["type"] == "figure"]
+    assert [figure["placement"] for figure in figures] == ["full"]
+
+
+def test_invalid_placement_is_canonicalized_to_inset() -> None:
+    sources = [_source(1)]
+    blocks = [
+        _passage("[First](newsly://briefing/content/1) covers agents."),
+        {"type": "figure", "source_key": "content:1", "placement": "wide"},
     ]
 
     result = repair_layout(

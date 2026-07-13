@@ -5778,7 +5778,7 @@ struct APIBriefingBlock: Codable {
     let imageUrl: String?
     let thumbnailUrl: String?
     let caption: String?
-    let placement: String?
+    let placement: APIBriefingFigurePlacement?
     let text: String?
 
     init(
@@ -5789,7 +5789,7 @@ struct APIBriefingBlock: Codable {
         imageUrl: String? = nil,
         thumbnailUrl: String? = nil,
         caption: String? = nil,
-        placement: String? = nil,
+        placement: APIBriefingFigurePlacement? = nil,
         text: String? = nil
     ) {
         self.type = type
@@ -5824,7 +5824,7 @@ struct APIBriefingBlock: Codable {
         imageUrl = try container.decodeIfPresent(String.self, forKey: .imageUrl)
         thumbnailUrl = try container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
         caption = try container.decodeIfPresent(String.self, forKey: .caption)
-        placement = try container.decodeIfPresent(String.self, forKey: .placement)
+        placement = try container.decodeIfPresent(APIBriefingFigurePlacement.self, forKey: .placement)
         text = try container.decodeIfPresent(String.self, forKey: .text)
     }
 

@@ -314,6 +314,13 @@ class BriefingBlockType(StrEnum):
     PULLQUOTE = "pullquote"
 
 
+class BriefingFigurePlacement(StrEnum):
+    """Editorial size hint for a Briefing figure."""
+
+    INSET = "inset"
+    FULL = "full"
+
+
 class BriefingRunKind(StrEnum):
     """Inline run kinds inside server-normalized briefing prose."""
 

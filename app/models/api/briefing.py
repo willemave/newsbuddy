@@ -6,6 +6,7 @@ from app.models.api.audio_episodes import AudioEpisodeResponse
 from app.models.api.base import UTCDateTime
 from app.models.contracts import (
     BriefingBlockType,
+    BriefingFigurePlacement,
     BriefingFirstRunPhase,
     BriefingFirstRunSourceOutcome,
     BriefingRunKind,
@@ -71,7 +72,7 @@ class BriefingBlockDto(BaseModel):
     image_url: str | None = None
     thumbnail_url: str | None = None
     caption: str | None = None
-    placement: str | None = None
+    placement: BriefingFigurePlacement | None = None
     text: str | None = None
 
 

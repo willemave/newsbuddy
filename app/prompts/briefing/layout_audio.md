@@ -30,8 +30,11 @@ Mark 2 or 3 useful deep-dive fragments with
 `{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
 window.
 Add one `figure` block for every episode whose payload includes an
-`image_url` or `thumbnail_url`, placed directly after the passage that develops that episode,
-always with `inset` placement. Write a specific caption that adds context beyond the title.
+`image_url` or `thumbnail_url`, placed directly after the passage that develops that episode.
+Prefer `inset` placement so the image sits inline with the episode prose. Use `full` only
+when an image materially establishes the episode and deserves a deliberate large treatment, never
+merely because an image is available, and use at most one `full` figure in this window. Write a
+specific caption that adds context beyond the title.
 Add a `pullquote` wherever a host or guest has a genuinely sharp line: as many as the material
 earns, but never two adjacent blocks.
 
