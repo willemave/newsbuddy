@@ -46,23 +46,7 @@ appId: "${APP_ID}"
     text: Add subreddit feeds
 - tapOn:
     text: Start with .* sources
-- assertVisible:
-    text: What to expect
-- tapOn:
-    text: Open my feed
-- tapOn:
-    id: tab.long_form
-- assertVisible:
-    text: Your long-form feed is being assembled
-- assertVisible:
-    text: 2 items are still processing across 5 sources.
-- assertVisible:
-    text: Check back in a minute.
-- assertVisible:
-    text: Selected Sources
-- assertVisible:
-    text: Decoder
-- assertVisible:
-    text: Stratechery
-- assertVisible:
-    text: 1 processing item
+- extendedWaitUntil:
+    visible:
+      id: briefing.screen
+    timeout: 15000

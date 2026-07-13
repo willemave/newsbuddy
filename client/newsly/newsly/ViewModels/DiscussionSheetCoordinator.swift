@@ -206,7 +206,7 @@ final class DiscussionSheetCoordinator {
 
     func inlineSummaryPayload(for content: ContentDetail) -> ContentDiscussion? {
         guard let discussion = cachedPayload(for: content),
-              discussion.summary != nil else {
+              discussion.summary != nil || !discussion.comments.isEmpty else {
             return nil
         }
         return discussion

@@ -560,6 +560,21 @@ struct CommunityDiscussionSummarySection: View {
                     }
                 }
             }
+        } else if !discussion.comments.isEmpty,
+                  let rawURL = discussion.discussionURL ?? discussion.sourceURL,
+                  let url = URL(string: rawURL) {
+            ReaderSectionHeader("Comments") {
+                Spacer(minLength: 10)
+
+                Button {
+                    onOpenComments(url)
+                } label: {
+                    headerIcon("bubble.left.and.bubble.right")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View full discussion")
+                .accessibilityIdentifier("content.discussion.open")
+            }
         }
     }
 
