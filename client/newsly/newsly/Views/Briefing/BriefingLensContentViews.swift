@@ -233,9 +233,8 @@ private struct BriefingSegmentView: View {
         var index = 0
         while index < blocks.count {
             let block = blocks[index]
-            if isFloatableFigure(block, sourcesByKey: sourcesByKey),
-               index + 1 < blocks.count,
-               isFloatHost(blocks[index + 1]) {
+            if index + 1 < blocks.count,
+               canFloatFigure(block, beside: blocks[index + 1], sourcesByKey: sourcesByKey) {
                 items.append(.floatingFigure(
                     index,
                     figure: block,
@@ -245,9 +244,9 @@ private struct BriefingSegmentView: View {
                 index += 2
                 continue
             }
-            if isFloatHost(block),
+            if block.type == .passage,
                index + 1 < blocks.count,
-               isFloatableFigure(blocks[index + 1], sourcesByKey: sourcesByKey) {
+               canFloatFigure(blocks[index + 1], beside: block, sourcesByKey: sourcesByKey) {
                 items.append(.floatingFigure(
                     index,
                     figure: blocks[index + 1],
@@ -294,15 +293,18 @@ private struct BriefingSegmentView: View {
         onOpenDiscussion(source)
     }
 
-    private static func isFloatableFigure(
-        _ block: APIBriefingBlock,
+    private static func canFloatFigure(
+        _ figure: APIBriefingBlock,
+        beside passage: APIBriefingBlock,
         sourcesByKey: [String: APIBriefingSource]
     ) -> Bool {
-        block.type == .figure && block.placement == "inset" && hasImage(block, sourcesByKey: sourcesByKey)
-    }
-
-    private static func isFloatHost(_ block: APIBriefingBlock) -> Bool {
-        block.type == .passage && plainTextLength(of: block) >= 240
+        figure.type == .figure
+            && passage.type == .passage
+            && BriefingFigureLayoutPolicy.usesInlineLayout(
+                placement: figure.placement,
+                hasImage: hasImage(figure, sourcesByKey: sourcesByKey),
+                passageTextLength: plainTextLength(of: passage)
+            )
     }
 
     private static func plainTextLength(of block: APIBriefingBlock) -> Int {
@@ -447,51 +449,12 @@ private struct BriefingFloatingFigurePassage: View {
     let onDig: (String, String) -> Void
     let onSourceKeysSeen: ([String]) -> Void
 
-    private static let imageSize = CGSize(width: 148, height: 148)
-    // Exclusion adds the text gutter around the floated image.
-    private static let exclusionSize = CGSize(width: 162, height: 160)
-
-    @ViewBuilder
     var body: some View {
-        if horizontalSizeClass == .compact {
-            stackedLayout
-        } else {
-            floatingLayout
-        }
-    }
-
-    private var stackedLayout: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            BriefingFigureView(
-                block: figure,
-                source: source,
-                onOpenSource: onOpenSource
-            )
-            .opacity(figureOpacity)
-            .animation(.easeInOut(duration: 0.35), value: figureOpacity)
-            .briefingSourceReadMarker(
-                sourceKeys: figure.briefingDirectSourceKeys,
-                onSourceKeysSeen: onSourceKeysSeen
-            )
-
-            BriefingPassageReadMarker(
-                block: passage,
-                discussionChips: discussionChips,
-                onOpenSource: onOpenSource,
-                onOpenDiscussion: onOpenDiscussion,
-                onDig: onDig,
-                onSourceKeysSeen: onSourceKeysSeen
-            )
-            .opacity(passageOpacity)
-            .animation(.easeInOut(duration: 0.35), value: passageOpacity)
-        }
-    }
-
-    private var floatingLayout: some View {
+        let metrics = BriefingFigureLayoutPolicy.metrics(for: horizontalSizeClass)
         ZStack(alignment: .topTrailing) {
             BriefingPassageReadMarker(
                 block: passage,
-                floatingExclusionSize: Self.exclusionSize,
+                floatingExclusionSize: metrics.exclusionSize,
                 discussionChips: discussionChips,
                 onOpenSource: onOpenSource,
                 onOpenDiscussion: onOpenDiscussion,
@@ -510,7 +473,7 @@ private struct BriefingFloatingFigurePassage: View {
                 CachedAsyncImage(
                     url: ServerImageURL.resolve(figure.imageUrl ?? source?.imageUrl),
                     thumbnailUrl: ServerImageURL.resolve(figure.thumbnailUrl ?? source?.thumbnailUrl),
-                    targetSize: Self.imageSize
+                    targetSize: metrics.imageSize
                 ) { image in
                     image
                         .resizable()
@@ -519,8 +482,12 @@ private struct BriefingFloatingFigurePassage: View {
                     Rectangle()
                         .fill(Color.surfaceSecondary)
                 }
-                .frame(width: Self.imageSize.width, height: Self.imageSize.height)
+                .frame(width: metrics.imageSize.width, height: metrics.imageSize.height)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                }
             }
             .buttonStyle(.plain)
             .opacity(figureOpacity)
@@ -539,6 +506,10 @@ private struct BriefingFigureView: View {
     let source: APIBriefingSource?
     let onOpenSource: (String) -> Void
 
+    private var figureHeight: CGFloat {
+        BriefingFigureLayoutPolicy.canonicalPlacement(block.placement) == .inset ? 176 : 216
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             CachedAsyncImage(
@@ -550,13 +521,13 @@ private struct BriefingFigureView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(maxWidth: .infinity)
-                    .frame(height: block.placement == "inset" ? 176 : 216)
+                    .frame(height: figureHeight)
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } placeholder: {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.surfaceSecondary)
-                    .frame(height: block.placement == "inset" ? 176 : 216)
+                    .frame(height: figureHeight)
                     .overlay {
                         Image(systemName: "photo")
                             .font(.appSymbol(size: 24, weight: .light))
