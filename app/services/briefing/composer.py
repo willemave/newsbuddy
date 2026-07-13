@@ -257,7 +257,7 @@ def compose_window(
                 ensure_source_figures=tier != "news",
             )
             news_contract_issues = (
-                _news_layout_contract_issues(candidate, sources=sources) if tier == "news" else []
+                news_layout_contract_issues(candidate, sources=sources) if tier == "news" else []
             )
             if candidate.accepted and not news_contract_issues:
                 processed = candidate
@@ -466,7 +466,7 @@ def deterministic_layout(
     return ComposerLayout(blocks=blocks)
 
 
-def _news_layout_contract_issues(
+def news_layout_contract_issues(
     processed: ProcessedLayout,
     *,
     sources: list[BriefingSource],

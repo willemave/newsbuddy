@@ -63,6 +63,8 @@ def main() -> None:
                     )
             if result.final_assessment:
                 print(f"  final disposition: {result.final_assessment.disposition.value}")
+            if result.contract_issues:
+                print("  contract issues: " + ", ".join(result.contract_issues))
             print(f"  final layout valid: {result.layout_valid}")
             if result.expectation_met is not None:
                 print(f"  expectation met: {result.expectation_met}")

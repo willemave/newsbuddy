@@ -12,7 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.core.model_defaults import OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
 from app.core.settings import Settings, get_settings
 from app.models.contracts import ContentType
-from app.services.briefing.composer import compose_window, process_generated_layout
+from app.services.briefing.composer import (
+    compose_window,
+    news_layout_contract_issues,
+    process_generated_layout,
+)
 from app.services.briefing.layout_policy import (
     BriefingLayoutAssessment,
     BriefingLayoutDisposition,
@@ -64,6 +68,8 @@ class BriefingEvalCase(BaseModel):
     fixture_blocks: list[dict[str, Any]] = Field(min_length=1)
     expected_disposition: BriefingLayoutDisposition
     expected_low_signal_values: list[str] = Field(default_factory=list)
+    expected_contract_issues: list[str] = Field(default_factory=list)
+    expected_warnings: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -112,6 +118,7 @@ class BriefingEvalCaseResult(BaseModel):
     layout_valid: bool
     raw_assessment: BriefingLayoutAssessment | None = None
     final_assessment: BriefingLayoutAssessment | None = None
+    contract_issues: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     usage: dict[str, int | None] | None = None
     raw_blocks: list[dict[str, Any]] = Field(default_factory=list)
@@ -212,10 +219,15 @@ def run_briefing_eval_case(
             figure_budget=figure_budget,
             ensure_source_figures=case.tier != "news",
         )
+        contract_issues = (
+            news_layout_contract_issues(processed, sources=sources) if case.tier == "news" else []
+        )
         expected_low_signal_values = set(case.expected_low_signal_values)
         expectation_met = (
             processed.raw_assessment.disposition == case.expected_disposition
             and expected_low_signal_values.issubset(set(processed.raw_assessment.low_signal_values))
+            and contract_issues == case.expected_contract_issues
+            and set(case.expected_warnings).issubset(set(processed.warnings))
         )
         return BriefingEvalCaseResult(
             suite=suite_name,
@@ -225,9 +237,10 @@ def run_briefing_eval_case(
             production_segment_id=case.production_segment_id,
             expectation_met=expectation_met,
             raw_layout_valid=processed.raw_assessment.layout_valid,
-            layout_valid=processed.accepted,
+            layout_valid=processed.accepted and not contract_issues,
             raw_assessment=processed.raw_assessment,
             final_assessment=processed.final_assessment,
+            contract_issues=contract_issues,
             warnings=processed.warnings,
             raw_blocks=processed.raw_blocks,
             final_blocks=(processed.normalized.blocks if processed.normalized is not None else []),

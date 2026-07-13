@@ -98,3 +98,77 @@ cases:
         source_key: normal
         caption: normal
         placement: inset
+
+  - id: prod_segment_1089_duplicate_news_coverage_repair
+    description: >
+      Replays the unlinked lead passage and pullquote that produced the repeated
+      M.G. Siegler story in production Briefing segment 1089 on 2026-07-10.
+      Generic coverage repair appended linked summaries for both sources, so the
+      news-tier contract must reject the resulting multi-block layout.
+    production_segment_id: 1089
+    lens_key: news-ai-in-practice
+    lens_title: AI in Practice
+    tier: news
+    window_index: 1
+    expected_disposition: repair
+    expected_contract_issues:
+      - news_requires_one_passage
+    expected_warnings:
+      - coverage_repair:2
+    sources:
+      - source_key: news:19257
+        kind: news
+        id: 19257
+        tier: news
+        lens_key: news-ai-in-practice
+        title: Write code like a human will maintain it
+        summary: >
+          In a personal essay, a developer describes how using LLMs to write code
+          led to unintentional duplication of logic, with the same access check
+          copied into multiple files. The author warns that every shortcut becomes
+          a training signal for the LLM, causing it to replicate bad patterns. The
+          takeaway: write code as if a human will maintain it, because LLMs are
+          sponges that repeat what they see.
+        key_points:
+          - >
+            A developer notices that using LLMs to write code leads to copying the
+            same access check conditional across multiple files instead of
+            extracting a shared helper.
+        url: https://unstack.io/write-code-like-a-human-will-maintain-it
+        published_at: 2026-07-10T00:00:00Z
+        content_type: news
+      - source_key: news:19264
+        kind: news
+        id: 19264
+        tier: news
+        lens_key: news-ai-in-practice
+        title: "Spyglass: New ChatGPT 'Super App' is a confusing UI mess"
+        summary: >
+          M.G. Siegler criticizes OpenAI's new ChatGPT 'Super App' for merging
+          Codex with ChatGPT, resulting in a messy UI with poor branding and buried
+          chat features. The author finds the experience jarring and confusing
+          compared to previous versions and alternatives like Claude.
+        key_points:
+          - >
+            The new ChatGPT Mac app merges Codex and ChatGPT into a 'Super App'
+            with confusing UI choices.
+        url: https://spyglass.org/chatgpt-gets-to-work
+        published_at: 2026-07-10T00:00:00Z
+        content_type: news
+    fixture_blocks:
+      - type: passage
+        weight: brief
+        markdown: >
+          A developer warns that using LLMs to write code leads to
+          {{insight:dup}}unintentional duplication of logic, with the same access
+          check copied into multiple files{{/insight}}. The lesson: write code as
+          if a human will maintain it, because LLMs are sponges that repeat what
+          they see. Meanwhile, M.G. Siegler criticizes OpenAI's new ChatGPT "Super
+          App" which {{insight:ui}}merges Codex with ChatGPT into a confusing UI
+          mess{{/insight}}. The app replaces the straightforward chat paradigm
+          with a "ChatGPT Work" mode, burying chat in the sidebar.
+      - type: pullquote
+        source_key: news:19264
+        text: >
+          The experience is jarring and confusing compared to previous versions
+          and alternatives like Claude.
