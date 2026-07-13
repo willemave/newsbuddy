@@ -66,8 +66,7 @@ enum AppChrome {
     }
 }
 
-/// Floating replacement for the system tab bar in the briefing experience:
-/// horizontal icon-beside-label items keep the bar vertically compact.
+/// Floating replacement for the system tab bar in the briefing experience.
 struct CompactTabBar: View {
     struct Item: Identifiable {
         let tab: RootTab
@@ -81,50 +80,103 @@ struct CompactTabBar: View {
     let items: [Item]
     let selection: RootTab
     let onSelect: (RootTab) -> Void
+    @Namespace private var glassNamespace
 
     var body: some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                liquidGlassBar
+            } else {
+                fallbackBar
+            }
+        }
+        .frame(maxWidth: 292)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        .frame(maxWidth: .infinity)
+        .animation(.easeOut(duration: 0.2), value: selection)
+    }
+
+    @available(iOS 26.0, *)
+    private var liquidGlassBar: some View {
+        GlassEffectContainer(spacing: 4) {
+            tabItems
+                .padding(5)
+                .glassEffect(.regular, in: .capsule)
+        }
+    }
+
+    private var fallbackBar: some View {
+        tabItems
+            .padding(5)
+            .background(Capsule().fill(.ultraThinMaterial))
+            .overlay {
+                Capsule().stroke(Color.outlineVariant.opacity(0.4), lineWidth: 0.5)
+            }
+            .appShadow(.floating)
+    }
+
+    private var tabItems: some View {
         HStack(spacing: 4) {
             ForEach(items) { item in
                 itemButton(item)
             }
         }
-        .padding(5)
-        .background(Capsule().fill(.ultraThinMaterial))
-        .overlay {
-            Capsule().stroke(Color.outlineVariant.opacity(0.5), lineWidth: 1)
-        }
-        .frame(maxWidth: 320)
-        .padding(.horizontal, Spacing.appHorizontalMargin)
-        .padding(.top, 6)
-        .padding(.bottom, 4)
-        .frame(maxWidth: .infinity)
     }
 
+    @ViewBuilder
     private func itemButton(_ item: Item) -> some View {
         let isSelected = item.tab == selection
-        return Button {
+
+        if #available(iOS 26.0, *), isSelected {
+            baseButton(item, isSelected: true)
+                .glassEffect(
+                    .regular.tint(Color.onSurface).interactive(),
+                    in: .rect(cornerRadius: 22)
+                )
+                .glassEffectID("compact-tab-selection", in: glassNamespace)
+        } else {
+            baseButton(item, isSelected: isSelected)
+                .background {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(Color.onSurface)
+                    }
+                }
+        }
+    }
+
+    private func baseButton(_ item: Item, isSelected: Bool) -> some View {
+        Button {
             onSelect(item.tab)
         } label: {
-            HStack(spacing: 6) {
+            VStack(spacing: 3) {
                 Image(systemName: item.icon)
-                    .font(.appSymbol(size: 13, weight: .semibold))
+                    .font(.appSymbol(size: 15, weight: .semibold))
+                    .frame(height: 17)
                 Text(item.label)
-                    .font(.appCaption.weight(.semibold))
+                    .font(.appCaption2.weight(.semibold))
+                    .lineLimit(1)
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity)
-            .background {
-                if isSelected {
-                    Capsule().fill(Color.surfaceSecondary)
-                }
-            }
-            .foregroundStyle(isSelected ? Color.appChromeAccent : Color.onSurfaceSecondary)
-            .contentShape(Capsule())
+            .frame(minHeight: 52)
+            .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurfaceSecondary)
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CompactTabButtonStyle())
         .accessibilityLabel(item.label)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier(item.accessibilityIdentifier)
+    }
+}
+
+private struct CompactTabButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

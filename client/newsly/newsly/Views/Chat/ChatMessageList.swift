@@ -89,7 +89,6 @@ struct ChatMessageList: View {
                 .animation(messageAnimation, value: isSending)
             }
             .contentMargins(.bottom, 12, for: .scrollContent)
-            .topScreenEdgeFade()
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 let distanceFromBottom =
                     geometry.contentSize.height
