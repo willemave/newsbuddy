@@ -30,9 +30,6 @@ Mark 2 or 3 useful deep-dive fragments with
 `{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
 window.
 
-Add a `pullquote` only where a source has a genuinely sharp line, and never place two
-pullquotes next to each other.
-
 ## Window
 
 Lens: $lens_title

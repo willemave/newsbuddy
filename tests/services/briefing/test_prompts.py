@@ -44,6 +44,7 @@ def test_news_tier_prompt_forbids_figures() -> None:
 
     assert "Return exactly one `passage` block" in system_prompt
     assert "Do not include `figure` or `pullquote` blocks" in system_prompt
+    assert "Add a `pullquote`" not in system_prompt
     assert "Write exactly one compact paragraph of at most three sentences" in system_prompt
     assert "link every provided source exactly once" in normalized_prompt
 
