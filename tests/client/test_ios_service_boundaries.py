@@ -253,7 +253,7 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "static func makeLearningDeckReaderViewModel(" in app_chrome_source
     assert "static func makeLearningDeckFocusRecorder()" in app_chrome_source
     assert "static func makeTweetSuggestionsViewModel()" in app_chrome_source
-    assert ".authenticationRequired" not in badge_stats_source
+    assert "[Notification.Name.authDidLogOut, .authenticationRequired]" in badge_stats_source
 
     assert "`AuthError.swift`" in services_docs
     assert "`TokenRefreshService.swift`" in services_docs

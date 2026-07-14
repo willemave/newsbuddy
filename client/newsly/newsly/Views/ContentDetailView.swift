@@ -714,7 +714,7 @@ struct ContentDetailView: View {
             return
         case .scrollInlineSummary:
             pendingScrollTarget = nil
-            withAnimation(.easeInOut(duration: 0.28)) {
+            withAnimation(AppMotion.subtle) {
                 scrollProxy.scrollTo(ContentDetailScrollTarget.comments, anchor: .top)
             }
         case .presentSheet:

@@ -60,6 +60,7 @@ struct KnowledgeView: View {
             await viewModel.loadMoreContent()
         }
         .refreshable { await viewModel.loadKnowledgeLibrary() }
+        .topScreenEdgeFade()
         .bottomScreenEdgeFade()
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())

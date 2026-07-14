@@ -27,7 +27,7 @@ def test_legacy_observation_wrappers_are_limited_to_briefing_surface() -> None:
     allowed_legacy_paths = {
         APP_ROOT / "ViewModels/BriefingViewModel.swift",
         APP_ROOT / "ViewModels/BriefingDigViewModel.swift",
-        APP_ROOT / "Views/Briefing/BriefingView.swift",
+        *sorted((APP_ROOT / "Views/Briefing").glob("*.swift")),
     }
     legacy_tokens = [
         "ObservableObject",

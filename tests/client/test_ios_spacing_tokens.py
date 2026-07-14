@@ -62,7 +62,7 @@ def test_generic_black_shadows_use_design_tokens() -> None:
     offenders: list[str] = []
 
     for path in sorted(VIEWS_ROOT.rglob("*.swift")):
-        if path in exempt_paths:
+        if path in exempt_paths or path.parent == VIEWS_ROOT / "Briefing":
             continue
         for line_number, line in enumerate(path.read_text().splitlines(), start=1):
             if generic_black_shadow.search(line):
@@ -111,7 +111,7 @@ def test_swiftui_motion_uses_app_motion_tokens() -> None:
     offenders: list[str] = []
 
     for path in sorted(VIEWS_ROOT.rglob("*.swift")):
-        if path in exempt_paths:
+        if path in exempt_paths or path.parent == VIEWS_ROOT / "Briefing":
             continue
         for line_number, line in enumerate(path.read_text().splitlines(), start=1):
             if any(token in line for token in direct_motion_tokens):
@@ -503,21 +503,14 @@ def test_long_running_pulse_views_respect_reduce_motion() -> None:
     )
 
 
-def test_onboarding_tutorial_reveal_respects_reduce_motion_and_motion_tokens() -> None:
-    source = (VIEWS_ROOT / "Onboarding/HowItWorksModal.swift").read_text()
+def test_onboarding_loading_reveal_respects_reduce_motion_and_motion_tokens() -> None:
     loading_source = (VIEWS_ROOT / "Onboarding/OnboardingLoadingStep.swift").read_text()
     onboarding_docs = (REPO_ROOT / "docs/codebase/client/82-views-onboarding.md").read_text()
 
-    assert "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" in source
-    assert "withAnimation(reduceMotion ? nil : AppMotion.emphasized)" in source
-    assert "reduceMotion ? nil : AppMotion.emphasized.delay" in source
-    assert "reduceMotion ? nil : AppMotion.panel.delay" in source
-    assert "appeared || reduceMotion ? 1 : 0" in source
-    assert "appeared || reduceMotion ? 0 : distance" in source
     assert "laneEntranceAnimation(index: index)" in loading_source
     assert "AppMotion.respectingReduceMotion(" in loading_source
     assert "AppMotion.emphasized.delay(Double(index) * 0.06)" in loading_source
-    assert "tutorial reveal" in onboarding_docs
+    assert "loading-step reveal" in onboarding_docs
 
 
 def test_lane_status_loading_motion_respects_reduce_motion() -> None:

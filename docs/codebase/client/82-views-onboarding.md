@@ -9,7 +9,7 @@ New-user onboarding flow UI including per-step onboarding screens, mic interacti
 - `OnboardingFlowView` owns the Observation-backed onboarding state with `@State` and routes each onboarding step to a dedicated view.
 - Guides first-run users through profile capture, audio onboarding, suggestion selection, aggregator selection, Reddit setup, and tutorial transitions before the main tab UI appears.
 - Uses custom mic interaction views to make the onboarding path more tactile than standard form sheets.
-- Simple onboarding state transitions use shared `AppMotion` tokens; longer staggered reveals, the tutorial reveal, and breathing pulses remain local presentation effects with reduce-motion handling.
+- Simple onboarding state transitions use shared `AppMotion` tokens; the longer loading-step reveal and breathing pulses remain local presentation effects with reduce-motion handling.
 
 ## Inventory scope
 - Direct file inventory for `client/newsly/newsly/Views/Onboarding`.
@@ -17,7 +17,6 @@ New-user onboarding flow UI including per-step onboarding screens, mic interacti
 ## Modules and files
 | File | Key symbols | Notes |
 |---|---|---|
-| `client/newsly/newsly/Views/Onboarding/HowItWorksModal.swift` | `struct HowItWorksModal` | Types: `struct HowItWorksModal` |
 | `client/newsly/newsly/Views/Onboarding/OnboardingAggregatorsStep.swift` | `struct OnboardingAggregatorsStep` | Aggregator source selection step. |
 | `client/newsly/newsly/Views/Onboarding/OnboardingAudioStep.swift` | `struct OnboardingAudioStep` | Audio capture step. |
 | `client/newsly/newsly/Views/Onboarding/OnboardingChoiceStep.swift` | `struct OnboardingChoiceStep` | Voice/text onboarding choice step. |

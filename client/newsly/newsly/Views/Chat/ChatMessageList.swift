@@ -136,6 +136,7 @@ struct ChatMessageList: View {
                 jumpToLatestOverlay(proxy: proxy)
             }
         }
+        .topScreenEdgeFade()
     }
 
     private static let thinkingBubbleID = "chat.thinkingBubble"
