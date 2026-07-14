@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 from sqlalchemy import exists, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.core.settings import get_settings
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
@@ -213,6 +213,7 @@ def sources_for_keys(
     *,
     user_id: int,
     source_keys: list[str],
+    include_briefing_context: bool = True,
 ) -> dict[str, BriefingSource]:
     parsed = [parse_source_key(key) for key in source_keys]
     content_ids = [key.source_id for key in parsed if key and key.kind == "content"]
@@ -222,18 +223,53 @@ def sources_for_keys(
     if content_ids:
         content_rows = (
             db.query(Content)
+            .options(
+                load_only(
+                    Content.id,
+                    Content.content_type,
+                    Content.url,
+                    Content.source_url,
+                    Content.title,
+                    Content.content_metadata,
+                    Content.created_at,
+                    Content.publication_date,
+                )
+            )
             .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
             .filter(ContentStatusEntry.user_id == user_id)
             .filter(Content.id.in_(content_ids))
             .all()
         )
         for content_row in content_rows:
-            source = _source_from_content(content_row)
+            source = _source_from_content(
+                content_row,
+                include_briefing_context=include_briefing_context,
+            )
             found[source.source_key] = source
 
     if news_ids:
         visible = build_visible_news_item_filter(db, user_id=user_id)
-        news_rows = db.query(NewsItem).filter(NewsItem.id.in_(news_ids)).filter(visible).all()
+        news_rows = (
+            db.query(NewsItem)
+            .options(
+                load_only(
+                    NewsItem.id,
+                    NewsItem.raw_metadata,
+                    NewsItem.summary_text,
+                    NewsItem.summary_key_points,
+                    NewsItem.article_url,
+                    NewsItem.canonical_story_url,
+                    NewsItem.canonical_item_url,
+                    NewsItem.published_at,
+                    NewsItem.processed_at,
+                    NewsItem.ingested_at,
+                    NewsItem.created_at,
+                )
+            )
+            .filter(NewsItem.id.in_(news_ids))
+            .filter(visible)
+            .all()
+        )
         discussions_by_news_id = _briefing_discussions_for_news_ids(db, news_ids=news_ids)
         for news_row in news_rows:
             source = _source_from_news_item(news_row)
@@ -404,7 +440,11 @@ def read_source_keys_for(
     return keys
 
 
-def _source_from_content(content: Content) -> BriefingSource:
+def _source_from_content(
+    content: Content,
+    *,
+    include_briefing_context: bool = True,
+) -> BriefingSource:
     content_id = _require_id(content.id, "content.id")
     content_type = ContentType(str(content.content_type))
     metadata = dict(content.content_metadata or {})
@@ -412,7 +452,9 @@ def _source_from_content(content: Content) -> BriefingSource:
         metadata.get("excerpt")
     )
     key_points = _key_points_from_metadata(metadata)
-    briefing_context = _briefing_context_from_metadata(metadata)
+    briefing_context = (
+        _briefing_context_from_metadata(metadata) if include_briefing_context else None
+    )
     tier = "audio" if content_type == ContentType.PODCAST else "longform"
     lens_key = "podcasts" if content_type == ContentType.PODCAST else "articles"
     image_version = metadata.get("image_version") or metadata.get("thumbnail_version")

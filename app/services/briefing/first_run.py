@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from app.models.api.briefing import BriefingFirstRunProgress, BriefingFirstRunSourceProgress
 from app.models.contracts import BriefingFirstRunPhase, BriefingFirstRunSourceOutcome
@@ -27,6 +27,12 @@ class FirstEditionSourceSpec:
     key: str
     display_name: str
     kind: str
+
+
+@dataclass(frozen=True)
+class FirstRunValidator:
+    run_id: int
+    revision: int
 
 
 def start_first_edition(db: Session, *, user_id: int) -> OnboardingFirstEditionRun:
@@ -109,6 +115,20 @@ def get_first_run_progress(
         completed_sources=completed,
         active_sources=active,
         ready_category_keys=category_keys,
+    )
+
+
+def get_first_run_validator(db: Session, *, user_id: int) -> FirstRunValidator | None:
+    row = (
+        _active_run_query(db, user_id=user_id)
+        .with_entities(OnboardingFirstEditionRun.id, OnboardingFirstEditionRun.revision)
+        .first()
+    )
+    if row is None:
+        return None
+    return FirstRunValidator(
+        run_id=_required_id(row.id),
+        revision=int(row.revision or 0),
     )
 
 
@@ -236,6 +256,14 @@ def _source_specs(db: Session, *, user_id: int) -> list[FirstEditionSourceSpec]:
 
 
 def _active_run(db: Session, *, user_id: int) -> OnboardingFirstEditionRun | None:
+    return _active_run_query(db, user_id=user_id).first()
+
+
+def _active_run_query(
+    db: Session,
+    *,
+    user_id: int,
+) -> Query[OnboardingFirstEditionRun]:
     return (
         db.query(OnboardingFirstEditionRun)
         .filter(
@@ -243,7 +271,6 @@ def _active_run(db: Session, *, user_id: int) -> OnboardingFirstEditionRun | Non
             OnboardingFirstEditionRun.status == "active",
         )
         .order_by(OnboardingFirstEditionRun.id.desc())
-        .first()
     )
 
 

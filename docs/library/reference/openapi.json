@@ -1571,8 +1571,24 @@
       },
       "BriefingLensResponse": {
         "properties": {
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
           "lens": {
             "$ref": "#/components/schemas/BriefingLensSummary"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           },
           "segments": {
             "items": {
@@ -1694,6 +1710,11 @@
             "title": "Marked",
             "type": "integer"
           },
+          "retired": {
+            "minimum": 0.0,
+            "title": "Retired",
+            "type": "integer"
+          },
           "version": {
             "title": "Version",
             "type": "integer"
@@ -1701,6 +1722,7 @@
         },
         "required": [
           "marked",
+          "retired",
           "version"
         ],
         "title": "BriefingReadMarkResponse",
@@ -10669,6 +10691,42 @@
             "schema": {
               "title": "Lens Key",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 12,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],

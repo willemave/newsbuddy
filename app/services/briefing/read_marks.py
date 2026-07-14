@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 @dataclass(frozen=True)
 class BriefingReadMarkResult:
     marked: int
+    retired: int
     version: int
 
 
@@ -60,12 +61,19 @@ def mark_briefing_sources_read(
         version += 1
         state.version = version
     db.flush()
-    return BriefingReadMarkResult(marked=marked, version=version)
+    return BriefingReadMarkResult(marked=marked, retired=retired, version=version)
 
 
 def retire_read_segments(db: Session, *, user_id: int) -> int:
     segments = (
         db.query(BriefingSegment)
+        .options(
+            load_only(
+                BriefingSegment.id,
+                BriefingSegment.source_keys,
+                BriefingSegment.status,
+            )
+        )
         .filter(BriefingSegment.user_id == user_id)
         .filter(BriefingSegment.status.in_(("active", "degraded")))
         .all()

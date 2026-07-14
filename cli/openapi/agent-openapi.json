@@ -1259,8 +1259,18 @@
       },
       "BriefingLensResponse": {
         "properties": {
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
           "lens": {
             "$ref": "#/components/schemas/BriefingLensSummary"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "title": "Next Cursor",
+            "type": "string"
           },
           "segments": {
             "items": {
@@ -1382,6 +1392,11 @@
             "title": "Marked",
             "type": "integer"
           },
+          "retired": {
+            "minimum": 0.0,
+            "title": "Retired",
+            "type": "integer"
+          },
           "version": {
             "title": "Version",
             "type": "integer"
@@ -1389,6 +1404,7 @@
         },
         "required": [
           "marked",
+          "retired",
           "version"
         ],
         "title": "BriefingReadMarkResponse",

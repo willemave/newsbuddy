@@ -24,7 +24,14 @@ from app.models.api.briefing import (
 from app.models.db.users import User
 from app.services.briefing.dig import search_fragment, summarize_fragment
 from app.services.briefing.narration import create_or_reuse_briefing_narration
-from app.services.briefing.presentation import get_briefing_index, get_briefing_lens
+from app.services.briefing.presentation import (
+    BRIEFING_LENS_PAGE_MAX,
+    InvalidBriefingLensCursor,
+    StaleBriefingLensCursor,
+    get_briefing_index,
+    get_briefing_index_validator,
+    get_briefing_lens,
+)
 from app.services.briefing.read_marks import mark_briefing_sources_read
 from app.services.briefing.refresh import enqueue_briefing_refresh_task, ensure_state
 
@@ -62,6 +69,20 @@ def get_index(
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ) -> BriefingIndexResponse | Response:
     user_id = require_user_id(current_user)
+    if if_none_match:
+        validator = get_briefing_index_validator(db, user_id=user_id)
+        validator_etag = _briefing_etag(
+            user_id=user_id,
+            version=validator.version,
+            first_run_id=validator.first_run_id,
+            first_run_revision=validator.first_run_revision,
+        )
+        if if_none_match == validator_etag:
+            return Response(
+                status_code=304,
+                headers=_briefing_cache_headers(etag=validator_etag),
+            )
+
     index = get_briefing_index(db, user_id=user_id)
     etag = _briefing_etag(
         user_id=user_id,
@@ -72,8 +93,6 @@ def get_index(
     headers = _briefing_cache_headers(etag=etag)
     for name, value in headers.items():
         response.headers[name] = value
-    if if_none_match == etag:
-        return Response(status_code=304, headers=headers)
     return index
 
 
@@ -82,8 +101,21 @@ def get_lens(
     lens_key: str,
     db: Annotated[Session, Depends(get_readonly_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int | None, Query(ge=1, le=BRIEFING_LENS_PAGE_MAX)] = None,
+    cursor: Annotated[str | None, Query(min_length=1, max_length=512)] = None,
 ) -> BriefingLensResponse:
-    lens = get_briefing_lens(db, user_id=require_user_id(current_user), lens_key=lens_key)
+    try:
+        lens = get_briefing_lens(
+            db,
+            user_id=require_user_id(current_user),
+            lens_key=lens_key,
+            limit=limit,
+            cursor=cursor,
+        )
+    except InvalidBriefingLensCursor as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except StaleBriefingLensCursor as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if lens is None:
         raise HTTPException(status_code=404, detail="Briefing lens not found")
     return lens
@@ -100,7 +132,11 @@ def mark_read(
         user_id=require_user_id(current_user),
         source_keys=request.source_keys,
     )
-    return BriefingReadMarkResponse(marked=result.marked, version=result.version)
+    return BriefingReadMarkResponse(
+        marked=result.marked,
+        retired=result.retired,
+        version=result.version,
+    )
 
 
 @router.post("/briefing/refresh", response_model=BriefingRefreshResponse)

@@ -2076,17 +2076,23 @@ struct APIBriefingLensResponse: Codable {
     let lens: APIBriefingLensSummary
     let segments: [APIBriefingSegment]
     let sources: [APIBriefingSource]
+    let nextCursor: String?
+    let hasMore: Bool
 
     init(
         version: Int,
         lens: APIBriefingLensSummary,
         segments: [APIBriefingSegment] = [],
-        sources: [APIBriefingSource] = []
+        sources: [APIBriefingSource] = [],
+        nextCursor: String? = nil,
+        hasMore: Bool = false
     ) {
         self.version = version
         self.lens = lens
         self.segments = segments
         self.sources = sources
+        self.nextCursor = nextCursor
+        self.hasMore = hasMore
     }
 
     enum CodingKeys: String, CodingKey {
@@ -2094,6 +2100,8 @@ struct APIBriefingLensResponse: Codable {
         case lens = "lens"
         case segments = "segments"
         case sources = "sources"
+        case nextCursor = "next_cursor"
+        case hasMore = "has_more"
     }
 
     init(from decoder: Decoder) throws {
@@ -2102,6 +2110,8 @@ struct APIBriefingLensResponse: Codable {
         lens = try container.decode(APIBriefingLensSummary.self, forKey: .lens)
         segments = try container.decode([APIBriefingSegment].self, forKey: .segments)
         sources = try container.decode([APIBriefingSource].self, forKey: .sources)
+        nextCursor = try container.decodeIfPresent(String.self, forKey: .nextCursor)
+        hasMore = try container.decode(Bool.self, forKey: .hasMore)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2110,6 +2120,8 @@ struct APIBriefingLensResponse: Codable {
         try container.encode(lens, forKey: .lens)
         try container.encode(segments, forKey: .segments)
         try container.encode(sources, forKey: .sources)
+        try container.encodeIfPresent(nextCursor, forKey: .nextCursor)
+        try container.encode(hasMore, forKey: .hasMore)
     }
 }
 
@@ -2373,30 +2385,36 @@ struct APIBriefingReadMarkRequest: Codable {
 
 struct APIBriefingReadMarkResponse: Codable {
     let marked: Int
+    let retired: Int
     let version: Int
 
     init(
         marked: Int,
+        retired: Int,
         version: Int
     ) {
         self.marked = marked
+        self.retired = retired
         self.version = version
     }
 
     enum CodingKeys: String, CodingKey {
         case marked = "marked"
+        case retired = "retired"
         case version = "version"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         marked = try container.decode(Int.self, forKey: .marked)
+        retired = try container.decode(Int.self, forKey: .retired)
         version = try container.decode(Int.self, forKey: .version)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(marked, forKey: .marked)
+        try container.encode(retired, forKey: .retired)
         try container.encode(version, forKey: .version)
     }
 }

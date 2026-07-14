@@ -531,6 +531,8 @@ type BriefingLensResponse struct {
 	Lens BriefingLensSummary `json:"lens"`
 	Segments []BriefingSegment `json:"segments,omitempty"`
 	Sources []BriefingSource `json:"sources,omitempty"`
+	NextCursor *string `json:"next_cursor,omitempty"`
+	HasMore *bool `json:"has_more,omitempty"`
 }
 
 type BriefingSegment struct {
@@ -575,6 +577,7 @@ type BriefingReadMarkRequest struct {
 
 type BriefingReadMarkResponse struct {
 	Marked int `json:"marked"`
+	Retired int `json:"retired"`
 	Version int `json:"version"`
 }
 

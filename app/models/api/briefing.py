@@ -117,6 +117,8 @@ class BriefingLensResponse(BaseModel):
     lens: BriefingLensSummary
     segments: list[BriefingSegmentDto] = Field(default_factory=list)
     sources: list[BriefingSourceDto] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class BriefingReadMarkRequest(BaseModel):
@@ -125,6 +127,7 @@ class BriefingReadMarkRequest(BaseModel):
 
 class BriefingReadMarkResponse(BaseModel):
     marked: int = Field(..., ge=0)
+    retired: int = Field(..., ge=0)
     version: int
 
 
