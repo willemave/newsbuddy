@@ -1630,8 +1630,22 @@ def main():
         "--user-ids",
         help="Comma-separated user IDs to receive article/podcast inbox entries",
     )
+    parser.add_argument(
+        "--briefing-performance-profile",
+        action="store_true",
+        help=(
+            "Seed about 200 completed sources and build a deterministic full Briefing "
+            "for one explicit --user-ids value"
+        ),
+    )
 
     args = parser.parse_args()
+
+    if args.briefing_performance_profile:
+        args.articles = 60
+        args.podcasts = 18
+        args.news = 122
+        args.no_pending = True
 
     print("Generating test data:")
     print(f"  - {args.articles} articles")
@@ -1643,6 +1657,8 @@ def main():
         user_ids = _parse_user_ids(args.user_ids)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.briefing_performance_profile and (user_ids is None or len(user_ids) != 1):
+        parser.error("--briefing-performance-profile requires exactly one --user-ids value")
     if user_ids is None:
         print("  - Inbox assignment user IDs: all users")
     else:
@@ -1672,6 +1688,25 @@ def main():
         # Insert into database
         print("\nInserting data into database...")
         inserted_ids = insert_test_data(session, data, user_ids=user_ids)
+        if args.briefing_performance_profile:
+            from app.services.briefing.refresh import run_briefing_refresh
+
+            assert user_ids is not None
+            settings = get_settings().model_copy(
+                update={"briefing_enabled_user_ids": list(set(user_ids))}
+            )
+            result = run_briefing_refresh(
+                session,
+                user_id=user_ids[0],
+                mode="full",
+                use_llm=False,
+                settings=settings,
+            )
+            session.commit()
+            print(
+                "  - Briefing performance fixture: "
+                f"{result.appended_segments} segments, version {result.version}"
+            )
 
     print(f"\nSuccessfully inserted {len(inserted_ids)} items")
     if inserted_ids:
