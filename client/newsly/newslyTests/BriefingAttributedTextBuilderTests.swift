@@ -280,3 +280,118 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         XCTAssertEqual(insight, "source_0")
     }
 }
+
+final class BriefingRenderModelTests: XCTestCase {
+    func testLensRenderModelPrecomputesSegmentPresentationAndReadState() throws {
+        let segment = APIBriefingSegment(
+            id: 44,
+            createdAt: Date(timeIntervalSince1970: 1_800_000_100),
+            status: "active",
+            narrationText: "Narration",
+            blocks: [
+                APIBriefingBlock(
+                    type: .passage,
+                    paragraphs: [
+                        APIBriefingParagraph(runs: [
+                            APIBriefingRun(
+                                kind: .source_link,
+                                text: "Story",
+                                sourceKey: "news:2"
+                            )
+                        ])
+                    ]
+                )
+            ],
+            sourceKeys: ["news:2"]
+        )
+        let source = APIBriefingSource(
+            sourceKey: "news:2",
+            kind: "news",
+            id: 2,
+            title: "Story",
+            read: true,
+            discussion: APIBriefingDiscussion(
+                platform: "hackernews",
+                commentCount: 17,
+                summaryStatus: "completed"
+            )
+        )
+        let lens = makeLens(
+            key: "today",
+            segments: [segment],
+            sources: [source]
+        )
+
+        let renderModel = BriefingLensRenderModel(lens: lens)
+        let segmentModel = try XCTUnwrap(renderModel.segments.first)
+
+        XCTAssertEqual(segmentModel.id, 44)
+        XCTAssertTrue(segmentModel.allSourcesRead)
+        XCTAssertEqual(segmentModel.displayBlocks.count, 1)
+        XCTAssertEqual(
+            segmentModel.discussionChipsByBlockIndex[0]?["news:2"]?.commentCount,
+            17
+        )
+        let passageContent = try XCTUnwrap(segmentModel.passageContentByBlockIndex[0])
+        XCTAssertTrue(passageContent.plainText.contains("Story"))
+        XCTAssertEqual(segmentModel.sourcesByKey["news:2"]?.title, "Story")
+    }
+
+    func testReadUpdateRebuildsOnlyAffectedSegmentPresentation() throws {
+        let first = makeSegment(id: 10, sourceKeys: ["content:1"])
+        let second = makeSegment(id: 9, sourceKeys: ["news:2"])
+        let initial = makeLens(key: "today", segments: [first, second])
+        let initialModel = BriefingLensRenderModel(lens: initial)
+        let updated = makeLens(
+            key: "today",
+            segments: [first, second],
+            sources: initial.sources.map { source in
+                guard source.sourceKey == "content:1" else { return source }
+                return APIBriefingSource(
+                    sourceKey: source.sourceKey,
+                    kind: source.kind,
+                    id: source.id,
+                    title: source.title,
+                    summary: source.summary,
+                    keyPoints: source.keyPoints,
+                    url: source.url,
+                    imageUrl: source.imageUrl,
+                    thumbnailUrl: source.thumbnailUrl,
+                    publishedAt: source.publishedAt,
+                    contentType: source.contentType,
+                    read: true,
+                    discussion: source.discussion
+                )
+            }
+        )
+
+        let updatedModel = BriefingLensRenderModel(
+            lens: updated,
+            reusing: initialModel,
+            affectedSourceKeys: ["content:1"]
+        )
+
+        XCTAssertFalse(initialModel.segments[0] === updatedModel.segments[0])
+        XCTAssertTrue(initialModel.segments[1] === updatedModel.segments[1])
+        XCTAssertTrue(updatedModel.segments[0].allSourcesRead)
+        XCTAssertFalse(updatedModel.segments[1].allSourcesRead)
+    }
+
+    func testPageAppendReusesExistingSegmentPresentation() throws {
+        let first = makeSegment(id: 10, sourceKeys: ["content:1"])
+        let second = makeSegment(id: 9, sourceKeys: ["news:2"])
+        let initial = makeLens(key: "today", segments: [first], hasMore: true)
+        let initialModel = BriefingLensRenderModel(lens: initial)
+        let appended = makeLens(key: "today", segments: [first, second])
+
+        let appendedModel = BriefingLensRenderModel(
+            lens: appended,
+            reusing: initialModel,
+            affectedSourceKeys: []
+        )
+
+        XCTAssertTrue(initialModel.segments[0] === appendedModel.segments[0])
+        XCTAssertEqual(appendedModel.segments.map(\.id), [10, 9])
+        XCTAssertFalse(appendedModel.hasMore)
+    }
+}

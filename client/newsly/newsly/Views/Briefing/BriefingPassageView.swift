@@ -2,9 +2,12 @@ import SwiftUI
 import UIKit
 
 struct BriefingPassageView: UIViewRepresentable {
-    let block: APIBriefingBlock
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var accessibilityContrast
+
+    let content: BriefingAttributedTextBuilder.Result
     var floatingExclusionSize: CGSize? = nil
-    var discussionChips: [String: BriefingDiscussionChip] = [:]
     let onOpenSource: (String) -> Void
     var onOpenDiscussion: (String) -> Void = { _ in }
     let onDig: (String, String) -> Void
@@ -50,18 +53,14 @@ struct BriefingPassageView: UIViewRepresentable {
         context.coordinator.onOpenDiscussion = onOpenDiscussion
         context.coordinator.onDig = onDig
         uiView.floatingExclusionSize = floatingExclusionSize
-        let builder = BriefingAttributedTextBuilder()
-        let result = builder.build(
-            paragraphs: block.paragraphs ?? [],
-            weight: block.weight,
-            discussionChips: discussionChips
-        )
-        if !uiView.attributedText.isEqual(to: result.attributedText) {
-            uiView.attributedText = result.attributedText
+        if !uiView.attributedText.isEqual(to: content.attributedText) {
+            uiView.attributedText = content.attributedText
+            context.coordinator.measurement = nil
+            context.coordinator.contentRevision += 1
             uiView.invalidateIntrinsicContentSize()
         }
         uiView.onDigDeeper = { selection in
-            context.coordinator.onDig(selection, result.plainText)
+            context.coordinator.onDig(selection, content.plainText)
         }
     }
 
@@ -71,21 +70,48 @@ struct BriefingPassageView: UIViewRepresentable {
         context: Context
     ) -> CGSize? {
         guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
+        let measurementFingerprint = Coordinator.MeasurementFingerprint(
+            contentRevision: context.coordinator.contentRevision,
+            width: width,
+            floatingExclusionSize: floatingExclusionSize,
+            dynamicTypeSize: dynamicTypeSize,
+            colorScheme: colorScheme,
+            accessibilityContrast: accessibilityContrast
+        )
+        if let measurement = context.coordinator.measurement,
+           measurement.fingerprint == measurementFingerprint {
+            return measurement.size
+        }
         if abs(uiView.bounds.width - width) > .ulpOfOne {
             uiView.bounds.size.width = width
         }
+        let signpostState = BriefingPerformance.signposter.beginInterval("passage-measurement")
         uiView.updateFloatingExclusion(forWidth: width)
         let fittingSize = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
         let minimumHeight = floatingExclusionSize?.height ?? 0
-        return CGSize(width: width, height: max(fittingSize.height, minimumHeight))
+        let size = CGSize(width: width, height: max(fittingSize.height, minimumHeight))
+        BriefingPerformance.signposter.endInterval("passage-measurement", signpostState)
+        context.coordinator.measurement = (measurementFingerprint, size)
+        return size
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
+        struct MeasurementFingerprint: Equatable {
+            let contentRevision: Int
+            let width: CGFloat
+            let floatingExclusionSize: CGSize?
+            let dynamicTypeSize: DynamicTypeSize
+            let colorScheme: ColorScheme
+            let accessibilityContrast: ColorSchemeContrast
+        }
+
         var onOpenSource: (String) -> Void
         var onOpenDiscussion: (String) -> Void
         var onDig: (String, String) -> Void
+        var contentRevision = 0
+        var measurement: (fingerprint: MeasurementFingerprint, size: CGSize)?
         weak var textView: DigDeeperTextView?
 
         init(

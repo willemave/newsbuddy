@@ -28,7 +28,13 @@ struct BriefingMidpointReadTracker {
 
 struct BriefingLensContentIdentity: Hashable {
     let lensKey: String
-    let segmentIDs: [Int]
+    let generation: Int
+}
+
+enum BriefingLensDocumentGenerationPolicy {
+    static func preservesGeneration(previousIDs: [Int], mergedIDs: [Int]) -> Bool {
+        mergedIDs == previousIDs || mergedIDs.starts(with: previousIDs)
+    }
 }
 
 func uniqueBriefingSourceKeys(_ sourceKeys: [String]) -> [String] {

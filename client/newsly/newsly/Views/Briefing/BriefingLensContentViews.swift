@@ -1,11 +1,206 @@
 import SwiftUI
 
-struct BriefingLensPageView: View {
+enum BriefingDisplayBlock: Identifiable {
+    case single(Int, APIBriefingBlock)
+    case floatingFigure(
+        Int,
+        figure: APIBriefingBlock,
+        passage: APIBriefingBlock,
+        passageIndex: Int
+    )
+
+    var id: Int {
+        switch self {
+        case .single(let index, _), .floatingFigure(let index, _, _, _):
+            return index
+        }
+    }
+}
+
+final class BriefingSegmentRenderModel: Identifiable {
+    let segment: APIBriefingSegment
+    let sourcesByKey: [String: APIBriefingSource]
+    let displayBlocks: [BriefingDisplayBlock]
+    let discussionChipsByBlockIndex: [Int: [String: BriefingDiscussionChip]]
+    let passageContentByBlockIndex: [Int: BriefingAttributedTextBuilder.Result]
+    let allSourcesRead: Bool
+
+    var id: Int { segment.id }
+
+    init(segment: APIBriefingSegment, sourcesByKey: [String: APIBriefingSource]) {
+        let segmentSourcesByKey = Dictionary(
+            uniqueKeysWithValues: segment.sourceKeys.compactMap { sourceKey in
+                sourcesByKey[sourceKey].map { (sourceKey, $0) }
+            }
+        )
+        self.segment = segment
+        self.sourcesByKey = segmentSourcesByKey
+        self.displayBlocks = Self.displayBlocks(
+            for: segment.blocks,
+            sourcesByKey: segmentSourcesByKey
+        )
+        let discussionChipsByBlockIndex = Self.discussionChipsByBlockIndex(
+            for: segment.blocks,
+            sourcesByKey: segmentSourcesByKey
+        )
+        self.discussionChipsByBlockIndex = discussionChipsByBlockIndex
+        let textBuilder = BriefingAttributedTextBuilder()
+        self.passageContentByBlockIndex = Dictionary(
+            uniqueKeysWithValues: segment.blocks.enumerated().compactMap { index, block in
+                guard block.type == .passage else { return nil }
+                return (
+                    index,
+                    textBuilder.build(
+                        paragraphs: block.paragraphs ?? [],
+                        weight: block.weight,
+                        discussionChips: discussionChipsByBlockIndex[index] ?? [:]
+                    )
+                )
+            }
+        )
+        self.allSourcesRead = !segment.sourceKeys.isEmpty
+            && segment.sourceKeys.allSatisfy { segmentSourcesByKey[$0]?.read ?? true }
+    }
+
+    /// Inset figures adjacent to a meaty passage float inside it (text wraps);
+    /// everything else renders block-by-block as before.
+    private static func displayBlocks(
+        for blocks: [APIBriefingBlock],
+        sourcesByKey: [String: APIBriefingSource]
+    ) -> [BriefingDisplayBlock] {
+        var items: [BriefingDisplayBlock] = []
+        var index = 0
+        while index < blocks.count {
+            let block = blocks[index]
+            if index + 1 < blocks.count,
+               canFloatFigure(block, beside: blocks[index + 1], sourcesByKey: sourcesByKey) {
+                items.append(.floatingFigure(
+                    index,
+                    figure: block,
+                    passage: blocks[index + 1],
+                    passageIndex: index + 1
+                ))
+                index += 2
+                continue
+            }
+            if block.type == .passage,
+               index + 1 < blocks.count,
+               canFloatFigure(blocks[index + 1], beside: block, sourcesByKey: sourcesByKey) {
+                items.append(.floatingFigure(
+                    index,
+                    figure: blocks[index + 1],
+                    passage: block,
+                    passageIndex: index
+                ))
+                index += 2
+                continue
+            }
+            items.append(.single(index, block))
+            index += 1
+        }
+        return items
+    }
+
+    /// Assigns each discussion-bearing source an inline chip on the first
+    /// passage block that links to it, so the affordance appears exactly once.
+    private static func discussionChipsByBlockIndex(
+        for blocks: [APIBriefingBlock],
+        sourcesByKey: [String: APIBriefingSource]
+    ) -> [Int: [String: BriefingDiscussionChip]] {
+        var assignedSourceKeys = Set<String>()
+        var chipsByBlockIndex: [Int: [String: BriefingDiscussionChip]] = [:]
+        for (index, block) in blocks.enumerated() where block.type == .passage {
+            for sourceKey in block.briefingSourceLinkKeys {
+                guard !assignedSourceKeys.contains(sourceKey),
+                      let source = sourcesByKey[sourceKey],
+                      source.kind == "news",
+                      let discussion = source.discussion
+                else { continue }
+                assignedSourceKeys.insert(sourceKey)
+                chipsByBlockIndex[index, default: [:]][sourceKey] = BriefingDiscussionChip(
+                    sourceKey: sourceKey,
+                    commentCount: discussion.commentCount
+                )
+            }
+        }
+        return chipsByBlockIndex
+    }
+
+    private static func canFloatFigure(
+        _ figure: APIBriefingBlock,
+        beside passage: APIBriefingBlock,
+        sourcesByKey: [String: APIBriefingSource]
+    ) -> Bool {
+        figure.type == .figure
+            && passage.type == .passage
+            && BriefingFigureLayoutPolicy.usesInlineLayout(
+                placement: figure.placement,
+                hasImage: hasImage(figure, sourcesByKey: sourcesByKey),
+                passageTextLength: plainTextLength(of: passage)
+            )
+    }
+
+    private static func plainTextLength(of block: APIBriefingBlock) -> Int {
+        (block.paragraphs ?? []).reduce(0) { total, paragraph in
+            total + paragraph.runs.reduce(0) { $0 + $1.text.count }
+        }
+    }
+
+    private static func hasImage(
+        _ block: APIBriefingBlock,
+        sourcesByKey: [String: APIBriefingSource]
+    ) -> Bool {
+        let source = block.sourceKey.flatMap { sourcesByKey[$0] }
+        let url = block.imageUrl ?? block.thumbnailUrl ?? source?.imageUrl ?? source?.thumbnailUrl
+        return url?.isEmpty == false
+    }
+}
+
+final class BriefingLensRenderModel {
+    let hasMore: Bool
+    let segments: [BriefingSegmentRenderModel]
+    let timelineSeparatorSegmentIDs: Set<Int>
+
+    init(
+        lens: APIBriefingLensResponse,
+        reusing previous: BriefingLensRenderModel? = nil,
+        affectedSourceKeys: Set<String>? = nil
+    ) {
+        let sourcesByKey = Dictionary(
+            lens.sources.map { ($0.sourceKey, $0) },
+            uniquingKeysWith: { current, _ in current }
+        )
+        self.hasMore = lens.hasMore
+        let previousSegmentsByID = Dictionary(
+            uniqueKeysWithValues: (previous?.segments ?? []).map { ($0.id, $0) }
+        )
+        self.segments = lens.segments.map { segment in
+            if let affectedSourceKeys,
+               affectedSourceKeys.isDisjoint(with: segment.sourceKeys),
+               let reusable = previousSegmentsByID[segment.id] {
+                return reusable
+            }
+            return BriefingSegmentRenderModel(segment: segment, sourcesByKey: sourcesByKey)
+        }
+        let separatorIndices = BriefingTimelineSeparatorPolicy.separatorIndices(
+            for: lens.segments.map(\.createdAt)
+        )
+        self.timelineSeparatorSegmentIDs = Set(
+            separatorIndices.map { lens.segments[$0].id }
+        )
+    }
+}
+
+struct BriefingLensPageView: View, Equatable {
     @Environment(\.displayScale) private var displayScale
 
-    let lensSummary: APIBriefingLensSummary
-    let lens: APIBriefingLensResponse?
-    @ObservedObject var viewModel: BriefingViewModel
+    let lensKey: String
+    let renderModel: BriefingLensRenderModel?
+    let isReadTrackingEnabled: Bool
+    let documentGeneration: Int
+    let error: String?
+    let continuationError: String?
+    let isLoadingContinuation: Bool
     var chromeCollapse: BriefingChromeCollapseModel
     let collapsibleChromeHeight: CGFloat
     /// Height of the fully expanded chrome; the scroll content is inset by
@@ -15,9 +210,17 @@ struct BriefingLensPageView: View {
     let onOpenSource: (String) -> Void
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
+    let onRefresh: () async -> Void
+    let onLoad: () -> Void
+    let onRetry: () -> Void
+    let onFirstPassageVisible: () -> Void
+    let onScrolledDown: () -> Void
+    let onMarkSegmentSeen: (APIBriefingSegment) -> Void
+    let onSetHeaderPinned: (Bool) -> Void
 
     @State private var isPinned = false
     @State private var containerHeight: CGFloat = 0
+    @State private var hasReportedFirstPassage = false
 
     // Steps only gate the discrete signals (retiring a tap-opened category
     // strip); the chrome collapse itself follows the clamped offset below.
@@ -25,6 +228,19 @@ struct BriefingLensPageView: View {
     /// Hysteresis so the pinned flag doesn't flicker while the finger rests
     /// exactly on the collapse boundary.
     private static let unpinSlack: CGFloat = 12
+
+    static func == (lhs: BriefingLensPageView, rhs: BriefingLensPageView) -> Bool {
+        lhs.lensKey == rhs.lensKey
+            && lhs.renderModel === rhs.renderModel
+            && lhs.isReadTrackingEnabled == rhs.isReadTrackingEnabled
+            && lhs.documentGeneration == rhs.documentGeneration
+            && lhs.error == rhs.error
+            && lhs.continuationError == rhs.continuationError
+            && lhs.isLoadingContinuation == rhs.isLoadingContinuation
+            && lhs.chromeCollapse === rhs.chromeCollapse
+            && lhs.collapsibleChromeHeight == rhs.collapsibleChromeHeight
+            && lhs.topContentInset == rhs.topContentInset
+    }
 
     /// The scroll facts the chrome cares about. `collapse` is clamped to the
     /// collapsible chrome height, so it only streams updates during the
@@ -42,40 +258,36 @@ struct BriefingLensPageView: View {
         return max(containerHeight - topContentInset + collapsibleChromeHeight, 0)
     }
 
-    private var isReadTrackingEnabled: Bool {
-        viewModel.isActive && viewModel.selectedLensKey == lensSummary.key
-    }
-
     var body: some View {
         Group {
-            if let lens {
-                let timelineSeparatorIndices = BriefingTimelineSeparatorPolicy.separatorIndices(
-                    for: lens.segments.map(\.createdAt)
-                )
+            if let renderModel {
+                let firstSegmentID = renderModel.segments.first?.id
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24) {
-                        let sourcesByKey = Dictionary(
-                            lens.sources.map { ($0.sourceKey, $0) },
-                            uniquingKeysWith: { current, _ in current }
-                        )
-                        ForEach(Array(lens.segments.enumerated()), id: \.element.id) { index, segment in
+                        ForEach(renderModel.segments) { segmentModel in
+                            let segment = segmentModel.segment
                             VStack(alignment: .leading, spacing: 16) {
-                                if timelineSeparatorIndices.contains(index) {
+                                if renderModel.timelineSeparatorSegmentIDs.contains(segment.id) {
                                     BriefingTimelineSeparator(date: segment.createdAt)
                                 }
 
                                 BriefingSegmentView(
-                                    segment: segment,
-                                    sourcesByKey: sourcesByKey,
+                                    model: segmentModel,
                                     onOpenSource: onOpenSource,
                                     onOpenDiscussion: onOpenDiscussion,
                                     onDig: onDig
                                 )
+                                .onAppear {
+                                    guard segment.id == firstSegmentID,
+                                          !hasReportedFirstPassage else { return }
+                                    hasReportedFirstPassage = true
+                                    onFirstPassageVisible()
+                                }
                                 .id(segment.id)
                                 .briefingSegmentReadMarker(
                                     isEnabled: isReadTrackingEnabled,
                                     onMidpointCrossed: {
-                                        viewModel.markSegmentSeen(segment)
+                                        onMarkSegmentSeen(segment)
                                     }
                                 )
                             }
@@ -85,21 +297,27 @@ struct BriefingLensPageView: View {
                         Color.clear
                             .frame(height: 24)
                             .accessibilityHidden(true)
+
+                        if renderModel.hasMore || continuationError != nil {
+                            continuationStatus
+                                .padding(.horizontal, Spacing.appHorizontalMargin)
+                                .padding(.bottom, 8)
+                        }
                     }
                     .padding(.top, 4)
                     .frame(minHeight: minContentHeight, alignment: .top)
                 }
                 .id(
                     BriefingLensContentIdentity(
-                        lensKey: lensSummary.key,
-                        segmentIDs: lens.segments.map(\.id)
+                        lensKey: lensKey,
+                        generation: documentGeneration
                     )
                 )
                 .contentMargins(.top, topContentInset)
                 .contentMargins(.bottom, 40)
                 .bottomScreenEdgeFade(fadeHeight: 32)
                 .refreshable {
-                    await viewModel.pullToRefresh()
+                    await onRefresh()
                 }
                 .onScrollGeometryChange(for: ScrollProbe.self) { geometry in
                     let offset = geometry.contentOffset.y + geometry.contentInsets.top
@@ -115,9 +333,9 @@ struct BriefingLensPageView: View {
                     )
                 } action: { oldProbe, probe in
                     if probe.step > oldProbe.step, probe.step >= 1 {
-                        viewModel.noteScrolledDown(forLens: lensSummary.key)
+                        onScrolledDown()
                     }
-                    chromeCollapse.setCollapse(probe.collapse, forLens: lensSummary.key)
+                    chromeCollapse.setCollapse(probe.collapse, forLens: lensKey)
                     if probe.containerHeight != containerHeight {
                         containerHeight = probe.containerHeight
                     }
@@ -133,22 +351,48 @@ struct BriefingLensPageView: View {
                     }
                     // Unconditional so a recreated pager resyncs stale
                     // view-model pinned state on its initial callback.
-                    viewModel.setHeaderPinned(pinned, forLens: lensSummary.key)
+                    onSetHeaderPinned(pinned)
                 }
-                .accessibilityIdentifier("briefing.lens_page.\(lensSummary.key)")
-            } else if let error = viewModel.lensErrors[lensSummary.key] {
+                .accessibilityIdentifier("briefing.lens_page.\(lensKey)")
+            } else if let error {
                 ErrorView(message: error) {
-                    viewModel.retryLens(key: lensSummary.key)
+                    onRetry()
                 }
                 .padding(.top, topContentInset)
-                .accessibilityIdentifier("briefing.lens_error.\(lensSummary.key)")
+                .accessibilityIdentifier("briefing.lens_error.\(lensKey)")
             } else {
                 LoadingView()
                     .padding(.top, topContentInset)
                     .onAppear {
-                        viewModel.loadLensIfNeeded(key: lensSummary.key)
+                        onLoad()
                     }
             }
+        }
+        .onChange(of: documentGeneration) { _, _ in
+            hasReportedFirstPassage = false
+        }
+    }
+
+    @ViewBuilder
+    private var continuationStatus: some View {
+        if let continuationError {
+            VStack(spacing: 8) {
+                Text(continuationError)
+                    .font(.appCaption)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .multilineTextAlignment(.center)
+                Button("Retry loading more") {
+                    onRetry()
+                }
+                .buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityIdentifier("briefing.lens_continuation_error.\(lensKey)")
+        } else if isLoadingContinuation {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel("Loading more briefing stories")
+                .accessibilityIdentifier("briefing.lens_continuation_loading.\(lensKey)")
         }
     }
 }
@@ -227,60 +471,22 @@ private struct BriefingTimelineSeparator: View {
 }
 
 private struct BriefingSegmentView: View {
-    let segment: APIBriefingSegment
-    let sourcesByKey: [String: APIBriefingSource]
+    let model: BriefingSegmentRenderModel
     let onOpenSource: (String) -> Void
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
-    private let displayBlocks: [DisplayBlock]
-    private let discussionChipsByBlockIndex: [Int: [String: BriefingDiscussionChip]]
-    private let allSourcesRead: Bool
-
-    private enum DisplayBlock: Identifiable {
-        case single(Int, APIBriefingBlock)
-        case floatingFigure(Int, figure: APIBriefingBlock, passage: APIBriefingBlock, passageIndex: Int)
-
-        var id: Int {
-            switch self {
-            case .single(let index, _), .floatingFigure(let index, _, _, _):
-                return index
-            }
-        }
-    }
-
-    init(
-        segment: APIBriefingSegment,
-        sourcesByKey: [String: APIBriefingSource],
-        onOpenSource: @escaping (String) -> Void,
-        onOpenDiscussion: @escaping (APIBriefingSource) -> Void,
-        onDig: @escaping (String, String) -> Void
-    ) {
-        self.segment = segment
-        self.sourcesByKey = sourcesByKey
-        self.onOpenSource = onOpenSource
-        self.onOpenDiscussion = onOpenDiscussion
-        self.onDig = onDig
-        self.displayBlocks = Self.displayBlocks(for: segment.blocks, sourcesByKey: sourcesByKey)
-        let chipsByBlockIndex = Self.discussionChipsByBlockIndex(
-            for: segment.blocks,
-            sourcesByKey: sourcesByKey
-        )
-        self.discussionChipsByBlockIndex = chipsByBlockIndex
-        self.allSourcesRead = Self.allSourcesRead(segment.sourceKeys, sourcesByKey: sourcesByKey)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ForEach(displayBlocks) { item in
+            ForEach(model.displayBlocks) { item in
                 switch item {
                 case .single(let index, let block):
                     blockView(block, blockIndex: index)
                 case .floatingFigure(_, let figure, let passage, let passageIndex):
                     BriefingFloatingFigurePassage(
                         figure: figure,
-                        passage: passage,
+                        passageContent: model.passageContentByBlockIndex[passageIndex],
                         source: source(for: figure),
-                        discussionChips: discussionChipsByBlockIndex[passageIndex] ?? [:],
                         figureOpacity: readOpacity(for: figure.briefingDirectSourceKeys),
                         passageOpacity: readOpacity(for: passage.briefingFallbackReadSourceKeys),
                         onOpenSource: onOpenSource,
@@ -292,132 +498,34 @@ private struct BriefingSegmentView: View {
         }
         .padding(.vertical, 2)
         // Read segments recede without losing legibility.
-        .opacity(allSourcesRead ? 0.72 : 1)
-        .animation(.easeInOut(duration: 0.35), value: allSourcesRead)
+        .opacity(model.allSourcesRead ? 0.72 : 1)
+        .animation(.easeInOut(duration: 0.35), value: model.allSourcesRead)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("briefing.segment.\(segment.id)")
-    }
-
-    private static func allSourcesRead(
-        _ sourceKeys: [String],
-        sourcesByKey: [String: APIBriefingSource]
-    ) -> Bool {
-        !sourceKeys.isEmpty
-            && sourceKeys.allSatisfy { sourcesByKey[$0]?.read ?? true }
-    }
-
-    /// Inset figures adjacent to a meaty passage float inside it (text wraps);
-    /// everything else renders block-by-block as before.
-    private static func displayBlocks(
-        for blocks: [APIBriefingBlock],
-        sourcesByKey: [String: APIBriefingSource]
-    ) -> [DisplayBlock] {
-        var items: [DisplayBlock] = []
-        var index = 0
-        while index < blocks.count {
-            let block = blocks[index]
-            if index + 1 < blocks.count,
-               canFloatFigure(block, beside: blocks[index + 1], sourcesByKey: sourcesByKey) {
-                items.append(.floatingFigure(
-                    index,
-                    figure: block,
-                    passage: blocks[index + 1],
-                    passageIndex: index + 1
-                ))
-                index += 2
-                continue
-            }
-            if block.type == .passage,
-               index + 1 < blocks.count,
-               canFloatFigure(blocks[index + 1], beside: block, sourcesByKey: sourcesByKey) {
-                items.append(.floatingFigure(
-                    index,
-                    figure: blocks[index + 1],
-                    passage: block,
-                    passageIndex: index
-                ))
-                index += 2
-                continue
-            }
-            items.append(.single(index, block))
-            index += 1
-        }
-        return items
-    }
-
-    /// Assigns each discussion-bearing source an inline chip on the first
-    /// passage block that links to it, so the affordance appears exactly once
-    /// per segment, in the sentence that cites the story.
-    private static func discussionChipsByBlockIndex(
-        for blocks: [APIBriefingBlock],
-        sourcesByKey: [String: APIBriefingSource]
-    ) -> [Int: [String: BriefingDiscussionChip]] {
-        var assignedSourceKeys = Set<String>()
-        var chipsByBlockIndex: [Int: [String: BriefingDiscussionChip]] = [:]
-        for (index, block) in blocks.enumerated() where block.type == .passage {
-            for sourceKey in block.briefingSourceLinkKeys {
-                guard !assignedSourceKeys.contains(sourceKey),
-                      let source = sourcesByKey[sourceKey],
-                      source.kind == "news",
-                      let discussion = source.discussion
-                else { continue }
-                assignedSourceKeys.insert(sourceKey)
-                chipsByBlockIndex[index, default: [:]][sourceKey] = BriefingDiscussionChip(
-                    sourceKey: sourceKey,
-                    commentCount: discussion.commentCount
-                )
-            }
-        }
-        return chipsByBlockIndex
+        .accessibilityIdentifier("briefing.segment.\(model.segment.id)")
     }
 
     private func openDiscussion(forSourceKey sourceKey: String) {
-        guard let source = sourcesByKey[sourceKey] else { return }
+        guard let source = model.sourcesByKey[sourceKey] else { return }
         onOpenDiscussion(source)
-    }
-
-    private static func canFloatFigure(
-        _ figure: APIBriefingBlock,
-        beside passage: APIBriefingBlock,
-        sourcesByKey: [String: APIBriefingSource]
-    ) -> Bool {
-        figure.type == .figure
-            && passage.type == .passage
-            && BriefingFigureLayoutPolicy.usesInlineLayout(
-                placement: figure.placement,
-                hasImage: hasImage(figure, sourcesByKey: sourcesByKey),
-                passageTextLength: plainTextLength(of: passage)
-            )
-    }
-
-    private static func plainTextLength(of block: APIBriefingBlock) -> Int {
-        (block.paragraphs ?? []).reduce(0) { total, paragraph in
-            total + paragraph.runs.reduce(0) { $0 + $1.text.count }
-        }
-    }
-
-    private static func hasImage(
-        _ block: APIBriefingBlock,
-        sourcesByKey: [String: APIBriefingSource]
-    ) -> Bool {
-        let source = block.sourceKey.flatMap { sourcesByKey[$0] }
-        let url = block.imageUrl ?? block.thumbnailUrl ?? source?.imageUrl ?? source?.thumbnailUrl
-        return url?.isEmpty == false
     }
 
     @ViewBuilder
     private func blockView(_ block: APIBriefingBlock, blockIndex: Int) -> some View {
         switch block.type {
         case .passage:
-            BriefingPassageView(
-                block: block,
-                discussionChips: discussionChipsByBlockIndex[blockIndex] ?? [:],
-                onOpenSource: onOpenSource,
-                onOpenDiscussion: openDiscussion(forSourceKey:),
-                onDig: onDig
-            )
-            .opacity(readOpacity(for: block.briefingFallbackReadSourceKeys))
-            .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingFallbackReadSourceKeys))
+            if let content = model.passageContentByBlockIndex[blockIndex] {
+                BriefingPassageView(
+                    content: content,
+                    onOpenSource: onOpenSource,
+                    onOpenDiscussion: openDiscussion(forSourceKey:),
+                    onDig: onDig
+                )
+                .opacity(readOpacity(for: block.briefingFallbackReadSourceKeys))
+                .animation(
+                    .easeInOut(duration: 0.35),
+                    value: readOpacity(for: block.briefingFallbackReadSourceKeys)
+                )
+            }
         case .figure:
             BriefingFigureView(
                 block: block,
@@ -438,12 +546,12 @@ private struct BriefingSegmentView: View {
     }
 
     private func readOpacity(for sourceKeys: [String]) -> Double {
-        guard !allSourcesRead, !sourceKeys.isEmpty else { return 1 }
-        return sourceKeys.allSatisfy { sourcesByKey[$0]?.read ?? true } ? 0.72 : 1
+        guard !model.allSourcesRead, !sourceKeys.isEmpty else { return 1 }
+        return sourceKeys.allSatisfy { model.sourcesByKey[$0]?.read ?? true } ? 0.72 : 1
     }
 
     private func source(for block: APIBriefingBlock) -> APIBriefingSource? {
-        block.sourceKey.flatMap { sourcesByKey[$0] }
+        block.sourceKey.flatMap { model.sourcesByKey[$0] }
     }
 }
 
@@ -494,9 +602,8 @@ private struct BriefingFloatingFigurePassage: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     let figure: APIBriefingBlock
-    let passage: APIBriefingBlock
+    let passageContent: BriefingAttributedTextBuilder.Result?
     let source: APIBriefingSource?
-    var discussionChips: [String: BriefingDiscussionChip] = [:]
     let figureOpacity: Double
     let passageOpacity: Double
     let onOpenSource: (String) -> Void
@@ -506,17 +613,18 @@ private struct BriefingFloatingFigurePassage: View {
     var body: some View {
         let metrics = BriefingFigureLayoutPolicy.metrics(for: horizontalSizeClass)
         ZStack(alignment: .topTrailing) {
-            BriefingPassageView(
-                block: passage,
-                floatingExclusionSize: metrics.exclusionSize,
-                discussionChips: discussionChips,
-                onOpenSource: onOpenSource,
-                onOpenDiscussion: onOpenDiscussion,
-                onDig: onDig
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .opacity(passageOpacity)
-            .animation(.easeInOut(duration: 0.35), value: passageOpacity)
+            if let passageContent {
+                BriefingPassageView(
+                    content: passageContent,
+                    floatingExclusionSize: metrics.exclusionSize,
+                    onOpenSource: onOpenSource,
+                    onOpenDiscussion: onOpenDiscussion,
+                    onDig: onDig
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .opacity(passageOpacity)
+                .animation(.easeInOut(duration: 0.35), value: passageOpacity)
+            }
 
             Button {
                 if let sourceKey = figure.sourceKey ?? source?.sourceKey {

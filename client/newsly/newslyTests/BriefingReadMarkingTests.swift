@@ -43,19 +43,52 @@ final class BriefingReadMarkingTests: XCTestCase {
     }
 
     func testLensContentIdentityChangesOnlyWithLensOrOrderedSegments() {
-        let identity = BriefingLensContentIdentity(lensKey: "podcasts", segmentIDs: [1, 2, 3])
+        let identity = BriefingLensContentIdentity(lensKey: "podcasts", generation: 2)
 
         XCTAssertEqual(
             identity,
-            BriefingLensContentIdentity(lensKey: "podcasts", segmentIDs: [1, 2, 3])
+            BriefingLensContentIdentity(lensKey: "podcasts", generation: 2)
         )
         XCTAssertNotEqual(
             identity,
-            BriefingLensContentIdentity(lensKey: "podcasts", segmentIDs: [2, 3])
+            BriefingLensContentIdentity(lensKey: "podcasts", generation: 3)
         )
         XCTAssertNotEqual(
             identity,
-            BriefingLensContentIdentity(lensKey: "articles", segmentIDs: [1, 2, 3])
+            BriefingLensContentIdentity(lensKey: "articles", generation: 2)
+        )
+    }
+
+    func testDocumentGenerationPolicyPreservesOnlyEqualOrAppendedIDs() {
+        XCTAssertTrue(
+            BriefingLensDocumentGenerationPolicy.preservesGeneration(
+                previousIDs: [3, 2],
+                mergedIDs: [3, 2]
+            )
+        )
+        XCTAssertTrue(
+            BriefingLensDocumentGenerationPolicy.preservesGeneration(
+                previousIDs: [3, 2],
+                mergedIDs: [3, 2, 1]
+            )
+        )
+        XCTAssertFalse(
+            BriefingLensDocumentGenerationPolicy.preservesGeneration(
+                previousIDs: [3, 2],
+                mergedIDs: [4, 3, 2]
+            )
+        )
+        XCTAssertFalse(
+            BriefingLensDocumentGenerationPolicy.preservesGeneration(
+                previousIDs: [3, 2],
+                mergedIDs: [3]
+            )
+        )
+        XCTAssertFalse(
+            BriefingLensDocumentGenerationPolicy.preservesGeneration(
+                previousIDs: [3, 2],
+                mergedIDs: [2, 3]
+            )
         )
     }
 

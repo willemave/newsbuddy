@@ -1,11 +1,10 @@
 import Foundation
-import OSLog
 import SwiftUI
 
 private let briefingReadFlushDebounceNanoseconds: UInt64 = 300_000_000
 private let briefingReadFlushRetryNanoseconds: UInt64 = 2_000_000_000
 private let briefingFirstRunCompletionRetryNanoseconds: UInt64 = 2_000_000_000
-private let briefingRefreshLogger = Logger(subsystem: "com.newsly", category: "BriefingRefresh")
+private let briefingRefreshLogger = BriefingPerformance.logger
 
 private enum BriefingDestination: Equatable {
     case startHere
@@ -25,7 +24,7 @@ extension AudioEpisodeService: BriefingAudioEpisodeServicing {}
 
 @MainActor
 final class BriefingViewModel: ObservableObject {
-    private enum TaskKey: Hashable {
+    enum TaskKey: Hashable {
         case lens(String)
         case readFlush
         case snapshotSave
@@ -41,6 +40,19 @@ final class BriefingViewModel: ObservableObject {
         var waiters: [UUID: CheckedContinuation<AudioEpisode, Error>]
     }
 
+    struct ReadVersionCompatibility {
+        let oldestCompatibleVersion: Int
+        let currentVersion: Int
+    }
+
+    enum PagingError: LocalizedError {
+        case missingCursor
+
+        var errorDescription: String? {
+            "The Briefing page was incomplete but did not include a continuation cursor."
+        }
+    }
+
     enum LoadState: Equatable {
         case idle
         case loading
@@ -53,10 +65,9 @@ final class BriefingViewModel: ObservableObject {
 
     @Published private(set) var index: APIBriefingIndexResponse?
     @Published private(set) var orderedLenses: [APIBriefingLensSummary] = []
-    @Published private(set) var lenses: [String: APIBriefingLensResponse] = [:]
+    @Published var lensStates: [String: BriefingLensState] = [:]
     @Published private(set) var state: LoadState = .idle
     @Published private(set) var refreshPhase: RefreshPhase = .idle
-    @Published private(set) var lensErrors: [String: String] = [:]
     @Published private var destination: BriefingDestination?
     @Published private(set) var narrationEpisodes: [String: AudioEpisode] = [:]
     @Published private(set) var isActive = false
@@ -68,14 +79,17 @@ final class BriefingViewModel: ObservableObject {
     /// reading); collapses as soon as the reader scrolls down.
     @Published private(set) var isCategoryStripExpanded = false
 
-    private let service: BriefingServicing
+    let service: BriefingServicing
     private let audioEpisodeService: any BriefingAudioEpisodeServicing
     private let snapshotStore: BriefingSnapshotStoring?
     private let indexSynchronizer: BriefingIndexSynchronizer
     private let firstRunCoordinator: BriefingFirstRunCoordinator
-    private let tasks = TaskBag<TaskKey>()
+    let tasks = TaskBag<TaskKey>()
     private var pendingReadKeys: Set<String> = []
-    private var staleLensKeys: Set<String> = []
+    var optimisticallyReadSourceKeys: Set<String> = []
+    private var sourceByKey: [String: APIBriefingSource] = [:]
+    private var lensKeysBySourceKey: [String: Set<String>] = [:]
+    var readVersionCompatibility: ReadVersionCompatibility?
     private var headerPinnedLensKeys: Set<String> = []
     private var narrationPreparations: [String: NarrationPreparation] = [:]
     /// The news category to return to when the reader re-enters the news tier.
@@ -122,6 +136,13 @@ final class BriefingViewModel: ObservableObject {
     var selectedLens: APIBriefingLensResponse? {
         guard let selectedLensKey else { return nil }
         return lenses[selectedLensKey]
+    }
+
+    func noteFirstPassageVisible(for lensKey: String) {
+        BriefingPerformance.signposter.emitEvent("first-passage-visible")
+        briefingRefreshLogger.info(
+            "First Lens passage visible | key=\(lensKey, privacy: .public)"
+        )
     }
 
     var isRefreshing: Bool {
@@ -225,6 +246,7 @@ final class BriefingViewModel: ObservableObject {
             dismissFirstRun()
         }
         destination = .lens(key)
+        cancelLensLoads(except: key)
         noteSelectionChanged()
         loadWorkingSet()
     }
@@ -294,49 +316,6 @@ final class BriefingViewModel: ObservableObject {
         }
     }
 
-    func loadLensIfNeeded(key: String) {
-        guard (lenses[key] == nil || staleLensKeys.contains(key)),
-              !tasks.isRunning(.lens(key)) else {
-            return
-        }
-        lensErrors.removeValue(forKey: key)
-        let expectedVersion = index?.version
-        tasks.runReplacing(.lens(key)) { [weak self] token in
-            guard let self else { return }
-            let startedAt = Date()
-            do {
-                let response = try await service.fetchLens(key: key)
-                guard self.tasks.isCurrent(token), !Task.isCancelled else {
-                    return
-                }
-                guard response.version == expectedVersion,
-                      response.version == self.index?.version else {
-                    if !Task.isCancelled {
-                        await self.refreshIndex()
-                    }
-                    return
-                }
-                self.lenses[key] = response
-                self.staleLensKeys.remove(key)
-                self.lensErrors.removeValue(forKey: key)
-                briefingRefreshLogger.info(
-                    "Lens loaded | key=\(key, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public) version=\(response.version, privacy: .public) foreground=\(key == self.selectedLensKey, privacy: .public)"
-                )
-                self.scheduleSnapshotSave()
-            } catch {
-                guard !isNetworkCancellation(error) else { return }
-                if key == self.selectedLensKey, self.lenses[key] == nil {
-                    self.lensErrors[key] = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    func retryLens(key: String) {
-        lensErrors.removeValue(forKey: key)
-        tasks.cancel(.lens(key))
-        loadLensIfNeeded(key: key)
-    }
 
     func markSegmentSeen(_ segment: APIBriefingSegment) {
         markSourcesSeen(segment.sourceKeys)
@@ -517,12 +496,7 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func source(for sourceKey: String) -> APIBriefingSource? {
-        for lens in lenses.values {
-            if let source = lens.sources.first(where: { $0.sourceKey == sourceKey }) {
-                return source
-            }
-        }
-        return nil
+        sourceByKey[sourceKey]
     }
 
     private func loadIndex(force: Bool) async {
@@ -555,12 +529,16 @@ final class BriefingViewModel: ObservableObject {
             dismissedFirstRunID = nil
         }
         let versionChanged = index.map { $0.version != response.version } ?? false
+        if let compatibility = readVersionCompatibility,
+           response.version != compatibility.currentVersion {
+            readVersionCompatibility = nil
+        }
         if versionChanged {
             markLensesStale(validLensKeys: Set(response.lenses.map(\.key)))
         } else {
             let validKeys = Set(response.lenses.map(\.key))
-            lenses = lenses.filter { validKeys.contains($0.key) }
-            staleLensKeys.formIntersection(validKeys)
+            lensStates = lensStates.filter { validKeys.contains($0.key) }
+            rebuildSourceIndex()
         }
         index = response
         orderedLenses = firstRun == nil
@@ -582,11 +560,29 @@ final class BriefingViewModel: ObservableObject {
     private func loadWorkingSet() {
         let workingSetKeys = workingSetLensKeys()
         let workingSet = Set(workingSetKeys)
-        for key in Set(orderedLenses.map(\.key)).union(lenses.keys)
+        for key in Set(orderedLenses.map(\.key)).union(lensStates.keys)
             where !workingSet.contains(key) {
             tasks.cancel(.lens(key))
+            mutateLensState(key) { $0.loadPhase = .idle }
         }
-        for key in workingSetKeys {
+        guard let selectedKey = workingSetKeys.first else { return }
+        loadLensIfNeeded(key: selectedKey)
+        if let selected = lenses[selectedKey],
+           lensStates[selectedKey]?.isStale != true,
+           !selected.hasMore,
+           selected.version == index?.version {
+            prefetchNeighborsIfSelected(selectedKey)
+        }
+    }
+
+    func prefetchNeighborsIfSelected(_ loadedKey: String) {
+        guard loadedKey == selectedLensKey,
+              let selected = lenses[loadedKey],
+              !selected.hasMore,
+              lensStates[loadedKey]?.isStale != true else {
+            return
+        }
+        for key in workingSetLensKeys().dropFirst() {
             loadLensIfNeeded(key: key)
         }
     }
@@ -609,12 +605,21 @@ final class BriefingViewModel: ObservableObject {
         let selectedKey = selectedLensKey
         for key in orderedLenses.map(\.key) where key != selectedKey {
             tasks.cancel(.lens(key))
+            mutateLensState(key) { $0.loadPhase = .idle }
+        }
+    }
+
+    private func cancelLensLoads(except retainedKey: String) {
+        for key in Set(orderedLenses.map(\.key)).union(lensStates.keys) where key != retainedKey {
+            tasks.cancel(.lens(key))
+            mutateLensState(key) { $0.loadPhase = .idle }
         }
     }
 
     private func cancelLensLoads() {
-        for key in Set(orderedLenses.map(\.key)).union(lenses.keys) {
+        for key in Set(orderedLenses.map(\.key)).union(lensStates.keys) {
             tasks.cancel(.lens(key))
+            mutateLensState(key) { $0.loadPhase = .idle }
         }
     }
 
@@ -628,8 +633,13 @@ final class BriefingViewModel: ObservableObject {
         orderedLenses = firstRun == nil
             ? Self.sortedLenses(snapshot.index.lenses)
             : snapshot.index.lenses
-        lenses = snapshot.lenses
-        staleLensKeys.removeAll()
+        lensStates = snapshot.lenses.mapValues { lens in
+            BriefingLensState(
+                document: lens,
+                renderModel: BriefingLensRenderModel(lens: lens)
+            )
+        }
+        rebuildSourceIndex()
         indexSynchronizer.restore(etag: snapshot.etag)
         state = .loaded
         if firstRun != nil {
@@ -646,7 +656,7 @@ final class BriefingViewModel: ObservableObject {
         return true
     }
 
-    private func scheduleSnapshotSave() {
+    func scheduleSnapshotSave() {
         guard let snapshotStore else { return }
         tasks.runReplacing(.snapshotSave) { [weak self] in
             do {
@@ -656,8 +666,13 @@ final class BriefingViewModel: ObservableObject {
             }
             guard let self, !Task.isCancelled, let index = self.index else { return }
             let workingSet = Set(self.workingSetLensKeys())
-            let snapshotLenses = self.lenses.filter {
-                workingSet.contains($0.key) && !self.staleLensKeys.contains($0.key)
+            let snapshotLenses = self.lensStates.reduce(
+                into: [String: APIBriefingLensResponse]()
+            ) { result, entry in
+                guard workingSet.contains(entry.key),
+                      !entry.value.isStale,
+                      let document = entry.value.document else { return }
+                result[entry.key] = document
             }
             await snapshotStore.save(
                 BriefingSnapshot(
@@ -692,14 +707,20 @@ final class BriefingViewModel: ObservableObject {
         let oldLensKeys = Set(index?.lenses.map(\.key) ?? [])
         let knownLensKeys = validLensKeys
             .union(oldLensKeys)
-            .union(lenses.keys)
-            .union(staleLensKeys)
+            .union(lensStates.keys)
         for key in knownLensKeys {
             tasks.cancel(.lens(key))
         }
-        lenses = lenses.filter { validLensKeys.contains($0.key) }
-        staleLensKeys = validLensKeys
-        lensErrors = lensErrors.filter { validLensKeys.contains($0.key) }
+        var nextStates = lensStates.filter { validLensKeys.contains($0.key) }
+        for key in validLensKeys {
+            var state = nextStates[key] ?? BriefingLensState()
+            state.loadPhase = .idle
+            state.failure = nil
+            state.isStale = true
+            nextStates[key] = state
+        }
+        lensStates = nextStates
+        rebuildSourceIndex()
     }
 
     private func scheduleReadFlush(
@@ -720,8 +741,25 @@ final class BriefingViewModel: ObservableObject {
         pendingReadKeys.removeAll()
         guard !keys.isEmpty else { return }
         do {
+            let acceptedVersion = index?.version
             let response = try await service.markRead(sourceKeys: keys)
             indexSynchronizer.cancelIndexLoad()
+            if let acceptedVersion,
+               response.retired == 0,
+               response.version == acceptedVersion + 1 {
+                readVersionCompatibility = ReadVersionCompatibility(
+                    oldestCompatibleVersion: min(
+                        readVersionCompatibility?.oldestCompatibleVersion ?? acceptedVersion,
+                        acceptedVersion
+                    ),
+                    currentVersion: response.version
+                )
+                fastForwardLoadedBriefing(to: response.version)
+                scheduleSnapshotSave()
+                return
+            }
+
+            readVersionCompatibility = nil
             markCachedLensesStale(containing: keys)
             if var currentIndex = index {
                 currentIndex = APIBriefingIndexResponse(
@@ -738,25 +776,55 @@ final class BriefingViewModel: ObservableObject {
                     : currentIndex.lenses
             }
             scheduleSnapshotSave()
+            await refreshIndex()
         } catch {
             pendingReadKeys.formUnion(keys)
             scheduleReadFlush(delayNanoseconds: briefingReadFlushRetryNanoseconds)
         }
     }
 
+    private func fastForwardLoadedBriefing(to version: Int) {
+        if let currentIndex = index {
+            let updatedIndex = APIBriefingIndexResponse(
+                version: version,
+                mastheadTitle: currentIndex.mastheadTitle,
+                mastheadDeck: currentIndex.mastheadDeck,
+                generatedAt: currentIndex.generatedAt,
+                lenses: currentIndex.lenses,
+                firstRun: currentIndex.firstRun
+            )
+            index = updatedIndex
+            orderedLenses = firstRun == nil
+                ? Self.sortedLenses(updatedIndex.lenses)
+                : updatedIndex.lenses
+        }
+        lensStates = lensStates.mapValues { state in
+            guard let lens = state.document else { return state }
+            var updated = state
+            updated.document = APIBriefingLensResponse(
+                    version: version,
+                    lens: lens.lens,
+                    segments: lens.segments,
+                    sources: lens.sources,
+                    nextCursor: lens.nextCursor,
+                    hasMore: lens.hasMore
+                )
+            return updated
+        }
+    }
+
     private func markCachedLensesStale(containing sourceKeys: [String]) {
         let keySet = Set(sourceKeys)
         guard !keySet.isEmpty else { return }
-        let affectedLensKeys = lenses.compactMap { lensKey, lens -> String? in
-            let lensSourceKeys = lens.segments.flatMap(\.sourceKeys)
-            if !keySet.isDisjoint(with: lensSourceKeys) {
-                return lensKey
-            }
-            return nil
+        let affectedLensKeys = keySet.reduce(into: Set<String>()) { result, sourceKey in
+            result.formUnion(lensKeysBySourceKey[sourceKey] ?? [])
         }
         for lensKey in affectedLensKeys {
             tasks.cancel(.lens(lensKey))
-            staleLensKeys.insert(lensKey)
+            mutateLensState(lensKey) { state in
+                state.loadPhase = .idle
+                state.isStale = true
+            }
         }
     }
 
@@ -764,9 +832,25 @@ final class BriefingViewModel: ObservableObject {
     /// unread counts. Read segments stay visible (greyed by the view); the server
     /// retires them and the next index fetch reconciles.
     private func markSourcesReadLocally(_ keys: [String]) {
+        let signpostState = BriefingPerformance.signposter.beginInterval("optimistic-read-update")
+        defer { BriefingPerformance.signposter.endInterval("optimistic-read-update", signpostState) }
+        let startedAt = Date()
         let keySet = Set(keys)
+        optimisticallyReadSourceKeys.formUnion(keySet)
+        for key in keySet {
+            if let source = sourceByKey[key] {
+                sourceByKey[key] = applyingOptimisticReadOverlay(source)
+            }
+        }
+        let affectedLensKeys = keySet.reduce(into: Set<String>()) { result, sourceKey in
+            result.formUnion(lensKeysBySourceKey[sourceKey] ?? [])
+        }
         var updatedSummaries: [String: APIBriefingLensSummary] = [:]
-        for (lensKey, lens) in lenses {
+        for lensKey in affectedLensKeys {
+            guard var state = lensStates[lensKey], let lens = state.document else { continue }
+            let newlyReadCount = lens.sources.count(where: { source in
+                keySet.contains(source.sourceKey) && !source.read
+            })
             let updatedSources = lens.sources.map { source in
                 guard keySet.contains(source.sourceKey) else { return source }
                 return APIBriefingSource(
@@ -785,23 +869,30 @@ final class BriefingViewModel: ObservableObject {
                     discussion: source.discussion
                 )
             }
-            let readSourceKeys = Set(updatedSources.filter(\.read).map(\.sourceKey))
-            let segmentSourceKeys = Set(lens.segments.flatMap(\.sourceKeys))
             let updatedSummary = APIBriefingLensSummary(
                 key: lens.lens.key,
                 tier: lens.lens.tier,
                 title: lens.lens.title,
                 deck: lens.lens.deck,
                 position: lens.lens.position,
-                segmentCount: lens.segments.count,
-                unreadSourceCount: segmentSourceKeys.subtracting(readSourceKeys).count
+                segmentCount: lens.lens.segmentCount,
+                unreadSourceCount: max(lens.lens.unreadSourceCount - newlyReadCount, 0)
             )
-            lenses[lensKey] = APIBriefingLensResponse(
+            let updatedLens = APIBriefingLensResponse(
                 version: lens.version,
                 lens: updatedSummary,
                 segments: lens.segments,
-                sources: updatedSources
+                sources: updatedSources,
+                nextCursor: lens.nextCursor,
+                hasMore: lens.hasMore
             )
+            state.document = updatedLens
+            state.renderModel = BriefingLensRenderModel(
+                lens: updatedLens,
+                reusing: state.renderModel,
+                affectedSourceKeys: keySet
+            )
+            lensStates[lensKey] = state
             updatedSummaries[lensKey] = updatedSummary
         }
         if var currentIndex = index {
@@ -818,7 +909,45 @@ final class BriefingViewModel: ObservableObject {
                 ? Self.sortedLenses(currentIndex.lenses)
                 : currentIndex.lenses
         }
+        briefingRefreshLogger.info(
+            "Optimistic read state published | source_count=\(keySet.count, privacy: .public) affected_lenses=\(affectedLensKeys.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
+        )
         scheduleSnapshotSave()
+    }
+
+    func reindexSources(
+        for lensKey: String,
+        replacing previousLens: APIBriefingLensResponse?,
+        with lens: APIBriefingLensResponse
+    ) {
+        for sourceKey in previousLens?.sources.map(\.sourceKey) ?? [] {
+            lensKeysBySourceKey[sourceKey]?.remove(lensKey)
+            if lensKeysBySourceKey[sourceKey]?.isEmpty == true {
+                lensKeysBySourceKey.removeValue(forKey: sourceKey)
+                sourceByKey.removeValue(forKey: sourceKey)
+            } else if let replacementLensKey = lensKeysBySourceKey[sourceKey]?.first,
+                      let replacement = lensStates[replacementLensKey]?.document?.sources.first(where: {
+                          $0.sourceKey == sourceKey
+                      }) {
+                sourceByKey[sourceKey] = replacement
+            }
+        }
+        for source in lens.sources {
+            lensKeysBySourceKey[source.sourceKey, default: []].insert(lensKey)
+            sourceByKey[source.sourceKey] = source
+        }
+    }
+
+    private func rebuildSourceIndex() {
+        sourceByKey.removeAll(keepingCapacity: true)
+        lensKeysBySourceKey.removeAll(keepingCapacity: true)
+        for (lensKey, state) in lensStates {
+            guard let lens = state.document else { continue }
+            for source in lens.sources {
+                lensKeysBySourceKey[source.sourceKey, default: []].insert(lensKey)
+                sourceByKey[source.sourceKey] = source
+            }
+        }
     }
 
     private static func sortedLenses(_ lenses: [APIBriefingLensSummary]) -> [APIBriefingLensSummary] {

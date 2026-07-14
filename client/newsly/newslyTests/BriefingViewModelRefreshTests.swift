@@ -11,7 +11,7 @@ final class BriefingViewModelRefreshTests: XCTestCase {
             .value(makeIndex(version: 2, lenses: [makeLensSummary(key: "today")]), etag: "etag-2")
         ]
         service.lensResponses["today"] = makeLens(key: "today", version: 1, segments: [segment])
-        service.readMarkResponse = APIBriefingReadMarkResponse(marked: 1, version: 2)
+        service.readMarkResponse = APIBriefingReadMarkResponse(marked: 1, retired: 0, version: 2)
         let viewModel = BriefingViewModel(service: service)
 
         viewModel.setActive(true)
@@ -20,7 +20,9 @@ final class BriefingViewModelRefreshTests: XCTestCase {
 
         service.lensResponses["today"] = makeLens(key: "today", version: 2, segments: [])
         await viewModel.pullToRefresh()
-        await waitForBriefingCondition { viewModel.selectedLens?.version == 2 }
+        await waitForBriefingCondition(timeoutNanoseconds: 2_500_000_000) {
+            viewModel.selectedLens?.version == 2 && service.indexEtags.count == 2
+        }
 
         XCTAssertEqual(service.markReadCalls, [["content:1"]])
         XCTAssertEqual(service.indexEtags, [nil, "etag-1"])

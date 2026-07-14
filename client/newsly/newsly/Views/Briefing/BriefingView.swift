@@ -103,16 +103,33 @@ struct BriefingView: View {
                 TabView(selection: selectedLensBinding) {
                     ForEach(viewModel.pagerLenses, id: \.key) { lens in
                         BriefingLensPageView(
-                            lensSummary: lens,
-                            lens: viewModel.lenses[lens.key],
-                            viewModel: viewModel,
+                            lensKey: lens.key,
+                            renderModel: viewModel.renderModel(for: lens.key),
+                            isReadTrackingEnabled: viewModel.isActive
+                                && viewModel.selectedLensKey == lens.key,
+                            documentGeneration: viewModel.documentGeneration(for: lens.key),
+                            error: viewModel.lensErrors[lens.key],
+                            continuationError: viewModel.lensContinuationErrors[lens.key],
+                            isLoadingContinuation: viewModel.lensContinuationLoadingKeys.contains(lens.key),
                             chromeCollapse: chromeCollapse,
                             collapsibleChromeHeight: collapsibleChromeHeight,
                             topContentInset: expandedChromeHeight,
                             onOpenSource: openSource,
                             onOpenDiscussion: openDiscussion,
-                            onDig: startDig
+                            onDig: startDig,
+                            onRefresh: { await viewModel.pullToRefresh() },
+                            onLoad: { viewModel.loadLensIfNeeded(key: lens.key) },
+                            onRetry: { viewModel.retryLens(key: lens.key) },
+                            onFirstPassageVisible: {
+                                viewModel.noteFirstPassageVisible(for: lens.key)
+                            },
+                            onScrolledDown: { viewModel.noteScrolledDown(forLens: lens.key) },
+                            onMarkSegmentSeen: viewModel.markSegmentSeen,
+                            onSetHeaderPinned: { pinned in
+                                viewModel.setHeaderPinned(pinned, forLens: lens.key)
+                            }
                         )
+                        .equatable()
                         .tag(lens.key)
                     }
                 }

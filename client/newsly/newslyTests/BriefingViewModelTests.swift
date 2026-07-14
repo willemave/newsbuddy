@@ -99,6 +99,290 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedLens?.lens.key, "today")
     }
 
+    func testSelectedLensCompletesPaginationBeforeNeighborPrefetch() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(
+                    lenses: [
+                        makeLensSummary(key: "today", position: 0, segmentCount: 2),
+                        makeLensSummary(key: "later", position: 1)
+                    ]
+                ),
+                etag: nil
+            )
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(
+                key: "today",
+                segments: [makeSegment(id: 10, sourceKeys: ["content:1"])],
+                nextCursor: "today-page-2",
+                hasMore: true
+            ),
+            makeLens(
+                key: "today",
+                segments: [makeSegment(id: 9, sourceKeys: ["news:2"])]
+            )
+        ]
+        service.lensResponses["later"] = makeLens(key: "later", position: 1)
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { service.fetchLensRequests.count == 3 }
+
+        XCTAssertEqual(service.fetchLensRequests.map(\.key), ["today", "today", "later"])
+        XCTAssertNil(service.fetchLensRequests[0].cursor)
+        XCTAssertEqual(service.fetchLensRequests[1].cursor, "today-page-2")
+        XCTAssertNil(service.fetchLensRequests[2].cursor)
+        XCTAssertEqual(viewModel.lenses["today"]?.segments.map(\.id), [10, 9])
+        XCTAssertEqual(viewModel.documentGeneration(for: "today"), 0)
+    }
+
+    func testContinuationFailureKeepsFirstPageVisibleAndRetriesFromItsCursor() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(lenses: [makeLensSummary(key: "today", segmentCount: 2)]),
+                etag: nil
+            )
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(
+                key: "today",
+                segments: [makeSegment(id: 10, sourceKeys: ["content:1"])],
+                nextCursor: "today-page-2",
+                hasMore: true
+            ),
+            makeLens(
+                key: "today",
+                segments: [makeSegment(id: 9, sourceKeys: ["news:2"])]
+            )
+        ]
+        service.fetchLensErrors = [nil, URLError(.notConnectedToInternet)]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition {
+            viewModel.lensContinuationErrors["today"] != nil
+        }
+
+        XCTAssertEqual(viewModel.selectedLens?.segments.map(\.id), [10])
+        XCTAssertEqual(viewModel.selectedLens?.nextCursor, "today-page-2")
+        XCTAssertFalse(viewModel.lensContinuationLoadingKeys.contains("today"))
+        guard let firstSegmentModel = viewModel.renderModel(for: "today")?.segments.first else {
+            XCTFail("Expected the first page render model")
+            return
+        }
+
+        viewModel.retryLens(key: "today")
+        await waitForBriefingCondition {
+            viewModel.selectedLens?.segments.map(\.id) == [10, 9]
+        }
+
+        XCTAssertEqual(service.fetchLensRequests.map(\.cursor), [nil, "today-page-2", "today-page-2"])
+        XCTAssertNil(viewModel.lensContinuationErrors["today"])
+        XCTAssertFalse(viewModel.selectedLens?.hasMore ?? true)
+        XCTAssertEqual(viewModel.documentGeneration(for: "today"), 0)
+        guard let appendedFirstSegmentModel = viewModel.renderModel(for: "today")?.segments.first else {
+            XCTFail("Expected the appended render model")
+            return
+        }
+        XCTAssertTrue(firstSegmentModel === appendedFirstSegmentModel)
+    }
+
+    func testStaleContinuationRetryRestartsFromFirstPage() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(lenses: [makeLensSummary(key: "today", segmentCount: 2)]),
+                etag: nil
+            )
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(
+                key: "today",
+                version: 1,
+                segments: [makeSegment(id: 10)],
+                nextCursor: "stale-page-2",
+                hasMore: true
+            ),
+            makeLens(
+                key: "today",
+                version: 1,
+                segments: [makeSegment(id: 20)]
+            )
+        ]
+        service.fetchLensErrors = [nil, BriefingLensFetchError.staleCursor, nil]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.lensContinuationErrors["today"] != nil }
+
+        XCTAssertEqual(viewModel.selectedLens?.segments.map(\.id), [10])
+
+        viewModel.retryLens(key: "today")
+        await waitForBriefingCondition { viewModel.selectedLens?.segments.map(\.id) == [20] }
+
+        XCTAssertEqual(service.fetchLensRequests.map(\.cursor), [nil, "stale-page-2", nil])
+        XCTAssertNil(viewModel.lensContinuationErrors["today"])
+        XCTAssertEqual(viewModel.selectedLens?.version, 1)
+    }
+
+    func testStaleReplacementFailureKeepsVisibleLensAndRetriesFromFirstPage() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "v1"),
+            .value(makeIndex(version: 2, lenses: [makeLensSummary(key: "today")]), etag: "v2")
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(key: "today", version: 1, segments: [makeSegment(id: 10)]),
+            makeLens(key: "today", version: 2, segments: [makeSegment(id: 20)])
+        ]
+        service.fetchLensErrors = [nil, URLError(.notConnectedToInternet), nil]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens?.segments.map(\.id) == [10] }
+        await viewModel.refreshIndex()
+        await waitForBriefingCondition { viewModel.lensContinuationErrors["today"] != nil }
+
+        XCTAssertEqual(viewModel.selectedLens?.segments.map(\.id), [10])
+
+        viewModel.retryLens(key: "today")
+        await waitForBriefingCondition { viewModel.selectedLens?.segments.map(\.id) == [20] }
+
+        XCTAssertEqual(service.fetchLensRequests.map(\.cursor), [nil, nil, nil])
+        XCTAssertNil(viewModel.lensContinuationErrors["today"])
+    }
+
+    func testNoRetirementReadFastForwardKeepsInFlightContinuation() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(
+                    version: 1,
+                    lenses: [makeLensSummary(key: "today", segmentCount: 2)]
+                ),
+                etag: nil
+            )
+        ]
+        let firstSegment = makeSegment(id: 10, sourceKeys: ["content:1"])
+        service.lensPageResponses["today"] = [
+            makeLens(
+                key: "today",
+                version: 1,
+                segments: [firstSegment],
+                sources: [
+                    APIBriefingSource(
+                        sourceKey: "content:1",
+                        kind: "content",
+                        id: 1,
+                        title: "First",
+                        read: false
+                    )
+                ],
+                nextCursor: "today-page-2",
+                hasMore: true
+            ),
+            makeLens(
+                key: "today",
+                version: 1,
+                segments: [makeSegment(id: 9, sourceKeys: ["news:2"])],
+                sources: [
+                    APIBriefingSource(
+                        sourceKey: "news:2",
+                        kind: "news",
+                        id: 2,
+                        title: "Second",
+                        read: false
+                    )
+                ]
+            )
+        ]
+        service.fetchLensDelaysNanoseconds = [0, 700_000_000]
+        service.readMarkResponse = APIBriefingReadMarkResponse(
+            marked: 1,
+            retired: 0,
+            version: 2
+        )
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition {
+            viewModel.selectedLens?.segments.map(\.id) == [10]
+                && service.fetchLensRequests.count == 2
+        }
+        viewModel.markSegmentSeen(firstSegment)
+        await waitForBriefingCondition(timeoutNanoseconds: 1_500_000_000) {
+            viewModel.selectedLens?.segments.map(\.id) == [10, 9]
+        }
+
+        XCTAssertEqual(service.fetchLensRequests.count, 2)
+        XCTAssertEqual(viewModel.index?.version, 2)
+        XCTAssertEqual(viewModel.selectedLens?.version, 2)
+        XCTAssertEqual(viewModel.source(for: "content:1")?.read, true)
+        XCTAssertEqual(viewModel.documentGeneration(for: "today"), 0)
+    }
+
+    func testRetirementReadResponseUsesNormalStaleVisibleRevalidation() async {
+        let service = MockBriefingService()
+        let summary = makeLensSummary(key: "today")
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [summary]), etag: "etag-1"),
+            .value(makeIndex(version: 2, lenses: [summary]), etag: "etag-2")
+        ]
+        let firstSegment = makeSegment(id: 10, sourceKeys: ["content:1"])
+        service.lensPageResponses["today"] = [
+            makeLens(key: "today", version: 1, segments: [firstSegment]),
+            makeLens(
+                key: "today",
+                version: 2,
+                segments: [makeSegment(id: 11, sourceKeys: ["news:2"])]
+            )
+        ]
+        service.readMarkResponse = APIBriefingReadMarkResponse(
+            marked: 1,
+            retired: 1,
+            version: 2
+        )
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens?.segments.map(\.id) == [10] }
+        viewModel.markSegmentSeen(firstSegment)
+        await waitForBriefingCondition(timeoutNanoseconds: 1_500_000_000) {
+            viewModel.selectedLens?.segments.map(\.id) == [11]
+        }
+
+        XCTAssertEqual(service.indexEtags, [nil, "etag-1"])
+        XCTAssertEqual(service.fetchLensRequests.map(\.cursor), [nil, nil])
+        XCTAssertEqual(viewModel.index?.version, 2)
+        XCTAssertEqual(viewModel.documentGeneration(for: "today"), 1)
+    }
+
+    func testAuthoritativeStructuralReplacementAdvancesDocumentGeneration() async {
+        let service = MockBriefingService()
+        let summary = makeLensSummary(key: "today")
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [summary]), etag: "v1"),
+            .value(makeIndex(version: 2, lenses: [summary]), etag: "v2")
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(key: "today", version: 1, segments: [makeSegment(id: 10)]),
+            makeLens(key: "today", version: 2, segments: [makeSegment(id: 11)])
+        ]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens?.segments.map(\.id) == [10] }
+        await viewModel.refreshIndex()
+        await waitForBriefingCondition {
+            viewModel.selectedLens?.segments.map(\.id) == [11]
+        }
+
+        XCTAssertEqual(viewModel.documentGeneration(for: "today"), 1)
+    }
+
     func testOrderedLensesAreStoredAndRefreshAfterLocalReadMarks() async {
         let service = MockBriefingService()
         let segment = makeSegment(sourceKeys: ["content:1", "news:2"])
@@ -190,7 +474,7 @@ final class BriefingViewModelTests: XCTestCase {
             .value(makeIndex(lenses: [makeLensSummary(key: "today")]), etag: nil)
         ]
         service.lensResponses["today"] = makeLens(key: "today", segments: [segment])
-        service.readMarkResponse = APIBriefingReadMarkResponse(marked: 2, version: 8)
+        service.readMarkResponse = APIBriefingReadMarkResponse(marked: 2, retired: 0, version: 2)
         let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
@@ -207,7 +491,7 @@ final class BriefingViewModelTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 450_000_000)
 
         XCTAssertEqual(service.markReadCalls, [["content:1", "news:2"]])
-        XCTAssertEqual(viewModel.index?.version, 8)
+        XCTAssertEqual(viewModel.index?.version, 2)
     }
 
     func testMarkSegmentSeenOptimisticallyMarksReadAndDecrementsOwningLensCount() async {
@@ -410,6 +694,7 @@ final class BriefingViewModelTests: XCTestCase {
 
         await viewModel.loadIndexIfNeeded()
         await waitForBriefingCondition { viewModel.selectedLens?.segments.first?.id == 10 }
+        let initialRenderModel = viewModel.renderModel(for: "today")
 
         service.lensResponses["today"] = makeLens(
             key: "today",
@@ -431,6 +716,7 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(service.indexEtags, [nil, "etag-stale"])
         XCTAssertEqual(service.fetchLensKeys, ["today"])
         XCTAssertEqual(viewModel.selectedLens?.segments.first?.id, 10)
+        XCTAssertTrue(initialRenderModel === viewModel.renderModel(for: "today"))
     }
 
     func testReadMarkFlushKeepsAffectedLensVisibleAndOmitsItFromSnapshot() async {
@@ -463,13 +749,14 @@ final class BriefingViewModelTests: XCTestCase {
                 )
             ]
         )
-        service.readMarkResponse = APIBriefingReadMarkResponse(marked: 1, version: 8)
+        service.readMarkResponse = APIBriefingReadMarkResponse(marked: 1, retired: 0, version: 8)
         let viewModel = BriefingViewModel(service: service, snapshotStore: snapshotStore)
 
         await viewModel.loadIndexIfNeeded()
         await waitForBriefingCondition {
             viewModel.lenses["today"] != nil && viewModel.lenses["later"] != nil
         }
+        service.indexError = NSError(domain: "BriefingViewModelTests", code: 1)
         viewModel.markSegmentSeen(todaySegment)
 
         await waitForBriefingCondition { service.markReadCalls.count == 1 }
@@ -483,6 +770,7 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(saved?.userID, 42)
         XCTAssertEqual(viewModel.lenses["today"]?.version, 1)
         XCTAssertEqual(service.fetchLensKeys.filter { $0 == "today" }.count, 1)
+        XCTAssertEqual(service.indexEtags.count, 2)
         XCTAssertNil(saved?.lenses["today"])
         XCTAssertNotNil(saved?.lenses["later"])
     }
@@ -515,6 +803,88 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(service.fetchLensKeys, ["alpha"])
     }
 
+    func testRestoredPartialSnapshotResumesCursorOnlyAfterNotModified() async {
+        let service = MockBriefingService()
+        let snapshotStore = MockBriefingSnapshotStore(userID: 1)
+        let firstPage = makeLens(
+            key: "today",
+            version: 4,
+            segments: [makeSegment(id: 10, sourceKeys: ["content:1"])],
+            nextCursor: "today-page-2",
+            hasMore: true
+        )
+        snapshotStore.snapshotToLoad = BriefingSnapshot(
+            userID: 1,
+            index: makeIndex(version: 4, lenses: [makeLensSummary(key: "today")]),
+            etag: "etag-4",
+            selectedLensKey: "today",
+            lenses: ["today": firstPage],
+            savedAt: Date()
+        )
+        service.indexResults = [.notModified]
+        service.lensPageResponses["today"] = [
+            makeLens(
+                key: "today",
+                version: 4,
+                segments: [makeSegment(id: 9, sourceKeys: ["news:2"])]
+            )
+        ]
+        let viewModel = BriefingViewModel(service: service, snapshotStore: snapshotStore)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition {
+            viewModel.selectedLens?.segments.map(\.id) == [10, 9]
+        }
+
+        XCTAssertEqual(service.indexEtags, ["etag-4"])
+        XCTAssertEqual(service.fetchLensRequests.map(\.cursor), ["today-page-2"])
+        XCTAssertEqual(viewModel.documentGeneration(for: "today"), 0)
+    }
+
+    func testNewerIndexRestartsPartialSnapshotAtFirstPage() async {
+        let service = MockBriefingService()
+        let snapshotStore = MockBriefingSnapshotStore(userID: 1)
+        snapshotStore.snapshotToLoad = BriefingSnapshot(
+            userID: 1,
+            index: makeIndex(version: 4, lenses: [makeLensSummary(key: "today")]),
+            etag: "etag-4",
+            selectedLensKey: "today",
+            lenses: [
+                "today": makeLens(
+                    key: "today",
+                    version: 4,
+                    segments: [makeSegment(id: 10)],
+                    nextCursor: "stale-page-2",
+                    hasMore: true
+                )
+            ],
+            savedAt: Date()
+        )
+        service.indexResults = [
+            .value(
+                makeIndex(version: 5, lenses: [makeLensSummary(key: "today")]),
+                etag: "etag-5"
+            )
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(
+                key: "today",
+                version: 5,
+                segments: [makeSegment(id: 20, sourceKeys: ["news:2"])]
+            )
+        ]
+        let viewModel = BriefingViewModel(service: service, snapshotStore: snapshotStore)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition {
+            viewModel.selectedLens?.segments.map(\.id) == [20]
+        }
+
+        XCTAssertEqual(service.fetchLensRequests.map(\.cursor), [nil])
+        XCTAssertEqual(viewModel.selectedLens?.version, 5)
+        XCTAssertEqual(viewModel.documentGeneration(for: "today"), 1)
+    }
+
     func testOfflineRevalidationKeepsRestoredSnapshotReady() async {
         let service = MockBriefingService()
         let snapshotStore = MockBriefingSnapshotStore(userID: 1)
@@ -533,194 +903,6 @@ final class BriefingViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertNotNil(viewModel.selectedLens)
-    }
-
-    func testInitialEntryLoadsOnlySelectedAndPagerNeighbor() async {
-        let service = MockBriefingService()
-        let summaries = (0..<5).map {
-            makeLensSummary(key: "news-\($0)", position: $0)
-        }
-        service.indexResults = [.value(makeIndex(lenses: summaries), etag: "etag-1")]
-        for summary in summaries {
-            service.lensResponses[summary.key] = makeLens(key: summary.key, position: summary.position)
-        }
-        let viewModel = BriefingViewModel(service: service)
-
-        await viewModel.loadIndexIfNeeded()
-        await waitForBriefingCondition { service.fetchLensKeys.count == 2 }
-        try? await Task.sleep(nanoseconds: 50_000_000)
-
-        XCTAssertEqual(service.fetchLensKeys, ["news-0", "news-1"])
-    }
-
-    func testFixedLensDoesNotPrefetchUnrelatedTiers() async {
-        let service = MockBriefingService()
-        let fixed = makeLensSummary(key: "articles", position: 0, tier: .longform)
-        let news = makeLensSummary(key: "news", position: 1)
-        service.indexResults = [.value(makeIndex(lenses: [fixed, news]), etag: nil)]
-        service.lensResponses["articles"] = makeLens(key: "articles", position: 0, tier: .longform)
-        service.lensResponses["news"] = makeLens(key: "news", position: 1)
-        let viewModel = BriefingViewModel(service: service)
-
-        await viewModel.loadIndexIfNeeded()
-        await waitForBriefingCondition { viewModel.selectedLens != nil }
-        try? await Task.sleep(nanoseconds: 50_000_000)
-
-        XCTAssertEqual(service.fetchLensKeys, ["articles"])
-    }
-
-    func testLatestIndexResponseIsAuthoritativeEvenWhenVersionIsLower() async {
-        let service = MockBriefingService()
-        let segment = makeSegment(sourceKeys: ["content:1"])
-        service.indexResults = [
-            .value(makeIndex(version: 4, lenses: [makeLensSummary(key: "today")]), etag: "etag-4"),
-            .value(makeIndex(version: 3, lenses: []), etag: "etag-3")
-        ]
-        service.lensResponses["today"] = makeLens(key: "today", version: 4, segments: [segment])
-        service.readMarkResponse = APIBriefingReadMarkResponse(marked: 1, version: 8)
-        let viewModel = BriefingViewModel(service: service)
-
-        await viewModel.loadIndexIfNeeded()
-        await waitForBriefingCondition { viewModel.selectedLens != nil }
-        viewModel.markSegmentSeen(segment)
-        try? await Task.sleep(nanoseconds: 450_000_000)
-        await viewModel.refreshIndex()
-
-        XCTAssertEqual(viewModel.index?.version, 3)
-        XCTAssertEqual(viewModel.index?.lenses.isEmpty, true)
-    }
-
-    func testMastheadCompactTracksScrolledStateOfSelectedLens() async {
-        let service = MockBriefingService()
-        service.indexResults = [
-            .value(
-                makeIndex(lenses: [makeLensSummary(key: "podcasts"), makeLensSummary(key: "articles")]),
-                etag: nil
-            )
-        ]
-        service.lensResponses["podcasts"] = makeLens(key: "podcasts")
-        service.lensResponses["articles"] = makeLens(key: "articles")
-        let viewModel = BriefingViewModel(service: service)
-
-        await viewModel.loadIndexIfNeeded()
-        await waitForBriefingCondition { viewModel.selectedLens != nil }
-        // Equal positions sort by key, so "articles" is auto-selected first.
-        XCTAssertEqual(viewModel.selectedLensKey, "articles")
-        XCTAssertFalse(viewModel.isMastheadCompact)
-
-        // Scrolling the selected lens collapses the masthead.
-        viewModel.setHeaderPinned(true, forLens: "articles")
-        XCTAssertTrue(viewModel.isMastheadCompact)
-
-        // Swiping to a lens still at its top brings the masthead back.
-        viewModel.selectLens(key: "podcasts")
-        XCTAssertFalse(viewModel.isMastheadCompact)
-
-        // Returning to the scrolled lens collapses it again; scrolling that
-        // lens back to the top restores it.
-        viewModel.selectLens(key: "articles")
-        XCTAssertTrue(viewModel.isMastheadCompact)
-        viewModel.setHeaderPinned(false, forLens: "articles")
-        XCTAssertFalse(viewModel.isMastheadCompact)
-    }
-
-    func testLensesGroupByTierAndPagerScopesToNewsCategories() async {
-        let service = MockBriefingService()
-        service.indexResults = [
-            .value(
-                makeIndex(lenses: [
-                    makeLensSummary(key: "news-tech", title: "Tech", position: 1),
-                    makeLensSummary(key: "news-world", title: "World", position: 2),
-                    makeLensSummary(key: "podcasts", title: "Podcasts", position: 3, tier: .audio),
-                    makeLensSummary(key: "articles", title: "Articles", position: 4, tier: .longform)
-                ]),
-                etag: nil
-            )
-        ]
-        let viewModel = BriefingViewModel(service: service)
-
-        await viewModel.loadIndexIfNeeded()
-        await waitForBriefingCondition { viewModel.selectedLens != nil }
-
-        XCTAssertEqual(viewModel.newsLenses.map(\.key), ["news-tech", "news-world"])
-        XCTAssertEqual(viewModel.fixedLenses.map(\.key), ["podcasts", "articles"])
-        XCTAssertEqual(viewModel.newsUnreadSourceCount, 4)
-        XCTAssertTrue(viewModel.isNewsTierSelected)
-        // In the news tier the pager swipes through categories only.
-        XCTAssertEqual(viewModel.pagerLenses.map(\.key), ["news-tech", "news-world"])
-
-        // A fixed lens pages alone — swiping never crosses tiers.
-        viewModel.selectLens(key: "podcasts")
-        XCTAssertFalse(viewModel.isNewsTierSelected)
-        XCTAssertEqual(viewModel.pagerLenses.map(\.key), ["podcasts"])
-    }
-
-    func testSelectNewsTierPicksFirstCategoryThenRemembersLastRead() async {
-        let service = MockBriefingService()
-        service.indexResults = [
-            .value(
-                makeIndex(lenses: [
-                    makeLensSummary(key: "podcasts", title: "Podcasts", position: 0, tier: .audio),
-                    makeLensSummary(key: "news-tech", title: "Tech", position: 1),
-                    makeLensSummary(key: "news-world", title: "World", position: 2)
-                ]),
-                etag: nil
-            )
-        ]
-        let viewModel = BriefingViewModel(service: service)
-
-        await viewModel.loadIndexIfNeeded()
-        await waitForBriefingCondition { viewModel.selectedLens != nil }
-        XCTAssertEqual(viewModel.selectedLensKey, "podcasts")
-        XCTAssertFalse(viewModel.isCategoryStripExpanded)
-
-        // First News tap lands on the first category and reveals the strip.
-        viewModel.selectNewsTier()
-        XCTAssertEqual(viewModel.selectedLensKey, "news-tech")
-        XCTAssertTrue(viewModel.isCategoryStripExpanded)
-
-        // Leaving news and coming back restores the last-read category.
-        viewModel.selectLens(key: "news-world")
-        viewModel.selectLens(key: "podcasts")
-        XCTAssertFalse(viewModel.isCategoryStripExpanded)
-        viewModel.selectNewsTier()
-        XCTAssertEqual(viewModel.selectedLensKey, "news-world")
-    }
-
-    func testCategoryStripCollapsesOnScrollAndReopensOnNewsTap() async {
-        let service = MockBriefingService()
-        service.indexResults = [
-            .value(
-                makeIndex(lenses: [
-                    makeLensSummary(key: "news-tech", title: "Tech", position: 1),
-                    makeLensSummary(key: "news-world", title: "World", position: 2)
-                ]),
-                etag: nil
-            )
-        ]
-        let viewModel = BriefingViewModel(service: service)
-
-        await viewModel.loadIndexIfNeeded()
-        await waitForBriefingCondition { viewModel.selectedLens != nil }
-        XCTAssertTrue(viewModel.isCategoryStripExpanded)
-
-        // Scrolling into the page collapses the strip with the masthead.
-        viewModel.setHeaderPinned(true, forLens: "news-tech")
-        XCTAssertTrue(viewModel.isMastheadCompact)
-        XCTAssertFalse(viewModel.isCategoryStripExpanded)
-
-        // Tapping News mid-read reopens it without leaving the category…
-        viewModel.selectNewsTier()
-        XCTAssertEqual(viewModel.selectedLensKey, "news-tech")
-        XCTAssertTrue(viewModel.isCategoryStripExpanded)
-
-        // …and the next scroll-down puts it away again.
-        viewModel.noteScrolledDown(forLens: "news-tech")
-        XCTAssertFalse(viewModel.isCategoryStripExpanded)
-
-        // Back at the top the strip returns on its own.
-        viewModel.setHeaderPinned(false, forLens: "news-tech")
-        XCTAssertTrue(viewModel.isCategoryStripExpanded)
     }
 
     func testCitationLinkedMarkdownWrapsBracketNumbers() {

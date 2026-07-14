@@ -4,16 +4,26 @@ import XCTest
 
 @MainActor
 final class MockBriefingService: BriefingServicing {
+    struct LensFetch: Equatable {
+        let key: String
+        let limit: Int?
+        let cursor: String?
+    }
+
     var indexResults: [BriefingIndexFetchResult] = []
     var indexError: Error?
     var indexEtags: [String?] = []
     var fetchIndexDelayNanoseconds: UInt64?
     var lensResponses: [String: APIBriefingLensResponse] = [:]
+    var lensPageResponses: [String: [APIBriefingLensResponse]] = [:]
     var fetchLensDelayNanoseconds: UInt64?
+    var fetchLensDelaysNanoseconds: [UInt64] = []
+    var fetchLensErrors: [Error?] = []
     var fetchLensKeys: [String] = []
+    var fetchLensRequests: [LensFetch] = []
     var markReadCalls: [[String]] = []
     var events: [String] = []
-    var readMarkResponse = APIBriefingReadMarkResponse(marked: 0, version: 1)
+    var readMarkResponse = APIBriefingReadMarkResponse(marked: 0, retired: 0, version: 1)
     var markReadError: Error?
     var refreshError: Error?
     var refreshDelayNanoseconds: UInt64?
@@ -46,12 +56,30 @@ final class MockBriefingService: BriefingServicing {
         return indexResults.removeFirst()
     }
 
-    func fetchLens(key: String) async throws -> APIBriefingLensResponse {
+    func fetchLens(
+        key: String,
+        limit: Int?,
+        cursor: String?
+    ) async throws -> APIBriefingLensResponse {
         fetchLensKeys.append(key)
+        fetchLensRequests.append(LensFetch(key: key, limit: limit, cursor: cursor))
         events.append("fetchLens:\(key)")
-        let response = lensResponses[key] ?? makeLens(key: key)
-        if let fetchLensDelayNanoseconds {
-            try? await Task.sleep(nanoseconds: fetchLensDelayNanoseconds)
+        let delay = fetchLensDelaysNanoseconds.isEmpty
+            ? fetchLensDelayNanoseconds
+            : fetchLensDelaysNanoseconds.removeFirst()
+        if let delay, delay > 0 {
+            try? await Task.sleep(nanoseconds: delay)
+        }
+        let error = fetchLensErrors.isEmpty ? nil : fetchLensErrors.removeFirst()
+        if let error {
+            throw error
+        }
+        let response: APIBriefingLensResponse
+        if var pages = lensPageResponses[key], !pages.isEmpty {
+            response = pages.removeFirst()
+            lensPageResponses[key] = pages
+        } else {
+            response = lensResponses[key] ?? makeLens(key: key)
         }
         return response
     }
@@ -249,7 +277,9 @@ func makeLensSummary(
     key: String,
     title: String = "Today",
     position: Int = 0,
-    tier: APIBriefingTier = .news
+    tier: APIBriefingTier = .news,
+    segmentCount: Int = 1,
+    unreadSourceCount: Int = 2
 ) -> APIBriefingLensSummary {
     APIBriefingLensSummary(
         key: key,
@@ -257,8 +287,8 @@ func makeLensSummary(
         title: title,
         deck: "Latest unread reporting",
         position: position,
-        segmentCount: 1,
-        unreadSourceCount: 2
+        segmentCount: segmentCount,
+        unreadSourceCount: unreadSourceCount
     )
 }
 
@@ -268,7 +298,9 @@ func makeLens(
     position: Int = 0,
     tier: APIBriefingTier = .news,
     segments: [APIBriefingSegment] = [makeSegment()],
-    sources: [APIBriefingSource]? = nil
+    sources: [APIBriefingSource]? = nil,
+    nextCursor: String? = nil,
+    hasMore: Bool = false
 ) -> APIBriefingLensResponse {
     APIBriefingLensResponse(
         version: version,
@@ -292,7 +324,9 @@ func makeLens(
                 summary: "News summary",
                 read: false
             )
-        ]
+        ],
+        nextCursor: nextCursor,
+        hasMore: hasMore
     )
 }
 

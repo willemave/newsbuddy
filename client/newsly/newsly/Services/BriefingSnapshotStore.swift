@@ -38,7 +38,7 @@ private final class BriefingSnapshotStorageLock: @unchecked Sendable {
 }
 
 struct BriefingSnapshot: Codable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     let schemaVersion: Int
     let userID: Int
@@ -112,43 +112,52 @@ actor BriefingSnapshotStore: BriefingSnapshotStoring {
     }
 
     func load() async -> BriefingSnapshot? {
+        let signpostState = BriefingPerformance.signposter.beginInterval("snapshot-read-decode")
+        defer { BriefingPerformance.signposter.endInterval("snapshot-read-decode", signpostState) }
         let startedAt = Date()
-        let stored: (Data, BriefingSnapshot)? = Self.storageLock.accessIfCurrent(storageGeneration) {
-            guard let data = try? Data(contentsOf: self.fileURL),
-                  let snapshot = try? JSONDecoder().decode(BriefingSnapshot.self, from: data),
-                  snapshot.schemaVersion == BriefingSnapshot.currentSchemaVersion,
-                  snapshot.userID == self.userID,
-                  AppClock.now.timeIntervalSince(snapshot.savedAt) < Self.maxSnapshotAge
-            else { return nil }
-            return (data, snapshot)
+        let data: Data? = Self.storageLock.accessIfCurrent(storageGeneration) {
+            try? Data(contentsOf: self.fileURL)
         }
-        guard let (data, snapshot) = stored else {
+        let readFinishedAt = Date()
+        guard let data,
+              let decoded = try? JSONDecoder().decode(BriefingSnapshot.self, from: data),
+              decoded.schemaVersion == BriefingSnapshot.currentSchemaVersion,
+              decoded.userID == self.userID,
+              AppClock.now.timeIntervalSince(decoded.savedAt) < Self.maxSnapshotAge,
+              let snapshot = Self.storageLock.accessIfCurrent(
+                  storageGeneration,
+                  operation: { decoded }
+              )
+        else {
             briefingSnapshotLogger.info(
                 "Snapshot cache miss | user_id=\(self.userID, privacy: .private) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
             )
             return nil
         }
         briefingSnapshotLogger.info(
-            "Snapshot loaded | user_id=\(self.userID, privacy: .private) bytes=\(data.count, privacy: .public) lenses=\(snapshot.lenses.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
+            "Snapshot loaded | user_id=\(self.userID, privacy: .private) bytes=\(data.count, privacy: .public) lenses=\(snapshot.lenses.count, privacy: .public) read_ms=\(Int(readFinishedAt.timeIntervalSince(startedAt) * 1_000), privacy: .public) decode_ms=\(Int(Date().timeIntervalSince(readFinishedAt) * 1_000), privacy: .public)"
         )
         return snapshot
     }
 
     func save(_ snapshot: BriefingSnapshot) async {
+        let signpostState = BriefingPerformance.signposter.beginInterval("snapshot-encode-write")
+        defer { BriefingPerformance.signposter.endInterval("snapshot-encode-write", signpostState) }
         guard snapshot.userID == userID else { return }
         let startedAt = Date()
+        guard let encoded = try? JSONEncoder().encode(snapshot) else { return }
+        let encodeFinishedAt = Date()
         let data: Data? = Self.storageLock.accessIfCurrent(storageGeneration) {
-            guard let data = try? JSONEncoder().encode(snapshot) else { return nil }
             try? FileManager.default.createDirectory(
                 at: self.fileURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try? data.write(to: self.fileURL, options: .atomic)
-            return data
+            try? encoded.write(to: self.fileURL, options: .atomic)
+            return encoded
         }
         guard let data else { return }
         briefingSnapshotLogger.info(
-            "Snapshot saved | user_id=\(snapshot.userID, privacy: .private) bytes=\(data.count, privacy: .public) lenses=\(snapshot.lenses.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
+            "Snapshot saved | user_id=\(snapshot.userID, privacy: .private) bytes=\(data.count, privacy: .public) lenses=\(snapshot.lenses.count, privacy: .public) encode_ms=\(Int(encodeFinishedAt.timeIntervalSince(startedAt) * 1_000), privacy: .public) write_ms=\(Int(Date().timeIntervalSince(encodeFinishedAt) * 1_000), privacy: .public)"
         )
     }
 
