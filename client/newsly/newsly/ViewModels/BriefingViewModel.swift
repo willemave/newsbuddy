@@ -731,7 +731,7 @@ final class BriefingViewModel: ObservableObject {
         }
         lensStates = lensStates.filter { validLensKeys.contains($0.key) }
         for key in validLensKeys {
-            invalidateLens(key)
+            invalidateLensForIndexChange(key)
         }
         rebuildSourceIndex()
     }

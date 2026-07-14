@@ -26,6 +26,16 @@ extension BriefingViewModel {
         }
     }
 
+    func invalidateLensForIndexChange(_ key: String) {
+        let containsOptimisticRead = lensStates[key]?.document?.sources.contains {
+            optimisticallyReadSourceKeys.contains($0.sourceKey)
+        } == true
+        invalidateLens(
+            key,
+            staleness: containsOptimisticRead ? .readRetirement : .structural
+        )
+    }
+
     func invalidateLens(
         _ key: String,
         staleness: BriefingLensState.Staleness = .structural
