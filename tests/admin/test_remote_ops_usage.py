@@ -22,7 +22,13 @@ from admin.remote_ops import (
     usage_by_user,
     usage_summary,
 )
-from app.models.db import Content, ContentStatusEntry, ProcessingTask, VendorUsageRecord
+from app.models.db import (
+    Content,
+    ContentKnowledgeSave,
+    ContentStatusEntry,
+    ProcessingTask,
+    VendorUsageRecord,
+)
 from app.models.db.users import User
 from app.testing.postgres_harness import create_temporary_postgres_harness
 
@@ -317,7 +323,12 @@ def test_sanitize_content_metadata_updates_row(remote_context):
 def test_preview_regenerate_images_returns_failed_candidates(remote_context, monkeypatch):
     harness = create_temporary_postgres_harness(
         schema_prefix="newsly_fix_regen_preview",
-        tables=[Content.__table__, ContentStatusEntry.__table__, ProcessingTask.__table__],
+        tables=[
+            Content.__table__,
+            ContentStatusEntry.__table__,
+            ContentKnowledgeSave.__table__,
+            ProcessingTask.__table__,
+        ],
     )
     try:
         with harness.engine.begin() as connection:
@@ -382,7 +393,12 @@ def test_regenerate_images_creates_completed_task_and_updates_metadata(
 ):
     harness = create_temporary_postgres_harness(
         schema_prefix="newsly_fix_regen_apply",
-        tables=[Content.__table__, ContentStatusEntry.__table__, ProcessingTask.__table__],
+        tables=[
+            Content.__table__,
+            ContentStatusEntry.__table__,
+            ContentKnowledgeSave.__table__,
+            ProcessingTask.__table__,
+        ],
     )
     try:
         with harness.engine.begin() as connection:

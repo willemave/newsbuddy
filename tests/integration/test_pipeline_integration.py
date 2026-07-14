@@ -8,6 +8,7 @@ import pytest
 from app.core.db import get_db
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, ContentBody, ProcessingTask
+from app.models.domain.scraper_runs import ScraperStats
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
 from app.pipeline.task_models import TaskEnvelope
 from app.services.queue import QueueService, TaskType
@@ -360,10 +361,10 @@ class TestPipelineIntegration:
                     queue_service.enqueue(
                         task_type=TaskType.PROCESS_CONTENT, content_id=new_content.id
                     )
-                return 1
+                return ScraperStats(scraped=1, saved=1)
 
             mock_runner_instance = Mock()
-            mock_runner_instance.run_scraper.side_effect = mock_scrape
+            mock_runner_instance.run_scraper_with_stats.side_effect = mock_scrape
             mock_runner.return_value = mock_runner_instance
 
             processor = SequentialTaskProcessor()
