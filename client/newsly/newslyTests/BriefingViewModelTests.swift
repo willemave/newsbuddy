@@ -3,6 +3,18 @@ import XCTest
 
 @MainActor
 final class BriefingViewModelTests: XCTestCase {
+    func testActiveStateTracksBriefingLifecycle() {
+        let viewModel = BriefingViewModel(service: MockBriefingService())
+
+        XCTAssertFalse(viewModel.isActive)
+
+        viewModel.setActive(true)
+        XCTAssertTrue(viewModel.isActive)
+
+        viewModel.setActive(false)
+        XCTAssertFalse(viewModel.isActive)
+    }
+
     func testFirstRunLoadsStartHereWithoutAReadableCategory() async {
         let service = MockBriefingService()
         service.indexResults = [

@@ -2,6 +2,63 @@ import XCTest
 @testable import newsly
 
 final class BriefingReadMarkingTests: XCTestCase {
+    func testSegmentMidpointJustBeforeViewportTopHasNotCrossed() {
+        let frame = CGRect(x: 0, y: -49.5, width: 100, height: 100)
+
+        XCTAssertFalse(briefingSegmentHasCrossedReadMidpoint(frame: frame))
+    }
+
+    func testSegmentMidpointExactlyAtViewportTopHasNotCrossed() {
+        let frame = CGRect(x: 0, y: -50, width: 100, height: 100)
+
+        XCTAssertFalse(briefingSegmentHasCrossedReadMidpoint(frame: frame))
+    }
+
+    func testSegmentMidpointJustAfterViewportTopHasCrossed() {
+        let frame = CGRect(x: 0, y: -50.5, width: 100, height: 100)
+
+        XCTAssertTrue(briefingSegmentHasCrossedReadMidpoint(frame: frame))
+    }
+
+    func testInitialObservationAfterMidpointDoesNotMarkRead() {
+        var tracker = BriefingMidpointReadTracker()
+
+        XCTAssertFalse(tracker.update(hasCrossedMidpoint: true, isEnabled: true))
+    }
+
+    func testBeforeToAfterMidpointMarksReadExactlyOnce() {
+        var tracker = BriefingMidpointReadTracker()
+
+        XCTAssertFalse(tracker.update(hasCrossedMidpoint: false, isEnabled: true))
+        XCTAssertTrue(tracker.update(hasCrossedMidpoint: true, isEnabled: true))
+        XCTAssertFalse(tracker.update(hasCrossedMidpoint: true, isEnabled: true))
+    }
+
+    func testDisablingTrackingClearsPriorMidpointObservation() {
+        var tracker = BriefingMidpointReadTracker()
+
+        XCTAssertFalse(tracker.update(hasCrossedMidpoint: false, isEnabled: true))
+        XCTAssertFalse(tracker.update(hasCrossedMidpoint: false, isEnabled: false))
+        XCTAssertFalse(tracker.update(hasCrossedMidpoint: true, isEnabled: true))
+    }
+
+    func testLensContentIdentityChangesOnlyWithLensOrOrderedSegments() {
+        let identity = BriefingLensContentIdentity(lensKey: "podcasts", segmentIDs: [1, 2, 3])
+
+        XCTAssertEqual(
+            identity,
+            BriefingLensContentIdentity(lensKey: "podcasts", segmentIDs: [1, 2, 3])
+        )
+        XCTAssertNotEqual(
+            identity,
+            BriefingLensContentIdentity(lensKey: "podcasts", segmentIDs: [2, 3])
+        )
+        XCTAssertNotEqual(
+            identity,
+            BriefingLensContentIdentity(lensKey: "articles", segmentIDs: [1, 2, 3])
+        )
+    }
+
     func testBlockSourceLinkKeysPreserveOrderAndRemoveDuplicates() {
         let block = APIBriefingBlock(
             type: .passage,

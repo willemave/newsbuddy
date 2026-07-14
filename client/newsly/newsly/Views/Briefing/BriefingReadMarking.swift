@@ -1,5 +1,36 @@
 import Foundation
 
+func briefingSegmentHasCrossedReadMidpoint(frame: CGRect) -> Bool {
+    frame.midY < 0
+}
+
+struct BriefingMidpointReadTracker {
+    private var hasObservedBeforeMidpoint = false
+    private var didMark = false
+
+    mutating func update(hasCrossedMidpoint: Bool, isEnabled: Bool) -> Bool {
+        guard isEnabled else {
+            hasObservedBeforeMidpoint = false
+            return false
+        }
+        guard !didMark else { return false }
+
+        if !hasCrossedMidpoint {
+            hasObservedBeforeMidpoint = true
+            return false
+        }
+
+        guard hasObservedBeforeMidpoint else { return false }
+        didMark = true
+        return true
+    }
+}
+
+struct BriefingLensContentIdentity: Hashable {
+    let lensKey: String
+    let segmentIDs: [Int]
+}
+
 func uniqueBriefingSourceKeys(_ sourceKeys: [String]) -> [String] {
     var seen = Set<String>()
     var result: [String] = []

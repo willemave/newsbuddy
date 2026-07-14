@@ -42,9 +42,16 @@ struct BriefingLensPageView: View {
         return max(containerHeight - topContentInset + collapsibleChromeHeight, 0)
     }
 
+    private var isReadTrackingEnabled: Bool {
+        viewModel.isActive && viewModel.selectedLensKey == lensSummary.key
+    }
+
     var body: some View {
         Group {
             if let lens {
+                let timelineSeparatorIndices = BriefingTimelineSeparatorPolicy.separatorIndices(
+                    for: lens.segments.map(\.createdAt)
+                )
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24) {
                         let sourcesByKey = Dictionary(
@@ -53,7 +60,7 @@ struct BriefingLensPageView: View {
                         )
                         ForEach(Array(lens.segments.enumerated()), id: \.element.id) { index, segment in
                             VStack(alignment: .leading, spacing: 16) {
-                                if index > 0 {
+                                if timelineSeparatorIndices.contains(index) {
                                     BriefingTimelineSeparator(date: segment.createdAt)
                                 }
 
@@ -62,21 +69,15 @@ struct BriefingLensPageView: View {
                                     sourcesByKey: sourcesByKey,
                                     onOpenSource: onOpenSource,
                                     onOpenDiscussion: onOpenDiscussion,
-                                    onDig: onDig,
-                                    onSourceKeysSeen: { sourceKeys in
-                                        viewModel.markSourcesSeen(sourceKeys)
-                                    }
+                                    onDig: onDig
                                 )
                                 .id(segment.id)
-                                // Segment-level backstop: sources are only seen
-                                // after the whole segment has moved above the
-                                // viewport, unless their own block exited first.
-                                .onGeometryChange(for: Bool.self) { proxy in
-                                    proxy.frame(in: .scrollView).maxY < 0
-                                } action: { _, exitedTop in
-                                    guard exitedTop else { return }
-                                    viewModel.markSegmentSeen(segment)
-                                }
+                                .briefingSegmentReadMarker(
+                                    isEnabled: isReadTrackingEnabled,
+                                    onMidpointCrossed: {
+                                        viewModel.markSegmentSeen(segment)
+                                    }
+                                )
                             }
                             .padding(.horizontal, Spacing.appHorizontalMargin)
                         }
@@ -88,6 +89,12 @@ struct BriefingLensPageView: View {
                     .padding(.top, 4)
                     .frame(minHeight: minContentHeight, alignment: .top)
                 }
+                .id(
+                    BriefingLensContentIdentity(
+                        lensKey: lensSummary.key,
+                        segmentIDs: lens.segments.map(\.id)
+                    )
+                )
                 .contentMargins(.top, topContentInset)
                 .contentMargins(.bottom, 40)
                 .bottomScreenEdgeFade(fadeHeight: 32)
@@ -177,6 +184,23 @@ struct BriefingTimelineStamp: Equatable {
     }
 }
 
+enum BriefingTimelineSeparatorPolicy {
+    static let minimumInterval: TimeInterval = 4 * 60 * 60
+
+    static func separatorIndices(for dates: [Date]) -> Set<Int> {
+        guard let firstDate = dates.first else { return [] }
+
+        var anchorDate = firstDate
+        var result = Set<Int>()
+        for (index, date) in dates.enumerated().dropFirst() {
+            guard anchorDate.timeIntervalSince(date) >= minimumInterval else { continue }
+            result.insert(index)
+            anchorDate = date
+        }
+        return result
+    }
+}
+
 private struct BriefingTimelineSeparator: View {
     private let stamp: BriefingTimelineStamp
 
@@ -208,7 +232,6 @@ private struct BriefingSegmentView: View {
     let onOpenSource: (String) -> Void
     let onOpenDiscussion: (APIBriefingSource) -> Void
     let onDig: (String, String) -> Void
-    let onSourceKeysSeen: ([String]) -> Void
     private let displayBlocks: [DisplayBlock]
     private let discussionChipsByBlockIndex: [Int: [String: BriefingDiscussionChip]]
     private let allSourcesRead: Bool
@@ -230,15 +253,13 @@ private struct BriefingSegmentView: View {
         sourcesByKey: [String: APIBriefingSource],
         onOpenSource: @escaping (String) -> Void,
         onOpenDiscussion: @escaping (APIBriefingSource) -> Void,
-        onDig: @escaping (String, String) -> Void,
-        onSourceKeysSeen: @escaping ([String]) -> Void
+        onDig: @escaping (String, String) -> Void
     ) {
         self.segment = segment
         self.sourcesByKey = sourcesByKey
         self.onOpenSource = onOpenSource
         self.onOpenDiscussion = onOpenDiscussion
         self.onDig = onDig
-        self.onSourceKeysSeen = onSourceKeysSeen
         self.displayBlocks = Self.displayBlocks(for: segment.blocks, sourcesByKey: sourcesByKey)
         let chipsByBlockIndex = Self.discussionChipsByBlockIndex(
             for: segment.blocks,
@@ -264,8 +285,7 @@ private struct BriefingSegmentView: View {
                         passageOpacity: readOpacity(for: passage.briefingFallbackReadSourceKeys),
                         onOpenSource: onOpenSource,
                         onOpenDiscussion: openDiscussion(forSourceKey:),
-                        onDig: onDig,
-                        onSourceKeysSeen: onSourceKeysSeen
+                        onDig: onDig
                     )
                 }
             }
@@ -389,13 +409,12 @@ private struct BriefingSegmentView: View {
     private func blockView(_ block: APIBriefingBlock, blockIndex: Int) -> some View {
         switch block.type {
         case .passage:
-            BriefingPassageReadMarker(
+            BriefingPassageView(
                 block: block,
                 discussionChips: discussionChipsByBlockIndex[blockIndex] ?? [:],
                 onOpenSource: onOpenSource,
                 onOpenDiscussion: openDiscussion(forSourceKey:),
-                onDig: onDig,
-                onSourceKeysSeen: onSourceKeysSeen
+                onDig: onDig
             )
             .opacity(readOpacity(for: block.briefingFallbackReadSourceKeys))
             .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingFallbackReadSourceKeys))
@@ -407,10 +426,6 @@ private struct BriefingSegmentView: View {
             )
             .opacity(readOpacity(for: block.briefingDirectSourceKeys))
             .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingDirectSourceKeys))
-            .briefingSourceReadMarker(
-                sourceKeys: block.briefingDirectSourceKeys,
-                onSourceKeysSeen: onSourceKeysSeen
-            )
         case .pullquote:
             BriefingPullquoteView(
                 block: block,
@@ -419,10 +434,6 @@ private struct BriefingSegmentView: View {
             )
             .opacity(readOpacity(for: block.briefingDirectSourceKeys))
             .animation(.easeInOut(duration: 0.35), value: readOpacity(for: block.briefingDirectSourceKeys))
-            .briefingSourceReadMarker(
-                sourceKeys: block.briefingDirectSourceKeys,
-                onSourceKeysSeen: onSourceKeysSeen
-            )
         }
     }
 
@@ -436,63 +447,44 @@ private struct BriefingSegmentView: View {
     }
 }
 
-private struct BriefingPassageReadMarker: View {
-    let block: APIBriefingBlock
-    var floatingExclusionSize: CGSize? = nil
-    var discussionChips: [String: BriefingDiscussionChip] = [:]
-    let onOpenSource: (String) -> Void
-    var onOpenDiscussion: (String) -> Void = { _ in }
-    let onDig: (String, String) -> Void
-    let onSourceKeysSeen: ([String]) -> Void
+private struct BriefingSegmentReadMarker: ViewModifier {
+    let isEnabled: Bool
+    let onMidpointCrossed: () -> Void
 
-    @State private var markedSourceKeys = Set<String>()
-
-    var body: some View {
-        BriefingPassageView(
-            block: block,
-            floatingExclusionSize: floatingExclusionSize,
-            discussionChips: discussionChips,
-            onOpenSource: onOpenSource,
-            onOpenDiscussion: onOpenDiscussion,
-            onDig: onDig
-        )
-        .onGeometryChange(for: [String].self) { proxy in
-            proxy.frame(in: .scrollView).maxY < 0 ? block.briefingFallbackReadSourceKeys : []
-        } action: { _, sourceKeys in
-            let newSourceKeys = sourceKeys.filter { markedSourceKeys.insert($0).inserted }
-            guard !newSourceKeys.isEmpty else { return }
-            onSourceKeysSeen(newSourceKeys)
-        }
-    }
-}
-
-private struct BriefingSourceReadMarker: ViewModifier {
-    let sourceKeys: [String]
-    let onSourceKeysSeen: ([String]) -> Void
-
-    @State private var didMark = false
+    @State private var tracker = BriefingMidpointReadTracker()
+    @State private var hasCrossedMidpoint = false
 
     func body(content: Content) -> some View {
         content
             .onGeometryChange(for: Bool.self) { proxy in
-                proxy.frame(in: .scrollView).maxY < 0
-            } action: { _, exitedTop in
-                guard exitedTop, !didMark, !sourceKeys.isEmpty else { return }
-                didMark = true
-                onSourceKeysSeen(sourceKeys)
+                briefingSegmentHasCrossedReadMidpoint(frame: proxy.frame(in: .scrollView))
+            } action: { _, crossed in
+                hasCrossedMidpoint = crossed
+                markReadIfNeeded(hasCrossedMidpoint: crossed, isEnabled: isEnabled)
             }
+            .onChange(of: isEnabled, initial: true) { _, enabled in
+                markReadIfNeeded(hasCrossedMidpoint: hasCrossedMidpoint, isEnabled: enabled)
+            }
+    }
+
+    private func markReadIfNeeded(hasCrossedMidpoint: Bool, isEnabled: Bool) {
+        guard tracker.update(
+            hasCrossedMidpoint: hasCrossedMidpoint,
+            isEnabled: isEnabled
+        ) else { return }
+        onMidpointCrossed()
     }
 }
 
 private extension View {
-    func briefingSourceReadMarker(
-        sourceKeys: [String],
-        onSourceKeysSeen: @escaping ([String]) -> Void
+    func briefingSegmentReadMarker(
+        isEnabled: Bool,
+        onMidpointCrossed: @escaping () -> Void
     ) -> some View {
         modifier(
-            BriefingSourceReadMarker(
-                sourceKeys: sourceKeys,
-                onSourceKeysSeen: onSourceKeysSeen
+            BriefingSegmentReadMarker(
+                isEnabled: isEnabled,
+                onMidpointCrossed: onMidpointCrossed
             )
         )
     }
@@ -510,19 +502,17 @@ private struct BriefingFloatingFigurePassage: View {
     let onOpenSource: (String) -> Void
     var onOpenDiscussion: (String) -> Void = { _ in }
     let onDig: (String, String) -> Void
-    let onSourceKeysSeen: ([String]) -> Void
 
     var body: some View {
         let metrics = BriefingFigureLayoutPolicy.metrics(for: horizontalSizeClass)
         ZStack(alignment: .topTrailing) {
-            BriefingPassageReadMarker(
+            BriefingPassageView(
                 block: passage,
                 floatingExclusionSize: metrics.exclusionSize,
                 discussionChips: discussionChips,
                 onOpenSource: onOpenSource,
                 onOpenDiscussion: onOpenDiscussion,
-                onDig: onDig,
-                onSourceKeysSeen: onSourceKeysSeen
+                onDig: onDig
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .opacity(passageOpacity)
@@ -557,10 +547,6 @@ private struct BriefingFloatingFigurePassage: View {
             .animation(.easeInOut(duration: 0.35), value: figureOpacity)
             .accessibilityLabel(source?.title ?? "Article image")
         }
-        .briefingSourceReadMarker(
-            sourceKeys: figure.briefingDirectSourceKeys,
-            onSourceKeysSeen: onSourceKeysSeen
-        )
     }
 }
 

@@ -59,6 +59,7 @@ final class BriefingViewModel: ObservableObject {
     @Published private(set) var lensErrors: [String: String] = [:]
     @Published private var destination: BriefingDestination?
     @Published private(set) var narrationEpisodes: [String: AudioEpisode] = [:]
+    @Published private(set) var isActive = false
     /// True while the selected lens is scrolled into reading — the masthead
     /// above the pager collapses to hand the space to the content.
     @Published private(set) var isMastheadCompact = false
@@ -173,6 +174,9 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func setActive(_ active: Bool) {
+        if isActive != active {
+            isActive = active
+        }
         indexSynchronizer.setActive(active) { [weak self] in
             await self?.loadIndexIfNeeded()
         }
