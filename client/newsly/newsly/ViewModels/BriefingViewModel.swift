@@ -84,6 +84,7 @@ final class BriefingViewModel: ObservableObject {
     private let snapshotStore: BriefingSnapshotStoring?
     private let indexSynchronizer: BriefingIndexSynchronizer
     private let firstRunCoordinator: BriefingFirstRunCoordinator
+    let lensRetention: BriefingLensRetentionPolicy
     let tasks = TaskBag<TaskKey>()
     private var pendingReadKeys: Set<String> = []
     var optimisticallyReadSourceKeys: Set<String> = []
@@ -104,11 +105,15 @@ final class BriefingViewModel: ObservableObject {
         audioEpisodeService: any BriefingAudioEpisodeServicing,
         snapshotStore: BriefingSnapshotStoring? = nil,
         refreshPollDelays: [UInt64] = briefingRefreshPollDelaysNanoseconds,
-        firstRunCompletionRetryDelay: UInt64 = briefingFirstRunCompletionRetryNanoseconds
+        firstRunCompletionRetryDelay: UInt64 = briefingFirstRunCompletionRetryNanoseconds,
+        lensRetentionScheduler: (any BriefingLensRetentionScheduling)? = nil
     ) {
         self.service = service
         self.audioEpisodeService = audioEpisodeService
         self.snapshotStore = snapshotStore
+        self.lensRetention = BriefingLensRetentionPolicy(
+            scheduler: lensRetentionScheduler ?? BriefingLensRetentionScheduler()
+        )
         self.firstRunCoordinator = BriefingFirstRunCoordinator(
             service: service,
             completionRetryDelay: firstRunCompletionRetryDelay
@@ -195,8 +200,13 @@ final class BriefingViewModel: ObservableObject {
     }
 
     func setActive(_ active: Bool) {
-        if isActive != active {
-            isActive = active
+        guard isActive != active else { return }
+        if !active, let selectedLensKey {
+            beginLensRetention(for: selectedLensKey)
+        }
+        isActive = active
+        if active, let selectedLensKey {
+            protectLens(selectedLensKey)
         }
         indexSynchronizer.setActive(active) { [weak self] in
             await self?.loadIndexIfNeeded()
@@ -245,7 +255,11 @@ final class BriefingViewModel: ObservableObject {
         if firstRun != nil {
             dismissFirstRun()
         }
+        if let selectedLensKey {
+            beginLensRetention(for: selectedLensKey)
+        }
         destination = .lens(key)
+        protectLens(key)
         cancelLensLoads(except: key)
         noteSelectionChanged()
         loadWorkingSet()
@@ -253,6 +267,9 @@ final class BriefingViewModel: ObservableObject {
 
     func selectStartHere() {
         guard firstRun != nil, destination != .startHere else { return }
+        if let selectedLensKey {
+            beginLensRetention(for: selectedLensKey)
+        }
         destination = .startHere
         noteSelectionChanged()
         loadWorkingSet()
@@ -708,18 +725,14 @@ final class BriefingViewModel: ObservableObject {
         let knownLensKeys = validLensKeys
             .union(oldLensKeys)
             .union(lensStates.keys)
-        for key in knownLensKeys {
+        for key in knownLensKeys where !validLensKeys.contains(key) {
             tasks.cancel(.lens(key))
+            lensRetention.protect(key)
         }
-        var nextStates = lensStates.filter { validLensKeys.contains($0.key) }
+        lensStates = lensStates.filter { validLensKeys.contains($0.key) }
         for key in validLensKeys {
-            var state = nextStates[key] ?? BriefingLensState()
-            state.loadPhase = .idle
-            state.failure = nil
-            state.isStale = true
-            nextStates[key] = state
+            invalidateLens(key)
         }
-        lensStates = nextStates
         rebuildSourceIndex()
     }
 
@@ -820,11 +833,7 @@ final class BriefingViewModel: ObservableObject {
             result.formUnion(lensKeysBySourceKey[sourceKey] ?? [])
         }
         for lensKey in affectedLensKeys {
-            tasks.cancel(.lens(lensKey))
-            mutateLensState(lensKey) { state in
-                state.loadPhase = .idle
-                state.isStale = true
-            }
+            invalidateLens(lensKey)
         }
     }
 
@@ -918,7 +927,7 @@ final class BriefingViewModel: ObservableObject {
     func reindexSources(
         for lensKey: String,
         replacing previousLens: APIBriefingLensResponse?,
-        with lens: APIBriefingLensResponse
+        with lens: APIBriefingLensResponse?
     ) {
         for sourceKey in previousLens?.sources.map(\.sourceKey) ?? [] {
             lensKeysBySourceKey[sourceKey]?.remove(lensKey)
@@ -932,7 +941,7 @@ final class BriefingViewModel: ObservableObject {
                 sourceByKey[sourceKey] = replacement
             }
         }
-        for source in lens.sources {
+        for source in lens?.sources ?? [] {
             lensKeysBySourceKey[source.sourceKey, default: []].insert(lensKey)
             sourceByKey[source.sourceKey] = source
         }

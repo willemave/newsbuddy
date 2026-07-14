@@ -324,42 +324,6 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.documentGeneration(for: "today"), 0)
     }
 
-    func testRetirementReadResponseUsesNormalStaleVisibleRevalidation() async {
-        let service = MockBriefingService()
-        let summary = makeLensSummary(key: "today")
-        service.indexResults = [
-            .value(makeIndex(version: 1, lenses: [summary]), etag: "etag-1"),
-            .value(makeIndex(version: 2, lenses: [summary]), etag: "etag-2")
-        ]
-        let firstSegment = makeSegment(id: 10, sourceKeys: ["content:1"])
-        service.lensPageResponses["today"] = [
-            makeLens(key: "today", version: 1, segments: [firstSegment]),
-            makeLens(
-                key: "today",
-                version: 2,
-                segments: [makeSegment(id: 11, sourceKeys: ["news:2"])]
-            )
-        ]
-        service.readMarkResponse = APIBriefingReadMarkResponse(
-            marked: 1,
-            retired: 1,
-            version: 2
-        )
-        let viewModel = BriefingViewModel(service: service)
-
-        await viewModel.loadIndexIfNeeded()
-        await waitForBriefingCondition { viewModel.selectedLens?.segments.map(\.id) == [10] }
-        viewModel.markSegmentSeen(firstSegment)
-        await waitForBriefingCondition(timeoutNanoseconds: 1_500_000_000) {
-            viewModel.selectedLens?.segments.map(\.id) == [11]
-        }
-
-        XCTAssertEqual(service.indexEtags, [nil, "etag-1"])
-        XCTAssertEqual(service.fetchLensRequests.map(\.cursor), [nil, nil])
-        XCTAssertEqual(viewModel.index?.version, 2)
-        XCTAssertEqual(viewModel.documentGeneration(for: "today"), 1)
-    }
-
     func testAuthoritativeStructuralReplacementAdvancesDocumentGeneration() async {
         let service = MockBriefingService()
         let summary = makeLensSummary(key: "today")

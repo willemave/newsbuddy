@@ -50,10 +50,11 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         service.markReadError = URLError(.notConnectedToInternet)
         service.lensResponses["today"] = makeLens(key: "today", version: 2, segments: [])
         await viewModel.pullToRefresh()
-        await waitForBriefingCondition { viewModel.selectedLens?.version == 2 }
+        await waitForBriefingCondition { viewModel.index?.version == 2 }
 
         XCTAssertEqual(service.markReadCalls.first, ["content:1"])
         XCTAssertEqual(service.indexEtags, [nil, "etag-1"])
+        XCTAssertEqual(viewModel.selectedLens?.segments.map(\.id), [10])
         let markReadIndex = service.events.firstIndex(of: "markRead:content:1")
         let refreshIndex = service.events.firstIndex(of: "requestRefresh")
         XCTAssertNotNil(markReadIndex)
@@ -121,7 +122,7 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         XCTAssertEqual(service.refreshRequestCount, 1)
     }
 
-    func testManualRefreshPollsPastOldDelayAndAppliesLaterVersion() async {
+    func testManualRefreshPollsPastOldDelayWithoutReplacingSelectedLens() async {
         let service = MockBriefingService()
         service.indexResults = [
             .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
@@ -139,10 +140,11 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         await viewModel.pullToRefresh()
         XCTAssertEqual(viewModel.refreshPhase, .waitingForVersion)
         await waitForBriefingCondition(timeoutNanoseconds: 1_000_000_000) {
-            viewModel.selectedLens?.version == 2
+            viewModel.index?.version == 2
         }
 
         XCTAssertEqual(viewModel.refreshPhase, .idle)
+        XCTAssertEqual(viewModel.selectedLens?.version, 1)
     }
 
     func testDeactivationDuringRefreshRequestDoesNotStartPolling() async {

@@ -24,6 +24,7 @@ final class MockBriefingService: BriefingServicing {
     var markReadCalls: [[String]] = []
     var events: [String] = []
     var readMarkResponse = APIBriefingReadMarkResponse(marked: 0, retired: 0, version: 1)
+    var markReadWaitsForResume = false
     var markReadError: Error?
     var refreshError: Error?
     var refreshDelayNanoseconds: UInt64?
@@ -40,6 +41,7 @@ final class MockBriefingService: BriefingServicing {
     private(set) var firstRunCompletionCount = 0
 
     private var refreshContinuation: CheckedContinuation<Void, Never>?
+    private var markReadContinuation: CheckedContinuation<Void, Never>?
 
     func fetchIndex(ifNoneMatch etag: String?) async throws -> BriefingIndexFetchResult {
         indexEtags.append(etag)
@@ -87,6 +89,11 @@ final class MockBriefingService: BriefingServicing {
     func markRead(sourceKeys: [String]) async throws -> APIBriefingReadMarkResponse {
         markReadCalls.append(sourceKeys)
         events.append("markRead:\(sourceKeys.joined(separator: ","))")
+        if markReadWaitsForResume {
+            await withCheckedContinuation { continuation in
+                markReadContinuation = continuation
+            }
+        }
         if let markReadError {
             throw markReadError
         }
@@ -121,6 +128,11 @@ final class MockBriefingService: BriefingServicing {
     func resumeRefreshRequest() {
         refreshContinuation?.resume()
         refreshContinuation = nil
+    }
+
+    func resumeMarkRead() {
+        markReadContinuation?.resume()
+        markReadContinuation = nil
     }
 
     func digSearch(fragment: String) async throws -> APIBriefingDigSearchResponse {
@@ -178,19 +190,42 @@ final class MockBriefingAudioEpisodeService: BriefingAudioEpisodeServicing {
     }
 }
 
+@MainActor
+final class MockBriefingLensRetentionScheduler: BriefingLensRetentionScheduling {
+    private var expiryActions: [String: @MainActor () -> Void] = [:]
+
+    func scheduleExpiry(
+        for lensKey: String,
+        action: @escaping @MainActor () -> Void
+    ) {
+        expiryActions[lensKey] = action
+    }
+
+    func cancelExpiry(for lensKey: String) {
+        expiryActions.removeValue(forKey: lensKey)
+    }
+
+    func expire(_ lensKey: String) {
+        let action = expiryActions.removeValue(forKey: lensKey)
+        action?()
+    }
+}
+
 extension BriefingViewModel {
     convenience init(
         service: BriefingServicing,
         snapshotStore: BriefingSnapshotStoring? = nil,
         refreshPollDelays: [UInt64] = [1_000_000, 2_000_000, 5_000_000],
-        firstRunCompletionRetryDelay: UInt64 = 1_000_000
+        firstRunCompletionRetryDelay: UInt64 = 1_000_000,
+        lensRetentionScheduler: (any BriefingLensRetentionScheduling)? = nil
     ) {
         self.init(
             service: service,
             audioEpisodeService: MockBriefingAudioEpisodeService(),
             snapshotStore: snapshotStore,
             refreshPollDelays: refreshPollDelays,
-            firstRunCompletionRetryDelay: firstRunCompletionRetryDelay
+            firstRunCompletionRetryDelay: firstRunCompletionRetryDelay,
+            lensRetentionScheduler: lensRetentionScheduler
         )
     }
 }

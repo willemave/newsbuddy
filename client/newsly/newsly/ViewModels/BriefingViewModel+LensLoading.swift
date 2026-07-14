@@ -40,6 +40,9 @@ extension BriefingViewModel {
               !tasks.isRunning(.lens(key)) else {
             return
         }
+        guard existing == nil || !requiresReplacement || !isLensReplacementProtected(key) else {
+            return
+        }
         mutateLensState(key) { state in
             state.failure = nil
             if requiresReplacement, existing != nil {
