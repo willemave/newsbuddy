@@ -122,7 +122,7 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         XCTAssertEqual(service.refreshRequestCount, 1)
     }
 
-    func testManualRefreshPollsPastOldDelayWithoutReplacingSelectedLens() async {
+    func testManualRefreshPollsPastOldDelayAndAppliesLaterVersion() async {
         let service = MockBriefingService()
         service.indexResults = [
             .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
@@ -140,11 +140,10 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         await viewModel.pullToRefresh()
         XCTAssertEqual(viewModel.refreshPhase, .waitingForVersion)
         await waitForBriefingCondition(timeoutNanoseconds: 1_000_000_000) {
-            viewModel.index?.version == 2
+            viewModel.selectedLens?.version == 2
         }
 
         XCTAssertEqual(viewModel.refreshPhase, .idle)
-        XCTAssertEqual(viewModel.selectedLens?.version, 1)
     }
 
     func testDeactivationDuringRefreshRequestDoesNotStartPolling() async {
