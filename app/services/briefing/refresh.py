@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from math import ceil
+from time import perf_counter
 from typing import Literal
 
 from sqlalchemy import func, or_, text
@@ -21,7 +24,7 @@ from app.models.db import (
 )
 from app.pipeline.task_specs import get_task_spec
 from app.services.briefing import compaction, window_composition
-from app.services.briefing.composer import plan_windows
+from app.services.briefing.composer import generate_layout_with_llm, plan_windows
 from app.services.briefing.eligibility import is_briefing_enabled_for_user
 from app.services.briefing.lenses import (
     assign_pending_lenses,
@@ -29,6 +32,7 @@ from app.services.briefing.lenses import (
     ensure_base_lenses,
     retire_idle_lenses,
 )
+from app.services.briefing.openrouter import BriefingOpenRouterClient
 from app.services.briefing.segments import build_briefing_segment
 from app.services.briefing.sources import (
     BriefingSource,
@@ -195,53 +199,89 @@ def run_briefing_refresh(
             pending_added=pending_added,
             settings=settings,
         )
-    naming_fn = (
-        build_llm_lens_namer(settings=settings, task_id=task_id, user_id=user_id)
-        if use_llm
-        else None
+    taxonomy_model = settings.briefing_taxonomy_model or settings.briefing_model
+    uses_openrouter = use_llm and (
+        settings.briefing_model.startswith("openrouter:")
+        or (settings.briefing_taxonomy_planner_enabled and taxonomy_model.startswith("openrouter:"))
     )
-    assigned = assign_pending_lenses(db, user_id=user_id, naming_fn=naming_fn, settings=settings)
-    if assigned:
-        db.flush()
-    taxonomized = apply_taxonomy_if_needed(
-        db,
-        user_id=user_id,
-        settings=settings,
-        task_id=task_id,
-        use_llm=use_llm,
+    provider_context = (
+        BriefingOpenRouterClient(
+            timeout_seconds=settings.briefing_llm_timeout_seconds,
+            settings=settings,
+        )
+        if uses_openrouter
+        else nullcontext(None)
     )
-    if taxonomized:
-        db.flush()
-    prepared_windows = _plan_ready_windows(db, user_id=user_id, mode=mode, settings=settings)
-    reserved_segment_counts: dict[int, int] = {}
-    for window in prepared_windows:
-        reserved_segment_counts[window.lens_id] = reserved_segment_counts.get(window.lens_id, 0) + 1
-    prepared_compactions = (
-        []
-        if mode == "full"
-        else compaction.prepare_compactions(
+    with provider_context as openrouter_client:
+        structured_output_requester = (
+            openrouter_client.request_json_schema if openrouter_client is not None else None
+        )
+        naming_fn = (
+            build_llm_lens_namer(
+                settings=settings,
+                task_id=task_id,
+                user_id=user_id,
+                structured_output_requester=structured_output_requester,
+            )
+            if use_llm
+            else None
+        )
+        assigned = assign_pending_lenses(
+            db,
+            user_id=user_id,
+            naming_fn=naming_fn,
+            settings=settings,
+        )
+        if assigned:
+            db.flush()
+        taxonomized = apply_taxonomy_if_needed(
             db,
             user_id=user_id,
             settings=settings,
-            reserved_segment_counts=reserved_segment_counts,
+            task_id=task_id,
+            use_llm=use_llm,
+            structured_output_requester=structured_output_requester,
         )
-    )
-    db.commit()
+        if taxonomized:
+            db.flush()
+        prepared_windows = _plan_ready_windows(db, user_id=user_id, mode=mode, settings=settings)
+        reserved_segment_counts: dict[int, int] = {}
+        for window in prepared_windows:
+            reserved_segment_counts[window.lens_id] = (
+                reserved_segment_counts.get(window.lens_id, 0) + 1
+            )
+        prepared_compactions = (
+            []
+            if mode == "full"
+            else compaction.prepare_compactions(
+                db,
+                user_id=user_id,
+                settings=settings,
+                reserved_segment_counts=reserved_segment_counts,
+            )
+        )
+        db.commit()
 
-    composed_windows = window_composition.compose_windows(
-        prepared_windows,
-        user_id=user_id,
-        task_id=task_id,
-        use_llm=use_llm,
-        settings=settings,
-    )
-    composed_compactions = compaction.compose_compactions(
-        prepared_compactions,
-        user_id=user_id,
-        task_id=task_id,
-        use_llm=use_llm,
-        settings=settings,
-    )
+        compaction_windows = [window for plan in prepared_compactions for window in plan.windows]
+        layout_generator = (
+            partial(
+                generate_layout_with_llm,
+                structured_output_requester=structured_output_requester,
+            )
+            if structured_output_requester is not None
+            else None
+        )
+        composition_started_at = perf_counter()
+        composed_windows, composed_compactions = window_composition.compose_window_groups(
+            prepared_windows,
+            compaction_windows,
+            user_id=user_id,
+            task_id=task_id,
+            use_llm=use_llm,
+            settings=settings,
+            layout_generator=layout_generator,
+        )
+        composition_ms = round((perf_counter() - composition_started_at) * 1000, 2)
 
     state = ensure_state(db, user_id=user_id, settings=settings)
     version = int(state.version or 0)
@@ -249,12 +289,35 @@ def run_briefing_refresh(
         db.query(BriefingSegment).filter(BriefingSegment.user_id == user_id).filter(
             BriefingSegment.status.in_(("active", "degraded"))
         ).update({BriefingSegment.status: "compacted"}, synchronize_session=False)
+    append_persistence_started_at = perf_counter()
     appended = _persist_composed_windows(db, user_id=user_id, composed_windows=composed_windows)
+    append_persistence_ms = round((perf_counter() - append_persistence_started_at) * 1000, 2)
+    compaction_persistence_started_at = perf_counter()
     compacted = compaction.persist_compactions(
         db,
         user_id=user_id,
         plans=prepared_compactions,
         composed_windows=composed_compactions,
+    )
+    compaction_persistence_ms = round(
+        (perf_counter() - compaction_persistence_started_at) * 1000,
+        2,
+    )
+    logger.info(
+        "Briefing refresh composition and publication measured",
+        extra={
+            "component": "briefing",
+            "operation": "measure_refresh_publication",
+            "item_id": user_id,
+            "task_id": task_id,
+            "context_data": {
+                "append_window_count": len(prepared_windows),
+                "append_persistence_ms": append_persistence_ms,
+                "compaction_window_count": len(composed_compactions),
+                "compaction_persistence_ms": compaction_persistence_ms,
+                "composition_ms": composition_ms,
+            },
+        },
     )
     retired = _retire_finished_segments(db, user_id=user_id, settings=settings)
     retired += retire_idle_lenses(db, user_id=user_id, idle_days=settings.briefing_lens_idle_days)
@@ -464,16 +527,29 @@ def _plan_ready_windows(
         .all()
     )
     now = datetime.now(UTC).replace(tzinfo=None)
-    for lens in lenses:
-        if lens.id is None:
-            continue
+    pending_by_lens_key: dict[str, list[BriefingPendingSource]] = {}
+    if lenses:
         pending_rows = (
             db.query(BriefingPendingSource)
             .filter(BriefingPendingSource.user_id == user_id)
-            .filter(BriefingPendingSource.lens_key == lens.key)
-            .order_by(BriefingPendingSource.enqueued_at.asc(), BriefingPendingSource.id.asc())
+            .filter(BriefingPendingSource.lens_key.in_([str(lens.key) for lens in lenses]))
+            .order_by(
+                BriefingPendingSource.lens_key.asc(),
+                BriefingPendingSource.enqueued_at.asc(),
+                BriefingPendingSource.id.asc(),
+            )
             .all()
         )
+        for row in pending_rows:
+            if row.lens_key is not None:
+                pending_by_lens_key.setdefault(str(row.lens_key), []).append(row)
+
+    ready_lenses: list[tuple[BriefingLens, list[BriefingPendingSource], list[str]]] = []
+    source_keys: list[str] = []
+    for lens in lenses:
+        if lens.id is None:
+            continue
+        pending_rows = pending_by_lens_key.get(str(lens.key), [])
         if not pending_rows:
             continue
         if not _pending_rows_are_ready(
@@ -484,14 +560,23 @@ def _plan_ready_windows(
             now=now,
         ):
             continue
-        source_keys = [f"{row.source_kind}:{row.source_id}" for row in pending_rows]
-        source_map = sources_for_keys(db, user_id=user_id, source_keys=source_keys)
-        for row, key in zip(pending_rows, source_keys, strict=True):
+        lens_source_keys = [f"{row.source_kind}:{row.source_id}" for row in pending_rows]
+        ready_lenses.append((lens, pending_rows, lens_source_keys))
+        source_keys.extend(lens_source_keys)
+
+    source_map = sources_for_keys(
+        db,
+        user_id=user_id,
+        source_keys=list(dict.fromkeys(source_keys)),
+    )
+    for lens, pending_rows, lens_source_keys in ready_lenses:
+        assert lens.id is not None
+        for row, key in zip(pending_rows, lens_source_keys, strict=True):
             if key not in source_map:
                 db.delete(row)
         source_rows = [
             (int(row.id), source_map[key])
-            for row, key in zip(pending_rows, source_keys, strict=True)
+            for row, key in zip(pending_rows, lens_source_keys, strict=True)
             if row.id is not None and key in source_map
         ]
         if not source_rows:

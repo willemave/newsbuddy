@@ -30,7 +30,11 @@ from app.services.briefing.normalize import (
     NormalizedLayout,
     normalize_layout,
 )
-from app.services.briefing.openrouter import request_openrouter_json_schema, strip_json_code_fence
+from app.services.briefing.openrouter import (
+    StructuredOutputRequester,
+    request_openrouter_json_schema,
+    strip_json_code_fence,
+)
 from app.services.briefing.repair import repair_layout
 from app.services.briefing.sources import BriefingSource
 from app.services.llm_agents import get_basic_agent
@@ -524,6 +528,7 @@ def generate_layout_with_llm(
     timeout_seconds: int,
     task_id: int | None,
     user_id: int | None,
+    structured_output_requester: StructuredOutputRequester | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int | None] | None]:
     prompt_name = _layout_prompt_name(tier)
     system_prompt = render_prompt(f"{prompt_name}#system")
@@ -545,6 +550,7 @@ def generate_layout_with_llm(
             timeout_seconds=timeout_seconds,
             task_id=task_id,
             user_id=user_id,
+            structured_output_requester=structured_output_requester,
         )
 
     result = _run_agent(model_spec, system_prompt, user_prompt, timeout_seconds=timeout_seconds)
@@ -575,6 +581,7 @@ def _compose_window_with_openrouter(
     timeout_seconds: int,
     task_id: int | None,
     user_id: int | None,
+    structured_output_requester: StructuredOutputRequester | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int | None] | None]:
     try:
         response = request_openrouter_json_schema(
@@ -584,6 +591,7 @@ def _compose_window_with_openrouter(
             schema_name="ComposerLayout",
             schema=ComposerLayout.model_json_schema(),
             timeout_seconds=timeout_seconds,
+            requester=structured_output_requester,
         )
     except RuntimeError as exc:
         raise BriefingCompositionInvalidOutput(str(exc)) from exc

@@ -1,11 +1,50 @@
 from sqlalchemy.orm import Session
 
 import app.services.briefing.compaction as compaction_service
+import app.services.briefing.window_composition as window_composition_service
 from app.core.settings import get_settings
 from app.models.contracts import ContentClassification, ContentType
 from app.models.db import BriefingLens, BriefingSegment, BriefingState
 from app.models.db.users import User
 from app.services.briefing.refresh import run_briefing_refresh
+
+
+def test_fragmentation_metrics_report_achievable_floor_and_duplicates(monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_news_window_max", 3)
+
+    metrics = compaction_service.briefing_fragmentation_metrics(
+        [
+            ["news:1", "news:2", "news:2"],
+            ["news:3", "news:4"],
+            ["news:5", "news:6"],
+            ["news:7", "news:8"],
+        ],
+        tier="news",
+        read_keys={"news:8"},
+        settings=settings,
+    )
+
+    assert metrics.unique_unread_source_count == 7
+    assert metrics.window_source_limit == 3
+    assert metrics.minimum_required_segment_count == 3
+    assert metrics.excess_fragmentation == 1
+
+
+def test_fragmentation_metrics_handle_zero_sources(monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_window_max", 5)
+
+    metrics = compaction_service.briefing_fragmentation_metrics(
+        [[], []],
+        tier="longform",
+        read_keys=set(),
+        settings=settings,
+    )
+
+    assert metrics.unique_unread_source_count == 0
+    assert metrics.minimum_required_segment_count == 0
+    assert metrics.excess_fragmentation == 2
 
 
 def test_release_path_compacts_every_unread_donor_source_without_loss(
@@ -63,10 +102,16 @@ def test_release_path_leaves_donors_active_when_compaction_coverage_is_incomplet
     monkeypatch.setattr(settings, "briefing_max_segments_per_lens", 3)
     monkeypatch.setattr(settings, "briefing_window_min", 1)
     monkeypatch.setattr(settings, "briefing_window_max", 4)
+    original_compose = window_composition_service.compose_window_groups
+
+    def compose_without_compaction(first_windows, _second_windows, **kwargs):
+        composed_first, _ = original_compose(first_windows, [], **kwargs)
+        return composed_first, []
+
     monkeypatch.setattr(
-        compaction_service,
-        "compose_compactions",
-        lambda *_args, **_kwargs: [],
+        window_composition_service,
+        "compose_window_groups",
+        compose_without_compaction,
     )
     before_keys = _seed_fragmented_article_lens(
         db_session,
@@ -112,7 +157,7 @@ def test_release_path_aborts_compaction_when_global_version_changes_during_compo
         content_factory=content_factory,
         status_entry_factory=status_entry_factory,
     )
-    original_compose = compaction_service.compose_compactions
+    original_compose = window_composition_service.compose_window_groups
 
     def compose_after_concurrent_version_change(*args, **kwargs):
         composed = original_compose(*args, **kwargs)
@@ -122,8 +167,8 @@ def test_release_path_aborts_compaction_when_global_version_changes_during_compo
         return composed
 
     monkeypatch.setattr(
-        compaction_service,
-        "compose_compactions",
+        window_composition_service,
+        "compose_window_groups",
         compose_after_concurrent_version_change,
     )
 

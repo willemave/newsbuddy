@@ -7,6 +7,8 @@ from app.models.db import (
     BriefingPendingSource,
     BriefingSegment,
     BriefingState,
+    ContentReadStatus,
+    NewsItemReadStatus,
 )
 from app.testing.postgres_harness import create_temporary_postgres_harness
 
@@ -17,6 +19,8 @@ def test_briefing_status_surfaces_over_cap_and_source_reference_health(
 ) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "briefing_max_segments_per_lens", 2)
+    monkeypatch.setattr(settings, "briefing_news_window_max", 2)
+    monkeypatch.setattr(settings, "briefing_window_max", 2)
     harness = create_temporary_postgres_harness(
         schema_prefix="newsly_test",
         tables=[
@@ -24,6 +28,8 @@ def test_briefing_status_surfaces_over_cap_and_source_reference_health(
             BriefingSegment.__table__,
             BriefingPendingSource.__table__,
             BriefingState.__table__,
+            ContentReadStatus.__table__,
+            NewsItemReadStatus.__table__,
         ],
     )
     try:
@@ -115,9 +121,14 @@ def test_briefing_status_surfaces_over_cap_and_source_reference_health(
         assert result["health"]["lenses_above_cap"] == ["technology"]
         assert result["health"]["max_active_segments"] == 3
         assert result["health"]["total_active_segments"] == 4
+        assert result["health"]["total_minimum_required_segments"] == 4
+        assert result["health"]["total_excess_fragmentation"] == 0
         assert result["health"]["total_source_references"] == 7
         assert result["health"]["stored_payload_bytes_estimate"] > 0
         assert result["lenses"][0]["above_segment_cap"] is True
+        assert result["lenses"][0]["unique_unread_sources"] == 6
+        assert result["lenses"][0]["minimum_required_segments"] == 3
+        assert result["lenses"][0]["excess_fragmentation"] == 0
         assert result["lenses"][0]["pending_sources"] == 1
         assert result["lenses"][1]["active_segments"] == 1
         assert result["lenses"][1]["pending_sources"] == 2

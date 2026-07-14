@@ -35,7 +35,9 @@ from app.models.db import (
 from app.models.db.users import User
 from app.models.domain.content_mapper import content_to_domain
 from app.queries.queue_health import get_queue_health_snapshot
+from app.services.briefing.compaction import briefing_fragmentation_metrics
 from app.services.briefing.refresh import RefreshMode, run_briefing_refresh, status_counts
+from app.services.briefing.sources import read_source_keys
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.image_generation import ImageGenerationService, get_image_generation_service
 from app.services.long_form_images import (
@@ -243,11 +245,13 @@ def usage_by_content(
 def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
     """Return briefing edition health for one user."""
 
-    segment_cap = get_settings().briefing_max_segments_per_lens
+    settings = get_settings()
+    segment_cap = settings.briefing_max_segments_per_lens
     engine = create_engine(context.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     try:
         with session_factory() as session:
+            briefing_read_keys = read_source_keys(session, user_id=user_id)
             state = session.query(BriefingState).filter(BriefingState.user_id == user_id).first()
             lenses = (
                 session.query(BriefingLens)
@@ -290,6 +294,8 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
             total_source_references = 0
             total_stored_payload_bytes = 0
             max_active_segments = 0
+            total_required_segments = 0
+            total_excess_fragmentation = 0
             for lens in lenses:
                 assert lens.id is not None
                 active_segment_rows = active_segments_by_lens[int(lens.id)]
@@ -311,7 +317,15 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                     )
                     for segment in active_segment_rows
                 )
+                fragmentation = briefing_fragmentation_metrics(
+                    [list(segment.source_keys or []) for segment in active_segment_rows],
+                    tier=str(lens.tier),
+                    read_keys=briefing_read_keys,
+                    settings=settings,
+                )
                 total_active_segments += active_segments
+                total_required_segments += fragmentation.minimum_required_segment_count
+                total_excess_fragmentation += fragmentation.excess_fragmentation
                 total_source_references += source_references
                 total_stored_payload_bytes += stored_payload_bytes
                 lens_rows.append(
@@ -322,6 +336,10 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                         "status": lens.status,
                         "position": lens.position,
                         "active_segments": active_segments,
+                        "unique_unread_sources": fragmentation.unique_unread_source_count,
+                        "window_source_limit": fragmentation.window_source_limit,
+                        "minimum_required_segments": fragmentation.minimum_required_segment_count,
+                        "excess_fragmentation": fragmentation.excess_fragmentation,
                         "above_segment_cap": active_segments > segment_cap,
                         "source_references": source_references,
                         "stored_payload_bytes_estimate": stored_payload_bytes,
@@ -346,6 +364,8 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                     ],
                     "max_active_segments": max_active_segments,
                     "total_active_segments": total_active_segments,
+                    "total_minimum_required_segments": total_required_segments,
+                    "total_excess_fragmentation": total_excess_fragmentation,
                     "total_source_references": total_source_references,
                     "stored_payload_bytes_estimate": total_stored_payload_bytes,
                 },

@@ -15,7 +15,11 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
 from app.models.db import BriefingLens, BriefingPendingSource, BriefingSegment
-from app.services.briefing.openrouter import request_openrouter_json_schema, strip_json_code_fence
+from app.services.briefing.openrouter import (
+    StructuredOutputRequester,
+    request_openrouter_json_schema,
+    strip_json_code_fence,
+)
 from app.services.briefing.sources import BriefingSource, sources_for_keys
 from app.services.llm_agents import get_basic_agent
 from app.services.prompt_library import render_prompt
@@ -63,6 +67,7 @@ def build_llm_taxonomy_planner(
     settings: Settings,
     task_id: int | None,
     user_id: int | None,
+    structured_output_requester: StructuredOutputRequester | None = None,
 ) -> TaxonomyPlanner:
     def plan_taxonomy(planner_input: TaxonomyPlannerInput) -> TaxonomyPlan:
         return _plan_taxonomy_with_llm(
@@ -70,6 +75,7 @@ def build_llm_taxonomy_planner(
             settings=settings,
             task_id=task_id,
             user_id=user_id,
+            structured_output_requester=structured_output_requester,
         )
 
     return plan_taxonomy
@@ -84,6 +90,7 @@ def apply_taxonomy_if_needed(
     task_id: int | None = None,
     use_llm: bool = True,
     force: bool = False,
+    structured_output_requester: StructuredOutputRequester | None = None,
 ) -> int:
     settings = settings or get_settings()
     if not settings.briefing_taxonomy_planner_enabled and not force:
@@ -103,7 +110,12 @@ def apply_taxonomy_if_needed(
     if planner is None:
         if not use_llm:
             return 0
-        planner = build_llm_taxonomy_planner(settings=settings, task_id=task_id, user_id=user_id)
+        planner = build_llm_taxonomy_planner(
+            settings=settings,
+            task_id=task_id,
+            user_id=user_id,
+            structured_output_requester=structured_output_requester,
+        )
 
     last_error: Exception | None = None
     for attempt in range(1, 3):
@@ -251,6 +263,7 @@ def _plan_taxonomy_with_llm(
     settings: Settings,
     task_id: int | None,
     user_id: int | None,
+    structured_output_requester: StructuredOutputRequester | None = None,
 ) -> TaxonomyPlan:
     started_at = time.perf_counter()
     model_spec = settings.briefing_taxonomy_model or settings.briefing_model
@@ -278,6 +291,7 @@ def _plan_taxonomy_with_llm(
             user_id=user_id,
             lens_count=len(planner_input.lens_dossiers),
             generation_started_at=started_at,
+            structured_output_requester=structured_output_requester,
         )
 
     agent = get_basic_agent(model_spec, TaxonomyPlan, system_prompt)
@@ -315,6 +329,7 @@ def _plan_taxonomy_with_openrouter(
     user_id: int | None,
     lens_count: int,
     generation_started_at: float,
+    structured_output_requester: StructuredOutputRequester | None = None,
 ) -> TaxonomyPlan:
     response = request_openrouter_json_schema(
         model_spec=model_spec,
@@ -324,6 +339,7 @@ def _plan_taxonomy_with_openrouter(
         schema=TaxonomyPlan.model_json_schema(),
         timeout_seconds=timeout_seconds,
         settings=settings,
+        requester=structured_output_requester,
     )
     output = TaxonomyPlan.model_validate_json(strip_json_code_fence(response.content))
     record_vendor_usage_out_of_band(

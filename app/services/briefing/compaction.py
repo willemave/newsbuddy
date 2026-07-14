@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.settings import Settings
 from app.models.db import BriefingLens, BriefingSegment, BriefingState
-from app.services.briefing.composer import plan_windows
+from app.services.briefing.composer import LayoutGenerator, plan_windows
 from app.services.briefing.segments import build_briefing_segment
 from app.services.briefing.sources import (
     BriefingSource,
@@ -44,6 +44,40 @@ class CompactionPlan:
     donors: tuple[CompactionDonor, ...]
     unread_source_keys: tuple[str, ...]
     windows: tuple[CompactionWindow, ...]
+
+
+@dataclass(frozen=True)
+class BriefingFragmentationMetrics:
+    unique_unread_source_count: int
+    window_source_limit: int
+    minimum_required_segment_count: int
+    excess_fragmentation: int
+
+
+def briefing_fragmentation_metrics(
+    source_key_groups: list[list[str]],
+    *,
+    tier: str,
+    read_keys: set[str],
+    settings: Settings,
+) -> BriefingFragmentationMetrics:
+    unique_unread_keys = {
+        str(source_key)
+        for source_keys in source_key_groups
+        for source_key in source_keys
+        if str(source_key) not in read_keys
+    }
+    window_source_limit = max(
+        settings.briefing_news_window_max if tier == "news" else settings.briefing_window_max,
+        1,
+    )
+    minimum_required = ceil(len(unique_unread_keys) / window_source_limit)
+    return BriefingFragmentationMetrics(
+        unique_unread_source_count=len(unique_unread_keys),
+        window_source_limit=window_source_limit,
+        minimum_required_segment_count=minimum_required,
+        excess_fragmentation=max(len(source_key_groups) - minimum_required, 0),
+    )
 
 
 def compact_fragmented_lenses(
@@ -87,15 +121,54 @@ def prepare_compactions(
         .order_by(BriefingLens.position.asc(), BriefingLens.id.asc())
         .all()
     )
+    lens_ids = [int(lens.id) for lens in lenses if lens.id is not None]
+    segments_by_lens_id: dict[int, list[BriefingSegment]] = {lens_id: [] for lens_id in lens_ids}
+    if lens_ids:
+        segment_rows = (
+            db.query(BriefingSegment)
+            .filter(BriefingSegment.lens_id.in_(lens_ids))
+            .filter(BriefingSegment.status.in_(("active", "degraded")))
+            .order_by(
+                BriefingSegment.lens_id.asc(),
+                BriefingSegment.created_at.desc(),
+                BriefingSegment.id.desc(),
+            )
+            .all()
+        )
+        for segment in segment_rows:
+            if segment.lens_id is not None:
+                segments_by_lens_id[int(segment.lens_id)].append(segment)
+
+    prepared_donors: list[tuple[BriefingLens, list[BriefingSegment], list[str]]] = []
+    all_source_keys: list[str] = []
+    seen_source_keys: set[str] = set()
     for lens in lenses:
         if lens.id is None:
             continue
-        segments = (
-            db.query(BriefingSegment)
-            .filter(BriefingSegment.lens_id == lens.id)
-            .filter(BriefingSegment.status.in_(("active", "degraded")))
-            .order_by(BriefingSegment.created_at.desc(), BriefingSegment.id.desc())
-            .all()
+        segments = segments_by_lens_id[int(lens.id)]
+        fragmentation = briefing_fragmentation_metrics(
+            [list(segment.source_keys or []) for segment in segments],
+            tier=str(lens.tier),
+            read_keys=read_keys,
+            settings=settings,
+        )
+        logger.info(
+            "Briefing Lens fragmentation measured",
+            extra={
+                "component": "briefing",
+                "operation": "measure_fragmentation",
+                "item_id": user_id,
+                "context_data": {
+                    "lens_key": str(lens.key),
+                    "active_segment_count": len(segments),
+                    "unique_unread_source_count": fragmentation.unique_unread_source_count,
+                    "window_source_limit": fragmentation.window_source_limit,
+                    "minimum_required_segment_count": (
+                        fragmentation.minimum_required_segment_count
+                    ),
+                    "excess_fragmentation": fragmentation.excess_fragmentation,
+                },
+            },
         )
         donors = _compaction_donors(
             segments,
@@ -109,8 +182,18 @@ def prepare_compactions(
         source_keys = _ordered_unread_source_keys(donors, read_keys=read_keys)
         if len(source_keys) < settings.briefing_window_min:
             continue
-        source_map = sources_for_keys(db, user_id=user_id, source_keys=source_keys)
-        if set(source_map) != set(source_keys):
+        prepared_donors.append((lens, donors, source_keys))
+        for source_key in source_keys:
+            if source_key not in seen_source_keys:
+                seen_source_keys.add(source_key)
+                all_source_keys.append(source_key)
+
+    source_map = sources_for_keys(db, user_id=user_id, source_keys=all_source_keys)
+    for lens, donors, source_keys in prepared_donors:
+        assert lens.id is not None
+        lens_id = lens.id
+        missing_source_keys = set(source_keys) - set(source_map)
+        if missing_source_keys:
             logger.warning(
                 "Briefing compaction skipped because donor sources could not be resolved",
                 extra={
@@ -121,7 +204,7 @@ def prepare_compactions(
                         "lens_key": str(lens.key),
                         "donor_count": len(donors),
                         "source_count": len(source_keys),
-                        "resolved_source_count": len(source_map),
+                        "resolved_source_count": len(source_keys) - len(missing_source_keys),
                     },
                 },
             )
@@ -129,7 +212,7 @@ def prepare_compactions(
         sources = [source_map[key] for key in source_keys]
         windows = tuple(
             CompactionWindow(
-                lens_id=int(lens.id),
+                lens_id=lens_id,
                 lens_key=str(lens.key),
                 lens_title=str(lens.title),
                 tier=str(lens.tier),
@@ -143,7 +226,7 @@ def prepare_compactions(
         )
         plans.append(
             CompactionPlan(
-                lens_id=int(lens.id),
+                lens_id=lens_id,
                 starting_version=starting_version,
                 donors=tuple(
                     CompactionDonor(
@@ -167,6 +250,7 @@ def compose_compactions(
     task_id: int | None,
     use_llm: bool,
     settings: Settings,
+    layout_generator: LayoutGenerator | None = None,
 ) -> list[ComposedWindow[CompactionWindow]]:
     windows = [window for plan in plans for window in plan.windows]
     return compose_windows(
@@ -175,6 +259,7 @@ def compose_compactions(
         task_id=task_id,
         use_llm=use_llm,
         settings=settings,
+        layout_generator=layout_generator,
     )
 
 

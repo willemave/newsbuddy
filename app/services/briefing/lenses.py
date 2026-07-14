@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
 from app.models.db import BriefingLens, BriefingPendingSource, BriefingSegment
-from app.services.briefing.openrouter import request_openrouter_json_schema, strip_json_code_fence
+from app.services.briefing.openrouter import (
+    StructuredOutputRequester,
+    request_openrouter_json_schema,
+    strip_json_code_fence,
+)
 from app.services.briefing.sources import BriefingSource, sources_for_keys
 from app.services.llm_agents import get_basic_agent
 from app.services.news_embeddings import encode_texts_with_embedding_model
@@ -71,6 +75,7 @@ def build_llm_lens_namer(
     settings: Settings,
     task_id: int | None,
     user_id: int | None,
+    structured_output_requester: StructuredOutputRequester | None = None,
 ) -> Callable[[list[BriefingSource]], LensName]:
     def name_lens(sources: list[BriefingSource]) -> LensName:
         return _name_lens_with_llm(
@@ -78,6 +83,7 @@ def build_llm_lens_namer(
             settings=settings,
             task_id=task_id,
             user_id=user_id,
+            structured_output_requester=structured_output_requester,
         )
 
     return name_lens
@@ -772,6 +778,7 @@ def _name_lens_with_llm(
     settings: Settings,
     task_id: int | None,
     user_id: int | None,
+    structured_output_requester: StructuredOutputRequester | None = None,
 ) -> LensName:
     started_at = time.perf_counter()
     model_spec = settings.briefing_model
@@ -795,6 +802,7 @@ def _name_lens_with_llm(
             user_id=user_id,
             source_count=len(sources),
             generation_started_at=started_at,
+            structured_output_requester=structured_output_requester,
         )
 
     agent = get_basic_agent(model_spec, LensNameOutput, system_prompt)
@@ -836,6 +844,7 @@ def _name_lens_with_openrouter(
     user_id: int | None,
     source_count: int,
     generation_started_at: float,
+    structured_output_requester: StructuredOutputRequester | None = None,
 ) -> LensName:
     response = request_openrouter_json_schema(
         model_spec=model_spec,
@@ -845,6 +854,7 @@ def _name_lens_with_openrouter(
         schema=LensNameOutput.model_json_schema(),
         timeout_seconds=timeout_seconds,
         settings=settings,
+        requester=structured_output_requester,
     )
     output = LensNameOutput.model_validate_json(strip_json_code_fence(response.content))
     record_vendor_usage_out_of_band(

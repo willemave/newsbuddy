@@ -14,6 +14,7 @@ from app.models.db import (
     ProcessingTask,
 )
 from app.models.db.users import User
+from app.services.briefing import refresh as refresh_service
 from app.services.briefing.read_marks import (
     bump_briefing_version_for_news_item,
     mark_briefing_sources_read,
@@ -70,6 +71,53 @@ def test_full_refresh_builds_segments_and_schedules_sweep(
         .count()
         == 1
     )
+
+
+def test_refresh_owns_one_provider_client_lifecycle(
+    db_session: Session,
+    test_user: User,
+    monkeypatch,
+) -> None:
+    assert test_user.id is not None
+    settings = get_settings().model_copy(
+        update={
+            "briefing_enabled_user_ids": [test_user.id],
+            "briefing_model": "openrouter:test/model",
+            "openrouter_api_key": "test-key",
+        }
+    )
+    clients: list[object] = []
+
+    class FakeRefreshClient:
+        def __init__(self, **_kwargs) -> None:
+            self.entered = False
+            self.closed = False
+            clients.append(self)
+
+        def __enter__(self):
+            self.entered = True
+            return self
+
+        def __exit__(self, *_args) -> None:
+            self.closed = True
+
+        def request_json_schema(self, **_kwargs):
+            raise AssertionError("No generation request expected for an empty refresh")
+
+    monkeypatch.setattr(refresh_service, "BriefingOpenRouterClient", FakeRefreshClient)
+
+    run_briefing_refresh(
+        db_session,
+        user_id=test_user.id,
+        mode="sweep",
+        use_llm=True,
+        settings=settings,
+    )
+
+    assert len(clients) == 1
+    assert isinstance(clients[0], FakeRefreshClient)
+    assert clients[0].entered is True
+    assert clients[0].closed is True
 
 
 def test_release_path_full_refresh_builds_segments_and_schedules_sweep(
