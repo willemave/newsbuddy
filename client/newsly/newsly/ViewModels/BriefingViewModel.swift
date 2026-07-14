@@ -833,7 +833,7 @@ final class BriefingViewModel: ObservableObject {
             result.formUnion(lensKeysBySourceKey[sourceKey] ?? [])
         }
         for lensKey in affectedLensKeys {
-            invalidateLens(lensKey)
+            invalidateLens(lensKey, staleness: .readRetirement)
         }
     }
 

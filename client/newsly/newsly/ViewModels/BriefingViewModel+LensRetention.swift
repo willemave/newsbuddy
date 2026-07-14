@@ -5,12 +5,14 @@ extension BriefingViewModel {
     /// the short return grace period. Expiry only evicts cached presentation;
     /// the normal working-set loader owns every subsequent network request.
     func isLensReplacementProtected(_ key: String) -> Bool {
-        (isActive && selectedLensKey == key) || lensRetention.contains(key)
+        lensRetention.isRetained(key)
+            || (selectedLensKey == key && !lensRetention.isExpired(key))
     }
 
     func protectLens(_ key: String) {
         lensRetention.protect(key)
         guard let state = lensStates[key], state.document != nil,
+              state.retainsReadRetirement,
               state.isStale || state.loadPhase == .replacingVisible else { return }
         tasks.cancel(.lens(key))
         mutateLensState(key) { $0.loadPhase = .idle }
@@ -24,14 +26,20 @@ extension BriefingViewModel {
         }
     }
 
-    func invalidateLens(_ key: String) {
+    func invalidateLens(
+        _ key: String,
+        staleness: BriefingLensState.Staleness = .structural
+    ) {
         tasks.cancel(.lens(key))
+        if staleness != .readRetirement {
+            lensRetention.protect(key)
+        }
         mutateLensState(key) { state in
             state.loadPhase = .idle
             state.failure = nil
-            state.isStale = true
+            state.staleness = staleness
         }
-        if !isLensReplacementProtected(key) {
+        if staleness == .readRetirement, !isLensReplacementProtected(key) {
             discardStaleLensDocument(key)
         }
     }
@@ -46,7 +54,8 @@ extension BriefingViewModel {
         state.renderModel = nil
         state.loadPhase = .idle
         state.failure = nil
-        state.isStale = false
+        state.staleness = .fresh
+        state.documentGeneration += 1
         lensStates[key] = state
         return true
     }

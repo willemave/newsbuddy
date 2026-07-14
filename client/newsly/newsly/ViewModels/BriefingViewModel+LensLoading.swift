@@ -32,6 +32,9 @@ extension BriefingViewModel {
 
     func loadLensIfNeeded(key: String) {
         let currentState = lensStates[key] ?? BriefingLensState()
+        guard key == selectedLensKey || !lensRetention.isExpired(key) else {
+            return
+        }
         let existing = currentState.document
         let requiresReplacement = currentState.isStale
             || existing.map { $0.version != index?.version } == true
@@ -40,7 +43,11 @@ extension BriefingViewModel {
               !tasks.isRunning(.lens(key)) else {
             return
         }
-        guard existing == nil || !requiresReplacement || !isLensReplacementProtected(key) else {
+        let keepsRetiredDocumentVisible = existing != nil
+            && requiresReplacement
+            && currentState.retainsReadRetirement
+            && isLensReplacementProtected(key)
+        guard !keepsRetiredDocumentVisible else {
             return
         }
         mutateLensState(key) { state in
@@ -89,7 +96,7 @@ extension BriefingViewModel {
                             for: key,
                             reusingUnchangedPrefix: visibleExisting != nil || pageCount > 1
                         ) { state in
-                            state.isStale = false
+                            state.staleness = .fresh
                             state.failure = nil
                             state.loadPhase = assembled.hasMore ? .continuation : .idle
                         }
@@ -107,7 +114,7 @@ extension BriefingViewModel {
                 guard let assembled else { return }
                 if replacingVisibleLens {
                     self.installLens(assembled, for: key) { state in
-                        state.isStale = false
+                        state.staleness = .fresh
                         state.failure = nil
                         state.loadPhase = .idle
                     }
@@ -126,7 +133,7 @@ extension BriefingViewModel {
                    case .staleCursor = fetchError {
                     self.mutateLensState(key) { state in
                         state.loadPhase = .idle
-                        state.isStale = true
+                        state.staleness = .structural
                         state.failure = .continuation(error.localizedDescription)
                     }
                     return

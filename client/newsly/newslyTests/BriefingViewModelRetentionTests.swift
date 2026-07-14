@@ -7,7 +7,10 @@ final class BriefingViewModelRetentionTests: XCTestCase {
         let (service, viewModel, _) = await makeRetiredLensScenario()
 
         XCTAssertEqual(service.indexEtags.prefix(2), [nil, "etag-1"])
-        XCTAssertEqual(service.fetchLensRequests.map(\.cursor), [nil])
+        XCTAssertEqual(
+            service.fetchLensRequests.filter { $0.key == "today" }.map(\.cursor),
+            [nil]
+        )
         XCTAssertEqual(viewModel.index?.version, 2)
         XCTAssertEqual(viewModel.selectedLens?.segments.map(\.id), [10])
         XCTAssertEqual(viewModel.source(for: "content:1")?.read, true)
@@ -81,7 +84,10 @@ final class BriefingViewModelRetentionTests: XCTestCase {
                 segments: [makeSegment(id: 11, sourceKeys: ["news:2"])]
             )
         ]
-        service.lensResponses["later"] = makeUnrelatedLens()
+        service.lensPageResponses["later"] = [
+            makeUnrelatedLens(version: 1),
+            makeUnrelatedLens(version: 2)
+        ]
         service.markReadWaitsForResume = true
         service.readMarkResponse = APIBriefingReadMarkResponse(
             marked: 1,
@@ -139,7 +145,10 @@ final class BriefingViewModelRetentionTests: XCTestCase {
                 segments: [makeSegment(id: 11, sourceKeys: ["news:2"])]
             )
         ]
-        service.lensResponses["later"] = makeUnrelatedLens()
+        service.lensPageResponses["later"] = [
+            makeUnrelatedLens(version: 1),
+            makeUnrelatedLens(version: 2)
+        ]
         service.readMarkResponse = APIBriefingReadMarkResponse(
             marked: 1,
             retired: 1,
@@ -159,10 +168,10 @@ final class BriefingViewModelRetentionTests: XCTestCase {
         return (service, viewModel, scheduler)
     }
 
-    private func makeUnrelatedLens() -> APIBriefingLensResponse {
+    private func makeUnrelatedLens(version: Int) -> APIBriefingLensResponse {
         makeLens(
             key: "later",
-            version: 1,
+            version: version,
             position: 1,
             segments: [makeSegment(id: 20, sourceKeys: ["news:9"])],
             sources: [

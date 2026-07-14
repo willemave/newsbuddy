@@ -4,6 +4,12 @@ import Foundation
 /// presentation model, paging phase, and failure together makes each published
 /// transition internally consistent.
 struct BriefingLensState {
+    enum Staleness: Equatable {
+        case fresh
+        case structural
+        case readRetirement
+    }
+
     enum LoadPhase: Equatable {
         case idle
         case initial
@@ -21,7 +27,15 @@ struct BriefingLensState {
     var loadPhase: LoadPhase = .idle
     var failure: Failure?
     var documentGeneration = 0
-    var isStale = false
+    var staleness: Staleness = .fresh
+
+    var isStale: Bool {
+        staleness != .fresh
+    }
+
+    var retainsReadRetirement: Bool {
+        staleness == .readRetirement
+    }
 
     var initialError: String? {
         guard case .initial(let message) = failure else { return nil }

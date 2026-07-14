@@ -46,30 +46,40 @@ final class BriefingLensRetentionScheduler: BriefingLensRetentionScheduling {
 
 @MainActor
 final class BriefingLensRetentionPolicy {
+    private enum Status {
+        case retained
+        case expired
+    }
+
     private let scheduler: any BriefingLensRetentionScheduling
-    private var retainedLensKeys: Set<String> = []
+    private var statuses: [String: Status] = [:]
 
     init(scheduler: any BriefingLensRetentionScheduling) {
         self.scheduler = scheduler
     }
 
-    func contains(_ lensKey: String) -> Bool {
-        retainedLensKeys.contains(lensKey)
+    func isRetained(_ lensKey: String) -> Bool {
+        statuses[lensKey] == .retained
+    }
+
+    func isExpired(_ lensKey: String) -> Bool {
+        statuses[lensKey] == .expired
     }
 
     func beginRetaining(
         _ lensKey: String,
         onExpiry: @escaping @MainActor () -> Void
     ) {
-        retainedLensKeys.insert(lensKey)
+        statuses[lensKey] = .retained
         scheduler.scheduleExpiry(for: lensKey) { [weak self] in
-            guard let self, self.retainedLensKeys.remove(lensKey) != nil else { return }
+            guard let self, self.statuses[lensKey] == .retained else { return }
+            self.statuses[lensKey] = .expired
             onExpiry()
         }
     }
 
     func protect(_ lensKey: String) {
-        retainedLensKeys.remove(lensKey)
+        statuses.removeValue(forKey: lensKey)
         scheduler.cancelExpiry(for: lensKey)
     }
 }
