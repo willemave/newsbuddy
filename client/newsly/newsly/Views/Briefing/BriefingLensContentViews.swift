@@ -197,6 +197,7 @@ struct BriefingLensPageView: View, Equatable {
     let lensKey: String
     let renderModel: BriefingLensRenderModel?
     let isReadTrackingEnabled: Bool
+    let readBoundaryY: CGFloat?
     let documentGeneration: Int
     let error: String?
     let continuationError: String?
@@ -233,6 +234,7 @@ struct BriefingLensPageView: View, Equatable {
         lhs.lensKey == rhs.lensKey
             && lhs.renderModel === rhs.renderModel
             && lhs.isReadTrackingEnabled == rhs.isReadTrackingEnabled
+            && lhs.readBoundaryY == rhs.readBoundaryY
             && lhs.documentGeneration == rhs.documentGeneration
             && lhs.error == rhs.error
             && lhs.continuationError == rhs.continuationError
@@ -286,6 +288,7 @@ struct BriefingLensPageView: View, Equatable {
                                 .id(segment.id)
                                 .briefingSegmentReadMarker(
                                     isEnabled: isReadTrackingEnabled,
+                                    readBoundaryY: readBoundaryY,
                                     onMidpointCrossed: {
                                         onMarkSegmentSeen(segment)
                                     }
@@ -557,6 +560,7 @@ private struct BriefingSegmentView: View {
 
 private struct BriefingSegmentReadMarker: ViewModifier {
     let isEnabled: Bool
+    let readBoundaryY: CGFloat?
     let onMidpointCrossed: () -> Void
 
     @State private var tracker = BriefingMidpointReadTracker()
@@ -565,7 +569,10 @@ private struct BriefingSegmentReadMarker: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onGeometryChange(for: Bool.self) { proxy in
-                briefingSegmentHasCrossedReadMidpoint(frame: proxy.frame(in: .scrollView))
+                briefingSegmentHasCrossedReadMidpoint(
+                    frame: proxy.frame(in: .named(briefingReadCoordinateSpaceName)),
+                    readBoundaryY: readBoundaryY
+                )
             } action: { _, crossed in
                 hasCrossedMidpoint = crossed
                 markReadIfNeeded(hasCrossedMidpoint: crossed, isEnabled: isEnabled)
@@ -587,11 +594,13 @@ private struct BriefingSegmentReadMarker: ViewModifier {
 private extension View {
     func briefingSegmentReadMarker(
         isEnabled: Bool,
+        readBoundaryY: CGFloat?,
         onMidpointCrossed: @escaping () -> Void
     ) -> some View {
         modifier(
             BriefingSegmentReadMarker(
                 isEnabled: isEnabled,
+                readBoundaryY: readBoundaryY,
                 onMidpointCrossed: onMidpointCrossed
             )
         )

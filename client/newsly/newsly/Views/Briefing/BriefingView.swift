@@ -47,6 +47,15 @@ struct BriefingView: View {
         mastheadHeight + (showsCategoryStrip ? categoryStripHeight : 0)
     }
 
+    /// Bottom edge of the chrome that remains pinned while reading. Segment
+    /// midpoints cross this edge beneath the pills, not the pager's raw top.
+    private var readBoundaryY: CGFloat? {
+        briefingPinnedReadBoundaryY(
+            expandedChromeHeight: expandedChromeHeight,
+            collapsibleChromeHeight: collapsibleChromeHeight
+        )
+    }
+
     /// The lens whose scroll position drives the chrome; Start Here never
     /// collapses the masthead.
     private var activeCollapseLensKey: String? {
@@ -107,6 +116,7 @@ struct BriefingView: View {
                             renderModel: viewModel.renderModel(for: lens.key),
                             isReadTrackingEnabled: viewModel.isActive
                                 && viewModel.selectedLensKey == lens.key,
+                            readBoundaryY: readBoundaryY,
                             documentGeneration: viewModel.documentGeneration(for: lens.key),
                             error: viewModel.lensErrors[lens.key],
                             continuationError: viewModel.lensContinuationErrors[lens.key],
@@ -140,6 +150,7 @@ struct BriefingView: View {
 
             headerChrome
         }
+        .coordinateSpace(name: briefingReadCoordinateSpaceName)
     }
 
     @ViewBuilder

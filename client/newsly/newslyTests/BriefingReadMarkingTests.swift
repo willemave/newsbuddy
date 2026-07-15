@@ -2,22 +2,55 @@ import XCTest
 @testable import newsly
 
 final class BriefingReadMarkingTests: XCTestCase {
-    func testSegmentMidpointJustBeforeViewportTopHasNotCrossed() {
-        let frame = CGRect(x: 0, y: -49.5, width: 100, height: 100)
-
-        XCTAssertFalse(briefingSegmentHasCrossedReadMidpoint(frame: frame))
+    func testPinnedReadBoundaryUsesRemainingChromeHeight() {
+        XCTAssertEqual(
+            briefingPinnedReadBoundaryY(
+                expandedChromeHeight: 220,
+                collapsibleChromeHeight: 160
+            ),
+            60
+        )
     }
 
-    func testSegmentMidpointExactlyAtViewportTopHasNotCrossed() {
-        let frame = CGRect(x: 0, y: -50, width: 100, height: 100)
-
-        XCTAssertFalse(briefingSegmentHasCrossedReadMidpoint(frame: frame))
+    func testPinnedReadBoundaryIsUnavailableBeforeChromeMeasurement() {
+        XCTAssertNil(
+            briefingPinnedReadBoundaryY(
+                expandedChromeHeight: 0,
+                collapsibleChromeHeight: 0
+            )
+        )
     }
 
-    func testSegmentMidpointJustAfterViewportTopHasCrossed() {
-        let frame = CGRect(x: 0, y: -50.5, width: 100, height: 100)
+    func testSegmentMidpointJustBeforePinnedBoundaryHasNotCrossed() {
+        let frame = CGRect(x: 0, y: 30.5, width: 100, height: 100)
 
-        XCTAssertTrue(briefingSegmentHasCrossedReadMidpoint(frame: frame))
+        XCTAssertFalse(
+            briefingSegmentHasCrossedReadMidpoint(frame: frame, readBoundaryY: 80)
+        )
+    }
+
+    func testSegmentMidpointExactlyAtPinnedBoundaryHasNotCrossed() {
+        let frame = CGRect(x: 0, y: 30, width: 100, height: 100)
+
+        XCTAssertFalse(
+            briefingSegmentHasCrossedReadMidpoint(frame: frame, readBoundaryY: 80)
+        )
+    }
+
+    func testSegmentMidpointJustAfterPinnedBoundaryHasCrossed() {
+        let frame = CGRect(x: 0, y: 29.5, width: 100, height: 100)
+
+        XCTAssertTrue(
+            briefingSegmentHasCrossedReadMidpoint(frame: frame, readBoundaryY: 80)
+        )
+    }
+
+    func testSegmentMidpointDoesNotCrossBeforeBoundaryMeasurement() {
+        let frame = CGRect(x: 0, y: -100, width: 100, height: 100)
+
+        XCTAssertFalse(
+            briefingSegmentHasCrossedReadMidpoint(frame: frame, readBoundaryY: nil)
+        )
     }
 
     func testInitialObservationAfterMidpointDoesNotMarkRead() {

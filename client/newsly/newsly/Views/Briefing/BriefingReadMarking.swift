@@ -1,7 +1,21 @@
 import Foundation
 
-func briefingSegmentHasCrossedReadMidpoint(frame: CGRect) -> Bool {
-    frame.midY < 0
+let briefingReadCoordinateSpaceName = "briefing.read-tracking"
+
+func briefingPinnedReadBoundaryY(
+    expandedChromeHeight: CGFloat,
+    collapsibleChromeHeight: CGFloat
+) -> CGFloat? {
+    guard expandedChromeHeight > 0 else { return nil }
+    return max(expandedChromeHeight - collapsibleChromeHeight, 0)
+}
+
+func briefingSegmentHasCrossedReadMidpoint(
+    frame: CGRect,
+    readBoundaryY: CGFloat?
+) -> Bool {
+    guard let readBoundaryY else { return false }
+    return frame.midY < readBoundaryY
 }
 
 struct BriefingMidpointReadTracker {
