@@ -36,6 +36,10 @@ def test_submission_of_existing_visible_article_enqueues_generated_image(
         return 999
 
     monkeypatch.setattr("app.services.queue.QueueService.enqueue", _fake_enqueue)
+    monkeypatch.setattr(
+        "app.services.long_form_images.has_generated_long_form_image",
+        lambda content: False,
+    )
 
     existing = Content(
         url="https://example.com/visible-article",
