@@ -1958,6 +1958,7 @@ struct APIBriefingFirstRunProgress: Codable {
     let connectedSourceCount: Int
     let completedSources: [APIBriefingFirstRunSourceProgress]
     let activeSources: [String]
+    let queuedSources: [String]
     let readyCategoryKeys: [String]
 
     init(
@@ -1967,6 +1968,7 @@ struct APIBriefingFirstRunProgress: Codable {
         connectedSourceCount: Int,
         completedSources: [APIBriefingFirstRunSourceProgress] = [],
         activeSources: [String] = [],
+        queuedSources: [String] = [],
         readyCategoryKeys: [String] = []
     ) {
         self.runId = runId
@@ -1975,6 +1977,7 @@ struct APIBriefingFirstRunProgress: Codable {
         self.connectedSourceCount = connectedSourceCount
         self.completedSources = completedSources
         self.activeSources = activeSources
+        self.queuedSources = queuedSources
         self.readyCategoryKeys = readyCategoryKeys
     }
 
@@ -1985,6 +1988,7 @@ struct APIBriefingFirstRunProgress: Codable {
         case connectedSourceCount = "connected_source_count"
         case completedSources = "completed_sources"
         case activeSources = "active_sources"
+        case queuedSources = "queued_sources"
         case readyCategoryKeys = "ready_category_keys"
     }
 
@@ -1996,6 +2000,7 @@ struct APIBriefingFirstRunProgress: Codable {
         connectedSourceCount = try container.decode(Int.self, forKey: .connectedSourceCount)
         completedSources = try container.decode([APIBriefingFirstRunSourceProgress].self, forKey: .completedSources)
         activeSources = try container.decode([String].self, forKey: .activeSources)
+        queuedSources = try container.decode([String].self, forKey: .queuedSources)
         readyCategoryKeys = try container.decode([String].self, forKey: .readyCategoryKeys)
     }
 
@@ -2007,6 +2012,7 @@ struct APIBriefingFirstRunProgress: Codable {
         try container.encode(connectedSourceCount, forKey: .connectedSourceCount)
         try container.encode(completedSources, forKey: .completedSources)
         try container.encode(activeSources, forKey: .activeSources)
+        try container.encode(queuedSources, forKey: .queuedSources)
         try container.encode(readyCategoryKeys, forKey: .readyCategoryKeys)
     }
 }

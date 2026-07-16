@@ -513,6 +513,7 @@ type BriefingFirstRunProgress struct {
 	ConnectedSourceCount int `json:"connected_source_count"`
 	CompletedSources []BriefingFirstRunSourceProgress `json:"completed_sources,omitempty"`
 	ActiveSources []string `json:"active_sources,omitempty"`
+	QueuedSources []string `json:"queued_sources,omitempty"`
 	ReadyCategoryKeys []string `json:"ready_category_keys,omitempty"`
 }
 

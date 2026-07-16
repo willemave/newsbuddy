@@ -44,6 +44,7 @@ def test_first_edition_progress_appends_sources_and_uses_ready_briefing_categori
     assert progress.connected_source_count == 2
     assert progress.completed_sources == []
     assert progress.active_sources == ["Stratechery", "Techmeme"]
+    assert progress.queued_sources == []
 
     assert (
         record_scraper_source_result(
@@ -93,6 +94,50 @@ def test_first_edition_progress_appends_sources_and_uses_ready_briefing_categori
     assert progress.phase == BriefingFirstRunPhase.READY
     assert run.status == "active"
     assert run.revision == 3
+
+
+def test_queued_sources_list_pending_sources_beyond_the_active_window(
+    db_session,
+    test_user,
+) -> None:
+    configs = [
+        UserScraperConfig(
+            user_id=test_user.id,
+            scraper_type="substack",
+            display_name=name,
+            feed_url=f"https://{key}.example.com/feed/",
+            config={"feed_url": f"https://{key}.example.com/feed/"},
+        )
+        for key, name in [
+            ("stratechery", "Stratechery"),
+            ("platformer", "Platformer"),
+            ("garbageday", "Garbage Day"),
+            ("numlock", "Numlock News"),
+        ]
+    ]
+    db_session.add_all(configs)
+    db_session.flush()
+    assert configs[0].id is not None
+
+    run = start_first_edition(db_session, user_id=test_user.id)
+    assert run.id is not None
+    progress = get_first_run_progress(db_session, user_id=test_user.id)
+    assert progress is not None
+    assert progress.active_sources == ["Stratechery", "Platformer"]
+    assert progress.queued_sources == ["Garbage Day", "Numlock News"]
+
+    assert record_feed_source_result(
+        db_session,
+        run_id=run.id,
+        config_id=configs[0].id,
+        processed_item_count=4,
+        outcome=BriefingFirstRunSourceOutcome.PROCESSED,
+    )
+    progress = get_first_run_progress(db_session, user_id=test_user.id)
+    assert progress is not None
+    assert [source.display_name for source in progress.completed_sources] == ["Stratechery"]
+    assert progress.active_sources == ["Platformer", "Garbage Day"]
+    assert progress.queued_sources == ["Numlock News"]
 
 
 def test_first_edition_completion_is_durable(db_session, test_user) -> None:

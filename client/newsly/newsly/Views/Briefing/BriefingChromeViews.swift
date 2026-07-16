@@ -40,7 +40,7 @@ struct BriefingTierStrip: View {
 }
 
 /// During first-run onboarding, ready categories append directly beside the
-/// synthetic Start Here page. The rail never shows placeholder categories.
+/// synthetic Welcome page. The rail never shows placeholder categories.
 struct BriefingFirstRunStrip: View {
     @ObservedObject var viewModel: BriefingViewModel
     let onSelectStartHere: () -> Void
@@ -50,7 +50,7 @@ struct BriefingFirstRunStrip: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 BriefingStripPill(
-                    title: "Start Here",
+                    title: "Welcome",
                     unreadCount: 0,
                     isSelected: viewModel.isStartHereSelected,
                     accessibilityId: "briefing.start_here.pill"

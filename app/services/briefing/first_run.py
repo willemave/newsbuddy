@@ -94,11 +94,13 @@ def get_first_run_progress(
         for source in sources
         if source.status in TERMINAL_SOURCE_STATUSES
     ]
-    active = [
+    pending = [
         str(source.display_name)
         for source in sorted(sources, key=lambda source: int(source.position or 0))
         if source.status not in TERMINAL_SOURCE_STATUSES
-    ][:2]
+    ]
+    active = pending[:2]
+    queued = pending[2:]
     category_keys = ready_category_keys or []
     all_sources_done = len(completed) == len(sources)
     if all_sources_done and category_keys:
@@ -114,6 +116,7 @@ def get_first_run_progress(
         connected_source_count=len(sources),
         completed_sources=completed,
         active_sources=active,
+        queued_sources=queued,
         ready_category_keys=category_keys,
     )
 

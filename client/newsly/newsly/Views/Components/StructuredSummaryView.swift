@@ -401,60 +401,37 @@ struct FlowLayout: Layout {
         }
         
         init(in maxPossibleWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
-            var itemsInRow = 0
-            var remainingWidth = maxPossibleWidth.isFinite ? maxPossibleWidth : .greatestFiniteMagnitude
+            let maxWidth = maxPossibleWidth.isFinite ? maxPossibleWidth : .greatestFiniteMagnitude
+            var rows = [Row]()
+            var rowStart = 0
+            var frames = [CGRect]()
             var rowMinY: CGFloat = 0.0
             var rowHeight: CGFloat = 0.0
-            var rows = [Row]()
-            
+            var maxRowWidth: CGFloat = 0.0
+
             for (index, subview) in zip(subviews.indices, subviews) {
                 let idealSize = subview.sizeThatFits(.unspecified)
-                if index != 0 && widthInRow(index: index, idealWidth: idealSize.width, spacing: spacing) > remainingWidth {
-                    finalizeRow(indices: index - itemsInRow..<index, y: rowMinY, rows: &rows)
-                    
-                    bounds.width = max(bounds.width, maxPossibleWidth - remainingWidth)
+                let originX = frames.isEmpty ? 0 : (frames[frames.count - 1].maxX + spacing)
+                if !frames.isEmpty, originX + idealSize.width > maxWidth {
+                    rows.append(Row(indices: rowStart..<index, frames: frames))
+                    maxRowWidth = max(maxRowWidth, frames[frames.count - 1].maxX)
                     rowMinY += rowHeight + spacing
-                    itemsInRow = 0
-                    remainingWidth = maxPossibleWidth
+                    rowStart = index
+                    frames = []
                     rowHeight = 0
                 }
-                
-                addToRow(index: index, idealSize: idealSize, spacing: spacing, &remainingWidth, &rowHeight)
-                
-                itemsInRow += 1
-            }
-            
-            if itemsInRow > 0 {
-                finalizeRow(indices: subviews.count - itemsInRow..<subviews.count, y: rowMinY, rows: &rows)
-                bounds.width = max(bounds.width, maxPossibleWidth - remainingWidth)
-            }
-            
-            bounds.height = rowMinY + rowHeight
-            self.rows = rows
-            
-            func widthInRow(index: Int, idealWidth: CGFloat, spacing: CGFloat) -> CGFloat {
-                idealWidth + (index == 0 ? 0 : spacing)
-            }
-            
-            func addToRow(index: Int, idealSize: CGSize, spacing: CGFloat, _ remainingWidth: inout CGFloat, _ rowHeight: inout CGFloat) {
-                let width = widthInRow(index: index, idealWidth: idealSize.width, spacing: spacing)
-                
-                remainingWidth -= width
+                let x = frames.isEmpty ? 0 : (frames[frames.count - 1].maxX + spacing)
+                frames.append(CGRect(x: x, y: rowMinY, width: idealSize.width, height: idealSize.height))
                 rowHeight = max(rowHeight, idealSize.height)
             }
-            
-            func finalizeRow(indices: Range<Int>, y: CGFloat, rows: inout [Row]) {
-                var frames = [CGRect]()
-                var x = 0.0
-                for index in indices {
-                    let idealSize = subviews[index].sizeThatFits(.unspecified)
-                    let width = idealSize.width
-                    let height = idealSize.height
-                    frames.append(CGRect(x: x, y: y, width: width, height: height))
-                    x += width + spacing
-                }
-                rows.append(Row(indices: indices, frames: frames))
+
+            if !frames.isEmpty {
+                rows.append(Row(indices: rowStart..<subviews.count, frames: frames))
+                maxRowWidth = max(maxRowWidth, frames[frames.count - 1].maxX)
             }
+
+            bounds = CGSize(width: maxRowWidth, height: rowMinY + rowHeight)
+            self.rows = rows
         }
     }
 }

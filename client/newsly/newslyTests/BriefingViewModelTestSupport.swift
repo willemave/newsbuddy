@@ -295,6 +295,7 @@ func makeFirstRun(
     connectedSourceCount: Int = 3,
     completedSources: [APIBriefingFirstRunSourceProgress] = [],
     activeSources: [String] = ["Techmeme", "Stratechery"],
+    queuedSources: [String] = ["The Verge"],
     readyCategoryKeys: [String] = []
 ) -> APIBriefingFirstRunProgress {
     APIBriefingFirstRunProgress(
@@ -304,6 +305,7 @@ func makeFirstRun(
         connectedSourceCount: connectedSourceCount,
         completedSources: completedSources,
         activeSources: activeSources,
+        queuedSources: queuedSources,
         readyCategoryKeys: readyCategoryKeys
     )
 }

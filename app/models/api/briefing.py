@@ -40,6 +40,7 @@ class BriefingFirstRunProgress(BaseModel):
     connected_source_count: int
     completed_sources: list[BriefingFirstRunSourceProgress] = Field(default_factory=list)
     active_sources: list[str] = Field(default_factory=list)
+    queued_sources: list[str] = Field(default_factory=list)
     ready_category_keys: list[str] = Field(default_factory=list)
 
 

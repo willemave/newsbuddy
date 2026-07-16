@@ -2,6 +2,28 @@
 
 **Date:** 2026-07-11
 **Status:** Implemented and quality-hardened locally
+**Amended:** 2026-07-15 — see "Amendment: source chips" below
+
+## Amendment: source chips (2026-07-15)
+
+The accumulated-prose progress paragraph was replaced by a per-source chip board
+("arrivals board"), and the rail pill was renamed `Start Here` → `Welcome`. Accumulated
+prose read as a wall of repeated sentences by the fifth source, and gave no at-a-glance
+read of overall progress. The "prose, not a checklist" rule and the example progression
+below are superseded for the progress display; the no-percentage / no-duration /
+no-spinner-copy non-goals still hold.
+
+- One chip per connected source: hollow outline (queued), pulsing terracotta dot
+  (being read), filled with item count (processed), dashed outline (unavailable).
+- A serif headline above the chips states the phase; a single narration line below
+  carries only the current story ("Now reading …", shaping copy, or an unavailable note),
+  not the accumulated history.
+- The API now includes `queued_sources` (pending source names beyond the two-item
+  active window) on `BriefingFirstRunProgress` so every chip can be named from the start.
+- The feature bullets grew into a two-part guide: what to expect while waiting
+  (categories appear beside `Welcome`, the briefing keeps updating), then the wider
+  app tour (listen, dig deeper, Knowledge, search, Learning, share extension).
+- Accessibility identifiers are unchanged (`briefing.start_here.*`).
 **Scope:** onboarding completion, first-edition progress, Briefing index, and iOS Briefing UI
 **Primary goal:** make Briefing the first product experience after onboarding and teach it inside a
 temporary `Start Here` category while the user's first real categories arrive
