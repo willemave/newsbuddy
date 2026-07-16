@@ -27,7 +27,6 @@ struct OnboardingRedditStep: View {
                     } else {
                         OnboardingSuggestionSection(
                             title: "SUBREDDITS",
-                            icon: "bubble.left.and.text.bubble.right",
                             items: viewModel.subredditSuggestions,
                             isSelected: { viewModel.selectedSubreddits.contains($0.subreddit ?? "") },
                             onToggle: { viewModel.toggleSubreddit($0) }

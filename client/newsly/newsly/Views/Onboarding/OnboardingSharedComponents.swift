@@ -7,17 +7,13 @@ import SwiftUI
 
 struct OnboardingSuggestionSection: View {
     let title: String
-    let icon: String
     let items: [OnboardingSuggestion]
     let isSelected: (OnboardingSuggestion) -> Bool
     let onToggle: (OnboardingSuggestion) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.appSymbol(size: 9, weight: .semibold))
-                    .foregroundColor(.onboardingText.opacity(0.55))
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(title)
                     .font(.editorialMeta)
                     .foregroundColor(.onboardingText.opacity(0.55))
@@ -26,18 +22,22 @@ struct OnboardingSuggestionSection: View {
                 Spacer()
 
                 Text("\(items.count)")
-                    .font(.appCaption.weight(.semibold))
+                    .font(.appCaption)
                     .monospacedDigit()
-                    .foregroundColor(.onboardingText.opacity(0.68))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.onboardingText.opacity(0.08)))
+                    .foregroundColor(.onboardingText.opacity(0.45))
             }
             .padding(.top, 16)
             .padding(.bottom, 4)
 
-            VStack(spacing: 8) {
-                ForEach(items, id: \.stableKey) { suggestion in
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.stableKey) { index, suggestion in
+                    if index > 0 {
+                        Rectangle()
+                            .fill(Color.onboardingText.opacity(0.07))
+                            .frame(height: 0.5)
+                            .padding(.leading, 60)
+                    }
+
                     OnboardingSuggestionCard(
                         suggestion: suggestion,
                         isSelected: isSelected(suggestion),
@@ -45,8 +45,20 @@ struct OnboardingSuggestionSection: View {
                     )
                 }
             }
+            .padding(.vertical, 4)
+            .background(listPanelSurface)
         }
     }
+}
+
+private var listPanelSurface: some View {
+    RoundedRectangle(cornerRadius: 20, style: .continuous)
+        .fill(Color.onboardingSurface.opacity(0.94))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.onboardingText.opacity(0.08), lineWidth: 0.5)
+        )
+        .appShadow(.card)
 }
 
 func onboardingPrimaryButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -62,7 +74,7 @@ func onboardingPrimaryButton(_ title: String, action: @escaping () -> Void) -> s
 }
 
 func onboardingHeaderBlock(
-    eyebrow: String,
+    eyebrow: String? = nil,
     title: String,
     subtitle: String,
     isLeading: Bool = false
@@ -72,10 +84,12 @@ func onboardingHeaderBlock(
     let frameAlignment: Alignment = isLeading ? .leading : .center
 
     return VStack(alignment: horizontalAlignment, spacing: 8) {
-        Text(eyebrow)
-            .font(.editorialMeta)
-            .tracking(1.8)
-            .foregroundColor(.onboardingText.opacity(0.58))
+        if let eyebrow, !eyebrow.isEmpty {
+            Text(eyebrow)
+                .font(.editorialMeta)
+                .tracking(1.8)
+                .foregroundColor(.onboardingText.opacity(0.58))
+        }
 
         Text(title)
             .font(.appTitle2)
@@ -187,24 +201,24 @@ struct OnboardingSelectionDot: View {
             Circle()
                 .fill(
                     isSelected
-                        ? Color.onboardingSelectionAccent.opacity(0.22)
+                        ? Color.onboardingSelectionAccent
                         : Color.clear
                 )
                 .overlay(
                     Circle()
                         .strokeBorder(
                             isSelected
-                                ? Color.onboardingSelectionAccent.opacity(0.55)
-                                : Color.onboardingText.opacity(0.28),
-                            lineWidth: isSelected ? 1.2 : 1
+                                ? Color.clear
+                                : Color.onboardingText.opacity(0.25),
+                            lineWidth: 1.2
                         )
                 )
-                .frame(width: 26, height: 26)
+                .frame(width: 24, height: 24)
 
             if isSelected {
                 Image(systemName: "checkmark")
                     .font(.appSymbol(size: 11, weight: .bold))
-                    .foregroundColor(.onboardingSelectionAccent)
+                    .foregroundColor(.onboardingSurface)
                     .transition(.scale(scale: 0.4).combined(with: .opacity))
             }
         }

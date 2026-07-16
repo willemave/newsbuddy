@@ -205,9 +205,8 @@ struct DiscoveryPersonalizeSheet: View {
                     }
 
                     if !viewModel.substackSuggestions.isEmpty {
-                        suggestionSection(
+                        OnboardingSuggestionSection(
                             title: "NEWSLETTERS",
-                            icon: "envelope.open",
                             items: viewModel.substackSuggestions,
                             isSelected: { viewModel.selectedSourceKeys.contains($0.feedURL ?? "") },
                             onToggle: { viewModel.toggleSource($0) }
@@ -215,9 +214,8 @@ struct DiscoveryPersonalizeSheet: View {
                     }
 
                     if !viewModel.podcastSuggestions.isEmpty {
-                        suggestionSection(
+                        OnboardingSuggestionSection(
                             title: "PODCASTS",
-                            icon: "headphones",
                             items: viewModel.podcastSuggestions,
                             isSelected: { viewModel.selectedSourceKeys.contains($0.feedURL ?? "") },
                             onToggle: { viewModel.toggleSource($0) }
@@ -225,9 +223,8 @@ struct DiscoveryPersonalizeSheet: View {
                     }
 
                     if !viewModel.subredditSuggestions.isEmpty {
-                        suggestionSection(
+                        OnboardingSuggestionSection(
                             title: "REDDIT",
-                            icon: "bubble.left.and.text.bubble.right",
                             items: viewModel.subredditSuggestions,
                             isSelected: { viewModel.selectedSubreddits.contains($0.subreddit ?? "") },
                             onToggle: { viewModel.toggleSubreddit($0) }
@@ -286,37 +283,5 @@ struct DiscoveryPersonalizeSheet: View {
                 .foregroundColor(.onboardingText.opacity(0.6))
         }
         .padding(.top, 48)
-    }
-
-    private func suggestionSection(
-        title: String,
-        icon: String,
-        items: [OnboardingSuggestion],
-        isSelected: @escaping (OnboardingSuggestion) -> Bool,
-        onToggle: @escaping (OnboardingSuggestion) -> Void
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.appSymbol(size: 9, weight: .semibold))
-                    .foregroundColor(.onboardingText.opacity(0.5))
-                Text(title)
-                    .font(.editorialMeta)
-                    .foregroundColor(.onboardingText.opacity(0.5))
-                    .tracking(1.5)
-            }
-            .padding(.top, 16)
-            .padding(.bottom, 4)
-
-            VStack(spacing: 6) {
-                ForEach(Array(items.enumerated()), id: \.element.stableKey) { _, suggestion in
-                    OnboardingSuggestionCard(
-                        suggestion: suggestion,
-                        isSelected: isSelected(suggestion),
-                        onToggle: { onToggle(suggestion) }
-                    )
-                }
-            }
-        }
     }
 }

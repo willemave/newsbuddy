@@ -13,7 +13,7 @@ struct OnboardingSuggestionsStep: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     onboardingHeaderBlock(
-                        eyebrow: viewModel.isShowingDefaultConfirmation ? "QUICK START" : "FINAL PICKS",
+                        eyebrow: viewModel.isShowingDefaultConfirmation ? "QUICK START" : nil,
                         title: viewModel.isShowingDefaultConfirmation ? "Start without personalized sources" : "Your picks",
                         subtitle: suggestionsSubtitle,
                         isLeading: true
@@ -31,7 +31,6 @@ struct OnboardingSuggestionsStep: View {
                     if !viewModel.substackSuggestions.isEmpty {
                         OnboardingSuggestionSection(
                             title: "NEWSLETTERS",
-                            icon: "envelope.open",
                             items: viewModel.substackSuggestions,
                             isSelected: { viewModel.selectedSourceKeys.contains($0.feedURL ?? "") },
                             onToggle: { viewModel.toggleSource($0) }
@@ -41,7 +40,6 @@ struct OnboardingSuggestionsStep: View {
                     if !viewModel.podcastSuggestions.isEmpty {
                         OnboardingSuggestionSection(
                             title: "PODCASTS",
-                            icon: "headphones",
                             items: viewModel.podcastSuggestions,
                             isSelected: { viewModel.selectedSourceKeys.contains($0.feedURL ?? "") },
                             onToggle: { viewModel.toggleSource($0) }
@@ -60,13 +58,6 @@ struct OnboardingSuggestionsStep: View {
 
     private var footer: some View {
         VStack(spacing: 10) {
-            if !viewModel.isShowingDefaultConfirmation {
-                Text("\(viewModel.selectedSourceKeys.count) selected")
-                    .font(.appCaption.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundColor(.onboardingText.opacity(0.65))
-            }
-
             onboardingPrimaryButton("Continue") {
                 withAnimation(AppMotion.panel) {
                     viewModel.advanceToAggregators()

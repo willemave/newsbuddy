@@ -12,103 +12,88 @@ struct OnboardingSuggestionCard: View {
     let isSelected: Bool
     let onToggle: () -> Void
 
-    private struct SuggestionMetadata {
-        let icon: String
-        let accentColor: Color
-        let label: String
-        let hidesLabel: Bool
-    }
-
-    private var metadata: SuggestionMetadata {
-        switch suggestion.suggestionType {
-        case "substack", "newsletter":
-            return SuggestionMetadata(
-                icon: "envelope.open",
-                accentColor: .onboardingAmbientPrimary,
-                label: "Newsletter",
-                hidesLabel: false
-            )
-        case "podcast_rss", "podcast":
-            return SuggestionMetadata(
-                icon: "waveform",
-                accentColor: .onboardingAmbientTertiary,
-                label: "Podcast",
-                hidesLabel: false
-            )
-        case "reddit":
-            return SuggestionMetadata(
-                icon: "bubble.left.and.text.bubble.right",
-                accentColor: .onboardingSelectionAccent,
-                label: "Reddit",
-                hidesLabel: true
-            )
-        default:
-            return SuggestionMetadata(
-                icon: "doc.text",
-                accentColor: .onboardingAmbientQuaternary,
-                label: "Feed",
-                hidesLabel: false
-            )
-        }
-    }
+    private static let tilePalette: [Color] = [
+        .onboardingAmbientPrimary,
+        .onboardingAmbientTertiary,
+        .onboardingAmbientQuaternary,
+    ]
 
     var body: some View {
         Button(action: onToggle) {
-            HStack(alignment: .center, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    if !metadata.hidesLabel || sourceDetail != nil {
-                        HStack(spacing: 6) {
-                            Image(systemName: metadata.icon)
-                                .font(.appSymbol(size: 10, weight: .semibold))
-                                .foregroundColor(metadata.accentColor)
+            HStack(alignment: .center, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
+                    monogramTile
 
-                            if !metadata.hidesLabel {
-                                Text(metadata.label.uppercased())
-                                    .font(.appCaption.weight(.semibold))
-                                    .tracking(1.0)
-                                    .foregroundColor(.onboardingText.opacity(0.55))
-                            }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(suggestion.displayTitle)
+                            .font(.appSubheadline.weight(.semibold))
+                            .foregroundColor(.onboardingText)
+                            .lineLimit(1)
 
-                            if let sourceDetail, !sourceDetail.isEmpty {
-                                if !metadata.hidesLabel {
-                                    Circle()
-                                        .fill(Color.onboardingText.opacity(0.28))
-                                        .frame(width: 2, height: 2)
-                                }
-
-                                Text(sourceDetail)
-                                    .font(.appCaption)
-                                    .foregroundColor(.onboardingText.opacity(0.55))
-                                    .lineLimit(1)
-                            }
+                        if let detail = secondaryDetail {
+                            Text(detail)
+                                .font(.appCaption)
+                                .foregroundColor(.onboardingText.opacity(0.55))
+                                .lineLimit(1)
                         }
                     }
-
-                    Text(suggestion.displayTitle)
-                        .font(.appSubheadline.weight(.semibold))
-                        .foregroundColor(.onboardingText)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-
-                    if let rationale = suggestion.rationale, !rationale.isEmpty {
-                        Text(rationale)
-                            .font(.appCaption)
-                            .foregroundColor(.onboardingText.opacity(0.62))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                    }
                 }
+                .opacity(isSelected ? 1.0 : 0.55)
 
                 Spacer(minLength: 0)
 
                 OnboardingSelectionDot(isSelected: isSelected)
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardSurface)
+            .contentShape(Rectangle())
         }
         .buttonStyle(EditorialCardButtonStyle())
+        .animation(AppMotion.press, value: isSelected)
         .accessibilityIdentifier("onboarding.suggestion.\(suggestion.stableKey)")
+    }
+
+    private var monogramTile: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(tileColor)
+            .frame(width: 34, height: 34)
+            .overlay(
+                Text(monogram)
+                    .font(.appSubheadline.weight(.bold))
+                    .foregroundColor(.onboardingText)
+            )
+    }
+
+    private var monogram: String {
+        var title = suggestion.displayTitle
+        if title.lowercased().hasPrefix("r/") {
+            title = String(title.dropFirst(2))
+        }
+        guard let letter = title.first(where: { $0.isLetter || $0.isNumber }) else {
+            return "·"
+        }
+        return String(letter).uppercased()
+    }
+
+    // Deterministic tint so a source keeps its color across renders and launches
+    // (Hasher is seed-randomized per launch, so use a plain djb2 over the key).
+    private var tileColor: Color {
+        var hash: UInt64 = 5381
+        for byte in suggestion.stableKey.utf8 {
+            hash = hash &* 33 &+ UInt64(byte)
+        }
+        return Self.tilePalette[Int(hash % UInt64(Self.tilePalette.count))]
+    }
+
+    private var secondaryDetail: String? {
+        if let host = sourceDetail, !host.isEmpty {
+            return host
+        }
+        if let rationale = suggestion.rationale, !rationale.isEmpty {
+            return rationale
+        }
+        return nil
     }
 
     private var sourceDetail: String? {
@@ -129,25 +114,6 @@ struct OnboardingSuggestionCard: View {
         }
 
         return nil
-    }
-
-    private var cardSurface: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(
-                isSelected
-                    ? Color.onboardingSurface.opacity(0.94)
-                    : Color.onboardingSurface.opacity(0.86)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(
-                        isSelected
-                            ? Color.onboardingSelectionAccent.opacity(0.32)
-                            : Color.onboardingText.opacity(0.08),
-                        lineWidth: isSelected ? 0.75 : 0.5
-                    )
-            )
-            .appShadow(.card)
     }
 
     private func formattedHost(_ urlString: String) -> String? {
