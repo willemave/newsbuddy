@@ -349,9 +349,9 @@ delayed visibility via `available_at`, retry via `finalize_task`
 3. Retirement: segments whose sources are all read → `retired`; news-tier segments whose sources
    are all older than `briefing_news_max_age_days` (4) → `retired` (stale news ages out even
    unread; longform/audio persist until read).
-4. Compaction: if a lens has > `briefing_max_segments_per_lens` (12) active segments, or ≥3
-   segments each with ≤2 unread sources, regenerate one merged window from the leftover unread
-   sources and mark the donors `compacted`. Tokens ∝ leftover unread only.
+4. Compaction: if a lens has ≥3 active segments each with ≤2 unread sources, regenerate merged
+   windows from those leftover unread sources and mark the donors `compacted`. There is no cap on
+   the total number of active segments in a lens. Tokens ∝ fragmented unread sources only.
 5. Degraded retry: re-compose `degraded` segments (bounded attempts).
 6. Masthead deck refresh if anything appended; bump `briefing_states.version` once per mutation
    batch; re-enqueue sweep successor.

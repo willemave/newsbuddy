@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from math import ceil
 
@@ -109,9 +108,7 @@ def prepare_compactions(
     *,
     user_id: int,
     settings: Settings,
-    reserved_segment_counts: Mapping[int, int] | None = None,
 ) -> list[CompactionPlan]:
-    reserved_segment_counts = reserved_segment_counts or {}
     read_keys = read_source_keys(db, user_id=user_id)
     starting_version = _state_version(db, user_id=user_id)
     plans: list[CompactionPlan] = []
@@ -173,9 +170,6 @@ def prepare_compactions(
         donors = _compaction_donors(
             segments,
             read_keys=read_keys,
-            settings=settings,
-            tier=str(lens.tier),
-            reserved_segment_count=reserved_segment_counts.get(int(lens.id), 0),
         )
         if not donors:
             continue
@@ -377,31 +371,11 @@ def _compaction_donors(
     segments: list[BriefingSegment],
     *,
     read_keys: set[str],
-    settings: Settings,
-    tier: str,
-    reserved_segment_count: int = 0,
 ) -> list[BriefingSegment]:
-    maximum = max(settings.briefing_max_segments_per_lens - reserved_segment_count, 0)
-    if len(segments) <= maximum:
-        small = [
-            segment
-            for segment in segments
-            if 0 < len(set(segment.source_keys or []) - read_keys) <= 2
-        ]
-        return small if len(small) >= 3 else []
-
-    keep_count = max(maximum - 1, 0)
-    while keep_count > 0:
-        donors = segments[keep_count:]
-        source_count = len(_ordered_unread_source_keys(donors, read_keys=read_keys))
-        window_size = (
-            settings.briefing_news_window_max if tier == "news" else settings.briefing_window_max
-        )
-        replacement_count = ceil(source_count / max(window_size, 1))
-        if keep_count + replacement_count <= maximum:
-            return donors
-        keep_count -= 1
-    return segments
+    small = [
+        segment for segment in segments if 0 < len(set(segment.source_keys or []) - read_keys) <= 2
+    ]
+    return small if len(small) >= 3 else []
 
 
 def _ordered_unread_source_keys(

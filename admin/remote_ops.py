@@ -246,7 +246,6 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
     """Return briefing edition health for one user."""
 
     settings = get_settings()
-    segment_cap = settings.briefing_max_segments_per_lens
     engine = create_engine(context.database_url, pool_pre_ping=True)
     session_factory = sessionmaker(bind=engine)
     try:
@@ -340,7 +339,6 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                         "window_source_limit": fragmentation.window_source_limit,
                         "minimum_required_segments": fragmentation.minimum_required_segment_count,
                         "excess_fragmentation": fragmentation.excess_fragmentation,
-                        "above_segment_cap": active_segments > segment_cap,
                         "source_references": source_references,
                         "stored_payload_bytes_estimate": stored_payload_bytes,
                         "pending_sources": pending_by_lens.get(str(lens.key), 0),
@@ -358,10 +356,6 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                 },
                 "counts": status_counts(session, user_id=user_id),
                 "health": {
-                    "configured_segment_cap": segment_cap,
-                    "lenses_above_cap": [
-                        row["key"] for row in lens_rows if row["above_segment_cap"]
-                    ],
                     "max_active_segments": max_active_segments,
                     "total_active_segments": total_active_segments,
                     "total_minimum_required_segments": total_required_segments,

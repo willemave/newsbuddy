@@ -59,7 +59,6 @@ def test_release_path_compacts_every_unread_donor_source_without_loss(
     user_id = test_user.id
     monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
     monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
-    monkeypatch.setattr(settings, "briefing_max_segments_per_lens", 3)
     monkeypatch.setattr(settings, "briefing_window_min", 1)
     monkeypatch.setattr(settings, "briefing_window_max", 4)
     before_keys = _seed_fragmented_article_lens(
@@ -80,11 +79,11 @@ def test_release_path_compacts_every_unread_donor_source_without_loss(
 
     active = _active_segments(db_session, user_id=user_id)
     after_keys = {str(key) for segment in active for key in (segment.source_keys or [])}
-    assert result.compacted_segments == 4
+    assert result.compacted_segments == 5
     assert len(active) == 3
     assert after_keys == before_keys
     compacted = [segment for segment in active if "compaction_segment" in (segment.warnings or [])]
-    assert len(compacted) == 2
+    assert len(compacted) == 3
 
 
 def test_release_path_leaves_donors_active_when_compaction_coverage_is_incomplete(
@@ -99,7 +98,6 @@ def test_release_path_leaves_donors_active_when_compaction_coverage_is_incomplet
     user_id = test_user.id
     monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
     monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
-    monkeypatch.setattr(settings, "briefing_max_segments_per_lens", 3)
     monkeypatch.setattr(settings, "briefing_window_min", 1)
     monkeypatch.setattr(settings, "briefing_window_max", 4)
     original_compose = window_composition_service.compose_window_groups
@@ -148,7 +146,6 @@ def test_release_path_aborts_compaction_when_global_version_changes_during_compo
     user_id = test_user.id
     monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
     monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
-    monkeypatch.setattr(settings, "briefing_max_segments_per_lens", 3)
     monkeypatch.setattr(settings, "briefing_window_min", 1)
     monkeypatch.setattr(settings, "briefing_window_max", 4)
     before_keys = _seed_fragmented_article_lens(
@@ -188,7 +185,7 @@ def test_release_path_aborts_compaction_when_global_version_changes_during_compo
     assert after_keys == before_keys
 
 
-def test_release_path_reserves_capacity_for_planned_append(
+def test_release_path_append_does_not_compact_without_fragmentation_threshold(
     db_session: Session,
     test_user: User,
     content_factory,
@@ -200,7 +197,6 @@ def test_release_path_reserves_capacity_for_planned_append(
     user_id = test_user.id
     monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
     monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
-    monkeypatch.setattr(settings, "briefing_max_segments_per_lens", 3)
     monkeypatch.setattr(settings, "briefing_window_min", 1)
     monkeypatch.setattr(settings, "briefing_window_max", 4)
 
@@ -258,9 +254,20 @@ def test_release_path_reserves_capacity_for_planned_append(
     active_source_keys = {str(key) for segment in active for key in (segment.source_keys or [])}
     expected_source_keys = {f"content:{content.id}" for content in contents}
     assert result.appended_segments == 1
-    assert result.compacted_segments == 2
-    assert len(active) == settings.briefing_max_segments_per_lens
+    assert result.compacted_segments == 0
+    assert len(active) == 4
     assert active_source_keys == expected_source_keys
+
+
+def test_large_lens_does_not_compact_full_windows() -> None:
+    segments = [
+        BriefingSegment(
+            source_keys=[f"news:{segment_index}:{source_index}" for source_index in range(4)]
+        )
+        for segment_index in range(63)
+    ]
+
+    assert compaction_service._compaction_donors(segments, read_keys=set()) == []
 
 
 def _seed_fragmented_article_lens(

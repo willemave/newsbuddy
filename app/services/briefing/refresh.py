@@ -245,11 +245,6 @@ def run_briefing_refresh(
         if taxonomized:
             db.flush()
         prepared_windows = _plan_ready_windows(db, user_id=user_id, mode=mode, settings=settings)
-        reserved_segment_counts: dict[int, int] = {}
-        for window in prepared_windows:
-            reserved_segment_counts[window.lens_id] = (
-                reserved_segment_counts.get(window.lens_id, 0) + 1
-            )
         prepared_compactions = (
             []
             if mode == "full"
@@ -257,7 +252,6 @@ def run_briefing_refresh(
                 db,
                 user_id=user_id,
                 settings=settings,
-                reserved_segment_counts=reserved_segment_counts,
             )
         )
         db.commit()

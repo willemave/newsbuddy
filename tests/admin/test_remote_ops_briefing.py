@@ -13,12 +13,11 @@ from app.models.db import (
 from app.testing.postgres_harness import create_temporary_postgres_harness
 
 
-def test_briefing_status_surfaces_over_cap_and_source_reference_health(
+def test_briefing_status_surfaces_fragmentation_and_source_reference_health(
     tmp_path,
     monkeypatch,
 ) -> None:
     settings = get_settings()
-    monkeypatch.setattr(settings, "briefing_max_segments_per_lens", 2)
     monkeypatch.setattr(settings, "briefing_news_window_max", 2)
     monkeypatch.setattr(settings, "briefing_window_max", 2)
     harness = create_temporary_postgres_harness(
@@ -117,15 +116,12 @@ def test_briefing_status_surfaces_over_cap_and_source_reference_health(
             user_id=7,
         )
 
-        assert result["health"]["configured_segment_cap"] == 2
-        assert result["health"]["lenses_above_cap"] == ["technology"]
         assert result["health"]["max_active_segments"] == 3
         assert result["health"]["total_active_segments"] == 4
         assert result["health"]["total_minimum_required_segments"] == 4
         assert result["health"]["total_excess_fragmentation"] == 0
         assert result["health"]["total_source_references"] == 7
         assert result["health"]["stored_payload_bytes_estimate"] > 0
-        assert result["lenses"][0]["above_segment_cap"] is True
         assert result["lenses"][0]["unique_unread_sources"] == 6
         assert result["lenses"][0]["minimum_required_segments"] == 3
         assert result["lenses"][0]["excess_fragmentation"] == 0
