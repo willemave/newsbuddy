@@ -167,23 +167,6 @@ struct BriefingPassageView: UIViewRepresentable {
                     return
                 }
             }
-            var effectiveRange = NSRange(location: 0, length: 0)
-            let insight = attributedText.attribute(
-                BriefingInsightAttributeName,
-                at: index,
-                effectiveRange: &effectiveRange
-            )
-            if insight != nil,
-               effectiveRange.location != NSNotFound,
-               NSMaxRange(effectiveRange) <= attributedText.length,
-               let range = Range(effectiveRange, in: attributedText.string) {
-                let insightText = String(attributedText.string[range])
-                // No lingering highlight behind the dig panel.
-                textView.clearSelection()
-                onDig(insightText, attributedText.string)
-                return
-            }
-
             // Plain-text tap: highlight the enclosing sentence and offer the
             // edit menu (Dig Deeper, Copy, …) instead of doing nothing.
             let sentenceRange = Self.sentenceRange(

@@ -13,7 +13,7 @@ and audio narration controls.
 - `BriefingPassageView` bridges `DigDeeperTextView` so server-normalized runs can expose tappable
   source links and selectable text without a WebView.
 - `BriefingAttributedTextBuilder` converts generated `APIBriefingParagraph`/`APIBriefingRun`
-  payloads into attributed text with source-link URLs and insight markers.
+  payloads into attributed text with source-link URLs. Insight runs render as ordinary body text.
 - Source sheets open content sources in `ContentDetailView` with `.briefing` navigation context and
   news sources in a compact native summary sheet.
 
@@ -21,8 +21,8 @@ and audio narration controls.
 | File | Purpose |
 |---|---|
 | `BriefingView.swift` | Top-level Briefing UI and private subviews for lens pages, blocks, source sheets, dig panel, and narration. |
-| `BriefingPassageView.swift` | UIKit text bridge for links, selection, and insight taps. |
-| `BriefingAttributedTextBuilder.swift` | Attributed string builder for source links and insight run metadata. |
+| `BriefingPassageView.swift` | UIKit text bridge for links and selection. |
+| `BriefingAttributedTextBuilder.swift` | Attributed string builder for body text, source links, and discussion chips. |
 
 ## Integration points
 - `AuthenticatedRootView` resolves production sessions to Briefing even when a legacy server profile still says Classic. `ContentView` retains the Classic Long/Fast shell only for explicit fallback and E2E coverage.

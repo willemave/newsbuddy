@@ -1,7 +1,5 @@
 import UIKit
 
-let BriefingInsightAttributeName = NSAttributedString.Key("BriefingInsightID")
-
 /// Inline discussion marker rendered after a source link: a clickable bubble
 /// icon grouped with a non-linked comment count inside parentheses.
 struct BriefingDiscussionChip: Equatable {
@@ -46,12 +44,6 @@ struct BriefingAttributedTextBuilder {
                     attributes[.link] = url(for: sourceKey)
                     attributes[.foregroundColor] = UIColor.appAccent
                     attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
-                }
-                if run.kind == .insight, let insightId = run.insightId {
-                    attributes[BriefingInsightAttributeName] = insightId
-                    attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
-                        | NSUnderlineStyle.patternDot.rawValue
-                    attributes[.underlineColor] = UIColor.appAccent.withAlphaComponent(0.75)
                 }
                 if run.kind == .text && run.bold {
                     attributes[.font] = baseFont.withWeight(.semibold)

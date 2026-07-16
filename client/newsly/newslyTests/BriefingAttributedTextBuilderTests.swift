@@ -253,7 +253,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         XCTAssertEqual(BriefingAttributedTextBuilder.compactCount(12345), "12k")
     }
 
-    func testBuildMarksInsightRuns() throws {
+    func testBuildRendersInsightRunsAsPlainBodyText() throws {
         let builder = BriefingAttributedTextBuilder()
         let result = builder.build(
             paragraphs: [
@@ -270,14 +270,13 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             weight: nil
         )
 
-        let insight = try XCTUnwrap(
-            result.attributedText.attribute(
-                BriefingInsightAttributeName,
-                at: 0,
-                effectiveRange: nil
-            ) as? String
+        XCTAssertEqual(result.plainText, "important context")
+        XCTAssertNil(
+            result.attributedText.attribute(.underlineStyle, at: 0, effectiveRange: nil)
         )
-        XCTAssertEqual(insight, "source_0")
+        XCTAssertNil(
+            result.attributedText.attribute(.underlineColor, at: 0, effectiveRange: nil)
+        )
     }
 }
 
