@@ -53,6 +53,21 @@ enum ServerConfigurationDefaults {
             && persistedString(forKey: portKey, in: userDefaults) != nil
     }
 
+    static func resolvedConfiguration(
+        in userDefaults: UserDefaults,
+        launchHost: String? = nil,
+        launchPort: String? = nil,
+        launchUseHTTPS: Bool? = nil
+    ) -> (host: String, port: String, useHTTPS: Bool) {
+        (
+            host: launchHost ?? persistedString(forKey: hostKey, in: userDefaults) ?? defaultHost,
+            port: launchPort ?? persistedString(forKey: portKey, in: userDefaults) ?? defaultPort,
+            useHTTPS: launchUseHTTPS
+                ?? (userDefaults.object(forKey: useHTTPSKey) as? Bool)
+                ?? false
+        )
+    }
+
     private static func persistedString(forKey key: String, in userDefaults: UserDefaults) -> String? {
         guard let value = userDefaults.string(forKey: key)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -60,32 +75,6 @@ enum ServerConfigurationDefaults {
             return nil
         }
         return value
-    }
-
-    static func applyLaunchOverridesIfNeeded(to userDefaults: UserDefaults) {
-        guard E2ETestLaunch.isEnabled else {
-            return
-        }
-
-        if let host = E2ETestLaunch.serverHost {
-            userDefaults.set(host, forKey: hostKey)
-        }
-
-        if let port = E2ETestLaunch.serverPort {
-            userDefaults.set(port, forKey: portKey)
-        }
-
-        if let useHTTPS = E2ETestLaunch.useHTTPS {
-            userDefaults.set(useHTTPS, forKey: useHTTPSKey)
-        }
-
-        if let readingExperience = E2ETestLaunch.readingExperience {
-            userDefaults.set(readingExperience, forKey: "readingExperience")
-        }
-
-        appSettingsLogger.notice(
-            "Applied E2E launch overrides host=\(userDefaults.string(forKey: hostKey) ?? "unset", privacy: .public) port=\(userDefaults.string(forKey: portKey) ?? "unset", privacy: .public)"
-        )
     }
 }
 
@@ -179,13 +168,26 @@ final class AppSettings {
     private init(userDefaults: UserDefaults = SharedContainer.userDefaults) {
         self.userDefaults = userDefaults
         ServerConfigurationDefaults.applyDebugDefaultsIfNeeded(to: userDefaults)
-        ServerConfigurationDefaults.applyLaunchOverridesIfNeeded(to: userDefaults)
-        serverHost = userDefaults.string(forKey: ServerConfigurationDefaults.hostKey) ?? ServerConfigurationDefaults.defaultHost
-        serverPort = userDefaults.string(forKey: ServerConfigurationDefaults.portKey) ?? ServerConfigurationDefaults.defaultPort
-        useHTTPS = userDefaults.object(forKey: ServerConfigurationDefaults.useHTTPSKey) as? Bool ?? false
+        let serverConfiguration = ServerConfigurationDefaults.resolvedConfiguration(
+            in: userDefaults,
+            launchHost: E2ETestLaunch.serverHost,
+            launchPort: E2ETestLaunch.serverPort,
+            launchUseHTTPS: E2ETestLaunch.useHTTPS
+        )
+        serverHost = serverConfiguration.host
+        serverPort = serverConfiguration.port
+        useHTTPS = serverConfiguration.useHTTPS
         appTextSizeIndex = userDefaults.object(forKey: "appTextSizeIndex") as? Int ?? 1
         contentTextSizeIndex = userDefaults.object(forKey: "contentTextSizeIndex") as? Int ?? 2
         backendTranscriptionAvailable = userDefaults.object(forKey: "backendTranscriptionAvailable") as? Bool ?? false
-        readingExperienceRaw = userDefaults.string(forKey: "readingExperience") ?? ReadingExperience.briefing.rawValue
+        readingExperienceRaw = E2ETestLaunch.readingExperience
+            ?? userDefaults.string(forKey: "readingExperience")
+            ?? ReadingExperience.briefing.rawValue
+
+        if E2ETestLaunch.isEnabled {
+            appSettingsLogger.notice(
+                "Applied ephemeral E2E server configuration host=\(self.serverHost, privacy: .public) port=\(self.serverPort, privacy: .public)"
+            )
+        }
     }
 }

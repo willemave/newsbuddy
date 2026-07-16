@@ -100,6 +100,29 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(ServerConfigurationDefaults.hasPersistedServerConfiguration(in: defaults))
     }
 
+    func testLaunchServerConfigurationOverridesDoNotReplacePersistedValues() {
+        let isolated = makeIsolatedDefaults()
+        let defaults = isolated.defaults
+        defer { clear(isolated.suiteName, defaults: defaults) }
+        defaults.set("localhost", forKey: ServerConfigurationDefaults.hostKey)
+        defaults.set("8000", forKey: ServerConfigurationDefaults.portKey)
+        defaults.set(false, forKey: ServerConfigurationDefaults.useHTTPSKey)
+
+        let configuration = ServerConfigurationDefaults.resolvedConfiguration(
+            in: defaults,
+            launchHost: "127.0.0.1",
+            launchPort: "59068",
+            launchUseHTTPS: true
+        )
+
+        XCTAssertEqual(configuration.host, "127.0.0.1")
+        XCTAssertEqual(configuration.port, "59068")
+        XCTAssertTrue(configuration.useHTTPS)
+        XCTAssertEqual(defaults.string(forKey: ServerConfigurationDefaults.hostKey), "localhost")
+        XCTAssertEqual(defaults.string(forKey: ServerConfigurationDefaults.portKey), "8000")
+        XCTAssertEqual(defaults.object(forKey: ServerConfigurationDefaults.useHTTPSKey) as? Bool, false)
+    }
+
     private func makeIsolatedDefaults(
         file: StaticString = #filePath,
         line: UInt = #line
