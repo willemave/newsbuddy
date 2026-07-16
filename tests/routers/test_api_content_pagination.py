@@ -1,7 +1,6 @@
 """Tests for cursor-based pagination in API content endpoints."""
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 from sqlalchemy.orm import Session
@@ -9,18 +8,17 @@ from sqlalchemy.orm import Session
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry
 from app.models.db.users import User
-from app.utils.image_paths import get_content_images_dir
 from app.utils.pagination import PaginationCursor
 
 
 @pytest.fixture
-def sample_contents(db_session: Session, test_user: User):
+def sample_contents(db_session: Session, test_user: User, tmp_path):
     """Create sample content items for pagination testing."""
     contents = []
     base_time = datetime.now(UTC)
-    images_dir = get_content_images_dir()
+    images_dir = tmp_path / "content-images"
     images_dir.mkdir(parents=True, exist_ok=True)
-    image_paths: list[Path] = []
+    image_paths = []
 
     # Create 50 articles with different timestamps
     for i in range(50):

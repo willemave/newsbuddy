@@ -110,7 +110,11 @@ def mock_structured_summary():
     )
 
 
-def test_summarize_task_updates_podcast_metadata(db_session, mock_structured_summary):
+def test_summarize_task_updates_podcast_metadata(
+    db_session,
+    mock_structured_summary,
+    _isolated_content_image_storage,
+):
     """Test that summarize task properly updates podcast metadata."""
     content = Mock(spec=Content)
     content.id = 1
@@ -398,7 +402,10 @@ def test_summarize_task_handles_missing_text(db_session):
     assert processing_errors[-1]["stage"] == "summarization"
 
 
-def test_summarize_task_skips_llm_when_input_fingerprint_matches(db_session):
+def test_summarize_task_skips_llm_when_input_fingerprint_matches(
+    db_session,
+    _isolated_content_image_storage,
+):
     """Matching fingerprints should reuse the existing summary without another model call."""
     article_text = "This is the full text content of the article."
     content = Mock(spec=Content)

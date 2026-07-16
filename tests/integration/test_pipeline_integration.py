@@ -71,7 +71,11 @@ class TestPipelineIntegration:
     """Integration tests for the complete pipeline."""
 
     @pytest.mark.integration
-    def test_full_article_processing_pipeline(self, setup_test_db):
+    def test_full_article_processing_pipeline(
+        self,
+        setup_test_db,
+        _isolated_content_image_storage,
+    ):
         """Test complete article processing from task creation to completion."""
         article_id = setup_test_db["article1_id"]
 

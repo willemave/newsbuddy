@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
 from itertools import count
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -32,6 +33,17 @@ from tests.support.builders import (
     create_user_row,
 )
 from tests.support.fixture_files import load_json_fixture
+
+
+@pytest.fixture
+def _isolated_content_image_storage(monkeypatch, tmp_path) -> Path:
+    """Keep generated-image existence checks away from developer assets."""
+    content_images_dir = tmp_path / "content-images"
+    monkeypatch.setattr(
+        "app.services.long_form_images.get_content_images_dir",
+        lambda: content_images_dir,
+    )
+    return content_images_dir
 
 
 @pytest.fixture

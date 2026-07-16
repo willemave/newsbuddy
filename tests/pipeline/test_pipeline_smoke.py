@@ -60,7 +60,11 @@ def _patch_db_access(monkeypatch, db_session):
     return override
 
 
-def test_scrape_to_completion_smoke(db_session, monkeypatch) -> None:
+def test_scrape_to_completion_smoke(
+    db_session,
+    monkeypatch,
+    _isolated_content_image_storage,
+) -> None:
     db_override = _patch_db_access(monkeypatch, db_session)
 
     scraper = DummyScraper()

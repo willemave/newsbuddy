@@ -254,7 +254,11 @@ def test_summarize_news_does_not_enqueue_image_tasks(db_session) -> None:
     queue_service.enqueue.assert_not_called()
 
 
-def test_summarize_article_enqueues_image_when_visible_in_inbox(db_session, test_user) -> None:
+def test_summarize_article_enqueues_image_when_visible_in_inbox(
+    db_session,
+    test_user,
+    _isolated_content_image_storage,
+) -> None:
     content = _create_content(db_session, "article")
     _add_inbox_status(db_session, test_user.id, content.id)
     queue_service = Mock()
