@@ -859,7 +859,7 @@ Registered handlers:
 
 Workers are launched per queue partition. `scripts/dev.sh` and `scripts/start_services.sh` start `content`, `media`, `audio_episode`, `image`, `onboarding`, `backfill`, `discussion`, `twitter`, `chat`, `learning`, and `llm` workers. The `content` queue runs with higher parallelism by default because it carries the widest set of user-visible work.
 
-`supervisor.conf` and `docker/supervisord.conf` mirror the same queue partitions; `docker/supervisord.server.conf` intentionally starts only server/bootstrap processes. `tests/scripts/test_supervisor_queue_config.py` derives expected worker coverage from `TaskQueue` and guards host/Docker config drift.
+`supervisor.conf` and `docker/supervisord.worker-programs.conf` mirror the same queue partitions. Both the all-in-one `docker/supervisord.conf` and split `docker/supervisord.workers.conf` include that canonical worker graph; `docker/supervisord.server.conf` intentionally starts only server/bootstrap processes. `tests/scripts/test_supervisor_queue_config.py` derives expected worker coverage from `TaskQueue` and guards host/Docker config drift.
 
 `scripts/watchdog_queue_recovery.py` is part of the production runtime. It moves misrouted active tasks back to their task-spec queue and requeues stale media, process-content, process-news-item, and integration-sync work.
 
@@ -1415,7 +1415,7 @@ The `admin` project script (`admin.cli:main`) is the operator surface for Docker
 - `debug`
 - allowlisted `fix` commands
 
-Commands emit a stable `--output json|text` envelope. Remote commands SSH to the host and run `python -m admin.remote` inside the `newsly` container. Mutating fixes require explicit apply/confirmation flags.
+Commands emit a stable `--output json|text` envelope. Remote commands SSH to the host and run `python -m admin.remote` inside the stable `newsly-workers` container. Docker-log commands merge the split production container streams. Mutating fixes require explicit apply/confirmation flags.
 
 ### 21.2 Local runtime
 
@@ -1434,17 +1434,13 @@ Representative local entrypoints:
 
 ### 21.3 Docker runtime
 
-The supported Docker runtime is a single `newsly` container with embedded Postgres and Supervisor. `docker/entrypoint.sh` initializes `/data`, builds `DATABASE_URL` from `POSTGRES_*`, and selects `NEWSLY_RUNTIME_MODE=full` or `server`.
+The image supports both the local all-in-one runtime and the split production runtime. `docker/entrypoint.sh` selects the role through `NEWSLY_RUNTIME_MODE`.
 
-Full mode runs:
+Local `full` mode embeds PostgreSQL and Supervisor and runs bootstrap/migrations, the API, all queue workers, the queue watchdog, and the scheduler. Local `server` mode intentionally starts only PostgreSQL, bootstrap, and the API.
 
-- bootstrap/migrations
-- API
-- all queue workers
-- queue watchdog
-- scheduler via `docker/supercronic.py` and `docker/crontab`
+RackNerd production uses `docker-compose.production.yml` and an external `newsly-internal` network. PostgreSQL, workers, and the scheduler are singletons; the API has blue and green slots bound to loopback ports 8001 and 8002. `scripts/deploy_blue_green.sh` migrates once, starts and health-checks the inactive API, atomically reloads the Nginx upstream, then replaces workers and the scheduler. PostgreSQL state and shared file-backed assets remain under host `/data` and outlive app containers.
 
-Server mode intentionally starts only API/bootstrap processes.
+The previous API slot remains running as an immediate rollback target. Production migrations must therefore remain compatible with the old active API for the duration of the switch.
 
 ### 21.4 Schema and bootstrapping
 

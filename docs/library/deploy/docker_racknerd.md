@@ -1,6 +1,7 @@
 # RackNerd Docker Deploy
 
-This is the supported production path for the Docker-based single-container runtime.
+This is the supported production path for the split Docker runtime on the
+RackNerd production host.
 
 ## Local
 
@@ -20,19 +21,19 @@ For non-Docker local runs that still use the Docker-style env file:
 
 ## RackNerd env file
 
-RackNerd now uses `.env.racknerd` directly with the same `/data` container paths the old bare-metal setup used:
+RackNerd uses `.env.racknerd` directly. PostgreSQL runs in its own container;
+the API, workers, and scheduler connect to it over the private
+`newsly-internal` Docker network.
 
 ```bash
-DATABASE_URL=postgresql+psycopg://newsly:...@127.0.0.1:5432/newsly
+NEWSLY_DATABASE_URL=postgresql+psycopg://newsly:...@postgres:5432/newsly
 CORS_ALLOW_ORIGINS=https://racknerd-3b1b61d.willemsavenue.com
-PGDATA=/data/postgres
 MEDIA_BASE_DIR=/data/media
 LOGS_BASE_DIR=/data/logs
 IMAGES_BASE_DIR=/data/images
 CONTENT_BODY_LOCAL_ROOT=/data/content_bodies
 PODCAST_SCRATCH_DIR=/data/scratch
 PERSONAL_MARKDOWN_ROOT=/data/personal_markdown
-NEWSLY_DATA_ROOT_HOST_PATH=/data
 ```
 
 Then set at minimum:
@@ -48,7 +49,38 @@ Then set at minimum:
 GitHub Actions:
 
 1. builds the Docker image
-2. streams it to RackNerd with `docker load`
-3. stops the legacy Supervisor services and host cron entries
-4. runs `docker compose --env-file .env.racknerd up -d`
-5. waits for the `newsly` container health check to turn healthy
+2. pushes it to GHCR and pulls it on RackNerd
+3. starts or verifies the external PostgreSQL container
+4. runs Alembic migrations once
+5. starts the inactive API slot and waits for its direct health check
+6. atomically switches Nginx to that slot
+7. updates the single workers and scheduler containers
+8. retains the previous API slot and image as the immediate rollback target
+
+The production services are defined in `docker-compose.production.yml`.
+`scripts/deploy_blue_green.sh` owns the release sequence. The active slot is
+recorded in `/opt/newsly/state/active-api-slot`; Nginx reads
+`/etc/nginx/newsly-active-upstream.conf`.
+
+The host Nginx configuration and atomic slot-switch helper live at
+`scripts/deploy/newsly-nginx.conf` and
+`scripts/deploy/switch-api-slot.sh`. Install them as
+`/etc/nginx/nginx.conf` and `/opt/newsly/bin/switch-api-slot`, respectively,
+when provisioning a replacement host.
+
+Operator commands use the stable `newsly-workers` container for app code,
+database settings, and shared file logs. The default SSH target is the local
+`news-app-server` alias, which should point at the current production host.
+
+## Availability invariants
+
+- Exactly one API slot receives new requests, but the previous healthy slot
+  remains running after a deploy.
+- Nginx is reloaded only after the inactive slot passes `/health`; existing
+  connections drain under Nginx's graceful reload.
+- PostgreSQL and `/data` outlive every app container replacement.
+- Workers and the scheduler are singletons. They are replaced after the HTTP
+  switch, so HTTP deploys are near-hitless while background processing has a
+  short controlled restart.
+- Migrations run before the API switch. Migrations used in this deploy path
+  must remain compatible with the currently active API until Nginx switches.
