@@ -135,8 +135,8 @@ def _format_error_details(details: dict[str, Any]) -> str:
     ):
         return (
             "The remote command reached the host, but Docker could not run the "
-            "newsly container command.\n"
-            "Check that the `newsly` container is up (`docker ps`), that Docker is "
+            "configured Newsly runtime command.\n"
+            "Check that the Newsly containers are up (`docker ps`), that Docker is "
             "installed on the host, and that the SSH user in `ADMIN_REMOTE` can run Docker."
         )
     return json.dumps(details, ensure_ascii=False, indent=2, default=str)

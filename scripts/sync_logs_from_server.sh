@@ -6,7 +6,7 @@ set -e
 
 # Configuration
 REMOTE_USER="willem"
-REMOTE_HOST="192.3.250.10"
+REMOTE_HOST="news-app-server"
 REMOTE_LOGS_DIR="/data/logs"
 REMOTE_APP_DIR="/opt/news_app"
 LOCAL_LOGS_DIR="./logs_from_server"

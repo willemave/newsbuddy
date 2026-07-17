@@ -38,8 +38,8 @@ except ImportError:  # pragma: no cover - compatibility for the system Python 3.
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_REMOTE_HOST = os.environ.get("REMOTE_HOST", "willem@192.3.250.10")
-DEFAULT_REMOTE_CONTAINER = os.environ.get("REMOTE_CONTAINER", "newsly")
+DEFAULT_REMOTE_HOST = os.environ.get("REMOTE_HOST", "news-app-server")
+DEFAULT_REMOTE_CONTAINER = os.environ.get("REMOTE_CONTAINER", "newsly-workers")
 DEFAULT_REMOTE_DATA_ROOT = "/data"
 DEFAULT_DATABASE_URL = "postgresql+psycopg://newsly:root@127.0.0.1:5432/newsly"
 DEFAULT_ASSET_DAYS = 30

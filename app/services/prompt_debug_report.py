@@ -36,7 +36,7 @@ class SyncOptions(BaseModel):
 
     enabled: bool = False
     remote_user: str = "willem"
-    remote_host: str = "192.3.250.10"
+    remote_host: str = "news-app-server"
     remote_logs_dir: str = "/data/logs"
     remote_app_dir: str = "/opt/news_app"
     local_logs_dir: Path = Field(default_factory=lambda: Path("./logs_from_server"))

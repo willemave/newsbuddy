@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from typing import Any, cast
 
 from admin.config import AdminConfig
@@ -99,6 +100,34 @@ def test_run_remote_docker_logs_builds_expected_ssh_command(monkeypatch) -> None
         "willem@host",
         "cd /opt/news_app && sudo docker logs --timestamps --tail 25 newsly",
     ]
+
+
+def test_run_remote_docker_logs_aggregates_split_runtime(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    config = replace(_config(), docker_service_name="newsly-workers")
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args[0]
+        return subprocess.CompletedProcess(
+            args[0],
+            0,
+            stdout="2026-07-17T04:00:00Z [newsly-workers] ready\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = run_remote_docker_logs(config, tail=25)
+
+    command = cast(list[str], captured["args"])[2]
+    assert result["service"] == "newsly-runtime"
+    assert "sudo bash -lc" in command
+    assert "newsly-postgres" in command
+    assert "newsly-api-blue" in command
+    assert "newsly-api-green" in command
+    assert "newsly-workers" in command
+    assert "newsly-scheduler" in command
+    assert "tail -n 25" in command
 
 
 def test_run_remote_script_injects_runtime_database_url(monkeypatch) -> None:

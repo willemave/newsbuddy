@@ -10,6 +10,15 @@ from typing import Any
 
 from admin.config import AdminConfig
 
+SPLIT_RUNTIME_EXEC_CONTAINER = "newsly-workers"
+SPLIT_RUNTIME_LOG_CONTAINERS = (
+    "newsly-postgres",
+    "newsly-api-blue",
+    "newsly-api-green",
+    "newsly-workers",
+    "newsly-scheduler",
+)
+
 
 class RemoteCommandError(RuntimeError):
     """Raised when a remote command fails."""
@@ -145,12 +154,18 @@ def run_remote_docker_logs(
     *,
     tail: int,
 ) -> dict[str, Any]:
-    """Return recent logs from the unified Docker container stdout stream."""
-    remote_command = (
-        f"cd {shlex.quote(config.app_dir)} && "
-        "sudo docker logs --timestamps "
-        f"--tail {shlex.quote(str(tail))} {shlex.quote(config.docker_service_name)}"
-    )
+    """Return recent logs from the Docker runtime stdout streams."""
+    split_runtime = config.docker_service_name == SPLIT_RUNTIME_EXEC_CONTAINER
+    if split_runtime:
+        remote_command = _build_split_runtime_logs_command(config, tail=tail)
+        service_name = "newsly-runtime"
+    else:
+        remote_command = (
+            f"cd {shlex.quote(config.app_dir)} && "
+            "sudo docker logs --timestamps "
+            f"--tail {shlex.quote(str(tail))} {shlex.quote(config.docker_service_name)}"
+        )
+        service_name = config.docker_service_name
     completed = _run_ssh_command(
         config,
         remote_command,
@@ -159,11 +174,40 @@ def run_remote_docker_logs(
     return {
         "source": "docker",
         "remote": config.remote,
-        "service": config.docker_service_name,
+        "service": service_name,
         "tail": tail,
         "stdout": completed.stdout,
         "stderr": completed.stderr,
     }
+
+
+def _build_split_runtime_logs_command(config: AdminConfig, *, tail: int) -> str:
+    containers = " ".join(shlex.quote(name) for name in SPLIT_RUNTIME_LOG_CONTAINERS)
+    script = "\n".join(
+        [
+            "set -euo pipefail",
+            'tmp="$(mktemp)"',
+            "trap 'rm -f \"$tmp\"' EXIT",
+            "found=false",
+            f"for container in {containers}; do",
+            '  if ! docker inspect "$container" >/dev/null 2>&1; then',
+            "    continue",
+            "  fi",
+            "  found=true",
+            "  while IFS= read -r line; do",
+            '    timestamp="${line%% *}"',
+            '    message="${line#* }"',
+            '    printf \'%s [%s] %s\\n\' "$timestamp" "$container" "$message"',
+            f'  done < <(docker logs --timestamps --tail {int(tail)} "$container" 2>&1) >> "$tmp"',
+            "done",
+            'if [[ "$found" != true ]]; then',
+            "  echo 'No Newsly runtime containers found' >&2",
+            "  exit 1",
+            "fi",
+            f'sort "$tmp" | tail -n {int(tail)}',
+        ]
+    )
+    return f"cd {shlex.quote(config.app_dir)} && sudo bash -lc {shlex.quote(script)}"
 
 
 def _build_docker_exec_command_with_env(

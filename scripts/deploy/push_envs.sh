@@ -8,9 +8,9 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/common.sh"
 
-REMOTE_HOST="willem@192.3.250.10"
+REMOTE_HOST="news-app-server"
 REMOTE_DIR="/opt/news_app"
-OWNER_GROUP="newsapp:newsapp"
+OWNER_GROUP="willem:willem"
 SOURCE_ENV_FILE=".env.racknerd"
 REMOTE_STAGING_DIR="/tmp/news_app_env_sync"
 REMOTE_PORT="22"

@@ -3,7 +3,7 @@
 # Usage: ./scripts/view_remote_errors.sh [hours_back]
 
 REMOTE_USER="willem"
-REMOTE_HOST="192.3.250.10"
+REMOTE_HOST="news-app-server"
 REMOTE_LOGS_DIR="/data/logs"
 HOURS_BACK=${1:-24}  # Default to last 24 hours
 

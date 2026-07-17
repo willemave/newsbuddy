@@ -54,7 +54,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sync", action="store_true", help="Sync logs from remote before parsing.")
     parser.add_argument("--remote-user", default="willem", help="Remote SSH user.")
-    parser.add_argument("--remote-host", default="192.3.250.10", help="Remote SSH host.")
+    parser.add_argument("--remote-host", default="news-app-server", help="Remote SSH host.")
     parser.add_argument(
         "--remote-logs-dir",
         default="/data/logs",

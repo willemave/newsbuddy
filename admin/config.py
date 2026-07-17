@@ -8,9 +8,9 @@ from typing import Any
 
 from dotenv import dotenv_values
 
-DEFAULT_REMOTE = "willem@192.3.250.10"
+DEFAULT_REMOTE = "news-app-server"
 DEFAULT_APP_DIR = "/opt/news_app"
-DEFAULT_DOCKER_SERVICE_NAME = "newsly"
+DEFAULT_DOCKER_SERVICE_NAME = "newsly-workers"
 DEFAULT_LOGS_DIR = "/data/logs"
 DEFAULT_SERVICE_LOG_DIR = "/var/log/news_app"
 DEFAULT_REMOTE_DB_PATH = "/data/news_app.db"

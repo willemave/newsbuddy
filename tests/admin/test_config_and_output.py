@@ -69,6 +69,13 @@ def test_resolve_config_prefers_flags_over_env(tmp_path):
     assert config.remote == "override@example.com"
 
 
+def test_resolve_config_uses_split_production_defaults(tmp_path):
+    config = resolve_config(_namespace(env_file=str(tmp_path / "missing.env")))
+
+    assert config.remote == "news-app-server"
+    assert config.docker_service_name == "newsly-workers"
+
+
 def test_emit_json_envelope():
     stream = StringIO()
     emit(Envelope(ok=True, command="db.tables", data={"tables": ["users"]}), "json", stream)
@@ -140,7 +147,7 @@ def test_emit_text_permission_error_envelope_is_actionable():
     )
 
     rendered = stream.getvalue()
-    assert "Docker could not run the newsly container command" in rendered
+    assert "Docker could not run the configured Newsly runtime command" in rendered
     assert "docker ps" in rendered
 
 
