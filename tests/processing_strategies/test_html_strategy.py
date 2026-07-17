@@ -894,6 +894,38 @@ def test_extract_data_reuses_crawler_across_extractions(html_strategy: HtmlProce
     mock_crawler.__aexit__.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_reusable_crawler_closes_idle_pages_after_each_crawl():
+    """A warm browser must not retain the fully rendered article page."""
+    manager = html_strategy_module._ReusableCrawlerManager()
+    browser_config = MagicMock()
+    run_config = MagicMock(session_id=None)
+    browser_config_key = ("test",)
+
+    page = AsyncMock()
+    context = MagicMock()
+    context.pages = [page]
+
+    result = MagicMock()
+    crawler = AsyncMock()
+    crawler.arun = AsyncMock(return_value=result)
+    crawler.crawler_strategy.browser_manager.contexts_by_config = {"default": context}
+    manager._crawler = crawler
+    manager._crawler_key = browser_config_key
+    manager._created_at = html_strategy_module.time.monotonic()
+
+    actual = await manager._arun(
+        browser_config=browser_config,
+        browser_config_key=browser_config_key,
+        url="https://example.com/article",
+        run_config=run_config,
+    )
+
+    assert actual is result
+    page.close.assert_awaited_once()
+    assert manager._crawler is crawler
+
+
 def test_extract_data_uses_firecrawl_for_discussion_only_extraction(
     html_strategy: HtmlProcessorStrategy,
 ):

@@ -148,9 +148,29 @@ class _ReusableCrawlerManager:
         run_config: CrawlerRunConfig,
     ) -> Any:
         crawler = await self._get_crawler(browser_config, browser_config_key)
-        result = await crawler.arun(url=url, config=run_config)
-        self._crawl_count += 1
-        return result
+        try:
+            result = await crawler.arun(url=url, config=run_config)
+            self._crawl_count += 1
+            return result
+        finally:
+            await self._close_idle_pages(crawler, run_config)
+
+    async def _close_idle_pages(self, crawler: Any, run_config: CrawlerRunConfig) -> None:
+        """Release Crawl4AI pages while keeping its browser process warm."""
+        if getattr(run_config, "session_id", None):
+            return
+
+        try:
+            browser_manager = crawler.crawler_strategy.browser_manager
+            contexts_by_config = browser_manager.contexts_by_config
+            if not isinstance(contexts_by_config, dict):
+                return
+
+            for context in list(contexts_by_config.values()):
+                for page in list(context.pages):
+                    await page.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to close idle Crawl4AI pages: %s", exc)
 
     async def _get_crawler(
         self,
