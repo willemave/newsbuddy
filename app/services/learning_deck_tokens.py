@@ -72,7 +72,7 @@ def get_deck_by_private_token(db: Session, *, token: str) -> LearningDeck:
         )
         .first()
     )
-    if deck is None or not deck.latest_successful_run_id:
+    if deck is None or not (deck.latest_successful_task_id or deck.latest_successful_run_id):
         raise LearningDeckError("Learning Deck is not available", status_code=404)
     return deck
 
@@ -82,7 +82,7 @@ def enable_learning_deck_share(db: Session, *, user_id: int, deck_id: int) -> st
     deck = _get_owned_deck(db, user_id=user_id, deck_id=deck_id)
     if deck is None:
         raise LearningDeckError("Learning Deck not found", status_code=404)
-    if not deck.latest_successful_run_id:
+    if not (deck.latest_successful_task_id or deck.latest_successful_run_id):
         raise LearningDeckError("Learning Deck is not ready to share", status_code=409)
     if not deck.share_token_nonce:
         deck.share_token_nonce = secrets.token_urlsafe(24)
@@ -131,7 +131,7 @@ def get_deck_by_valid_share_token(db: Session, *, token: str) -> LearningDeck:
     if (
         deck is None
         or not deck.share_enabled
-        or not deck.latest_successful_run_id
+        or not (deck.latest_successful_task_id or deck.latest_successful_run_id)
         or not deck.share_token_nonce
         or not deck.share_token_hash
         or not hmac.compare_digest(str(deck.share_token_nonce), nonce)

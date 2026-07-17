@@ -171,7 +171,7 @@ def _learning_deck_targets_by_id(
     *,
     user_id: int,
     actions_by_task_id: dict[int, list[LlmTaskAction]],
-) -> dict[int, tuple[LearningDeck, LearningDeckRun]]:
+) -> dict[int, tuple[LearningDeck, LearningDeckRun | LlmTask]]:
     deck_ids = {
         deck_id
         for actions in actions_by_task_id.values()
@@ -180,22 +180,43 @@ def _learning_deck_targets_by_id(
     }
     if not deck_ids:
         return {}
-    rows = (
-        db.query(LearningDeck, LearningDeckRun)
-        .join(LearningDeckRun, LearningDeck.latest_run_id == LearningDeckRun.id)
+    decks = (
+        db.query(LearningDeck)
         .filter(
             LearningDeck.id.in_(deck_ids),
             LearningDeck.user_id == user_id,
             LearningDeck.deleted_at.is_(None),
-            LearningDeckRun.user_id == user_id,
         )
         .all()
     )
-    return {
-        int(deck.id): (deck, run)
-        for deck, run in rows
-        if deck.id is not None and run.id is not None
+    task_ids = {int(deck.latest_task_id) for deck in decks if deck.latest_task_id is not None}
+    run_ids = {
+        int(deck.latest_run_id)
+        for deck in decks
+        if deck.latest_task_id is None and deck.latest_run_id is not None
     }
+    tasks = {
+        int(task.id): task
+        for task in db.query(LlmTask).filter(LlmTask.id.in_(task_ids)).all()
+        if task.id is not None
+    }
+    runs = {
+        int(run.id): run
+        for run in db.query(LearningDeckRun).filter(LearningDeckRun.id.in_(run_ids)).all()
+        if run.id is not None
+    }
+    targets: dict[int, tuple[LearningDeck, LearningDeckRun | LlmTask]] = {}
+    for deck in decks:
+        attempt = (
+            tasks.get(int(deck.latest_task_id))
+            if deck.latest_task_id is not None
+            else runs.get(int(deck.latest_run_id))
+            if deck.latest_run_id is not None
+            else None
+        )
+        if deck.id is not None and attempt is not None:
+            targets[int(deck.id)] = (deck, attempt)
+    return targets
 
 
 def _build_task_submission_response(
@@ -203,7 +224,7 @@ def _build_task_submission_response(
     *,
     actions: list[LlmTaskAction],
     content_by_id: dict[int, Content],
-    deck_targets_by_id: dict[int, tuple[LearningDeck, LearningDeckRun]],
+    deck_targets_by_id: dict[int, tuple[LearningDeck, LearningDeckRun | LlmTask]],
 ) -> SubmissionStatusResponse | None:
     try:
         action = _primary_action(actions)
@@ -328,12 +349,12 @@ def _build_llm_task_submission_response(
 def _build_learning_deck_submission_response(
     task: LlmTask,
     deck: LearningDeck,
-    run: LearningDeckRun,
+    run: LearningDeckRun | LlmTask,
 ) -> SubmissionStatusResponse:
     raw_status = run.status
     if raw_status is None:
         raise ValueError("Learning Deck run is missing status")
-    deck_status = LearningDeckRunStatus(raw_status)
+    deck_status = LearningDeckRunStatus(_learning_deck_attempt_status(raw_status))
     content_status = _learning_deck_content_status(deck_status)
     title = _clean_string(deck.source_title) or _clean_string(deck.title)
     source_url = _clean_string(deck.source_url)
@@ -601,6 +622,15 @@ def _learning_deck_content_status(status: LearningDeckRunStatus) -> ContentStatu
     if status == LearningDeckRunStatus.CANCELLED:
         return ContentStatus.SKIPPED
     return ContentStatus.FAILED
+
+
+def _learning_deck_attempt_status(status: str) -> str:
+    return {
+        LlmTaskStatus.RUNNING.value: LearningDeckRunStatus.GENERATING.value,
+        LlmTaskStatus.AWAITING_APPROVAL.value: LearningDeckRunStatus.GENERATING.value,
+        LlmTaskStatus.APPLYING.value: LearningDeckRunStatus.PUBLISHING.value,
+        LlmTaskStatus.CANCELLED.value: LearningDeckRunStatus.CANCELLED.value,
+    }.get(status, status)
 
 
 def _learning_deck_outcome(status: LearningDeckRunStatus) -> SubmissionOutcome:

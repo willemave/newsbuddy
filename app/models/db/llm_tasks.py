@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.db import Base
@@ -29,6 +29,13 @@ class LlmTask(Base):
     mode = Column(String(64), nullable=False, index=True)
     workflow_key = Column(String(128), nullable=False, index=True)
     workflow_version = Column(Integer, nullable=False, default=1)
+    subject_id = Column(Integer, nullable=True, index=True)
+    parent_task_id = Column(
+        Integer,
+        ForeignKey("llm_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     workflow_state = Column(
         String(32),
         nullable=False,
@@ -69,6 +76,20 @@ class LlmTask(Base):
         Index("idx_llm_tasks_user_status_created", "user_id", "status", "created_at"),
         Index("idx_llm_tasks_kind_mode_created", "task_kind", "mode", "created_at"),
         Index("idx_llm_tasks_workflow_state", "workflow_key", "workflow_state"),
+        Index("idx_llm_tasks_kind_subject_created", "task_kind", "subject_id", "created_at"),
+        Index(
+            "uq_llm_tasks_learning_deck_user_active",
+            "user_id",
+            unique=True,
+            postgresql_where=text(
+                "task_kind = 'learning_deck' AND "
+                "status IN ('queued', 'preparing', 'running', 'awaiting_approval', 'applying')"
+            ),
+            sqlite_where=text(
+                "task_kind = 'learning_deck' AND "
+                "status IN ('queued', 'preparing', 'running', 'awaiting_approval', 'applying')"
+            ),
+        ),
     )
 
 

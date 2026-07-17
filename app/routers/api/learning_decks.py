@@ -132,7 +132,7 @@ def create_viewer_url(
     deck = get_learning_deck(db, user_id=user_id, deck_id=deck_id)
     if deck is None:
         raise HTTPException(status_code=404, detail="Learning Deck not found")
-    if not deck.latest_successful_run_id:
+    if not (deck.latest_successful_task_id or deck.latest_successful_run_id):
         raise HTTPException(status_code=409, detail="Learning Deck is not ready")
     token, expires_at = build_private_learning_deck_token(deck=deck, user_id=user_id)
     return LearningDeckUrlResponse(
@@ -157,7 +157,7 @@ def create_source_notes_url(
     deck = get_learning_deck(db, user_id=user_id, deck_id=deck_id)
     if deck is None:
         raise HTTPException(status_code=404, detail="Learning Deck not found")
-    if not deck.latest_successful_run_id:
+    if not (deck.latest_successful_task_id or deck.latest_successful_run_id):
         raise HTTPException(status_code=409, detail="Learning Deck is not ready")
     token, expires_at = build_private_learning_deck_token(deck=deck, user_id=user_id)
     return LearningDeckUrlResponse(

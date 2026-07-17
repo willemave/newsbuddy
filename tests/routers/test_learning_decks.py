@@ -6,7 +6,7 @@ from app.models.db import (
     ContentKnowledgeSave,
     ContentReadStatus,
     LearningDeck,
-    LearningDeckRun,
+    LlmTask,
     ProcessingTask,
 )
 from app.services.gateways.object_storage_gateway import LocalObjectStorageGateway
@@ -42,8 +42,8 @@ def test_create_learning_deck_endpoint_enqueues_generation(
     assert payload["status"] == "queued"
     assert payload["latest_run"]["interests_prompt"] == "Teach the architecture"
     task = db_session.query(ProcessingTask).one()
-    assert task.task_type == TaskType.GENERATE_LEARNING_DECK.value
-    assert task.queue_name == "learning"
+    assert task.task_type == TaskType.RUN_LLM_TASK.value
+    assert task.queue_name == "llm"
 
 
 def test_create_learning_deck_from_url_saves_to_knowledge_and_skips_unread_long_read(
@@ -103,9 +103,9 @@ def test_private_viewer_url_requires_completed_deck(
     assert not_ready.status_code == 409
 
     deck = db_session.query(LearningDeck).filter_by(id=deck_id).one()
-    run = db_session.query(LearningDeckRun).filter_by(deck_id=deck_id).one()
-    run.status = "completed"
-    deck.latest_successful_run_id = run.id
+    task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    task.status = "completed"
+    deck.latest_successful_task_id = task.id
     deck.deck_object_key = "learning/test/index.html"
     db_session.commit()
 
@@ -132,7 +132,7 @@ def test_public_share_route_serves_latest_artifact_and_disable_revokes(
     create_response = client.post("/api/learning/decks", json={"content_id": content.id})
     deck_id = create_response.json()["id"]
     deck = db_session.query(LearningDeck).filter_by(id=deck_id).one()
-    run = db_session.query(LearningDeckRun).filter_by(deck_id=deck_id).one()
+    task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
     gateway.put_text(
         key="learning/deck/index.html",
         text="<html><body>Shared Learning Deck</body></html>",
@@ -148,8 +148,8 @@ def test_public_share_route_serves_latest_artifact_and_disable_revokes(
         text=".reveal { color: rgb(20 20 20); }",
         content_type="text/css",
     )
-    run.status = "completed"
-    deck.latest_successful_run_id = run.id
+    task.status = "completed"
+    deck.latest_successful_task_id = task.id
     deck.artifact_storage_prefix = "learning/deck"
     deck.deck_object_key = "learning/deck/index.html"
     deck.source_notes_html_object_key = "learning/deck/source-notes.html"

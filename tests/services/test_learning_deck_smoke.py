@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content, LearningDeckRun
+from app.models.db import Content, LlmTask
 from app.services.gateways.object_storage_gateway import LocalObjectStorageGateway
 from app.services.learning_deck_agent import LearningDeckAgentResult
-from app.services.learning_deck_generation import generate_learning_deck
+from app.services.learning_deck_task_generation import run_learning_deck_task
 from app.services.learning_decks import (
     create_or_rerun_learning_deck,
     enable_learning_deck_share,
@@ -44,12 +44,12 @@ def test_learning_deck_smoke_matrix_article_github_arxiv_url_and_failed_rerun(
         content_id=article.id,
         interests_prompt="Teach the queue architecture",
     )
-    article_run = _latest_run(db_session, _required_id(article_deck.id))
-    _generate_success(db_session, _required_id(article_run.id), title="Article Deck")
+    article_task = _latest_task(db_session, _required_id(article_deck.id))
+    _generate_success(db_session, _required_id(article_task.id), title="Article Deck")
 
     db_session.refresh(article_deck)
     original_article_key = article_deck.deck_object_key
-    assert article_deck.latest_successful_run_id == article_run.id
+    assert article_deck.latest_successful_task_id == article_task.id
     assert original_article_key
     assert b"Article Deck" in gateway.get_bytes(key=original_article_key)
 
@@ -67,17 +67,17 @@ def test_learning_deck_smoke_matrix_article_github_arxiv_url_and_failed_rerun(
         url="https://github.com/openai/codex/tree/main",
         interests_prompt="Focus on repo architecture",
     )
-    github_run = _latest_run(db_session, _required_id(github_deck.id))
+    github_task = _latest_task(db_session, _required_id(github_deck.id))
     _generate_success(
         db_session,
-        _required_id(github_run.id),
+        _required_id(github_task.id),
         title="GitHub Deck",
         source_metadata={"default_branch": "main", "commit_sha": "abc123"},
     )
 
     db_session.refresh(github_deck)
     assert github_deck.source_identity == "github:openai/codex"
-    assert github_deck.latest_successful_run_id == github_run.id
+    assert github_deck.latest_successful_task_id == github_task.id
     assert isinstance(github_deck.source_metadata, dict)
     assert github_deck.source_metadata["commit_sha"] == "abc123"
 
@@ -97,12 +97,12 @@ def test_learning_deck_smoke_matrix_article_github_arxiv_url_and_failed_rerun(
     }
     db_session.commit()
 
-    arxiv_run = _latest_run(db_session, _required_id(arxiv_deck.id))
-    _generate_success(db_session, _required_id(arxiv_run.id), title="arXiv Deck")
+    arxiv_task = _latest_task(db_session, _required_id(arxiv_deck.id))
+    _generate_success(db_session, _required_id(arxiv_task.id), title="arXiv Deck")
 
     db_session.refresh(arxiv_deck)
     assert arxiv_deck.source_identity == f"content:{arxiv_content.id}"
-    assert arxiv_deck.latest_successful_run_id == arxiv_run.id
+    assert arxiv_deck.latest_successful_task_id == arxiv_task.id
 
     failed_rerun_deck = create_or_rerun_learning_deck(
         db_session,
@@ -110,14 +110,14 @@ def test_learning_deck_smoke_matrix_article_github_arxiv_url_and_failed_rerun(
         content_id=article.id,
         interests_prompt="Try a broken rerun",
     )
-    failed_run = _latest_run(db_session, _required_id(failed_rerun_deck.id))
+    failed_task = _latest_task(db_session, _required_id(failed_rerun_deck.id))
     assert failed_rerun_deck.id == article_deck.id
 
     try:
-        generate_learning_deck(
+        run_learning_deck_task(
             db_session,
-            learning_deck_run_id=_required_id(failed_run.id),
-            agent_runner=lambda *_args: LearningDeckAgentResult(
+            llm_task_id=_required_id(failed_task.id),
+            agent_runner=lambda **_kwargs: LearningDeckAgentResult(
                 index_html="<html><body>not a reveal deck</body></html>",
                 source_notes_md="# Source Notes\n\n## Sources\n\n- Article.",
                 assets={},
@@ -134,9 +134,9 @@ def test_learning_deck_smoke_matrix_article_github_arxiv_url_and_failed_rerun(
         raise AssertionError("Expected failed rerun validation")
 
     db_session.refresh(article_deck)
-    db_session.refresh(failed_run)
-    assert failed_run.status == "failed"
-    assert article_deck.latest_successful_run_id == article_run.id
+    db_session.refresh(failed_task)
+    assert failed_task.status == "failed"
+    assert article_deck.latest_successful_task_id == article_task.id
     assert article_deck.deck_object_key == original_article_key
     assert b"Article Deck" in gateway.get_bytes(key=original_article_key)
     assert get_deck_by_valid_share_token(db_session, token=share_token).deck_object_key == (
@@ -144,35 +144,35 @@ def test_learning_deck_smoke_matrix_article_github_arxiv_url_and_failed_rerun(
     )
 
 
-def _latest_run(db_session, deck_id: int) -> LearningDeckRun:
-    run = (
-        db_session.query(LearningDeckRun)
-        .filter_by(deck_id=deck_id)
-        .order_by(LearningDeckRun.id.desc())
+def _latest_task(db_session, deck_id: int) -> LlmTask:
+    task = (
+        db_session.query(LlmTask)
+        .filter_by(subject_id=deck_id, task_kind="learning_deck")
+        .order_by(LlmTask.id.desc())
         .first()
     )
-    assert run is not None
-    return run
+    assert task is not None
+    return task
 
 
 def _generate_success(
     db_session,
-    run_id: int,
+    task_id: int,
     *,
     title: str,
     source_metadata: dict[str, str] | None = None,
 ) -> None:
-    generate_learning_deck(
+    run_learning_deck_task(
         db_session,
-        learning_deck_run_id=run_id,
-        agent_runner=lambda *_args: LearningDeckAgentResult(
+        llm_task_id=task_id,
+        agent_runner=lambda **_kwargs: LearningDeckAgentResult(
             index_html=_index_html(title),
             source_notes_md=_source_notes(title),
             assets={},
             model_provider="openai",
             model_name="openai:test",
             sandbox_provider="local",
-            sandbox_id=f"smoke-{run_id}",
+            sandbox_id=f"smoke-{task_id}",
             source_metadata_updates=source_metadata or {},
         ),
     )

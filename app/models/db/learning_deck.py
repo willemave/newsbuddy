@@ -35,6 +35,18 @@ class LearningDeck(Base):
     title = Column(String(500), nullable=False)
     latest_successful_run_id = Column(Integer, nullable=True, index=True)
     latest_run_id = Column(Integer, nullable=True, index=True)
+    latest_successful_task_id = Column(
+        Integer,
+        ForeignKey("llm_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    latest_task_id = Column(
+        Integer,
+        ForeignKey("llm_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     artifact_storage_prefix = Column(String(2048), nullable=True)
     deck_object_key = Column(String(2048), nullable=True)
     source_notes_object_key = Column(String(2048), nullable=True)

@@ -135,7 +135,6 @@ def create_or_rerun_learning_deck(
 ) -> LearningDeck:
     """Create or rerun a Learning Deck and enqueue generation in one transaction."""
     user_id = require_user_id(current_user)
-    _ensure_no_active_run(db, user_id=user_id)
     source = resolve_learning_deck_create_source(
         db,
         current_user=current_user,
@@ -150,45 +149,57 @@ def create_or_rerun_learning_deck(
     )
 
     try:
-        _ensure_no_active_run(db, user_id=user_id)
         deck = _get_or_create_deck(db, user_id=user_id, source=source)
-        run = _create_queued_run(
-            deck=deck,
-            user_id=user_id,
-            source=source,
-            interests_prompt=interests_prompt,
-        )
-        db.add(run)
-        db.flush()
-
-        run_id = require_int_value(run.id, "Learning Deck run id")
+        active_legacy_run = _active_legacy_learning_deck_run(db, user_id=user_id)
+        if active_legacy_run is not None:
+            if active_legacy_run.deck_id == deck.id:
+                db.commit()
+                db.refresh(deck)
+                return deck
+            db.rollback()
+            raise LearningDeckError("A Learning Deck is already generating", status_code=409)
+        active_task = _active_learning_deck_task(db, user_id=user_id)
+        if active_task is not None:
+            if active_task.subject_id == deck.id:
+                db.commit()
+                db.refresh(deck)
+                return deck
+            db.rollback()
+            raise LearningDeckError("A Learning Deck is already generating", status_code=409)
         llm_task = create_llm_task(
             db,
             user_id=user_id,
             task_kind=LlmTaskKind.LEARNING_DECK,
             mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
             workflow_key="learning_deck.presentation.v1",
+            subject_id=require_int_value(deck.id, "Learning Deck id"),
             approval_policy={"default": LlmTaskApprovalPolicy.AUTO_APPLY.value},
             allowed_actions=["create_learning_deck"],
             tool_policy={"execute_bash": True, "web_search": True, "files": "read_write"},
             prompt_pack="learning_deck.presentation",
             input_json={
-                "learning_deck_run_id": run_id,
                 "deck_id": require_int_value(deck.id, "Learning Deck id"),
-                "source": run.source_snapshot,
-                "interests_prompt": run.interests_prompt,
+                "source": {
+                    "source_kind": source.source_kind.value,
+                    "source_identity": source.source_identity,
+                    "source_url": source.source_url,
+                    "source_content_id": source.source_content_id,
+                    "source_title": source.source_title,
+                    "source_metadata": source.source_metadata,
+                },
+                "interests_prompt": clean_optional_text(interests_prompt),
             },
         )
-        run.llm_task_id = require_int_value(llm_task.id, "LLM task id")
-        deck.latest_run_id = run_id
+        llm_task_id = require_int_value(llm_task.id, "LLM task id")
+        deck.latest_task_id = llm_task_id
         deck.updated_at = utcnow()
-        _enqueue_generation_task(db, run_id=run_id, user_id=user_id)
+        _enqueue_llm_task(db, llm_task_id=llm_task_id, user_id=user_id)
         db.commit()
         db.refresh(deck)
         return deck
     except IntegrityError as exc:
         db.rollback()
-        if _is_active_run_integrity_error(exc):
+        if _is_active_task_integrity_error(exc):
             raise LearningDeckError(
                 "A Learning Deck is already generating",
                 status_code=409,
@@ -215,11 +226,16 @@ def delete_learning_deck(db: Session, *, user_id: int, deck_id: int) -> None:
 
 def present_learning_deck(db: Session, deck: LearningDeck) -> LearningDeckResponse:
     """Build an API response for one deck."""
-    latest_run = _latest_run_for_deck(db, deck)
-    status = LearningDeckStatus.READY if deck.latest_successful_run_id else None
-    if latest_run is not None and latest_run.status != LearningDeckRunStatus.COMPLETED.value:
+    latest_task = _latest_task_for_deck(db, deck)
+    latest_run = None if latest_task is not None else _latest_run_for_deck(db, deck)
+    successful_attempt_id = deck.latest_successful_task_id or deck.latest_successful_run_id
+    status = LearningDeckStatus.READY if successful_attempt_id else None
+    attempt_status = (
+        latest_task.status if latest_task is not None else getattr(latest_run, "status", None)
+    )
+    if attempt_status is not None and attempt_status != LearningDeckRunStatus.COMPLETED.value:
         status = LearningDeckStatus(
-            require_str_value(latest_run.status, "Learning Deck run status")
+            _learning_deck_status_for_task_status(require_str_value(attempt_status, "status"))
         )
     display_title = learning_deck_display_title(db, deck)
     return LearningDeckResponse(
@@ -234,12 +250,16 @@ def present_learning_deck(db: Session, deck: LearningDeck) -> LearningDeckRespon
         source_metadata=deck.source_metadata if isinstance(deck.source_metadata, dict) else {},
         status=status,
         share_enabled=bool(deck.share_enabled),
-        viewer_available=bool(deck.deck_object_key and deck.latest_successful_run_id),
-        source_notes_available=bool(
-            deck.source_notes_html_object_key and deck.latest_successful_run_id
+        viewer_available=bool(deck.deck_object_key and successful_attempt_id),
+        source_notes_available=bool(deck.source_notes_html_object_key and successful_attempt_id),
+        latest_successful_run_id=successful_attempt_id,
+        latest_run=(
+            _present_learning_deck_task(latest_task)
+            if latest_task is not None
+            else present_learning_deck_run(latest_run)
+            if latest_run
+            else None
         ),
-        latest_successful_run_id=deck.latest_successful_run_id,
-        latest_run=present_learning_deck_run(latest_run) if latest_run else None,
         created_at=require_datetime_value(deck.created_at, "Learning Deck created_at"),
         updated_at=deck.updated_at,
     )
@@ -373,38 +393,6 @@ def promote_learning_deck_run(
         delete_learning_deck_objects(stale_keys)
 
 
-def _create_queued_run(
-    *,
-    deck: LearningDeck,
-    user_id: int,
-    source: LearningDeckSource,
-    interests_prompt: str | None,
-) -> LearningDeckRun:
-    deck_id = require_int_value(deck.id, "Learning Deck id")
-    run = LearningDeckRun(
-        deck_id=deck_id,
-        user_id=user_id,
-        status=LearningDeckRunStatus.QUEUED.value,
-        interests_prompt=clean_optional_text(interests_prompt),
-        source_snapshot={
-            "source_kind": source.source_kind.value,
-            "source_identity": source.source_identity,
-            "source_url": source.source_url,
-            "source_content_id": source.source_content_id,
-            "source_title": source.source_title,
-            "source_metadata": source.source_metadata,
-        },
-        timeline=[],
-        artifact_object_keys=[],
-    )
-    append_learning_deck_timeline(
-        run,
-        status=LearningDeckRunStatus.QUEUED,
-        note="Learning Deck generation queued",
-    )
-    return run
-
-
 def _with_submission_metadata(
     source: LearningDeckSource,
     *,
@@ -486,12 +474,12 @@ def _merged_source_metadata(
     return metadata
 
 
-def _enqueue_generation_task(db: Session, *, run_id: int, user_id: int) -> int:
+def _enqueue_llm_task(db: Session, *, llm_task_id: int, user_id: int) -> int:
     """Insert the generation queue task in the caller's transaction."""
-    task_spec = get_task_spec(TaskType.GENERATE_LEARNING_DECK)
-    payload = task_spec.normalize_payload({"learning_deck_run_id": run_id, "user_id": user_id})
+    task_spec = get_task_spec(TaskType.RUN_LLM_TASK)
+    payload = task_spec.normalize_payload({"llm_task_id": llm_task_id, "user_id": user_id})
     task = ProcessingTask(
-        task_type=TaskType.GENERATE_LEARNING_DECK.value,
+        task_type=TaskType.RUN_LLM_TASK.value,
         payload=payload,
         status=TaskStatus.PENDING.value,
         queue_name=task_spec.queue.value,
@@ -509,7 +497,7 @@ def _enqueue_generation_task(db: Session, *, run_id: int, user_id: int) -> int:
                 json.dumps(
                     {
                         "task_id": int(task.id),
-                        "task_type": TaskType.GENERATE_LEARNING_DECK.value,
+                        "task_type": TaskType.RUN_LLM_TASK.value,
                         "queue_name": task_spec.queue.value,
                     },
                     separators=(",", ":"),
@@ -520,14 +508,95 @@ def _enqueue_generation_task(db: Session, *, run_id: int, user_id: int) -> int:
     return int(task.id)
 
 
-def _ensure_no_active_run(db: Session, *, user_id: int) -> None:
-    active = (
-        db.query(LearningDeckRun.id)
-        .filter(LearningDeckRun.user_id == user_id, LearningDeckRun.status.in_(ACTIVE_RUN_STATUSES))
+def _active_learning_deck_task(db: Session, *, user_id: int) -> LlmTask | None:
+    return (
+        db.query(LlmTask)
+        .filter(
+            LlmTask.user_id == user_id,
+            LlmTask.task_kind == LlmTaskKind.LEARNING_DECK.value,
+            LlmTask.status.in_(
+                {
+                    LlmTaskStatus.QUEUED.value,
+                    LlmTaskStatus.PREPARING.value,
+                    LlmTaskStatus.RUNNING.value,
+                    LlmTaskStatus.AWAITING_APPROVAL.value,
+                    LlmTaskStatus.APPLYING.value,
+                }
+            ),
+        )
+        .order_by(desc(LlmTask.created_at), desc(LlmTask.id))
         .first()
     )
-    if active is not None:
-        raise LearningDeckError("A Learning Deck is already generating", status_code=409)
+
+
+def _active_legacy_learning_deck_run(
+    db: Session,
+    *,
+    user_id: int,
+) -> LearningDeckRun | None:
+    """Honor in-flight pre-cutover runs until the legacy queue drains."""
+    return (
+        db.query(LearningDeckRun)
+        .filter(
+            LearningDeckRun.user_id == user_id,
+            LearningDeckRun.status.in_(ACTIVE_RUN_STATUSES),
+        )
+        .order_by(desc(LearningDeckRun.created_at), desc(LearningDeckRun.id))
+        .first()
+    )
+
+
+def _latest_task_for_deck(db: Session, deck: LearningDeck) -> LlmTask | None:
+    if deck.latest_task_id:
+        task = db.query(LlmTask).filter(LlmTask.id == deck.latest_task_id).first()
+        if task is not None:
+            return task
+    return (
+        db.query(LlmTask)
+        .filter(
+            LlmTask.task_kind == LlmTaskKind.LEARNING_DECK.value,
+            LlmTask.subject_id == deck.id,
+        )
+        .order_by(desc(LlmTask.created_at), desc(LlmTask.id))
+        .first()
+    )
+
+
+def _present_learning_deck_task(task: LlmTask) -> LearningDeckRunResponse:
+    timeline = []
+    for entry in task.status_history or []:
+        if not isinstance(entry, dict) or not entry.get("note") or not entry.get("created_at"):
+            continue
+        timeline.append(
+            LearningDeckTimelineEntry.model_validate(
+                {
+                    "status": _learning_deck_status_for_task_status(str(entry.get("status"))),
+                    "note": entry["note"],
+                    "created_at": entry["created_at"],
+                }
+            )
+        )
+    input_json = task.input_json if isinstance(task.input_json, dict) else {}
+    return LearningDeckRunResponse(
+        id=require_int_value(task.id, "LLM task id"),
+        status=LearningDeckRunStatus(_learning_deck_status_for_task_status(str(task.status))),
+        interests_prompt=clean_optional_text(input_json.get("interests_prompt")),
+        timeline=timeline,
+        error_message=task.error_message,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+        created_at=require_datetime_value(task.created_at, "LLM task created_at"),
+        updated_at=task.updated_at,
+    )
+
+
+def _learning_deck_status_for_task_status(status: str) -> str:
+    return {
+        LlmTaskStatus.RUNNING.value: LearningDeckRunStatus.GENERATING.value,
+        LlmTaskStatus.AWAITING_APPROVAL.value: LearningDeckRunStatus.GENERATING.value,
+        LlmTaskStatus.APPLYING.value: LearningDeckRunStatus.PUBLISHING.value,
+        LlmTaskStatus.CANCELLED.value: LearningDeckRunStatus.FAILED.value,
+    }.get(status, status)
 
 
 def _latest_run_for_deck(db: Session, deck: LearningDeck) -> LearningDeckRun | None:
@@ -544,9 +613,9 @@ def _latest_run_for_deck(db: Session, deck: LearningDeck) -> LearningDeckRun | N
     )
 
 
-def _is_active_run_integrity_error(exc: IntegrityError) -> bool:
+def _is_active_task_integrity_error(exc: IntegrityError) -> bool:
     text = str(exc.orig if exc.orig is not None else exc).lower()
-    return "uq_learning_deck_runs_user_active" in text
+    return "uq_llm_tasks_learning_deck_user_active" in text
 
 
 def _set_learning_run_llm_task_status(

@@ -110,20 +110,18 @@ def test_create_learning_deck_from_content_enqueues_generation(
     )
 
     assert deck.source_identity == f"content:{content.id}"
-    run = db_session.query(LearningDeckRun).filter_by(deck_id=deck.id).one()
-    assert run.status == "queued"
-    assert run.interests_prompt == "Focus on architecture"
-    assert run.llm_task_id is not None
-    llm_task = db_session.query(LlmTask).filter_by(id=run.llm_task_id).one()
+    assert db_session.query(LearningDeckRun).filter_by(deck_id=deck.id).count() == 0
+    llm_task = db_session.query(LlmTask).filter_by(subject_id=deck.id).one()
     assert llm_task.task_kind == LlmTaskKind.LEARNING_DECK.value
     assert llm_task.mode == LlmTaskMode.LEARNING_DECK_PRESENTATION.value
     assert llm_task.status == LlmTaskStatus.QUEUED.value
     assert llm_task.workflow_key == "learning_deck.presentation.v1"
-    assert llm_task.input_json["learning_deck_run_id"] == run.id
+    assert llm_task.input_json["interests_prompt"] == "Focus on architecture"
+    assert deck.latest_task_id == llm_task.id
     task = db_session.query(ProcessingTask).one()
-    assert task.task_type == TaskType.GENERATE_LEARNING_DECK.value
-    assert task.queue_name == "learning"
-    assert task.payload == {"learning_deck_run_id": run.id, "user_id": test_user.id}
+    assert task.task_type == TaskType.RUN_LLM_TASK.value
+    assert task.queue_name == "llm"
+    assert task.payload == {"llm_task_id": llm_task.id, "user_id": test_user.id}
 
 
 def test_content_learning_deck_uses_resolved_pdf_title(
@@ -193,9 +191,9 @@ def test_create_learning_deck_reuses_source_identity_for_rerun(
         current_user=test_user,
         content_id=content.id,
     )
-    first_run = db_session.query(LearningDeckRun).filter_by(deck_id=first.id).one()
-    first_run.status = "completed"
-    first.latest_successful_run_id = first_run.id
+    first_task = db_session.query(LlmTask).filter_by(subject_id=first.id).one()
+    first_task.status = "completed"
+    first.latest_successful_task_id = first_task.id
     db_session.commit()
 
     second = create_or_rerun_learning_deck(
@@ -207,8 +205,9 @@ def test_create_learning_deck_reuses_source_identity_for_rerun(
 
     assert second.id == first.id
     assert db_session.query(LearningDeck).count() == 1
-    assert db_session.query(LearningDeckRun).count() == 2
-    assert second.latest_successful_run_id == first_run.id
+    assert db_session.query(LearningDeckRun).count() == 0
+    assert db_session.query(LlmTask).filter_by(subject_id=first.id).count() == 2
+    assert second.latest_successful_task_id == first_task.id
 
 
 def test_create_learning_deck_enforces_one_active_run_per_user(
@@ -240,9 +239,9 @@ def test_share_tokens_enable_disable_and_private_tokens(
 ) -> None:
     content = _create_visible_article(db_session, test_user, content_factory)
     deck = create_or_rerun_learning_deck(db_session, current_user=test_user, content_id=content.id)
-    run = db_session.query(LearningDeckRun).filter_by(deck_id=deck.id).one()
-    run.status = "completed"
-    deck.latest_successful_run_id = run.id
+    task = db_session.query(LlmTask).filter_by(subject_id=deck.id).one()
+    task.status = "completed"
+    deck.latest_successful_task_id = task.id
     deck.deck_object_key = "learning/test/index.html"
     db_session.commit()
 
@@ -270,9 +269,6 @@ def test_delete_learning_deck_invalidates_access_and_deletes_artifacts(
     deleted_keys: list[str] = []
     content = _create_visible_article(db_session, test_user, content_factory)
     deck = create_or_rerun_learning_deck(db_session, current_user=test_user, content_id=content.id)
-    run = db_session.query(LearningDeckRun).filter_by(deck_id=deck.id).one()
-    run.artifact_object_keys = ["learning/run/index.html"]
-    run.agent_log_object_key = "learning/internal/agent-log.jsonl"
     deck.artifact_object_keys = ["learning/deck/index.html"]
     db_session.commit()
 
@@ -289,5 +285,4 @@ def test_delete_learning_deck_invalidates_access_and_deletes_artifacts(
 
     db_session.refresh(deck)
     assert deck.deleted_at is not None
-    assert set(deleted_keys) == {"learning/deck/index.html", "learning/run/index.html"}
-    assert "learning/internal/agent-log.jsonl" not in deleted_keys
+    assert set(deleted_keys) == {"learning/deck/index.html"}

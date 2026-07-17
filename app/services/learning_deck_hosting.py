@@ -15,7 +15,9 @@ from app.services.learning_deck_viewer import with_learning_deck_navigation_cont
 
 def read_learning_deck_viewer_object(deck: LearningDeck) -> LearningDeckHostedObject:
     """Read the latest hosted deck HTML for a deck."""
-    if not deck.deck_object_key or not deck.latest_successful_run_id:
+    if not deck.deck_object_key or not (
+        deck.latest_successful_task_id or deck.latest_successful_run_id
+    ):
         raise LearningDeckError("Learning Deck is not ready", status_code=404)
     return LearningDeckHostedObject(
         data=with_learning_deck_navigation_controls(
@@ -27,7 +29,9 @@ def read_learning_deck_viewer_object(deck: LearningDeck) -> LearningDeckHostedOb
 
 def read_learning_deck_source_notes_object(deck: LearningDeck) -> LearningDeckHostedObject:
     """Read the latest hosted rendered source notes for a deck."""
-    if not deck.source_notes_html_object_key or not deck.latest_successful_run_id:
+    if not deck.source_notes_html_object_key or not (
+        deck.latest_successful_task_id or deck.latest_successful_run_id
+    ):
         raise LearningDeckError("Learning Deck source notes are not ready", status_code=404)
     return LearningDeckHostedObject(
         data=read_learning_deck_object(str(deck.source_notes_html_object_key)),
@@ -41,7 +45,9 @@ def read_learning_deck_asset_object(
     asset_path: str,
 ) -> LearningDeckHostedObject:
     """Read one local asset from the latest hosted Learning Deck bundle."""
-    if not deck.artifact_storage_prefix or not deck.latest_successful_run_id:
+    if not deck.artifact_storage_prefix or not (
+        deck.latest_successful_task_id or deck.latest_successful_run_id
+    ):
         raise LearningDeckError("Learning Deck is not ready", status_code=404)
     try:
         relative_path = normalize_artifact_relative_path(f"assets/{asset_path}")
