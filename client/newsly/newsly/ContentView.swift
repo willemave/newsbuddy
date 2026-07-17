@@ -57,7 +57,11 @@ struct ContentView: View {
     var body: some View {
         TabView(selection: tabSelection.binding) {
             if isBriefingExperience {
-                BriefingTab(path: $briefingPath, viewModel: tabCoordinator.briefingVM)
+                BriefingTab(
+                    path: $briefingPath,
+                    viewModel: tabCoordinator.briefingVM,
+                    contentTextSize: contentTextSize
+                )
             } else {
                 LongFormTab(
                     path: $longFormPath,

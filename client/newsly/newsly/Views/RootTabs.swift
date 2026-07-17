@@ -120,10 +120,12 @@ struct ShortFormTab: View {
 struct BriefingTab: View {
     @Binding var path: NavigationPath
     let viewModel: BriefingViewModel
+    let contentTextSize: DynamicTypeSize
 
     var body: some View {
         NavigationStack(path: $path) {
             BriefingView(viewModel: viewModel)
+                .dynamicTypeSize(contentTextSize)
         }
         .toolbar(.hidden, for: .tabBar)
         .tag(RootTab.briefing)

@@ -53,8 +53,12 @@ struct BriefingPassageView: UIViewRepresentable {
         context.coordinator.onOpenDiscussion = onOpenDiscussion
         context.coordinator.onDig = onDig
         uiView.floatingExclusionSize = floatingExclusionSize
-        if !uiView.attributedText.isEqual(to: content.attributedText) {
-            uiView.attributedText = content.attributedText
+        let scaledText = Self.scaledAttributedText(
+            content.attributedText,
+            compatibleWith: uiView.traitCollection
+        )
+        if !uiView.attributedText.isEqual(to: scaledText) {
+            uiView.attributedText = scaledText
             context.coordinator.measurement = nil
             context.coordinator.contentRevision += 1
             uiView.invalidateIntrinsicContentSize()
@@ -95,6 +99,23 @@ struct BriefingPassageView: UIViewRepresentable {
         BriefingPerformance.signposter.endInterval("passage-measurement", signpostState)
         context.coordinator.measurement = (measurementFingerprint, size)
         return size
+    }
+
+    static func scaledAttributedText(
+        _ attributedText: NSAttributedString,
+        compatibleWith traitCollection: UITraitCollection
+    ) -> NSAttributedString {
+        let scaledText = NSMutableAttributedString(attributedString: attributedText)
+        let fullRange = NSRange(location: 0, length: scaledText.length)
+        scaledText.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+            guard let font = value as? UIFont else { return }
+            let scaledFont = UIFontMetrics(forTextStyle: .callout).scaledFont(
+                for: font,
+                compatibleWith: traitCollection
+            )
+            scaledText.addAttribute(.font, value: scaledFont, range: range)
+        }
+        return scaledText
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {

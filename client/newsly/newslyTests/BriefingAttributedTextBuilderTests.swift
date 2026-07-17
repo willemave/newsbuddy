@@ -17,6 +17,32 @@ final class BriefingSentenceRangeTests: XCTestCase {
     }
 }
 
+final class BriefingPassageTypographyTests: XCTestCase {
+    func testPassageTypographyScalesWithContentTextSize() throws {
+        let baseFont = UIFont.appSans(size: 16)
+        let attributedText = NSAttributedString(
+            string: "Briefing body",
+            attributes: [.font: baseFont]
+        )
+        let traitCollection = UITraitCollection(preferredContentSizeCategory: .extraLarge)
+
+        let scaledText = BriefingPassageView.scaledAttributedText(
+            attributedText,
+            compatibleWith: traitCollection
+        )
+
+        let scaledFont = try XCTUnwrap(
+            scaledText.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        )
+        let expectedFont = UIFontMetrics(forTextStyle: .callout).scaledFont(
+            for: baseFont,
+            compatibleWith: traitCollection
+        )
+        XCTAssertEqual(scaledFont.pointSize, expectedFont.pointSize, accuracy: 0.01)
+        XCTAssertGreaterThan(scaledFont.pointSize, baseFont.pointSize)
+    }
+}
+
 final class BriefingAttributedTextBuilderTests: XCTestCase {
     func testFeaturePassagesUseBodyTypography() throws {
         let builder = BriefingAttributedTextBuilder()
