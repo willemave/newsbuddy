@@ -855,7 +855,29 @@ Registered handlers:
 - generate learning deck
 - run LLM task
 
-### 9.5 Worker launch and drift guards
+### 9.5 LLM task workflows
+
+`llm_tasks` is the canonical attempt ledger for queued agent workflows. `run_llm_task` dispatches
+by `task_kind`; the workflow executor owns status history, model and sandbox metadata, errors,
+usage, and artifact manifests. `processing_tasks` only owns queue delivery, leases, deferral, and
+retry state.
+
+Learning Decks use `learning_decks` as the stable product record and point to their latest and
+latest-successful `llm_tasks` attempts. New attempts do not create `learning_deck_runs`; API fields
+named `latest_run` remain a compatibility projection from the LLM task. Legacy run rows and the
+`generate_learning_deck` handler remain readable/executable only while the pre-cutover queue drains.
+
+Source preparation uses queue deferral rather than failure retry: a deferred task returns to
+`pending`, preserves its retry count, clears stale errors, and waits until `available_at`. Learning
+Deck source waits have a fixed two-hour deadline and fail immediately if source processing is
+terminal. Before publishing, the workflow renews and verifies queue ownership.
+
+VM-backed agents share five direct host tools: `execute_bash`, `read_file`, `write_file`,
+`list_files`, and `web_search`. Tool results are structured. Learning Deck output is validated
+automatically; a missing or invalid artifact gets one focused repair turn before a typed terminal
+failure.
+
+### 9.6 Worker launch and drift guards
 
 Workers are launched per queue partition. `scripts/dev.sh` and `scripts/start_services.sh` start `content`, `media`, `audio_episode`, `image`, `onboarding`, `backfill`, `discussion`, `twitter`, `chat`, `learning`, and `llm` workers. The `content` queue runs with higher parallelism by default because it carries the widest set of user-visible work.
 
