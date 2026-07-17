@@ -3,9 +3,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 from app.models.contracts import LlmTaskKind, LlmTaskMode
 from app.models.db import VendorUsageRecord
 from app.services import learning_deck_agent
+from app.services.learning_deck_agent import LearningDeckAgentExecutionError
 from app.services.llm_tasks import create_llm_task
 
 
@@ -59,7 +62,8 @@ class _FakeSandbox:
         del max_bytes
         if path == learning_deck_agent.OUTPUT_INDEX_HTML:
             return (
-                "<html><body><div class='reveal'><div class='slides'>"
+                "<html><style>.reveal .slides section { color: #eee; background: #111; "
+                "padding: 2rem; }</style><body><div class='reveal'><div class='slides'>"
                 "<section>Deck</section></div></div></body></html>"
             )
         if path == learning_deck_agent.OUTPUT_SOURCE_NOTES:
@@ -77,6 +81,36 @@ class _FakeSandbox:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _MissingOutputSandbox(_FakeSandbox):
+    def read_file(self, path: str, *, max_bytes: int | None = None) -> str:
+        del max_bytes
+        if path == learning_deck_agent.OUTPUT_SOURCE_METADATA:
+            return "{}"
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        return self.files[path]
+
+
+class _RepairingAgent(_FakeAgent):
+    calls = 0
+
+    def run_sync(self, *_args: Any, **kwargs: Any) -> _FakeAgentResult:
+        type(self).calls += 1
+        if type(self).calls == 2:
+            sandbox = kwargs["deps"].sandbox
+            sandbox.write_file(
+                learning_deck_agent.OUTPUT_INDEX_HTML,
+                "<html><style>.reveal .slides section { color: #eee; background: #111; "
+                "padding: 2rem; }</style><div class='reveal'><div class='slides'>"
+                "<section>Repaired</section></div></div></html>",
+            )
+            sandbox.write_file(
+                learning_deck_agent.OUTPUT_SOURCE_NOTES,
+                "# Sources\n\n- Primary source.",
+            )
+        return _FakeAgentResult()
 
 
 def test_learning_deck_agent_persists_vendor_usage_row(
@@ -215,3 +249,67 @@ def test_learning_deck_agent_log_event_accepts_deps_object() -> None:
             "payload": {"path": "output/index.html"},
         }
     ]
+
+
+def test_learning_deck_agent_repairs_missing_required_artifacts_once(
+    test_user,
+    vendor_usage_db,
+    monkeypatch,
+) -> None:
+    del vendor_usage_db
+    sandbox = _MissingOutputSandbox()
+    _RepairingAgent.calls = 0
+    monkeypatch.setattr(learning_deck_agent, "Agent", _RepairingAgent)
+    monkeypatch.setattr(
+        learning_deck_agent,
+        "build_pydantic_model",
+        lambda _model_spec: (object(), {}),
+    )
+    monkeypatch.setattr(learning_deck_agent, "resolve_model_provider", lambda _model_spec: "openai")
+
+    result = learning_deck_agent.run_learning_deck_agent(
+        source_snapshot={"source_kind": "content", "source_title": "Source"},
+        interests_prompt=None,
+        user_id=test_user.id,
+        run_id=91,
+        sandbox_factory=lambda _user_id, _run_id: cast(Any, sandbox),
+    )
+
+    assert _RepairingAgent.calls == 2
+    assert "Repaired" in result.index_html
+    assert any(
+        event["event_type"] == "artifact_validation_failed" for event in result.agent_log_events
+    )
+
+
+def test_learning_deck_agent_reports_typed_failure_when_repair_does_not_create_outputs(
+    test_user,
+    vendor_usage_db,
+    monkeypatch,
+) -> None:
+    del vendor_usage_db
+    sandbox = _MissingOutputSandbox()
+    monkeypatch.setattr(learning_deck_agent, "Agent", _FakeAgent)
+    monkeypatch.setattr(
+        learning_deck_agent,
+        "build_pydantic_model",
+        lambda _model_spec: (object(), {}),
+    )
+    monkeypatch.setattr(learning_deck_agent, "resolve_model_provider", lambda _model_spec: "openai")
+
+    with pytest.raises(
+        LearningDeckAgentExecutionError,
+        match="artifact_contract_failed",
+    ) as exc_info:
+        learning_deck_agent.run_learning_deck_agent(
+            source_snapshot={"source_kind": "content", "source_title": "Source"},
+            interests_prompt=None,
+            user_id=test_user.id,
+            run_id=92,
+            sandbox_factory=lambda _user_id, _run_id: cast(Any, sandbox),
+        )
+
+    assert exc_info.value.sandbox_id == sandbox.sandbox_id
+    assert any(
+        event["event_type"] == "artifact_repair_failed" for event in exc_info.value.agent_log_events
+    )

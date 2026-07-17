@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
@@ -21,7 +22,8 @@ from app.services.agent_vm_runtime import (
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 _PROCESS_LOCAL_ROOTS_BY_NAMESPACE: dict[str, Path] = {}
-_PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE: dict[str, Any] = {}
+_PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE: dict[tuple[str, str], Any] = {}
+_PROCESS_LOCAL_E2B_CAPABILITIES_BY_NAMESPACE: dict[tuple[str, str], dict[str, Any]] = {}
 
 logger = get_logger(__name__)
 
@@ -120,7 +122,8 @@ class E2BAgentVmSession(AgentVmSession):
         except ImportError as exc:  # pragma: no cover
             raise AgentVmError("e2b-code-interpreter is not installed") from exc
 
-        sandbox, created = _get_or_create_e2b_sandbox(
+        self._cache_key = _e2b_cache_key(vm_namespace, settings.llm_task_sandbox_template)
+        sandbox, created, capabilities = _get_or_create_e2b_sandbox(
             sandbox_class=Sandbox,
             vm_namespace=vm_namespace,
             user_id=user_id,
@@ -140,6 +143,8 @@ class E2BAgentVmSession(AgentVmSession):
             sandbox_id=self.sandbox_id,
             reuse_scope="process_namespace",
             reused=not created,
+            template_revision=settings.llm_task_sandbox_template,
+            capabilities=capabilities,
         )
         try:
             self._run_raw_command(
@@ -150,8 +155,8 @@ class E2BAgentVmSession(AgentVmSession):
         except Exception as exc:
             if created or not _is_missing_e2b_sandbox_error(exc):
                 raise
-            _evict_e2b_sandbox(vm_namespace, sandbox)
-            sandbox, created = _get_or_create_e2b_sandbox(
+            _evict_e2b_sandbox(self._cache_key, sandbox)
+            sandbox, created, capabilities = _get_or_create_e2b_sandbox(
                 sandbox_class=Sandbox,
                 vm_namespace=vm_namespace,
                 user_id=user_id,
@@ -166,6 +171,8 @@ class E2BAgentVmSession(AgentVmSession):
                 sandbox_id=self.sandbox_id,
                 reuse_scope="process_namespace",
                 reused=False,
+                template_revision=settings.llm_task_sandbox_template,
+                capabilities=capabilities,
             )
             self._run_raw_command(
                 "mkdir -p "
@@ -289,7 +296,7 @@ class E2BAgentVmSession(AgentVmSession):
 
     def _evict_if_missing(self, exc: Exception) -> None:
         if _is_missing_e2b_sandbox_error(exc):
-            _evict_e2b_sandbox(self.vm_namespace, self._sandbox)
+            _evict_e2b_sandbox(self._cache_key, self._sandbox)
 
 
 def create_agent_vm_session(
@@ -399,8 +406,9 @@ def _get_or_create_e2b_sandbox(
     user_id: int,
     feature: str,
     settings: Any,
-) -> tuple[Any, bool]:
-    cached = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(vm_namespace)
+) -> tuple[Any, bool, dict[str, Any]]:
+    cache_key = _e2b_cache_key(vm_namespace, settings.llm_task_sandbox_template)
+    cached = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(cache_key)
     if cached is not None:
         try:
             _refresh_e2b_sandbox_timeout(
@@ -410,13 +418,17 @@ def _get_or_create_e2b_sandbox(
         except Exception as exc:
             if not _is_missing_e2b_sandbox_error(exc):
                 raise
-            _evict_e2b_sandbox(vm_namespace, cached)
+            _evict_e2b_sandbox(cache_key, cached)
         else:
-            return cached, False
+            return (
+                cached,
+                False,
+                _PROCESS_LOCAL_E2B_CAPABILITIES_BY_NAMESPACE.get(cache_key, {}),
+            )
 
-    cached = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(vm_namespace)
+    cached = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(cache_key)
     if cached is not None:
-        return cached, False
+        return cached, False, _PROCESS_LOCAL_E2B_CAPABILITIES_BY_NAMESPACE.get(cache_key, {})
 
     create_kwargs: dict[str, Any] = {
         "timeout": settings.llm_task_sandbox_timeout_seconds,
@@ -431,8 +443,16 @@ def _get_or_create_e2b_sandbox(
     if settings.llm_task_sandbox_template:
         create_kwargs["template"] = settings.llm_task_sandbox_template
     sandbox = sandbox_class.create(**create_kwargs)
-    _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[vm_namespace] = sandbox
-    return sandbox, True
+    try:
+        capabilities = _probe_e2b_sandbox(sandbox) if settings.llm_task_sandbox_template else {}
+    except Exception:
+        kill = getattr(sandbox, "kill", None)
+        if callable(kill):
+            kill()
+        raise
+    _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] = sandbox
+    _PROCESS_LOCAL_E2B_CAPABILITIES_BY_NAMESPACE[cache_key] = capabilities
+    return sandbox, True, capabilities
 
 
 def _refresh_e2b_sandbox_timeout(sandbox: object, *, timeout_seconds: int) -> None:
@@ -441,11 +461,12 @@ def _refresh_e2b_sandbox_timeout(sandbox: object, *, timeout_seconds: int) -> No
         set_timeout(timeout_seconds)
 
 
-def _evict_e2b_sandbox(vm_namespace: str, sandbox: object) -> None:
-    cached = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(vm_namespace)
+def _evict_e2b_sandbox(cache_key: tuple[str, str], sandbox: object) -> None:
+    cached = _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.get(cache_key)
     if cached is not sandbox:
         return
-    _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.pop(vm_namespace, None)
+    _PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE.pop(cache_key, None)
+    _PROCESS_LOCAL_E2B_CAPABILITIES_BY_NAMESPACE.pop(cache_key, None)
     kill = getattr(sandbox, "kill", None)
     if callable(kill):
         try:
@@ -457,7 +478,7 @@ def _evict_e2b_sandbox(vm_namespace: str, sandbox: object) -> None:
                 extra={
                     "component": "llm_task_sandbox",
                     "operation": "evict_e2b_sandbox",
-                    "vm_namespace": vm_namespace,
+                    "vm_namespace": cache_key[1],
                     "sandbox_id": _sandbox_identifier(sandbox),
                 },
             )
@@ -466,10 +487,31 @@ def _evict_e2b_sandbox(vm_namespace: str, sandbox: object) -> None:
         extra={
             "component": "llm_task_sandbox",
             "operation": "evict_e2b_sandbox",
-            "vm_namespace": vm_namespace,
+            "vm_namespace": cache_key[1],
             "sandbox_id": _sandbox_identifier(sandbox),
         },
     )
+
+
+def _e2b_cache_key(vm_namespace: str, template: str | None) -> tuple[str, str]:
+    return (template or "default", vm_namespace)
+
+
+def _probe_e2b_sandbox(sandbox: Any) -> dict[str, Any]:
+    result = sandbox.commands.run("newsly-sandbox-probe --json", timeout=30)
+    if int(getattr(result, "exit_code", getattr(result, "exitCode", 0)) or 0) != 0:
+        raise AgentVmError("Configured E2B template failed newsly-sandbox-probe")
+    try:
+        payload = json.loads(str(getattr(result, "stdout", "") or ""))
+    except (TypeError, ValueError) as exc:
+        raise AgentVmError(
+            "Configured E2B template returned an invalid capability manifest"
+        ) from exc
+    required = {"bash", "python", "node", "git", "curl", "jq", "chromium", "playwright"}
+    missing = sorted(name for name in required if not payload.get(name))
+    if missing:
+        raise AgentVmError(f"Configured E2B template is missing capabilities: {', '.join(missing)}")
+    return payload
 
 
 def _is_missing_e2b_sandbox_error(exc: Exception) -> bool:

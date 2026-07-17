@@ -22,7 +22,6 @@ from app.services.agent_toolset import (
 )
 from app.services.agent_vm_runtime import AgentVmSession, agent_vm_session_log_payload
 from app.services.agent_vm_sessions import create_agent_vm_session
-from app.services.agent_vm_tool_scripts import install_agent_vm_task_tools
 from app.services.llm_models import build_pydantic_model, resolve_model_provider
 from app.services.llm_tasks import require_llm_task_id
 from app.services.prompt_library import load_prompt
@@ -97,7 +96,6 @@ def run_share_action_agent(
             "sandbox_started",
             agent_vm_session_log_payload(sandbox),
         )
-        install_agent_vm_task_tools(sandbox, task=task)
         _prepare_sandbox_inputs(sandbox, task=task)
         model_spec = settings.llm_task_model
         provider = resolve_model_provider(model_spec)
@@ -184,7 +182,6 @@ def _register_tools(agent: Agent[ShareActionAgentDeps, str], *, task: LlmTask) -
             operation_prefix="share_action",
             source="queue",
             tool_policy=AgentToolPolicy.from_mapping(task.tool_policy),
-            register_direct_web_search_tool=False,
         ),
     )
 
@@ -224,10 +221,8 @@ def _prepare_sandbox_inputs(sandbox: AgentVmSession, *, task: LlmTask) -> None:
 def _build_system_prompt(task: LlmTask) -> str:
     return (
         "You run a Newsly ShareSheet workflow in a VM.\n"
-        "Use only the provided tools and workspace helper scripts. Do not call Newsly "
-        "internal APIs from bash except for the provided `newsly-web-search` command.\n"
-        "For web search, call `newsly-web-search` from `execute_bash` and process its JSON output "
-        "with shell, Python, or jq.\n"
+        "Use only the provided tools. Do not call Newsly internal APIs from bash.\n"
+        "Use the web_search tool for web research.\n"
         "Always write output/result.json matching input/output-schema.json. The host validates "
         "that artifact and applies any product action.\n\n"
         f"{_load_mode_prompt(task)}"

@@ -9,7 +9,7 @@ from typing import Any
 from pydantic_ai import Agent, RunContext
 
 from app.services.agent_vm_runtime import AgentVmSession
-from app.services.exa_client import ExaSearchResult, exa_search
+from app.services.exa_client import exa_search
 
 
 @dataclass(frozen=True)
@@ -62,7 +62,6 @@ class AgentToolsetConfig:
     max_read_bytes: int = 100_000
     max_search_results: int = 8
     tool_policy: AgentToolPolicy = field(default_factory=AgentToolPolicy)
-    register_direct_web_search_tool: bool = True
 
 
 SessionGetter = Callable[[Any], AgentVmSession]
@@ -79,7 +78,6 @@ def register_agent_vm_tools(
     user_id_getter: UserIdGetter,
     metadata_getter: MetadataGetter,
     config: AgentToolsetConfig,
-    include_legacy_bash_alias: bool = False,
 ) -> None:
     """Register the stable VM tool surface on a pydantic-ai agent."""
     tool_policy = config.tool_policy
@@ -88,7 +86,7 @@ def register_agent_vm_tools(
         ctx: RunContext[Any],
         command: str,
         timeout_seconds: int | None = None,
-    ) -> str:
+    ) -> dict[str, Any]:
         session = session_getter(ctx.deps)
         result = session.execute_bash(command, timeout_seconds=timeout_seconds)
         log_event(
@@ -102,7 +100,12 @@ def register_agent_vm_tools(
                 "stderr": result.stderr,
             },
         )
-        return f"exit_code={result.exit_code}\nstdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        return {
+            "ok": result.exit_code == 0,
+            "exit_code": result.exit_code,
+            "stdout": _bounded_text(result.stdout),
+            "stderr": _bounded_text(result.stderr),
+        }
 
     if tool_policy.execute_bash:
 
@@ -111,34 +114,27 @@ def register_agent_vm_tools(
             ctx: RunContext[Any],
             command: str,
             timeout_seconds: int | None = None,
-        ) -> str:
+        ) -> dict[str, Any]:
             """Run a bash command inside the VM workspace."""
             return _execute_bash_impl(ctx, command, timeout_seconds=timeout_seconds)
-
-        if include_legacy_bash_alias:
-
-            @agent.tool
-            def bash(
-                ctx: RunContext[Any],
-                command: str,
-                timeout_seconds: int | None = None,
-            ) -> str:
-                """Deprecated alias for execute_bash."""
-                return _execute_bash_impl(ctx, command, timeout_seconds=timeout_seconds)
 
     if tool_policy.write_file:
 
         @agent.tool
-        def write_file(ctx: RunContext[Any], path: str, text: str) -> str:
+        def write_file(ctx: RunContext[Any], path: str, text: str) -> dict[str, Any]:
             """Write a UTF-8 file below the VM workspace."""
             session_getter(ctx.deps).write_file(path, text)
             log_event(ctx.deps, "write_file", {"path": path, "chars": len(text)})
-            return f"Wrote {path}"
+            return {"ok": True, "path": path, "chars": len(text)}
 
     if tool_policy.read_file:
 
         @agent.tool
-        def read_file(ctx: RunContext[Any], path: str, max_bytes: int | None = None) -> str:
+        def read_file(
+            ctx: RunContext[Any],
+            path: str,
+            max_bytes: int | None = None,
+        ) -> dict[str, Any]:
             """Read a UTF-8 file below the VM workspace."""
             bounded_max_bytes = _bounded_read_limit(max_bytes, config.max_read_bytes)
             try:
@@ -150,20 +146,20 @@ def register_agent_vm_tools(
                     "read_file_failed",
                     {"path": path, "error": str(exc), "failure_class": type(exc).__name__},
                 )
-                return message
+                return {"ok": False, "path": path, "error": message}
             log_event(ctx.deps, "read_file", {"path": path, "chars": len(text)})
-            return text
+            return {"ok": True, "path": path, "text": text}
 
     if tool_policy.list_files:
 
         @agent.tool
-        def list_files(ctx: RunContext[Any], path: str = ".") -> str:
+        def list_files(ctx: RunContext[Any], path: str = ".") -> dict[str, Any]:
             """List files below a VM workspace path."""
             files = session_getter(ctx.deps).list_files(path)
             log_event(ctx.deps, "list_files", {"path": path, "files": files})
-            return "\n".join(files) if files else "No files found."
+            return {"ok": True, "path": path, "files": files}
 
-    if tool_policy.web_search and config.register_direct_web_search_tool:
+    if tool_policy.web_search:
 
         @agent.tool
         def web_search(
@@ -171,7 +167,7 @@ def register_agent_vm_tools(
             query: str,
             num_results: int = 5,
             category: str | None = None,
-        ) -> str:
+        ) -> dict[str, Any]:
             """Search the web with Newsly's configured Exa client."""
             del category
             bounded_results = min(max(int(num_results), 1), config.max_search_results)
@@ -203,23 +199,25 @@ def register_agent_vm_tools(
                     ],
                 },
             )
-            return format_search_results(results)
+            return {
+                "ok": True,
+                "query": query,
+                "results": [
+                    {
+                        "title": result.title,
+                        "url": result.url,
+                        "published_date": result.published_date,
+                        "snippet": result.snippet,
+                    }
+                    for result in results
+                ],
+            }
 
 
-def format_search_results(results: list[ExaSearchResult]) -> str:
-    """Render search results in the compact source format used by agents."""
-    if not results:
-        return "No web search results available."
-    lines: list[str] = []
-    for index, result in enumerate(results, start=1):
-        lines.append(f"[{index}] {result.title}")
-        lines.append(f"URL: {result.url}")
-        if result.published_date:
-            lines.append(f"Published: {result.published_date}")
-        if result.snippet:
-            lines.append(f"Snippet: {result.snippet}")
-        lines.append("")
-    return "\n".join(lines).strip()
+def _bounded_text(value: str, *, max_chars: int = 20_000) -> str:
+    if len(value) <= max_chars:
+        return value
+    return value[:max_chars] + "\n...[truncated]"
 
 
 def _bounded_read_limit(requested: int | None, default_max: int) -> int:

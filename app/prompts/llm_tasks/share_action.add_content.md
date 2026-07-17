@@ -11,8 +11,7 @@ type hints.
 Recommended sequence:
 1. Inspect `input/request.json`.
 2. Use `execute_bash` with `curl`, Python, and HTML parsing when the page is accessible.
-3. Use `newsly-web-search` from `execute_bash` only when the submitted URL is ambiguous, blocked,
-   or lacks metadata.
+3. Use `web_search` only when the submitted URL is ambiguous, blocked, or lacks metadata.
 4. Prefer canonical article, podcast episode, or video URLs over tracking/share URLs.
 5. Write `output/result.json`.
 

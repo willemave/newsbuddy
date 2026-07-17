@@ -29,6 +29,8 @@ class AgentVmLease:
     sandbox_id: str | None
     reuse_scope: str
     reused: bool
+    template_revision: str | None = None
+    capabilities: dict[str, Any] | None = None
 
 
 class AgentVmSession(ABC):
@@ -77,4 +79,6 @@ def agent_vm_session_log_payload(session: object) -> dict[str, Any]:
         "vm_namespace": getattr(lease, "vm_namespace", None),
         "reuse_scope": getattr(lease, "reuse_scope", None),
         "reused": getattr(lease, "reused", None),
+        "template_revision": getattr(lease, "template_revision", None),
+        "capabilities": getattr(lease, "capabilities", None),
     }

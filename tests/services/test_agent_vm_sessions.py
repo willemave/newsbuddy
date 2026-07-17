@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from types import SimpleNamespace
 from uuid import uuid4
@@ -7,7 +8,6 @@ from uuid import uuid4
 from app.core.settings import get_settings
 from app.services import agent_vm_sessions
 from app.services.agent_vm_sessions import create_agent_vm_session
-from app.services.agent_vm_tool_scripts import install_agent_vm_tool_scripts
 
 
 def test_local_agent_vm_session_reports_process_namespace_reuse(monkeypatch) -> None:
@@ -40,36 +40,6 @@ def test_local_agent_vm_session_reports_process_namespace_reuse(monkeypatch) -> 
     assert second.lease.reused is True
 
 
-def test_local_agent_vm_session_loads_workspace_tool_env(monkeypatch) -> None:
-    settings = get_settings()
-    monkeypatch.setattr(settings, "llm_task_sandbox_provider", "local")
-    monkeypatch.setenv("EXA_API_KEY", "host-secret-must-not-leak")
-    namespace = f"test:{uuid4()}"
-    session = create_agent_vm_session(
-        user_id=1,
-        llm_task_id=3,
-        vm_namespace=namespace,
-        workspace_path="/workspace/newsly/tasks/tool-env",
-        shared_workspace_path="/workspace/newsly/users/1/shared",
-        feature="test",
-    )
-
-    install_agent_vm_tool_scripts(
-        session,
-        llm_task_id=3,
-        api_base_url="http://127.0.0.1:8000",
-        task_token="test-token",
-    )
-    help_result = session.execute_bash("newsly-web-search --help")
-    env_result = session.execute_bash("printf '%s' \"$NEWSLY_LLM_TASK_ID\"")
-    secret_result = session.execute_bash("printf '%s' \"${EXA_API_KEY:-}\"")
-
-    assert help_result.exit_code == 0
-    assert "usage: newsly-web-search" in help_result.stdout
-    assert env_result.stdout == "3"
-    assert secret_result.stdout == ""
-
-
 class _FakeE2BCommands:
     def __init__(self, sandbox: _FakeE2BSandbox) -> None:
         self.sandbox = sandbox
@@ -86,6 +56,26 @@ class _FakeE2BCommands:
         self.commands.append(command)
         if self.sandbox.missing:
             raise RuntimeError("The sandbox was not found")
+        if command == "newsly-sandbox-probe --json":
+            return SimpleNamespace(
+                stdout=json.dumps(
+                    {
+                        name: "test"
+                        for name in (
+                            "bash",
+                            "python",
+                            "node",
+                            "git",
+                            "curl",
+                            "jq",
+                            "chromium",
+                            "playwright",
+                        )
+                    }
+                ),
+                stderr="",
+                exit_code=0,
+            )
         return SimpleNamespace(stdout="", stderr="", exit_code=0)
 
 
@@ -160,7 +150,8 @@ def test_e2b_agent_vm_session_recreates_stale_cached_sandbox(monkeypatch) -> Non
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
     stale = _FakeE2BSandbox(missing=True)
-    agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[namespace] = stale
+    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] = stale
 
     session = create_agent_vm_session(
         user_id=1,
@@ -177,9 +168,45 @@ def test_e2b_agent_vm_session_recreates_stale_cached_sandbox(monkeypatch) -> Non
     assert session.sandbox_id == _FakeE2BSandbox.created[0].id
     assert session.lease.reused is False
     assert (
-        agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[namespace]
+        agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key]
         is (_FakeE2BSandbox.created[0])
     )
+
+
+def test_e2b_agent_vm_session_probes_configured_template_once(monkeypatch) -> None:
+    _install_fake_e2b(monkeypatch)
+    _configure_e2b(monkeypatch)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_task_sandbox_template", "newsly-agent-v1")
+    namespace = f"test:{uuid4()}"
+
+    first = create_agent_vm_session(
+        user_id=1,
+        llm_task_id=1,
+        vm_namespace=namespace,
+        workspace_path="/workspace/newsly/users/1/tasks/one",
+        shared_workspace_path="/workspace/newsly/users/1/shared",
+        feature="test",
+    )
+    second = create_agent_vm_session(
+        user_id=1,
+        llm_task_id=2,
+        vm_namespace=namespace,
+        workspace_path="/workspace/newsly/users/1/tasks/two",
+        shared_workspace_path="/workspace/newsly/users/1/shared",
+        feature="test",
+    )
+
+    probe_commands = [
+        command
+        for command in _FakeE2BSandbox.created[0].commands.commands
+        if command == "newsly-sandbox-probe --json"
+    ]
+    assert probe_commands == ["newsly-sandbox-probe --json"]
+    assert first.lease.template_revision == "newsly-agent-v1"
+    assert first.lease.capabilities is not None
+    assert first.lease.capabilities["chromium"] == "test"
+    assert second.lease.capabilities == first.lease.capabilities
 
 
 def test_e2b_agent_vm_session_reuses_live_cached_sandbox(monkeypatch) -> None:

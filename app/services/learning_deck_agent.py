@@ -21,7 +21,10 @@ from app.services.agent_toolset import (
 )
 from app.services.agent_vm_runtime import AgentVmSession, agent_vm_session_log_payload
 from app.services.agent_vm_sessions import create_agent_vm_session
-from app.services.agent_vm_tool_scripts import install_agent_vm_task_tools
+from app.services.learning_deck_artifacts import (
+    LearningDeckArtifactError,
+    validate_learning_deck_artifact,
+)
 from app.services.learning_deck_sandbox import (
     create_learning_deck_sandbox_session,
     guess_asset_content_type,
@@ -115,8 +118,6 @@ def run_learning_deck_agent(
             "sandbox_started",
             agent_vm_session_log_payload(sandbox),
         )
-        if llm_task is not None:
-            install_agent_vm_task_tools(sandbox, task=llm_task)
         _prepare_sandbox_inputs(
             sandbox,
             source_snapshot=source_snapshot,
@@ -195,15 +196,56 @@ def run_learning_deck_agent(
             },
         )
 
+        try:
+            index_html, source_notes_md = _read_and_validate_required_artifacts(sandbox)
+        except Exception as first_error:  # noqa: BLE001
+            _append_agent_log_event(
+                agent_log_events,
+                "artifact_validation_failed",
+                {"error": str(first_error), "failure_class": type(first_error).__name__},
+            )
+            try:
+                repair_result = agent.run_sync(
+                    _artifact_repair_prompt(first_error),
+                    deps=LearningDeckAgentDeps(
+                        sandbox=sandbox,
+                        user_id=user_id,
+                        run_id=run_id,
+                        agent_log_events=agent_log_events,
+                    ),
+                    model_settings=_build_runtime_model_settings(base_model_settings),
+                )
+                record_model_usage(
+                    "learning_deck_repair",
+                    repair_result,
+                    model_spec=model_spec,
+                    persist={
+                        "provider": provider,
+                        "feature": "learning_deck_generation",
+                        "operation": "learning_deck.repair",
+                        "source": "queue",
+                        "content_id": _learning_deck_usage_content_id(source_snapshot),
+                        "user_id": user_id,
+                        "metadata": _learning_deck_usage_metadata(source_snapshot, run_id=run_id),
+                    },
+                )
+                index_html, source_notes_md = _read_and_validate_required_artifacts(sandbox)
+            except Exception as repair_error:  # noqa: BLE001
+                _append_agent_log_event(
+                    agent_log_events,
+                    "artifact_repair_failed",
+                    {"error": str(repair_error), "failure_class": type(repair_error).__name__},
+                )
+                raise LearningDeckAgentExecutionError(
+                    f"artifact_contract_failed: {repair_error}",
+                    agent_log_events=agent_log_events,
+                    sandbox_provider=sandbox.provider,
+                    sandbox_id=sandbox.sandbox_id,
+                ) from repair_error
+
         return LearningDeckAgentResult(
-            index_html=sandbox.read_file(
-                OUTPUT_INDEX_HTML,
-                max_bytes=settings.learning_deck_max_index_html_bytes,
-            ),
-            source_notes_md=sandbox.read_file(
-                OUTPUT_SOURCE_NOTES,
-                max_bytes=settings.learning_deck_max_source_notes_bytes,
-            ),
+            index_html=index_html,
+            source_notes_md=source_notes_md,
             assets=_collect_assets(sandbox),
             model_provider=provider,
             model_name=model_spec,
@@ -230,9 +272,65 @@ def _register_tools(agent: Agent[LearningDeckAgentDeps, str], *, llm_task: LlmTa
             tool_policy=AgentToolPolicy.from_mapping(
                 llm_task.tool_policy if llm_task is not None else None,
             ),
-            register_direct_web_search_tool=llm_task is None,
         ),
-        include_legacy_bash_alias=True,
+    )
+
+
+def _read_and_validate_required_artifacts(sandbox: AgentVmSession) -> tuple[str, str]:
+    settings = get_settings()
+    try:
+        index_html = sandbox.read_file(
+            OUTPUT_INDEX_HTML,
+            max_bytes=settings.learning_deck_max_index_html_bytes,
+        )
+        source_notes_md = sandbox.read_file(
+            OUTPUT_SOURCE_NOTES,
+            max_bytes=settings.learning_deck_max_source_notes_bytes,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise LearningDeckArtifactError(f"Required output file is missing: {exc}") from exc
+    validate_learning_deck_artifact(
+        index_html=index_html,
+        source_notes_md=source_notes_md,
+    )
+    _validate_artifact_in_browser(sandbox)
+    return index_html, source_notes_md
+
+
+def _validate_artifact_in_browser(sandbox: AgentVmSession) -> None:
+    capabilities = getattr(getattr(sandbox, "lease", None), "capabilities", None)
+    if not isinstance(capabilities, dict) or not (
+        capabilities.get("playwright") and capabilities.get("chromium")
+    ):
+        return
+    command = r"""node - <<'NODE'
+const { chromium } = require('playwright');
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(String(error)));
+  await page.goto('file://' + process.cwd() + '/output/index.html');
+  await page.waitForTimeout(500);
+  const sections = await page.locator('.reveal .slides section').count();
+  await browser.close();
+  if (sections < 1 || errors.length) {
+    throw new Error(JSON.stringify({ sections, errors }));
+  }
+})().catch(error => { console.error(error); process.exit(1); });
+NODE"""
+    result = sandbox.execute_bash(command, timeout_seconds=30)
+    if result.exit_code != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "unknown browser error"
+        raise LearningDeckArtifactError(f"Browser validation failed: {detail}")
+
+
+def _artifact_repair_prompt(error: Exception) -> str:
+    return (
+        "The generated artifact did not satisfy the output contract. Fix only the output files "
+        "in the existing workspace, then verify them. You must create output/index.html and "
+        "output/source-notes.md. Do not restart the research. Validation error: "
+        f"{error}"
     )
 
 

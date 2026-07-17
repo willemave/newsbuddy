@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
 
 from app.services.agent_toolset import (
@@ -12,9 +13,11 @@ from app.services.agent_toolset import (
 class _FakeAgent:
     def __init__(self) -> None:
         self.tool_names: list[str] = []
+        self.tools: dict[str, Any] = {}
 
     def tool(self, func):
         self.tool_names.append(func.__name__)
+        self.tools[func.__name__] = func
         return func
 
 
@@ -39,13 +42,12 @@ def test_register_agent_vm_tools_respects_tool_policy() -> None:
                 }
             ),
         ),
-        include_legacy_bash_alias=True,
     )
 
     assert agent.tool_names == ["read_file", "list_files"]
 
 
-def test_register_agent_vm_tools_can_hide_direct_web_search_tool() -> None:
+def test_register_agent_vm_tools_exposes_one_five_tool_surface() -> None:
     agent = _FakeAgent()
 
     register_agent_vm_tools(
@@ -62,11 +64,45 @@ def test_register_agent_vm_tools_can_hide_direct_web_search_tool() -> None:
                 {
                     "execute_bash": True,
                     "web_search": True,
-                    "files": "none",
+                    "files": "read_write",
                 }
             ),
-            register_direct_web_search_tool=False,
         ),
     )
 
-    assert agent.tool_names == ["execute_bash"]
+    assert agent.tool_names == [
+        "execute_bash",
+        "write_file",
+        "read_file",
+        "list_files",
+        "web_search",
+    ]
+
+
+def test_read_file_returns_typed_failure_for_missing_artifact() -> None:
+    agent = _FakeAgent()
+
+    class Session:
+        def read_file(self, _path: str, *, max_bytes: int) -> str:
+            del max_bytes
+            raise FileNotFoundError("missing")
+
+    register_agent_vm_tools(
+        cast(Any, agent),
+        session_getter=lambda _deps: cast(Any, Session()),
+        log_event=lambda _deps, _event, _payload: None,
+        user_id_getter=lambda _deps: None,
+        metadata_getter=lambda _deps: {},
+        config=AgentToolsetConfig(feature="test", operation_prefix="test", source="unit"),
+    )
+
+    result = agent.tools["read_file"](
+        SimpleNamespace(deps=object()),
+        "output/index.html",
+    )
+
+    assert result == {
+        "ok": False,
+        "path": "output/index.html",
+        "error": "File not found or unreadable: output/index.html",
+    }
