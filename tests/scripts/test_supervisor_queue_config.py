@@ -61,7 +61,7 @@ def test_supervisor_config_does_not_use_old_transcribe_queue() -> None:
 
 def test_docker_supervisor_config_runs_all_queue_partitions() -> None:
     """Docker Supervisor config should run every active queue partition."""
-    parser = _load_config("docker/supervisord.conf")
+    parser = _load_config("docker/supervisord.worker-programs.conf")
     required_programs = {
         "program:worker_content": "run-worker.sh content",
         "program:worker_media": "run-worker.sh media",
@@ -85,7 +85,7 @@ def test_docker_supervisor_config_runs_all_queue_partitions() -> None:
 
 def test_docker_supervisor_config_parallelizes_content_workers() -> None:
     """Docker content workers should also use the higher planned parallelism."""
-    parser = _load_config("docker/supervisord.conf")
+    parser = _load_config("docker/supervisord.worker-programs.conf")
     command = parser.get("program:worker_content", "command")
 
     assert "run-worker.sh content %(process_num)s" in command
@@ -95,9 +95,16 @@ def test_docker_supervisor_config_parallelizes_content_workers() -> None:
 
 def test_docker_supervisor_config_does_not_use_old_transcribe_queue() -> None:
     """The Docker runtime should not start the old transcribe worker partition."""
-    parser = _load_config("docker/supervisord.conf")
+    parser = _load_config("docker/supervisord.worker-programs.conf")
     assert not parser.has_section("program:worker_transcribe")
     commands = "\n".join(
         parser.get(section, "command", fallback="") for section in parser.sections()
     )
     assert "run-worker.sh transcribe" not in commands
+
+
+def test_full_and_worker_docker_profiles_share_worker_programs() -> None:
+    """Full and split worker runtimes should include one canonical worker graph."""
+    for config_path in ("docker/supervisord.conf", "docker/supervisord.workers.conf"):
+        parser = _load_config(config_path)
+        assert parser.get("include", "files") == ("/app/docker/supervisord.worker-programs.conf")

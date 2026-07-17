@@ -12,7 +12,7 @@ env:
 
 jobs:
   deploy:
-    name: Build image and deploy to RackNerd
+    name: Build image and deploy to production
     runs-on: ubuntu-latest
     concurrency: news-app-docker-deploy
     environment: production
@@ -21,7 +21,6 @@ jobs:
       packages: write
     env:
       DEPLOY_REMOTE_DIR: ${{ vars.DEPLOY_REMOTE_DIR }}
-      DEPLOY_OWNER_GROUP: ${{ vars.DEPLOY_OWNER_GROUP }}
       DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
     steps:
       - name: Checkout repository
@@ -76,7 +75,7 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -p "$PORT" -H "$DEPLOY_SSH_HOST" >> ~/.ssh/known_hosts
 
-      - name: Sync repo and deploy container
+      - name: Sync repo and deploy blue-green stack
         env:
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
@@ -102,7 +101,7 @@ jobs:
           PORT="${DEPLOY_SSH_PORT:-22}"
           SSH_OPTS=(-p "$PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes)
           REMOTE_DIR="${DEPLOY_REMOTE_DIR:-/opt/news_app}"
-          OWNER_GROUP="${DEPLOY_OWNER_GROUP:-newsapp:newsapp}"
+          OWNER_GROUP="${DEPLOY_SSH_USER}:${DEPLOY_SSH_USER}"
 
           EXCLUDES=(
             ".git/"
@@ -145,73 +144,86 @@ jobs:
           rsync "${RSYNC_ARGS[@]}" ./ "$REMOTE:$REMOTE_DIR/"
 
           echo "→ Verifying RackNerd env file"
-          ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
-            set -euo pipefail
-            cd \"$REMOTE_DIR\"
-            if ! sudo test -f .env.racknerd; then
-              echo \".env.racknerd is required for deploy\" >&2
+          ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s -- "$REMOTE_DIR" <<'REMOTE_ENV_CHECK'
+          set -euo pipefail
+          remote_dir="$1"
+          env_file="$remote_dir/.env.racknerd"
+          if [[ ! -f "$env_file" ]]; then
+            echo ".env.racknerd is required for deploy" >&2
+            exit 1
+          fi
+          for key in POSTGRES_PASSWORD NEWSLY_DATABASE_URL; do
+            if ! grep -q "^${key}=" "$env_file"; then
+              echo "${key} is required for deploy" >&2
               exit 1
             fi
-            if sudo grep -q \"^ENVIRONMENT=production$\" .env.racknerd; then
-              if ! sudo grep -q \"^CORS_ALLOW_ORIGINS=\" .env.racknerd; then
-                echo \"CORS_ALLOW_ORIGINS is required when ENVIRONMENT=production\" >&2
-                exit 1
-              fi
-              if sudo grep -q \"^CORS_ALLOW_ORIGINS=\\*$\" .env.racknerd; then
-                echo \"CORS_ALLOW_ORIGINS must be explicit when ENVIRONMENT=production\" >&2
-                exit 1
-              fi
+          done
+          if grep -q '^ENVIRONMENT=production$' "$env_file"; then
+            if ! grep -q '^CORS_ALLOW_ORIGINS=' "$env_file"; then
+              echo "CORS_ALLOW_ORIGINS is required when ENVIRONMENT=production" >&2
+              exit 1
             fi
-            sudo chmod 600 .env.racknerd
-            sudo mkdir -p /data
-          '"
-
-          remote_cleanup_docker() {
-            ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
-              set -euo pipefail
-              current_image=\$(sudo docker inspect --format \"{{.Config.Image}}\" newsly 2>/dev/null || true)
-              for image_repository in \"$IMAGE_REPOSITORY\" newsly; do
-                sudo docker images --format \"{{.Repository}}:{{.Tag}}\" \"\${image_repository}\" \
-                  | grep -Fvx \"\${current_image}\" \
-                  | xargs -r sudo docker rmi || true
-              done
-              sudo docker images --filter dangling=true -q | xargs -r sudo docker rmi || true
-              sudo docker builder prune -af || true
-              sudo docker container prune -f || true
-              sudo docker system df || true
-            '"
-          }
+            if grep -q '^CORS_ALLOW_ORIGINS=\*$' "$env_file"; then
+              echo "CORS_ALLOW_ORIGINS must be explicit when ENVIRONMENT=production" >&2
+              exit 1
+            fi
+          fi
+          chmod 600 "$env_file"
+          test -x "$remote_dir/scripts/deploy_blue_green.sh"
+          test -x "$remote_dir/scripts/deploy/switch-api-slot.sh"
+          mkdir -p /data /opt/newsly/bin /opt/newsly/state
+          install -m 755 "$remote_dir/scripts/deploy/switch-api-slot.sh" \
+            /opt/newsly/bin/switch-api-slot
+          REMOTE_ENV_CHECK
 
           echo "→ Logging in to GitHub Container Registry on remote host"
           printf '%s' "$GHCR_TOKEN" | ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker login '$REGISTRY' --username '$GHCR_USERNAME' --password-stdin >/dev/null"
 
-          echo "→ Cleaning up unused remote Docker artifacts before image pull"
-          remote_cleanup_docker
-
           echo "→ Pulling image on remote host"
           ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker pull '$IMAGE_TAG'"
 
-          echo "→ Restarting Docker stack"
-          ssh "${SSH_OPTS[@]}" "$REMOTE" "bash -lc '
-            set -euo pipefail
-            cd \"$REMOTE_DIR\"
-            sudo env NEWSLY_IMAGE=\"$IMAGE_TAG\" NEWSLY_ENV_FILE=.env.racknerd docker compose --env-file .env.racknerd up -d --no-build --remove-orphans
-          '"
+          echo "→ Deploying inactive API slot"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" \
+            "sudo env NEWSLY_DEPLOY_APP_DIR='$REMOTE_DIR' '$REMOTE_DIR/scripts/deploy_blue_green.sh' '$IMAGE_TAG'"
 
-          echo "→ Verifying container health"
-          for attempt in $(seq 1 30); do
-            STATUS=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' newsly" 2>/dev/null || true)
-            echo "Health attempt $attempt/30: ${STATUS:-unknown}"
-            if [[ "$STATUS" == "healthy" ]]; then
-              echo "→ Cleaning up superseded remote Docker images"
-              remote_cleanup_docker
-              ssh "${SSH_OPTS[@]}" "$REMOTE" "cd '$REMOTE_DIR' && sudo env NEWSLY_IMAGE='$IMAGE_TAG' NEWSLY_ENV_FILE=.env.racknerd docker compose --env-file .env.racknerd ps"
-              exit 0
-            fi
-            if [[ $attempt -eq 30 ]]; then
-              echo "Container failed to become healthy" >&2
-              ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker logs --tail 200 newsly || true"
+          echo "→ Verifying production runtime"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s <<'REMOTE_VERIFY'
+          set -euo pipefail
+          active_slot="$(tr -d '[:space:]' < /opt/newsly/state/active-api-slot)"
+          case "$active_slot" in
+            blue) active_port=8001 ;;
+            green) active_port=8002 ;;
+            *) echo "invalid active API slot: $active_slot" >&2; exit 1 ;;
+          esac
+
+          for container in newsly-postgres "newsly-api-${active_slot}" newsly-workers newsly-scheduler; do
+            status="$(docker inspect --format '{{.State.Status}}' "$container")"
+            if [[ "$status" != "running" ]]; then
+              echo "$container is not running: $status" >&2
               exit 1
             fi
-            sleep 10
           done
+          postgres_health="$(docker inspect --format '{{.State.Health.Status}}' newsly-postgres)"
+          api_health="$(docker inspect --format '{{.State.Health.Status}}' "newsly-api-${active_slot}")"
+          [[ "$postgres_health" == "healthy" ]]
+          [[ "$api_health" == "healthy" ]]
+          curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${active_port}/health" >/dev/null
+          curl --fail --silent --show-error --max-time 10 http://127.0.0.1/health >/dev/null
+          curl --fail --silent --show-error --max-time 10 http://127.0.0.1/server-health >/dev/null
+          docker ps --filter name=newsly- --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+          REMOTE_VERIFY
+
+          echo "→ Cleaning up unreferenced deployment images"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s -- "$IMAGE_REPOSITORY" <<'REMOTE_CLEANUP'
+          set -euo pipefail
+          image_repository="$1"
+          while IFS= read -r image; do
+            [[ -n "$image" ]] || continue
+            if [[ -z "$(docker ps -aq --filter "ancestor=$image")" ]]; then
+              docker rmi "$image" || true
+            fi
+          done < <(docker images "$image_repository" --format '{{.Repository}}:{{.Tag}}')
+          docker image prune -f
+          docker builder prune -af
+          docker system df
+          REMOTE_CLEANUP

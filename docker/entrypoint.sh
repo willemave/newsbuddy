@@ -11,10 +11,7 @@ export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-newsly}"
 export POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 export PORT="${PORT:-8000}"
 export NEWSLY_BOOTSTRAP_READY_FILE="${NEWSLY_BOOTSTRAP_READY_FILE:-/tmp/newsly-bootstrap.ready}"
-
-mkdir -p "${PGDATA}" "${NEWSLY_APP_DATA_ROOT}" /var/run/postgresql
-chown -R postgres:postgres "${PGDATA}" /var/run/postgresql
-chmod 700 "${PGDATA}"
+export NEWSLY_RUNTIME_MODE="${NEWSLY_RUNTIME_MODE:-full}"
 
 export MEDIA_BASE_DIR="${MEDIA_BASE_DIR:-${NEWSLY_APP_DATA_ROOT}/media}"
 export LOGS_BASE_DIR="${LOGS_BASE_DIR:-${NEWSLY_APP_DATA_ROOT}/logs}"
@@ -22,16 +19,51 @@ export IMAGES_BASE_DIR="${IMAGES_BASE_DIR:-${NEWSLY_APP_DATA_ROOT}/images}"
 export CONTENT_BODY_LOCAL_ROOT="${CONTENT_BODY_LOCAL_ROOT:-${NEWSLY_APP_DATA_ROOT}/content_bodies}"
 export PODCAST_SCRATCH_DIR="${PODCAST_SCRATCH_DIR:-${NEWSLY_APP_DATA_ROOT}/scratch}"
 export PERSONAL_MARKDOWN_ROOT="${PERSONAL_MARKDOWN_ROOT:-${NEWSLY_APP_DATA_ROOT}/personal_markdown}"
-export NEWSLY_RUNTIME_MODE="${NEWSLY_RUNTIME_MODE:-full}"
-export DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
 
 mkdir -p \
+  "${NEWSLY_APP_DATA_ROOT}" \
   "${MEDIA_BASE_DIR}" \
   "${LOGS_BASE_DIR}" \
   "${IMAGES_BASE_DIR}" \
   "${CONTENT_BODY_LOCAL_ROOT}" \
   "${PODCAST_SCRATCH_DIR}" \
   "${PERSONAL_MARKDOWN_ROOT}"
+
+case "${NEWSLY_RUNTIME_MODE}" in
+  api|workers|scheduler|migrate)
+    if [[ -z "${DATABASE_URL:-}" ]]; then
+      echo "DATABASE_URL is required for NEWSLY_RUNTIME_MODE=${NEWSLY_RUNTIME_MODE}" >&2
+      exit 1
+    fi
+    export NEWSLY_WAIT_FOR_BOOTSTRAP=false
+    case "${NEWSLY_RUNTIME_MODE}" in
+      api)
+        exec /app/docker/run-api.sh
+        ;;
+      workers)
+        exec /usr/bin/supervisord -c /app/docker/supervisord.workers.conf
+        ;;
+      scheduler)
+        exec /app/docker/run-scheduler.sh
+        ;;
+      migrate)
+        cd /app
+        exec python -m alembic -c /app/migrations/alembic.ini upgrade head
+        ;;
+    esac
+    ;;
+  full|server)
+    ;;
+  *)
+    echo "unsupported NEWSLY_RUNTIME_MODE: ${NEWSLY_RUNTIME_MODE}" >&2
+    exit 1
+    ;;
+esac
+
+mkdir -p "${PGDATA}" /var/run/postgresql
+chown -R postgres:postgres "${PGDATA}" /var/run/postgresql
+chmod 700 "${PGDATA}"
+export DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
 
 postgres_bin_dir="$(dirname "$(find /usr/lib/postgresql -path '*/bin/postgres' | sort -V | tail -n 1)")"
 if [[ -z "${postgres_bin_dir:-}" || ! -x "${postgres_bin_dir}/initdb" ]]; then
@@ -72,10 +104,6 @@ case "${NEWSLY_RUNTIME_MODE}" in
     ;;
   server)
     supervisord_conf="/app/docker/supervisord.server.conf"
-    ;;
-  *)
-    echo "unsupported NEWSLY_RUNTIME_MODE: ${NEWSLY_RUNTIME_MODE}" >&2
-    exit 1
     ;;
 esac
 
