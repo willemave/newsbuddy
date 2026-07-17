@@ -84,24 +84,6 @@
                 <key>NSIncludesSubdomains</key>
                 <true/>
             </dict>
-            <key>192.3.250.10</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <true/>
-                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
-                <true/>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-            </dict>
-            <key>192.3.250.102</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <true/>
-                <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
-                <true/>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-            </dict>
             <key>100.103.186.67</key>
             <dict>
                 <key>NSExceptionAllowsInsecureHTTPLoads</key>

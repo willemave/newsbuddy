@@ -3168,8 +3168,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var authViewModel: AuthenticationViewModel
-    @AppStorage("serverHost") private var serverHost = "192.3.250.10"
-    @AppStorage("serverPort") private var serverPort = "8000"
+    @AppStorage("serverHost") private var serverHost = "racknerd-3b1b61d.willemsavenue.com"
+    @AppStorage("serverPort") private var serverPort = "443"
 
     var body: some View {
         NavigationView {
