@@ -50,7 +50,7 @@ def test_generate_learning_deck_handler_calls_generation(db_session, monkeypatch
     assert called == [42]
 
 
-def test_generate_learning_deck_handler_retries_when_source_waits(
+def test_generate_learning_deck_handler_defers_without_retry_when_source_waits(
     db_session,
     monkeypatch,
 ) -> None:
@@ -73,5 +73,6 @@ def test_generate_learning_deck_handler_retries_when_source_waits(
     )
 
     assert result.success is False
-    assert result.retryable is True
+    assert result.retryable is False
+    assert result.deferred is True
     assert result.retry_delay_seconds == 123

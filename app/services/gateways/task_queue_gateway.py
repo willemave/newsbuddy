@@ -61,6 +61,7 @@ class TaskQueueGateway:
         current_retry_count: int = 0,
         max_retries: int = 3,
         retry_delay_seconds: int | None = None,
+        deferred: bool = False,
     ) -> dict[str, Any] | None:
         """Apply one final task transition after processing."""
         return self._queue_service.finalize_task(
@@ -71,6 +72,7 @@ class TaskQueueGateway:
             current_retry_count=current_retry_count,
             max_retries=max_retries,
             retry_delay_seconds=retry_delay_seconds,
+            deferred=deferred,
         )
 
     def dequeue(

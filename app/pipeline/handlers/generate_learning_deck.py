@@ -34,9 +34,7 @@ class GenerateLearningDeckHandler:
             try:
                 generate_learning_deck(db, learning_deck_run_id=run_id_int)
             except LearningDeckGenerationWaiting as exc:
-                return TaskResult.fail(
-                    str(exc),
-                    retryable=True,
+                return TaskResult.defer(
                     retry_delay_seconds=exc.retry_delay_seconds,
                 )
             except ValueError as exc:

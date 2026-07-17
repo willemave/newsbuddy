@@ -248,6 +248,30 @@ class TestSequentialTaskProcessor:
             retry_delay_seconds=120,
         )
 
+    def test_run_deferral_preserves_retry_budget(self, processor):
+        task_data = {
+            "id": 1,
+            "task_type": TaskType.RUN_LLM_TASK.value,
+            "retry_count": 3,
+            "payload": {"llm_task_id": 7},
+        }
+        processor.process_task = Mock(return_value=TaskResult.defer(retry_delay_seconds=90))
+
+        with patch("app.pipeline.sequential_task_processor.setup_logging"):
+            success = processor.run_single_task(task_data)
+
+        assert success is False
+        processor.queue_service.finalize_task.assert_called_once_with(
+            1,
+            success=False,
+            error_message=None,
+            retryable=False,
+            current_retry_count=3,
+            max_retries=processor.settings.max_retries,
+            retry_delay_seconds=90,
+            deferred=True,
+        )
+
     def test_run_max_retries_exceeded(self, processor):
         """Test behavior when max retries exceeded."""
         task_data = {

@@ -403,7 +403,7 @@ class SequentialTaskProcessor:
                     ),
                 )
                 result = self.dispatcher.dispatch(task, self.context)
-                if not result.success and not result.error_message:
+                if not result.success and not result.error_message and not result.deferred:
                     result = TaskResult(
                         success=False,
                         error_message=f"{task.task_type.value} returned False",
@@ -465,15 +465,27 @@ class SequentialTaskProcessor:
         try:
             finalization = None
             if hasattr(self.queue_service, "finalize_task"):
-                finalization = self.queue_service.finalize_task(
-                    task.id,
-                    success=result.success,
-                    error_message=result.error_message,
-                    retryable=result.retryable,
-                    current_retry_count=retry_count,
-                    max_retries=max_retries,
-                    retry_delay_seconds=retry_delay_seconds,
-                )
+                if result.deferred:
+                    finalization = self.queue_service.finalize_task(
+                        task.id,
+                        success=False,
+                        error_message=None,
+                        retryable=False,
+                        current_retry_count=retry_count,
+                        max_retries=max_retries,
+                        retry_delay_seconds=result.retry_delay_seconds,
+                        deferred=True,
+                    )
+                else:
+                    finalization = self.queue_service.finalize_task(
+                        task.id,
+                        success=result.success,
+                        error_message=result.error_message,
+                        retryable=result.retryable,
+                        current_retry_count=retry_count,
+                        max_retries=max_retries,
+                        retry_delay_seconds=retry_delay_seconds,
+                    )
 
             if not isinstance(self.queue_service, QueueService):
                 self.queue_service.complete_task(
@@ -481,6 +493,17 @@ class SequentialTaskProcessor:
                     success=result.success,
                     error_message=result.error_message,
                 )
+                if result.deferred:
+                    self.queue_service.retry_task(
+                        task.id,
+                        delay_seconds=int(result.retry_delay_seconds or 0),
+                    )
+                    return {
+                        "status": "pending",
+                        "retry_count": retry_count,
+                        "retry_delay_seconds": result.retry_delay_seconds,
+                        "deferred": True,
+                    }
                 if should_retry:
                     self.queue_service.retry_task(
                         task.id,
@@ -636,13 +659,19 @@ class SequentialTaskProcessor:
                     max_retries = self.settings.queue.max_retries
                     if finalization and finalization.get("status") == "pending":
                         logger.info(
-                            "Task retry requested by processor",
+                            (
+                                "Task deferred by processor"
+                                if result.deferred
+                                else "Task retry requested by processor"
+                            ),
                             extra=_task_extra(
                                 task,
                                 processor=self,
                                 operation="retry_task",
-                                event_name="task.retry_scheduled",
-                                status="retry_scheduled",
+                                event_name=(
+                                    "task.deferred" if result.deferred else "task.retry_scheduled"
+                                ),
+                                status="deferred" if result.deferred else "retry_scheduled",
                                 context_data={
                                     "retry_count": finalization.get("retry_count"),
                                     "max_retries": max_retries,
@@ -736,7 +765,11 @@ class SequentialTaskProcessor:
         result, finalization = self._process_and_finalize_task(task)
 
         if finalization and finalization.get("status") == "pending":
-            logger.info("Task %s scheduled for retry", task.id)
+            logger.info(
+                "Task %s %s",
+                task.id,
+                "deferred" if result.deferred else "scheduled for retry",
+            )
 
         return result.success
 

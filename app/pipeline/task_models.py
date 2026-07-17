@@ -49,6 +49,7 @@ class TaskResult(BaseModel):
     error_message: str | None = None
     retry_delay_seconds: int | None = None
     retryable: bool = True
+    deferred: bool = False
 
     @classmethod
     def ok(cls) -> TaskResult:
@@ -71,6 +72,20 @@ class TaskResult(BaseModel):
             retry_delay_seconds=retry_delay_seconds,
         )
 
+    @classmethod
+    def defer(
+        cls,
+        *,
+        retry_delay_seconds: int,
+    ) -> TaskResult:
+        """Return a pending outcome that does not consume the retry budget."""
+        return cls(
+            success=False,
+            retryable=False,
+            deferred=True,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+
 
 def task_will_retry(
     result: TaskResult,
@@ -80,6 +95,8 @@ def task_will_retry(
 ) -> bool:
     """Return whether the queue will schedule another attempt for this result."""
 
+    if result.deferred:
+        return False
     return retry_will_be_scheduled(
         success=result.success,
         retryable=result.retryable,

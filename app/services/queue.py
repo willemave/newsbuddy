@@ -577,16 +577,17 @@ class QueueService:
         current_retry_count: int = 0,
         max_retries: int = 3,
         retry_delay_seconds: int | None = None,
+        deferred: bool = False,
     ) -> dict[str, Any] | None:
         """Persist one terminal or retry transition for a processed task."""
         with get_db() as db:
-            should_retry = retry_will_be_scheduled(
+            should_retry = not deferred and retry_will_be_scheduled(
                 success=success,
                 retryable=retryable,
                 retry_count=current_retry_count,
                 max_retries=max_retries,
             )
-            resolved_delay_seconds = retry_delay_seconds if should_retry else None
+            resolved_delay_seconds = retry_delay_seconds if should_retry or deferred else None
             task = db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()
             if not task:
                 transition = None
@@ -598,6 +599,13 @@ class QueueService:
                 if success:
                     task.status = TaskStatus.COMPLETED.value
                     task.completed_at = now
+                    task.error_message = None
+                elif deferred:
+                    task.status = TaskStatus.PENDING.value
+                    task.retry_count = base_retry_count
+                    task.started_at = None
+                    task.completed_at = None
+                    task.available_at = now + timedelta(seconds=resolved_delay_seconds or 0)
                     task.error_message = None
                 elif should_retry:
                     task.status = TaskStatus.PENDING.value
@@ -620,6 +628,7 @@ class QueueService:
                     "status": task.status,
                     "retry_count": int(task.retry_count or 0),
                     "retry_delay_seconds": resolved_delay_seconds,
+                    "deferred": deferred,
                     "available_at": task.available_at,
                 }
 
@@ -653,12 +662,14 @@ class QueueService:
                 )
             elif transition["status"] == TaskStatus.PENDING.value:
                 logger.info(
-                    "Task retry scheduled",
+                    "Task deferred" if transition["deferred"] else "Task retry scheduled",
                     extra=build_log_extra(
                         component="queue",
                         operation="finalize_task",
-                        event_name="task.retry_scheduled",
-                        status="retry_scheduled",
+                        event_name=(
+                            "task.deferred" if transition["deferred"] else "task.retry_scheduled"
+                        ),
+                        status="deferred" if transition["deferred"] else "retry_scheduled",
                         task_id=task_id,
                         task_type=transition["task_type"],
                         queue_name=transition["queue_name"],

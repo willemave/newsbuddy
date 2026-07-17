@@ -88,6 +88,46 @@ def test_finalize_task_retryable_failure_requeues_in_one_step(db_session, monkey
     assert task.available_at >= datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=110)
 
 
+def test_finalize_task_deferral_preserves_retry_budget_and_clears_error(
+    db_session,
+    monkeypatch,
+):
+    queue = _patch_db(monkeypatch, db_session)
+    task = ProcessingTask(
+        task_type=TaskType.RUN_LLM_TASK.value,
+        payload={"llm_task_id": 7},
+        status=TaskStatus.PROCESSING.value,
+        queue_name=TaskQueue.CONTENT.value,
+        retry_count=3,
+        error_message="stale error",
+        started_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    transition = queue.finalize_task(
+        task.id,
+        success=False,
+        retryable=False,
+        current_retry_count=3,
+        retry_delay_seconds=120,
+        deferred=True,
+    )
+
+    db_session.refresh(task)
+    assert transition is not None
+    assert transition["deferred"] is True
+    assert task.status == TaskStatus.PENDING.value
+    assert task.retry_count == 3
+    assert task.error_message is None
+    assert task.started_at is None
+    assert task.completed_at is None
+    assert task.locked_at is None
+    assert task.locked_by is None
+    assert task.lease_expires_at is None
+    assert task.available_at >= datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=110)
+
+
 def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
     """Tasks are partitioned into the expected default queue."""
     queue = _patch_db(monkeypatch, db_session)
