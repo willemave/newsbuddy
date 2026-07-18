@@ -37,19 +37,11 @@ BASELINE_DIR = Path(
 
 BASELINE_FILES = {
     "visual_main_screens": [
-        "main-long.png",
-        "main-fast.png",
-        "main-knowledge.png",
-        "main-learning.png",
-        "main-more.png",
-    ],
-    "visual_briefing": [
         "briefing-articles.png",
         "briefing-news.png",
-    ],
-    "visual_knowledge_learning": [
         "redesign-knowledge.png",
         "redesign-learning.png",
+        "main-more.png",
     ],
     "visual_content_modals": [
         "detail-article.png",
@@ -472,8 +464,9 @@ def test_primary_tabs_match_visual_baselines(
     db_session,
     test_user,
 ) -> None:
-    """Primary tab screens should keep their known visual shape."""
+    """The Briefing-first primary tabs should keep their known visual shape."""
     _prepare_baselines("visual_main_screens")
+    test_user.reading_experience = "briefing"
     long_content = create_sample_content(sample_article_long)
     long_content = _apply_article_visual_timestamps(db_session, long_content)
     _seed_article_visual_artwork(long_content)
@@ -486,7 +479,13 @@ def test_primary_tabs_match_visual_baselines(
         db_session,
         user_id=test_user.id,
         ingest_key="ios-visual-main-screen",
-        title="Mini NAS Boards Put NVMe Storage in Tiny Homelab Servers",
+        title="Compact AI Hardware Turns Homelab Boards Into Real Test Beds",
+    )
+    article_segment_id, news_segment_id = _seed_visual_briefing(
+        db_session,
+        user_id=test_user.id,
+        content=long_content,
+        news_item=news_item,
     )
 
     run_ios_flow(
@@ -494,72 +493,8 @@ def test_primary_tabs_match_visual_baselines(
         extra_env={
             **_baseline_env(),
             "LONG_CONTENT_ID": str(long_content.id),
-            "NEWS_ITEM_ID": str(news_item.id),
-            "CHAT_SESSION_ID": str(chat_session_id),
-        },
-    )
-
-
-def test_briefing_experience_matches_visual_baselines(
-    run_ios_flow,
-    create_sample_content,
-    sample_article_long,
-    db_session,
-    test_user,
-) -> None:
-    """Briefing article and news lenses should keep their known visual shape."""
-    _prepare_baselines("visual_briefing")
-    test_user.reading_experience = "briefing"
-    content = create_sample_content(sample_article_long)
-    content = _apply_article_visual_timestamps(db_session, content)
-    _seed_article_visual_artwork(content)
-    news_item = _create_user_visible_news_item(
-        db_session,
-        user_id=test_user.id,
-        ingest_key="ios-visual-briefing-news",
-        title="Compact AI Hardware Turns Homelab Boards Into Real Test Beds",
-    )
-    article_segment_id, news_segment_id = _seed_visual_briefing(
-        db_session,
-        user_id=test_user.id,
-        content=content,
-        news_item=news_item,
-    )
-
-    run_ios_flow(
-        _flow_name("visual_briefing"),
-        extra_env={
-            **_baseline_env(),
             "ARTICLE_SEGMENT_ID": str(article_segment_id),
             "NEWS_SEGMENT_ID": str(news_segment_id),
-        },
-    )
-
-
-def test_knowledge_learning_tabs_match_visual_baselines(
-    run_ios_flow,
-    create_sample_content,
-    sample_article_long,
-    db_session,
-    test_user,
-) -> None:
-    """The Briefing experience should expose the visual Knowledge and Learning roots."""
-    _prepare_baselines("visual_knowledge_learning")
-    test_user.reading_experience = "briefing"
-    content = create_sample_content(sample_article_long)
-    content = _apply_article_visual_timestamps(db_session, content)
-    _seed_article_visual_artwork(content)
-    chat_session_id = _seed_visual_knowledge_and_learning(
-        db_session,
-        user_id=test_user.id,
-        content=content,
-    )
-
-    run_ios_flow(
-        _flow_name("visual_knowledge_learning"),
-        extra_env={
-            **_baseline_env(),
-            "LONG_CONTENT_ID": str(content.id),
             "CHAT_SESSION_ID": str(chat_session_id),
         },
     )

@@ -22,6 +22,8 @@ appId: "${APP_ID}"
     id: long.row.${CONTENT_ID}
 - assertVisible:
     id: content.detail.screen
+- assertVisible:
+    id: content.detail.title.${CONTENT_ID}
 - tapOn:
     id: content.action.knowledge
 - assertVisible:

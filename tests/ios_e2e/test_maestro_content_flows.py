@@ -127,23 +127,6 @@ def _personalized_onboarding_output() -> _DiscoverOutput:
     )
 
 
-def test_long_form_detail_flow_uses_seeded_fixture_data(
-    run_ios_flow,
-    create_sample_content,
-    sample_article_long,
-) -> None:
-    """The seeded long-form content fixture should render in the iOS app."""
-    content = create_sample_content(sample_article_long)
-
-    run_ios_flow(
-        "long_form_detail.yaml",
-        extra_env={
-            "CONTENT_ID": str(content.id),
-            "CONTENT_TITLE": content.title,
-        },
-    )
-
-
 def test_long_form_detail_knowledge_save_action_updates_backend_state(
     run_ios_flow,
     create_sample_content,

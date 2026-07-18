@@ -13,30 +13,31 @@ appId: "${APP_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
       newslyE2EVisualNow: "${VISUAL_NOW}"
-- tapOn:
-    id: tab.long_form
+      newslyE2EReadingExperience: briefing
 - extendedWaitUntil:
     visible:
-      id: long.screen
+      id: briefing.screen
     timeout: 15000
 - assertVisible:
-    id: long.row.${LONG_CONTENT_ID}
+    id: briefing.lens_page.articles
+- assertVisible:
+    id: briefing.segment.${ARTICLE_SEGMENT_ID}
 - takeScreenshot:
-    path: "${BASELINE_DIR}/main-long"
+    path: "${BASELINE_DIR}/briefing-articles"
     cropOn:
-      id: long.screen
+      id: briefing.screen
 - tapOn:
-    id: tab.fast_news
+    id: briefing.tier.news
 - extendedWaitUntil:
     visible:
-      id: short.screen
-    timeout: 15000
+      id: briefing.lens_page.ai-hardware
+    timeout: 10000
 - assertVisible:
-    id: short.row.${NEWS_ITEM_ID}
+    id: briefing.segment.${NEWS_SEGMENT_ID}
 - takeScreenshot:
-    path: "${BASELINE_DIR}/main-fast"
+    path: "${BASELINE_DIR}/briefing-news"
     cropOn:
-      id: short.screen
+      id: briefing.screen
 - tapOn:
     id: tab.knowledge
 - extendedWaitUntil:
@@ -46,10 +47,9 @@ appId: "${APP_ID}"
 - assertVisible: Recently Saved
 - assertVisible:
     id: knowledge.saved.${LONG_CONTENT_ID}
+- waitForAnimationToEnd
 - takeScreenshot:
-    path: "${BASELINE_DIR}/main-knowledge"
-    cropOn:
-      id: knowledge.screen
+    path: "${BASELINE_DIR}/redesign-knowledge"
 - tapOn:
     id: tab.learning
 - extendedWaitUntil:
@@ -60,12 +60,11 @@ appId: "${APP_ID}"
     id: learning.chat.${CHAT_SESSION_ID}
 - assertVisible: Learning Deck
 - assertVisible: Narration
+- waitForAnimationToEnd
 - takeScreenshot:
-    path: "${BASELINE_DIR}/main-learning"
-    cropOn:
-      id: learning.screen
+    path: "${BASELINE_DIR}/redesign-learning"
 - tapOn:
-    id: tab.more
+    id: learning.more_menu
 - extendedWaitUntil:
     visible:
       id: more.screen

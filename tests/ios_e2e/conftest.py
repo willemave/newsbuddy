@@ -185,6 +185,8 @@ def run_maestro_flow(maestro_bin: str) -> Callable[..., subprocess.CompletedProc
 
         try:
             command = [maestro_bin, "test"]
+            if simulator_id := os.environ.get("NEWSLY_MAESTRO_SIMULATOR_ID"):
+                command.extend(["--udid", simulator_id])
             if test_output_dir := os.environ.get("NEWSLY_MAESTRO_TEST_OUTPUT_DIR"):
                 command.extend(["--test-output-dir", test_output_dir])
             command.append(rendered_path)
