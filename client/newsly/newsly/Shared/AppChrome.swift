@@ -20,21 +20,30 @@ extension EnvironmentValues {
 }
 
 enum AppChrome {
-    static func configure() {
+    static func configure(textSize: DynamicTypeSize = .large) {
         let chromeAccent = UIColor.appChromeAccent
         let unselected = UIColor.tertiaryLabel
         let surface = UIColor.appSurfacePrimary
+        let traitCollection = UITraitCollection(
+            preferredContentSizeCategory: textSize.uiContentSizeCategory
+        )
 
         let itemAppearance = UITabBarItemAppearance()
         itemAppearance.selected.iconColor = chromeAccent
         itemAppearance.selected.titleTextAttributes = [
             .foregroundColor: chromeAccent,
-            .font: UIFont.appSans(size: 10, weight: .medium)
+            .font: UIFontMetrics(forTextStyle: .caption2).scaledFont(
+                for: UIFont.appSans(size: 10, weight: .medium),
+                compatibleWith: traitCollection
+            )
         ]
         itemAppearance.normal.iconColor = unselected
         itemAppearance.normal.titleTextAttributes = [
             .foregroundColor: unselected,
-            .font: UIFont.appSans(size: 10, weight: .medium)
+            .font: UIFontMetrics(forTextStyle: .caption2).scaledFont(
+                for: UIFont.appSans(size: 10, weight: .medium),
+                compatibleWith: traitCollection
+            )
         ]
 
         let tabAppearance = UITabBarAppearance()
@@ -54,15 +63,41 @@ enum AppChrome {
         navigationAppearance.shadowColor = UIColor.separator
         navigationAppearance.titleTextAttributes = [
             .foregroundColor: UIColor.appOnSurface,
-            .font: UIFont.appSerif(size: 17, weight: .semibold)
+            .font: UIFontMetrics(forTextStyle: .headline).scaledFont(
+                for: UIFont.appSerif(size: 17, weight: .semibold),
+                compatibleWith: traitCollection
+            )
         ]
         navigationAppearance.largeTitleTextAttributes = [
             .foregroundColor: UIColor.appOnSurface,
-            .font: UIFont.appSerif(size: 34, weight: .semibold)
+            .font: UIFontMetrics(forTextStyle: .largeTitle).scaledFont(
+                for: UIFont.appSerif(size: 34, weight: .semibold),
+                compatibleWith: traitCollection
+            )
         ]
         UINavigationBar.appearance().standardAppearance = navigationAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navigationAppearance
         UINavigationBar.appearance().tintColor = chromeAccent
+    }
+}
+
+private extension DynamicTypeSize {
+    var uiContentSizeCategory: UIContentSizeCategory {
+        switch self {
+        case .xSmall: return .extraSmall
+        case .small: return .small
+        case .medium: return .medium
+        case .large: return .large
+        case .xLarge: return .extraLarge
+        case .xxLarge: return .extraExtraLarge
+        case .xxxLarge: return .extraExtraExtraLarge
+        case .accessibility1: return .accessibilityMedium
+        case .accessibility2: return .accessibilityLarge
+        case .accessibility3: return .accessibilityExtraLarge
+        case .accessibility4: return .accessibilityExtraExtraLarge
+        case .accessibility5: return .accessibilityExtraExtraExtraLarge
+        @unknown default: return .large
+        }
     }
 }
 

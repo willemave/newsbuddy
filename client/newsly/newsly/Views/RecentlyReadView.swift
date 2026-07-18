@@ -11,7 +11,6 @@ struct RecentlyReadView: View {
     let readStateCache: ReadStateCache
 
     @State private var viewModel: ContentListViewModel
-    @State private var settings = AppSettings.shared
     @State private var showingFilters = false
 
     init(readStateCache: ReadStateCache? = nil) {
@@ -44,12 +43,11 @@ struct RecentlyReadView: View {
 
                     List {
                         ForEach(viewModel.contents) { content in
-                            NavigationLink(destination: ContentDetailView(
-                                    contentId: content.id,
-                                    allContentIds: contentIds,
-                                    navigationSurface: .recentlyRead,
-                                    readStateCache: readStateCache
-                                )) {
+                            NavigationLink(value: ContentDetailRoute(
+                                summary: content,
+                                allContentIds: contentIds,
+                                navigationSurface: .recentlyRead
+                            )) {
                                 ContentCard(content: content)
                             }
                             .buttonStyle(.plain)

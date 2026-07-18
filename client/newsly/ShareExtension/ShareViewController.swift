@@ -121,6 +121,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
         titleLabel.text = "How should Newsbuddy handle this link?"
         titleLabel.font = ShareExtensionStyle.titleFont(textStyle: .headline)
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 0
 
         optionsStack.axis = .vertical
@@ -174,10 +175,12 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
         chatPromptLabel.text = "First message"
         chatPromptLabel.font = ShareExtensionStyle.font(textStyle: .subheadline, weight: .medium)
+        chatPromptLabel.adjustsFontForContentSizeCategory = true
         chatPromptLabel.textColor = .secondaryLabel
 
         chatPromptTextView.delegate = self
         chatPromptTextView.font = ShareExtensionStyle.font(textStyle: .body)
+        chatPromptTextView.adjustsFontForContentSizeCategory = true
         chatPromptTextView.backgroundColor = .secondarySystemBackground
         chatPromptTextView.layer.cornerRadius = 10
         chatPromptTextView.layer.borderWidth = 1
@@ -512,10 +515,12 @@ private final class OptionRowView: UIControl {
 
         titleLabel.text = title
         titleLabel.font = ShareExtensionStyle.font(textStyle: .body, weight: .medium)
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = .label
 
         descriptionLabel.text = description
         descriptionLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
+        descriptionLabel.adjustsFontForContentSizeCategory = true
         descriptionLabel.textColor = .secondaryLabel
         descriptionLabel.numberOfLines = 0
 
@@ -610,10 +615,12 @@ private final class ToggleRowView: UIControl {
 
         titleLabel.text = title
         titleLabel.font = ShareExtensionStyle.font(textStyle: .body, weight: .medium)
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = .label
 
         descriptionLabel.text = description
         descriptionLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
+        descriptionLabel.adjustsFontForContentSizeCategory = true
         descriptionLabel.textColor = .secondaryLabel
         descriptionLabel.numberOfLines = 0
 

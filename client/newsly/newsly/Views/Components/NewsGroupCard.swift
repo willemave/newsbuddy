@@ -15,9 +15,8 @@ struct NewsGroupCard: View {
             // News items
             ForEach(group.items) { item in
                 NavigationLink(
-                    destination: ContentDetailView(
-                        contentId: item.id,
-                        contentType: item.contentType,
+                    value: ContentDetailRoute(
+                        summary: item,
                         allContentIds: group.items.map(\.id),
                         navigationSurface: .newsGroup
                     )

@@ -220,41 +220,44 @@ extension Font {
     static let appCaption = Font.appSans(size: 12, relativeTo: .caption)
     static let appCaption2 = Font.appSans(size: 11, relativeTo: .caption2)
 
-    static let listTitle = Font.appSans(size: 17)
-    static let listSubtitle = Font.appSans(size: 15)
-    static let listCaption = Font.appSans(size: 12)
+    static let listTitle = Font.appSans(size: 17, relativeTo: .body)
+    static let listSubtitle = Font.appSans(size: 15, relativeTo: .subheadline)
+    static let listCaption = Font.appSans(size: 12, relativeTo: .caption)
     static let listValue = Font.appCaption.monospacedDigit()
 
-    static let sectionHeader = Font.appSans(size: 13, weight: .semibold)
-    static let chipLabel = Font.appSans(size: 11, weight: .medium)
+    static let sectionHeader = Font.appSans(size: 13, relativeTo: .footnote, weight: .semibold)
+    static let chipLabel = Font.appSans(size: 11, relativeTo: .caption2, weight: .medium)
 
     // Editorial typography.
-    static let editorialMeta = Font.appSans(size: 11, weight: .bold)
+    static let editorialMeta = Font.appSans(size: 11, relativeTo: .caption2, weight: .bold)
 
     // Watercolor typography (Landing & Onboarding) follows the app title/body split.
-    static let watercolorDisplay = Font.appSerif(size: 54, weight: .semibold)
-    static let watercolorSubtitle = Font.appSans(size: 17)
+    static let watercolorDisplay = Font.appSerif(size: 54, relativeTo: .largeTitle, weight: .semibold)
+    static let watercolorSubtitle = Font.appSans(size: 17, relativeTo: .body)
 
     // Terracotta typography - title aliases use the serif family, body/labels use the sans family.
-    static let terracottaDisplayLarge = Font.appSerif(size: 44, weight: .semibold)
-    static let terracottaHeadlineLarge = Font.appSerif(size: 28, weight: .semibold)
-    static let terracottaHeadlineMedium = Font.appSerif(size: 22, weight: .semibold)
-    static let terracottaHeadlineSmall = Font.appSerif(size: 18, weight: .semibold)
+    static let terracottaDisplayLarge = Font.appSerif(size: 44, relativeTo: .largeTitle, weight: .semibold)
+    static let terracottaHeadlineLarge = Font.appSerif(size: 28, relativeTo: .title, weight: .semibold)
+    static let terracottaHeadlineMedium = Font.appSerif(size: 22, relativeTo: .title2, weight: .semibold)
+    static let terracottaHeadlineSmall = Font.appSerif(size: 18, relativeTo: .headline, weight: .semibold)
 
     // Terracotta typography — body/labels/UI
-    static let terracottaBodyLarge = Font.appSans(size: 16)
-    static let terracottaBodyMedium = Font.appSans(size: 14)
-    static let terracottaBodySmall = Font.appSans(size: 12)
-    static let terracottaLabelSmall = Font.appSans(size: 9, weight: .bold)
-    static let terracottaCategoryPill = Font.appSans(size: 10, weight: .semibold)
+    static let terracottaBodyLarge = Font.appSans(size: 16, relativeTo: .body)
+    static let terracottaBodyMedium = Font.appSans(size: 14, relativeTo: .subheadline)
+    static let terracottaBodySmall = Font.appSans(size: 12, relativeTo: .caption)
+    static let terracottaLabelSmall = Font.appSans(size: 9, relativeTo: .caption2, weight: .bold)
+    static let terracottaCategoryPill = Font.appSans(size: 10, relativeTo: .caption2, weight: .semibold)
 
-    static let readerTitle = Font.appSerif(size: 34, weight: .semibold)
-    static let readerControlLabel = Font.appSans(size: 16, weight: .semibold)
+    static let readerTitle = Font.appSerif(size: 34, relativeTo: .largeTitle, weight: .semibold)
+    static let readerControlLabel = Font.appSans(size: 16, relativeTo: .callout, weight: .semibold)
 
     // Reader typography — regular body copy.
-    static let readerBody = Font.appSans(size: ReaderContentStyle.bodyFontSize)
+    static let readerBody = Font.appSans(size: ReaderContentStyle.bodyFontSize, relativeTo: .body)
         .weight(ReaderContentStyle.bodyFontWeight)
-    static let readerSummaryBody = Font.appSans(size: ReaderContentStyle.summaryBodyFontSize)
+    static let readerSummaryBody = Font.appSans(
+        size: ReaderContentStyle.summaryBodyFontSize,
+        relativeTo: .subheadline
+    )
         .weight(ReaderContentStyle.bodyFontWeight)
 }
 
@@ -277,10 +280,16 @@ extension UIFont {
         return UIFont(descriptor: descriptor, size: size)
     }
 
-    static func appSans(textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
-        let preferred = UIFont.preferredFont(forTextStyle: textStyle)
-        let baseFont = appSans(size: preferred.pointSize, weight: weight)
-        return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: baseFont)
+    static func appSans(
+        textStyle: UIFont.TextStyle,
+        weight: UIFont.Weight = .regular,
+        compatibleWith traitCollection: UITraitCollection? = nil
+    ) -> UIFont {
+        let baseFont = appSans(size: basePointSize(for: textStyle), weight: weight)
+        return UIFontMetrics(forTextStyle: textStyle).scaledFont(
+            for: baseFont,
+            compatibleWith: traitCollection
+        )
     }
 
     static var appReaderBody: UIFont {
@@ -288,6 +297,22 @@ extension UIFont {
             size: ReaderContentStyle.bodyFontSize,
             weight: ReaderContentStyle.uiBodyFontWeight
         )
+    }
+
+    private static func basePointSize(for textStyle: UIFont.TextStyle) -> CGFloat {
+        switch textStyle {
+        case .largeTitle: return 34
+        case .title1: return 28
+        case .title2: return 22
+        case .title3: return 20
+        case .headline, .body: return 17
+        case .callout: return 16
+        case .subheadline: return 15
+        case .footnote: return 13
+        case .caption1: return 12
+        case .caption2: return 11
+        default: return 17
+        }
     }
 }
 

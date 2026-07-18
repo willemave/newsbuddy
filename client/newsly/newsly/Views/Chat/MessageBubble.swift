@@ -76,7 +76,9 @@ struct MessageBubble: View {
                     SelectableMarkdownView(
                         markdown: message.content,
                         textColor: assistantTextColor,
-                        baseFont: .appSans(textStyle: .callout),
+                        baseFont: .appSans(size: 16),
+                        adjustsFontForContentSizeCategory: true,
+                        scalingTextStyle: .callout,
                         onDigDeeper: onDigDeeper
                     )
                 }

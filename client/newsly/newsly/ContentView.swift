@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var briefingPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
     @State private var learningPath = NavigationPath()
+    @State private var morePath = NavigationPath()
     @State private var isRestoringPath = false
     @State private var learningFocusRequest: LearningFocusRequest?
     @State private var showMoreSheet = false
@@ -110,8 +111,11 @@ struct ContentView: View {
 
             if !isBriefingExperience {
                 MoreTab(
+                    path: $morePath,
                     submissionsViewModel: submissionStatusViewModel,
                     readStateCache: readStateCache,
+                    readingStateStore: readingStateStore,
+                    contentTextSize: contentTextSize,
                     badge: moreBadge
                 )
             }
@@ -132,22 +136,31 @@ struct ContentView: View {
                 compactTabBarHeight = max(height, 0)
             }
         }
-        .sheet(isPresented: $showMoreSheet) {
-            NavigationStack {
+        .sheet(isPresented: $showMoreSheet, onDismiss: {
+            morePath = NavigationPath()
+        }) {
+            NavigationStack(path: $morePath) {
                 MoreView(
                     submissionsViewModel: submissionStatusViewModel,
                     readStateCache: readStateCache
+                )
+                .withContentRoutes(
+                    tab: .more,
+                    path: $morePath,
+                    readingStateStore: readingStateStore,
+                    readStateCache: readStateCache,
+                    contentTextSize: contentTextSize
                 )
             }
         }
         .tint(Color.appChromeAccent)
         .font(.appBody)
-        .dynamicTypeSize(AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize)
+        .dynamicTypeSize(appTextSize)
         .sensoryFeedback(.impact(weight: .light), trigger: tabRetapFeedbackTrigger)
         .environment(readingStateStore)
         .environment(readStateCache)
         .onAppear {
-            AppChrome.configure()
+            AppChrome.configure(textSize: appTextSize)
             chatSessionManager.setPollingSuspended(scenePhase != .active)
             unreadCountService.setPeriodicRefreshSuspended(scenePhase != .active)
             processingCountService.setPeriodicRefreshSuspended(scenePhase != .active)
@@ -165,6 +178,9 @@ struct ContentView: View {
         .onChange(of: settings.readingExperienceRaw) { _, _ in
             tabSelection.reconcile()
             updateBriefingActivity()
+        }
+        .onChange(of: settings.appTextSizeIndex) { _, _ in
+            AppChrome.configure(textSize: appTextSize)
         }
         .onChange(of: longFormPath.count) { oldValue, newValue in
             logger.info(
@@ -213,6 +229,10 @@ struct ContentView: View {
 
     private var contentTextSize: DynamicTypeSize {
         ContentTextSize(index: settings.contentTextSizeIndex).dynamicTypeSize
+    }
+
+    private var appTextSize: DynamicTypeSize {
+        AppTextSize(index: settings.appTextSizeIndex).dynamicTypeSize
     }
 
     private var isBriefingExperience: Bool {

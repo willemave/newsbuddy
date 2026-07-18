@@ -25,6 +25,7 @@ struct LearningView: View {
     let onFocusHandled: (LearningFocusRequest) -> Void
     let onSelectSession: (ChatSessionRoute) -> Void
     let chatTransitionNamespace: Namespace.ID?
+    let contentTextSize: DynamicTypeSize
     var onOpenMore: (() -> Void)?
 
     @State private var viewModel: LearningHubViewModel
@@ -43,6 +44,7 @@ struct LearningView: View {
         onOpenMore: (() -> Void)? = nil,
         viewModel: LearningHubViewModel,
         readStateCache: ReadStateCache,
+        contentTextSize: DynamicTypeSize,
         chatTransitionNamespace: Namespace.ID? = nil
     ) {
         self.focusRequest = focusRequest
@@ -50,6 +52,7 @@ struct LearningView: View {
         self.onSelectSession = onSelectSession
         self.onOpenMore = onOpenMore
         self.viewModel = viewModel
+        self.contentTextSize = contentTextSize
         self.chatTransitionNamespace = chatTransitionNamespace
         self._narrations = State(
             initialValue: RootDependencyFactory.makeCustomNarrationLibraryViewModel(
@@ -117,6 +120,7 @@ struct LearningView: View {
                 viewerURL: destination.url,
                 onClose: { deckReaderDestination = nil }
             )
+            .dynamicTypeSize(contentTextSize)
             .ignoresSafeArea()
         }
         .task {

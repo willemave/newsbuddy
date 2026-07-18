@@ -199,6 +199,7 @@ struct LearningTab: View {
                 onOpenMore: isBriefingExperience ? onOpenMore : nil,
                 viewModel: viewModel,
                 readStateCache: readStateCache,
+                contentTextSize: contentTextSize,
                 chatTransitionNamespace: chatTransitionNamespace
             )
             .withContentRoutes(
@@ -229,15 +230,25 @@ struct LearningTab: View {
 }
 
 struct MoreTab: View {
+    @Binding var path: NavigationPath
     let submissionsViewModel: SubmissionStatusViewModel
     let readStateCache: ReadStateCache
+    let readingStateStore: ReadingStateStore
+    let contentTextSize: DynamicTypeSize
     let badge: Int
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             MoreView(
                 submissionsViewModel: submissionsViewModel,
                 readStateCache: readStateCache
+            )
+            .withContentRoutes(
+                tab: .more,
+                path: $path,
+                readingStateStore: readingStateStore,
+                readStateCache: readStateCache,
+                contentTextSize: contentTextSize
             )
         }
         .tag(RootTab.more)

@@ -9,6 +9,7 @@ private let briefingNarrationLogger = Logger(
 struct BriefingView: View {
     @ObservedObject var viewModel: BriefingViewModel
 
+    @Environment(\.dynamicTypeSize) private var contentTextSize
     @StateObject private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
     @State private var playbackService = NarrationPlaybackService.shared
     @State private var activeSource: BriefingSourceSheetItem?
@@ -87,6 +88,7 @@ struct BriefingView: View {
                 item: item,
                 contentIds: contentIdsForCurrentLens(matching: item.source.kind)
             )
+            .dynamicTypeSize(contentTextSize)
             .presentationDetents([.fraction(0.75), .large])
             .presentationContentInteraction(.resizes)
             .presentationDragIndicator(.visible)

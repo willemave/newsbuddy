@@ -43,6 +43,43 @@ final class BriefingPassageTypographyTests: XCTestCase {
     }
 }
 
+final class TypographyScalingTests: XCTestCase {
+    func testSelectableMarkdownUsesItsSemanticTextStyleWhenScaling() {
+        let baseFont = UIFont.appSans(size: 16)
+        let traitCollection = UITraitCollection(preferredContentSizeCategory: .extraLarge)
+
+        let scaledFont = SelectableMarkdownView.scaledFont(
+            baseFont,
+            relativeTo: .callout,
+            compatibleWith: traitCollection,
+            adjustsForContentSizeCategory: true
+        )
+        let expectedFont = UIFontMetrics(forTextStyle: .callout).scaledFont(
+            for: baseFont,
+            compatibleWith: traitCollection
+        )
+
+        XCTAssertEqual(scaledFont.pointSize, expectedFont.pointSize, accuracy: 0.01)
+        XCTAssertGreaterThan(scaledFont.pointSize, baseFont.pointSize)
+    }
+
+    func testSemanticUIFontAppliesDynamicTypeExactlyOnce() {
+        let traitCollection = UITraitCollection(preferredContentSizeCategory: .extraLarge)
+        let baseFont = UIFont.appSans(size: 16)
+
+        let scaledFont = UIFont.appSans(
+            textStyle: .callout,
+            compatibleWith: traitCollection
+        )
+        let expectedFont = UIFontMetrics(forTextStyle: .callout).scaledFont(
+            for: baseFont,
+            compatibleWith: traitCollection
+        )
+
+        XCTAssertEqual(scaledFont.pointSize, expectedFont.pointSize, accuracy: 0.01)
+    }
+}
+
 final class BriefingAttributedTextBuilderTests: XCTestCase {
     func testFeaturePassagesUseBodyTypography() throws {
         let builder = BriefingAttributedTextBuilder()

@@ -114,10 +114,10 @@ struct SearchView: View {
                     .foregroundStyle(Color.onSurfaceSecondary)
             } else {
                 ForEach(viewModel.contentResults, id: \.id) { item in
-                    NavigationLink(destination: ContentDetailView(
-                        contentId: item.id,
-                        navigationSurface: .search,
-                        readStateCache: readStateCache
+                    NavigationLink(value: ContentDetailRoute(
+                        summary: item,
+                        allContentIds: viewModel.contentResults.map(\.id),
+                        navigationSurface: .search
                     )) {
                         HStack(spacing: 12) {
                             Image(systemName: item.contentType == .podcast ? "waveform" : "doc.text")

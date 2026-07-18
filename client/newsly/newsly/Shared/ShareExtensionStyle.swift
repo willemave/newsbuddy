@@ -31,13 +31,29 @@ enum ShareExtensionStyle {
         textStyle: UIFont.TextStyle,
         weight: UIFont.Weight = .regular
     ) -> UIFont {
-        let preferred = UIFont.preferredFont(forTextStyle: textStyle)
-        let baseFont = UIFont(name: family, size: preferred.pointSize)
-            ?? UIFont.systemFont(ofSize: preferred.pointSize, weight: weight)
+        let pointSize = basePointSize(for: textStyle)
+        let baseFont = UIFont(name: family, size: pointSize)
+            ?? UIFont.systemFont(ofSize: pointSize, weight: weight)
         let descriptor = baseFont.fontDescriptor.addingAttributes([
             .traits: [UIFontDescriptor.TraitKey.weight: weight.rawValue]
         ])
-        let weightedFont = UIFont(descriptor: descriptor, size: preferred.pointSize)
+        let weightedFont = UIFont(descriptor: descriptor, size: pointSize)
         return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: weightedFont)
+    }
+
+    private static func basePointSize(for textStyle: UIFont.TextStyle) -> CGFloat {
+        switch textStyle {
+        case .largeTitle: 34
+        case .title1: 28
+        case .title2: 22
+        case .title3: 20
+        case .headline, .body: 17
+        case .callout: 16
+        case .subheadline: 15
+        case .footnote: 13
+        case .caption1: 12
+        case .caption2: 11
+        default: 17
+        }
     }
 }

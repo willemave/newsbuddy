@@ -15,6 +15,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
     let textColor: UIColor
     let baseFont: UIFont
     let adjustsFontForContentSizeCategory: Bool
+    let scalingTextStyle: UIFont.TextStyle
     var onDigDeeper: ((String) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
@@ -24,12 +25,14 @@ struct SelectableMarkdownView: UIViewRepresentable {
         textColor: UIColor = .appReaderBodyText,
         baseFont: UIFont = .appReaderBody,
         adjustsFontForContentSizeCategory: Bool = false,
+        scalingTextStyle: UIFont.TextStyle = .body,
         onDigDeeper: ((String) -> Void)? = nil
     ) {
         self.markdown = markdown
         self.textColor = textColor
         self.baseFont = baseFont
         self.adjustsFontForContentSizeCategory = adjustsFontForContentSizeCategory
+        self.scalingTextStyle = scalingTextStyle
         self.onDigDeeper = onDigDeeper
     }
 
@@ -61,7 +64,12 @@ struct SelectableMarkdownView: UIViewRepresentable {
         let resolvedTextColor = textColor.resolvedColor(with: uiView.traitCollection)
         let resolvedLinkColor = UIColor.appAccent.resolvedColor(with: uiView.traitCollection)
         let linkAppearanceSignature = context.coordinator.colorSignature(for: resolvedLinkColor)
-        let scaledBaseFont = scaledFont(for: baseFont, compatibleWith: uiView.traitCollection)
+        let scaledBaseFont = Self.scaledFont(
+            baseFont,
+            relativeTo: scalingTextStyle,
+            compatibleWith: uiView.traitCollection,
+            adjustsForContentSizeCategory: adjustsFontForContentSizeCategory
+        )
         let renderKey = RenderKey(
             markdown: markdown,
             baseFontName: scaledBaseFont.fontDescriptor.postscriptName,
@@ -108,7 +116,12 @@ struct SelectableMarkdownView: UIViewRepresentable {
 
         let resolvedTextColor = textColor.resolvedColor(with: uiView.traitCollection)
         let resolvedLinkColor = UIColor.appAccent.resolvedColor(with: uiView.traitCollection)
-        let scaledBaseFont = scaledFont(for: baseFont, compatibleWith: uiView.traitCollection)
+        let scaledBaseFont = Self.scaledFont(
+            baseFont,
+            relativeTo: scalingTextStyle,
+            compatibleWith: uiView.traitCollection,
+            adjustsForContentSizeCategory: adjustsFontForContentSizeCategory
+        )
         let renderKey = RenderKey(
             markdown: markdown,
             baseFontName: scaledBaseFont.fontDescriptor.postscriptName,
@@ -129,9 +142,17 @@ struct SelectableMarkdownView: UIViewRepresentable {
         return CGSize(width: width, height: fittingSize.height)
     }
 
-    private func scaledFont(for font: UIFont, compatibleWith traitCollection: UITraitCollection) -> UIFont {
-        guard adjustsFontForContentSizeCategory else { return font }
-        return UIFontMetrics(forTextStyle: .body).scaledFont(for: font, compatibleWith: traitCollection)
+    static func scaledFont(
+        _ font: UIFont,
+        relativeTo textStyle: UIFont.TextStyle,
+        compatibleWith traitCollection: UITraitCollection,
+        adjustsForContentSizeCategory: Bool
+    ) -> UIFont {
+        guard adjustsForContentSizeCategory else { return font }
+        return UIFontMetrics(forTextStyle: textStyle).scaledFont(
+            for: font,
+            compatibleWith: traitCollection
+        )
     }
 
     struct RenderKey: Equatable {
