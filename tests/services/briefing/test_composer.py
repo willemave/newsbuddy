@@ -10,6 +10,7 @@ from app.services.briefing.composer import (
     MAX_COMPOSE_ATTEMPTS,
     BriefingCompositionError,
     BriefingCompositionInvalidOutput,
+    _news_clause,
     _parse_composer_layout_json,
     _source_payload,
     compose_window,
@@ -385,6 +386,24 @@ def test_deterministic_news_layout_remains_one_paragraph_at_max_batch() -> None:
         run["source_key"] for run in paragraphs[0]["runs"] if run["kind"] == "source_link"
     ]
     assert linked_keys == [f"news:{index}" for index in range(1, 5)]
+    assert segment.narration_text.count(";") == 3
+    assert "News summary 1; News item 2" in segment.narration_text
+
+
+@pytest.mark.parametrize(
+    ("sentence", "expected"),
+    [
+        ("First. Second.{{/insight}}", "First, Second{{/insight}}"),
+        ("Question?{{/insight}}", "Question{{/insight}}"),
+        ("Bang!{{/insight}}", "Bang{{/insight}}"),
+        ("Plain.", "Plain"),
+    ],
+)
+def test_news_clause_preserves_internal_normalization_without_terminal_punctuation(
+    sentence: str,
+    expected: str,
+) -> None:
+    assert _news_clause(sentence) == expected
 
 
 def test_compose_window_repairs_unknown_optional_figure_without_retry() -> None:

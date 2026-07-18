@@ -27,6 +27,7 @@ from app.services.briefing.layout_policy import (
     is_low_signal_generated_text,
 )
 from app.services.briefing.normalize import (
+    INSIGHT_CLOSE,
     NormalizedLayout,
     normalize_layout,
 )
@@ -436,7 +437,7 @@ def deterministic_layout(
     source_label = "source" if len(sources) == 1 else "sources"
     intro = f"**{lens_title}** opens with {len(sources)} unread {source_label}."
     if tier == "news":
-        clauses = [re.sub(r"[.!?]+(?=\s|$)", ",", sentence).strip(" ,;") for sentence in sentences]
+        clauses = [_news_clause(sentence) for sentence in sentences]
         markdown = f"{intro.rstrip('.')}: " + "; ".join(clauses) + "."
         return ComposerLayout(
             blocks=[PassageBlock(type="passage", markdown=markdown, weight="feature")]
@@ -468,6 +469,14 @@ def deterministic_layout(
             )
         )
     return ComposerLayout(blocks=blocks)
+
+
+def _news_clause(sentence: str) -> str:
+    normalized = re.sub(r"[.!?]+(?=\s|$)", ",", sentence).strip(" ,;")
+    if not normalized.endswith(INSIGHT_CLOSE):
+        return normalized
+    body = normalized.removesuffix(INSIGHT_CLOSE).rstrip(" ,;.!?")
+    return f"{body}{INSIGHT_CLOSE}"
 
 
 def news_layout_contract_issues(
@@ -512,7 +521,7 @@ def _source_sentence(source: BriefingSource, *, index: int) -> str:
     url_kind = "content" if source.kind == "content" else "news"
     summary = source.summary or (source.key_points[0] if source.key_points else "is ready to read")
     insight_open = f"{{{{insight:source_{index}}}}}" if index < 3 else ""
-    insight_close = "{{/insight}}" if index < 3 else ""
+    insight_close = INSIGHT_CLOSE if index < 3 else ""
     return (
         f"[{source.title}](newsly://briefing/{url_kind}/{source.id}) "
         f"{insight_open}{summary}{insight_close}"
