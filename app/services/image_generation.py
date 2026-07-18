@@ -280,9 +280,6 @@ def _build_news_thumbnail_prompt(content: ContentData) -> str:
 
 def _build_infographic_prompt(content: ContentData) -> str:
     """Build a compact no-text editorial brief for long-form images."""
-    if content.content_type == ContentType.INSIGHT_REPORT:
-        return _build_insight_report_infographic_prompt(content)
-
     summary = content.metadata.get("summary", {})
     title = _clamp_text(str(summary.get("title") or content.display_title).strip(), max_chars=180)
     key_points: list[str] = []
@@ -343,49 +340,6 @@ def _build_infographic_prompt(content: ContentData) -> str:
 
     return render_prompt(
         "images/infographic#article_user",
-        story_context=visual_brief["story_context"],
-        primary_subject=visual_brief["primary_subject"],
-        visual_metaphor=visual_brief["visual_metaphor"],
-        scene_direction=visual_brief["scene_direction"],
-        supporting_cues=visual_brief["supporting_cues"],
-    )
-
-
-def _build_insight_report_infographic_prompt(content: ContentData) -> str:
-    """Build an image prompt for the insight_report content type.
-
-    Insight reports don't carry a ``summary`` blob — they have ``intro``,
-    ``themes``, and ``insights`` fields on the metadata top level. Map those
-    into the same visual-brief shape so we can reuse the standard infographic
-    prompt pipeline.
-    """
-    metadata = content.metadata
-    title = _clamp_text(str(content.display_title or "Insight report").strip(), max_chars=180)
-    intro = str(metadata.get("intro") or "")
-    overview_text = _clamp_text(" ".join(intro.split()).strip(), max_chars=240)
-
-    themes_raw = metadata.get("themes") or []
-    insights_raw = metadata.get("insights") or []
-    key_points: list[str] = []
-    for item in themes_raw[:3]:
-        if isinstance(item, str) and item.strip():
-            key_points.append(_clamp_text(item.strip(), max_chars=120))
-    for item in insights_raw[:2]:
-        if isinstance(item, str) and item.strip():
-            key_points.append(_clamp_text(" ".join(item.split()).strip(), max_chars=220))
-        if len(key_points) >= 4:
-            break
-    if not key_points and overview_text:
-        key_points.append(overview_text)
-
-    visual_brief = _build_infographic_visual_brief(
-        title=title,
-        overview=overview_text,
-        key_points=key_points,
-    )
-
-    return render_prompt(
-        "images/infographic#insight_report_user",
         story_context=visual_brief["story_context"],
         primary_subject=visual_brief["primary_subject"],
         visual_metaphor=visual_brief["visual_metaphor"],
@@ -468,13 +422,6 @@ def _should_skip_image_generation(content: ContentData) -> tuple[bool, str]:
     """Check if image generation should be skipped."""
     if content.content_type == ContentType.NEWS:
         return True, "News thumbnails are disabled"
-
-    if content.content_type == ContentType.INSIGHT_REPORT:
-        # Insight reports don't carry a ``summary`` blob — they use ``intro`` /
-        # ``themes`` for the prompt. Require at least an intro to be present.
-        if not content.metadata.get("intro"):
-            return True, "Insight report missing intro for prompt generation"
-        return False, ""
 
     if not content.metadata.get("summary"):
         return True, "No summary available for prompt generation"

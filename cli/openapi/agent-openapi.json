@@ -854,29 +854,6 @@
         "title": "Body_adminApiKeysCreate",
         "type": "object"
       },
-      "Body_adminInsightReportsTrigger": {
-        "properties": {
-          "effort": {
-            "default": "high",
-            "title": "Effort",
-            "type": "string"
-          },
-          "synthesis_model": {
-            "default": "anthropic:claude-opus-4-6",
-            "title": "Synthesis Model",
-            "type": "string"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "user_id"
-        ],
-        "title": "Body_adminInsightReportsTrigger",
-        "type": "object"
-      },
       "Body_transcribeOpenaiTranscriptionsAudio": {
         "properties": {
           "file": {
@@ -6727,8 +6704,7 @@
           "long_bullets",
           "long_editorial_narrative",
           "short_news",
-          "longform_artifact",
-          "insight_report"
+          "longform_artifact"
         ],
         "title": "SummaryKind",
         "type": "string"

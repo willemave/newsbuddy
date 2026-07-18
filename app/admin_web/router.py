@@ -7,7 +7,6 @@ from app.admin_web import (
     dashboard,
     evals,
     feedback,
-    insight_reports,
     logs,
     onboarding,
     usage,
@@ -19,6 +18,5 @@ router.include_router(evals.router)
 router.include_router(onboarding.router)
 router.include_router(api_keys.router)
 router.include_router(feedback.router)
-router.include_router(insight_reports.router)
 router.include_router(logs.router)
 router.include_router(usage.router)

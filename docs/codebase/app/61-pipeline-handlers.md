@@ -26,7 +26,6 @@ Concrete queue task handlers that translate normalized task envelopes into servi
 | `fetch_discussion.py`, `fetch_news_item_discussion.py` | Content and news-item discussion refresh/summary handlers. |
 | `generate_audio_episode.py` | On-demand audio episode generation. |
 | `generate_image.py` | Long-form generated image handler. |
-| `generate_insight_report.py` | Insight report generation handler. |
 | `generate_learning_deck.py` | Learning Deck generation handler. |
 | `onboarding_discover.py` | Onboarding discovery enrichment. |
 | `process_content.py`, `summarize.py` | Long-form content processing and summarization. |

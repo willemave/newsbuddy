@@ -134,7 +134,6 @@ enum APITaskType: Codable, Equatable, Hashable {
     case onboarding_discover
     case dig_deeper
     case sync_integration
-    case generate_insight_report
     case generate_audio_episode
     case generate_learning_deck
     case run_llm_task
@@ -161,7 +160,6 @@ enum APITaskType: Codable, Equatable, Hashable {
         .onboarding_discover,
         .dig_deeper,
         .sync_integration,
-        .generate_insight_report,
         .generate_audio_episode,
         .generate_learning_deck,
         .run_llm_task,
@@ -189,7 +187,6 @@ enum APITaskType: Codable, Equatable, Hashable {
         case .onboarding_discover: "onboarding_discover"
         case .dig_deeper: "dig_deeper"
         case .sync_integration: "sync_integration"
-        case .generate_insight_report: "generate_insight_report"
         case .generate_audio_episode: "generate_audio_episode"
         case .generate_learning_deck: "generate_learning_deck"
         case .run_llm_task: "run_llm_task"
@@ -219,7 +216,6 @@ enum APITaskType: Codable, Equatable, Hashable {
         case "onboarding_discover": self = .onboarding_discover
         case "dig_deeper": self = .dig_deeper
         case "sync_integration": self = .sync_integration
-        case "generate_insight_report": self = .generate_insight_report
         case "generate_audio_episode": self = .generate_audio_episode
         case "generate_learning_deck": self = .generate_learning_deck
         case "run_llm_task": self = .run_llm_task
@@ -291,7 +287,6 @@ enum APISummaryKind: Codable, Equatable, Hashable {
     case long_editorial_narrative
     case short_news
     case longform_artifact
-    case insight_report
     case unknown(String)
 
     static let knownCases: [APISummaryKind] = [
@@ -301,7 +296,6 @@ enum APISummaryKind: Codable, Equatable, Hashable {
         .long_editorial_narrative,
         .short_news,
         .longform_artifact,
-        .insight_report,
     ]
 
     var rawValue: String {
@@ -312,7 +306,6 @@ enum APISummaryKind: Codable, Equatable, Hashable {
         case .long_editorial_narrative: "long_editorial_narrative"
         case .short_news: "short_news"
         case .longform_artifact: "longform_artifact"
-        case .insight_report: "insight_report"
         case .unknown(let rawValue): rawValue
         }
     }
@@ -325,7 +318,6 @@ enum APISummaryKind: Codable, Equatable, Hashable {
         case "long_editorial_narrative": self = .long_editorial_narrative
         case "short_news": self = .short_news
         case "longform_artifact": self = .longform_artifact
-        case "insight_report": self = .insight_report
         default: self = .unknown(rawValue)
         }
     }

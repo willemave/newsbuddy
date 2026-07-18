@@ -29,7 +29,6 @@ from app.pipeline.handlers.fetch_discussion import FetchDiscussionHandler
 from app.pipeline.handlers.fetch_news_item_discussion import FetchNewsItemDiscussionHandler
 from app.pipeline.handlers.generate_audio_episode import GenerateAudioEpisodeHandler
 from app.pipeline.handlers.generate_image import GenerateImageHandler
-from app.pipeline.handlers.generate_insight_report import GenerateInsightReportHandler
 from app.pipeline.handlers.generate_learning_deck import GenerateLearningDeckHandler
 from app.pipeline.handlers.onboarding_discover import OnboardingDiscoverHandler
 from app.pipeline.handlers.process_content import ProcessContentHandler
@@ -188,7 +187,6 @@ class SequentialTaskProcessor:
             OnboardingDiscoverHandler(),
             DigDeeperHandler(),
             SyncIntegrationHandler(),
-            GenerateInsightReportHandler(),
             GenerateAudioEpisodeHandler(),
             GenerateLearningDeckHandler(),
             RunLlmTaskHandler(),

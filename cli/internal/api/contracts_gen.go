@@ -85,7 +85,6 @@ const (
 	TaskTypeOnboardingDiscover TaskType = "onboarding_discover"
 	TaskTypeDigDeeper TaskType = "dig_deeper"
 	TaskTypeSyncIntegration TaskType = "sync_integration"
-	TaskTypeGenerateInsightReport TaskType = "generate_insight_report"
 	TaskTypeGenerateAudioEpisode TaskType = "generate_audio_episode"
 	TaskTypeGenerateLearningDeck TaskType = "generate_learning_deck"
 	TaskTypeRunLLMTask TaskType = "run_llm_task"
@@ -94,7 +93,7 @@ const (
 
 func (v TaskType) Known() bool {
 	switch v {
-	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadAudio, TaskTypeTranscribe, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateInsightReport, TaskTypeGenerateAudioEpisode, TaskTypeGenerateLearningDeck, TaskTypeRunLLMTask, TaskTypeBriefingRefresh:
+	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadAudio, TaskTypeTranscribe, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateAudioEpisode, TaskTypeGenerateLearningDeck, TaskTypeRunLLMTask, TaskTypeBriefingRefresh:
 		return true
 	default:
 		return false
@@ -128,12 +127,11 @@ const (
 	SummaryKindLongEditorialNarrative SummaryKind = "long_editorial_narrative"
 	SummaryKindShortNews SummaryKind = "short_news"
 	SummaryKindLongformArtifact SummaryKind = "longform_artifact"
-	SummaryKindInsightReport SummaryKind = "insight_report"
 )
 
 func (v SummaryKind) Known() bool {
 	switch v {
-	case SummaryKindLongStructured, SummaryKindLongInterleaved, SummaryKindLongBullets, SummaryKindLongEditorialNarrative, SummaryKindShortNews, SummaryKindLongformArtifact, SummaryKindInsightReport:
+	case SummaryKindLongStructured, SummaryKindLongInterleaved, SummaryKindLongBullets, SummaryKindLongEditorialNarrative, SummaryKindShortNews, SummaryKindLongformArtifact:
 		return true
 	default:
 		return false

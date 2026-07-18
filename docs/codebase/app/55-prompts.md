@@ -16,7 +16,7 @@ Markdown prompt library for LLM-backed backend features, evals, image generation
 | `admin/` | Admin diagnostics and fix-request prompts. |
 | `audio/` | Audio episode and transcription prompts. |
 | `chat/` | Article, contextual assistant, council, and dig-deeper chat prompts. |
-| `content/` | Analyzer, insight report, interesting links, and news-pipeline prompts. |
+| `content/` | Analyzer, interesting links, and news-pipeline prompts. |
 | `discovery/` | Feed/discovery candidate, direction, and lane prompts. |
 | `evals/` | Judge and variant prompts for eval tooling. |
 | `feeds/` | Feed classification prompts. |

@@ -63,7 +63,6 @@ class TaskType(StrEnum):
     ONBOARDING_DISCOVER = "onboarding_discover"
     DIG_DEEPER = "dig_deeper"
     SYNC_INTEGRATION = "sync_integration"
-    GENERATE_INSIGHT_REPORT = "generate_insight_report"
     GENERATE_AUDIO_EPISODE = "generate_audio_episode"
     GENERATE_LEARNING_DECK = "generate_learning_deck"
     RUN_LLM_TASK = "run_llm_task"
@@ -176,7 +175,6 @@ class SummaryKind(StrEnum):
     LONG_EDITORIAL_NARRATIVE = "long_editorial_narrative"
     SHORT_NEWS = "short_news"
     LONGFORM_ARTIFACT = "longform_artifact"
-    INSIGHT_REPORT = "insight_report"
 
 
 class SummaryVersion(IntEnum):

@@ -16,7 +16,6 @@ def test_task_spec_defines_queue_payload_and_dedupe_for_core_tasks() -> None:
     sync_integration = get_task_spec(TaskType.SYNC_INTEGRATION)
     onboarding = get_task_spec(TaskType.ONBOARDING_DISCOVER)
     dig_deeper = get_task_spec(TaskType.DIG_DEEPER)
-    insight_report = get_task_spec(TaskType.GENERATE_INSIGHT_REPORT)
     llm_task = get_task_spec(TaskType.RUN_LLM_TASK)
 
     assert analyze.queue == TaskQueue.CONTENT
@@ -57,7 +56,6 @@ def test_task_spec_defines_queue_payload_and_dedupe_for_core_tasks() -> None:
         "user_id": 4,
         "initial_message": "why?",
     }
-    assert insight_report.normalize_payload({"user_id": 5}) == {"user_id": 5}
     assert llm_task.queue == TaskQueue.LLM
     assert llm_task.normalize_payload({"user_id": 6, "llm_task_id": 7}) == {
         "user_id": 6,
@@ -83,6 +81,3 @@ def test_task_spec_payload_validation_rejects_missing_required_fields() -> None:
 
     with pytest.raises(ValueError, match="Invalid payload for onboarding_discover"):
         get_task_spec(TaskType.ONBOARDING_DISCOVER).normalize_payload({"run_id": 1})
-
-    with pytest.raises(ValueError, match="Invalid payload for generate_insight_report"):
-        get_task_spec(TaskType.GENERATE_INSIGHT_REPORT).normalize_payload({})

@@ -1058,29 +1058,6 @@
         "title": "Body_adminApiKeysCreate",
         "type": "object"
       },
-      "Body_adminInsightReportsTrigger": {
-        "properties": {
-          "effort": {
-            "default": "high",
-            "title": "Effort",
-            "type": "string"
-          },
-          "synthesis_model": {
-            "default": "anthropic:claude-opus-4-6",
-            "title": "Synthesis Model",
-            "type": "string"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "user_id"
-        ],
-        "title": "Body_adminInsightReportsTrigger",
-        "type": "object"
-      },
       "Body_transcribeOpenaiTranscriptionsAudio": {
         "properties": {
           "file": {
@@ -8638,8 +8615,7 @@
           "long_bullets",
           "long_editorial_narrative",
           "short_news",
-          "longform_artifact",
-          "insight_report"
+          "longform_artifact"
         ],
         "title": "SummaryKind",
         "type": "string"
@@ -9738,70 +9714,6 @@
           }
         },
         "summary": "Admin Feedback Page",
-        "tags": [
-          "admin",
-          "admin"
-        ]
-      }
-    },
-    "/admin/insight-reports": {
-      "get": {
-        "description": "Admin panel: per-user insight report eligibility + manual trigger.",
-        "operationId": "adminInsightReportsPage",
-        "responses": {
-          "200": {
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Admin Insight Reports Page",
-        "tags": [
-          "admin",
-          "admin"
-        ]
-      }
-    },
-    "/admin/insight-reports/trigger": {
-      "post": {
-        "description": "Manually enqueue a ``generate_insight_report`` task for a single user.",
-        "operationId": "adminInsightReportsTrigger",
-        "requestBody": {
-          "content": {
-            "application/x-www-form-urlencoded": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_adminInsightReportsTrigger"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Admin Insight Reports Trigger",
         "tags": [
           "admin",
           "admin"

@@ -98,7 +98,7 @@ The app currently mounts:
 - `/auth`
   - Apple Sign In, token refresh, `/me`, profile updates, admin login/logout.
 - `/admin`
-  - Dashboard, eval tooling, API key management, feedback, insight reports, usage dashboards, onboarding lane preview.
+  - Dashboard, eval tooling, API key management, feedback, usage dashboards, onboarding lane preview.
 - `/admin/logs` and `/admin/errors`
   - Log browser and error reset utilities.
 - `/api/content`
@@ -717,7 +717,7 @@ Representative routes:
 - onboarding lane preview
 - eval summaries and eval run trigger
 - API key management
-- feedback and insight report review
+- feedback review
 - log browser and error reset tools
 - vendor and LLM usage dashboards
 
@@ -748,7 +748,6 @@ Defined in `app/models/contracts.py`:
 - `onboarding_discover`
 - `dig_deeper`
 - `sync_integration`
-- `generate_insight_report`
 - `generate_audio_episode`
 - `generate_learning_deck`
 - `run_llm_task`
@@ -793,7 +792,6 @@ used by `app/services/queue.py`:
 | `onboarding_discover` | `onboarding` |
 | `dig_deeper` | `chat` |
 | `sync_integration` | `twitter` |
-| `generate_insight_report` | `content` |
 | `generate_audio_episode` | `audio_episode` |
 | `generate_learning_deck` | `learning` |
 | `run_llm_task` | `llm` |
@@ -850,7 +848,6 @@ Registered handlers:
 - onboarding discover
 - dig deeper
 - sync integration
-- generate insight report
 - generate audio episode
 - generate learning deck
 - run LLM task
@@ -1041,7 +1038,7 @@ Stored output lands in `content_discussions` for long-form/legacy content and `n
 
 `app/services/image_generation.py` uses Google Gemini and optional Runware generation to create:
 
-- editorial infographics for articles, podcasts, and insight reports
+- editorial infographics for articles and podcasts
 - news thumbnails
 - derivative resized assets
 
@@ -1387,7 +1384,7 @@ Capabilities visible in `app/admin_web/`:
 - onboarding lane preview
 - eval execution and summaries
 - API key creation/revocation
-- feedback and insight report review
+- feedback review
 - log/error diagnostics
 - vendor and LLM usage dashboards
 

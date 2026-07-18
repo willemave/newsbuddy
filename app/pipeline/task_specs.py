@@ -68,11 +68,6 @@ class SyncIntegrationPayload(RequiredUserPayload):
     trigger: str = "cron"
 
 
-class InsightReportPayload(RequiredUserPayload):
-    synthesis_model: str | None = None
-    effort: str | None = None
-
-
 class BriefingRefreshPayload(RequiredUserPayload):
     mode: str = "append"
 
@@ -162,11 +157,6 @@ TASK_SPECS: dict[TaskType, TaskSpec] = {
         TaskQueue.TWITTER,
         SyncIntegrationPayload,
         True,
-    ),
-    TaskType.GENERATE_INSIGHT_REPORT: TaskSpec(
-        TaskType.GENERATE_INSIGHT_REPORT,
-        TaskQueue.CONTENT,
-        InsightReportPayload,
     ),
     TaskType.GENERATE_AUDIO_EPISODE: TaskSpec(
         TaskType.GENERATE_AUDIO_EPISODE,

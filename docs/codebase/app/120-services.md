@@ -24,7 +24,7 @@ Business-logic layer for content ingestion/lifecycle, LLM use, chat, discovery, 
 | External providers | `openai_llm.py`, `firecrawl_client.py`, `exa_client.py`, `image_generation.py`, `arxiv_metadata.py`, `pdf_text_extraction.py`, `twitter_share.py`, `x_api.py`, `x_integration.py`, `x_tweet_metadata.py`, `youtube_equivalent_resolver.py`, `http.py` | OpenAI transcription, Firecrawl, Exa, image generation, arXiv/PDF helpers, X/Twitter, YouTube equivalence, and HTTP error classification. |
 | User state and integrations | `knowledge.py`, `read_status.py`, `content_interactions.py`, `cli_link.py`, `personal_markdown_library.py`, `token_crypto.py`, `tweet_suggestions.py` | Knowledge/read state, interaction analytics, CLI QR linking, personal markdown library, encrypted tokens, and tweet suggestions. |
 | Queue, usage, and cost | `queue.py`, `vendor_usage.py`, `vendor_costs.py`, `langfuse_tracing.py` | Queue persistence and status, model/storage usage aggregation, vendor cost calculations, and tracing helpers. |
-| Admin and reports | `admin_eval.py`, `insight_report.py`, `longform_artifact_prompts.py`, `longform_artifact_routing.py`, `sandbox_runtime.py` | Admin evals, insight reports, long-form artifact routing/prompts, and sandbox runtime helpers. |
+| Admin and reports | `admin_eval.py`, `longform_artifact_prompts.py`, `longform_artifact_routing.py`, `sandbox_runtime.py` | Admin evals, long-form artifact routing/prompts, and sandbox runtime helpers. |
 
 ## Runtime dependencies
 - `yt_dlp` and YouTube config support audio/video extraction.
