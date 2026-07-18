@@ -725,33 +725,43 @@ private struct BriefingPullquoteView: View {
     let onOpenSource: (String) -> Void
 
     var body: some View {
-        Button {
-            if let sourceKey = block.sourceKey ?? source?.sourceKey {
-                onOpenSource(sourceKey)
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(block.text ?? "")
-                    .font(.appSerifItalic(size: 20, relativeTo: .title3))
-                    .foregroundStyle(Color.onSurface)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(block.text ?? "")
+                .font(.appSerifItalic(size: 20, relativeTo: .title3))
+                .foregroundStyle(Color.onSurface)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .accessibilityIdentifier("briefing.pullquote.text")
 
-                if let title = source?.title {
-                    Text(title)
-                        .font(.appCaption.weight(.semibold))
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .lineLimit(2)
+            if let sourceKey = block.sourceKey ?? source?.sourceKey {
+                Button {
+                    onOpenSource(sourceKey)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(source?.title ?? "Open source")
+                            .lineLimit(2)
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(.appCaption.weight(.semibold))
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-            }
-            .padding(.leading, 14)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.brandPrimary)
-                    .frame(width: 3)
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    source.map { "Open source: \($0.title)" } ?? "Open source"
+                )
             }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Quote from \(source?.title ?? "source")")
+        .padding(.leading, 14)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color.brandPrimary)
+                .frame(width: 3)
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 

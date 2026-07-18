@@ -10,8 +10,8 @@ and audio narration controls.
 ## Runtime behavior
 - `BriefingView` owns the tab surface, lens strip, page container, bottom narration bar, dig panel,
   and source/Safari sheets.
-- `BriefingPassageView` bridges `DigDeeperTextView` so server-normalized runs can expose tappable
-  source links and selectable text without a WebView.
+- `BriefingPassageView` bridges `DigDeeperTextView` so server-normalized runs expose tappable
+  source links plus native touch-and-hold selection with a custom Dig Deeper edit-menu action.
 - `BriefingAttributedTextBuilder` converts generated `APIBriefingParagraph`/`APIBriefingRun`
   payloads into attributed text with source-link URLs. Insight runs render as ordinary body text.
 - Source sheets open content sources in `ContentDetailView` with `.briefing` navigation context and

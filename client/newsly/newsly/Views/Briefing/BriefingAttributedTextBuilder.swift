@@ -1,7 +1,7 @@
 import UIKit
 
-/// Inline discussion marker rendered after a source link: a clickable bubble
-/// icon grouped with a non-linked comment count inside parentheses.
+/// Inline discussion badge rendered after a source link. The icon and count
+/// share one link target so the visible badge is also the complete tap target.
 struct BriefingDiscussionChip: Equatable {
     let sourceKey: String
     let commentCount: Int?
@@ -92,6 +92,7 @@ struct BriefingAttributedTextBuilder {
             .font: chipFont,
             .paragraphStyle: paragraphStyle
         ]))
+        let badgeStart = output.length
 
         let count = chip.commentCount.flatMap { $0 > 0 ? $0 : nil }
         if count != nil {
@@ -109,10 +110,8 @@ struct BriefingAttributedTextBuilder {
                 height: icon.size.height
             )
             output.append(NSAttributedString(attachment: attachment))
-            var iconAttributes = attributes
-            iconAttributes[.link] = discussionURL(for: chip.sourceKey)
             output.addAttributes(
-                iconAttributes,
+                attributes,
                 range: NSRange(location: output.length - 1, length: 1)
             )
         }
@@ -123,6 +122,14 @@ struct BriefingAttributedTextBuilder {
                 string: "\u{202F}\(Self.compactCount(count)))",
                 attributes: attributes
             ))
+        }
+        if output.length > badgeStart,
+           let discussionURL = discussionURL(for: chip.sourceKey) {
+            output.addAttribute(
+                .link,
+                value: discussionURL,
+                range: NSRange(location: badgeStart, length: output.length - badgeStart)
+            )
         }
         return output
     }

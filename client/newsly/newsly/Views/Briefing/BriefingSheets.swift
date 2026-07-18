@@ -56,14 +56,23 @@ struct BriefingDigSheet: View {
                 Markdown(BriefingDigViewModel.citationLinkedMarkdown(summary))
                     .markdownTheme(.chat)
                     .environment(\.openURL, citationOpenAction(results: results))
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("briefing.dig_summary")
                 resultLinks(results)
             }
             .transition(.opacity)
         case .error(let message):
-            Text(message)
-                .font(.appCallout)
-                .foregroundStyle(Color.statusDestructive)
-                .transition(.opacity)
+            VStack(alignment: .leading, spacing: 12) {
+                Text(message)
+                    .font(.appCallout)
+                    .foregroundStyle(Color.statusDestructive)
+                Button("Try Again") {
+                    viewModel.retry()
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("briefing.dig_retry")
+            }
+            .transition(.opacity)
         }
     }
 

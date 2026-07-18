@@ -294,7 +294,7 @@ private struct BriefingStartHereGuide: View {
         ),
         BriefingStartHereFeature(
             title: "Dig deeper.",
-            detail: "Select a passage while reading and Newsly pulls fresh context from the web."
+            detail: "Touch and hold text while reading, then choose Dig Deeper to pull fresh context from the web."
         ),
         BriefingStartHereFeature(
             title: "Save to Knowledge.",

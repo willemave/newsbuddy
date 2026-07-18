@@ -6,6 +6,20 @@ final class BriefingDigViewModel: ObservableObject {
         case dig
     }
 
+    private struct CacheKey: Hashable {
+        let fragment: String
+        let passageContext: String
+    }
+
+    private struct DigRequest {
+        let fragment: String
+        let passageContext: String
+
+        var cacheKey: CacheKey {
+            CacheKey(fragment: fragment.lowercased(), passageContext: passageContext)
+        }
+    }
+
     enum State {
         case idle
         case searching
@@ -34,7 +48,8 @@ final class BriefingDigViewModel: ObservableObject {
     }
 
     private let service: BriefingServicing
-    private var cache: [String: State] = [:]
+    private var cache: [CacheKey: State] = [:]
+    private var currentRequest: DigRequest?
     private let tasks = TaskBag<TaskKey>()
 
     init(service: BriefingServicing) {
@@ -46,29 +61,52 @@ final class BriefingDigViewModel: ObservableObject {
     }
 
     func dig(fragment rawFragment: String, passageContext: String) {
-        let normalized = rawFragment.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard normalized.count >= 3 else { return }
-        fragment = normalized
-        if let cached = cache[normalized.lowercased()] {
+        guard let normalized = BriefingDigSelectionPolicy.normalize(rawFragment) else { return }
+        let request = DigRequest(
+            fragment: normalized,
+            passageContext: BriefingDigSelectionPolicy.passageContext(
+                passageContext,
+                around: normalized
+            )
+        )
+        currentRequest = request
+        fragment = request.fragment
+        run(request, useCache: true)
+    }
+
+    func retry() {
+        guard let currentRequest else { return }
+        run(currentRequest, useCache: false)
+    }
+
+    private func run(_ request: DigRequest, useCache: Bool) {
+        if useCache, let cached = cache[request.cacheKey] {
+            tasks.cancel(.dig)
             state = cached
             return
         }
 
-        tasks.runReplacing(.dig) { [weak self] in
-            guard let self else { return }
+        tasks.runReplacing(.dig) { [weak self] token in
+            guard let self,
+                  self.tasks.isCurrent(token),
+                  !Task.isCancelled
+            else { return }
             do {
                 self.state = .searching
-                let search = try await service.digSearch(fragment: normalized)
+                let search = try await service.digSearch(fragment: request.fragment)
+                guard self.tasks.isCurrent(token), !Task.isCancelled else { return }
                 self.state = .summarizing(results: search.results)
                 let summary = try await service.digSummarize(
-                    fragment: normalized,
-                    passageContext: passageContext,
+                    fragment: request.fragment,
+                    passageContext: request.passageContext,
                     results: search.results
                 )
+                guard self.tasks.isCurrent(token), !Task.isCancelled else { return }
                 let loaded = State.loaded(results: search.results, summary: summary.summary)
-                self.cache[normalized.lowercased()] = loaded
+                self.cache[request.cacheKey] = loaded
                 self.state = loaded
             } catch {
+                guard self.tasks.isCurrent(token), !Task.isCancelled else { return }
                 if !isNetworkCancellation(error) {
                     self.state = .error("Couldn't dig into that just now. Try again.")
                 }
@@ -79,6 +117,7 @@ final class BriefingDigViewModel: ObservableObject {
     func clear() {
         tasks.cancel(.dig)
         fragment = nil
+        currentRequest = nil
         state = .idle
     }
 

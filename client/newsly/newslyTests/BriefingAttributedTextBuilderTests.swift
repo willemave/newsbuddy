@@ -1,19 +1,37 @@
 import XCTest
 @testable import newsly
 
-final class BriefingSentenceRangeTests: XCTestCase {
-    func testSentenceRangeSelectsEnclosingSentenceWithoutTrailingWhitespace() {
-        let text = "First sentence here. Second sentence lives after. Third."
-        let index = (text as NSString).range(of: "Second").location + 2
+final class BriefingPassageCoordinatorTests: XCTestCase {
+    func testBriefingLinksRouteInsideTheApp() throws {
+        var openedSourceKey: String?
+        var openedDiscussionKey: String?
+        let coordinator = BriefingPassageView.Coordinator(
+            onOpenSource: { openedSourceKey = $0 },
+            onOpenDiscussion: { openedDiscussionKey = $0 }
+        )
+        coordinator.openBriefingLink(
+            try XCTUnwrap(URL(string: "newsly://briefing/content/42"))
+        )
+        coordinator.openBriefingLink(try XCTUnwrap(
+            URL(string: "newsly://briefing/discussion/news/8")
+        ))
 
-        let range = BriefingPassageView.Coordinator.sentenceRange(around: index, in: text)
-
-        XCTAssertEqual((text as NSString).substring(with: range), "Second sentence lives after.")
+        XCTAssertEqual(openedSourceKey, "content:42")
+        XCTAssertEqual(openedDiscussionKey, "news:8")
     }
 
-    func testSentenceRangeReturnsEmptyForEmptyString() {
-        let range = BriefingPassageView.Coordinator.sentenceRange(around: 0, in: "")
-        XCTAssertEqual(range.length, 0)
+    func testNonBriefingLinkDoesNotRouteInsideTheApp() throws {
+        var callbackCount = 0
+        let coordinator = BriefingPassageView.Coordinator(
+            onOpenSource: { _ in callbackCount += 1 },
+            onOpenDiscussion: { _ in callbackCount += 1 }
+        )
+
+        coordinator.openBriefingLink(
+            try XCTUnwrap(URL(string: "https://example.com/story"))
+        )
+
+        XCTAssertEqual(callbackCount, 0)
     }
 }
 
@@ -186,7 +204,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         )
     }
 
-    func testBuildAppendsClickableDiscussionIconInsideParenthesesAfterStoredMarkdownSourceLink() throws {
+    func testBuildAppendsClickableDiscussionBadgeAfterStoredMarkdownSourceLink() {
         let builder = BriefingAttributedTextBuilder()
         let result = builder.build(
             paragraphs: [
@@ -205,27 +223,14 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             ]
         )
 
-        var discussionLinkRanges: [NSRange] = []
-        let fullRange = NSRange(location: 0, length: result.attributedText.length)
-        result.attributedText.enumerateAttribute(.link, in: fullRange) { value, range, _ in
-            guard let url = value as? URL,
-                  url.absoluteString == "newsly://briefing/discussion/news/8"
-            else { return }
-            discussionLinkRanges.append(range)
-        }
-
-        XCTAssertEqual(discussionLinkRanges.count, 1)
-        XCTAssertEqual(discussionLinkRanges.first?.length, 1)
-        let countRange = (result.plainText as NSString).range(of: "64")
+        let badgeRange = (result.plainText as NSString).range(of: "(\u{FFFC}\u{202F}64)")
         XCTAssertEqual(
-            result.attributedText.attribute(
-                .link,
-                at: countRange.location,
-                effectiveRange: nil
-            ) as? URL,
-            nil
+            linkRanges(
+                in: result.attributedText,
+                matching: "newsly://briefing/discussion/news/8"
+            ),
+            [badgeRange]
         )
-        XCTAssertTrue(result.plainText.contains("(\u{FFFC}\u{202F}64)"))
     }
 
     func testBriefingSourceLinkKeysIncludesStoredMarkdownSourceLinks() {
@@ -247,7 +252,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         XCTAssertEqual(block.briefingSourceLinkKeys, ["news:8", "content:42"])
     }
 
-    func testBuildAppendsClickableDiscussionIconInsideParenthesesAfterFirstSourceLinkOnly() throws {
+    func testBuildAppendsClickableDiscussionBadgeAfterFirstSourceLinkOnly() {
         let builder = BriefingAttributedTextBuilder()
         let linkRun = APIBriefingRun(
             kind: .source_link,
@@ -265,27 +270,15 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             ]
         )
 
-        var discussionLinkRanges: [NSRange] = []
-        let fullRange = NSRange(location: 0, length: result.attributedText.length)
-        result.attributedText.enumerateAttribute(.link, in: fullRange) { value, range, _ in
-            guard let url = value as? URL,
-                  url.absoluteString == "newsly://briefing/discussion/news/7"
-            else { return }
-            discussionLinkRanges.append(range)
-        }
-
-        XCTAssertEqual(discussionLinkRanges.count, 1, "Only the first discussion icon should be linked")
-        XCTAssertEqual(discussionLinkRanges.first?.length, 1)
-        let countRange = (result.plainText as NSString).range(of: "128")
+        let badgeRange = (result.plainText as NSString).range(of: "(\u{FFFC}\u{202F}128)")
         XCTAssertEqual(
-            result.attributedText.attribute(
-                .link,
-                at: countRange.location,
-                effectiveRange: nil
-            ) as? URL,
-            nil
+            linkRanges(
+                in: result.attributedText,
+                matching: "newsly://briefing/discussion/news/7"
+            ),
+            [badgeRange],
+            "Only the first badge should be linked"
         )
-        XCTAssertTrue(result.plainText.contains("(\u{FFFC}\u{202F}128)"))
     }
 
     func testBuildStripsLeftoverBoldMarkersAroundSourceLinks() {
@@ -341,6 +334,19 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             result.attributedText.attribute(.underlineColor, at: 0, effectiveRange: nil)
         )
     }
+}
+
+private func linkRanges(
+    in attributedText: NSAttributedString,
+    matching absoluteURL: String
+) -> [NSRange] {
+    var ranges: [NSRange] = []
+    let fullRange = NSRange(location: 0, length: attributedText.length)
+    attributedText.enumerateAttribute(.link, in: fullRange) { value, range, _ in
+        guard (value as? URL)?.absoluteString == absoluteURL else { return }
+        ranges.append(range)
+    }
+    return ranges
 }
 
 final class BriefingRenderModelTests: XCTestCase {
