@@ -27,9 +27,11 @@ from admin.remote_ops import (
     logs_range,
     logs_search,
     logs_tail,
+    preview_reconcile_x_bookmarks,
     preview_regenerate_images,
     preview_reset_content,
     preview_sanitize_content_metadata,
+    reconcile_x_bookmarks,
     regenerate_images,
     sanitize_content_metadata,
     usage_by_content,
@@ -193,6 +195,12 @@ def _dispatch(action: str, *, context: RemoteContext, payload: dict[str, Any]) -
             content_ids=_parse_content_ids(payload.get("content_ids")),
             limit=int(payload.get("limit", 20)),
         )
+    if action == "fix.preview-reconcile-x-bookmarks":
+        return preview_reconcile_x_bookmarks(
+            context,
+            user_id=int(payload["user_id"]) if payload.get("user_id") is not None else None,
+            limit=int(payload.get("limit", 100)),
+        )
     if action == "fix.sanitize-content-metadata":
         return sanitize_content_metadata(
             context,
@@ -206,6 +214,12 @@ def _dispatch(action: str, *, context: RemoteContext, payload: dict[str, Any]) -
             context,
             content_ids=_parse_content_ids(payload.get("content_ids")),
             limit=int(payload.get("limit", 20)),
+        )
+    if action == "fix.reconcile-x-bookmarks":
+        return reconcile_x_bookmarks(
+            context,
+            user_id=int(payload["user_id"]) if payload.get("user_id") is not None else None,
+            limit=int(payload.get("limit", 100)),
         )
     raise ValueError(f"Unsupported remote action: {action}")
 

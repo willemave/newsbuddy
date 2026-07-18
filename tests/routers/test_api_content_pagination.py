@@ -6,7 +6,13 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry
+from app.models.db import (
+    Content,
+    ContentKnowledgeSave,
+    ContentStatusEntry,
+    UserIntegrationConnection,
+    UserIntegrationSyncedItem,
+)
 from app.models.db.users import User
 from app.utils.pagination import PaginationCursor
 
@@ -424,6 +430,45 @@ class TestKnowledgeLibraryPagination:
         assert response.status_code == 200
         returned_ids = [item["id"] for item in response.json()["contents"]]
         assert returned_ids == [saved_match.id]
+
+    def test_knowledge_library_uses_per_user_x_ledger_for_saved_source(
+        self,
+        client,
+        sample_contents,
+        db_session: Session,
+        test_user,
+    ) -> None:
+        from app.services import knowledge
+
+        x_bookmark = sample_contents[0]
+        ordinary_save = sample_contents[1]
+        knowledge.save_to_knowledge(db_session, x_bookmark.id, test_user.id)
+        knowledge.save_to_knowledge(db_session, ordinary_save.id, test_user.id)
+        connection = UserIntegrationConnection(
+            user_id=test_user.id,
+            provider="x",
+            provider_user_id="42",
+            is_active=True,
+        )
+        db_session.add(connection)
+        db_session.flush()
+        db_session.add(
+            UserIntegrationSyncedItem(
+                connection_id=connection.id,
+                channel="bookmarks",
+                external_item_id="bookmark-1",
+                content_id=x_bookmark.id,
+                item_url="https://x.com/i/status/bookmark-1",
+            )
+        )
+        db_session.commit()
+
+        response = client.get("/api/content/knowledge/list")
+
+        assert response.status_code == 200
+        saved_sources = {item["id"]: item["saved_source"] for item in response.json()["contents"]}
+        assert saved_sources[x_bookmark.id] == "x_bookmark"
+        assert saved_sources[ordinary_save.id] == "knowledge"
 
     def test_knowledge_library_search_ignores_internal_metadata_keys(
         self,

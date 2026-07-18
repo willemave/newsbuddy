@@ -27,6 +27,7 @@ def _sync_personal_markdown_after_knowledge_mutation(
             content_id,
             user_id,
         )
+        db.rollback()
 
 
 def save_to_knowledge(db: Session, content_id: int, user_id: int) -> ContentKnowledgeSave:

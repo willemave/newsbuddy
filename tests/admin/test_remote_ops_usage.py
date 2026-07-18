@@ -14,19 +14,24 @@ from sqlalchemy.orm import sessionmaker
 from admin.remote_ops import (
     RemoteContext,
     logs_exceptions,
+    preview_reconcile_x_bookmarks,
     preview_regenerate_images,
     preview_sanitize_content_metadata,
+    reconcile_x_bookmarks,
     regenerate_images,
     sanitize_content_metadata,
     usage_by_content,
     usage_by_user,
     usage_summary,
 )
+from app.core.settings import get_settings
 from app.models.db import (
     Content,
     ContentKnowledgeSave,
     ContentStatusEntry,
     ProcessingTask,
+    UserIntegrationConnection,
+    UserIntegrationSyncedItem,
     VendorUsageRecord,
 )
 from app.models.db.users import User
@@ -316,6 +321,92 @@ def test_sanitize_content_metadata_updates_row(remote_context):
         query_result = preview_sanitize_content_metadata(repair_context, content_id=102, limit=10)
         assert query_result["matched_total"] == 0
         assert query_result["rows"] == []
+    finally:
+        harness.close()
+
+
+def test_reconcile_x_bookmarks_previews_and_repairs_knowledge_destination(
+    remote_context,
+    monkeypatch,
+):
+    monkeypatch.setattr(get_settings(), "personal_markdown_enabled", False)
+    harness = create_temporary_postgres_harness(
+        schema_prefix="newsly_fix_x_bookmarks",
+        tables=[
+            Content.__table__,
+            ContentKnowledgeSave.__table__,
+            ContentStatusEntry.__table__,
+            UserIntegrationConnection.__table__,
+            UserIntegrationSyncedItem.__table__,
+        ],
+    )
+    try:
+        with harness.session_factory() as session:
+            canonical = Content(
+                content_type="article",
+                url="https://example.com/canonical",
+                status="completed",
+                content_metadata={},
+            )
+            shell = Content(
+                content_type="article",
+                url="https://x.com/i/status/101",
+                status="skipped",
+                content_metadata={},
+            )
+            connection = UserIntegrationConnection(
+                user_id=7,
+                provider="x",
+                provider_user_id="42",
+                is_active=True,
+            )
+            session.add_all([canonical, shell, connection])
+            session.flush()
+            shell.content_metadata = {"canonical_content_id": canonical.id}
+            session.add_all(
+                [
+                    UserIntegrationSyncedItem(
+                        connection_id=connection.id,
+                        channel="bookmarks",
+                        external_item_id="101",
+                        content_id=shell.id,
+                    ),
+                    ContentKnowledgeSave(user_id=7, content_id=shell.id),
+                ]
+            )
+            session.commit()
+            canonical_id = canonical.id
+            shell_id = shell.id
+
+        context = RemoteContext(
+            database_url=harness.database_url,
+            logs_dir=remote_context.logs_dir,
+            service_log_dir=remote_context.service_log_dir,
+        )
+        preview = preview_reconcile_x_bookmarks(context, user_id=7, limit=10)
+
+        assert preview["applied"] is False
+        assert preview["selected_count"] == 1
+        assert preview["rows"][0]["destination_content_id"] == canonical_id
+
+        result = reconcile_x_bookmarks(context, user_id=7, limit=10)
+
+        assert result["applied"] is True
+        assert result["updated_count"] == 1
+        with harness.session_factory() as session:
+            synced_item = session.query(UserIntegrationSyncedItem).one()
+            assert synced_item.content_id == canonical_id
+            assert (
+                session.query(ContentKnowledgeSave)
+                .filter_by(user_id=7, content_id=canonical_id)
+                .one()
+            )
+            assert (
+                session.query(ContentKnowledgeSave)
+                .filter_by(user_id=7, content_id=shell_id)
+                .first()
+                is None
+            )
     finally:
         harness.close()
 

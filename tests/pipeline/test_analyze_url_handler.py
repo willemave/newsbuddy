@@ -9,7 +9,13 @@ from unittest.mock import Mock
 
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry
+from app.models.db import (
+    Content,
+    ContentKnowledgeSave,
+    ContentStatusEntry,
+    UserIntegrationConnection,
+    UserIntegrationSyncedItem,
+)
 from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
@@ -154,6 +160,51 @@ def test_tweet_submission_spend_cap_failure_is_non_retryable(
     queue_gateway.enqueue.assert_not_called()
 
 
+def test_tweet_bookmark_failure_remains_visible_in_knowledge(
+    db_session,
+    monkeypatch,
+) -> None:
+    bookmark = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "x_bookmarks",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(bookmark)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(success=False, error="Tweet lookup failed"),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    result = AnalyzeUrlHandler().handle(
+        TaskEnvelope(
+            id=1002,
+            task_type=TaskType.ANALYZE_URL,
+            content_id=bookmark.id,
+            payload={"content_id": bookmark.id},
+        ),
+        _build_context(db_session, queue_gateway=queue_gateway),
+    )
+
+    db_session.refresh(bookmark)
+    assert result.success is False
+    assert bookmark.status == ContentStatus.FAILED.value
+    assert db_session.query(ContentKnowledgeSave).filter_by(user_id=1, content_id=bookmark.id).one()
+
+
 def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
     db_session,
     monkeypatch,
@@ -179,11 +230,40 @@ def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
             "platform_hint": "twitter",
         },
     )
-    db_session.add(existing_article)
-    db_session.add(bookmark_shell)
+    connection = UserIntegrationConnection(
+        user_id=1,
+        provider="x",
+        provider_user_id="42",
+        is_active=True,
+    )
+    second_connection = UserIntegrationConnection(
+        user_id=2,
+        provider="x",
+        provider_user_id="43",
+        is_active=True,
+    )
+    db_session.add_all([existing_article, bookmark_shell, connection, second_connection])
+    db_session.flush()
+    synced_item = UserIntegrationSyncedItem(
+        connection_id=connection.id,
+        channel="bookmarks",
+        external_item_id="123456789",
+        content_id=bookmark_shell.id,
+        item_url="https://x.com/i/status/123456789",
+    )
+    second_synced_item = UserIntegrationSyncedItem(
+        connection_id=second_connection.id,
+        channel="bookmarks",
+        external_item_id="123456789",
+        content_id=bookmark_shell.id,
+        item_url="https://x.com/i/status/123456789",
+    )
+    db_session.add_all([synced_item, second_synced_item])
     db_session.commit()
     db_session.refresh(existing_article)
     db_session.refresh(bookmark_shell)
+    db_session.refresh(synced_item)
+    db_session.refresh(second_synced_item)
 
     monkeypatch.setattr(
         "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
@@ -242,6 +322,21 @@ def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
     assert _metadata(bookmark_shell.content_metadata)["canonical_content_id"] == existing_article.id
     assert status_row is None
     assert knowledge_row is not None
+    assert synced_item.content_id == existing_article.id
+    assert second_synced_item.content_id == existing_article.id
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=1, content_id=bookmark_shell.id)
+        .first()
+        is None
+    )
+    assert db_session.query(ContentKnowledgeSave).filter_by(user_id=1).count() == 1
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=2, content_id=existing_article.id)
+        .one()
+    )
+    assert db_session.query(ContentKnowledgeSave).filter_by(user_id=2).count() == 1
     assert db_session.query(Content).filter(Content.url == "https://example.com/story").count() == 1
     queue_gateway.enqueue.assert_not_called()
 

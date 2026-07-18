@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.commands import save_to_knowledge as save_to_knowledge_command
@@ -148,6 +149,26 @@ class TestSaveToKnowledge:
         assert first is not None
         assert second is not None
         assert first.id == second.id
+
+    def test_markdown_sync_failure_rolls_back_best_effort_transaction(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+        monkeypatch,
+    ) -> None:
+        """A failed optional markdown sync must not poison the caller's session."""
+        content_id = _require_id(test_content.id)
+        user_id = _require_id(test_user.id)
+
+        def fail_markdown_sync(db: Session, **_kwargs) -> None:
+            db.execute(text("SELECT 1 / 0"))
+
+        monkeypatch.setattr(knowledge, "sync_personal_markdown_for_content", fail_markdown_sync)
+
+        knowledge.save_to_knowledge(db_session, content_id, user_id)
+
+        assert knowledge.is_saved_to_knowledge(db_session, content_id, user_id)
 
     def test_repository_save_to_knowledge_raises_database_errors(
         self,

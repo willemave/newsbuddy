@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.models.api.content import ContentListResponse
 from app.models.api.pagination import PaginationMetadata
-from app.models.contracts import ContentType
+from app.models.contracts import ContentType, SavedSource
 from app.models.domain.content_display import resolve_image_urls
 from app.models.domain.content_mapper import content_to_domain
 from app.presenters.content_responses import build_content_summary_response
@@ -16,6 +16,7 @@ from app.repositories.content_card_repository import (
     get_knowledge_library_entries,
     list_content_types,
 )
+from app.services.x_bookmark_destinations import list_x_bookmark_destination_content_ids
 from app.utils.pagination import PaginationCursor
 
 logger = get_logger(__name__)
@@ -58,6 +59,11 @@ def execute(
     if has_more:
         rows = rows[:limit]
 
+    x_bookmark_content_ids = list_x_bookmark_destination_content_ids(
+        db,
+        user_id=user_id,
+        content_ids=[content.id for content, _read_id, _saved_row_id in rows],
+    )
     contents = []
     for content, read_id, _saved_row_id in rows:
         try:
@@ -81,6 +87,11 @@ def execute(
                 is_saved_to_knowledge=True,
                 image_url=image_url,
                 thumbnail_url=thumbnail_url,
+                saved_source_override=(
+                    SavedSource.X_BOOKMARK
+                    if content.id in x_bookmark_content_ids
+                    else SavedSource.KNOWLEDGE
+                ),
             )
         )
 

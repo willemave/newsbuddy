@@ -191,6 +191,44 @@ def test_fix_regenerate_images_apply_uses_remote_helper(monkeypatch, tmp_path) -
     assert captured["payload"] == {"content_ids": [12], "limit": 20}
 
 
+def test_fix_reconcile_x_bookmarks_preview_uses_remote_helper(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    args = build_parser().parse_args(
+        ["fix", "reconcile-x-bookmarks", "--user-id", "7", "--limit", "25"]
+    )
+
+    def fake_invoke_remote(action, *, config, payload):
+        captured["action"] = action
+        captured["payload"] = payload
+        return {"selected_count": 2}
+
+    monkeypatch.setattr("admin.cli._invoke_remote", fake_invoke_remote)
+
+    result = _handle_fix(args, config=_config(tmp_path))
+
+    assert result.data == {"selected_count": 2}
+    assert captured["action"] == "fix.preview-reconcile-x-bookmarks"
+    assert captured["payload"] == {"user_id": 7, "limit": 25}
+
+
+def test_fix_reconcile_x_bookmarks_apply_uses_remote_helper(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    args = build_parser().parse_args(["fix", "--apply", "--yes", "reconcile-x-bookmarks"])
+
+    def fake_invoke_remote(action, *, config, payload):
+        captured["action"] = action
+        captured["payload"] = payload
+        return {"updated_count": 2}
+
+    monkeypatch.setattr("admin.cli._invoke_remote", fake_invoke_remote)
+
+    result = _handle_fix(args, config=_config(tmp_path))
+
+    assert result.data == {"updated_count": 2}
+    assert captured["action"] == "fix.reconcile-x-bookmarks"
+    assert captured["payload"] == {"user_id": None, "limit": 100}
+
+
 def test_fix_run_scraper_preview_does_not_execute(monkeypatch, tmp_path):
     args = build_parser().parse_args(["fix", "run-scraper", "--scraper", "HackerNews"])
 

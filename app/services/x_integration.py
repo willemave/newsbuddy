@@ -35,6 +35,7 @@ from app.services.x_api import (
     get_authenticated_user,
     refresh_oauth_token,
 )
+from app.services.x_bookmark_destinations import reconcile_x_bookmark_destination
 from app.services.x_tweet_metadata import build_tweet_snapshot_metadata
 
 logger = get_logger(__name__)
@@ -546,61 +547,55 @@ def _sync_bookmark_channel(
             else None
         )
         if existing_content_id is not None:
-            _persist_bookmark_tweet_snapshot(
-                db,
-                content_id=existing_content_id,
-                tweet=tweet,
-                included_tweets=included_tweets,
-            )
-            synced_items_by_external_id[tweet.id] = _upsert_synced_item(
-                db,
-                synced_item=existing_synced_item,
-                connection_id=connection_id,
-                channel=BOOKMARKS_CHANNEL,
-                external_item_id=tweet.id,
-                content_id=existing_content_id,
-                item_url=tweet_url,
-            )
+            content_id = existing_content_id
             reused += 1
-            continue
+        else:
+            ingest_result = ingest_content_command.execute(
+                db,
+                payload=SubmitContentRequest(
+                    url=tweet_url,
+                    content_type=None,
+                    title=None,
+                    platform="twitter",
+                    instruction=None,
+                    crawl_links=False,
+                    subscribe_to_feed=False,
+                    share_and_chat=False,
+                    chat_initial_message=None,
+                    save_to_knowledge_and_mark_read=False,
+                ),
+                current_user=user,
+                submitted_via="x_bookmarks",
+            )
+            result = ingest_result.response
+            content_id = result.content_id
+            if result.already_exists:
+                reused += 1
+            else:
+                created += 1
 
-        ingest_result = ingest_content_command.execute(
-            db,
-            payload=SubmitContentRequest(
-                url=tweet_url,
-                content_type=None,
-                title=None,
-                platform="twitter",
-                instruction=None,
-                crawl_links=False,
-                subscribe_to_feed=False,
-                share_and_chat=False,
-                chat_initial_message=None,
-                save_to_knowledge_and_mark_read=False,
-            ),
-            current_user=user,
-            submitted_via="x_bookmarks",
-        )
-        result = ingest_result.response
         _persist_bookmark_tweet_snapshot(
             db,
-            content_id=result.content_id,
+            content_id=content_id,
             tweet=tweet,
             included_tweets=included_tweets,
         )
-        synced_items_by_external_id[tweet.id] = _upsert_synced_item(
+        synced_item = _upsert_synced_item(
             db,
             synced_item=existing_synced_item,
             connection_id=connection_id,
             channel=BOOKMARKS_CHANNEL,
             external_item_id=tweet.id,
-            content_id=result.content_id,
+            content_id=content_id,
             item_url=tweet_url,
         )
-        if result.already_exists:
-            reused += 1
-        else:
-            created += 1
+        synced_items_by_external_id[tweet.id] = synced_item
+        reconcile_x_bookmark_destination(
+            db,
+            user_id=user_id,
+            bookmark_content_id=content_id,
+            synced_items=[synced_item],
+        )
     if collected_new:
         db.commit()
 

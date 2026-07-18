@@ -19,7 +19,6 @@ from app.models.metadata.state import normalize_metadata_shape, update_processin
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.workflows.analyze_url_workflow import AnalyzeUrlWorkflow
-from app.services import knowledge as knowledge_service
 from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.content_analyzer import AnalysisError
 from app.services.content_metadata_merge import refresh_merge_content_metadata
@@ -46,6 +45,7 @@ from app.services.x_api import (
     build_tweet_processing_text,
     fetch_tweet_by_id,
 )
+from app.services.x_bookmark_destinations import reconcile_x_bookmark_destinations_for_content
 from app.services.x_integration import get_x_user_access_token
 from app.services.x_tweet_metadata import (
     hydrate_included_tweets_from_metadata,
@@ -55,6 +55,13 @@ from app.services.x_tweet_metadata import (
 logger = get_logger(__name__)
 
 FEED_BACKFILL_SUPPORTED_TYPES = {"substack", "atom", "podcast_rss"}
+
+
+def _require_content_id(content: Content) -> int:
+    content_id = content.id
+    if content_id is None:
+        raise ValueError("Analyze URL content must be persisted")
+    return int(content_id)
 
 
 def _build_analysis_instruction(
@@ -296,22 +303,6 @@ class TweetResolutionFlow:
         )
         return detected_type.value, detected_platform
 
-    def _save_bookmark_target_for_user(
-        self,
-        db,
-        *,
-        content: Content,
-        submitter_id: int | None,
-    ) -> None:
-        """Save a bookmark target without adding it to the long-form inbox."""
-        if not submitter_id:
-            return
-
-        content_id = content.id
-        if content_id is None:
-            return
-        knowledge_service.save_to_knowledge(db, content_id, submitter_id)
-
     def run(
         self,
         db,
@@ -330,11 +321,18 @@ class TweetResolutionFlow:
             return FlowOutcome(handled=False, success=True)
 
         tweet_url = canonical_tweet_url(tweet_id)
-        submitter_id = metadata.get("submitted_by_user_id")
+        raw_submitter_id = metadata.get("submitted_by_user_id")
+        submitter_id = raw_submitter_id if isinstance(raw_submitter_id, int) else None
         submitted_via = str(metadata.get("submitted_via") or "").strip().lower()
         is_bookmark_submission = submitted_via == "x_bookmarks"
+        if is_bookmark_submission:
+            reconcile_x_bookmark_destinations_for_content(
+                db,
+                bookmark_content_id=_require_content_id(content),
+                fallback_user_id=submitter_id,
+            )
         access_token = None
-        if isinstance(submitter_id, int):
+        if submitter_id is not None:
             access_token = get_x_user_access_token(db, user_id=submitter_id)
 
         hydrated_tweet = hydrate_tweet_from_metadata(metadata, tweet_id=tweet_id)
@@ -348,7 +346,7 @@ class TweetResolutionFlow:
                     "feature": "analyze_url",
                     "operation": "analyze_url.fetch_tweet",
                     "content_id": content.id,
-                    "user_id": submitter_id if isinstance(submitter_id, int) else None,
+                    "user_id": submitter_id,
                 },
             )
             if not fetch_result.success or not fetch_result.tweet:
@@ -414,9 +412,7 @@ class TweetResolutionFlow:
 
             tweet = fetch_result.tweet
         processing_text = build_tweet_processing_text(tweet)
-        content_id = content.id
-        if content_id is None:
-            raise ValueError("Tweet resolution flow requires persisted content")
+        content_id = _require_content_id(content)
         included_tweets_by_id = hydrate_included_tweets_from_metadata(metadata)
         resolution = self._target_resolver.resolve_tweet_target(
             root_tweet=tweet,
@@ -482,11 +478,6 @@ class TweetResolutionFlow:
                 .first()
             )
             if existing_target:
-                self._save_bookmark_target_for_user(
-                    db,
-                    content=existing_target,
-                    submitter_id=submitter_id if is_bookmark_submission else None,
-                )
                 metadata["canonical_content_id"] = existing_target.id
                 content.url = tweet_url
                 content.status = ContentStatus.SKIPPED.value
@@ -506,11 +497,11 @@ class TweetResolutionFlow:
             updated_metadata=metadata,
         )
         db.commit()
-        if is_bookmark_submission:
-            self._save_bookmark_target_for_user(
+        if is_bookmark_submission and existing_target is not None:
+            reconcile_x_bookmark_destinations_for_content(
                 db,
-                content=content,
-                submitter_id=submitter_id if isinstance(submitter_id, int) else None,
+                bookmark_content_id=_require_content_id(content),
+                fallback_user_id=submitter_id,
             )
 
         logger.info(

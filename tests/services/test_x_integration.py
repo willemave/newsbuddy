@@ -8,8 +8,10 @@ import app.services.x_integration as x_integration
 from app.core.settings import get_settings
 from app.models.db import (
     Content,
+    ContentKnowledgeSave,
     ContentStatusEntry,
     NewsItem,
+    ProcessingTask,
     UserIntegrationConnection,
     UserIntegrationSyncedItem,
     UserIntegrationSyncState,
@@ -201,6 +203,11 @@ def test_sync_x_sources_syncs_bookmarks_only(
     assert content.url == "https://x.com/i/status/101"
     assert (content.content_metadata or {})["tweet_snapshot_source"] == "x_bookmarks_sync"
     assert db_session.query(ContentStatusEntry).count() == 0
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=test_user.id, content_id=content.id)
+        .one()
+    )
     assert synced_item.connection_id == connection.id
     assert synced_item.channel == "bookmarks"
     assert synced_item.external_item_id == "101"
@@ -464,6 +471,61 @@ def test_sync_x_sources_records_synced_item_when_reusing_existing_content(
     assert synced_item.external_item_id == "101"
     assert synced_item.content_id == existing.id
     assert synced_item.item_url == "https://x.com/i/status/101"
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=test_user.id, content_id=existing.id)
+        .one()
+    )
+
+
+def test_sync_x_sources_saves_reused_completed_content_without_reanalysis(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read"],
+    )
+    existing = Content(
+        url="https://x.com/i/status/101",
+        source_url="https://x.com/i/status/101",
+        content_type="article",
+        title="Already processed",
+        source="self",
+        platform="twitter",
+        is_aggregate=False,
+        status="completed",
+        classification="to_read",
+        content_metadata={"source": "self"},
+    )
+    db_session.add_all([connection, existing])
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_valid_access_token",
+        lambda *_args, **_kwargs: "token",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_provider_user_id",
+        lambda *_args, **_kwargs: "42",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration.fetch_bookmarks",
+        lambda **_kwargs: XTweetsPage(tweets=[_tweet("101", "Bookmark me")]),
+    )
+
+    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    synced_item = db_session.query(UserIntegrationSyncedItem).one()
+    assert summary.channels["bookmarks"].reused == 1
+    assert synced_item.content_id == existing.id
+    assert db_session.query(ProcessingTask).count() == 0
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=test_user.id, content_id=existing.id)
+        .one()
+    )
 
 
 def test_sync_x_sources_reuses_existing_ledger_entry_without_resubmitting_content(
@@ -546,6 +608,11 @@ def test_sync_x_sources_reuses_existing_ledger_entry_without_resubmitting_conten
     assert synced_item.content_id == existing.id
     assert synced_item.last_seen_at > before_seen_at
     assert (existing.content_metadata or {})["tweet_snapshot_source"] == "x_bookmarks_sync"
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=test_user.id, content_id=existing.id)
+        .one()
+    )
 
 
 def test_sync_x_sources_skips_recent_scheduled_runs(db_session, test_user, monkeypatch):

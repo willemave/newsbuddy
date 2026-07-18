@@ -321,6 +321,18 @@ def _handle_fix(args: argparse.Namespace, *, config: AdminConfig) -> CommandResu
             warnings=warnings,
         )
 
+    if args.fix_command == "reconcile-x-bookmarks":
+        payload = {
+            "user_id": args.user_id,
+            "limit": args.limit,
+        }
+        action = "fix.reconcile-x-bookmarks" if args.apply else "fix.preview-reconcile-x-bookmarks"
+        warnings = [] if args.apply else ["Preview only; add --apply --yes to repair rows."]
+        return CommandResult(
+            data=_invoke_remote(action, config=config, payload=payload),
+            warnings=warnings,
+        )
+
     if args.fix_command == "reset-content" and not args.apply:
         payload = {
             "cancel_only": bool(args.cancel_only),
@@ -791,6 +803,13 @@ def _build_fix_parser(subparsers: argparse._SubParsersAction[AdminArgumentParser
     )
     regenerate_parser.add_argument("--content-id", dest="content_ids", action="append", type=int)
     regenerate_parser.add_argument("--limit", type=int, default=20)
+
+    reconcile_bookmarks_parser = fix_subparsers.add_parser(
+        "reconcile-x-bookmarks",
+        help="Preview or repair X bookmark Knowledge destinations",
+    )
+    reconcile_bookmarks_parser.add_argument("--user-id", type=int, default=None)
+    reconcile_bookmarks_parser.add_argument("--limit", type=int, default=100)
 
     run_scraper_parser = fix_subparsers.add_parser("run-scraper", help="Run selected scrapers")
     run_scraper_parser.add_argument("--scraper", dest="scrapers", action="append", required=True)

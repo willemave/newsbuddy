@@ -45,6 +45,10 @@ from app.services.long_form_images import (
     has_generated_long_form_image,
     is_visible_long_form_image_candidate,
 )
+from app.services.x_bookmark_destinations import (
+    preview_x_bookmark_destination_reconciliation,
+    repair_x_bookmark_destinations,
+)
 from app.utils.image_urls import build_content_image_url, build_thumbnail_url
 
 DEFAULT_ROW_LIMIT = 200
@@ -638,6 +642,36 @@ def regenerate_images(
     return _regenerate_images(context, content_ids=content_ids, limit=limit, apply=True)
 
 
+def preview_reconcile_x_bookmarks(
+    context: RemoteContext,
+    *,
+    user_id: int | None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Preview repairs that align X bookmark ledger rows with Knowledge saves."""
+    return _reconcile_x_bookmarks(
+        context,
+        user_id=user_id,
+        limit=limit,
+        apply=False,
+    )
+
+
+def reconcile_x_bookmarks(
+    context: RemoteContext,
+    *,
+    user_id: int | None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Align persisted X bookmark ledger rows with canonical Knowledge saves."""
+    return _reconcile_x_bookmarks(
+        context,
+        user_id=user_id,
+        limit=limit,
+        apply=True,
+    )
+
+
 def logs_list(context: RemoteContext) -> dict[str, Any]:
     """List available structured and service log files."""
     sources: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -908,6 +942,45 @@ def _regenerate_images(
                 "updated_count": sum(1 for row in results if row["status"] == "completed"),
                 "rows": rows,
                 "results": results,
+            }
+    finally:
+        engine.dispose()
+
+
+def _reconcile_x_bookmarks(
+    context: RemoteContext,
+    *,
+    user_id: int | None,
+    limit: int,
+    apply: bool,
+) -> dict[str, Any]:
+    bounded_limit = _bounded_limit(limit)
+    engine = create_engine(context.database_url, pool_pre_ping=True)
+    session_factory = sessionmaker(bind=engine)
+    try:
+        with session_factory() as session:
+            if apply:
+                plans, results = repair_x_bookmark_destinations(
+                    session,
+                    user_id=user_id,
+                    limit=bounded_limit,
+                )
+            else:
+                plans = preview_x_bookmark_destination_reconciliation(
+                    session,
+                    user_id=user_id,
+                    limit=bounded_limit,
+                )
+                results = []
+            return {
+                "applied": apply,
+                "user_id": user_id,
+                "limit": bounded_limit,
+                "matched_total": len(plans),
+                "selected_count": len(plans),
+                "updated_count": len(results),
+                "rows": [plan.as_dict() for plan in plans],
+                "results": [result.as_dict() for result in results],
             }
     finally:
         engine.dispose()

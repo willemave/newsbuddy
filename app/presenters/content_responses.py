@@ -195,6 +195,7 @@ def build_content_summary_response(
     is_saved_to_knowledge: bool,
     image_url: str | None = None,
     thumbnail_url: str | None = None,
+    saved_source_override: SavedSource | None = None,
 ) -> ContentSummaryResponse:
     """Build a summary response for list/search views."""
     content_id = _require_content_id(domain_content.id)
@@ -291,9 +292,13 @@ def build_content_summary_response(
         preview_bullets=artifact_fields["preview_bullets"],
         reason_to_read=artifact_fields["reason_to_read"],
         key_takeaway=_extract_key_takeaway(domain_content.metadata),
-        saved_source=_resolve_saved_source(
-            metadata=domain_content.metadata,
-            is_saved_to_knowledge=is_saved_to_knowledge,
+        saved_source=(
+            saved_source_override
+            if saved_source_override is not None
+            else _resolve_saved_source(
+                metadata=domain_content.metadata,
+                is_saved_to_knowledge=is_saved_to_knowledge,
+            )
         ),
     )
 

@@ -6,10 +6,15 @@ from contextlib import contextmanager
 
 from pydantic import HttpUrl, TypeAdapter
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content
+from app.models.db import (
+    Content,
+    ContentKnowledgeSave,
+    UserIntegrationConnection,
+    UserIntegrationSyncedItem,
+)
 from app.models.domain.content_mapper import content_to_domain
 from app.pipeline.worker import ContentWorker
 
@@ -30,6 +35,36 @@ def _patch_worker_db(monkeypatch, db_session) -> None:
             raise
 
     monkeypatch.setattr("app.pipeline.worker.get_db", _get_db_override)
+
+
+def _attach_x_bookmark(
+    db_session: Session,
+    content: Content,
+    *,
+    user_id: int = 1,
+) -> UserIntegrationSyncedItem:
+    connection = UserIntegrationConnection(
+        user_id=user_id,
+        provider="x",
+        provider_user_id=f"worker-test-{content.id}",
+        is_active=True,
+    )
+    db_session.add(connection)
+    db_session.flush()
+    synced_item = UserIntegrationSyncedItem(
+        connection_id=connection.id,
+        channel="bookmarks",
+        external_item_id=f"bookmark-{content.id}",
+        content_id=content.id,
+    )
+    db_session.add_all(
+        [
+            synced_item,
+            ContentKnowledgeSave(user_id=user_id, content_id=content.id),
+        ]
+    )
+    db_session.commit()
+    return synced_item
 
 
 def test_update_canonical_url_marks_existing_content_id(monkeypatch, db_session) -> None:
@@ -74,10 +109,11 @@ def test_handle_canonical_integrity_conflict_marks_content_skipped(monkeypatch, 
         content_type=ContentType.ARTICLE.value,
         url="https://example.com/unique",
         status=ContentStatus.PROCESSING.value,
-        content_metadata={},
+        content_metadata={"submitted_by_user_id": 1, "submitted_via": "x_bookmarks"},
     )
     db_session.add_all([existing, incoming])
     db_session.commit()
+    synced_item = _attach_x_bookmark(db_session, incoming)
     db_session.refresh(existing)
     db_session.refresh(incoming)
     existing_id = _require_id(existing.id)
@@ -95,9 +131,60 @@ def test_handle_canonical_integrity_conflict_marks_content_skipped(monkeypatch, 
     assert handled is True
 
     db_session.refresh(incoming)
+    db_session.refresh(synced_item)
     assert incoming.status == ContentStatus.SKIPPED.value
     assert incoming.content_metadata is not None
     assert incoming.content_metadata["canonical_content_id"] == existing_id
+    assert synced_item.content_id == existing_id
+    assert db_session.query(ContentKnowledgeSave).filter_by(user_id=1, content_id=existing_id).one()
+    assert (
+        db_session.query(ContentKnowledgeSave).filter_by(user_id=1, content_id=incoming.id).first()
+        is None
+    )
+
+
+def test_process_content_reconciles_bookmark_after_canonicalization(
+    monkeypatch,
+    db_session,
+) -> None:
+    _patch_worker_db(monkeypatch, db_session)
+
+    existing = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://example.com/process-canonical",
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={},
+    )
+    incoming = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://example.com/process-original",
+        status=ContentStatus.NEW.value,
+        content_metadata={"submitted_by_user_id": 1, "submitted_via": "x_bookmarks"},
+    )
+    db_session.add_all([existing, incoming])
+    db_session.commit()
+    synced_item = _attach_x_bookmark(db_session, incoming)
+    existing_id = _require_id(existing.id)
+    incoming_id = _require_id(incoming.id)
+
+    def _process_article(_worker, content):  # noqa: ANN001
+        content.metadata["canonical_content_id"] = existing_id
+        content.metadata["content_to_summarize"] = "Processed article text"
+        content.status = ContentStatus.PROCESSING
+        return True
+
+    monkeypatch.setattr(ContentWorker, "_process_article", _process_article)
+
+    handled = ContentWorker().process_content(incoming_id, "test-worker")
+
+    assert handled is True
+    db_session.refresh(synced_item)
+    assert synced_item.content_id == existing_id
+    assert db_session.query(ContentKnowledgeSave).filter_by(user_id=1, content_id=existing_id).one()
+    assert (
+        db_session.query(ContentKnowledgeSave).filter_by(user_id=1, content_id=incoming_id).first()
+        is None
+    )
 
 
 def test_process_content_handles_integrity_error_from_worker(monkeypatch, db_session) -> None:
