@@ -32,7 +32,10 @@ from app.services.briefing.presentation import (
     get_briefing_index_validator,
     get_briefing_lens,
 )
-from app.services.briefing.read_marks import mark_briefing_sources_read
+from app.services.briefing.read_marks import (
+    mark_briefing_lens_read,
+    mark_briefing_sources_read,
+)
 from app.services.briefing.refresh import enqueue_briefing_refresh_task, ensure_state
 
 router = APIRouter(tags=["briefing"])
@@ -132,6 +135,29 @@ def mark_read(
         user_id=require_user_id(current_user),
         source_keys=request.source_keys,
     )
+    return BriefingReadMarkResponse(
+        marked=result.marked,
+        retired=result.retired,
+        version=result.version,
+    )
+
+
+@router.post(
+    "/briefing/lenses/{lens_key}/read-marks",
+    response_model=BriefingReadMarkResponse,
+)
+def mark_lens_read(
+    lens_key: str,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> BriefingReadMarkResponse:
+    result = mark_briefing_lens_read(
+        db,
+        user_id=require_user_id(current_user),
+        lens_key=lens_key,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Briefing lens not found")
     return BriefingReadMarkResponse(
         marked=result.marked,
         retired=result.retired,

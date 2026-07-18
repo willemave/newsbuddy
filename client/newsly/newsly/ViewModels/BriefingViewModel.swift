@@ -350,6 +350,35 @@ final class BriefingViewModel: ObservableObject {
         scheduleReadFlush()
     }
 
+    func markAllSourcesRead(in lensKey: String) async throws {
+        guard orderedLenses.contains(where: {
+            $0.key == lensKey && $0.unreadSourceCount > 0
+        }) else { return }
+
+        tasks.cancel(.readFlush)
+        await flushPendingReadMarks()
+        let response = try await service.markLensRead(key: lensKey)
+
+        let loadedUnreadKeys = lensStates[lensKey]?.document?.sources.compactMap { source in
+            source.read ? nil : source.sourceKey
+        } ?? []
+        if !loadedUnreadKeys.isEmpty {
+            markSourcesReadLocally(loadedUnreadKeys)
+        }
+        setUnreadSourceCount(0, for: lensKey)
+
+        indexSynchronizer.cancelIndexLoad()
+        do {
+            if let result = try await indexSynchronizer.load(force: true) {
+                applyIndexResult(result)
+            }
+        } catch {
+            briefingRefreshLogger.error(
+                "Category read reconciliation failed | lens_key=\(lensKey, privacy: .public) version=\(response.version, privacy: .public) error=\(error.localizedDescription, privacy: .private)"
+            )
+        }
+    }
+
     func narrationEpisode(for lensKey: String) -> AudioEpisode? {
         narrationEpisodes[lensKey]
     }
@@ -921,6 +950,37 @@ final class BriefingViewModel: ObservableObject {
         briefingRefreshLogger.info(
             "Optimistic read state published | source_count=\(keySet.count, privacy: .public) affected_lenses=\(affectedLensKeys.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
         )
+        scheduleSnapshotSave()
+    }
+
+    private func setUnreadSourceCount(_ count: Int, for lensKey: String) {
+        guard let currentIndex = index,
+              currentIndex.lenses.contains(where: {
+                  $0.key == lensKey && $0.unreadSourceCount != count
+              }) else { return }
+        let updatedIndex = APIBriefingIndexResponse(
+            version: currentIndex.version,
+            mastheadTitle: currentIndex.mastheadTitle,
+            mastheadDeck: currentIndex.mastheadDeck,
+            generatedAt: currentIndex.generatedAt,
+            lenses: currentIndex.lenses.map { lens in
+                guard lens.key == lensKey else { return lens }
+                return APIBriefingLensSummary(
+                    key: lens.key,
+                    tier: lens.tier,
+                    title: lens.title,
+                    deck: lens.deck,
+                    position: lens.position,
+                    segmentCount: lens.segmentCount,
+                    unreadSourceCount: count
+                )
+            },
+            firstRun: currentIndex.firstRun
+        )
+        index = updatedIndex
+        orderedLenses = firstRun == nil
+            ? Self.sortedLenses(updatedIndex.lenses)
+            : updatedIndex.lenses
         scheduleSnapshotSave()
     }
 

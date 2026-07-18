@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, load_only
 
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
-from app.models.db import BriefingSegment, BriefingState
+from app.models.db import BriefingLens, BriefingSegment, BriefingState
 from app.repositories import read_status_repository
 from app.services.briefing.eligibility import briefing_enabled_user_ids
 from app.services.briefing.source_keys import build_source_key, parse_source_key
@@ -22,6 +22,45 @@ class BriefingReadMarkResult:
     marked: int
     retired: int
     version: int
+
+
+def mark_briefing_lens_read(
+    db: Session,
+    *,
+    user_id: int,
+    lens_key: str,
+) -> BriefingReadMarkResult | None:
+    lens_id = db.execute(
+        select(BriefingLens.id).where(
+            BriefingLens.user_id == user_id,
+            BriefingLens.key == lens_key,
+            BriefingLens.status == "active",
+        )
+    ).scalar_one_or_none()
+    if lens_id is None:
+        return None
+
+    segment_source_keys = db.execute(
+        select(BriefingSegment.source_keys).where(
+            BriefingSegment.lens_id == lens_id,
+            BriefingSegment.user_id == user_id,
+            BriefingSegment.status.in_(("active", "degraded")),
+        )
+    ).scalars()
+    source_keys = sorted(
+        {
+            str(source_key)
+            for segment_keys in segment_source_keys
+            for source_key in (segment_keys or [])
+        }
+    )
+    read_keys = read_source_keys_for(db, user_id=user_id, source_keys=source_keys)
+    unread_keys = [source_key for source_key in source_keys if source_key not in read_keys]
+    return mark_briefing_sources_read(
+        db,
+        user_id=user_id,
+        source_keys=unread_keys,
+    )
 
 
 def mark_briefing_sources_read(

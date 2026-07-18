@@ -109,6 +109,9 @@ enum APIEndpoints {
     static func briefingLens(_ key: String) -> String {
         return "/api/briefing/lenses/\(key)"
     }
+    static func briefingLensReadMarks(_ key: String) -> String {
+        return "/api/briefing/lenses/\(key)/read-marks"
+    }
     static let briefingReadMarks = "/api/briefing/read-marks"
     static let briefingRefresh = "/api/briefing/refresh"
     static let briefingDigSearch = "/api/briefing/dig/search"

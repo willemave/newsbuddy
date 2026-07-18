@@ -3,15 +3,17 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.models.contracts import ContentClassification, ContentType, TaskType
 from app.models.db import (
     AudioEpisode,
+    BriefingLens,
     BriefingSegment,
     BriefingState,
+    NewsItemReadStatus,
     ProcessingTask,
     VendorUsageRecord,
 )
@@ -548,6 +550,106 @@ def test_briefing_read_mark_response_reports_retirement_count(
 
     assert response.status_code == 200
     assert response.json() == {"marked": 1, "retired": 0, "version": 2}
+
+
+def test_briefing_lens_read_marks_every_source_in_the_category(
+    client: TestClient,
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+) -> None:
+    assert test_user.id is not None
+    user_id = test_user.id
+    first = news_item_factory(
+        article_title="First category story",
+        visibility_scope="user",
+        owner_user_id=user_id,
+    )
+    second = news_item_factory(
+        article_title="Second category story",
+        visibility_scope="user",
+        owner_user_id=user_id,
+    )
+    untouched = news_item_factory(
+        article_title="Other category story",
+        visibility_scope="user",
+        owner_user_id=user_id,
+    )
+    category = BriefingLens(
+        user_id=user_id,
+        key="technology",
+        tier="news",
+        title="Technology",
+        deck="Technology updates",
+        position=0,
+        status="active",
+    )
+    other_category = BriefingLens(
+        user_id=user_id,
+        key="science",
+        tier="news",
+        title="Science",
+        deck="Science updates",
+        position=1,
+        status="active",
+    )
+    db_session.add_all([category, other_category])
+    db_session.flush()
+    category_segment = BriefingSegment(
+        lens_id=category.id,
+        user_id=user_id,
+        blocks=[],
+        source_keys=[f"news:{first.id}", f"news:{second.id}"],
+        status="active",
+        model="test",
+        prompt_version="test",
+    )
+    other_segment = BriefingSegment(
+        lens_id=other_category.id,
+        user_id=user_id,
+        blocks=[],
+        source_keys=[f"news:{untouched.id}"],
+        status="active",
+        model="test",
+        prompt_version="test",
+    )
+    db_session.add_all(
+        [
+            category_segment,
+            other_segment,
+            BriefingState(
+                user_id=user_id,
+                version=4,
+                masthead_title="The Unread Times",
+                masthead_deck="Existing edition",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.post("/api/briefing/lenses/technology/read-marks")
+    db_session.refresh(category_segment)
+    db_session.refresh(other_segment)
+    read_news_item_ids = set(
+        db_session.execute(
+            select(NewsItemReadStatus.news_item_id).where(NewsItemReadStatus.user_id == user_id)
+        ).scalars()
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"marked": 2, "retired": 1, "version": 5}
+    assert read_news_item_ids == {first.id, second.id}
+    assert category_segment.status == "retired"
+    assert other_segment.status == "active"
+
+
+def test_briefing_lens_read_returns_not_found_for_an_unknown_category(
+    client: TestClient,
+) -> None:
+    response = client.post("/api/briefing/lenses/missing/read-marks")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Briefing lens not found"}
 
 
 def test_briefing_dig_endpoints_are_mockable_and_rate_limited(

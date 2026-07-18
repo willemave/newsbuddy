@@ -24,6 +24,7 @@ protocol BriefingServicing: AnyObject {
         cursor: String?
     ) async throws -> APIBriefingLensResponse
     func markRead(sourceKeys: [String]) async throws -> APIBriefingReadMarkResponse
+    func markLensRead(key: String) async throws -> APIBriefingReadMarkResponse
     func requestRefresh() async throws -> APIBriefingRefreshResponse
     func completeFirstRun() async throws
     func digSearch(fragment: String) async throws -> APIBriefingDigSearchResponse
@@ -121,6 +122,14 @@ final class LiveBriefingService: BriefingServicing {
             APIEndpoints.briefingReadMarks,
             method: "POST",
             body: body
+        )
+    }
+
+    func markLensRead(key: String) async throws -> APIBriefingReadMarkResponse {
+        let encodedKey = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? key
+        return try await apiClient.request(
+            APIEndpoints.briefingLensReadMarks(encodedKey),
+            method: "POST"
         )
     }
 

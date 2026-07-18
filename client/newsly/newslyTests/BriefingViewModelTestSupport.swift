@@ -22,13 +22,20 @@ final class MockBriefingService: BriefingServicing {
     var fetchLensKeys: [String] = []
     var fetchLensRequests: [LensFetch] = []
     var markReadCalls: [[String]] = []
+    var markLensReadKeys: [String] = []
     var events: [String] = []
     var readMarkResponse = APIBriefingReadMarkResponse(marked: 0, retired: 0, version: 1)
+    var lensReadMarkResponse = APIBriefingReadMarkResponse(marked: 0, retired: 0, version: 1)
     var markReadWaitsForResume = false
     var markReadError: Error?
+    var markLensReadError: Error?
     var refreshError: Error?
     var refreshDelayNanoseconds: UInt64?
     var refreshWaitsForResume = false
+    var digSearchFragments: [String] = []
+    var digSearchErrors: [Error?] = []
+    var digSummarizePassageContexts: [String] = []
+    var digSummaries: [String] = []
     private(set) var refreshRequestCount = 0
     var narrationEpisode: AudioEpisode?
     var narrationEpisodes: [AudioEpisode] = []
@@ -100,6 +107,15 @@ final class MockBriefingService: BriefingServicing {
         return readMarkResponse
     }
 
+    func markLensRead(key: String) async throws -> APIBriefingReadMarkResponse {
+        markLensReadKeys.append(key)
+        events.append("markLensRead:\(key)")
+        if let markLensReadError {
+            throw markLensReadError
+        }
+        return lensReadMarkResponse
+    }
+
     func requestRefresh() async throws -> APIBriefingRefreshResponse {
         refreshRequestCount += 1
         events.append("requestRefresh")
@@ -136,7 +152,12 @@ final class MockBriefingService: BriefingServicing {
     }
 
     func digSearch(fragment: String) async throws -> APIBriefingDigSearchResponse {
-        APIBriefingDigSearchResponse(results: [], elapsedMs: 0)
+        digSearchFragments.append(fragment)
+        let error = digSearchErrors.isEmpty ? nil : digSearchErrors.removeFirst()
+        if let error {
+            throw error
+        }
+        return APIBriefingDigSearchResponse(results: [], elapsedMs: 0)
     }
 
     func digSummarize(
@@ -144,7 +165,9 @@ final class MockBriefingService: BriefingServicing {
         passageContext: String,
         results: [APIBriefingDigSearchResult]
     ) async throws -> APIBriefingDigSummarizeResponse {
-        APIBriefingDigSummarizeResponse(summary: "Summary", model: "test", elapsedMs: 0)
+        digSummarizePassageContexts.append(passageContext)
+        let summary = digSummaries.isEmpty ? "Summary" : digSummaries.removeFirst()
+        return APIBriefingDigSummarizeResponse(summary: summary, model: "test", elapsedMs: 0)
     }
 
     func requestNarration(lensKey: String) async throws -> AudioEpisode {

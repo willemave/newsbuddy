@@ -10682,6 +10682,53 @@
         ]
       }
     },
+    "/api/briefing/lenses/{lens_key}/read-marks": {
+      "post": {
+        "operationId": "markBriefingLensesLensRead",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lens_key",
+            "required": true,
+            "schema": {
+              "title": "Lens Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingReadMarkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark Lens Read",
+        "tags": [
+          "briefing"
+        ]
+      }
+    },
     "/api/briefing/narration": {
       "post": {
         "operationId": "narrationBriefing",

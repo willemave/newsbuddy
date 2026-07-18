@@ -90,6 +90,7 @@ struct BriefingFirstRunStrip: View {
 struct BriefingCategoryStrip: View {
     @ObservedObject var viewModel: BriefingViewModel
     let onSelectLens: (String) -> Void
+    let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
 
     /// Even indices on top, odd below, so neighbors in swipe order sit next
     /// to each other. A handful of categories stays on a single row.
@@ -120,7 +121,10 @@ struct BriefingCategoryStrip: View {
                                     unreadCount: lens.unreadSourceCount,
                                     isSelected: lens.key == viewModel.selectedLensKey,
                                     accessibilityId: "briefing.lens.\(lens.key)",
-                                    minHeight: 30
+                                    minHeight: 30,
+                                    longPressAction: lens.unreadSourceCount > 0
+                                        ? { onRequestMarkAllRead(lens) }
+                                        : nil
                                 ) {
                                     onSelectLens(lens.key)
                                 }
@@ -169,9 +173,32 @@ private struct BriefingStripPill: View {
     let isSelected: Bool
     let accessibilityId: String
     var minHeight: CGFloat = 36
+    var longPressAction: (() -> Void)? = nil
     let action: () -> Void
 
+    @State private var longPressFeedbackTrigger = 0
+
     var body: some View {
+        Group {
+            if let longPressAction {
+                pillButton
+                    .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 12) {
+                        longPressFeedbackTrigger += 1
+                        longPressAction()
+                    }
+                    .accessibilityHint("Long press to mark this category as read")
+                    .accessibilityAction(named: "Mark All as Read") {
+                        longPressFeedbackTrigger += 1
+                        longPressAction()
+                    }
+            } else {
+                pillButton
+            }
+        }
+        .sensoryFeedback(.impact(weight: .medium), trigger: longPressFeedbackTrigger)
+    }
+
+    private var pillButton: some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Text(title)

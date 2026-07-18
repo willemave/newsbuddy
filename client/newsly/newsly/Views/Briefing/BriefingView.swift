@@ -6,6 +6,28 @@ private let briefingNarrationLogger = Logger(
     category: "BriefingNarration"
 )
 
+private struct BriefingMarkAllReadPrompt: Identifiable {
+    let lensKey: String
+    let title: String
+    let unreadCount: Int
+
+    var id: String { lensKey }
+}
+
+private enum BriefingViewAlert: Identifiable {
+    case markAllRead(BriefingMarkAllReadPrompt)
+    case markAllReadFailed(categoryTitle: String, message: String)
+
+    var id: String {
+        switch self {
+        case .markAllRead(let prompt):
+            return "mark-all-read:\(prompt.lensKey)"
+        case .markAllReadFailed(let categoryTitle, _):
+            return "mark-all-read-failed:\(categoryTitle)"
+        }
+    }
+}
+
 struct BriefingView: View {
     @ObservedObject var viewModel: BriefingViewModel
 
@@ -19,6 +41,9 @@ struct BriefingView: View {
     @State private var mastheadHeight: CGFloat = 0
     @State private var categoryStripHeight: CGFloat = 0
     @State private var expandedChromeHeight: CGFloat = 0
+    @State private var activeAlert: BriefingViewAlert?
+    @State private var markingCategoryTitle: String?
+    @State private var markAllReadFeedbackTrigger = 0
 
     private var digSheetPresented: Binding<Bool> {
         Binding(
@@ -83,6 +108,43 @@ struct BriefingView: View {
         .topScreenEdgeFade()
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("briefing.screen")
+        .overlay {
+            if let markingCategoryTitle {
+                Color.black.opacity(0.15)
+                    .ignoresSafeArea()
+
+                ProgressView("Marking \(markingCategoryTitle) as read")
+                    .padding(16)
+                    .background(Color.surfacePrimary)
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: CornerRadius.control,
+                            style: .continuous
+                        )
+                    )
+                    .accessibilityIdentifier("briefing.category.mark_all.progress")
+            }
+        }
+        .alert(item: $activeAlert) { alert in
+            switch alert {
+            case .markAllRead(let prompt):
+                Alert(
+                    title: Text("Mark all in “\(prompt.title)” as read?"),
+                    message: Text(markAllReadMessage(for: prompt)),
+                    primaryButton: .destructive(Text("Mark All as Read")) {
+                        markAllSourcesRead(in: prompt)
+                    },
+                    secondaryButton: .cancel()
+                )
+            case .markAllReadFailed(let categoryTitle, let message):
+                Alert(
+                    title: Text("Couldn’t mark “\(categoryTitle)” as read"),
+                    message: Text(message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+        }
+        .sensoryFeedback(.success, trigger: markAllReadFeedbackTrigger)
         .sheet(item: $activeSource) { item in
             BriefingSourceSheet(
                 item: item,
@@ -244,11 +306,15 @@ struct BriefingView: View {
                     },
                     naturalHeight: $categoryStripHeight
                 ) {
-                    BriefingCategoryStrip(viewModel: viewModel) { key in
-                        withAnimation(.smooth(duration: 0.28)) {
-                            viewModel.selectLens(key: key)
-                        }
-                    }
+                    BriefingCategoryStrip(
+                        viewModel: viewModel,
+                        onSelectLens: { key in
+                            withAnimation(.smooth(duration: 0.28)) {
+                                viewModel.selectLens(key: key)
+                            }
+                        },
+                        onRequestMarkAllRead: presentMarkAllReadPrompt
+                    )
                 }
             }
 
@@ -361,6 +427,39 @@ struct BriefingView: View {
 
     private func startDig(fragment: String, passageContext: String) {
         digViewModel.dig(fragment: fragment, passageContext: passageContext)
+    }
+
+    private func presentMarkAllReadPrompt(for lens: APIBriefingLensSummary) {
+        guard markingCategoryTitle == nil, lens.unreadSourceCount > 0 else { return }
+        activeAlert = .markAllRead(
+            BriefingMarkAllReadPrompt(
+                lensKey: lens.key,
+                title: lens.title,
+                unreadCount: lens.unreadSourceCount
+            )
+        )
+    }
+
+    private func markAllReadMessage(for prompt: BriefingMarkAllReadPrompt) -> String {
+        let noun = prompt.unreadCount == 1 ? "item" : "items"
+        return "Marks all \(prompt.unreadCount) unread \(noun) in this category."
+    }
+
+    private func markAllSourcesRead(in prompt: BriefingMarkAllReadPrompt) {
+        guard markingCategoryTitle == nil else { return }
+        markingCategoryTitle = prompt.title
+        Task {
+            defer { markingCategoryTitle = nil }
+            do {
+                try await viewModel.markAllSourcesRead(in: prompt.lensKey)
+                markAllReadFeedbackTrigger += 1
+            } catch {
+                activeAlert = .markAllReadFailed(
+                    categoryTitle: prompt.title,
+                    message: error.localizedDescription
+                )
+            }
+        }
     }
 
     /// Ids of same-kind sources in the current lens, so the detail screen can

@@ -178,4 +178,71 @@ final class BriefingViewModelNavigationTests: XCTestCase {
         viewModel.setHeaderPinned(false, forLens: "news-tech")
         XCTAssertTrue(viewModel.isCategoryStripExpanded)
     }
+
+    func testMarkAllSourcesReadUsesCategoryEndpointAndRefreshesIndex() async throws {
+        let service = MockBriefingService()
+        let category = makeLensSummary(
+            key: "news-tech",
+            title: "Technology",
+            unreadSourceCount: 2
+        )
+        let readCategory = makeLensSummary(
+            key: "news-tech",
+            title: "Technology",
+            segmentCount: 0,
+            unreadSourceCount: 0
+        )
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [category]), etag: "etag-1"),
+            .value(makeIndex(version: 2, lenses: [readCategory]), etag: "etag-2")
+        ]
+        service.lensResponses[category.key] = makeLens(key: category.key, version: 1)
+        service.lensReadMarkResponse = APIBriefingReadMarkResponse(
+            marked: 2,
+            retired: 1,
+            version: 2
+        )
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+        service.lensResponses[category.key] = makeLens(
+            key: category.key,
+            version: 2,
+            segments: [],
+            sources: []
+        )
+
+        try await viewModel.markAllSourcesRead(in: category.key)
+
+        XCTAssertEqual(service.markLensReadKeys, [category.key])
+        XCTAssertEqual(service.indexEtags, [nil, nil])
+        XCTAssertEqual(viewModel.newsLenses.first?.unreadSourceCount, 0)
+        XCTAssertEqual(viewModel.index?.version, 2)
+    }
+
+    func testMarkAllSourcesReadKeepsUnreadCountWhenRequestFails() async {
+        let service = MockBriefingService()
+        let category = makeLensSummary(key: "news-tech", unreadSourceCount: 2)
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [category]), etag: "etag-1")
+        ]
+        service.lensResponses[category.key] = makeLens(key: category.key)
+        service.markLensReadError = URLError(.notConnectedToInternet)
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+
+        do {
+            try await viewModel.markAllSourcesRead(in: category.key)
+            XCTFail("Expected category mark-read to fail")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet)
+        }
+
+        XCTAssertEqual(service.markLensReadKeys, [category.key])
+        XCTAssertEqual(viewModel.newsLenses.first?.unreadSourceCount, 2)
+        XCTAssertEqual(viewModel.index?.version, 1)
+    }
 }
