@@ -191,6 +191,92 @@ final class LearningHubViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.errorMessage, "Boom")
     }
 
+    func testDeleteSessionRemovesItFromLearningHistory() async {
+        let chatService = MockLearningHubChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 1), makeSession(id: 2)],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                )
+            ],
+            turnResponses: []
+        )
+        let viewModel = LearningHubViewModel(chatService: chatService)
+        await viewModel.loadLearning()
+
+        await viewModel.deleteSession(viewModel.sessions[0])
+
+        XCTAssertEqual(chatService.deletedSessionIDs, [1])
+        XCTAssertEqual(viewModel.sessions.map(\.id), [2])
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testFailedDeleteKeepsSessionInLearningHistory() async {
+        let chatService = MockLearningHubChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 1), makeSession(id: 2)],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                )
+            ],
+            turnResponses: [],
+            deleteError: MockLearningHubChatService.MockError.boom
+        )
+        let viewModel = LearningHubViewModel(chatService: chatService)
+        await viewModel.loadLearning()
+
+        await viewModel.deleteSession(viewModel.sessions[0])
+
+        XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2])
+        XCTAssertEqual(viewModel.errorMessage, "Boom")
+    }
+
+    func testCompletedDeleteIsNotResurrectedByStaleRefresh() async {
+        let staleSessions = [makeSession(id: 1), makeSession(id: 2)]
+        let chatService = MockLearningHubChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: staleSessions,
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+                .success(
+                    makeSessionListResponse(
+                        sessions: staleSessions,
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+            ],
+            turnResponses: []
+        )
+        let viewModel = LearningHubViewModel(chatService: chatService)
+        await viewModel.loadLearning()
+
+        chatService.pauseNextPageResponse()
+        let refreshTask = Task { await viewModel.loadLearning() }
+        defer {
+            refreshTask.cancel()
+            chatService.resumePageResponse()
+        }
+        await chatService.waitForPageResponsePause()
+
+        await viewModel.deleteSession(viewModel.sessions[0])
+        chatService.resumePageResponse()
+        await refreshTask.value
+
+        XCTAssertEqual(viewModel.sessions.map(\.id), [2])
+        XCTAssertEqual(chatService.deletedSessionIDs, [1])
+    }
+
     private func makeAssistantTurnResponse(sessionId: Int) -> AssistantTurnResponse {
         AssistantTurnResponse(
             session: makeSession(id: sessionId),
@@ -329,16 +415,23 @@ private final class MockLearningHubChatService: LearningHubChatServicing {
     var receivedQueries: [String?] = []
     var receivedNotes: [String?] = []
     var receivedAssistantActions: [String?] = []
+    var deletedSessionIDs: [Int] = []
 
     private var pageResponses: [Result<ChatSessionListResponse, Error>]
     private var turnResponses: [Result<AssistantTurnResponse, Error>]
+    private let deleteError: Error?
+    private var shouldPauseNextPageResponse = false
+    private var pageResponseContinuation: CheckedContinuation<Void, Never>?
+    private var pageResponsePausedContinuation: CheckedContinuation<Void, Never>?
 
     init(
         pageResponses: [Result<ChatSessionListResponse, Error>] = [],
-        turnResponses: [Result<AssistantTurnResponse, Error>]
+        turnResponses: [Result<AssistantTurnResponse, Error>],
+        deleteError: Error? = nil
     ) {
         self.pageResponses = pageResponses
         self.turnResponses = turnResponses
+        self.deleteError = deleteError
     }
 
     func listSessionsPage(
@@ -357,7 +450,16 @@ private final class MockLearningHubChatService: LearningHubChatServicing {
             throw MockError.boom
         }
 
-        return try pageResponses.removeFirst().get()
+        let response = try pageResponses.removeFirst().get()
+        if shouldPauseNextPageResponse {
+            shouldPauseNextPageResponse = false
+            await withCheckedContinuation { continuation in
+                pageResponseContinuation = continuation
+                pageResponsePausedContinuation?.resume()
+                pageResponsePausedContinuation = nil
+            }
+        }
+        return response
     }
 
     func createAssistantTurn(
@@ -379,6 +481,29 @@ private final class MockLearningHubChatService: LearningHubChatServicing {
         }
 
         return try turnResponses.removeFirst().get()
+    }
+
+    func deleteSession(sessionId: Int) async throws {
+        deletedSessionIDs.append(sessionId)
+        if let deleteError {
+            throw deleteError
+        }
+    }
+
+    func pauseNextPageResponse() {
+        shouldPauseNextPageResponse = true
+    }
+
+    func waitForPageResponsePause() async {
+        guard pageResponseContinuation == nil else { return }
+        await withCheckedContinuation { continuation in
+            pageResponsePausedContinuation = continuation
+        }
+    }
+
+    func resumePageResponse() {
+        pageResponseContinuation?.resume()
+        pageResponseContinuation = nil
     }
 
 }

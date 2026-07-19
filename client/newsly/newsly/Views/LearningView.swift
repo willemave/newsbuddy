@@ -82,22 +82,25 @@ struct LearningView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                EditorialMastheadHeader(
-                    title: "Learning",
-                    trailingAccessory: onOpenMore.map { action in
-                        AnyView(moreMenuButton(action))
-                    }
-                )
+        List {
+            EditorialMastheadHeader(
+                title: "Learning",
+                trailingAccessory: onOpenMore.map { action in
+                    AnyView(moreMenuButton(action))
+                }
+            )
+            .appListRow()
 
-                composer
-                    .padding(.bottom, 24)
+            composer
+                .padding(.bottom, 24)
+                .appListRow()
 
-                timelineContent
-            }
-            .padding(.bottom, 32)
+            timelineContent
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .contentMargins(.bottom, 32, for: .scrollContent)
+        .environment(\.defaultMinListRowHeight, 1)
         .accessibilityIdentifier("learning.screen")
         .refreshable { await loadLearningScreen() }
         .topScreenEdgeFade()
@@ -205,6 +208,7 @@ struct LearningView: View {
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 20)
+            .appListRow()
         } else if timeline.isEmpty {
             EmptyStateView(
                 icon: "sparkles",
@@ -213,9 +217,11 @@ struct LearningView: View {
             )
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 28)
+            .appListRow()
         } else {
             ForEach(Array(timelineSections.enumerated()), id: \.element.id) { sectionIndex, section in
                 dayDivider(section.label, isFirst: sectionIndex == 0)
+                    .appListRow()
 
                 ForEach(section.items) { item in
                     timelineRow(item)
@@ -236,6 +242,14 @@ struct LearningView: View {
             .buttonStyle(.plain)
             .matchedContentZoomSource(id: session.id, namespace: chatTransitionNamespace)
             .accessibilityIdentifier("learning.chat.\(session.id)")
+            .appListRow()
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button(role: .destructive) {
+                    Task { await viewModel.deleteSession(session) }
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
         case .deck(let deck):
             Button {
                 Task { await openDeck(deck) }
@@ -244,6 +258,14 @@ struct LearningView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("learning.deck.\(deck.id)")
+            .appListRow()
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button(role: .destructive) {
+                    Task { await decks.delete(deck) }
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
         case .narration(let episode):
             Button {
                 Task { await narrations.handleTap(episode) }
@@ -257,6 +279,7 @@ struct LearningView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("learning.narration.\(episode.id)")
+            .appListRow()
         }
     }
 
@@ -343,22 +366,20 @@ private struct LearningChatRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            LearningArtwork(
-                imageUrl: session.articleImageUrl,
-                thumbnailUrl: session.articleThumbnailUrl,
-                fallbackIcon: "bubble.left.and.bubble.right"
-            )
+            VStack(spacing: 5) {
+                LearningArtwork(icon: "bubble.left.and.bubble.right")
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text("CHAT").kicker(color: .terracottaPrimary)
-                    Text("· \(ContentTimestampFormatter.compactRelativeText(from: activityDate))")
+                HStack(spacing: 4) {
+                    Text(ContentTimestampFormatter.compactRelativeText(from: activityDate))
                         .font(.terracottaLabelSmall)
                         .foregroundStyle(Color.onSurfaceTertiary)
                     if session.isProcessing {
                         ProgressView().controlSize(.mini)
                     }
                 }
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
                 Text(session.displayTitle)
                     .font(.terracottaHeadlineSmall)
                     .foregroundStyle(Color.onSurface)
@@ -388,7 +409,7 @@ private struct LearningDeckTimelineRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            LearningArtwork(imageUrl: nil, thumbnailUrl: nil, fallbackIcon: "rectangle.stack.fill", isDeck: true)
+            LearningArtwork(icon: "rectangle.stack.fill", isDeck: true)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text("LEARNING DECK").kicker(color: .terracottaPrimary)
@@ -427,7 +448,7 @@ private struct LearningNarrationRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            LearningArtwork(imageUrl: nil, thumbnailUrl: nil, fallbackIcon: "waveform")
+            LearningArtwork(icon: "waveform")
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text("NARRATION").kicker(color: .terracottaPrimary)
@@ -457,38 +478,25 @@ private struct LearningNarrationRow: View {
 }
 
 private struct LearningArtwork: View {
-    let imageUrl: String?
-    let thumbnailUrl: String?
-    let fallbackIcon: String
+    let icon: String
     var isDeck = false
 
     private let size = CGSize(width: 72, height: 64)
 
     var body: some View {
-        CachedAsyncImage(
-            url: imageUrl.flatMap(ServerImageURL.resolve),
-            thumbnailUrl: thumbnailUrl.flatMap(ServerImageURL.resolve),
-            targetSize: size
-        ) { image in
-            image.resizable().aspectRatio(contentMode: .fill)
-                .frame(width: size.width, height: size.height).clipped()
-        } placeholder: {
-            ZStack {
-                if isDeck {
-                    Color.surfaceSecondary
-                    RoundedRectangle(cornerRadius: 5)
-                        .stroke(Color.terracottaPrimary.opacity(0.45), lineWidth: 1)
-                        .frame(width: 38, height: 27)
-                        .offset(x: 5, y: 4)
-                } else {
-                    Color.surfaceSecondary
-                }
-                Image(systemName: fallbackIcon)
-                    .font(.appSymbol(size: 17, weight: .semibold))
-                    .foregroundStyle(Color.terracottaPrimary)
+        ZStack {
+            Color.surfaceSecondary
+            if isDeck {
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(Color.terracottaPrimary.opacity(0.45), lineWidth: 1)
+                    .frame(width: 38, height: 27)
+                    .offset(x: 5, y: 4)
             }
-            .frame(width: size.width, height: size.height)
+            Image(systemName: icon)
+                .font(.appSymbol(size: 17, weight: .semibold))
+                .foregroundStyle(Color.terracottaPrimary)
         }
+        .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)

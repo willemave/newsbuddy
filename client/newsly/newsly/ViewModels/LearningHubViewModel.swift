@@ -21,6 +21,8 @@ protocol LearningHubChatServicing: AnyObject {
         sessionId: Int?,
         screenContext: AssistantScreenContext
     ) async throws -> AssistantTurnResponse
+
+    func deleteSession(sessionId: Int) async throws
 }
 
 extension ChatService: LearningHubChatServicing {}
@@ -57,6 +59,12 @@ final class LearningHubViewModel {
     private var pendingVoiceTranscript: String?
     @ObservationIgnored
     private var hasConfiguredVoiceCallbacks = false
+    @ObservationIgnored
+    private var deletingSessionIDs: Set<Int> = []
+    @ObservationIgnored
+    private var deletedSessionIDs: Set<Int> = []
+    @ObservationIgnored
+    private var inFlightSessionListRequestCount = 0
 
     init(
         chatService: any LearningHubChatServicing,
@@ -75,7 +83,11 @@ final class LearningHubViewModel {
     func loadLearning() async {
         guard !isLoading else { return }
         isLoading = true
-        defer { isLoading = false }
+        beginSessionListRequest()
+        defer {
+            isLoading = false
+            finishSessionListRequest()
+        }
 
         errorMessage = nil
         hasLoadMoreError = false
@@ -87,7 +99,7 @@ final class LearningHubViewModel {
                 limit: historyPageLimit,
                 cursor: nil
             )
-            sessions = response.sessions
+            sessions = visibleSessions(response.sessions)
             nextCursor = response.meta.nextCursor
             hasMoreSessions = response.meta.hasMore
         } catch where isNetworkCancellation(error) {
@@ -106,7 +118,11 @@ final class LearningHubViewModel {
 
         isLoadingMore = true
         hasLoadMoreError = false
-        defer { isLoadingMore = false }
+        beginSessionListRequest()
+        defer {
+            isLoadingMore = false
+            finishSessionListRequest()
+        }
 
         do {
             let response = try await chatService.listSessionsPage(
@@ -115,7 +131,7 @@ final class LearningHubViewModel {
                 limit: historyPageLimit,
                 cursor: cursor
             )
-            appendUniqueSessions(response.sessions)
+            appendUniqueSessions(visibleSessions(response.sessions))
             nextCursor = response.meta.nextCursor
             hasMoreSessions = response.meta.hasMore
         } catch where isNetworkCancellation(error) {
@@ -127,6 +143,26 @@ final class LearningHubViewModel {
 
     func startChat(message: String) async -> ChatSessionRoute? {
         await startAssistantTurn(message: message)
+    }
+
+    func deleteSession(_ session: ChatSessionSummary) async {
+        guard sessions.contains(where: { $0.id == session.id }),
+              deletingSessionIDs.insert(session.id).inserted else {
+            return
+        }
+        defer { deletingSessionIDs.remove(session.id) }
+        errorMessage = nil
+
+        do {
+            try await chatService.deleteSession(sessionId: session.id)
+            deletedSessionIDs.insert(session.id)
+            sessions.removeAll { $0.id == session.id }
+            discardSettledDeletionTombstones()
+        } catch where isNetworkCancellation(error) {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func checkAndRefreshVoiceDictation() async {
@@ -215,8 +251,29 @@ final class LearningHubViewModel {
     }
 
     private func prependSession(_ session: ChatSessionSummary) {
+        deletedSessionIDs.remove(session.id)
         sessions.removeAll { $0.id == session.id }
         sessions.insert(session, at: 0)
+    }
+
+    private func visibleSessions(
+        _ sessions: [ChatSessionSummary]
+    ) -> [ChatSessionSummary] {
+        sessions.filter { !deletedSessionIDs.contains($0.id) }
+    }
+
+    private func beginSessionListRequest() {
+        inFlightSessionListRequestCount += 1
+    }
+
+    private func finishSessionListRequest() {
+        inFlightSessionListRequestCount -= 1
+        discardSettledDeletionTombstones()
+    }
+
+    private func discardSettledDeletionTombstones() {
+        guard inFlightSessionListRequestCount == 0 else { return }
+        deletedSessionIDs.removeAll()
     }
 
     private func startVoiceRecording() async {

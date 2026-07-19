@@ -155,4 +155,8 @@ private final class FailingLearningTimelineChatService: LearningHubChatServicing
     ) async throws -> AssistantTurnResponse {
         throw Failure.unavailable
     }
+
+    func deleteSession(sessionId: Int) async throws {
+        throw Failure.unavailable
+    }
 }
