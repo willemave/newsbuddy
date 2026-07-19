@@ -12,7 +12,7 @@ aggregators:
   - key: hackernews
     name: Hacker News
     kind: hackernews
-    limit: 30
+    limit: 15
 
   - key: techmeme
     name: Techmeme

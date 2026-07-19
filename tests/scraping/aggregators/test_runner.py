@@ -35,6 +35,7 @@ def test_default_aggregators_yaml_loads_all_scrapers() -> None:
 
     by_key: dict[str, AggregatorScraper] = {s.KEY: s for s in scrapers}
     assert isinstance(by_key["hackernews"], HackerNewsAggregatorScraper)
+    assert by_key["hackernews"].settings.limit == 15
     assert isinstance(by_key["techmeme"], TechmemeAggregatorScraper)
     assert isinstance(by_key["mediagazer"], MediagazerAggregatorScraper)
     assert isinstance(by_key["memeorandum"], MemeorandumAggregatorScraper)

@@ -36,7 +36,7 @@ class HackerNewsAggregator(_AggregatorBase):
     kind: Literal["hackernews"]
     api_base_url: HttpUrl | str = Field(default="https://hacker-news.firebaseio.com/v0")
     site_base_url: HttpUrl | str = Field(default="https://news.ycombinator.com")
-    limit: int = Field(default=30, ge=1, le=100)
+    limit: int = Field(default=15, ge=1, le=100)
 
 
 class RssClusterAggregator(_AggregatorBase):
