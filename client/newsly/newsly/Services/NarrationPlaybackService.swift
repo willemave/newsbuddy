@@ -304,7 +304,9 @@ final class NarrationPlaybackService {
                         "Streaming narration reached end | target=\(String(describing: target), privacy: .public)"
                     )
                 }
-                self?.resetPlaybackState(clearSavedPositionFor: self?.speakingTarget)
+                let finishedTarget = self?.speakingTarget
+                self?.resetPlaybackState(clearSavedPositionFor: finishedTarget)
+                await self?.recordPlaybackFinished(for: finishedTarget)
             }
         }
         streamFailureObserver = NotificationCenter.default.addObserver(
@@ -464,6 +466,17 @@ final class NarrationPlaybackService {
             false,
             options: [.notifyOthersOnDeactivation]
         )
+    }
+
+    private func recordPlaybackFinished(for target: NarrationTarget?) async {
+        guard let target, case let .audioEpisode(episodeID) = target else { return }
+        do {
+            try await AudioEpisodeService.shared.markPlaybackFinished(id: episodeID)
+        } catch {
+            narrationPlaybackLogger.error(
+                "Playback completion failed | episodeId=\(episodeID) error=\(error.localizedDescription, privacy: .private)"
+            )
+        }
     }
 
     private func streamDuration(_ player: AVPlayer) -> TimeInterval? {

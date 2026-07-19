@@ -1,4 +1,4 @@
-"""Audio episode API presentation, delivery, and read-on-play behavior."""
+"""Audio episode API presentation, delivery, and playback read behavior."""
 
 from __future__ import annotations
 
@@ -106,12 +106,65 @@ def mark_audio_episode_sources_read_on_play(
 
     spec = AUDIO_EPISODE_KIND_SPECS.get(str(episode.kind))
     if spec is None or not spec.marks_sources_read_on_play:
-        return {
-            "content_marked_count": 0,
-            "content_failed_ids": [],
-            "news_marked_count": 0,
-            "news_failed_ids": [],
-        }
+        return _empty_read_mark_result()
+
+    return _mark_audio_episode_source_ids_read(db, episode=episode)
+
+
+def mark_audio_episode_sources_read_on_finish(
+    db: Session,
+    *,
+    episode: AudioEpisode,
+) -> dict[str, Any]:
+    """Mark narration sources read only after playback reaches the end."""
+
+    spec = AUDIO_EPISODE_KIND_SPECS.get(str(episode.kind))
+    if spec is None or not spec.marks_sources_read_on_finish:
+        return _empty_read_mark_result()
+
+    if str(episode.kind) == BRIEFING_NARRATION_KIND:
+        source_keys = _episode_source_keys(episode)
+        if source_keys:
+            # Import locally to keep the audio facade and Briefing narration
+            # creation path acyclic.
+            from app.services.briefing.read_marks import mark_briefing_sources_read
+            from app.services.briefing.sources import read_source_keys_for
+
+            read_keys = read_source_keys_for(
+                db,
+                user_id=required_int(episode.user_id, "audio episode user_id"),
+                source_keys=source_keys,
+            )
+            unread_keys = [key for key in source_keys if key not in read_keys]
+            if not unread_keys:
+                return _empty_read_mark_result()
+            result = mark_briefing_sources_read(
+                db,
+                user_id=required_int(episode.user_id, "audio episode user_id"),
+                source_keys=unread_keys,
+            )
+            return {
+                "content_marked_count": sum(
+                    source_key.startswith("content:") for source_key in unread_keys
+                ),
+                "content_failed_ids": [],
+                "news_marked_count": sum(
+                    source_key.startswith("news:") for source_key in unread_keys
+                ),
+                "news_failed_ids": [],
+                "segments_retired_count": result.retired,
+                "briefing_version": result.version,
+            }
+
+    return _mark_audio_episode_source_ids_read(db, episode=episode)
+
+
+def _mark_audio_episode_source_ids_read(
+    db: Session,
+    *,
+    episode: AudioEpisode,
+) -> dict[str, Any]:
+    """Apply the episode's persisted source read policy."""
 
     user_id = required_int(episode.user_id, "audio episode user_id")
     content_ids = _episode_read_on_play_content_ids(episode)
@@ -140,6 +193,19 @@ def mark_audio_episode_sources_read_on_play(
         "content_failed_ids": content_failed_ids,
         "news_marked_count": news_marked_count,
         "news_failed_ids": news_failed_ids,
+        "segments_retired_count": 0,
+        "briefing_version": None,
+    }
+
+
+def _empty_read_mark_result() -> dict[str, Any]:
+    return {
+        "content_marked_count": 0,
+        "content_failed_ids": [],
+        "news_marked_count": 0,
+        "news_failed_ids": [],
+        "segments_retired_count": 0,
+        "briefing_version": None,
     }
 
 
@@ -222,8 +288,17 @@ def _episode_read_on_play_policy(episode: AudioEpisode) -> dict[str, Any]:
     return read_policy if isinstance(read_policy, dict) else {}
 
 
+def _episode_source_keys(episode: AudioEpisode) -> list[str]:
+    snapshot = episode.source_snapshot if isinstance(episode.source_snapshot, dict) else {}
+    raw_keys = snapshot.get("source_keys")
+    if not isinstance(raw_keys, list):
+        return []
+    return list(dict.fromkeys(str(key) for key in raw_keys if str(key).strip()))
+
+
 __all__ = [
     "commit_audio_episode_delivery",
+    "mark_audio_episode_sources_read_on_finish",
     "mark_audio_episode_sources_read_on_play",
     "present_audio_episode",
 ]

@@ -3,7 +3,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.models.contracts import ContentType, TaskType
-from app.models.db import AudioEpisode, ContentReadStatus, NewsItemReadStatus, ProcessingTask
+from app.models.db import (
+    AudioEpisode,
+    BriefingLens,
+    BriefingSegment,
+    BriefingState,
+    ContentReadStatus,
+    NewsItemReadStatus,
+    ProcessingTask,
+)
 from tests.support.builders import create_content_status_entry_row, create_news_item_row
 
 
@@ -279,6 +287,92 @@ def test_custom_narration_marks_sources_read_when_audio_is_played(
     )
     assert content_read is not None
     assert news_read is not None
+
+
+def test_briefing_narration_marks_sources_only_when_playback_finishes(
+    client,
+    db_session,
+    test_user,
+    content_factory,
+    tmp_path,
+) -> None:
+    audio_path = tmp_path / "briefing.mp3"
+    audio_path.write_bytes(b"mp3")
+    article = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Finish-triggered article",
+        content_metadata={"content": "The article narration."},
+    )
+    lens = BriefingLens(
+        user_id=test_user.id,
+        key="articles",
+        tier="longform",
+        title="Articles",
+        status="active",
+    )
+    db_session.add(lens)
+    db_session.flush()
+    segment = BriefingSegment(
+        lens_id=lens.id,
+        user_id=test_user.id,
+        blocks=[],
+        markdown_raw="The article narration.",
+        narration_text="The article narration.",
+        source_keys=[f"content:{article.id}"],
+        status="active",
+        model="test:model",
+        prompt_version="test",
+    )
+    episode = AudioEpisode(
+        user_id=test_user.id,
+        kind="briefing_narration",
+        status="completed",
+        title="Articles briefing",
+        input_hash="finish-triggered-briefing",
+        source_item_ids=[],
+        source_snapshot={
+            "kind": "briefing_narration",
+            "source_keys": [f"content:{article.id}"],
+            "read_on_play": {
+                "content_ids": [article.id],
+                "news_item_ids": [],
+            },
+        },
+        prompt_version=2,
+        audio_storage_path=str(audio_path),
+    )
+    db_session.add_all([segment, episode])
+    db_session.commit()
+
+    audio_response = client.get(f"/api/content/audio-episodes/{episode.id}/audio")
+    stream_response = client.get(f"/api/content/audio-episodes/{episode.id}/stream")
+
+    assert audio_response.status_code == 200
+    assert stream_response.status_code == 200
+    assert db_session.query(ContentReadStatus).count() == 0
+    db_session.refresh(segment)
+    assert segment.status == "active"
+
+    finished_response = client.post(f"/api/content/audio-episodes/{episode.id}/playback-finished")
+
+    assert finished_response.status_code == 200
+    assert finished_response.json()["id"] == episode.id
+    assert (
+        db_session.query(ContentReadStatus)
+        .filter_by(user_id=test_user.id, content_id=article.id)
+        .one_or_none()
+        is not None
+    )
+    db_session.refresh(segment)
+    assert segment.status == "retired"
+    state = db_session.query(BriefingState).filter_by(user_id=test_user.id).one()
+    assert state.version == 1
+
+    repeated_response = client.post(f"/api/content/audio-episodes/{episode.id}/playback-finished")
+
+    assert repeated_response.status_code == 200
+    db_session.refresh(state)
+    assert state.version == 1
 
 
 def test_custom_narration_playback_marks_fast_reads_but_not_long_reads_by_default(

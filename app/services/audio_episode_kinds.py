@@ -34,6 +34,7 @@ class AudioEpisodeKindSpec:
     build_prompt: Callable[[dict[str, Any]], str] | None = None
     script_mode: AudioEpisodeScriptMode = "generated_dialogue"
     marks_sources_read_on_play: bool = False
+    marks_sources_read_on_finish: bool = False
 
 
 def audio_episode_kind_spec(kind: str) -> AudioEpisodeKindSpec:
@@ -87,6 +88,6 @@ AUDIO_EPISODE_KIND_SPECS: dict[str, AudioEpisodeKindSpec] = {
     BRIEFING_NARRATION_KIND: AudioEpisodeKindSpec(
         default_model="deterministic",
         script_mode="preauthored",
-        marks_sources_read_on_play=True,
+        marks_sources_read_on_finish=True,
     ),
 }

@@ -250,6 +250,14 @@ final class AudioEpisodeService {
         return data
     }
 
+    func markPlaybackFinished(id: Int) async throws {
+        let startedAt = Date()
+        try await client.requestVoid(APIEndpoints.audioEpisodePlaybackFinished(id: id))
+        audioEpisodeLogger.info(
+            "Playback completion recorded | episodeId=\(id) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
+        )
+    }
+
     func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource {
         let startedAt = Date()
         guard let endpoint = episode.audioUrl ?? episode.streamUrl else {

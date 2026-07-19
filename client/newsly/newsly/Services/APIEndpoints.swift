@@ -38,6 +38,9 @@ enum APIEndpoints {
     static func audioEpisodeAudio(id: Int) -> String {
         return "/api/content/audio-episodes/\(id)/audio"
     }
+    static func audioEpisodePlaybackFinished(id: Int) -> String {
+        return "/api/content/audio-episodes/\(id)/playback-finished"
+    }
     static func audioEpisodeShare(id: Int) -> String {
         return "/api/content/audio-episodes/\(id)/share"
     }

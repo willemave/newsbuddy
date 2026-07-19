@@ -38,6 +38,7 @@ from app.services.audio_episodes import (
     get_user_audio_episode,
     is_audio_episode_processing_stale,
     list_custom_narration_episodes,
+    mark_audio_episode_sources_read_on_finish,
     mark_audio_episode_sources_read_on_play,
     present_audio_episode,
 )
@@ -240,6 +241,45 @@ def get_audio_episode_audio(
         filename=f"audio-episode-{audio_episode_id}.mp3",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@router.post(
+    "/audio-episodes/{audio_episode_id}/playback-finished",
+    response_model=AudioEpisodeResponse,
+    summary="Record completed audio episode playback",
+)
+def finish_audio_episode_playback(
+    audio_episode_id: Annotated[int, Path(..., gt=0)],
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AudioEpisodeResponse:
+    """Apply finish-triggered source read marks for one completed episode."""
+
+    started_at = time.perf_counter()
+    user_id = require_user_id(current_user)
+    episode = get_user_audio_episode(db, user_id=user_id, audio_episode_id=audio_episode_id)
+    if episode is None:
+        raise HTTPException(status_code=404, detail="Audio episode not found")
+    if episode.status != "completed":
+        raise HTTPException(status_code=409, detail="Audio episode is not ready")
+
+    result = mark_audio_episode_sources_read_on_finish(db, episode=episode)
+    logger.info(
+        "Audio episode playback completion recorded",
+        extra={
+            "component": "audio_episodes",
+            "operation": "playback_finished",
+            "status": "completed",
+            "duration_ms": _duration_ms(started_at),
+            "item_id": audio_episode_id,
+            "user_id": user_id,
+            "context_data": {
+                "kind": episode.kind,
+                **result,
+            },
+        },
+    )
+    return present_audio_episode(episode)
 
 
 @router.get(

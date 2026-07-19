@@ -29,6 +29,7 @@ from app.services.audio_episodes.generation import (
 )
 from app.services.audio_episodes.presentation import (
     commit_audio_episode_delivery,
+    mark_audio_episode_sources_read_on_finish,
     mark_audio_episode_sources_read_on_play,
     present_audio_episode,
 )
@@ -84,6 +85,7 @@ __all__ = [
     "get_user_audio_episode",
     "is_audio_episode_processing_stale",
     "list_custom_narration_episodes",
+    "mark_audio_episode_sources_read_on_finish",
     "mark_audio_episode_sources_read_on_play",
     "present_audio_episode",
 ]
