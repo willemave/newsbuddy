@@ -29,39 +29,39 @@ struct ThinkingBubbleView: View {
     }
 
     private func content(elapsedSeconds: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                ForEach(0..<3) { index in
-                    Circle()
-                        .fill(Color.chatAccent.opacity(0.5))
-                        .frame(width: 6, height: 6)
-                        .offset(y: reduceMotion ? 0 : (isAnimating ? -2 : 2))
-                        .animation(
-                            reduceMotion ? nil : AppMotion.typingDotPulse
-                                .delay(Double(index) * 0.1),
-                            value: isAnimating
-                        )
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                HStack(spacing: 6) {
+                    ForEach(0..<3) { index in
+                        Circle()
+                            .fill(Color.chatAccent.opacity(0.5))
+                            .frame(width: 6, height: 6)
+                            .offset(y: reduceMotion ? 0 : (isAnimating ? -2 : 2))
+                            .animation(
+                                reduceMotion ? nil : AppMotion.typingDotPulse
+                                    .delay(Double(index) * 0.1),
+                                value: isAnimating
+                            )
+                    }
                 }
+
+                Text(formattedDuration(elapsedSeconds: elapsedSeconds))
+                    .font(.appCaption2)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .monospacedDigit()
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color.surfaceContainer)
-            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 16, bottomTrailingRadius: 16, topTrailingRadius: 16))
 
             if let statusText, !statusText.isEmpty {
                 Text(statusText)
                     .font(.appCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
             }
-
-            Text(formattedDuration(elapsedSeconds: elapsedSeconds))
-                .font(.appCaption2)
-                .foregroundStyle(Color.onSurfaceSecondary)
-                .monospacedDigit()
-                .padding(.horizontal, 4)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.surfaceContainer)
+        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 16, bottomTrailingRadius: 16, topTrailingRadius: 16))
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             guard !reduceMotion else { return }

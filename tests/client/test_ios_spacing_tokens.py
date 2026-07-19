@@ -299,7 +299,6 @@ def test_primary_scroll_surfaces_use_top_edge_fade() -> None:
         VIEWS_ROOT / "ShortFormView.swift": ".topScreenEdgeFade()",
         VIEWS_ROOT / "LongFormView.swift": ".topScreenEdgeFade()",
         VIEWS_ROOT / "KnowledgeView.swift": ".topScreenEdgeFade()",
-        VIEWS_ROOT / "Chat/ChatMessageList.swift": ".topScreenEdgeFade()",
         VIEWS_ROOT / "ChatSessionHistoryView.swift": ".topScreenEdgeFade()",
     }
     offenders: list[str] = []
@@ -357,6 +356,8 @@ def test_chat_messages_use_single_parameterized_bubble_surface() -> None:
     assert "AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)" in message_list
     assert ".animation(messageAnimation, value: timeline.map(\\.id))" in message_list
     assert ".animation(messageAnimation, value: isSending)" in message_list
+    assert ".defaultScrollAnchor(.bottom)" in message_list
+    assert ".topScreenEdgeFade()" not in message_list
     assert "parameterized user/assistant bubble presentation" in chat_docs
 
 

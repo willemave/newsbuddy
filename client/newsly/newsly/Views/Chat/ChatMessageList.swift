@@ -88,6 +88,7 @@ struct ChatMessageList: View {
                 .animation(messageAnimation, value: timeline.map(\.id))
                 .animation(messageAnimation, value: isSending)
             }
+            .defaultScrollAnchor(.bottom)
             .contentMargins(.bottom, 12, for: .scrollContent)
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 let distanceFromBottom =
@@ -110,7 +111,7 @@ struct ChatMessageList: View {
                     proxy.scrollTo(newId, anchor: .bottom)
                     return
                 }
-                if isNearBottom {
+                if isNearBottom || isLocalUserInsertion(newId) {
                     withAnimation(messageAnimation) {
                         proxy.scrollTo(newId, anchor: .bottom)
                     }
@@ -136,7 +137,6 @@ struct ChatMessageList: View {
                 jumpToLatestOverlay(proxy: proxy)
             }
         }
-        .topScreenEdgeFade()
     }
 
     private static let thinkingBubbleID = "chat.thinkingBubble"
@@ -151,6 +151,11 @@ struct ChatMessageList: View {
         } else {
             return .opacity.combined(with: .move(edge: .bottom))
         }
+    }
+
+    private func isLocalUserInsertion(_ id: ChatTimelineID) -> Bool {
+        guard case .local = id else { return false }
+        return timeline.last?.id == id && timeline.last?.message.isUser == true
     }
 
     @ViewBuilder
