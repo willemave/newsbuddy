@@ -182,20 +182,26 @@ private struct BriefingStripPill: View {
         Group {
             if let longPressAction {
                 pillButton
-                    .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 12) {
-                        longPressFeedbackTrigger += 1
-                        longPressAction()
-                    }
+                    .highPriorityGesture(
+                        LongPressGesture(minimumDuration: 0.5, maximumDistance: 12)
+                            .onEnded { _ in
+                                performLongPressAction(longPressAction)
+                            }
+                    )
                     .accessibilityHint("Long press to mark this category as read")
                     .accessibilityAction(named: "Mark All as Read") {
-                        longPressFeedbackTrigger += 1
-                        longPressAction()
+                        performLongPressAction(longPressAction)
                     }
             } else {
                 pillButton
             }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: longPressFeedbackTrigger)
+    }
+
+    private func performLongPressAction(_ action: () -> Void) {
+        longPressFeedbackTrigger += 1
+        action()
     }
 
     private var pillButton: some View {
