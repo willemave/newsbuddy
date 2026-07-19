@@ -27,7 +27,7 @@ private enum ChatSessionTaskKey: Hashable {
     case selectCouncilDeadline
 }
 
-/// Owns the visible chat transcript, local pending sends, polling, council selection, and voice state.
+/// Owns the visible chat transcript, local pending sends, polling, and council selection.
 ///
 /// Streaming readiness: the timeline reconciler is intentionally isolated so a future SSE
 /// implementation can add an `apply(streamChunk:)` path that updates the active assistant row
@@ -47,20 +47,14 @@ final class ChatSessionViewModel {
     var retryingCouncilChildSessionId: Int?
     private(set) var councilSelectionTimedOut = false
 
-    // Voice dictation state
-    var isRecording = false
-    var isTranscribing = false
-    private(set) var voiceDictationAvailable = false
-    private(set) var isVoiceActionInFlight = false
+    var isRecording: Bool { voiceInput.isRecording }
+    var isTranscribing: Bool { voiceInput.isTranscribing }
+    var voiceDictationAvailable: Bool { voiceInput.isAvailable }
+    var isVoiceActionInFlight: Bool { voiceInput.isActionInFlight }
 
     private let chatService: any ChatSessionServicing
-    private let transcriptionService: any SpeechTranscribing
-    private let voiceCoordinator: VoiceDictationCoordinator
+    private let voiceInput: ChatVoiceInputController
     private let activeSessionManager: ActiveChatSessionManager
-    private let authService: any AuthenticationServicing
-    private let tokenStore: any AuthTokenStore
-    private let refreshTranscriptionAvailability: () async -> Bool
-    private let setBackendTranscriptionAvailable: (Bool) -> Void
     private let timelineReconciler = ChatTimelineReconciler()
     let sessionId: Int
     private let initialPendingMessageId: Int?
@@ -69,10 +63,6 @@ final class ChatSessionViewModel {
     @ObservationIgnored
     private var hasTriggeredPendingCouncilStart = false
     @ObservationIgnored
-    private var hasAppliedVoiceTranscript = false
-    @ObservationIgnored
-    private var pendingVoiceTranscript: String?
-    @ObservationIgnored
     private var pendingSends: [UUID: PendingSend] = [:]
     @ObservationIgnored
     private var localIdentityAliases: [ChatTimelineID: UUID] = [:]
@@ -80,8 +70,6 @@ final class ChatSessionViewModel {
     private var selectCouncilRequestId: UUID?
     @ObservationIgnored
     private let tasks = TaskBag<ChatSessionTaskKey>()
-    @ObservationIgnored
-    private var voiceRecordingStartedAt: Date?
     @ObservationIgnored
     private var isViewActive = true
     @ObservationIgnored
@@ -95,19 +83,28 @@ final class ChatSessionViewModel {
         let initialPendingUserMessage = Self.initialPendingUserMessage(from: route)
         let initialPendingLocalId = initialPendingUserMessage.map { _ in UUID() }
         self.chatService = dependencies.chatService
-        self.transcriptionService = dependencies.transcriptionService
-        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: dependencies.transcriptionService)
+        self.voiceInput = ChatVoiceInputController(
+            transcriptionService: dependencies.transcriptionService,
+            authService: dependencies.authService,
+            tokenStore: dependencies.tokenStore,
+            refreshAvailability: dependencies.refreshTranscriptionAvailability,
+            setBackendAvailability: dependencies.setBackendTranscriptionAvailable,
+            initiallyAvailable: initialVoiceDictationAvailable
+        )
         self.activeSessionManager = dependencies.activeSessionManager
-        self.authService = dependencies.authService
-        self.tokenStore = dependencies.tokenStore
-        self.refreshTranscriptionAvailability = dependencies.refreshTranscriptionAvailability
-        self.setBackendTranscriptionAvailable = dependencies.setBackendTranscriptionAvailable
         self.sessionId = route.sessionId
         self.session = route.session
         self.initialPendingMessageId = route.pendingMessageId
         self.pendingCouncilPrompt = route.pendingCouncilPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.voiceDictationAvailable = initialVoiceDictationAvailable
         configureInitialPendingMessage(initialPendingUserMessage, localId: initialPendingLocalId)
+        voiceInput.configure(
+            onTranscriptReady: { [weak self] transcript in
+                await self?.sendVoiceTranscript(transcript)
+            },
+            onError: { [weak self] message in
+                self?.errorMessage = message
+            }
+        )
     }
 
     deinit {
@@ -397,12 +394,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
             isSending = false
             stopThinkingTimer()
         }
-        transcriptionService.reset()
-        voiceCoordinator.stopListening()
-        isRecording = false
-        isTranscribing = false
-        isVoiceActionInFlight = false
-        pendingVoiceTranscript = nil
+        voiceInput.reset()
     }
 
     func handleScenePhaseChange(_ phase: ScenePhase) {
@@ -802,197 +794,24 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
 
     // MARK: - Voice Dictation
 
-    /// Check voice dictation availability and attempt token refresh if auth is stale.
     func checkAndRefreshVoiceDictation() async {
-        if transcriptionService.isAvailable {
-            voiceDictationAvailable = true
-            return
-        }
-
-        do {
-            if !hasVoiceAuthToken {
-                _ = try await authService.refreshAccessToken()
-            }
-            voiceDictationAvailable = await refreshTranscriptionAvailability()
-        } catch {
-            logger.debug("Token refresh for voice dictation failed: \(error.localizedDescription)")
-            setBackendTranscriptionAvailable(false)
-            voiceDictationAvailable = false
-        }
-    }
-
-    /// Start voice recording for chat message.
-    func startVoiceRecording() async {
-        guard !isRecording, !isTranscribing else { return }
-        let startedAt = Date()
-        voiceRecordingStartedAt = startedAt
-        hasAppliedVoiceTranscript = false
-        pendingVoiceTranscript = nil
-        if !voiceDictationAvailable {
-            await checkAndRefreshVoiceDictation()
-        }
-        guard voiceDictationAvailable else {
-            logger.error(
-                "[ViewModel] Voice recording unavailable | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
-            )
-            errorMessage = "Microphone is unavailable right now. Try again in a moment."
-            return
-        }
-        errorMessage = nil
-        configureTranscriptionCallbacks()
-        logger.info("[ViewModel] Starting voice recording")
-        do {
-            try await transcriptionService.start()
-            isRecording = true
-            logger.info(
-                "[ViewModel] Voice recording started | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) sessionId=\(self.sessionId)"
-            )
-        } catch {
-            logger.error(
-                "[ViewModel] Voice recording start failed | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
-            )
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    /// Stop recording, transcribe, and send the message.
-    func stopVoiceRecording() async {
-        guard isRecording else { return }
-        let startedAt = Date()
-        logger.info(
-            "[ViewModel] Stopping voice recording | captureElapsedMs=\(self.voiceRecordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? 0)"
-        )
-
-        do {
-            let trimmedTranscription = try await transcriptionService.stop().trimmingCharacters(
-                in: .whitespacesAndNewlines
-            )
-            logger.info(
-                "[ViewModel] Transcription complete | length=\(trimmedTranscription.count) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
-            )
-            isRecording = false
-            isTranscribing = false
-            voiceRecordingStartedAt = nil
-            pendingVoiceTranscript = nil
-            await sendVoiceTranscript(trimmedTranscription)
-        } catch {
-            logger.error(
-                "[ViewModel] Voice transcription error | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
-            )
-            errorMessage = error.localizedDescription
-            isRecording = false
-            isTranscribing = false
-            voiceRecordingStartedAt = nil
-            pendingVoiceTranscript = nil
-        }
+        await voiceInput.checkAndRefreshAvailability()
     }
 
     func toggleVoiceRecording() async {
-        guard !isVoiceActionInFlight, !isTranscribing else { return }
-
-        isVoiceActionInFlight = true
-        defer { isVoiceActionInFlight = false }
-
-        if isRecording {
-            await stopVoiceRecording()
-        } else {
-            await startVoiceRecording()
+        if !isRecording {
+            errorMessage = nil
         }
-    }
-
-    /// Cancel voice recording.
-    func cancelVoiceRecording() {
-        transcriptionService.cancel()
-        voiceCoordinator.stopListening()
-        isRecording = false
-        isTranscribing = false
-        isVoiceActionInFlight = false
-        pendingVoiceTranscript = nil
-        if let voiceRecordingStartedAt {
-            logger.info(
-                "[ViewModel] Voice recording cancelled | captureElapsedMs=\(Int(Date().timeIntervalSince(voiceRecordingStartedAt) * 1000))"
-            )
-        }
-        voiceRecordingStartedAt = nil
-    }
-
-    private var hasVoiceAuthToken: Bool {
-        if let accessToken = tokenStore.getToken(key: .accessToken), !accessToken.isEmpty {
-            return true
-        }
-        if let refreshToken = tokenStore.getToken(key: .refreshToken), !refreshToken.isEmpty {
-            return true
-        }
-        return false
-    }
-
-    private func configureTranscriptionCallbacks() {
-        voiceCoordinator.listen(
-            onTranscriptFinal: { [weak self] transcript in
-                self?.pendingVoiceTranscript = transcript
-            },
-            onError: { [weak self] message in
-                self?.errorMessage = message
-                self?.pendingVoiceTranscript = nil
-                self?.isRecording = false
-                self?.isTranscribing = false
-                self?.isVoiceActionInFlight = false
-                self?.voiceRecordingStartedAt = nil
-            },
-            onStateChange: { [weak self] state in
-                guard let self else { return }
-                switch state {
-                case .idle:
-                    self.isRecording = false
-                    self.isTranscribing = false
-                case .recording:
-                    self.isRecording = true
-                    self.isTranscribing = false
-                case .transcribing:
-                    self.isRecording = false
-                    self.isTranscribing = true
-                }
-            },
-            onStopReason: { [weak self] reason in
-                guard let self else { return }
-                switch reason {
-                case .manual:
-                    return
-                case .silenceAutoStop:
-                    let transcript = self.pendingVoiceTranscript ?? ""
-                    self.pendingVoiceTranscript = nil
-                    self.isRecording = false
-                    self.isTranscribing = false
-                    self.isVoiceActionInFlight = true
-                    self.voiceRecordingStartedAt = nil
-                    await self.sendVoiceTranscript(transcript)
-                    self.isVoiceActionInFlight = false
-                case .cancel, .failure:
-                    self.pendingVoiceTranscript = nil
-                    self.isRecording = false
-                    self.isTranscribing = false
-                    self.isVoiceActionInFlight = false
-                    self.voiceRecordingStartedAt = nil
-                }
-            }
-        )
+        await voiceInput.toggle()
     }
 
     private func sendVoiceTranscript(_ transcript: String) async {
         let signpostState = chatPerfSignposter.beginInterval("send-voice-transcript")
         defer { chatPerfSignposter.endInterval("send-voice-transcript", signpostState) }
 
-        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedTranscript.isEmpty else {
-            errorMessage = "I didn't catch that. Try again."
-            return
-        }
-        guard !hasAppliedVoiceTranscript else { return }
-
-        hasAppliedVoiceTranscript = true
         errorMessage = nil
         let existingInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let message = existingInput.isEmpty ? trimmedTranscript : "\(existingInput) \(trimmedTranscript)"
+        let message = existingInput.isEmpty ? transcript : "\(existingInput) \(transcript)"
         inputText = ""
         await sendMessage(text: message)
     }

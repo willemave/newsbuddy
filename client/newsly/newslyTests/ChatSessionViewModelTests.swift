@@ -5,12 +5,7 @@ import XCTest
 @MainActor
 final class ChatSessionViewModelTests: XCTestCase {
     func testDefaultChatDictationUsesRecordThenTranscribeService() {
-        let viewModel = ChatSessionViewModel(
-            route: ChatSessionRoute(sessionId: 42),
-            dependencies: .live
-        )
-        let mirror = Mirror(reflecting: viewModel)
-        let service = mirror.children.first { $0.label == "transcriptionService" }?.value as AnyObject?
+        let service = ChatDependencies.live.transcriptionService as AnyObject
 
         XCTAssertTrue(service === VoiceDictationService.shared)
     }
@@ -62,11 +57,14 @@ final class ChatSessionViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        viewModel.isTranscribing = true
+        await viewModel.toggleVoiceRecording()
+        transcriptionService.onStateChange?(.transcribing)
+        let didEnterTranscribingState = await waitUntil { viewModel.isTranscribing }
 
         await viewModel.toggleVoiceRecording()
 
-        XCTAssertEqual(transcriptionService.startCallCount, 0)
+        XCTAssertTrue(didEnterTranscribingState)
+        XCTAssertEqual(transcriptionService.startCallCount, 1)
         XCTAssertEqual(transcriptionService.stopCallCount, 0)
         XCTAssertFalse(viewModel.isRecording)
         XCTAssertTrue(viewModel.isTranscribing)
@@ -84,10 +82,10 @@ final class ChatSessionViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        viewModel.isRecording = true
+        await viewModel.toggleVoiceRecording()
         XCTAssertEqual(viewModel.inputText, "")
 
-        await viewModel.stopVoiceRecording()
+        await viewModel.toggleVoiceRecording()
 
         XCTAssertEqual(chatService.sentMessages.map { $0.message }, ["Final transcript"])
         XCTAssertEqual(viewModel.inputText, "")
@@ -109,9 +107,9 @@ final class ChatSessionViewModelTests: XCTestCase {
         )
 
         viewModel.inputText = "First draft"
-        viewModel.isRecording = true
+        await viewModel.toggleVoiceRecording()
 
-        await viewModel.stopVoiceRecording()
+        await viewModel.toggleVoiceRecording()
 
         XCTAssertEqual(chatService.sentMessages.map { $0.message }, ["First draft second thought"])
         XCTAssertEqual(viewModel.inputText, "")
@@ -129,7 +127,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             initialVoiceDictationAvailable: true
         )
 
-        await viewModel.startVoiceRecording()
+        await viewModel.toggleVoiceRecording()
         await transcriptionService.simulateSilenceAutoStop()
         let didSendTranscript = await waitUntil {
             chatService.sentMessages.map { $0.message } == ["Auto transcript"]
@@ -141,6 +139,38 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isRecording)
         XCTAssertFalse(viewModel.isTranscribing)
         XCTAssertEqual(transcriptionService.stopCallCount, 0)
+    }
+
+    func testConsecutiveSilenceAutoStopsRemainSubscribed() async {
+        let transcriptionService = MockChatSpeechTranscriber(transcript: "Auto transcript")
+        let chatService = makeSuccessfulVoiceSendService()
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: transcriptionService,
+                chatService: chatService
+            ),
+            initialVoiceDictationAvailable: true
+        )
+
+        await viewModel.toggleVoiceRecording()
+        await transcriptionService.simulateSilenceAutoStop()
+        let didSendFirstTranscript = await waitUntil {
+            chatService.sentMessages.count == 1 && !viewModel.isVoiceActionInFlight
+        }
+
+        await viewModel.toggleVoiceRecording()
+        await transcriptionService.simulateSilenceAutoStop()
+        let didSendSecondTranscript = await waitUntil {
+            chatService.sentMessages.count == 2 && !viewModel.isVoiceActionInFlight
+        }
+
+        XCTAssertTrue(didSendFirstTranscript)
+        XCTAssertTrue(didSendSecondTranscript)
+        XCTAssertEqual(
+            chatService.sentMessages.map(\.message),
+            ["Auto transcript", "Auto transcript"]
+        )
     }
 
     func testCancelCouncilSelectionClearsInFlightState() async {
@@ -687,14 +717,20 @@ private final class MockChatSpeechTranscriber: SpeechTranscribing {
     }
 
     func cancel() {
-        reset()
+        isRecording = false
+        isTranscribing = false
+        onStateChange?(.idle)
         onStopReason?(.cancel)
     }
 
     func reset() {
         isRecording = false
         isTranscribing = false
-        onStateChange?(.idle)
+        onTranscriptDelta = nil
+        onTranscriptFinal = nil
+        onError = nil
+        onStateChange = nil
+        onStopReason = nil
     }
 }
 
