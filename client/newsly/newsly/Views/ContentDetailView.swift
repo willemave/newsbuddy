@@ -111,10 +111,7 @@ struct ContentDetailView: View {
                                     ChatStatusBanner(
                                         session: activeSession,
                                         onTap: {
-                                            chatCoordinator.openChatSession(
-                                                sessionId: activeSession.id,
-                                                content: content
-                                            )
+                                            openActiveChatSession(activeSession, content: content)
                                         },
                                         onDismiss: {
                                             chatCoordinator.markSessionViewed(sessionId: activeSession.id)
@@ -159,10 +156,9 @@ struct ContentDetailView: View {
                                         presentDiscussionSheet(content: content, fallbackURL: discussionURL)
                                     },
                                     onDigDeeper: { selectedText in
-                                        chatCoordinator.handleReaderDigDeeper(
+                                        startReaderDigDeeper(
                                             selectedText: selectedText,
-                                            content: content,
-                                            visibleContentIds: allContentIds
+                                            content: content
                                         )
                                     }
                                 )
@@ -358,10 +354,9 @@ struct ContentDetailView: View {
                 },
                 onDigDeeper: { selectedText in
                     activeReaderContent = nil
-                    chatCoordinator.handleReaderDigDeeper(
+                    startReaderDigDeeper(
                         selectedText: selectedText,
-                        content: content,
-                        visibleContentIds: allContentIds
+                        content: content
                     )
                 }
             )
@@ -534,7 +529,6 @@ struct ContentDetailView: View {
             isPodcastAudioActive: podcastAudioController.isActive(for: content),
             podcastAudioAccessibilityLabel: podcastAudioController.accessibilityLabel(for: content),
             isStartingChat: chatCoordinator.isStartingChat,
-            isCheckingChatSession: chatCoordinator.isCheckingChatSession,
             showLearningDeckHint: $showLearningDeckHint,
             hasSeenLearningDeckHint: $hasSeenLearningDeckHint,
             learningDeckHintBounce: $learningDeckHintBounce,
@@ -565,20 +559,7 @@ struct ContentDetailView: View {
                 }
             },
             onCreateLearningDeck: { activeSheet = .learningDeckCreate },
-            onDeepDive: {
-                Task {
-                    if let activeSession = chatCoordinator.activeSession(for: content) {
-                        chatCoordinator.openChatSession(
-                            sessionId: activeSession.id,
-                            content: content
-                        )
-                        return
-                    }
-                    if chatCoordinator.prepareChatSheetPresentation() {
-                        activeSheet = .chat
-                    }
-                }
-            }
+            onDeepDive: { handleDeepDive(for: content) }
         )
     }
 
@@ -636,46 +617,85 @@ struct ContentDetailView: View {
             isStartingChat: chatCoordinator.isStartingChat,
             showsPodcastAudioCard: podcastAudioController.supportsAudio(for: content),
             onClose: { activeSheet = nil },
-            onStartChat: {
-                Task {
-                    await chatCoordinator.startChat(
-                        content: content,
-                        visibleContentIds: allContentIds,
-                        provider: .openai,
-                        onCloseSheet: { activeSheet = nil }
-                    )
-                }
-            },
-            onDigDeeper: {
-                Task {
-                    await chatCoordinator.startDeepDive(
-                        content: content,
-                        visibleContentIds: allContentIds,
-                        onCloseSheet: { activeSheet = nil }
-                    )
-                }
-            },
-            onCouncilChat: {
-                Task {
-                    await chatCoordinator.startCouncil(
-                        content: content,
-                        visibleContentIds: allContentIds,
-                        provider: .openai,
-                        onCloseSheet: { activeSheet = nil }
-                    )
-                }
-            },
-            onDeepResearch: {
-                Task {
-                    await chatCoordinator.startDeepResearch(
-                        content: content,
-                        onCloseSheet: { activeSheet = nil }
-                    )
-                }
-            }
+            onStartChat: { startChat(for: content) },
+            onDigDeeper: { startDeepDive(for: content) },
+            onCouncilChat: { startCouncil(for: content) },
+            onDeepResearch: { startDeepResearch(for: content) }
         ) {
             audioPromptCard(for: content)
         }
+    }
+
+    private func openActiveChatSession(
+        _ session: ActiveChatSession,
+        content: ContentDetail
+    ) {
+        openGlobalChat(
+            chatCoordinator.chatRoute(sessionId: session.id, content: content)
+        )
+    }
+
+    private func handleDeepDive(for content: ContentDetail) {
+        if let activeSession = chatCoordinator.activeSession(for: content) {
+            openActiveChatSession(activeSession, content: content)
+        } else {
+            chatCoordinator.chatError = nil
+            activeSheet = .chat
+        }
+    }
+
+    private func startChat(for content: ContentDetail) {
+        Task {
+            let route = await chatCoordinator.startChat(
+                content: content,
+                visibleContentIds: allContentIds
+            )
+            openGlobalChat(route)
+        }
+    }
+
+    private func startDeepDive(for content: ContentDetail) {
+        Task {
+            let route = await chatCoordinator.startDeepDive(
+                content: content,
+                visibleContentIds: allContentIds
+            )
+            openGlobalChat(route)
+        }
+    }
+
+    private func startCouncil(for content: ContentDetail) {
+        Task {
+            let route = await chatCoordinator.startCouncil(content: content)
+            openGlobalChat(route)
+        }
+    }
+
+    private func startDeepResearch(for content: ContentDetail) {
+        Task {
+            let route = await chatCoordinator.startDeepResearch(content: content)
+            openGlobalChat(route)
+        }
+    }
+
+    private func startReaderDigDeeper(
+        selectedText: String,
+        content: ContentDetail
+    ) {
+        Task {
+            let route = await chatCoordinator.startReaderDigDeeper(
+                selectedText: selectedText,
+                content: content,
+                visibleContentIds: allContentIds
+            )
+            openGlobalChat(route)
+        }
+    }
+
+    private func openGlobalChat(_ route: ChatSessionRoute?) {
+        guard let route else { return }
+        activeSheet = nil
+        chatCoordinator.open(route)
     }
 
     @MainActor

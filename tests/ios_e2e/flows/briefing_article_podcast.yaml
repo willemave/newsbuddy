@@ -37,3 +37,22 @@ appId: "${APP_ID}"
 - assertVisible:
     id: briefing.segment.${ARTICLE_SEGMENT_ID}
 - assertVisible: "${ARTICLE_TITLE}"
+- tapOn: "${ARTICLE_TITLE}"
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 10000
+- tapOn:
+    id: content.action.deep_dive
+- extendedWaitUntil:
+    visible:
+      id: content.chat.sheet
+    timeout: 10000
+- tapOn:
+    id: content.chat.start
+- extendedWaitUntil:
+    visible:
+      id: chat.header
+    timeout: 10000
+- assertNotVisible:
+    id: tab.learning

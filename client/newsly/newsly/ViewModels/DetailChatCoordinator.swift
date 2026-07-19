@@ -25,7 +25,6 @@ protocol DetailChatServicing: AnyObject {
 @MainActor
 protocol ChatRouteOpening: AnyObject {
     func open(_ route: ChatSessionRoute)
-    func openAssistantTurn(_ response: AssistantTurnResponse)
 }
 
 extension ChatService: DetailChatServicing {}
@@ -34,7 +33,6 @@ extension ChatNavigationCoordinator: ChatRouteOpening {}
 @MainActor
 @Observable
 final class DetailChatCoordinator {
-    private(set) var isCheckingChatSession = false
     private(set) var isStartingChat = false
     var chatError: String?
 
@@ -85,92 +83,51 @@ final class DetailChatCoordinator {
         )
     }
 
-    func prepareChatSheetPresentation() -> Bool {
-        guard !isCheckingChatSession else { return false }
-        isCheckingChatSession = true
-        defer { isCheckingChatSession = false }
-        chatError = nil
-        return true
-    }
-
     func startChat(
         content: ContentDetail,
         visibleContentIds: [Int],
         provider: ChatModelProvider = .openai,
-        prompt: String? = nil,
-        onCloseSheet: () -> Void
-    ) async {
-        guard !isStartingChat else { return }
-
-        isStartingChat = true
-        chatError = nil
-        defer { isStartingChat = false }
-
-        do {
-            if content.contentType == .news {
-                if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let response = try await chatService.createAssistantTurn(
-                        message: prompt,
-                        sessionId: nil,
-                        screenContext: newsScreenContext(for: content, visibleContentIds: visibleContentIds)
-                    )
-                    onCloseSheet()
-                    chatRouter.openAssistantTurn(response)
-                } else {
-                    let session = try await chatService.startNewsChat(
-                        newsItemId: content.id,
-                        provider: provider
-                    )
-                    onCloseSheet()
-                    openChatSession(
-                        sessionId: session.id,
-                        content: content,
-                        focusComposerOnAppear: true
-                    )
-                }
-            } else {
-                if let prompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let response = try await chatService.createAssistantTurn(
-                        message: prompt,
-                        sessionId: nil,
-                        screenContext: articleScreenContext(for: content, visibleContentIds: visibleContentIds)
-                    )
-                    onCloseSheet()
-                    chatRouter.openAssistantTurn(response)
-                } else {
-                    let session = try await chatService.startArticleChat(
-                        contentId: content.id,
-                        provider: provider
-                    )
-                    onCloseSheet()
-                    openChatSession(
-                        sessionId: session.id,
-                        content: content,
-                        focusComposerOnAppear: true
-                    )
-                }
+        prompt: String? = nil
+    ) async -> ChatSessionRoute? {
+        await performChatStart {
+            let trimmedPrompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let trimmedPrompt, !trimmedPrompt.isEmpty {
+                let response = try await chatService.createAssistantTurn(
+                    message: trimmedPrompt,
+                    sessionId: nil,
+                    screenContext: content.contentType == .news
+                        ? newsScreenContext(for: content, visibleContentIds: visibleContentIds)
+                        : articleScreenContext(for: content, visibleContentIds: visibleContentIds)
+                )
+                return ChatSessionRoute(assistantTurn: response)
             }
-        } catch where isNetworkCancellation(error) {
-            return
-        } catch {
-            chatError = error.localizedDescription
+
+            let session: ChatSessionSummary
+            if content.contentType == .news {
+                session = try await chatService.startNewsChat(
+                    newsItemId: content.id,
+                    provider: provider
+                )
+            } else {
+                session = try await chatService.startArticleChat(
+                    contentId: content.id,
+                    provider: provider
+                )
+            }
+            return chatRoute(
+                sessionId: session.id,
+                content: content,
+                focusComposerOnAppear: true
+            )
         }
     }
 
     func startCouncil(
         content: ContentDetail,
-        visibleContentIds _: [Int],
-        provider: ChatModelProvider = .openai,
-        onCloseSheet: () -> Void
-    ) async {
+        provider: ChatModelProvider = .openai
+    ) async -> ChatSessionRoute? {
         let prompt = councilPrompt(for: content)
-        guard !isStartingChat else { return }
-
-        isStartingChat = true
-        chatError = nil
-        defer { isStartingChat = false }
-
-        do {
+        return await performChatStart {
             let session: ChatSessionSummary
             if content.contentType == .news {
                 if let existingSession = try await chatService.getSessionForNewsItem(
@@ -195,45 +152,28 @@ final class DetailChatCoordinator {
                     )
                 }
             }
-            onCloseSheet()
-            openChatSession(
+            return chatRoute(
                 sessionId: session.id,
                 content: content,
                 pendingCouncilPrompt: session.isCouncilMode ? nil : prompt
             )
-        } catch where isNetworkCancellation(error) {
-            return
-        } catch {
-            chatError = error.localizedDescription
         }
     }
 
     func startDeepDive(
         content: ContentDetail,
-        visibleContentIds: [Int],
-        onCloseSheet: () -> Void
-    ) async {
+        visibleContentIds: [Int]
+    ) async -> ChatSessionRoute? {
         await startChat(
             content: content,
             visibleContentIds: visibleContentIds,
-            provider: .openai,
-            prompt: deepDivePrompt(for: content),
-            onCloseSheet: onCloseSheet
+            prompt: deepDivePrompt(for: content)
         )
     }
 
-    func startDeepResearch(
-        content: ContentDetail,
-        onCloseSheet: () -> Void
-    ) async {
+    func startDeepResearch(content: ContentDetail) async -> ChatSessionRoute? {
         let prompt = deepResearchPrompt(for: content)
-        guard !isStartingChat else { return }
-
-        isStartingChat = true
-        chatError = nil
-        defer { isStartingChat = false }
-
-        do {
+        return await performChatStart {
             let isNews = content.contentType == .news
             let session = try await chatService.startDeepResearch(
                 contentId: isNews ? nil : content.id,
@@ -245,97 +185,92 @@ final class DetailChatCoordinator {
                 message: prompt
             )
 
-            onCloseSheet()
-            openChatSession(
+            return chatRoute(
                 sessionId: session.id,
                 content: content,
                 initialUserMessage: pendingResponse.userMessage,
                 pendingMessageId: pendingResponse.messageId
             )
-        } catch where isNetworkCancellation(error) {
-            return
-        } catch {
-            chatError = error.localizedDescription
         }
     }
 
-    func handleReaderDigDeeper(
+    func startReaderDigDeeper(
         selectedText: String,
         content: ContentDetail,
         visibleContentIds: [Int]
-    ) {
+    ) async -> ChatSessionRoute? {
         let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return nil }
 
-        Task { @MainActor in
-            do {
-                let isNews = content.contentType == .news
-                let response = try await self.chatService.createAssistantTurn(
-                    message: "Dig deeper into this selected text from \(content.displayTitle): \"\(trimmed)\"",
-                    sessionId: nil,
-                    screenContext: AssistantScreenContext(
-                        screenType: "article_reader",
-                        screenTitle: "Article Reader",
-                        contentId: isNews ? nil : content.id,
-                        newsItemId: isNews ? content.id : nil,
-                        visibleContentIds: isNews ? [] : visibleContentIds,
-                        visibleNewsItemIds: isNews ? visibleContentIds : [],
-                        selectedTopic: trimmed,
-                        query: trimmed,
-                        note: "The user selected text from the full article reader. Use the article body and selected passage as primary context. For news items, use news_item_id and do not resolve same-numbered content IDs."
-                    )
+        do {
+            let isNews = content.contentType == .news
+            let response = try await chatService.createAssistantTurn(
+                message: "Dig deeper into this selected text from \(content.displayTitle): \"\(trimmed)\"",
+                sessionId: nil,
+                screenContext: AssistantScreenContext(
+                    screenType: "article_reader",
+                    screenTitle: "Article Reader",
+                    contentId: isNews ? nil : content.id,
+                    newsItemId: isNews ? content.id : nil,
+                    visibleContentIds: isNews ? [] : visibleContentIds,
+                    visibleNewsItemIds: isNews ? visibleContentIds : [],
+                    selectedTopic: trimmed,
+                    query: trimmed,
+                    note: "The user selected text from the full article reader. Use the article body and selected passage as primary context. For news items, use news_item_id and do not resolve same-numbered content IDs."
                 )
-                self.chatRouter.openAssistantTurn(response)
-            } catch where isNetworkCancellation(error) {
-                return
-            } catch {
-                self.toastPresenter.showError("Failed to dig deeper: \(error.localizedDescription)")
-            }
+            )
+            return ChatSessionRoute(assistantTurn: response)
+        } catch where isNetworkCancellation(error) {
+            return nil
+        } catch {
+            toastPresenter.showError("Failed to dig deeper: \(error.localizedDescription)")
+            return nil
         }
     }
 
-    func openChatSession(
+    func chatRoute(
         sessionId: Int,
         content: ContentDetail,
         initialUserMessage: ChatMessage? = nil,
         pendingMessageId: Int? = nil,
         pendingCouncilPrompt: String? = nil,
         focusComposerOnAppear: Bool = false
-    ) {
+    ) -> ChatSessionRoute {
         let isNews = content.contentType == .news
-        openChatSession(
+        return ChatSessionRoute(
             sessionId: sessionId,
             contentId: isNews ? nil : content.id,
             newsItemId: isNews ? content.id : nil,
-            initialUserMessage: initialUserMessage,
+            initialUserMessageText: initialUserMessage?.content,
+            initialUserMessageTimestamp: initialUserMessage?.timestamp,
             pendingMessageId: pendingMessageId,
             pendingCouncilPrompt: pendingCouncilPrompt,
             focusComposerOnAppear: focusComposerOnAppear
         )
     }
 
-    private func openChatSession(
-        sessionId: Int,
-        contentId: Int? = nil,
-        newsItemId: Int? = nil,
-        initialUserMessage: ChatMessage? = nil,
-        pendingMessageId: Int? = nil,
-        pendingCouncilPrompt: String? = nil,
-        focusComposerOnAppear: Bool = false
-    ) {
-        chatSessionManager.stopTracking(sessionId: sessionId)
-        chatRouter.open(
-            ChatSessionRoute(
-                sessionId: sessionId,
-                contentId: contentId,
-                newsItemId: newsItemId,
-                initialUserMessageText: initialUserMessage?.content,
-                initialUserMessageTimestamp: initialUserMessage?.timestamp,
-                pendingMessageId: pendingMessageId,
-                pendingCouncilPrompt: pendingCouncilPrompt,
-                focusComposerOnAppear: focusComposerOnAppear
-            )
-        )
+    func open(_ route: ChatSessionRoute) {
+        chatSessionManager.stopTracking(sessionId: route.sessionId)
+        chatRouter.open(route)
+    }
+
+    private func performChatStart(
+        _ operation: () async throws -> ChatSessionRoute
+    ) async -> ChatSessionRoute? {
+        guard !isStartingChat else { return nil }
+
+        isStartingChat = true
+        chatError = nil
+        defer { isStartingChat = false }
+
+        do {
+            return try await operation()
+        } catch where isNetworkCancellation(error) {
+            return nil
+        } catch {
+            chatError = error.localizedDescription
+            return nil
+        }
     }
 
     private func articleScreenContext(

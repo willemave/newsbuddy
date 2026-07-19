@@ -19,7 +19,6 @@ struct DetailActionBar: View {
     let isPodcastAudioActive: Bool
     let podcastAudioAccessibilityLabel: String
     let isStartingChat: Bool
-    let isCheckingChatSession: Bool
     @Binding var showLearningDeckHint: Bool
     @Binding var hasSeenLearningDeckHint: Bool
     @Binding var learningDeckHintBounce: Bool
@@ -145,7 +144,6 @@ struct DetailActionBar: View {
                     actionIcon("bubble.left.and.text.bubble.right")
                 }
             }
-            .disabled(isCheckingChatSession)
             .detailActionBarSegment()
             .accessibilityIdentifier("content.action.deep_dive")
             .accessibilityLabel("Start deep dive")

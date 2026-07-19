@@ -72,4 +72,13 @@ struct ChatSessionRoute: Hashable {
             focusComposerOnAppear: focusComposerOnAppear
         )
     }
+
+    init(assistantTurn response: AssistantTurnResponse) {
+        self.init(
+            session: response.session,
+            initialUserMessageText: response.userMessage.content,
+            initialUserMessageTimestamp: response.userMessage.timestamp,
+            pendingMessageId: response.messageId
+        )
+    }
 }

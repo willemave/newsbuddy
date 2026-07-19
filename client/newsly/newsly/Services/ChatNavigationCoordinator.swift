@@ -24,14 +24,7 @@ final class ChatNavigationCoordinator {
     }
 
     func openAssistantTurn(_ response: AssistantTurnResponse) {
-        open(
-            ChatSessionRoute(
-                session: response.session,
-                initialUserMessageText: response.userMessage.content,
-                initialUserMessageTimestamp: response.userMessage.timestamp,
-                pendingMessageId: response.messageId
-            )
-        )
+        open(ChatSessionRoute(assistantTurn: response))
     }
 
     func clear(route: ChatSessionRoute? = nil) {

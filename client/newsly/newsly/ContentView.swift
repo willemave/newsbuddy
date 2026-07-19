@@ -183,24 +183,19 @@ struct ContentView: View {
             AppChrome.configure(textSize: appTextSize)
         }
         .onChange(of: longFormPath.count) { oldValue, newValue in
-            logger.info(
-                "[Navigation] pathChanged tab=long_form oldCount=\(oldValue, privacy: .public) newCount=\(newValue, privacy: .public)"
-            )
+            logRootPathChange(tab: .longContent, oldDepth: oldValue, newDepth: newValue)
         }
         .onChange(of: shortFormPath.count) { oldValue, newValue in
-            logger.info(
-                "[Navigation] pathChanged tab=fast_news oldCount=\(oldValue, privacy: .public) newCount=\(newValue, privacy: .public)"
-            )
+            logRootPathChange(tab: .shortNews, oldDepth: oldValue, newDepth: newValue)
+        }
+        .onChange(of: briefingPath.count) { oldValue, newValue in
+            logRootPathChange(tab: .briefing, oldDepth: oldValue, newDepth: newValue)
         }
         .onChange(of: knowledgePath.count) { oldValue, newValue in
-            logger.info(
-                "[Navigation] pathChanged tab=knowledge oldCount=\(oldValue, privacy: .public) newCount=\(newValue, privacy: .public)"
-            )
+            logRootPathChange(tab: .knowledge, oldDepth: oldValue, newDepth: newValue)
         }
         .onChange(of: learningPath.count) { oldValue, newValue in
-            logger.info(
-                "[Navigation] pathChanged tab=learning oldCount=\(oldValue, privacy: .public) newCount=\(newValue, privacy: .public)"
-            )
+            logRootPathChange(tab: .learning, oldDepth: oldValue, newDepth: newValue)
         }
         .onChange(of: scenePhase) { _, newPhase in
             chatSessionManager.setPollingSuspended(newPhase != .active)
@@ -279,8 +274,14 @@ struct ContentView: View {
         case .learning:
             learningPath.isEmpty
         case .longContent, .shortNews, .more:
-            true
+            false
         }
+    }
+
+    private func logRootPathChange(tab: RootTab, oldDepth: Int, newDepth: Int) {
+        logger.info(
+            "[Navigation] pathChanged tab=\(tab.logName, privacy: .public) oldCount=\(oldDepth, privacy: .public) newCount=\(newDepth, privacy: .public)"
+        )
     }
 
     private func restoreIfNeeded() {
@@ -295,9 +296,11 @@ struct ContentView: View {
     }
 
     private func openChatSession(route: ChatSessionRoute) {
+        if tabCoordinator.selectedTab == .briefing {
+            briefingPath = NavigationPath()
+        }
+        learningPath = navigationPath(containing: route)
         tabCoordinator.selectedTab = .learning
-        learningPath = NavigationPath()
-        learningPath.append(route)
     }
 
     private func openKnowledgeNarrations() {
@@ -309,14 +312,18 @@ struct ContentView: View {
     private func openContentRoute(_ route: ContentDetailRoute) {
         switch route.contentType {
         case .news:
+            shortFormPath = navigationPath(containing: route)
             tabCoordinator.selectedTab = .shortNews
-            shortFormPath = NavigationPath()
-            shortFormPath.append(route)
         case .article, .podcast, .insight_report, .unknown, .unknownRaw:
+            longFormPath = navigationPath(containing: route)
             tabCoordinator.selectedTab = .longContent
-            longFormPath = NavigationPath()
-            longFormPath.append(route)
         }
+    }
+
+    private func navigationPath<Value: Hashable>(containing value: Value) -> NavigationPath {
+        var path = NavigationPath()
+        path.append(value)
+        return path
     }
 
     private func requestScrollToTop(_ request: Binding<Int>) {
