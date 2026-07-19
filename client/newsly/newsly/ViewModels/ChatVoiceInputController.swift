@@ -35,7 +35,7 @@ final class ChatVoiceInputController {
     @ObservationIgnored
     private var onTranscriptReady: (@MainActor (String) async -> Void)?
     @ObservationIgnored
-    private var onError: (@MainActor (String) -> Void)?
+    private var errorHandler: (@MainActor (String) -> Void)?
     @ObservationIgnored
     private var pendingTranscript: String?
     @ObservationIgnored
@@ -67,7 +67,7 @@ final class ChatVoiceInputController {
         onError: @escaping @MainActor (String) -> Void
     ) {
         self.onTranscriptReady = onTranscriptReady
-        self.onError = onError
+        errorHandler = onError
     }
 
     func checkAndRefreshAvailability() async {
@@ -258,6 +258,6 @@ final class ChatVoiceInputController {
     }
 
     private func reportError(_ message: String) {
-        onError?(message)
+        errorHandler?(message)
     }
 }

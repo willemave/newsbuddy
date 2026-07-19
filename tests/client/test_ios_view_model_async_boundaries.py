@@ -105,6 +105,7 @@ def test_content_feed_repositories_expose_async_methods_directly() -> None:
 def test_voice_dictation_view_models_use_event_coordinator() -> None:
     speech_source = (APP_ROOT / "Services/SpeechTranscribing.swift").read_text()
     coordinator_source = (VIEW_MODELS_ROOT / "VoiceDictationCoordinator.swift").read_text()
+    chat_session_source = (VIEW_MODELS_ROOT / "ChatSessionViewModel.swift").read_text()
     docs = (REPO_ROOT / "docs/codebase/client/70-view-models.md").read_text()
 
     assert "func events() -> AsyncStream<SpeechTranscriptionEvent>" in speech_source
@@ -112,7 +113,7 @@ def test_voice_dictation_view_models_use_event_coordinator() -> None:
     assert "for await event in events" in coordinator_source
 
     expected_coordinator_users = [
-        VIEW_MODELS_ROOT / "ChatSessionViewModel.swift",
+        VIEW_MODELS_ROOT / "ChatVoiceInputController.swift",
         VIEW_MODELS_ROOT / "LearningHubViewModel.swift",
         VIEW_MODELS_ROOT / "OnboardingViewModel.swift",
         VIEW_MODELS_ROOT / "DiscoveryPersonalizeViewModel.swift",
@@ -120,6 +121,8 @@ def test_voice_dictation_view_models_use_event_coordinator() -> None:
     ]
     for path in expected_coordinator_users:
         assert "VoiceDictationCoordinator" in path.read_text(), path
+
+    assert "ChatVoiceInputController" in chat_session_source
 
     direct_callback_tokens = [
         ".onTranscriptFinal =",
