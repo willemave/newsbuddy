@@ -356,7 +356,7 @@ SQLAlchemy tables live under `app/models/db/`. API DTOs, domain objects, metadat
 | `news_items` | Canonical short-form/Fast Reads rows | Visible representative news items, summaries, source metadata, clustering relations |
 | `news_item_discussions` | Canonical short-form discussion payloads | Latest raw-comment storage pointer, structured summary, refresh status and lease |
 | `news_item_read_status` | Per-user read marks for `news_items` | Separate from `content_read_status` |
-| `audio_episodes` | On-demand podcast-style episode state | Fast Reads brief, long-form council, and news-item discussion episodes |
+| `audio_episodes` | On-demand podcast-style episode state | Fast Reads, discussions, custom narration, and grouped Briefing chapter episodes |
 | `briefing_states` | Per-user Briefing masthead/version state | Versioned ETag source for the Briefing index |
 | `briefing_lenses` | Per-user Briefing lenses | Fixed podcast/article lenses plus dynamic news category lenses |
 | `briefing_segments` | Immutable composed Briefing documents | Typed passage/figure/pullquote blocks over frozen unread source sets |
@@ -611,7 +611,9 @@ Endpoints:
 - `POST /api/briefing/refresh`
 - `POST /api/briefing/dig/search`
 - `POST /api/briefing/dig/summarize`
-- `POST /api/briefing/narration`
+- `POST /api/briefing/narration` (legacy full-length episode response)
+- `POST /api/briefing/narrations` (chapter manifest)
+- `GET /api/briefing/narrations/{episode_group_id}`
 
 ### 8.4 Discovery
 
@@ -863,6 +865,10 @@ Learning Decks use `learning_decks` as the stable product record and point to th
 latest-successful `llm_tasks` attempts. New attempts do not create `learning_deck_runs`; API fields
 named `latest_run` remain a compatibility projection from the LLM task. Legacy run rows and the
 `generate_learning_deck` handler remain readable/executable only while the pre-cutover queue drains.
+The worker handler owns terminal failure recording. Successful publication locks the stable deck row,
+commits its new artifact bundle and attempt pointers together through
+`app/services/learning_deck_publication.py`, then retires the superseded object-store bundle. Request
+paths read the canonical ledger and do not reconcile queue failures as a side effect.
 
 Source preparation uses queue deferral rather than failure retry: a deferred task returns to
 `pending`, preserves its retry count, clears stale errors, and waits until `available_at`. Learning
@@ -1217,8 +1223,14 @@ Current episode kinds:
 - Fast Reads digest
 - long-form content council discussion
 - short-form news-item discussion
+- custom narration
+- Briefing narration, with each chapter stored as a normal episode row and grouped by
+  `episode_group_id` plus `chapter_index`
 
 Episode routes can enqueue background generation, generate inline for stream delivery, or serve a cached MP3.
+`app/services/audio_episodes/presentation.py` is the delivery boundary for both single episodes and
+chapter batches. It commits a batch atomically before enqueueing background work or running inline
+generation, which keeps feature services from duplicating delivery side effects.
 
 ## 15. X Integration and External Connections
 
@@ -1321,6 +1333,11 @@ The client has dedicated flows for:
 - settings, feedback, CLI link, X OAuth, display preferences, council personas, debug tools, and sources
 - submissions and processing status
 - X integration
+
+Briefing data loading and lens content remain owned by `BriefingViewModel`. Per-lens narration
+manifests, preparation polling, playback selection, completion advancement, and narration errors are
+owned by `BriefingNarrationController`; `BriefingView` renders the controller session and sends user
+intents to it.
 
 ### 17.4 Generated API contracts
 
