@@ -167,14 +167,14 @@ def test_long_form_detail_knowledge_save_action_updates_backend_state(
     assert knowledge_save is not None
 
 
-def test_long_form_detail_learning_deck_create_recovers_failed_legacy_attempt(
+def test_long_form_detail_learning_deck_create_ignores_failed_legacy_attempt(
     run_ios_flow,
     create_sample_content,
     sample_article_long,
     test_user,
     db_session,
 ) -> None:
-    """A terminal legacy queue failure should not make Create appear unresponsive."""
+    """A reconciled legacy queue failure should not make Create appear unresponsive."""
     stale_deck = LearningDeck(
         user_id=test_user.id,
         source_kind="content",
@@ -196,16 +196,19 @@ def test_long_form_detail_learning_deck_create_recovers_failed_legacy_attempt(
         workflow_key="learning_deck.presentation.v1",
         subject_id=stale_deck.id,
     )
-    stale_task.status = LlmTaskStatus.PREPARING.value
-    stale_task.workflow_state = LlmWorkflowState.PREPARING.value
+    stale_task.status = LlmTaskStatus.FAILED.value
+    stale_task.workflow_state = LlmWorkflowState.FAILED.value
+    stale_task.error_type = "queue_task_failed"
+    stale_task.error_message = "Source content is still processing"
     stale_run = LearningDeckRun(
         deck_id=stale_deck.id,
         user_id=test_user.id,
         llm_task_id=stale_task.id,
-        status="preparing",
+        status="failed",
         source_snapshot={},
         timeline=[],
         artifact_object_keys=[],
+        error_message="Source content is still processing",
     )
     db_session.add(stale_run)
     db_session.flush()
