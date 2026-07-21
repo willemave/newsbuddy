@@ -32,6 +32,20 @@ struct ChatMessageList: View {
     @State private var hasAnchoredInitialScroll = false
     @State private var feedOptionActionModel = AssistantFeedOptionActionModel()
 
+    private static let thinkingBubbleID = "chat.thinkingBubble"
+
+    private var messageAnimation: Animation {
+        AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)
+    }
+
+    private var messageInsertionTransition: AnyTransition {
+        if reduceMotion {
+            return .opacity
+        } else {
+            return .opacity.combined(with: .move(edge: .bottom))
+        }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -96,42 +110,17 @@ struct ChatMessageList: View {
                     - geometry.visibleRect.maxY
                     + geometry.contentInsets.bottom
                 return distanceFromBottom < 48
-            } action: { _, newValue in
-                if isNearBottom != newValue {
-                    isNearBottom = newValue
-                }
-                if newValue, hasNewerContentBelow {
-                    hasNewerContentBelow = false
-                }
+            } action: { _, isNearBottom in
+                handleBottomProximityChange(isNearBottom)
             }
             .onChange(of: timeline.last?.id) { _, newId in
-                guard let newId else { return }
-                if !hasAnchoredInitialScroll {
-                    hasAnchoredInitialScroll = true
-                    proxy.scrollTo(newId, anchor: .bottom)
-                    return
-                }
-                if isNearBottom || isLocalUserInsertion(newId) {
-                    withAnimation(messageAnimation) {
-                        proxy.scrollTo(newId, anchor: .bottom)
-                    }
-                } else {
-                    hasNewerContentBelow = true
-                }
+                handleTimelineChange(newId, proxy: proxy)
             }
-            .onChange(of: isSending) { _, sending in
-                if sending, isNearBottom {
-                    withAnimation(messageAnimation) {
-                        proxy.scrollTo(Self.thinkingBubbleID, anchor: .bottom)
-                    }
-                }
+            .onChange(of: isSending) { wasSending, sending in
+                handleSendingChange(from: wasSending, to: sending, proxy: proxy)
             }
             .onChange(of: scrollToBottomRequest) { _, _ in
-                guard let anchorId = timeline.last?.id else { return }
-                withAnimation(messageAnimation) {
-                    proxy.scrollTo(anchorId, anchor: .bottom)
-                }
-                hasNewerContentBelow = false
+                scrollToLatest(proxy: proxy)
             }
             .overlay(alignment: .bottom) {
                 jumpToLatestOverlay(proxy: proxy)
@@ -139,17 +128,54 @@ struct ChatMessageList: View {
         }
     }
 
-    private static let thinkingBubbleID = "chat.thinkingBubble"
-
-    private var messageAnimation: Animation {
-        AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)
+    private func handleBottomProximityChange(_ newValue: Bool) {
+        if isNearBottom != newValue {
+            isNearBottom = newValue
+        }
+        if newValue, hasNewerContentBelow {
+            hasNewerContentBelow = false
+        }
     }
 
-    private var messageInsertionTransition: AnyTransition {
-        if reduceMotion {
-            return .opacity
-        } else {
-            return .opacity.combined(with: .move(edge: .bottom))
+    private func handleTimelineChange(_ newId: ChatTimelineID?, proxy: ScrollViewProxy) {
+        guard let newId else { return }
+        if !hasAnchoredInitialScroll {
+            hasAnchoredInitialScroll = true
+            proxy.scrollTo(newId, anchor: .bottom)
+            return
+        }
+        guard isNearBottom || isLocalUserInsertion(newId) || isSending else {
+            hasNewerContentBelow = true
+            return
+        }
+        scrollToBottom(newId, proxy: proxy)
+    }
+
+    private func handleSendingChange(
+        from wasSending: Bool,
+        to sending: Bool,
+        proxy: ScrollViewProxy
+    ) {
+        if sending {
+            guard isNearBottom else { return }
+            scrollToBottom(Self.thinkingBubbleID, proxy: proxy)
+            return
+        }
+
+        guard wasSending else { return }
+        scrollToLatest(proxy: proxy)
+    }
+
+    private func scrollToLatest(proxy: ScrollViewProxy) {
+        if let anchorId = timeline.last?.id {
+            scrollToBottom(anchorId, proxy: proxy)
+        }
+        hasNewerContentBelow = false
+    }
+
+    private func scrollToBottom<ID: Hashable>(_ target: ID, proxy: ScrollViewProxy) {
+        withAnimation(messageAnimation) {
+            proxy.scrollTo(target, anchor: .bottom)
         }
     }
 
@@ -196,12 +222,7 @@ struct ChatMessageList: View {
     private func jumpToLatestOverlay(proxy: ScrollViewProxy) -> some View {
         if hasNewerContentBelow {
             Button {
-                if let anchorId = timeline.last?.id {
-                    withAnimation(messageAnimation) {
-                        proxy.scrollTo(anchorId, anchor: .bottom)
-                    }
-                }
-                hasNewerContentBelow = false
+                scrollToLatest(proxy: proxy)
             } label: {
                 Label("Jump to latest", systemImage: "arrow.down")
                     .font(.terracottaBodySmall.weight(.semibold))

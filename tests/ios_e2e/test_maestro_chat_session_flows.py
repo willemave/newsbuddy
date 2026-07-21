@@ -130,7 +130,7 @@ def test_chat_session_council_failure_surfaces_error_banner(
     )
 
 
-def test_chat_session_long_transcript_scroll_preserves_jump_to_latest(
+def test_chat_session_long_transcript_send_follows_latest_reply(
     run_ios_flow,
     test_user,
     chat_session_factory,
@@ -138,7 +138,7 @@ def test_chat_session_long_transcript_scroll_preserves_jump_to_latest(
     completed_chat_processors_factory,
     monkeypatch,
 ) -> None:
-    """Long transcripts should stay scrollable and preserve jump-to-latest behavior."""
+    """Sending from an older turn should follow the new reply to the live bottom."""
     latest_assistant = "Scroll matrix assistant turn 24"
     older_user = "Scroll matrix user turn 12"
     follow_up = "Scroll matrix follow-up"

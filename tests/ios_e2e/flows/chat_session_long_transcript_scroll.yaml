@@ -33,8 +33,6 @@ appId: "${APP_ID}"
 - tapOn:
     id: knowledge.chat_send
 - assertVisible:
-    text: "Jump to latest"
-- tapOn:
-    text: "Jump to latest"
-- assertVisible:
     text: "${FOLLOW_UP_REPLY}"
+- assertNotVisible:
+    text: "Jump to latest"

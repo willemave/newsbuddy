@@ -1,6 +1,6 @@
 # iOS Chat Stability Verification
 
-**Updated:** 2026-04-16
+**Updated:** 2026-07-19
 **Scope:** `10-design.md` manual flow matrix for the core chat stability implementation.
 
 ## Automated Validation
@@ -22,7 +22,7 @@
 - Focused simulator row-extraction slice after moving row dispatch and failed-send retry rendering into `MessageRow.swift`: `newslyTests/ChatSessionViewModelTests`, `newslyTests/ChatMessageDisplayTests`, `newslyTests/QuickMicViewModelTests`, `newslyTests/ChatTimelineReconcilerTests` — passed `27/27`.
 - Focused simulator polling-ownership slice after wiring `handleDisappear()` to hand content-backed in-flight sessions to `ActiveChatSessionManager`: `newslyTests/ChatSessionViewModelTests`, `newslyTests/ChatMessageDisplayTests`, `newslyTests/QuickMicViewModelTests`, `newslyTests/ChatTimelineReconcilerTests` — passed `28/28`.
 - Focused simulator background-tracker idempotence slice after making `ActiveChatSessionManager.startTracking` ignore duplicate session/message pairs and cancel replaced pollers before restarting: `newslyTests/ChatSessionViewModelTests`, `newslyTests/ChatMessageDisplayTests`, `newslyTests/QuickMicViewModelTests`, `newslyTests/ChatTimelineReconcilerTests` — passed `28/28`.
-- iOS E2E long-transcript scroll matrix: `tests/ios_e2e/flows/chat_session_long_transcript_scroll.yaml` plus `test_chat_session_long_transcript_scroll_preserves_jump_to_latest` added; `pytest tests/ios_e2e/test_maestro_chat_session_flows.py -k long_transcript -v` collected and skipped locally because no Java runtime is installed for Maestro.
+- iOS E2E long-transcript scroll matrix: `tests/ios_e2e/flows/chat_session_long_transcript_scroll.yaml` plus `test_chat_session_long_transcript_send_follows_latest_reply` verify that a sent turn follows its reply without showing "Jump to latest"; local Maestro execution remains skipped because no Java runtime is installed.
 - Full simulator suite after preview expansion: `newslyTests` — passed `99/99`.
 - Full simulator suite after per-voice council retry: `newslyTests` — passed `100/100`.
 - `git diff --check` — passed.
@@ -43,8 +43,8 @@
 | I | Navigate away from a chat during polling | Not run manually | Current policy is view-owned polling cancellation plus active-session manager for background sessions. Requires simulator walkthrough. |
 | J | Logout while a message is polling | Automated partial | `APIClientAuthTests.testRequestThrowsUnauthorizedWhenRefreshUnavailable` covers terminal refresh logout notification; `ActiveChatSessionManager.reset()` observes it. Manual in-flight chat logout still needed. |
 | K | Airplane mode during send | Automated partial | Failed local rows preserve retry text and render retry UI. Requires simulator network-off walkthrough. |
-| L | Keyboard up, assistant response arrives | Not run manually | Chat relies on SwiftUI keyboard avoidance and bottom tracking. Requires simulator walkthrough. |
-| M | Long transcript (50+ messages), scroll up, new message arrives | Automated E2E added; local execution blocked | Maestro flow seeds a long transcript, scrolls to an older message, sends while scrolled up, verifies "Jump to latest", then asserts the follow-up reply and backend persistence. Local run collected and skipped because no Java runtime is installed for Maestro. |
+| L | Keyboard up, assistant response arrives | Verified manually | iPhone 17 Pro Simulator stayed on the completed assistant reply with the keyboard-driven composer flow. |
+| M | Long transcript (50+ messages), scroll up, then send | Automated E2E updated; manual Simulator verified | The flow now verifies that the sent turn and completed reply become the live bottom without "Jump to latest". Local Maestro execution remains blocked by the missing Java runtime. |
 | N | Share a message via context menu | Not run manually | Share sheet path unchanged. Requires simulator walkthrough. |
 | O | Switch provider mid-session | Not run manually | Provider update uses injected `ChatDependencies.chatService`. Requires simulator walkthrough. |
 | P | Deep-link into a chat from outside the app | Not run manually | Route-based `ChatSessionView` and `ChatNavigationCoordinator` paths compile. Requires notification/deep-link walkthrough. |
