@@ -1657,6 +1657,58 @@
         "title": "BriefingNarrationRequest",
         "type": "object"
       },
+      "BriefingNarrationResponse": {
+        "properties": {
+          "chapters": {
+            "items": {
+              "$ref": "#/components/schemas/AudioEpisodeResponse"
+            },
+            "minItems": 1,
+            "title": "Chapters",
+            "type": "array"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "integer"
+          },
+          "episode_group_id": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Episode Group Id",
+            "type": "string"
+          },
+          "lens_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Lens Key",
+            "type": "string"
+          },
+          "playable": {
+            "title": "Playable",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AudioEpisodeStatus"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "episode_group_id",
+          "lens_key",
+          "title",
+          "status",
+          "playable",
+          "duration_seconds",
+          "chapters"
+        ],
+        "title": "BriefingNarrationResponse",
+        "type": "object"
+      },
       "BriefingParagraphDto": {
         "properties": {
           "runs": {
@@ -10792,6 +10844,116 @@
         ]
       }
     },
+    "/api/briefing/narrations": {
+      "post": {
+        "operationId": "chapteredBriefingNarration",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "delivery",
+            "required": false,
+            "schema": {
+              "default": "background",
+              "enum": [
+                "background",
+                "stream",
+                "inline"
+              ],
+              "title": "Delivery",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BriefingNarrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingNarrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Chaptered Narration",
+        "tags": [
+          "briefing"
+        ]
+      }
+    },
+    "/api/briefing/narrations/{episode_group_id}": {
+      "get": {
+        "operationId": "narrationBriefingStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episode_group_id",
+            "required": true,
+            "schema": {
+              "title": "Episode Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingNarrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Narration Status",
+        "tags": [
+          "briefing"
+        ]
+      }
+    },
     "/api/briefing/read-marks": {
       "post": {
         "operationId": "markBriefingRead",
@@ -11281,6 +11443,58 @@
           }
         ],
         "summary": "Stream generated audio episode MP3",
+        "tags": [
+          "content"
+        ]
+      }
+    },
+    "/api/content/audio-episodes/{audio_episode_id}/playback-finished": {
+      "post": {
+        "description": "Apply finish-triggered source read marks for one completed episode.",
+        "operationId": "finishContentFinishedAudioEpisodePlayback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "audio_episode_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Audio Episode Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEpisodeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record completed audio episode playback",
         "tags": [
           "content"
         ]

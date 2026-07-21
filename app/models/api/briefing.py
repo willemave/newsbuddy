@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from app.models.api.audio_episodes import AudioEpisodeResponse
 from app.models.api.base import UTCDateTime
 from app.models.contracts import (
+    AudioEpisodeStatus,
     BriefingBlockType,
     BriefingFigurePlacement,
     BriefingFirstRunPhase,
@@ -164,9 +165,16 @@ class BriefingNarrationRequest(BaseModel):
     lens_key: str = Field(..., min_length=1, max_length=64)
 
 
+class BriefingNarrationResponse(BaseModel):
+    episode_group_id: str = Field(..., min_length=64, max_length=64)
+    lens_key: str = Field(..., min_length=1, max_length=64)
+    title: str = Field(..., min_length=1)
+    status: AudioEpisodeStatus
+    playable: bool
+    duration_seconds: int = Field(..., ge=0)
+    chapters: list[AudioEpisodeResponse] = Field(..., min_length=1)
+
+
 class BriefingRefreshResponse(BaseModel):
     enqueued: bool
     version: int
-
-
-BriefingNarrationResponse = AudioEpisodeResponse

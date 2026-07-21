@@ -1339,6 +1339,58 @@
         "title": "BriefingNarrationRequest",
         "type": "object"
       },
+      "BriefingNarrationResponse": {
+        "properties": {
+          "chapters": {
+            "items": {
+              "$ref": "#/components/schemas/AudioEpisodeResponse"
+            },
+            "minItems": 1,
+            "title": "Chapters",
+            "type": "array"
+          },
+          "duration_seconds": {
+            "minimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "integer"
+          },
+          "episode_group_id": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Episode Group Id",
+            "type": "string"
+          },
+          "lens_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Lens Key",
+            "type": "string"
+          },
+          "playable": {
+            "title": "Playable",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AudioEpisodeStatus"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "episode_group_id",
+          "lens_key",
+          "title",
+          "status",
+          "playable",
+          "duration_seconds",
+          "chapters"
+        ],
+        "title": "BriefingNarrationResponse",
+        "type": "object"
+      },
       "BriefingParagraphDto": {
         "properties": {
           "runs": {

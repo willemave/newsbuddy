@@ -28,6 +28,7 @@ from app.services.audio_episodes.generation import (
     is_audio_episode_processing_stale,
 )
 from app.services.audio_episodes.presentation import (
+    commit_audio_episode_deliveries,
     commit_audio_episode_delivery,
     mark_audio_episode_sources_read_on_finish,
     mark_audio_episode_sources_read_on_play,
@@ -74,6 +75,7 @@ __all__ = [
     "AudioEpisodeTurn",
     "audio_episode_file_path",
     "commit_audio_episode_delivery",
+    "commit_audio_episode_deliveries",
     "create_content_council_episode",
     "create_custom_narration_episode",
     "create_fast_news_digest_episode",

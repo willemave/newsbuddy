@@ -257,16 +257,85 @@ def test_briefing_lens_and_narration_endpoints_reuse_episode(
     assert lens_payload["next_cursor"] is None
     assert lens_payload["has_more"] is False
 
-    first = client.post("/api/briefing/narration", json={"lens_key": "articles"})
-    second = client.post("/api/briefing/narration", json={"lens_key": "articles"})
+    first = client.post("/api/briefing/narrations", json={"lens_key": "articles"})
+    second = client.post("/api/briefing/narrations", json={"lens_key": "articles"})
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json()["id"] == second.json()["id"]
-    episode = db_session.query(AudioEpisode).one()
+    first_payload = first.json()
+    second_payload = second.json()
+    assert first_payload["episode_group_id"] == second_payload["episode_group_id"]
+    assert first_payload["chapters"][0]["id"] == second_payload["chapters"][0]["id"]
+    assert first_payload["playable"] is False
+    assert first_payload["status"] == "pending"
+    assert len(first_payload["chapters"]) == 1
+    episode = (
+        db_session.query(AudioEpisode)
+        .filter(AudioEpisode.episode_group_id == first_payload["episode_group_id"])
+        .one()
+    )
     assert episode.kind == "briefing_narration"
+    assert episode.episode_group_id == first_payload["episode_group_id"]
+    assert episode.chapter_index == 0
     assert episode.source_snapshot is not None
     assert episode.source_snapshot["read_on_play"]["content_ids"]
+
+    status_response = client.get(f"/api/briefing/narrations/{first_payload['episode_group_id']}")
+
+    assert status_response.status_code == 200
+    assert status_response.json()["episode_group_id"] == first_payload["episode_group_id"]
+    assert status_response.json()["chapters"][0]["id"] == episode.id
+
+    legacy_response = client.post(
+        "/api/briefing/narration?delivery=stream",
+        json={"lens_key": "articles"},
+    )
+
+    assert legacy_response.status_code == 200
+    assert "id" in legacy_response.json()
+    assert "chapters" not in legacy_response.json()
+    legacy_episode = (
+        db_session.query(AudioEpisode).filter(AudioEpisode.episode_group_id.is_(None)).one()
+    )
+    assert legacy_response.json()["id"] == legacy_episode.id
+    assert legacy_episode.chapter_index is None
+
+
+def test_briefing_narration_manifest_is_scoped_to_owner(
+    client: TestClient,
+    client_factory,
+    db_session: Session,
+    test_user: User,
+    user_factory,
+) -> None:
+    episode = AudioEpisode(
+        user_id=test_user.id,
+        kind="briefing_narration",
+        status="completed",
+        title="Articles briefing — Chapter 1",
+        input_hash="owner-scoped-chapter",
+        episode_group_id="a" * 64,
+        chapter_index=0,
+        source_item_ids=[],
+        source_snapshot={
+            "lens_key": "articles",
+            "lens_title": "Articles",
+            "source_count": 0,
+            "source_keys": [],
+        },
+        prompt_version=3,
+        duration_seconds=300,
+    )
+    db_session.add(episode)
+    db_session.commit()
+
+    owner_response = client.get(f"/api/briefing/narrations/{episode.episode_group_id}")
+    other_user = user_factory(email="other-briefing-listener@example.com")
+    with client_factory(user=other_user) as other_client:
+        other_response = other_client.get(f"/api/briefing/narrations/{episode.episode_group_id}")
+
+    assert owner_response.status_code == 200
+    assert other_response.status_code == 404
 
 
 def test_briefing_lens_pagination_matches_legacy_response(

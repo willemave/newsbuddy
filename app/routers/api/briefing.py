@@ -17,13 +17,18 @@ from app.models.api.briefing import (
     BriefingIndexResponse,
     BriefingLensResponse,
     BriefingNarrationRequest,
+    BriefingNarrationResponse,
     BriefingReadMarkRequest,
     BriefingReadMarkResponse,
     BriefingRefreshResponse,
 )
 from app.models.db.users import User
 from app.services.briefing.dig import search_fragment, summarize_fragment
-from app.services.briefing.narration import create_or_reuse_briefing_narration
+from app.services.briefing.narration import (
+    create_or_reuse_briefing_narration,
+    create_or_reuse_legacy_briefing_narration,
+    get_briefing_narration,
+)
 from app.services.briefing.presentation import (
     BRIEFING_LENS_PAGE_MAX,
     InvalidBriefingLensCursor,
@@ -212,9 +217,43 @@ def narration(
     current_user: Annotated[User, Depends(get_current_user)],
     delivery: Annotated[AudioEpisodeDelivery, Query()] = "background",
 ) -> AudioEpisodeResponse:
+    return create_or_reuse_legacy_briefing_narration(
+        db,
+        user_id=require_user_id(current_user),
+        lens_key=request.lens_key,
+        delivery=delivery,
+    )
+
+
+@router.post("/briefing/narrations", response_model=BriefingNarrationResponse)
+def chaptered_narration(
+    request: BriefingNarrationRequest,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    delivery: Annotated[AudioEpisodeDelivery, Query()] = "background",
+) -> BriefingNarrationResponse:
     return create_or_reuse_briefing_narration(
         db,
         user_id=require_user_id(current_user),
         lens_key=request.lens_key,
         delivery=delivery,
     )
+
+
+@router.get(
+    "/briefing/narrations/{episode_group_id}",
+    response_model=BriefingNarrationResponse,
+)
+def narration_status(
+    episode_group_id: str,
+    db: Annotated[Session, Depends(get_readonly_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> BriefingNarrationResponse:
+    narration_response = get_briefing_narration(
+        db,
+        user_id=require_user_id(current_user),
+        episode_group_id=episode_group_id,
+    )
+    if narration_response is None:
+        raise HTTPException(status_code=404, detail="Briefing narration not found")
+    return narration_response

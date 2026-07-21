@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -75,12 +76,34 @@ def commit_audio_episode_delivery(
 ) -> AudioEpisodeResponse:
     """Commit creation, then enqueue or explicitly run inline generation."""
 
+    delivered = commit_audio_episode_deliveries(db, [episode], delivery=delivery)
+    return present_audio_episode(delivered[0])
+
+
+def commit_audio_episode_deliveries(
+    db: Session,
+    episodes: Sequence[AudioEpisode],
+    *,
+    delivery: AudioEpisodeDelivery,
+) -> list[AudioEpisode]:
+    """Commit a batch atomically, then deliver each incomplete episode in order."""
+    delivered = list(episodes)
+    if not delivered:
+        raise ValueError("At least one audio episode is required")
+
     db.commit()
-    db.refresh(episode)
-    if delivery == "background" and episode.status != "completed":
-        enqueue_audio_episode_generation(required_int(episode.id, "audio episode id"))
-    elif delivery == "inline" and episode.status != "completed":
+    for episode in delivered:
+        db.refresh(episode)
+
+    for index, episode in enumerate(delivered):
+        if episode.status == AudioEpisodeStatus.COMPLETED.value:
+            continue
         episode_id = required_int(episode.id, "audio episode id")
+        if delivery == "background":
+            enqueue_audio_episode_generation(episode_id)
+            continue
+        if delivery != "inline":
+            continue
         try:
             episode = generate_audio_episode(db, audio_episode_id=episode_id)
         except Exception as exc:
@@ -94,7 +117,8 @@ def commit_audio_episode_delivery(
             raise
         db.commit()
         db.refresh(episode)
-    return present_audio_episode(episode)
+        delivered[index] = episode
+    return delivered
 
 
 def mark_audio_episode_sources_read_on_play(
@@ -297,6 +321,7 @@ def _episode_source_keys(episode: AudioEpisode) -> list[str]:
 
 
 __all__ = [
+    "commit_audio_episode_deliveries",
     "commit_audio_episode_delivery",
     "mark_audio_episode_sources_read_on_finish",
     "mark_audio_episode_sources_read_on_play",
