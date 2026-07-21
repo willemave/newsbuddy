@@ -6,22 +6,31 @@
 import SwiftUI
 
 struct MoreView: View {
+    @Environment(\.dismiss) private var dismiss
+
     let submissionsViewModel: SubmissionStatusViewModel
     let readStateCache: ReadStateCache
+    let showsDismissButton: Bool
     @State private var processingCountService = ProcessingCountService.shared
 
     init(
         submissionsViewModel: SubmissionStatusViewModel,
-        readStateCache: ReadStateCache? = nil
+        readStateCache: ReadStateCache? = nil,
+        showsDismissButton: Bool = false
     ) {
         let readStateCache = readStateCache ?? ReadStateCache()
         self.submissionsViewModel = submissionsViewModel
         self.readStateCache = readStateCache
+        self.showsDismissButton = showsDismissButton
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorialMastheadHeader(title: "More", showsDate: false)
+            EditorialMastheadHeader(
+                title: "More",
+                showsDate: false,
+                trailingAccessory: showsDismissButton ? AnyView(dismissButton) : nil
+            )
 
             List {
                 Section {
@@ -97,6 +106,22 @@ struct MoreView: View {
             await submissionsViewModel.load()
             await processingCountService.refreshCount()
         }
+    }
+
+    private var dismissButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.appSymbol(size: 16, weight: .semibold))
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .frame(width: 44, height: 44)
+                .background(Color.surfaceTertiary)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close More")
+        .accessibilityIdentifier("more.close")
     }
 
     private func menuRow<D: View>(

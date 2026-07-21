@@ -142,7 +142,8 @@ struct ContentView: View {
             NavigationStack(path: $morePath) {
                 MoreView(
                     submissionsViewModel: submissionStatusViewModel,
-                    readStateCache: readStateCache
+                    readStateCache: readStateCache,
+                    showsDismissButton: true
                 )
                 .withContentRoutes(
                     tab: .more,
@@ -152,6 +153,7 @@ struct ContentView: View {
                     contentTextSize: contentTextSize
                 )
             }
+            .presentationDragIndicator(.visible)
         }
         .tint(Color.appChromeAccent)
         .font(.appBody)
