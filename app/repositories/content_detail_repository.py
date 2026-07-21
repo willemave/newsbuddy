@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any, cast
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.models.contracts import ContentStatus
 from app.models.db import Content, ContentBody, ContentDiscussion
 from app.repositories.content_repository import VisibilityContext, build_visibility_context
 
@@ -50,7 +52,13 @@ def get_content_detail(db: Session, *, user_id: int, content_id: int):
     )
 
 
-def get_visible_content(db: Session, *, user_id: int, content_id: int):
+def get_visible_content(
+    db: Session,
+    *,
+    user_id: int,
+    content_id: int,
+    allowed_statuses: Collection[str] = (ContentStatus.COMPLETED.value,),
+):
     """Return one visible content row for the given user."""
     context = build_visibility_context(user_id)
     visibility_expr = _is_visible_to_user(context)
@@ -58,7 +66,7 @@ def get_visible_content(db: Session, *, user_id: int, content_id: int):
         db.query(Content)
         .filter(
             Content.id == content_id,
-            Content.status == "completed",
+            Content.status.in_(allowed_statuses),
             visibility_expr,
         )
         .first()

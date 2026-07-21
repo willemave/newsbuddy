@@ -43,7 +43,15 @@ def resolve_learning_deck_create_source(
     """Resolve one create request into a stable deck source."""
     user_id = require_user_id(current_user)
     if content_id is not None:
-        content = get_visible_content(db, user_id=user_id, content_id=content_id)
+        content = get_visible_content(
+            db,
+            user_id=user_id,
+            content_id=content_id,
+            allowed_statuses={
+                ContentStatus.COMPLETED.value,
+                ContentStatus.AWAITING_IMAGE.value,
+            },
+        )
         if content is None:
             raise LearningDeckError("Content not found or not ready", status_code=404)
         body_text = get_content_body_resolver().resolve_text(db, content=content)
@@ -192,10 +200,10 @@ def build_content_source_snapshot_for_deck(
     content = db.query(Content).filter(Content.id == deck.source_content_id).first()
     if content is None:
         raise LearningDeckError("Content source not found", status_code=404)
-    if content.status != ContentStatus.COMPLETED.value:
-        raise LearningDeckSourceNotReady("Source content is still processing")
     body_text = get_content_body_resolver().resolve_text(db, content=content)
     if not body_text or not body_text.strip():
+        if content.status != ContentStatus.COMPLETED.value:
+            raise LearningDeckSourceNotReady("Source content is still processing")
         raise LearningDeckSourceNotReady("Source text is not available yet")
     content_id = require_int_value(content.id, "Content id")
     metadata = content.content_metadata if isinstance(content.content_metadata, dict) else {}

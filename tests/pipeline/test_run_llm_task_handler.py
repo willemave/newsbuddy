@@ -3,7 +3,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import cast
 
-from app.models.contracts import LlmTaskKind, LlmTaskMode, TaskType
+import pytest
+
+from app.models.contracts import (
+    LlmTaskKind,
+    LlmTaskMode,
+    LlmTaskStatus,
+    LlmWorkflowState,
+    TaskType,
+)
 from app.pipeline.handlers.run_llm_task import RunLlmTaskHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
@@ -129,6 +137,81 @@ def test_run_llm_task_handler_defers_learning_deck_source_wait(
 
     assert result.deferred is True
     assert result.retry_delay_seconds == 90
+
+
+def test_run_llm_task_handler_terminalizes_unexpected_executor_failure(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    llm_task = create_llm_task(
+        db_session,
+        user_id=test_user.id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+        subject_id=44,
+    )
+    db_session.commit()
+
+    def fail_unexpectedly(_db, *, llm_task_id: int, **_kwargs) -> None:
+        assert llm_task_id == llm_task.id
+        raise FileNotFoundError("source body disappeared")
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.run_llm_task.run_learning_deck_task",
+        fail_unexpectedly,
+    )
+
+    result = RunLlmTaskHandler().handle(
+        TaskEnvelope(
+            id=4,
+            task_type=TaskType.RUN_LLM_TASK,
+            payload={"llm_task_id": llm_task.id},
+        ),
+        cast(TaskContext, SimpleContext(db_session)),
+    )
+
+    db_session.refresh(llm_task)
+    assert result.success is False
+    assert result.retryable is False
+    assert llm_task.status == LlmTaskStatus.FAILED.value
+    assert llm_task.workflow_state == LlmWorkflowState.FAILED.value
+    assert llm_task.error_type == "FileNotFoundError"
+    assert llm_task.error_message == "source body disappeared"
+
+
+def test_run_llm_task_handler_treats_terminal_redelivery_as_noop(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    llm_task = create_llm_task(
+        db_session,
+        user_id=test_user.id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+        subject_id=44,
+        status=LlmTaskStatus.FAILED,
+        workflow_state=LlmWorkflowState.FAILED,
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.pipeline.handlers.run_llm_task.run_learning_deck_task",
+        lambda *_args, **_kwargs: pytest.fail("terminal task must not be executed"),
+    )
+
+    result = RunLlmTaskHandler().handle(
+        TaskEnvelope(
+            id=5,
+            task_type=TaskType.RUN_LLM_TASK,
+            payload={"llm_task_id": llm_task.id},
+        ),
+        cast(TaskContext, SimpleContext(db_session)),
+    )
+
+    assert result.success is True
 
 
 class _SessionContext:

@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from app.core.logging import get_logger
+from app.models.db import LearningDeckRun
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.services.learning_deck_common import ACTIVE_RUN_STATUSES
 from app.services.learning_deck_generation import (
     LearningDeckGenerationWaiting,
     generate_learning_deck,
 )
+from app.services.learning_decks import mark_learning_deck_run_failed
 from app.services.queue import TaskType
 
 logger = get_logger(__name__)
@@ -38,6 +43,7 @@ class GenerateLearningDeckHandler:
                     retry_delay_seconds=exc.retry_delay_seconds,
                 )
             except ValueError as exc:
+                _mark_run_failed_if_active(db, run_id=run_id_int, error=exc)
                 return TaskResult.fail(str(exc), retryable=False)
             except Exception as exc:  # noqa: BLE001
                 logger.exception(
@@ -50,6 +56,16 @@ class GenerateLearningDeckHandler:
                         "context_data": {"error": str(exc)},
                     },
                 )
+                _mark_run_failed_if_active(db, run_id=run_id_int, error=exc)
                 return TaskResult.fail(str(exc), retryable=False)
 
         return TaskResult.ok()
+
+
+def _mark_run_failed_if_active(db: Session, *, run_id: int, error: Exception) -> None:
+    """Keep the legacy compatibility ledger aligned with terminal handler failures."""
+    db.rollback()
+    run = db.query(LearningDeckRun).filter(LearningDeckRun.id == run_id).first()
+    if run is None or run.status not in ACTIVE_RUN_STATUSES:
+        return
+    mark_learning_deck_run_failed(db, run, error_message=str(error))

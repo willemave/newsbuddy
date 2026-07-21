@@ -3,11 +3,13 @@ from __future__ import annotations
 import pytest
 
 from app.models.contracts import (
+    ContentStatus,
     ContentType,
     LearningDeckSourceKind,
     LlmTaskKind,
     LlmTaskMode,
     LlmTaskStatus,
+    LlmWorkflowState,
     TaskType,
 )
 from app.models.db import LearningDeck, LearningDeckRun, LlmTask, ProcessingTask
@@ -122,6 +124,29 @@ def test_create_learning_deck_from_content_enqueues_generation(
     assert task.task_type == TaskType.RUN_LLM_TASK.value
     assert task.queue_name == "llm"
     assert task.payload == {"llm_task_id": llm_task.id, "user_id": test_user.id}
+
+
+def test_create_learning_deck_uses_ready_body_while_artwork_is_pending(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Article waiting for artwork",
+        status=ContentStatus.AWAITING_IMAGE,
+        content_metadata={"content": "The article body is already ready for a deck."},
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=content)
+
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=content.id,
+    )
+
+    assert deck.source_content_id == content.id
+    assert deck.latest_task_id is not None
 
 
 def test_content_learning_deck_uses_resolved_pdf_title(
@@ -284,5 +309,8 @@ def test_delete_learning_deck_invalidates_access_and_deletes_artifacts(
     )
 
     db_session.refresh(deck)
+    task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
     assert deck.deleted_at is not None
+    assert task.status == LlmTaskStatus.CANCELLED.value
+    assert task.workflow_state == LlmWorkflowState.CANCELLED.value
     assert set(deleted_keys) == {"learning/deck/index.html"}

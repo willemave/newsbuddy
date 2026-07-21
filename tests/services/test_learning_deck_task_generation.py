@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.contracts import ContentStatus, ContentType, LlmTaskStatus
+from app.models.contracts import ContentStatus, ContentType, LlmTaskStatus, LlmWorkflowState
 from app.models.db import LlmTask
 from app.services.learning_deck_agent import LearningDeckAgentResult
 from app.services.learning_deck_artifacts import StoredLearningDeckArtifact
 from app.services.learning_deck_generation import LearningDeckGenerationWaiting
 from app.services.learning_deck_task_generation import run_learning_deck_task
-from app.services.learning_decks import create_or_rerun_learning_deck, present_learning_deck
+from app.services.learning_decks import (
+    create_or_rerun_learning_deck,
+    delete_learning_deck,
+    present_learning_deck,
+)
 from tests.support.builders import create_content_status_entry_row
 
 
@@ -36,6 +40,7 @@ def test_learning_deck_llm_task_defers_while_source_is_processing(
 ) -> None:
     content, deck, task = _create_task(db_session, test_user, content_factory)
     content.status = ContentStatus.PROCESSING.value
+    content.content_metadata = {}
     db_session.commit()
 
     with pytest.raises(LearningDeckGenerationWaiting) as exc_info:
@@ -46,6 +51,36 @@ def test_learning_deck_llm_task_defers_while_source_is_processing(
     assert task.status == LlmTaskStatus.PREPARING.value
     assert deck.latest_task_id == task.id
     assert exc_info.value.retry_delay_seconds >= 30
+
+
+def test_learning_deck_llm_task_uses_source_body_before_artwork_finishes(
+    db_session,
+    test_user,
+    content_factory,
+    monkeypatch,
+) -> None:
+    content, deck, task = _create_task(db_session, test_user, content_factory)
+    content.status = ContentStatus.AWAITING_IMAGE.value
+    db_session.commit()
+    captured_source: dict[str, object] = {}
+
+    def run_agent(**kwargs):
+        captured_source.update(kwargs["source_snapshot"])
+        return _agent_result()
+
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation.run_learning_deck_agent",
+        run_agent,
+    )
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation.store_learning_deck_artifact",
+        lambda **_kwargs: _stored_artifact(),
+    )
+
+    result = run_learning_deck_task(db_session, llm_task_id=task.id)
+
+    assert result.status == LlmTaskStatus.COMPLETED.value
+    assert captured_source["body_text"] == "A sufficiently detailed source body."
 
 
 def test_learning_deck_llm_task_publishes_and_drives_api_projection(
@@ -96,6 +131,43 @@ def test_learning_deck_llm_task_publishes_and_drives_api_projection(
     assert response.viewer_available is True
 
 
+def test_learning_deck_llm_task_retires_previous_artifact_bundle(
+    db_session,
+    test_user,
+    content_factory,
+    monkeypatch,
+) -> None:
+    _content, deck, task = _create_task(db_session, test_user, content_factory)
+    deck.artifact_object_keys = [
+        "learning/1/previous/index.html",
+        "learning/1/previous/source-notes.md",
+    ]
+    db_session.commit()
+    stored = _stored_artifact()
+    removed_keys: list[str] = []
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation.run_learning_deck_agent",
+        lambda **_kwargs: _agent_result(),
+    )
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation.store_learning_deck_artifact",
+        lambda **_kwargs: stored,
+    )
+    monkeypatch.setattr(
+        "app.services.learning_deck_publication.delete_learning_deck_objects",
+        lambda keys: removed_keys.extend(keys),
+    )
+
+    run_learning_deck_task(db_session, llm_task_id=task.id)
+
+    db_session.refresh(deck)
+    assert deck.artifact_object_keys == stored.artifact_object_keys
+    assert set(removed_keys) == {
+        "learning/1/previous/index.html",
+        "learning/1/previous/source-notes.md",
+    }
+
+
 def test_learning_deck_llm_task_refuses_to_publish_after_lease_loss(
     db_session,
     test_user,
@@ -140,3 +212,122 @@ def test_learning_deck_llm_task_refuses_to_publish_after_lease_loss(
     assert stored is False
     assert task.status == LlmTaskStatus.FAILED.value
     assert task.error_type == "lease_lost"
+
+
+def test_learning_deck_llm_task_does_not_redeliver_terminal_failure(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    _content, _deck, task = _create_task(db_session, test_user, content_factory)
+    task.status = LlmTaskStatus.FAILED.value
+    task.workflow_state = LlmWorkflowState.FAILED.value
+    db_session.commit()
+
+    result = run_learning_deck_task(
+        db_session,
+        llm_task_id=task.id,
+        agent_runner=lambda **_kwargs: pytest.fail("terminal task must not run again"),
+    )
+
+    assert result.status == LlmTaskStatus.FAILED.value
+
+
+def test_learning_deck_llm_task_does_not_publish_after_deletion(
+    db_session,
+    test_user,
+    content_factory,
+    monkeypatch,
+) -> None:
+    _content, deck, task = _create_task(db_session, test_user, content_factory)
+    stored = False
+
+    def delete_while_agent_runs(**_kwargs):
+        delete_learning_deck(
+            db_session,
+            user_id=test_user.id,
+            deck_id=deck.id,
+        )
+        return _agent_result()
+
+    def store(**_kwargs):
+        nonlocal stored
+        stored = True
+        return _stored_artifact()
+
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation.store_learning_deck_artifact",
+        store,
+    )
+
+    result = run_learning_deck_task(
+        db_session,
+        llm_task_id=task.id,
+        agent_runner=delete_while_agent_runs,
+    )
+
+    db_session.refresh(task)
+    assert result.status == LlmTaskStatus.CANCELLED.value
+    assert task.status == LlmTaskStatus.CANCELLED.value
+    assert stored is False
+
+
+def test_learning_deck_llm_task_removes_unpublished_artifact_if_deleted_during_storage(
+    db_session,
+    test_user,
+    content_factory,
+    monkeypatch,
+) -> None:
+    _content, deck, task = _create_task(db_session, test_user, content_factory)
+    stored = _stored_artifact()
+    removed_keys: list[str] = []
+
+    def store_and_delete(**_kwargs):
+        delete_learning_deck(
+            db_session,
+            user_id=test_user.id,
+            deck_id=deck.id,
+        )
+        return stored
+
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation.store_learning_deck_artifact",
+        store_and_delete,
+    )
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation.delete_learning_deck_objects",
+        lambda keys: removed_keys.extend(keys),
+    )
+
+    result = run_learning_deck_task(
+        db_session,
+        llm_task_id=task.id,
+        agent_runner=lambda **_kwargs: _agent_result(),
+    )
+
+    assert result.status == LlmTaskStatus.CANCELLED.value
+    assert set(removed_keys) == set(stored.artifact_object_keys)
+
+
+def _agent_result() -> LearningDeckAgentResult:
+    return LearningDeckAgentResult(
+        index_html="<html>deck</html>",
+        source_notes_md="# Sources\n\n- Source",
+        assets={},
+        model_provider="openai",
+        model_name="test-model",
+        sandbox_provider="local",
+        sandbox_id="sandbox-1",
+        source_metadata_updates={},
+        agent_log_events=[],
+    )
+
+
+def _stored_artifact() -> StoredLearningDeckArtifact:
+    return StoredLearningDeckArtifact(
+        storage_prefix="learning/1/1",
+        deck_object_key="learning/1/1/index.html",
+        source_notes_object_key="learning/1/1/source-notes.md",
+        source_notes_html_object_key="learning/1/1/source-notes.html",
+        artifact_object_keys=["learning/1/1/index.html"],
+    )

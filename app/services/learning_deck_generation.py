@@ -153,11 +153,7 @@ def generate_learning_deck(
         promote_learning_deck_run(
             db,
             run,
-            artifact_storage_prefix=stored.storage_prefix,
-            deck_object_key=stored.deck_object_key,
-            source_notes_object_key=stored.source_notes_object_key,
-            source_notes_html_object_key=stored.source_notes_html_object_key,
-            artifact_object_keys=stored.artifact_object_keys,
+            artifact=stored,
             source_metadata=agent_result.source_metadata_updates,
         )
     except LearningDeckArtifactError as exc:

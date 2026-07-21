@@ -16,6 +16,7 @@ from app.services.learning_deck_agent import (
     LearningDeckAgentExecutionError,
     LearningDeckAgentResult,
 )
+from app.services.learning_deck_artifacts import StoredLearningDeckArtifact
 from app.services.learning_deck_generation import (
     LearningDeckGenerationWaiting,
     generate_learning_deck,
@@ -225,22 +226,24 @@ def test_promote_learning_deck_run_does_not_delete_new_artifact_keys(
     db_session.commit()
 
     monkeypatch.setattr(
-        "app.services.learning_decks.delete_learning_deck_objects",
+        "app.services.learning_deck_publication.delete_learning_deck_objects",
         lambda keys: deleted_keys.extend(keys),
     )
 
     promote_learning_deck_run(
         db_session,
         run,
-        artifact_storage_prefix="learning/decks/1/runs/22",
-        deck_object_key="learning/decks/1/runs/22/index.html",
-        source_notes_object_key="learning/decks/1/runs/22/source-notes.md",
-        source_notes_html_object_key="learning/decks/1/runs/22/source-notes.html",
-        artifact_object_keys=[
-            "learning/decks/1/runs/22/index.html",
-            "learning/decks/1/runs/22/source-notes.md",
-            "learning/decks/1/runs/22/source-notes.html",
-        ],
+        artifact=StoredLearningDeckArtifact(
+            storage_prefix="learning/decks/1/runs/22",
+            deck_object_key="learning/decks/1/runs/22/index.html",
+            source_notes_object_key="learning/decks/1/runs/22/source-notes.md",
+            source_notes_html_object_key="learning/decks/1/runs/22/source-notes.html",
+            artifact_object_keys=[
+                "learning/decks/1/runs/22/index.html",
+                "learning/decks/1/runs/22/source-notes.md",
+                "learning/decks/1/runs/22/source-notes.html",
+            ],
+        ),
     )
 
     assert deleted_keys == ["learning/decks/1/runs/old/index.html"]

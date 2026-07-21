@@ -29,7 +29,10 @@ from app.models.contracts import (
 )
 from app.models.db import LearningDeck, LearningDeckRun, LlmTask, ProcessingTask, User
 from app.pipeline.task_specs import get_task_spec
-from app.services.learning_deck_artifacts import delete_learning_deck_objects
+from app.services.learning_deck_artifacts import (
+    StoredLearningDeckArtifact,
+    delete_learning_deck_objects,
+)
 from app.services.learning_deck_common import (
     ACTIVE_RUN_STATUSES,
     LearningDeckError,
@@ -51,6 +54,7 @@ from app.services.learning_deck_hosting import (
     read_learning_deck_source_notes_object,
     read_learning_deck_viewer_object,
 )
+from app.services.learning_deck_publication import commit_learning_deck_artifact_promotion
 from app.services.learning_deck_sources import (
     build_content_source_snapshot,
     build_github_source_snapshot,
@@ -68,6 +72,14 @@ from app.services.learning_deck_tokens import (
     get_deck_by_valid_share_token,
 )
 from app.services.llm_tasks import create_llm_task, set_llm_task_status
+
+ACTIVE_LLM_TASK_STATUSES = {
+    LlmTaskStatus.QUEUED.value,
+    LlmTaskStatus.PREPARING.value,
+    LlmTaskStatus.RUNNING.value,
+    LlmTaskStatus.AWAITING_APPROVAL.value,
+    LlmTaskStatus.APPLYING.value,
+}
 
 __all__ = [
     "LearningDeckError",
@@ -209,7 +221,16 @@ def create_or_rerun_learning_deck(
 
 def delete_learning_deck(db: Session, *, user_id: int, deck_id: int) -> None:
     """Soft-delete deck state and hard-delete known public artifact objects."""
-    deck = get_learning_deck(db, user_id=user_id, deck_id=deck_id)
+    deck = (
+        db.query(LearningDeck)
+        .filter(
+            LearningDeck.id == deck_id,
+            LearningDeck.user_id == user_id,
+            LearningDeck.deleted_at.is_(None),
+        )
+        .with_for_update()
+        .first()
+    )
     if deck is None:
         raise LearningDeckError("Learning Deck not found", status_code=404)
     runs = db.query(LearningDeckRun).filter(LearningDeckRun.deck_id == deck_id).all()
@@ -217,11 +238,44 @@ def delete_learning_deck(db: Session, *, user_id: int, deck_id: int) -> None:
     keys.extend(coerce_string_list(deck.artifact_object_keys))
     for run in runs:
         keys.extend(coerce_string_list(run.artifact_object_keys))
-    delete_learning_deck_objects(keys)
+
+    active_tasks = (
+        db.query(LlmTask)
+        .filter(
+            LlmTask.task_kind == LlmTaskKind.LEARNING_DECK.value,
+            LlmTask.subject_id == deck_id,
+            LlmTask.status.in_(ACTIVE_LLM_TASK_STATUSES),
+        )
+        .all()
+    )
+    for task in active_tasks:
+        set_llm_task_status(
+            db,
+            task,
+            status=LlmTaskStatus.CANCELLED,
+            workflow_state=LlmWorkflowState.CANCELLED,
+            note="Learning Deck was deleted",
+            error_type="deck_deleted",
+            error_message="Learning Deck was deleted",
+        )
+
+    for run in runs:
+        if run.status not in ACTIVE_RUN_STATUSES:
+            continue
+        run.status = LearningDeckRunStatus.CANCELLED.value
+        run.error_message = "Learning Deck was deleted"
+        run.completed_at = utcnow()
+        append_learning_deck_timeline(
+            run,
+            status=LearningDeckRunStatus.CANCELLED,
+            note="Learning Deck was deleted",
+        )
+
     deck.deleted_at = utcnow()
     deck.share_enabled = False
     deck.updated_at = utcnow()
     db.commit()
+    delete_learning_deck_objects(keys)
 
 
 def present_learning_deck(db: Session, deck: LearningDeck) -> LearningDeckResponse:
@@ -321,47 +375,29 @@ def promote_learning_deck_run(
     db: Session,
     run: LearningDeckRun,
     *,
-    artifact_storage_prefix: str,
-    deck_object_key: str,
-    source_notes_object_key: str,
-    source_notes_html_object_key: str,
-    artifact_object_keys: list[str],
+    artifact: StoredLearningDeckArtifact,
     title: str | None = None,
     source_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Promote a completed run to the deck's latest successful artifact."""
     run_id = require_int_value(run.id, "Learning Deck run id")
     deck_id = require_int_value(run.deck_id, "Learning Deck id")
-    deck = db.query(LearningDeck).filter(LearningDeck.id == deck_id).first()
+    deck = db.query(LearningDeck).filter(LearningDeck.id == deck_id).with_for_update().first()
     if deck is None:
         raise LearningDeckError("Learning Deck not found", status_code=404)
-    old_keys = coerce_string_list(deck.artifact_object_keys)
     run.status = LearningDeckRunStatus.COMPLETED.value
     run.completed_at = utcnow()
-    run.artifact_storage_prefix = artifact_storage_prefix
-    run.deck_object_key = deck_object_key
-    run.source_notes_object_key = source_notes_object_key
-    run.source_notes_html_object_key = source_notes_html_object_key
-    run.artifact_object_keys = artifact_object_keys
+    run.artifact_storage_prefix = artifact.storage_prefix
+    run.deck_object_key = artifact.deck_object_key
+    run.source_notes_object_key = artifact.source_notes_object_key
+    run.source_notes_html_object_key = artifact.source_notes_html_object_key
+    run.artifact_object_keys = artifact.artifact_object_keys
     append_learning_deck_timeline(
         run,
         status=LearningDeckRunStatus.COMPLETED,
         note="Learning Deck is ready",
     )
 
-    deck.latest_successful_run_id = run_id
-    deck.latest_run_id = run_id
-    deck.artifact_storage_prefix = artifact_storage_prefix
-    deck.deck_object_key = deck_object_key
-    deck.source_notes_object_key = source_notes_object_key
-    deck.source_notes_html_object_key = source_notes_html_object_key
-    deck.artifact_object_keys = artifact_object_keys
-    if title:
-        deck.title = title[:500]
-    if source_metadata:
-        metadata = dict(deck.source_metadata or {})
-        metadata.update(source_metadata)
-        deck.source_metadata = metadata
     _set_learning_run_llm_task_status(
         db,
         run,
@@ -371,26 +407,27 @@ def promote_learning_deck_run(
         output_json={
             "learning_deck_run_id": run_id,
             "deck_id": deck_id,
-            "deck_object_key": deck_object_key,
-            "source_notes_object_key": source_notes_object_key,
-            "source_notes_html_object_key": source_notes_html_object_key,
-            "artifact_object_keys": artifact_object_keys,
+            "deck_object_key": artifact.deck_object_key,
+            "source_notes_object_key": artifact.source_notes_object_key,
+            "source_notes_html_object_key": artifact.source_notes_html_object_key,
+            "artifact_object_keys": artifact.artifact_object_keys,
         },
         artifact_manifest={
-            "artifact_storage_prefix": artifact_storage_prefix,
-            "deck_object_key": deck_object_key,
-            "source_notes_object_key": source_notes_object_key,
-            "source_notes_html_object_key": source_notes_html_object_key,
-            "artifact_object_keys": artifact_object_keys,
+            "artifact_storage_prefix": artifact.storage_prefix,
+            "deck_object_key": artifact.deck_object_key,
+            "source_notes_object_key": artifact.source_notes_object_key,
+            "source_notes_html_object_key": artifact.source_notes_html_object_key,
+            "artifact_object_keys": artifact.artifact_object_keys,
         },
     )
-    deck.updated_at = utcnow()
-    db.commit()
-
-    new_keys = set(coerce_string_list(artifact_object_keys))
-    stale_keys = [key for key in old_keys if key not in new_keys]
-    if stale_keys:
-        delete_learning_deck_objects(stale_keys)
+    commit_learning_deck_artifact_promotion(
+        db,
+        deck,
+        artifact=artifact,
+        latest_run_id=run_id,
+        title=title,
+        source_metadata=source_metadata,
+    )
 
 
 def _with_submission_metadata(
@@ -514,15 +551,7 @@ def _active_learning_deck_task(db: Session, *, user_id: int) -> LlmTask | None:
         .filter(
             LlmTask.user_id == user_id,
             LlmTask.task_kind == LlmTaskKind.LEARNING_DECK.value,
-            LlmTask.status.in_(
-                {
-                    LlmTaskStatus.QUEUED.value,
-                    LlmTaskStatus.PREPARING.value,
-                    LlmTaskStatus.RUNNING.value,
-                    LlmTaskStatus.AWAITING_APPROVAL.value,
-                    LlmTaskStatus.APPLYING.value,
-                }
-            ),
+            LlmTask.status.in_(ACTIVE_LLM_TASK_STATUSES),
         )
         .order_by(desc(LlmTask.created_at), desc(LlmTask.id))
         .first()

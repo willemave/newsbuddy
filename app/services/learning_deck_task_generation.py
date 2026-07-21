@@ -23,12 +23,14 @@ from app.services.learning_deck_agent import (
 )
 from app.services.learning_deck_artifacts import (
     LearningDeckArtifactError,
+    delete_learning_deck_objects,
     render_source_notes_html,
     store_learning_deck_agent_log,
     store_learning_deck_artifact,
 )
 from app.services.learning_deck_common import LearningDeckSourceNotReady, require_int_value
 from app.services.learning_deck_generation import LearningDeckGenerationWaiting
+from app.services.learning_deck_publication import commit_learning_deck_artifact_promotion
 from app.services.learning_deck_sources import (
     build_content_source_snapshot_for_deck,
     build_github_source_snapshot_for_deck,
@@ -41,6 +43,11 @@ from app.services.llm_tasks import (
 )
 
 SOURCE_WAIT_DEADLINE = timedelta(hours=2)
+TERMINAL_LLM_TASK_STATUSES = {
+    LlmTaskStatus.COMPLETED.value,
+    LlmTaskStatus.FAILED.value,
+    LlmTaskStatus.CANCELLED.value,
+}
 
 
 def run_learning_deck_task(
@@ -54,14 +61,16 @@ def run_learning_deck_task(
     task = db.query(LlmTask).filter(LlmTask.id == llm_task_id).first()
     if task is None or task.task_kind != LlmTaskKind.LEARNING_DECK.value:
         raise LlmTaskError("Learning Deck LLM task not found")
-    if task.status == LlmTaskStatus.COMPLETED.value:
+    if task.status in TERMINAL_LLM_TASK_STATUSES:
         return task
     if task.subject_id is None:
         _fail_task(db, task, "invalid_subject", "Learning Deck task is missing subject_id")
 
     deck = db.query(LearningDeck).filter(LearningDeck.id == task.subject_id).first()
-    if deck is None or deck.deleted_at is not None:
+    if deck is None:
         _fail_task(db, task, "deck_not_found", "Learning Deck not found")
+    if deck.deleted_at is not None:
+        return _cancel_task(db, task, "Learning Deck was deleted")
 
     _set_status(db, task, deck, LlmTaskStatus.PREPARING, "Preparing source material")
     try:
@@ -95,6 +104,14 @@ def run_learning_deck_task(
             run_id=task_id,
             llm_task=task,
         )
+        publish_state = _reload_publishable_state(
+            db,
+            task_id=task_id,
+            deck_id=deck_id,
+        )
+        if publish_state is None:
+            return _reload_task(db, task_id)
+        task, deck = publish_state
         _store_agent_log(db, task, deck, result.agent_log_events)
         set_llm_task_status(
             db,
@@ -148,17 +165,17 @@ def run_learning_deck_task(
         db.rollback()
         _fail_task(db, task, type(exc).__name__, str(exc))
 
-    deck.artifact_storage_prefix = stored.storage_prefix
-    deck.deck_object_key = stored.deck_object_key
-    deck.source_notes_object_key = stored.source_notes_object_key
-    deck.source_notes_html_object_key = stored.source_notes_html_object_key
-    deck.artifact_object_keys = stored.artifact_object_keys
-    deck.latest_task_id = task_id
-    deck.latest_successful_task_id = task_id
-    deck.updated_at = utcnow()
-    source_metadata = dict(deck.source_metadata or {})
-    source_metadata.update(result.source_metadata_updates)
-    deck.source_metadata = source_metadata
+    publish_state = _reload_publishable_state(
+        db,
+        task_id=task_id,
+        deck_id=deck_id,
+        lock_deck=True,
+    )
+    if publish_state is None:
+        delete_learning_deck_objects(stored.artifact_object_keys)
+        return _reload_task(db, task_id)
+    task, deck = publish_state
+
     set_llm_task_status(
         db,
         task,
@@ -180,7 +197,13 @@ def run_learning_deck_task(
             "artifact_object_keys": stored.artifact_object_keys,
         },
     )
-    db.commit()
+    commit_learning_deck_artifact_promotion(
+        db,
+        deck,
+        artifact=stored,
+        latest_task_id=task_id,
+        source_metadata=result.source_metadata_updates,
+    )
     return task
 
 
@@ -212,6 +235,52 @@ def _fail_task(db: Session, task: LlmTask, error_type: str, message: str) -> NoR
     )
     db.commit()
     raise LlmTaskError(message)
+
+
+def _cancel_task(db: Session, task: LlmTask, message: str) -> LlmTask:
+    if task.status not in TERMINAL_LLM_TASK_STATUSES:
+        set_llm_task_status(
+            db,
+            task,
+            status=LlmTaskStatus.CANCELLED,
+            workflow_state=LlmWorkflowState.CANCELLED,
+            note=message,
+            error_type="deck_deleted",
+            error_message=message,
+        )
+        db.commit()
+    return task
+
+
+def _reload_publishable_state(
+    db: Session,
+    *,
+    task_id: int,
+    deck_id: int,
+    lock_deck: bool = False,
+) -> tuple[LlmTask, LearningDeck] | None:
+    deck_query = db.query(LearningDeck).filter(LearningDeck.id == deck_id)
+    if lock_deck:
+        deck_query = deck_query.with_for_update()
+    deck = deck_query.populate_existing().first()
+    task = db.query(LlmTask).filter(LlmTask.id == task_id).populate_existing().first()
+    if task is None:
+        raise LlmTaskError("Learning Deck LLM task not found")
+    if task.status in TERMINAL_LLM_TASK_STATUSES:
+        return None
+    if deck is None:
+        _fail_task(db, task, "deck_not_found", "Learning Deck not found")
+    if deck.deleted_at is not None:
+        _cancel_task(db, task, "Learning Deck was deleted")
+        return None
+    return task, deck
+
+
+def _reload_task(db: Session, task_id: int) -> LlmTask:
+    task = db.query(LlmTask).filter(LlmTask.id == task_id).populate_existing().first()
+    if task is None:
+        raise LlmTaskError("Learning Deck LLM task not found")
+    return task
 
 
 def _build_source_snapshot(db: Session, deck: LearningDeck) -> dict[str, Any]:
