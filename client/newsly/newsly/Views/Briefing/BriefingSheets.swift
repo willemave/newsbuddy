@@ -174,3 +174,138 @@ struct BriefingSourceSheet: View {
         }
     }
 }
+
+struct BriefingNarrationChapterSheetItem: Identifiable {
+    let lensKey: String
+    let episodeGroupID: String
+
+    var id: String { episodeGroupID }
+}
+
+struct BriefingNarrationChapterSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let narration: BriefingNarration
+    let selectedIndex: Int
+    let isPreparing: Bool
+    let onSelect: (Int) -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(
+                        Array(narration.chapters.enumerated()),
+                        id: \.element.id
+                    ) { index, chapter in
+                        Button {
+                            onSelect(index)
+                            dismiss()
+                        } label: {
+                            chapterRow(chapter, index: index)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(chapterAccessibilityLabel(chapter, index: index))
+                        .accessibilityIdentifier("briefing.narration.chapter.\(index + 1)")
+
+                        if index < narration.chapters.count - 1 {
+                            Divider()
+                                .padding(.leading, 52)
+                        }
+                    }
+                }
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.bottom, 24)
+            }
+            .background(Color.surfacePrimary)
+            .navigationTitle("Chapters")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .accessibilityIdentifier("briefing.narration.chapter_sheet")
+        }
+    }
+
+    private func chapterRow(_ chapter: AudioEpisode, index: Int) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.terracottaPrimary.opacity(index == selectedIndex ? 0.16 : 0.09))
+                    .frame(width: 36, height: 36)
+
+                chapterStatusIcon(chapter, index: index)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Chapter \(index + 1)")
+                    .font(
+                        .appCallout.weight(index == selectedIndex ? .semibold : .regular)
+                    )
+                    .foregroundStyle(Color.onSurface)
+
+                Text(chapterDetail(chapter))
+                    .font(.appCaption)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+            }
+
+            Spacer(minLength: 8)
+
+            if index == selectedIndex {
+                Image(systemName: "checkmark")
+                    .font(.appSymbol(size: 12, weight: .bold))
+                    .foregroundStyle(Color.terracottaPrimary)
+            }
+        }
+        .frame(minHeight: 58)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func chapterStatusIcon(_ chapter: AudioEpisode, index: Int) -> some View {
+        if isPreparing && index == selectedIndex {
+            ProgressView()
+                .controlSize(.small)
+                .tint(Color.terracottaPrimary)
+        } else {
+            Image(systemName: chapterStatusSystemName(chapter))
+                .font(.appSymbol(size: 12, weight: .semibold))
+                .foregroundStyle(
+                    chapter.isFailed ? Color.statusDestructive : Color.terracottaPrimary
+                )
+        }
+    }
+
+    private func chapterStatusSystemName(_ chapter: AudioEpisode) -> String {
+        if chapter.isCompleted {
+            return "play.fill"
+        }
+        if chapter.isFailed {
+            return "arrow.clockwise"
+        }
+        return "clock"
+    }
+
+    private func chapterDetail(_ chapter: AudioEpisode) -> String {
+        var parts: [String] = []
+        if let duration = chapter.durationSeconds, duration > 0 {
+            parts.append("~\(max(1, Int((Double(duration) / 60).rounded()))) min")
+        }
+        let sourceNoun = chapter.sourceCount == 1 ? "source" : "sources"
+        parts.append("\(chapter.sourceCount) \(sourceNoun)")
+        if chapter.isGenerating {
+            parts.append("preparing")
+        } else if chapter.isFailed {
+            parts.append("tap to retry")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func chapterAccessibilityLabel(_ chapter: AudioEpisode, index: Int) -> String {
+        "Chapter \(index + 1) of \(narration.chapters.count), \(chapterDetail(chapter))"
+    }
+}

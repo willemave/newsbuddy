@@ -33,7 +33,8 @@ protocol BriefingServicing: AnyObject {
         passageContext: String,
         results: [APIBriefingDigSearchResult]
     ) async throws -> APIBriefingDigSummarizeResponse
-    func requestNarration(lensKey: String) async throws -> AudioEpisode
+    func requestNarration(lensKey: String) async throws -> BriefingNarration
+    func fetchNarration(episodeGroupID: String) async throws -> BriefingNarration
 }
 
 final class LiveBriefingService: BriefingServicing {
@@ -169,12 +170,18 @@ final class LiveBriefingService: BriefingServicing {
         )
     }
 
-    func requestNarration(lensKey: String) async throws -> AudioEpisode {
+    func requestNarration(lensKey: String) async throws -> BriefingNarration {
         let body = try encoder.encode(APIBriefingNarrationRequest(lensKey: lensKey))
         return try await apiClient.request(
             APIEndpoints.briefingNarration,
             method: "POST",
             body: body
+        )
+    }
+
+    func fetchNarration(episodeGroupID: String) async throws -> BriefingNarration {
+        try await apiClient.request(
+            APIEndpoints.briefingNarration(episodeGroupID: episodeGroupID)
         )
     }
 }

@@ -511,7 +511,8 @@ final class TabCoordinatorViewModelTests: XCTestCase {
     private func makeTabBriefingViewModel() -> BriefingViewModel {
         BriefingViewModel(
             service: LiveBriefingService(),
-            audioEpisodeService: AudioEpisodeService.shared
+            audioEpisodeService: AudioEpisodeService.shared,
+            playbackService: NarrationPlaybackService.shared
         )
     }
 

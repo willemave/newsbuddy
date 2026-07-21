@@ -2617,6 +2617,66 @@ struct APIBriefingNarrationRequest: Codable {
     }
 }
 
+struct APIBriefingNarrationResponse: Codable {
+    let episodeGroupId: String
+    let lensKey: String
+    let title: String
+    let status: APIAudioEpisodeStatus
+    let playable: Bool
+    let durationSeconds: Int
+    let chapters: [APIAudioEpisodeResponse]
+
+    init(
+        episodeGroupId: String,
+        lensKey: String,
+        title: String,
+        status: APIAudioEpisodeStatus,
+        playable: Bool,
+        durationSeconds: Int,
+        chapters: [APIAudioEpisodeResponse]
+    ) {
+        self.episodeGroupId = episodeGroupId
+        self.lensKey = lensKey
+        self.title = title
+        self.status = status
+        self.playable = playable
+        self.durationSeconds = durationSeconds
+        self.chapters = chapters
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case episodeGroupId = "episode_group_id"
+        case lensKey = "lens_key"
+        case title = "title"
+        case status = "status"
+        case playable = "playable"
+        case durationSeconds = "duration_seconds"
+        case chapters = "chapters"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        episodeGroupId = try container.decode(String.self, forKey: .episodeGroupId)
+        lensKey = try container.decode(String.self, forKey: .lensKey)
+        title = try container.decode(String.self, forKey: .title)
+        status = try container.decode(APIAudioEpisodeStatus.self, forKey: .status)
+        playable = try container.decode(Bool.self, forKey: .playable)
+        durationSeconds = try container.decode(Int.self, forKey: .durationSeconds)
+        chapters = try container.decode([APIAudioEpisodeResponse].self, forKey: .chapters)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(episodeGroupId, forKey: .episodeGroupId)
+        try container.encode(lensKey, forKey: .lensKey)
+        try container.encode(title, forKey: .title)
+        try container.encode(status, forKey: .status)
+        try container.encode(playable, forKey: .playable)
+        try container.encode(durationSeconds, forKey: .durationSeconds)
+        try container.encode(chapters, forKey: .chapters)
+    }
+}
+
 struct APIBriefingRefreshResponse: Codable {
     let enqueued: Bool
     let version: Int

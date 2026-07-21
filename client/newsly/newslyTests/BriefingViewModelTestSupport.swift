@@ -37,18 +37,21 @@ final class MockBriefingService: BriefingServicing {
     var digSummarizePassageContexts: [String] = []
     var digSummaries: [String] = []
     private(set) var refreshRequestCount = 0
-    var narrationEpisode: AudioEpisode?
-    var narrationEpisodes: [AudioEpisode] = []
+    var narrationManifest: BriefingNarration?
+    var narrationManifests: [BriefingNarration] = []
+    var narrationFetchResults: [Result<BriefingNarration, Error>] = []
     var narrationError: Error?
     var narrationRequestDelayNanoseconds: UInt64?
     var narrationWaitsForCancellation = false
     var narrationLensKeys: [String] = []
+    var narrationFetchEpisodeGroupIDs: [String] = []
     private(set) var narrationCancellationCount = 0
     var firstRunCompletionFailuresRemaining = 0
     private(set) var firstRunCompletionCount = 0
 
     private var refreshContinuation: CheckedContinuation<Void, Never>?
     private var markReadContinuation: CheckedContinuation<Void, Never>?
+    private var latestNarration: BriefingNarration?
 
     func fetchIndex(ifNoneMatch etag: String?) async throws -> BriefingIndexFetchResult {
         indexEtags.append(etag)
@@ -170,7 +173,7 @@ final class MockBriefingService: BriefingServicing {
         return APIBriefingDigSummarizeResponse(summary: summary, model: "test", elapsedMs: 0)
     }
 
-    func requestNarration(lensKey: String) async throws -> AudioEpisode {
+    func requestNarration(lensKey: String) async throws -> BriefingNarration {
         narrationLensKeys.append(lensKey)
         if let narrationRequestDelayNanoseconds {
             try await Task.sleep(nanoseconds: narrationRequestDelayNanoseconds)
@@ -186,30 +189,88 @@ final class MockBriefingService: BriefingServicing {
         if let narrationError {
             throw narrationError
         }
-        if !narrationEpisodes.isEmpty {
-            return narrationEpisodes.removeFirst()
+        let narration: BriefingNarration
+        if !narrationManifests.isEmpty {
+            narration = narrationManifests.removeFirst()
+        } else if let narrationManifest {
+            narration = narrationManifest
+        } else {
+            throw NSError(domain: "MockBriefingService", code: 2)
         }
-        return narrationEpisode ?? makeAudioEpisode(id: 1)
+        latestNarration = narration
+        return narration
+    }
+
+    func fetchNarration(episodeGroupID: String) async throws -> BriefingNarration {
+        narrationFetchEpisodeGroupIDs.append(episodeGroupID)
+        if !narrationFetchResults.isEmpty {
+            let narration = try narrationFetchResults.removeFirst().get()
+            guard narration.episodeGroupId == episodeGroupID else {
+                throw NSError(domain: "MockBriefingService", code: 3)
+            }
+            latestNarration = narration
+            return narration
+        }
+        guard let latestNarration,
+              latestNarration.episodeGroupId == episodeGroupID else {
+            throw NSError(domain: "MockBriefingService", code: 3)
+        }
+        return latestNarration
     }
 }
 
 @MainActor
 final class MockBriefingAudioEpisodeService: BriefingAudioEpisodeServicing {
-    var waitResults: [Result<AudioEpisode, Error>] = []
-    private(set) var waitedEpisodeIDs: [Int] = []
-
-    func waitForCompletedEpisode(
-        _ episode: AudioEpisode,
-        pollIntervalNanoseconds: UInt64,
-        maxAttempts: Int
-    ) async throws -> AudioEpisode {
-        waitedEpisodeIDs.append(episode.id)
-        guard !waitResults.isEmpty else { return episode }
-        return try waitResults.removeFirst().get()
-    }
+    private(set) var streamedEpisodeIDs: [Int] = []
 
     func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource {
-        throw AudioEpisodeServiceError.missingStreamResource
+        streamedEpisodeIDs.append(episode.id)
+        return AuthorizedMediaResource(
+            url: URL(string: "https://example.test/audio/\(episode.id)")!,
+            headers: [:]
+        )
+    }
+}
+
+@MainActor
+final class MockBriefingNarrationPlaybackService: BriefingNarrationPlaybackControlling {
+    private(set) var isSpeaking = false
+    private(set) var playbackRate: Float = 1
+    private(set) var speakingTarget: NarrationTarget?
+    private(set) var playedTargets: [NarrationTarget] = []
+    private var finishedHandler: NarrationPlaybackFinishedHandler?
+
+    func pause() {
+        isSpeaking = false
+    }
+
+    func stop() {
+        isSpeaking = false
+        speakingTarget = nil
+        finishedHandler = nil
+    }
+
+    func playStreamingNarration(
+        for target: NarrationTarget,
+        rate: Float,
+        onFinished: NarrationPlaybackFinishedHandler?,
+        fetchStreamResource: () async throws -> AuthorizedMediaResource
+    ) async throws {
+        _ = try await fetchStreamResource()
+        playbackRate = rate
+        speakingTarget = target
+        isSpeaking = true
+        playedTargets.append(target)
+        finishedHandler = onFinished
+    }
+
+    func finishCurrent() {
+        guard let target = speakingTarget else { return }
+        let handler = finishedHandler
+        isSpeaking = false
+        speakingTarget = nil
+        finishedHandler = nil
+        handler?(target)
     }
 }
 
@@ -245,6 +306,7 @@ extension BriefingViewModel {
         self.init(
             service: service,
             audioEpisodeService: MockBriefingAudioEpisodeService(),
+            playbackService: MockBriefingNarrationPlaybackService(),
             snapshotStore: snapshotStore,
             refreshPollDelays: refreshPollDelays,
             firstRunCompletionRetryDelay: firstRunCompletionRetryDelay,
@@ -430,5 +492,33 @@ func makeAudioEpisode(
         sourceTitles: ["Long report"],
         errorMessage: errorMessage,
         createdAt: Date(timeIntervalSince1970: 1_800_000_200)
+    )
+}
+
+func makeBriefingNarration(
+    lensKey: String = "today",
+    episodeGroupID: String = "briefing-group",
+    chapters: [AudioEpisode]
+) -> BriefingNarration {
+    let firstStatus = chapters.first?.status
+    let playable = chapters.first?.isCompleted == true
+    let status: APIAudioEpisodeStatus
+    if !chapters.isEmpty, chapters.allSatisfy(\.isCompleted) {
+        status = .completed
+    } else if firstStatus == .failed {
+        status = .failed
+    } else if playable || chapters.contains(where: \.isGenerating) {
+        status = .processing
+    } else {
+        status = .pending
+    }
+    return BriefingNarration(
+        episodeGroupId: episodeGroupID,
+        lensKey: lensKey,
+        title: "Today briefing",
+        status: status,
+        playable: playable,
+        durationSeconds: chapters.compactMap(\.durationSeconds).reduce(0, +),
+        chapters: chapters
     )
 }

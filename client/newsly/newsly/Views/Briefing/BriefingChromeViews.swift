@@ -283,3 +283,104 @@ struct BriefingListenButton: View {
         return isPlaying ? "Pause briefing audio" : "Play briefing audio"
     }
 }
+
+/// Chapter navigation sits above the shared playback row: previous/next are
+/// immediate, while the center label opens the full chapter list.
+struct BriefingNarrationChapterControls: View {
+    let narration: BriefingNarration
+    let selectedIndex: Int
+    let playbackService: NarrationPlaybackService
+    let target: NarrationTarget?
+    let isPreparing: Bool
+    let onPrevious: () -> Void
+    let onShowChapters: () -> Void
+    let onNext: () -> Void
+    let onTogglePlayback: () -> Void
+
+    private var boundedIndex: Int {
+        guard !narration.chapters.isEmpty else { return 0 }
+        return min(max(selectedIndex, 0), narration.chapters.count - 1)
+    }
+
+    private var selectedChapter: AudioEpisode? {
+        guard narration.chapters.indices.contains(boundedIndex) else { return nil }
+        return narration.chapters[boundedIndex]
+    }
+
+    var body: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 6) {
+                chapterNavigationButton(
+                    systemName: "chevron.left",
+                    accessibilityLabel: "Previous chapter",
+                    isDisabled: boundedIndex == 0,
+                    action: onPrevious
+                )
+
+                Button(action: onShowChapters) {
+                    HStack(spacing: 5) {
+                        Text(chapterLabel)
+                            .font(.appCaption.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        Image(systemName: "chevron.down")
+                            .font(.appSymbol(size: 9, weight: .bold))
+                    }
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Choose chapter. \(chapterLabel)")
+                .accessibilityIdentifier("briefing.narration.chapters")
+
+                chapterNavigationButton(
+                    systemName: "chevron.right",
+                    accessibilityLabel: "Next chapter",
+                    isDisabled: boundedIndex >= narration.chapters.count - 1,
+                    action: onNext
+                )
+            }
+            .padding(.horizontal, 6)
+
+            NarrationPlaybackControlRow(
+                playbackService: playbackService,
+                target: target,
+                isPreparing: isPreparing,
+                onTogglePlayback: onTogglePlayback
+            )
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.outlineVariant.opacity(0.5), lineWidth: 1)
+        }
+    }
+
+    private var chapterLabel: String {
+        let count = narration.chapters.count
+        guard count > 0 else { return "Chapters" }
+        let duration = selectedChapter?.durationSeconds ?? 0
+        let roundedMinutes = max(1, Int((Double(duration) / 60).rounded()))
+        let durationLabel = duration > 0 ? " · ~\(roundedMinutes) min" : ""
+        return "Chapter \(boundedIndex + 1) of \(count)\(durationLabel)"
+    }
+
+    private func chapterNavigationButton(
+        systemName: String,
+        accessibilityLabel: String,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.appSymbol(size: 12, weight: .semibold))
+                .foregroundStyle(Color.terracottaPrimary)
+                .frame(width: 44, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled || isPreparing)
+        .opacity(isDisabled ? 0.35 : 1)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}

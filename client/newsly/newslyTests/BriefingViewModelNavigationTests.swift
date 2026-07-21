@@ -21,7 +21,7 @@ final class BriefingViewModelNavigationTests: XCTestCase {
         XCTAssertEqual(service.fetchLensKeys, ["news-0", "news-1"])
     }
 
-    func testFixedLensDoesNotPrefetchUnrelatedTiers() async {
+    func testFixedLensPrefetchesAdjacentNewsPage() async {
         let service = MockBriefingService()
         let fixed = makeLensSummary(key: "articles", position: 0, tier: .longform)
         let news = makeLensSummary(key: "news", position: 1)
@@ -34,7 +34,7 @@ final class BriefingViewModelNavigationTests: XCTestCase {
         await waitForBriefingCondition { viewModel.selectedLens != nil }
         try? await Task.sleep(nanoseconds: 50_000_000)
 
-        XCTAssertEqual(service.fetchLensKeys, ["articles"])
+        XCTAssertEqual(service.fetchLensKeys, ["articles", "news"])
     }
 
     func testLatestIndexResponseIsAuthoritativeEvenWhenVersionIsLower() async {
@@ -88,7 +88,7 @@ final class BriefingViewModelNavigationTests: XCTestCase {
         XCTAssertFalse(viewModel.isMastheadCompact)
     }
 
-    func testLensesGroupByTierAndPagerScopesToNewsCategories() async {
+    func testLensesGroupByTierAndPagerCrossesAllAreas() async {
         let service = MockBriefingService()
         service.indexResults = [
             .value(
@@ -110,11 +110,15 @@ final class BriefingViewModelNavigationTests: XCTestCase {
         XCTAssertEqual(viewModel.fixedLenses.map(\.key), ["podcasts", "articles"])
         XCTAssertEqual(viewModel.newsUnreadSourceCount, 4)
         XCTAssertTrue(viewModel.isNewsTierSelected)
-        XCTAssertEqual(viewModel.pagerLenses.map(\.key), ["news-tech", "news-world"])
+        let expectedPagerKeys = ["news-tech", "news-world", "podcasts", "articles"]
+        XCTAssertEqual(viewModel.pagerLenses.map(\.key), expectedPagerKeys)
 
         viewModel.selectLens(key: "podcasts")
         XCTAssertFalse(viewModel.isNewsTierSelected)
-        XCTAssertEqual(viewModel.pagerLenses.map(\.key), ["podcasts"])
+        XCTAssertEqual(viewModel.pagerLenses.map(\.key), expectedPagerKeys)
+
+        viewModel.selectLens(key: "articles")
+        XCTAssertEqual(viewModel.pagerLenses.map(\.key), expectedPagerKeys)
     }
 
     func testSelectNewsTierPicksFirstCategoryThenRemembersLastRead() async {

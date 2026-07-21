@@ -1,10 +1,4 @@
-import os.log
 import SwiftUI
-
-private let briefingNarrationLogger = Logger(
-    subsystem: "com.newsly",
-    category: "BriefingNarration"
-)
 
 private struct BriefingMarkAllReadPrompt: Identifiable {
     let lensKey: String
@@ -30,13 +24,13 @@ private enum BriefingViewAlert: Identifiable {
 
 struct BriefingView: View {
     @ObservedObject var viewModel: BriefingViewModel
+    private let narrationController: BriefingNarrationController
 
     @Environment(\.dynamicTypeSize) private var contentTextSize
     @StateObject private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
     @State private var playbackService = NarrationPlaybackService.shared
     @State private var activeSource: BriefingSourceSheetItem?
-    @State private var preparingNarrationLensKeys: Set<String> = []
-    @State private var narrationError: String?
+    @State private var activeNarrationChapters: BriefingNarrationChapterSheetItem?
     @State private var chromeCollapse = BriefingChromeCollapseModel()
     @State private var mastheadHeight: CGFloat = 0
     @State private var categoryStripHeight: CGFloat = 0
@@ -44,6 +38,11 @@ struct BriefingView: View {
     @State private var activeAlert: BriefingViewAlert?
     @State private var markingCategoryTitle: String?
     @State private var markAllReadFeedbackTrigger = 0
+
+    init(viewModel: BriefingViewModel) {
+        self.viewModel = viewModel
+        self.narrationController = viewModel.narrationController
+    }
 
     private var digSheetPresented: Binding<Bool> {
         Binding(
@@ -155,6 +154,25 @@ struct BriefingView: View {
             .presentationContentInteraction(.resizes)
             .presentationDragIndicator(.visible)
         }
+        .sheet(item: $activeNarrationChapters) { item in
+            if let narration = narrationController.narration(for: item.lensKey) {
+                BriefingNarrationChapterSheet(
+                    narration: narration,
+                    selectedIndex: narrationController.narrationChapterIndex(for: item.lensKey),
+                    isPreparing: narrationController.session(for: item.lensKey).isPreparing,
+                    onSelect: { chapterIndex in
+                        Task {
+                            await narrationController.playChapter(
+                                at: chapterIndex,
+                                for: item.lensKey
+                            )
+                        }
+                    }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+        }
         .sheet(isPresented: digSheetPresented) {
             BriefingDigSheet(viewModel: digViewModel)
                 .presentationDetents([.fraction(0.75), .large])
@@ -177,6 +195,7 @@ struct BriefingView: View {
                     ForEach(viewModel.pagerLenses, id: \.key) { lens in
                         BriefingLensPageView(
                             lensKey: lens.key,
+                            lensTitle: lens.title,
                             renderModel: viewModel.renderModel(for: lens.key),
                             isReadTrackingEnabled: viewModel.isActive
                                 && viewModel.selectedLensKey == lens.key,
@@ -208,7 +227,6 @@ struct BriefingView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .id(viewModel.isNewsTierSelected ? "tier:news" : "lens:\(viewModel.selectedLensKey ?? "")")
                 .accessibilityIdentifier("briefing.lens_pager")
             }
 
@@ -354,10 +372,10 @@ struct BriefingView: View {
 
     private func listenAccessory(lensKey: String) -> some View {
         BriefingListenButton(
-            isPreparing: preparingNarrationLensKeys.contains(lensKey),
-            isPlaying: isNarrationPlaying(lensKey: lensKey),
+            isPreparing: narrationController.session(for: lensKey).isPreparing,
+            isPlaying: narrationController.isPlaying(lensKey: lensKey),
             onToggle: {
-                Task { await toggleNarration(lensKey: lensKey) }
+                Task { await narrationController.togglePlayback(for: lensKey) }
             }
         )
     }
@@ -366,44 +384,79 @@ struct BriefingView: View {
     /// lens is preparing or active, so the resting chrome stays quiet.
     @ViewBuilder
     private func listenPanel(lensKey: String) -> some View {
-        let isPreparing = preparingNarrationLensKeys.contains(lensKey)
-        let target = viewModel.narrationEpisode(for: lensKey)
+        let session = narrationController.session(for: lensKey)
+        let isPreparing = session.isPreparing
+        let narration = session.manifest
+        let chapterIndex = session.selectedChapterIndex
+        let target = narrationController.narrationEpisode(for: lensKey)
             .map { NarrationTarget.audioEpisode($0.id) }
         let isActive = isPreparing || (target != nil && target == playbackService.speakingTarget)
 
-        if narrationError != nil || isActive {
+        if session.errorMessage != nil || isActive {
             VStack(alignment: .leading, spacing: 8) {
-                if let narrationError {
-                    Text(narrationError)
+                if let errorMessage = session.errorMessage {
+                    Text(errorMessage)
                         .font(.appCaption)
                         .foregroundStyle(Color.statusDestructive)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 if isActive {
-                    NarrationPlaybackControlRow(
-                        playbackService: playbackService,
-                        target: target,
-                        isPreparing: isPreparing,
-                        onTogglePlayback: {
-                            Task { await toggleNarration(lensKey: lensKey) }
+                    if let narration {
+                        BriefingNarrationChapterControls(
+                            narration: narration,
+                            selectedIndex: chapterIndex,
+                            playbackService: playbackService,
+                            target: target,
+                            isPreparing: isPreparing,
+                            onPrevious: {
+                                Task {
+                                    await narrationController.playChapter(
+                                        at: chapterIndex - 1,
+                                        for: lensKey
+                                    )
+                                }
+                            },
+                            onShowChapters: {
+                                activeNarrationChapters = BriefingNarrationChapterSheetItem(
+                                    lensKey: lensKey,
+                                    episodeGroupID: narration.episodeGroupId
+                                )
+                                Task {
+                                    await narrationController.refresh(for: lensKey)
+                                }
+                            },
+                            onNext: {
+                                Task {
+                                    await narrationController.playChapter(
+                                        at: chapterIndex + 1,
+                                        for: lensKey
+                                    )
+                                }
+                            },
+                            onTogglePlayback: {
+                                Task { await narrationController.togglePlayback(for: lensKey) }
+                            }
+                        )
+                    } else {
+                        NarrationPlaybackControlRow(
+                            playbackService: playbackService,
+                            target: target,
+                            isPreparing: isPreparing,
+                            onTogglePlayback: {
+                                Task { await narrationController.togglePlayback(for: lensKey) }
+                            }
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.outlineVariant.opacity(0.5), lineWidth: 1)
                         }
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(Color.outlineVariant.opacity(0.5), lineWidth: 1)
                     }
                 }
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.bottom, 10)
         }
-    }
-
-    private func isNarrationPlaying(lensKey: String) -> Bool {
-        guard let episode = viewModel.narrationEpisode(for: lensKey) else { return false }
-        return playbackService.speakingTarget == .audioEpisode(episode.id)
-            && playbackService.isSpeaking
     }
 
     private var emptyState: some View {
@@ -471,35 +524,4 @@ struct BriefingView: View {
             .map(\.id)
     }
 
-    private func toggleNarration(lensKey: String) async {
-        narrationError = nil
-        let target = viewModel.narrationEpisode(for: lensKey).map { NarrationTarget.audioEpisode($0.id) }
-        if let target,
-           playbackService.speakingTarget == target,
-           playbackService.isSpeaking {
-            playbackService.pause()
-            return
-        }
-
-        preparingNarrationLensKeys.insert(lensKey)
-        defer { preparingNarrationLensKeys.remove(lensKey) }
-
-        do {
-            let episode = try await viewModel.prepareNarration(for: lensKey)
-            try await playbackService.playStreamingNarration(
-                for: .audioEpisode(episode.id),
-                rate: playbackService.playbackRate
-            ) {
-                try await viewModel.narrationStreamResource(for: episode)
-            }
-        } catch where isNetworkCancellation(error) {
-            return
-        } catch {
-            briefingNarrationLogger.error(
-                "Narration playback failed | lensKey=\(lensKey, privacy: .public) error=\(error.localizedDescription, privacy: .private)"
-            )
-            narrationError = (error as? AudioEpisodeServiceError)?.userFacingMessage
-                ?? AudioEpisodeServiceError.generationFailed.userFacingMessage
-        }
-    }
 }

@@ -422,6 +422,7 @@ enum RootDependencyFactory {
         let briefingViewModel = BriefingViewModel(
             service: LiveBriefingService(),
             audioEpisodeService: AudioEpisodeService.shared,
+            playbackService: NarrationPlaybackService.shared,
             snapshotStore: userID.map { BriefingSnapshotStore(userID: $0) }
         )
 

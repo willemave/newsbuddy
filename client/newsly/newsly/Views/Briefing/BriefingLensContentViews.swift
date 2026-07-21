@@ -195,6 +195,7 @@ struct BriefingLensPageView: View, Equatable {
     @Environment(\.displayScale) private var displayScale
 
     let lensKey: String
+    let lensTitle: String
     let renderModel: BriefingLensRenderModel?
     let isReadTrackingEnabled: Bool
     let readBoundaryY: CGFloat?
@@ -232,6 +233,7 @@ struct BriefingLensPageView: View, Equatable {
 
     static func == (lhs: BriefingLensPageView, rhs: BriefingLensPageView) -> Bool {
         lhs.lensKey == rhs.lensKey
+            && lhs.lensTitle == rhs.lensTitle
             && lhs.renderModel === rhs.renderModel
             && lhs.isReadTrackingEnabled == rhs.isReadTrackingEnabled
             && lhs.readBoundaryY == rhs.readBoundaryY
@@ -262,7 +264,13 @@ struct BriefingLensPageView: View, Equatable {
 
     var body: some View {
         Group {
-            if let renderModel {
+            if let renderModel, renderModel.segments.isEmpty, !renderModel.hasMore {
+                BriefingLensEmptyView(
+                    lensTitle: lensTitle,
+                    topContentInset: topContentInset,
+                    onRefresh: onRefresh
+                )
+            } else if let renderModel {
                 let firstSegmentID = renderModel.segments.first?.id
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24) {
@@ -397,6 +405,50 @@ struct BriefingLensPageView: View, Equatable {
                 .accessibilityLabel("Loading more briefing stories")
                 .accessibilityIdentifier("briefing.lens_continuation_loading.\(lensKey)")
         }
+    }
+}
+
+private struct BriefingLensEmptyView: View {
+    let lensTitle: String
+    let topContentInset: CGFloat
+    let onRefresh: () async -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("YOU'RE CAUGHT UP")
+                    .kicker()
+
+                Text("Nothing unread here.")
+                    .font(.appTitle)
+                    .foregroundStyle(Color.onSurface)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+
+                Text("New items in \(lensTitle) will appear here as your briefing updates.")
+                    .font(.appBody)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 14)
+
+                Text("Pull down to check again.")
+                    .font(.appCaption)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .padding(.top, 24)
+            }
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.top, 28)
+            .frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .contentMargins(.top, topContentInset)
+        .contentMargins(.bottom, 40)
+        .bottomScreenEdgeFade(fadeHeight: 32)
+        .refreshable {
+            await onRefresh()
+        }
+        .accessibilityIdentifier("briefing.lens_empty")
     }
 }
 

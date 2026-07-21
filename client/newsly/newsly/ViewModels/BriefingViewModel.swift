@@ -11,33 +11,12 @@ private enum BriefingDestination: Equatable {
     case lens(String)
 }
 
-protocol BriefingAudioEpisodeServicing: AnyObject {
-    func waitForCompletedEpisode(
-        _ episode: AudioEpisode,
-        pollIntervalNanoseconds: UInt64,
-        maxAttempts: Int
-    ) async throws -> AudioEpisode
-    func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource
-}
-
-extension AudioEpisodeService: BriefingAudioEpisodeServicing {}
-
 @MainActor
 final class BriefingViewModel: ObservableObject {
     enum TaskKey: Hashable {
         case lens(String)
         case readFlush
         case snapshotSave
-    }
-
-    private enum NarrationPreparationOutcome {
-        case ready(AudioEpisode)
-        case failed(Error, cachedEpisode: AudioEpisode?)
-    }
-
-    private struct NarrationPreparation {
-        let task: Task<Void, Never>
-        var waiters: [UUID: CheckedContinuation<AudioEpisode, Error>]
     }
 
     struct ReadVersionCompatibility {
@@ -69,7 +48,6 @@ final class BriefingViewModel: ObservableObject {
     @Published private(set) var state: LoadState = .idle
     @Published private(set) var refreshPhase: RefreshPhase = .idle
     @Published private var destination: BriefingDestination?
-    @Published private(set) var narrationEpisodes: [String: AudioEpisode] = [:]
     @Published private(set) var isActive = false
     /// True while the selected lens is scrolled into reading — the masthead
     /// above the pager collapses to hand the space to the content.
@@ -80,7 +58,7 @@ final class BriefingViewModel: ObservableObject {
     @Published private(set) var isCategoryStripExpanded = false
 
     let service: BriefingServicing
-    private let audioEpisodeService: any BriefingAudioEpisodeServicing
+    let narrationController: BriefingNarrationController
     private let snapshotStore: BriefingSnapshotStoring?
     private let indexSynchronizer: BriefingIndexSynchronizer
     private let firstRunCoordinator: BriefingFirstRunCoordinator
@@ -92,7 +70,6 @@ final class BriefingViewModel: ObservableObject {
     private var lensKeysBySourceKey: [String: Set<String>] = [:]
     var readVersionCompatibility: ReadVersionCompatibility?
     private var headerPinnedLensKeys: Set<String> = []
-    private var narrationPreparations: [String: NarrationPreparation] = [:]
     /// The news category to return to when the reader re-enters the news tier.
     private var lastNewsLensKey: String?
     /// Keeps the category strip open after an explicit News tap while the
@@ -103,14 +80,19 @@ final class BriefingViewModel: ObservableObject {
     init(
         service: BriefingServicing,
         audioEpisodeService: any BriefingAudioEpisodeServicing,
+        playbackService: any BriefingNarrationPlaybackControlling,
         snapshotStore: BriefingSnapshotStoring? = nil,
         refreshPollDelays: [UInt64] = briefingRefreshPollDelaysNanoseconds,
         firstRunCompletionRetryDelay: UInt64 = briefingFirstRunCompletionRetryNanoseconds,
         lensRetentionScheduler: (any BriefingLensRetentionScheduling)? = nil
     ) {
         self.service = service
-        self.audioEpisodeService = audioEpisodeService
         self.snapshotStore = snapshotStore
+        self.narrationController = BriefingNarrationController(
+            briefingService: service,
+            audioEpisodeService: audioEpisodeService,
+            playbackService: playbackService
+        )
         self.lensRetention = BriefingLensRetentionPolicy(
             scheduler: lensRetentionScheduler ?? BriefingLensRetentionScheduler()
         )
@@ -130,12 +112,6 @@ final class BriefingViewModel: ObservableObject {
 
     deinit {
         tasks.cancelAll()
-        for preparation in narrationPreparations.values {
-            preparation.task.cancel()
-            for continuation in preparation.waiters.values {
-                continuation.resume(throwing: CancellationError())
-            }
-        }
     }
 
     var selectedLens: APIBriefingLensResponse? {
@@ -185,14 +161,10 @@ final class BriefingViewModel: ObservableObject {
         newsLenses.reduce(0) { $0 + $1.unreadSourceCount }
     }
 
-    /// Pages the content pager swipes through: all news categories while the
-    /// news tier is active, otherwise just the selected fixed lens — swiping
-    /// never crosses from a category into podcasts or articles.
+    /// Pages the content pager swipes through: news categories followed by the
+    /// fixed podcast and article lenses, matching the top-level tier strip.
     var pagerLenses: [APIBriefingLensSummary] {
-        if isNewsTierSelected {
-            return newsLenses
-        }
-        return selectedLensSummary.map { [$0] } ?? []
+        newsLenses + fixedLenses
     }
 
     private var selectedLensSummary: APIBriefingLensSummary? {
@@ -377,168 +349,6 @@ final class BriefingViewModel: ObservableObject {
                 "Category read reconciliation failed | lens_key=\(lensKey, privacy: .public) version=\(response.version, privacy: .public) error=\(error.localizedDescription, privacy: .private)"
             )
         }
-    }
-
-    func narrationEpisode(for lensKey: String) -> AudioEpisode? {
-        narrationEpisodes[lensKey]
-    }
-
-    func prepareNarration(for lensKey: String) async throws -> AudioEpisode {
-        let waiterID = UUID()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                if Task.isCancelled {
-                    continuation.resume(throwing: CancellationError())
-                    return
-                }
-                registerNarrationPreparationWaiter(
-                    continuation,
-                    id: waiterID,
-                    for: lensKey
-                )
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.cancelNarrationPreparationWaiter(id: waiterID, for: lensKey)
-            }
-        }
-    }
-
-    private func registerNarrationPreparationWaiter(
-        _ continuation: CheckedContinuation<AudioEpisode, Error>,
-        id waiterID: UUID,
-        for lensKey: String
-    ) {
-        if var preparation = narrationPreparations[lensKey] {
-            preparation.waiters[waiterID] = continuation
-            narrationPreparations[lensKey] = preparation
-            return
-        }
-
-        let cachedEpisode = narrationEpisodes[lensKey]
-        let briefingService = service
-        let audioEpisodeService = audioEpisodeService
-        let task = Task { @MainActor [weak self] in
-            let outcome = await Self.prepareNarration(
-                for: lensKey,
-                cachedEpisode: cachedEpisode,
-                briefingService: briefingService,
-                audioEpisodeService: audioEpisodeService
-            )
-            self?.finishNarrationPreparation(outcome, for: lensKey)
-        }
-        narrationPreparations[lensKey] = NarrationPreparation(
-            task: task,
-            waiters: [waiterID: continuation]
-        )
-    }
-
-    func narrationStreamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource {
-        try await audioEpisodeService.streamResource(for: episode)
-    }
-
-    private static func prepareNarration(
-        for lensKey: String,
-        cachedEpisode: AudioEpisode?,
-        briefingService: any BriefingServicing,
-        audioEpisodeService: any BriefingAudioEpisodeServicing
-    ) async -> NarrationPreparationOutcome {
-        do {
-            var current: AudioEpisode
-            if let cachedEpisode, cachedEpisode.isCompleted {
-                return .ready(cachedEpisode)
-            } else if let cachedEpisode, cachedEpisode.isGenerating {
-                current = cachedEpisode
-            } else {
-                current = try await briefingService.requestNarration(lensKey: lensKey)
-                try Task.checkCancellation()
-            }
-
-            if current.isGenerating {
-                do {
-                    current = try await audioEpisodeService.waitForCompletedEpisode(
-                        current,
-                        pollIntervalNanoseconds: 1_500_000_000,
-                        maxAttempts: 120
-                    )
-                    try Task.checkCancellation()
-                } catch let error where isNetworkCancellation(error) {
-                    return .failed(error, cachedEpisode: cachedEpisode)
-                } catch let error as AudioEpisodeServiceError {
-                    switch error {
-                    case .generationFailed:
-                        return .failed(error, cachedEpisode: nil)
-                    case .preparationTimedOut, .missingStreamResource:
-                        return .failed(error, cachedEpisode: current)
-                    }
-                } catch {
-                    return .failed(error, cachedEpisode: current)
-                }
-            }
-
-            guard current.isCompleted else {
-                return .failed(
-                    AudioEpisodeServiceError.generationFailed,
-                    cachedEpisode: nil
-                )
-            }
-            return .ready(current)
-        } catch let error where isNetworkCancellation(error) {
-            return .failed(error, cachedEpisode: cachedEpisode)
-        } catch {
-            return .failed(error, cachedEpisode: cachedEpisode)
-        }
-    }
-
-    private func applyNarrationPreparation(
-        _ outcome: NarrationPreparationOutcome,
-        for lensKey: String
-    ) throws -> AudioEpisode {
-        switch outcome {
-        case .ready(let episode):
-            narrationEpisodes[lensKey] = episode
-            return episode
-        case .failed(let error, let cachedEpisode):
-            if let cachedEpisode {
-                narrationEpisodes[lensKey] = cachedEpisode
-            } else {
-                narrationEpisodes.removeValue(forKey: lensKey)
-            }
-            throw error
-        }
-    }
-
-    private func finishNarrationPreparation(
-        _ outcome: NarrationPreparationOutcome,
-        for lensKey: String
-    ) {
-        guard let preparation = narrationPreparations.removeValue(forKey: lensKey) else {
-            return
-        }
-        do {
-            let episode = try applyNarrationPreparation(outcome, for: lensKey)
-            for continuation in preparation.waiters.values {
-                continuation.resume(returning: episode)
-            }
-        } catch {
-            for continuation in preparation.waiters.values {
-                continuation.resume(throwing: error)
-            }
-        }
-    }
-
-    private func cancelNarrationPreparationWaiter(id waiterID: UUID, for lensKey: String) {
-        guard var preparation = narrationPreparations[lensKey],
-              let continuation = preparation.waiters.removeValue(forKey: waiterID) else {
-            return
-        }
-        continuation.resume(throwing: CancellationError())
-        if preparation.waiters.isEmpty {
-            narrationPreparations.removeValue(forKey: lensKey)
-            preparation.task.cancel()
-            return
-        }
-        narrationPreparations[lensKey] = preparation
     }
 
     func source(for sourceKey: String) -> APIBriefingSource? {

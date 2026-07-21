@@ -119,7 +119,12 @@ enum APIEndpoints {
     static let briefingRefresh = "/api/briefing/refresh"
     static let briefingDigSearch = "/api/briefing/dig/search"
     static let briefingDigSummarize = "/api/briefing/dig/summarize"
-    static let briefingNarration = "/api/briefing/narration"
+    static let briefingNarration = "/api/briefing/narrations"
+    static func briefingNarration(episodeGroupID: String) -> String {
+        let encodedID = episodeGroupID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+            ?? episodeGroupID
+        return "/api/briefing/narrations/\(encodedID)"
+    }
 
     // MARK: - Onboarding Endpoints
     static let onboardingComplete = "/api/onboarding/complete"

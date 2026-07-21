@@ -9,6 +9,7 @@ import Observation
 import os.log
 
 private let narrationPlaybackLogger = Logger(subsystem: "com.newsly", category: "NarrationPlayback")
+typealias NarrationPlaybackFinishedHandler = @MainActor (NarrationTarget) -> Void
 
 private func narrationElapsedMilliseconds(since start: Date) -> Int {
     Int(Date().timeIntervalSince(start) * 1000)
@@ -104,6 +105,9 @@ final class NarrationPlaybackService {
     @ObservationIgnored
     private var playbackFirstProgressLogged = false
 
+    @ObservationIgnored
+    private var playbackFinishedHandler: NarrationPlaybackFinishedHandler?
+
     private init() {
         let preferenceStore = NarrationPlaybackPreferenceStore.shared
         self.preferenceStore = preferenceStore
@@ -134,6 +138,7 @@ final class NarrationPlaybackService {
     func playStreamingNarration(
         for target: NarrationTarget,
         rate: Float = defaultPlaybackRate,
+        onFinished: NarrationPlaybackFinishedHandler? = nil,
         fetchStreamResource: () async throws -> AuthorizedMediaResource
     ) async throws {
         let startedAt = Date()
@@ -143,6 +148,7 @@ final class NarrationPlaybackService {
         setPlaybackRate(rate)
 
         if speakingTarget == target {
+            playbackFinishedHandler = onFinished
             if try resumeStreamIfNeeded(for: target) {
                 narrationPlaybackLogger.info(
                     "Streaming narration resumed | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt))"
@@ -164,7 +170,7 @@ final class NarrationPlaybackService {
             narrationPlaybackLogger.info(
                 "Streaming narration resource ready | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt))"
             )
-            try playAudioStream(resource, for: target)
+            try playAudioStream(resource, for: target, onFinished: onFinished)
         } catch {
             narrationPlaybackLogger.error(
                 "Streaming narration failed before playback | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
@@ -173,7 +179,11 @@ final class NarrationPlaybackService {
         }
     }
 
-    func playAudioStream(_ resource: AuthorizedMediaResource, for target: NarrationTarget) throws {
+    func playAudioStream(
+        _ resource: AuthorizedMediaResource,
+        for target: NarrationTarget,
+        onFinished: NarrationPlaybackFinishedHandler? = nil
+    ) throws {
         let startedAt = Date()
         let resumeTime = savedPlaybackPositions[target] ?? 0
         stop()
@@ -190,6 +200,7 @@ final class NarrationPlaybackService {
 
             streamPlayer = player
             speakingTarget = target
+            playbackFinishedHandler = onFinished
             isSpeaking = true
             isPaused = false
             progress.reset()
@@ -305,7 +316,11 @@ final class NarrationPlaybackService {
                     )
                 }
                 let finishedTarget = self?.speakingTarget
+                let finishedHandler = self?.playbackFinishedHandler
                 self?.resetPlaybackState(clearSavedPositionFor: finishedTarget)
+                if let finishedTarget {
+                    finishedHandler?(finishedTarget)
+                }
                 await self?.recordPlaybackFinished(for: finishedTarget)
             }
         }
@@ -462,6 +477,7 @@ final class NarrationPlaybackService {
         playbackTimeControlPlayingLogged = false
         playbackTimeControlWaitingLogged = false
         playbackFirstProgressLogged = false
+        playbackFinishedHandler = nil
         try? AVAudioSession.sharedInstance().setActive(
             false,
             options: [.notifyOthersOnDeactivation]
