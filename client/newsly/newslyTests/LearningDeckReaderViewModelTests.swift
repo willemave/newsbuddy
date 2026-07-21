@@ -27,7 +27,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
         let viewModel = LearningDeckReaderViewModel(
             deck: Self.deck(),
             chatService: chatService,
-            deckService: .shared
+            deckService: LearningDeckService.shared
         )
 
         viewModel.performSendMessage(text: "Hello deck")
@@ -75,7 +75,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
         let viewModel = LearningDeckReaderViewModel(
             deck: Self.deck(),
             chatService: chatService,
-            deckService: .shared
+            deckService: LearningDeckService.shared
         )
 
         viewModel.performSendMessage(text: "Keep this")

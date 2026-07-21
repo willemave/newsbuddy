@@ -199,9 +199,12 @@ struct LearningDeckRow: View {
                 .accessibilityIdentifier("learning_deck.row.\(deck.id).open_menu")
             }
 
-            if isFailedOrCancelled {
+            if !deck.hasActiveLatestRun {
                 Button(action: retry) {
-                    Label("Try again", systemImage: "arrow.clockwise")
+                    Label(
+                        isFailedOrCancelled ? "Try again" : "Regenerate",
+                        systemImage: "arrow.clockwise"
+                    )
                 }
                 .accessibilityIdentifier("learning_deck.row.\(deck.id).retry")
             }

@@ -7,12 +7,22 @@ from datetime import UTC, datetime
 import pytest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-from app.models.contracts import TaskType
+from app.models.contracts import (
+    LlmTaskKind,
+    LlmTaskMode,
+    LlmTaskStatus,
+    LlmWorkflowState,
+    TaskStatus,
+    TaskType,
+)
 from app.models.db import (
     ChatMessage,
     ChatSession,
     ContentKnowledgeSave,
     ContentReadStatus,
+    LearningDeck,
+    LearningDeckRun,
+    LlmTask,
     NewsItem,
     NewsItemDiscussion,
     OnboardingDiscoveryLane,
@@ -21,6 +31,7 @@ from app.models.db import (
     UserScraperConfig,
 )
 from app.services.chat_agent import ChatRunResult, save_messages
+from app.services.llm_tasks import create_llm_task
 from app.services.onboarding import (
     _AudioLane,
     _AudioPlanOutput,
@@ -154,6 +165,138 @@ def test_long_form_detail_knowledge_save_action_updates_backend_state(
         .one_or_none()
     )
     assert knowledge_save is not None
+
+
+def test_long_form_detail_learning_deck_create_recovers_failed_legacy_attempt(
+    run_ios_flow,
+    create_sample_content,
+    sample_article_long,
+    test_user,
+    db_session,
+) -> None:
+    """A terminal legacy queue failure should not make Create appear unresponsive."""
+    stale_deck = LearningDeck(
+        user_id=test_user.id,
+        source_kind="content",
+        source_identity="content:failed-legacy-attempt",
+        source_url="https://example.com/failed-legacy-attempt",
+        source_title="Failed legacy attempt",
+        source_metadata={},
+        title="Failed legacy attempt",
+        artifact_object_keys=[],
+        share_enabled=False,
+    )
+    db_session.add(stale_deck)
+    db_session.flush()
+    stale_task = create_llm_task(
+        db_session,
+        user_id=test_user.id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+        subject_id=stale_deck.id,
+    )
+    stale_task.status = LlmTaskStatus.PREPARING.value
+    stale_task.workflow_state = LlmWorkflowState.PREPARING.value
+    stale_run = LearningDeckRun(
+        deck_id=stale_deck.id,
+        user_id=test_user.id,
+        llm_task_id=stale_task.id,
+        status="preparing",
+        source_snapshot={},
+        timeline=[],
+        artifact_object_keys=[],
+    )
+    db_session.add(stale_run)
+    db_session.flush()
+    stale_deck.latest_task_id = stale_task.id
+    stale_deck.latest_run_id = stale_run.id
+    db_session.add(
+        ProcessingTask(
+            task_type=TaskType.GENERATE_LEARNING_DECK.value,
+            status=TaskStatus.FAILED.value,
+            queue_name="learning",
+            payload={
+                "user_id": test_user.id,
+                "learning_deck_run_id": stale_run.id,
+            },
+            error_message="Source content is still processing",
+        )
+    )
+    db_session.commit()
+
+    content = create_sample_content(sample_article_long)
+
+    run_ios_flow(
+        "learning_deck_create_from_content.yaml",
+        extra_env={"CONTENT_ID": str(content.id)},
+    )
+
+    deck = (
+        db_session.query(LearningDeck)
+        .filter(
+            LearningDeck.user_id == test_user.id,
+            LearningDeck.source_content_id == content.id,
+        )
+        .one_or_none()
+    )
+    assert deck is not None
+    db_session.refresh(stale_run)
+    db_session.refresh(stale_task)
+    assert stale_run.status == "failed"
+    assert stale_task.status == LlmTaskStatus.FAILED.value
+
+
+def test_learning_tab_long_press_regenerates_deck_with_existing_focus(
+    run_ios_flow,
+    create_sample_content,
+    sample_article_long,
+    test_user,
+    db_session,
+) -> None:
+    content = create_sample_content(sample_article_long)
+    deck = LearningDeck(
+        user_id=test_user.id,
+        source_kind="content",
+        source_identity=f"content:{content.id}",
+        source_url=content.source_url or content.url,
+        source_content_id=content.id,
+        source_title=content.title,
+        source_metadata={"content_type": content.content_type},
+        title=content.title,
+        artifact_object_keys=[],
+        share_enabled=False,
+    )
+    db_session.add(deck)
+    db_session.flush()
+    original_task = create_llm_task(
+        db_session,
+        user_id=test_user.id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+        subject_id=deck.id,
+        input_json={
+            "deck_id": deck.id,
+            "interests_prompt": "Focus on the existing tradeoffs",
+        },
+        status=LlmTaskStatus.COMPLETED,
+        workflow_state=LlmWorkflowState.COMPLETED,
+    )
+    deck.latest_task_id = original_task.id
+    deck.latest_successful_task_id = original_task.id
+    db_session.commit()
+
+    run_ios_flow(
+        "learning_deck_regenerate_from_learning.yaml",
+        extra_env={"DECK_ID": str(deck.id)},
+    )
+
+    task_query = db_session.query(LlmTask).filter(LlmTask.subject_id == deck.id)
+    tasks = task_query.order_by(LlmTask.id).all()
+    assert len(tasks) == 2
+    assert tasks[-1].status == LlmTaskStatus.QUEUED.value
+    assert tasks[-1].input_json["interests_prompt"] == "Focus on the existing tradeoffs"
 
 
 def test_long_form_list_mark_read_action_updates_backend_state(

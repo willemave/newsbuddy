@@ -259,6 +259,21 @@ struct LearningView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("learning.deck.\(deck.id)")
             .appListRow()
+            .contextMenu {
+                Button {
+                    Task { await regenerateDeck(deck) }
+                } label: {
+                    Label("Regenerate", systemImage: "arrow.clockwise")
+                }
+                .disabled(deck.hasActiveLatestRun || decks.busyDeckIDs.contains(deck.id))
+                .accessibilityIdentifier("learning.deck.\(deck.id).regenerate")
+
+                Button(role: .destructive) {
+                    Task { await decks.delete(deck) }
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button(role: .destructive) {
                     Task { await decks.delete(deck) }
@@ -324,6 +339,12 @@ struct LearningView: View {
     private func openDeck(_ deck: LearningDeck) async {
         let url = deck.viewerAvailable ? await decks.viewerURL(for: deck) : nil
         deckReaderDestination = LearningDeckReaderDestination(deck: deck, url: url)
+    }
+
+    @MainActor
+    private func regenerateDeck(_ deck: LearningDeck) async {
+        guard await decks.regenerate(deck) != nil else { return }
+        ToastService.shared.show("Regenerating your deck", type: .info)
     }
 
     private func handleFocusRequest(_ request: LearningFocusRequest?) {

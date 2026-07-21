@@ -5,6 +5,22 @@
 
 import Foundation
 
+protocol LearningDeckServicing: AnyObject {
+    func listDecks() async throws -> LearningDeckListResponse
+    func fetchDeck(id: Int) async throws -> LearningDeck
+    func createDeck(
+        contentId: Int?,
+        newsItemId: Int?,
+        url: String?,
+        interestsPrompt: String?
+    ) async throws -> LearningDeck
+    func viewerURL(deckId: Int) async throws -> URL
+    func sourceNotesURL(deckId: Int) async throws -> URL
+    func enableShare(deckId: Int) async throws -> LearningDeckShareResponse
+    func disableShare(deckId: Int) async throws -> LearningDeckShareResponse
+    func deleteDeck(deckId: Int) async throws
+}
+
 final class LearningDeckService {
     static let shared = LearningDeckService()
 
@@ -80,3 +96,5 @@ final class LearningDeckService {
         )
     }
 }
+
+extension LearningDeckService: LearningDeckServicing {}

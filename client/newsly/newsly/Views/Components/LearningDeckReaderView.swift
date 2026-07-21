@@ -166,7 +166,7 @@ struct LearningDeckReaderView: View {
                 .font(.terracottaBodySmall)
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .multilineTextAlignment(.center)
-            pillButton("Try again") { webController.reload() }
+            pillButton("Try again") { viewModel.retryViewerResolution() }
                 .padding(.top, 4)
         }
         .padding(.horizontal, 32)

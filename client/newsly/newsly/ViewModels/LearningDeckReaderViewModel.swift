@@ -96,11 +96,11 @@ final class LearningDeckReaderViewModel {
 
     private let deck: LearningDeck
     private let chatService: LearningDeckReaderChatServicing
-    private let deckService: LearningDeckService
+    private let deckService: any LearningDeckServicing
     private let maxPollingAttempts = 120
     private let pollingIntervalNanoseconds: UInt64 = 500_000_000
-    private let viewerPollIntervalNanoseconds: UInt64 = 3_000_000_000
-    private let viewerPollAttemptLimit = 120
+    private let viewerPollIntervalNanoseconds: UInt64
+    private let viewerPollAttemptLimit: Int
 
     @ObservationIgnored
     private let tasks = TaskBag<LearningDeckReaderTaskKey>()
@@ -110,11 +110,15 @@ final class LearningDeckReaderViewModel {
     init(
         deck: LearningDeck,
         chatService: any LearningDeckReaderChatServicing,
-        deckService: LearningDeckService
+        deckService: any LearningDeckServicing,
+        viewerPollIntervalNanoseconds: UInt64 = 3_000_000_000,
+        viewerPollAttemptLimit: Int = 120
     ) {
         self.deck = deck
         self.chatService = chatService
         self.deckService = deckService
+        self.viewerPollIntervalNanoseconds = viewerPollIntervalNanoseconds
+        self.viewerPollAttemptLimit = viewerPollAttemptLimit
     }
 
     deinit {
@@ -126,7 +130,11 @@ final class LearningDeckReaderViewModel {
     func prepareViewer(initialURL: URL?) {
         if let initialURL {
             resolvedViewerURL = initialURL
-            isResolvingViewer = false
+            if deck.hasActiveLatestRun, !tasks.isRunning(.viewer) {
+                startViewerResolution()
+            } else {
+                isResolvingViewer = false
+            }
             return
         }
         guard resolvedViewerURL == nil, !tasks.isRunning(.viewer) else { return }
@@ -135,11 +143,13 @@ final class LearningDeckReaderViewModel {
 
     func retryViewerResolution() {
         tasks.cancel(.viewer)
+        resolvedViewerURL = nil
         startViewerResolution()
     }
 
     func cancelViewerResolution() {
         tasks.cancel(.viewer)
+        isResolvingViewer = false
     }
 
     private func startViewerResolution() {
@@ -161,6 +171,12 @@ final class LearningDeckReaderViewModel {
                     generationNote = note
                 }
 
+                if latest.hasActiveLatestRun {
+                    attempts += 1
+                    try await Task.sleep(nanoseconds: viewerPollIntervalNanoseconds)
+                    continue
+                }
+
                 if latest.viewerAvailable {
                     let url = try await deckService.viewerURL(deckId: latest.id)
                     resolvedViewerURL = url
@@ -169,25 +185,24 @@ final class LearningDeckReaderViewModel {
                     return
                 }
 
-                if !latest.hasActiveLatestRun {
-                    isResolvingViewer = false
-                    viewerResolutionFailed = true
-                    return
-                }
-
-                attempts += 1
-                try await Task.sleep(nanoseconds: viewerPollIntervalNanoseconds)
-            } catch where isNetworkCancellation(error) {
-                return
-            } catch {
-                generationNote = error.localizedDescription
                 isResolvingViewer = false
                 viewerResolutionFailed = true
                 return
+            } catch where isNetworkCancellation(error) {
+                isResolvingViewer = false
+                return
+            } catch {
+                attempts += 1
+                generationNote = "Connection interrupted. Still trying…"
+                if attempts < viewerPollAttemptLimit {
+                    try? await Task.sleep(nanoseconds: viewerPollIntervalNanoseconds)
+                }
             }
         }
         isResolvingViewer = false
-        viewerResolutionFailed = true
+        viewerResolutionFailed = false
+        generationStatusLabel = "Taking longer than expected"
+        generationNote = "Your deck is still being prepared."
     }
 
     // MARK: - Chat

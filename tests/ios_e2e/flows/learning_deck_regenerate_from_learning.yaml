@@ -1,0 +1,33 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+- tapOn:
+    id: tab.learning
+- extendedWaitUntil:
+    visible:
+      id: learning.screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: learning.deck.${DECK_ID}
+    timeout: 10000
+- longPressOn:
+    id: learning.deck.${DECK_ID}
+- extendedWaitUntil:
+    visible: Regenerate
+    timeout: 5000
+- tapOn: Regenerate
+- extendedWaitUntil:
+    visible: QUEUED
+    timeout: 8000

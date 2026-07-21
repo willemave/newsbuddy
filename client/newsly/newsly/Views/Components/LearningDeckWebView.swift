@@ -22,23 +22,14 @@ final class LearningDeckReaderWebController {
 
     @ObservationIgnored
     private weak var webView: WKWebView?
-    @ObservationIgnored
-    private var url: URL?
 
-    func attach(_ webView: WKWebView, url: URL) {
+    func attach(_ webView: WKWebView) {
         self.webView = webView
-        self.url = url
     }
 
     func markLoading() { phase = .loading }
     func markLoaded() { phase = .loaded }
     func markFailed() { phase = .failed }
-
-    func reload() {
-        guard let webView, let url else { return }
-        phase = .loading
-        webView.load(URLRequest(url: url))
-    }
 
     func goNext() { evaluate("if (window.Reveal && Reveal.next) { Reveal.next(); }") }
     func goPrevious() { evaluate("if (window.Reveal && Reveal.prev) { Reveal.prev(); }") }
@@ -83,7 +74,7 @@ struct LearningDeckWebView: UIViewRepresentable {
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.isOpaque = false
         webView.backgroundColor = .clear
-        controller.attach(webView, url: url)
+        controller.attach(webView)
         controller.markLoading()
         webView.load(URLRequest(url: url))
         return webView
@@ -97,6 +88,7 @@ struct LearningDeckWebView: UIViewRepresentable {
         if let current = webView.url, current.newslySameDocument(as: url) {
             return
         }
+        controller.attach(webView)
         controller.markLoading()
         webView.load(URLRequest(url: url))
     }
@@ -142,6 +134,23 @@ struct LearningDeckWebView: UIViewRepresentable {
             withError error: Error
         ) {
             controller.markFailed()
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationResponse: WKNavigationResponse,
+            decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+        ) {
+            guard
+                navigationResponse.isForMainFrame,
+                let response = navigationResponse.response as? HTTPURLResponse,
+                !(200..<400).contains(response.statusCode)
+            else {
+                decisionHandler(.allow)
+                return
+            }
+            controller.markFailed()
+            decisionHandler(.cancel)
         }
 
         func userContentController(

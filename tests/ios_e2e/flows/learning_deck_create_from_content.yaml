@@ -1,0 +1,32 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenContentType: article
+      newslyE2EOpenContentId: "${CONTENT_ID}"
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 15000
+- tapOn:
+    id: content.action.learning_deck
+- extendedWaitUntil:
+    visible:
+      id: learning_deck.create.sheet
+    timeout: 8000
+- tapOn:
+    id: learning_deck.create.submit
+- extendedWaitUntil:
+    visible:
+      id: learning_deck.reader.generating
+    timeout: 8000
