@@ -410,9 +410,15 @@ struct FlowLayout: Layout {
             var maxRowWidth: CGFloat = 0.0
 
             for (index, subview) in zip(subviews.indices, subviews) {
-                let idealSize = subview.sizeThatFits(.unspecified)
+                let idealSize = subview.sizeThatFits(
+                    ProposedViewSize(width: maxWidth, height: nil)
+                )
+                let itemSize = CGSize(
+                    width: min(idealSize.width, maxWidth),
+                    height: idealSize.height
+                )
                 let originX = frames.isEmpty ? 0 : (frames[frames.count - 1].maxX + spacing)
-                if !frames.isEmpty, originX + idealSize.width > maxWidth {
+                if !frames.isEmpty, originX + itemSize.width > maxWidth {
                     rows.append(Row(indices: rowStart..<index, frames: frames))
                     maxRowWidth = max(maxRowWidth, frames[frames.count - 1].maxX)
                     rowMinY += rowHeight + spacing
@@ -421,8 +427,8 @@ struct FlowLayout: Layout {
                     rowHeight = 0
                 }
                 let x = frames.isEmpty ? 0 : (frames[frames.count - 1].maxX + spacing)
-                frames.append(CGRect(x: x, y: rowMinY, width: idealSize.width, height: idealSize.height))
-                rowHeight = max(rowHeight, idealSize.height)
+                frames.append(CGRect(x: x, y: rowMinY, width: itemSize.width, height: itemSize.height))
+                rowHeight = max(rowHeight, itemSize.height)
             }
 
             if !frames.isEmpty {
