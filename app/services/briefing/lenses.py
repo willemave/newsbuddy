@@ -109,7 +109,7 @@ def assign_pending_lenses(
     naming_fn: Callable[[list[BriefingSource]], LensName] | None = None,
     settings: Settings | None = None,
 ) -> int:
-    """Assign unbucketed pending news sources to active or newly-created news lenses."""
+    """Assign all unbucketed news to active or newly-created lenses."""
 
     settings = settings or get_settings()
     pending = (

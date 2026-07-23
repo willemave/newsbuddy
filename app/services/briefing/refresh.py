@@ -26,6 +26,7 @@ from app.pipeline.task_specs import get_task_spec
 from app.services.briefing import compaction, window_composition
 from app.services.briefing.composer import generate_layout_with_llm, plan_windows
 from app.services.briefing.eligibility import is_briefing_enabled_for_user
+from app.services.briefing.first_run import bump_first_edition_revision
 from app.services.briefing.lenses import (
     assign_pending_lenses,
     build_llm_lens_namer,
@@ -105,13 +106,21 @@ def enqueue_ready_source(
         source_id=source_id,
         lens_key=lens_key,
     )
+    resolved_delay = delay_seconds
+    if resolved_delay is None:
+        if inserted:
+            db.flush()
+        resolved_delay = settings.briefing_debounce_seconds
+        batch_minimum = settings.briefing_window_min
+        if lens_key is None:
+            batch_minimum = max(batch_minimum, settings.briefing_new_lens_min_items)
+        if _pending_batch_source_count(db, user_id=user_id, lens_key=lens_key) >= batch_minimum:
+            resolved_delay = 0
     enqueue_briefing_refresh_task(
         db,
         user_id=user_id,
         mode="append",
-        delay_seconds=settings.briefing_debounce_seconds
-        if delay_seconds is None
-        else delay_seconds,
+        delay_seconds=resolved_delay,
     )
     return inserted
 
@@ -254,6 +263,11 @@ def run_briefing_refresh(
                 settings=settings,
             )
         )
+        first_run_progress_changed = mode != "full" and bool(
+            pending_added or assigned or taxonomized or prepared_windows
+        )
+        if first_run_progress_changed:
+            bump_first_edition_revision(db, user_id=user_id)
         db.commit()
 
         compaction_windows = [window for plan in prepared_compactions for window in plan.windows]
@@ -316,7 +330,7 @@ def run_briefing_refresh(
     retired = _retire_finished_segments(db, user_id=user_id, settings=settings)
     retired += retire_idle_lenses(db, user_id=user_id, idle_days=settings.briefing_lens_idle_days)
     state.last_sweep_at = datetime.now(UTC).replace(tzinfo=None)
-    mutated = bool(pending_added or assigned or taxonomized or appended or retired or compacted)
+    mutated = bool(appended or retired or compacted or taxonomized)
     if appended:
         state.last_append_at = datetime.now(UTC).replace(tzinfo=None)
         state.masthead_deck = _masthead_deck(db, user_id=user_id)
@@ -372,6 +386,22 @@ def _pending_source_count(db: Session, *, user_id: int) -> int:
         .scalar()
         or 0
     )
+
+
+def _pending_batch_source_count(
+    db: Session,
+    *,
+    user_id: int,
+    lens_key: str | None,
+) -> int:
+    query = db.query(func.count(BriefingPendingSource.id)).filter(
+        BriefingPendingSource.user_id == user_id
+    )
+    if lens_key is None:
+        query = query.filter(BriefingPendingSource.lens_key.is_(None))
+    else:
+        query = query.filter(BriefingPendingSource.lens_key == lens_key)
+    return int(query.scalar() or 0)
 
 
 def _release_current_sweep_dedupe(db: Session, *, task_id: int) -> None:
@@ -575,10 +605,10 @@ def _plan_ready_windows(
         ]
         if not source_rows:
             continue
-        for window_index, window_rows in enumerate(
-            plan_windows(source_rows, tier=str(lens.tier), settings=settings),
-            start=1,
-        ):
+        planned_windows = plan_windows(source_rows, tier=str(lens.tier), settings=settings)
+        if mode != "full":
+            planned_windows = planned_windows[:1]
+        for window_index, window_rows in enumerate(planned_windows, start=1):
             windows.append(
                 _PreparedWindow(
                     lens_id=int(lens.id),

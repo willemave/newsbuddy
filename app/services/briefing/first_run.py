@@ -227,6 +227,23 @@ def complete_first_edition(db: Session, *, user_id: int) -> bool:
     return True
 
 
+def bump_first_edition_revision(db: Session, *, user_id: int) -> bool:
+    """Publish first-run presentation progress without changing Briefing content version."""
+
+    updated = (
+        db.query(OnboardingFirstEditionRun)
+        .filter(
+            OnboardingFirstEditionRun.user_id == user_id,
+            OnboardingFirstEditionRun.status == "active",
+        )
+        .update(
+            {OnboardingFirstEditionRun.revision: (OnboardingFirstEditionRun.revision + 1)},
+            synchronize_session=False,
+        )
+    )
+    return bool(updated)
+
+
 def _source_specs(db: Session, *, user_id: int) -> list[FirstEditionSourceSpec]:
     configs = (
         db.query(UserScraperConfig)

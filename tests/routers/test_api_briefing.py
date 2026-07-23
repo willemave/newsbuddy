@@ -11,6 +11,7 @@ from app.models.contracts import ContentClassification, ContentType, TaskType
 from app.models.db import (
     AudioEpisode,
     BriefingLens,
+    BriefingPendingSource,
     BriefingSegment,
     BriefingState,
     NewsItemReadStatus,
@@ -120,6 +121,44 @@ def test_briefing_index_validator_excludes_completed_first_run(
     assert validator.first_run_id == 0
     assert validator.first_run_revision == 0
     assert db_session.get(BriefingState, test_user.id) is None
+
+
+def test_first_run_index_reveals_a_category_while_its_segment_is_pending(
+    client: TestClient,
+    db_session: Session,
+    test_user: User,
+) -> None:
+    assert test_user.id is not None
+    user_id = test_user.id
+    start_first_edition(db_session, user_id=user_id)
+    lens = BriefingLens(
+        user_id=user_id,
+        key="news-progressive",
+        tier="news",
+        title="Progressive",
+        deck="Stories still being composed.",
+        position=2,
+    )
+    db_session.add(lens)
+    db_session.flush()
+    db_session.add(
+        BriefingPendingSource(
+            user_id=user_id,
+            lens_key=lens.key,
+            source_kind="news",
+            source_id=101,
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/briefing")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [(item["key"], item["segment_count"]) for item in payload["lenses"]] == [
+        ("news-progressive", 0)
+    ]
+    assert payload["first_run"]["ready_category_keys"] == []
 
 
 def test_briefing_index_segment_query_projects_only_summary_fields(

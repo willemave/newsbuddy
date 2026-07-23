@@ -39,8 +39,8 @@ struct BriefingTierStrip: View {
     }
 }
 
-/// During first-run onboarding, ready categories append directly beside the
-/// synthetic Welcome page. The rail never shows placeholder categories.
+/// During first-run onboarding, assigned categories append beside Welcome.
+/// They become interactive as soon as their first segment is readable.
 struct BriefingFirstRunStrip: View {
     @ObservedObject var viewModel: BriefingViewModel
     let onSelectStartHere: () -> Void
@@ -67,6 +67,7 @@ struct BriefingFirstRunStrip: View {
                     ) {
                         onSelectLens(lens.key)
                     }
+                    .disabled(lens.segmentCount == 0)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }

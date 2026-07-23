@@ -188,8 +188,11 @@ struct BriefingView: View {
     private var briefingContent: some View {
         ZStack(alignment: .top) {
             if viewModel.isStartHereSelected, let firstRun = viewModel.firstRun {
-                BriefingStartHereView(progress: firstRun)
-                    .padding(.top, expandedChromeHeight)
+                BriefingStartHereView(
+                    progress: firstRun,
+                    onRefresh: viewModel.refreshIndex
+                )
+                .padding(.top, expandedChromeHeight)
             } else {
                 TabView(selection: selectedLensBinding) {
                     ForEach(viewModel.pagerLenses, id: \.key) { lens in

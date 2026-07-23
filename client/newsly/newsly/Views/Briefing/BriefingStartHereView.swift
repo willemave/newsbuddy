@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BriefingStartHereView: View {
     let progress: APIBriefingFirstRunProgress
+    let onRefresh: () async -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
@@ -78,6 +79,9 @@ struct BriefingStartHereView: View {
             .frame(maxWidth: .infinity, alignment: .center)
             .opacity(appeared || reduceMotion ? 1 : 0)
             .offset(y: appeared || reduceMotion ? 0 : 12)
+        }
+        .refreshable {
+            await onRefresh()
         }
         .onAppear {
             withAnimation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)) {

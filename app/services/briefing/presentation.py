@@ -22,7 +22,7 @@ from app.models.api.briefing import (
     BriefingSourceDto,
 )
 from app.models.contracts import BriefingTier
-from app.models.db import BriefingLens, BriefingSegment, BriefingState
+from app.models.db import BriefingLens, BriefingPendingSource, BriefingSegment, BriefingState
 from app.services.briefing.first_run import get_first_run_progress, get_first_run_validator
 from app.services.briefing.refresh import ensure_state
 from app.services.briefing.sources import read_source_keys_for, sources_for_keys
@@ -157,7 +157,21 @@ def get_briefing_index(db: Session, *, user_id: int) -> BriefingIndexResponse:
     )
     first_run_query_ms = _elapsed_ms(first_run_started_at)
     if first_run is not None:
-        summaries = readable_summaries
+        pending_lens_keys = {
+            str(lens_key)
+            for (lens_key,) in db.query(BriefingPendingSource.lens_key)
+            .filter(
+                BriefingPendingSource.user_id == user_id,
+                BriefingPendingSource.lens_key.is_not(None),
+            )
+            .distinct()
+            .all()
+        }
+        summaries = [
+            summary
+            for summary in summaries
+            if summary.segment_count > 0 or summary.key in pending_lens_keys
+        ]
     generated_at = max(
         [segment.created_at for segment in active_segments if segment.created_at],
         default=None,
