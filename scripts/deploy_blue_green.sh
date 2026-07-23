@@ -108,9 +108,18 @@ echo "Switching Nginx to ${target_slot}"
 "${switch_script}" "${target_slot}"
 
 echo "Verifying public HTTPS origin"
-if ! curl --fail --silent --show-error --max-time 15 \
-  --retry 2 --retry-delay 2 --retry-max-time 45 --retry-all-errors \
-  "${public_base_url%/}/health" >/dev/null; then
+public_origin_healthy=false
+for attempt in $(seq 1 3); do
+  if curl --fail --silent --show-error --max-time 15 \
+    "${public_base_url%/}/health" >/dev/null; then
+    public_origin_healthy=true
+    break
+  fi
+  if [[ "${attempt}" -lt 3 ]]; then
+    sleep 2
+  fi
+done
+if [[ "${public_origin_healthy}" != true ]]; then
   echo "Public HTTPS origin did not reach the new API slot" >&2
   if [[ "${active_slot}" == "blue" || "${active_slot}" == "green" ]]; then
     echo "Rolling back Nginx to ${active_slot}" >&2

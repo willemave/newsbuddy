@@ -81,7 +81,9 @@ def test_blue_green_deploy_orders_migration_health_switch_and_workers() -> None:
 
     assert migration < inactive_api < health < switch < public_health < background
     assert 'docker exec "newsly-api-${target_slot}" printenv PUBLIC_BASE_URL' in deploy_script
-    assert "--retry 2 --retry-delay 2 --retry-max-time 45 --retry-all-errors" in deploy_script
+    assert "for attempt in $(seq 1 3)" in deploy_script
+    assert 'if [[ "${attempt}" -lt 3 ]]' in deploy_script
+    assert "--retry-all-errors" not in deploy_script
     assert '"${switch_script}" "${active_slot}"' in deploy_script
 
 
