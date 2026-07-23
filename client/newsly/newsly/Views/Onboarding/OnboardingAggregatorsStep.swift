@@ -84,33 +84,9 @@ private struct OnboardingAggregatorSection: View {
     let onToggleBrutalistTopic: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "bolt.horizontal")
-                    .font(.appSymbol(size: 9, weight: .semibold))
-                    .foregroundColor(.onboardingText.opacity(0.55))
-                Text("AGGREGATORS")
-                    .font(.editorialMeta)
-                    .foregroundColor(.onboardingText.opacity(0.55))
-                    .tracking(1.5)
-
-                Spacer()
-
-                Text("\(selectedAggregators.count)/\(onboardingAggregatorOptions.count)")
-                    .font(.appCaption.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundColor(.onboardingText.opacity(0.68))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.onboardingText.opacity(0.08)))
-            }
-            .padding(.top, 16)
-            .padding(.bottom, 4)
-
-            VStack(spacing: 8) {
-                ForEach(onboardingAggregatorOptions) { option in
-                    aggregatorRow(option: option)
-                }
+        VStack(spacing: 8) {
+            ForEach(onboardingAggregatorOptions) { option in
+                aggregatorRow(option: option)
             }
         }
     }

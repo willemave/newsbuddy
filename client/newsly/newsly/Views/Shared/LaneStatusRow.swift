@@ -40,12 +40,9 @@ struct LaneStatusRow: View {
                 }
 
                 if showsProgressBar {
-                    OnboardingProgressBar(
-                        progress: laneProgress,
-                        isActive: lane.status == "processing"
-                    )
-                    .frame(height: 3)
-                    .transition(.opacity)
+                    OnboardingProgressBar(progress: laneProgress)
+                        .frame(height: 3)
+                        .transition(.opacity)
                 } else if !isCompleted {
                     Text(statusLabel)
                         .font(.appCaption)
@@ -114,7 +111,6 @@ struct LaneStatusRow: View {
     }
 
     private var isCompleted: Bool { lane.status == "completed" }
-    private var isProcessing: Bool { lane.status == "processing" }
 
     private var showsCountBadge: Bool {
         lane.queryCount > 0 && !isCompleted && lane.status != "failed"
@@ -145,72 +141,19 @@ struct LaneStatusRow: View {
 
 private struct OnboardingProgressBar: View {
     let progress: Double
-    let isActive: Bool
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var shimmerPhase: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
             let fillWidth = max(0, min(geo.size.width, geo.size.width * CGFloat(progress)))
-            let shimmerWidth = max(24, fillWidth * 0.35)
 
             ZStack(alignment: .leading) {
                 Capsule(style: .continuous)
                     .fill(Color.onboardingText.opacity(0.08))
 
                 Capsule(style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.statusProcessing.opacity(0.85),
-                                Color.onboardingSelectionAccent.opacity(0.9),
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                    .fill(Color.statusProcessing.opacity(0.9))
                     .frame(width: fillWidth)
-                    .overlay(alignment: .leading) {
-                        if shouldShimmer(fillWidth: fillWidth) {
-                            Rectangle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            .clear,
-                                            Color.white.opacity(0.65),
-                                            .clear,
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: shimmerWidth)
-                                .offset(x: shimmerPhase * (fillWidth + shimmerWidth) - shimmerWidth)
-                                .blendMode(.plusLighter)
-                        }
-                    }
-                    .clipShape(Capsule(style: .continuous))
             }
-            .onAppear { restartShimmer(fillWidth: fillWidth) }
-            .onChange(of: isActive) { _, _ in restartShimmer(fillWidth: fillWidth) }
-            .onChange(of: progress) { _, _ in restartShimmer(fillWidth: fillWidth) }
-            .onChange(of: reduceMotion) { _, _ in restartShimmer(fillWidth: fillWidth) }
-        }
-    }
-
-    private func shouldShimmer(fillWidth: CGFloat) -> Bool {
-        isActive && !reduceMotion && fillWidth > 8 && progress < 1
-    }
-
-    private func restartShimmer(fillWidth: CGFloat) {
-        guard shouldShimmer(fillWidth: fillWidth) else {
-            shimmerPhase = 0
-            return
-        }
-        shimmerPhase = 0
-        withAnimation(AppMotion.laneShimmer) {
-            shimmerPhase = 1
         }
     }
 }

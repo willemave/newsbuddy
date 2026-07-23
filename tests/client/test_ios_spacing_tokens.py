@@ -514,16 +514,17 @@ def test_onboarding_loading_reveal_respects_reduce_motion_and_motion_tokens() ->
     assert "loading-step reveal" in onboarding_docs
 
 
-def test_lane_status_loading_motion_respects_reduce_motion() -> None:
+def test_lane_status_progress_is_solid_and_activity_respects_reduce_motion() -> None:
     source = (VIEWS_ROOT / "Shared/LaneStatusRow.swift").read_text()
     shared_docs = (REPO_ROOT / "docs/codebase/client/84-views-shared.md").read_text()
 
     assert "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" in source
     assert "AppMotion.respectingReduceMotion(reduceMotion, AppMotion.panel)" in source
     assert ".onChange(of: reduceMotion)" in source
-    assert "isActive && !reduceMotion && fillWidth > 8 && progress < 1" in source
-    assert "shimmerPhase = 0" in source
     assert "guard !reduceMotion else" in source
+    assert ".fill(Color.statusProcessing.opacity(0.9))" in source
+    assert "LinearGradient" not in source
+    assert "shimmerPhase" not in source
     assert "LaneStatusRow" in shared_docs
     assert "Reduce Motion" in shared_docs
 
