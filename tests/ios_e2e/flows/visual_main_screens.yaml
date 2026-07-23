@@ -61,7 +61,8 @@ appId: "${APP_ID}"
     timeout: 15000
 - assertVisible:
     id: learning.chat.${CHAT_SESSION_ID}
-- assertVisible: Learning Deck
+- assertVisible:
+    id: learning.deck.1
 - assertVisible: Narration
 - waitForAnimationToEnd
 - assertScreenshot:
