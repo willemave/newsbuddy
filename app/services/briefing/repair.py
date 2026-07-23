@@ -14,7 +14,7 @@ from app.services.briefing.layout_policy import (
     assess_briefing_layout,
     clean_pullquote_text,
 )
-from app.services.briefing.normalize import close_unpaired_insights, source_keys_in_markdown
+from app.services.briefing.normalize import source_keys_in_markdown, strip_insight_markers
 from app.services.briefing.sources import BriefingSource
 
 _EM_DASH_RANGE_RE = re.compile(r"(?<=\d)\s*—\s*(?=\d)")
@@ -35,8 +35,6 @@ def repair_layout(
     blocks: list[dict[str, Any]],
     *,
     sources: list[BriefingSource],
-    lens_key: str,
-    window_index: int,
     figure_budget: int,
     ensure_source_figures: bool = False,
     assessment: BriefingLayoutAssessment | None = None,
@@ -133,7 +131,7 @@ def repair_layout(
             markdown = _clean_text(block.get("markdown") or block.get("text"))
             if not markdown:
                 raise BriefingLayoutRepairError("Layout assessment allowed an empty passage")
-            block["markdown"] = _replace_em_dashes(close_unpaired_insights(markdown))
+            block["markdown"] = _replace_em_dashes(strip_insight_markers(markdown))
             if "markdown" not in raw and raw.get("text"):
                 warnings.append("passage_text_field_recovered")
         repaired.append(block)
@@ -159,8 +157,7 @@ def repair_layout(
         if backfilled:
             warnings.append(f"figure_backfill:{backfilled}")
 
-    prefixed = _prefix_insight_ids(repaired, prefix=f"{lens_key}_w{window_index}_")
-    return RepairResult(blocks=prefixed, warnings=warnings)
+    return RepairResult(blocks=repaired, warnings=warnings)
 
 
 def _backfill_source_figures(
@@ -214,17 +211,6 @@ def _deterministic_source_sentence(source: BriefingSource) -> str:
     url_kind = "content" if source.kind == "content" else "news"
     sentence = source.summary or (source.key_points[0] if source.key_points else "is ready to read")
     return f"[{source.title}](newsly://briefing/{url_kind}/{source.id}) {sentence}"
-
-
-def _prefix_insight_ids(blocks: list[dict[str, Any]], *, prefix: str) -> list[dict[str, Any]]:
-    prefixed: list[dict[str, Any]] = []
-    for raw in blocks:
-        block = dict(raw)
-        if block.get("type") == "passage":
-            markdown = str(block.get("markdown") or "")
-            block["markdown"] = markdown.replace("{{insight:", "{{insight:" + prefix)
-        prefixed.append(block)
-    return prefixed
 
 
 def _replace_em_dashes(text: str) -> str:

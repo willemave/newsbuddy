@@ -136,8 +136,6 @@ def test_layout_policy_repairs_auxiliary_debris_and_missing_coverage() -> None:
     processed = process_generated_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
         ensure_source_figures=True,
     )
@@ -393,9 +391,9 @@ def test_deterministic_news_layout_remains_one_paragraph_at_max_batch() -> None:
 @pytest.mark.parametrize(
     ("sentence", "expected"),
     [
-        ("First. Second.{{/insight}}", "First, Second{{/insight}}"),
-        ("Question?{{/insight}}", "Question{{/insight}}"),
-        ("Bang!{{/insight}}", "Bang{{/insight}}"),
+        ("First. Second.", "First, Second"),
+        ("Question?", "Question"),
+        ("Bang!", "Bang"),
         ("Plain.", "Plain"),
     ],
 )
@@ -507,8 +505,6 @@ def test_process_generated_layout_emits_normalization_warning_once(
     processed = process_generated_layout(
         WELL_FORMED_BLOCKS,
         sources=[_source()],
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
         ensure_source_figures=True,
     )

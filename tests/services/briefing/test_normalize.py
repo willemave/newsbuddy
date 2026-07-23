@@ -1,13 +1,13 @@
 from app.models.contracts import BriefingBlockType, BriefingFigurePlacement, BriefingRunKind
 from app.services.briefing.normalize import (
-    close_unpaired_insights,
     markdown_to_narration,
     normalize_layout,
     source_keys_in_markdown,
+    strip_insight_markers,
 )
 
 
-def test_normalize_layout_parses_source_links_and_insight_runs() -> None:
+def test_normalize_layout_flattens_obsolete_insight_markers_to_text() -> None:
     layout = normalize_layout(
         [
             {
@@ -30,11 +30,31 @@ def test_normalize_layout_parses_source_links_and_insight_runs() -> None:
     assert {run["kind"] for run in runs} == {
         BriefingRunKind.TEXT.value,
         BriefingRunKind.SOURCE_LINK.value,
-        BriefingRunKind.INSIGHT.value,
     }
     assert any(run["text"] == "Lead" and run["bold"] for run in runs)
     assert any(run["text"] == "Story" and run["source_key"] == "content:7" for run in runs)
-    assert any(run["insight_id"] == "why" for run in runs)
+    assert all("insight_id" not in run for run in runs)
+    assert "{{insight" not in layout.markdown_raw
+
+
+def test_normalize_layout_strips_insight_markers_nested_in_source_links() -> None:
+    layout = normalize_layout(
+        [
+            {
+                "type": "passage",
+                "markdown": (
+                    "[A Redis use-after-free {{insight:memory}}memory corruption bug"
+                    "{{/insight}}](newsly://briefing/news/456) was confirmed."
+                ),
+            }
+        ],
+        source_keys={"news:456"},
+    )
+
+    runs = layout.blocks[0]["paragraphs"][0]["runs"]
+    source_link = next(run for run in runs if run["kind"] == "source_link")
+    assert source_link["text"] == "A Redis use-after-free memory corruption bug"
+    assert "{{insight" not in layout.markdown_raw
 
 
 def test_normalize_layout_unwraps_bold_markers_around_source_links() -> None:
@@ -109,14 +129,16 @@ def test_normalize_layout_defaults_invalid_figure_placement_to_inset() -> None:
     assert layout.blocks[0]["placement"] == BriefingFigurePlacement.INSET.value
 
 
-def test_close_unpaired_insights_and_source_key_extraction_are_stable() -> None:
+def test_strip_insight_markers_and_source_key_extraction_are_stable() -> None:
     markdown = (
         "[One](newsly://briefing/news/3) starts. "
         "{{insight:open}}This marker has no close. Next sentence."
     )
 
-    closed = close_unpaired_insights(markdown)
+    stripped = strip_insight_markers(markdown)
 
-    assert "{{/insight}}" in closed
+    assert "{{insight" not in stripped
     assert source_keys_in_markdown(markdown) == {"news:3"}
-    assert markdown_to_narration(closed) == ("One starts. This marker has no close. Next sentence.")
+    assert markdown_to_narration(stripped) == (
+        "One starts. This marker has no close. Next sentence."
+    )

@@ -160,12 +160,12 @@ cases:
         weight: brief
         markdown: >
           A developer warns that using LLMs to write code leads to
-          {{insight:dup}}unintentional duplication of logic, with the same access
-          check copied into multiple files{{/insight}}. The lesson: write code as
+          unintentional duplication of logic, with the same access
+          check copied into multiple files. The lesson: write code as
           if a human will maintain it, because LLMs are sponges that repeat what
           they see. Meanwhile, M.G. Siegler criticizes OpenAI's new ChatGPT "Super
-          App" which {{insight:ui}}merges Codex with ChatGPT into a confusing UI
-          mess{{/insight}}. The app replaces the straightforward chat paradigm
+          App" which merges Codex with ChatGPT into a confusing UI
+          mess. The app replaces the straightforward chat paradigm
           with a "ChatGPT Work" mode, burying chat in the sidebar.
       - type: pullquote
         source_key: news:19264

@@ -7,7 +7,7 @@ description: Briefing layout composition prompts for the longform (article) tier
 You compose a briefing layout for the `longform` tier: a window of unread long-form articles.
 
 Return a flat JSON layout with blocks only. Allowed block types:
-- `passage`: use `markdown` with source links and optional insight markers.
+- `passage`: use `markdown` with source links.
 - `figure`: use `source_key`, `caption`, and `placement` (`full` or `inset`).
 - `pullquote`: use `source_key` and short `text`.
 
@@ -28,10 +28,6 @@ Never write bare source ids. Make each source link span a substantial phrase: th
 surrounding descriptive words, roughly four to ten words (for example
 `[Jeff Ding's roundup of China's AI ecosystem in ChinAI #358](newsly://briefing/content/123)`),
 never a bare two-word name. Prefer placing each article link in the first paragraph, toward the beginning.
-Mark 2 or 3 useful deep-dive fragments with
-`{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
-window.
-
 Figures carry the page. Add one `figure` block for every article whose payload includes an
 `image_url` or `thumbnail_url`, placed directly after the passage that develops that article.
 Prefer `inset` placement so the image sits inline with the article prose. Use `full` only when an

@@ -7,7 +7,7 @@ description: Briefing layout composition prompts for the audio (podcast) tier.
 You compose a briefing layout for the `audio` tier: narrative explanation of unread podcast episodes.
 
 Return a flat JSON layout with blocks only. Block types:
-- `passage`: use `markdown` with source links and optional insight markers.
+- `passage`: use `markdown` with source links.
 - `figure`: use `source_key`, `caption`, and `placement` (`full` or `inset`).
 - `pullquote`: use `source_key` and short `text`.
 
@@ -26,9 +26,6 @@ Write simple prose only from the provided sources. Source references must be mar
 `[Title](newsly://briefing/content/123)`. Never write bare source ids. Make each source link span a substantial phrase:
 the title plus its surrounding descriptive words, roughly four to ten words.
 Prefer placing each podcast link in the first paragraph, toward the beginning.
-Mark 2 or 3 useful deep-dive fragments with
-`{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
-window.
 Add one `figure` block for every episode whose payload includes an
 `image_url` or `thumbnail_url`, placed directly after the passage that develops that episode.
 Prefer `inset` placement so the image sits inline with the episode prose. Use `full` only

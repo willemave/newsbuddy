@@ -17,8 +17,6 @@ def test_backfill_adds_inset_figure_after_citing_passage() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
         ensure_source_figures=True,
     )
@@ -43,8 +41,6 @@ def test_backfill_skips_sources_already_figured_by_the_llm() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
         ensure_source_figures=True,
     )
@@ -69,8 +65,6 @@ def test_backfill_skips_sources_without_images_and_respects_budget() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=2,
         ensure_source_figures=True,
     )
@@ -87,8 +81,6 @@ def test_backfill_uses_coverage_repair_passage_for_uncited_sources() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
         ensure_source_figures=True,
     )
@@ -112,8 +104,6 @@ def test_layout_with_no_usable_passage_is_not_repaired() -> None:
         repair_layout(
             blocks,
             sources=sources,
-            lens_key="articles",
-            window_index=0,
             figure_budget=12,
         )
 
@@ -125,8 +115,6 @@ def test_short_source_linked_passage_is_not_dropped() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
     )
 
@@ -144,8 +132,6 @@ def test_short_unlinked_prose_is_not_mistaken_for_schema_debris() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
     )
 
@@ -166,8 +152,6 @@ def test_low_signal_pullquotes_are_dropped() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
     )
 
@@ -185,8 +169,6 @@ def test_short_real_pullquote_is_not_dropped() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
     )
 
@@ -205,8 +187,6 @@ def test_full_placement_is_preserved() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
     )
 
@@ -226,8 +206,6 @@ def test_only_first_full_figure_is_preserved() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
     )
 
@@ -246,8 +224,6 @@ def test_invalid_placement_is_canonicalized_to_inset() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
     )
 
@@ -272,8 +248,6 @@ def test_em_dashes_replaced_across_block_types() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="articles",
-        window_index=0,
         figure_budget=12,
     )
 
@@ -292,8 +266,6 @@ def test_backfill_disabled_by_default() -> None:
     result = repair_layout(
         blocks,
         sources=sources,
-        lens_key="news-ai",
-        window_index=0,
         figure_budget=6,
     )
 

@@ -9,9 +9,7 @@ from app.services.briefing.figure_placement import canonical_figure_placement
 from app.services.briefing.source_keys import build_source_key
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(((?:newsly|news)://briefing/(content|news)/(\d+))\)")
-INSIGHT_OPEN_RE = re.compile(r"\{\{insight:([a-zA-Z0-9_.:-]+)\}\}")
-INSIGHT_CLOSE = "{{/insight}}"
-MARKER_RE = re.compile(r"\{\{/?insight(?::[a-zA-Z0-9_.:-]+)?\}\}")
+INSIGHT_MARKER_RE = re.compile(r"\{\{/?insight(?::[^{}]*)?\}\}")
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
 # Bold markers wrapping a source link (**[title](url)**) are not representable
@@ -27,34 +25,10 @@ class NormalizedLayout:
     warnings: list[str]
 
 
-def close_unpaired_insights(markdown: str) -> str:
-    """Close insight markers before the next opener or at a sentence boundary."""
+def strip_insight_markers(text: str) -> str:
+    """Flatten obsolete Briefing insight markup to ordinary text."""
 
-    result: list[str] = []
-    position = 0
-    open_marker = False
-    for match in INSIGHT_OPEN_RE.finditer(markdown):
-        chunk = markdown[position : match.start()]
-        if open_marker and INSIGHT_CLOSE not in chunk:
-            result.append(_close_at_sentence_boundary(chunk))
-        else:
-            result.append(chunk)
-        result.append(match.group(0))
-        open_marker = True
-        position = match.end()
-        close_index = markdown.find(INSIGHT_CLOSE, position)
-        next_open = INSIGHT_OPEN_RE.search(markdown, position)
-        if close_index != -1 and (next_open is None or close_index < next_open.start()):
-            chunk = markdown[position : close_index + len(INSIGHT_CLOSE)]
-            result.append(chunk)
-            position = close_index + len(INSIGHT_CLOSE)
-            open_marker = False
-    tail = markdown[position:]
-    if open_marker and INSIGHT_CLOSE not in tail:
-        result.append(_close_at_sentence_boundary(tail))
-    else:
-        result.append(tail)
-    return "".join(result)
+    return INSIGHT_MARKER_RE.sub("", text)
 
 
 def normalize_layout(
@@ -74,7 +48,7 @@ def normalize_layout(
             if not markdown:
                 warnings.append("empty_passage_dropped")
                 continue
-            markdown = close_unpaired_insights(markdown)
+            markdown = strip_insight_markers(markdown)
             paragraphs = _paragraphs_from_markdown(markdown, source_keys=source_keys)
             if not paragraphs:
                 warnings.append("passage_without_runs_dropped")
@@ -146,7 +120,7 @@ def normalize_layout(
 
 def markdown_to_narration(markdown: str) -> str:
     text = LINK_RE.sub(lambda match: match.group(1), markdown)
-    text = MARKER_RE.sub("", text)
+    text = strip_insight_markers(text)
     text = text.replace("**", "")
     return " ".join(text.split()).strip()
 
@@ -192,24 +166,17 @@ def _runs_from_markdown(
     markdown = BOLD_LINK_RE.sub(lambda match: match.group(1), markdown)
     runs: list[dict[str, Any]] = []
     index = 0
-    insight_id: str | None = None
     while index < len(markdown):
         next_link = LINK_RE.search(markdown, index)
-        next_open = INSIGHT_OPEN_RE.search(markdown, index)
-        next_close = markdown.find(INSIGHT_CLOSE, index)
         candidates: list[tuple[int, str, re.Match[str] | None]] = []
         if next_link:
             candidates.append((next_link.start(), "link", next_link))
-        if next_open:
-            candidates.append((next_open.start(), "open", next_open))
-        if next_close != -1:
-            candidates.append((next_close, "close", None))
         if not candidates:
-            _append_text_runs(runs, markdown[index:], insight_id=insight_id)
+            _append_text_runs(runs, markdown[index:])
             break
         next_pos, token_type, match = min(candidates, key=lambda item: item[0])
         if next_pos > index:
-            _append_text_runs(runs, markdown[index:next_pos], insight_id=insight_id)
+            _append_text_runs(runs, markdown[index:next_pos])
         if token_type == "link" and match is not None:
             source_key = build_source_key(match.group(3), int(match.group(4)))
             text = match.group(1)
@@ -219,58 +186,44 @@ def _runs_from_markdown(
                         "kind": BriefingRunKind.SOURCE_LINK.value,
                         "text": text,
                         "source_key": source_key,
-                        "insight_id": insight_id,
                         "bold": False,
                     }
                 )
             else:
-                _append_text_runs(runs, text, insight_id=insight_id)
+                _append_text_runs(runs, text)
             index = match.end()
-        elif token_type == "open" and match is not None:
-            insight_id = match.group(1)
-            index = match.end()
-        else:
-            insight_id = None
-            index = next_close + len(INSIGHT_CLOSE)
     return _coalesce_runs(runs)
 
 
 def _append_text_runs(
     runs: list[dict[str, Any]],
     text: str,
-    *,
-    insight_id: str | None,
 ) -> None:
     if not text:
         return
     position = 0
     for match in BOLD_RE.finditer(text):
         if match.start() > position:
-            _append_plain_run(
-                runs, text[position : match.start()], insight_id=insight_id, bold=False
-            )
-        _append_plain_run(runs, match.group(1), insight_id=insight_id, bold=True)
+            _append_plain_run(runs, text[position : match.start()], bold=False)
+        _append_plain_run(runs, match.group(1), bold=True)
         position = match.end()
     if position < len(text):
-        _append_plain_run(runs, text[position:], insight_id=insight_id, bold=False)
+        _append_plain_run(runs, text[position:], bold=False)
 
 
 def _append_plain_run(
     runs: list[dict[str, Any]],
     text: str,
     *,
-    insight_id: str | None,
     bold: bool,
 ) -> None:
     if not text:
         return
-    kind = BriefingRunKind.INSIGHT.value if insight_id else BriefingRunKind.TEXT.value
     runs.append(
         {
-            "kind": kind,
+            "kind": BriefingRunKind.TEXT.value,
             "text": text,
             "source_key": None,
-            "insight_id": insight_id,
             "bold": bold,
         }
     )
@@ -286,21 +239,12 @@ def _coalesce_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             previous
             and previous["kind"] == run["kind"]
             and previous.get("source_key") == run.get("source_key")
-            and previous.get("insight_id") == run.get("insight_id")
             and previous.get("bold") == run.get("bold")
         ):
             previous["text"] += run["text"]
         else:
             coalesced.append(run)
     return coalesced
-
-
-def _close_at_sentence_boundary(text: str) -> str:
-    boundary = re.search(r"([.!?])(\s|$)", text)
-    if boundary:
-        insert_at = boundary.end(1)
-        return text[:insert_at] + INSIGHT_CLOSE + text[insert_at:]
-    return text + INSIGHT_CLOSE
 
 
 def _valid_source_key(value: Any, source_keys: set[str]) -> str | None:

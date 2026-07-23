@@ -6,7 +6,7 @@ description: Briefing layout composition prompts for the news tier.
 
 You compose a briefing layout for the `news` tier: one cluster of unread news headlines.
 
-Return exactly one `passage` block. Use `markdown` with source links and optional insight markers.
+Return exactly one `passage` block. Use `markdown` with source links.
 Do not include `figure` or `pullquote` blocks.
 
 Writing Style:
@@ -26,9 +26,6 @@ surrounding descriptive words, roughly four to ten words (for example
 never a bare two-word name. Write exactly one compact paragraph of at most three sentences and link
 every provided source exactly once. Place links toward the beginning of the sentence that covers
 each source.
-Mark 2 or 3 useful deep-dive fragments with
-`{{insight:short_id}}selected words{{/insight}}`. Keep insight ids short and unique inside this
-window.
 
 ## Window
 

@@ -26,11 +26,7 @@ from app.services.briefing.layout_policy import (
     assess_briefing_layout,
     is_low_signal_generated_text,
 )
-from app.services.briefing.normalize import (
-    INSIGHT_CLOSE,
-    NormalizedLayout,
-    normalize_layout,
-)
+from app.services.briefing.normalize import NormalizedLayout, normalize_layout
 from app.services.briefing.openrouter import (
     StructuredOutputRequester,
     request_openrouter_json_schema,
@@ -44,7 +40,7 @@ from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
 
-PROMPT_VERSION = "briefing-v2"
+PROMPT_VERSION = "briefing-v3"
 MAX_COMPOSE_ATTEMPTS = 4
 LAYOUT_PROMPTS_BY_TIER = {
     "audio": "briefing/layout_audio",
@@ -256,8 +252,6 @@ def compose_window(
             candidate = process_generated_layout(
                 llm_blocks,
                 sources=sources,
-                lens_key=lens_key,
-                window_index=window_index,
                 figure_budget=figure_budget,
                 ensure_source_figures=tier != "news",
             )
@@ -324,8 +318,6 @@ def compose_window(
                     mode="json"
                 )["blocks"],
                 sources=sources,
-                lens_key=lens_key,
-                window_index=window_index,
                 figure_budget=figure_budget,
                 ensure_source_figures=tier != "news",
             )
@@ -336,8 +328,6 @@ def compose_window(
                 "blocks"
             ],
             sources=sources,
-            lens_key=lens_key,
-            window_index=window_index,
             figure_budget=figure_budget,
             ensure_source_figures=tier != "news",
         )
@@ -372,8 +362,6 @@ def process_generated_layout(
     blocks: list[dict[str, Any]],
     *,
     sources: list[BriefingSource],
-    lens_key: str,
-    window_index: int,
     figure_budget: int,
     ensure_source_figures: bool,
 ) -> ProcessedLayout:
@@ -401,8 +389,6 @@ def process_generated_layout(
     repaired = repair_layout(
         raw_blocks,
         sources=sources,
-        lens_key=lens_key,
-        window_index=window_index,
         figure_budget=figure_budget,
         ensure_source_figures=ensure_source_figures,
         assessment=raw_assessment,
@@ -433,7 +419,7 @@ def deterministic_layout(
     lens_title: str,
     tier: str,
 ) -> ComposerLayout:
-    sentences = [_source_sentence(source, index=index) for index, source in enumerate(sources)]
+    sentences = [_source_sentence(source) for source in sources]
     source_label = "source" if len(sources) == 1 else "sources"
     intro = f"**{lens_title}** opens with {len(sources)} unread {source_label}."
     if tier == "news":
@@ -472,11 +458,7 @@ def deterministic_layout(
 
 
 def _news_clause(sentence: str) -> str:
-    normalized = re.sub(r"[.!?]+(?=\s|$)", ",", sentence).strip(" ,;")
-    if not normalized.endswith(INSIGHT_CLOSE):
-        return normalized
-    body = normalized.removesuffix(INSIGHT_CLOSE).rstrip(" ,;.!?")
-    return f"{body}{INSIGHT_CLOSE}"
+    return re.sub(r"[.!?]+(?=\s|$)", ",", sentence).strip(" ,;")
 
 
 def news_layout_contract_issues(
@@ -517,15 +499,10 @@ def news_layout_contract_issues(
     return []
 
 
-def _source_sentence(source: BriefingSource, *, index: int) -> str:
+def _source_sentence(source: BriefingSource) -> str:
     url_kind = "content" if source.kind == "content" else "news"
     summary = source.summary or (source.key_points[0] if source.key_points else "is ready to read")
-    insight_open = f"{{{{insight:source_{index}}}}}" if index < 3 else ""
-    insight_close = INSIGHT_CLOSE if index < 3 else ""
-    return (
-        f"[{source.title}](newsly://briefing/{url_kind}/{source.id}) "
-        f"{insight_open}{summary}{insight_close}"
-    )
+    return f"[{source.title}](newsly://briefing/{url_kind}/{source.id}) {summary}"
 
 
 def generate_layout_with_llm(
