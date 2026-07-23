@@ -5,6 +5,76 @@
 
 import Foundation
 
+enum LearningDeckURLValidationError: LocalizedError, Equatable {
+    case invalidURL
+    case insecureRemoteURL
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            "The server returned an invalid Learning Deck URL."
+        case .insecureRemoteURL:
+            "The server returned an insecure Learning Deck URL."
+        }
+    }
+}
+
+enum LearningDeckURLValidator {
+    static func validate(_ rawValue: String, apiBaseURL: URL) throws -> URL {
+        guard
+            let url = URL(string: rawValue),
+            let scheme = url.scheme?.lowercased(),
+            let host = url.host,
+            let apiScheme = apiBaseURL.scheme?.lowercased(),
+            let apiHost = apiBaseURL.host,
+            url.user == nil,
+            url.password == nil,
+            url.path.hasPrefix("/learning/signed/")
+        else {
+            throw LearningDeckURLValidationError.invalidURL
+        }
+
+        if isLoopback(host), isLoopback(apiHost) {
+            guard scheme == "http" || scheme == "https" else {
+                throw LearningDeckURLValidationError.invalidURL
+            }
+            return url
+        }
+
+        guard
+            scheme == "https",
+            apiScheme == "https",
+            host.caseInsensitiveCompare(apiHost) == .orderedSame,
+            effectivePort(for: url) == effectivePort(for: apiBaseURL)
+        else {
+            throw LearningDeckURLValidationError.insecureRemoteURL
+        }
+        return url
+    }
+
+    private static func isLoopback(_ host: String) -> Bool {
+        let normalized = host.lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if normalized == "localhost" || normalized == "::1" {
+            return true
+        }
+
+        let octets = normalized.split(separator: ".", omittingEmptySubsequences: false)
+        return octets.count == 4
+            && octets.first == "127"
+            && octets.allSatisfy { UInt8($0) != nil }
+    }
+
+    private static func effectivePort(for url: URL) -> Int? {
+        if let port = url.port { return port }
+        switch url.scheme?.lowercased() {
+        case "https": return 443
+        case "http": return 80
+        default: return nil
+        }
+    }
+}
+
 protocol LearningDeckServicing: AnyObject {
     func listDecks() async throws -> LearningDeckListResponse
     func fetchDeck(id: Int) async throws -> LearningDeck
@@ -69,10 +139,10 @@ final class LearningDeckService {
             endpoint,
             method: "POST"
         )
-        guard let url = URL(string: response.url) else {
+        guard let apiBaseURL = URL(string: AppSettings.shared.baseURL) else {
             throw APIError.invalidURL
         }
-        return url
+        return try LearningDeckURLValidator.validate(response.url, apiBaseURL: apiBaseURL)
     }
 
     func enableShare(deckId: Int) async throws -> LearningDeckShareResponse {

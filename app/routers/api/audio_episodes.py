@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session, get_readonly_db_session, get_session_factory
 from app.core.deps import get_current_user, require_user_id
+from app.core.external_urls import external_url_for
 from app.core.logging import get_logger
 from app.models.api.audio_episodes import (
     AudioEpisodeDelivery,
@@ -420,7 +421,11 @@ def serve_shared_audio_episode(
         path = audio_episode_file_path(episode)
         if path is None or not path.exists():
             raise HTTPException(status_code=404, detail="Audio file not found")
-        audio_url = str(request.url_for("serve_shared_audio_episode_audio", token=token))
+        audio_url = external_url_for(
+            request,
+            "serve_shared_audio_episode_audio",
+            token=token,
+        )
         return HTMLResponse(
             _shared_audio_episode_html(episode, audio_url=audio_url),
             headers={"Cache-Control": "no-store"},
@@ -463,8 +468,12 @@ def _audio_episode_share_response(
 ) -> AudioEpisodeShareResponse:
     return AudioEpisodeShareResponse(
         share_enabled=True,
-        share_page_url=str(request.url_for("serve_shared_audio_episode", token=token)),
-        share_audio_url=str(request.url_for("serve_shared_audio_episode_audio", token=token)),
+        share_page_url=external_url_for(request, "serve_shared_audio_episode", token=token),
+        share_audio_url=external_url_for(
+            request,
+            "serve_shared_audio_episode_audio",
+            token=token,
+        ),
     )
 
 

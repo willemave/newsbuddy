@@ -33,6 +33,32 @@ def test_production_settings_reject_wildcard_cors() -> None:
         )
 
 
+def test_production_settings_require_https_public_base_url() -> None:
+    common = {
+        "database_url": "postgresql://postgres@localhost/test",
+        "JWT_SECRET_KEY": "test-secret-key",
+        "ADMIN_PASSWORD": "test-admin-password",
+        "environment": "production",
+        "cors_allow_origins": ["https://app.example.com"],
+    }
+
+    with pytest.raises(ValidationError, match="PUBLIC_BASE_URL must be set"):
+        build_settings(**common)
+
+    with pytest.raises(ValidationError, match="PUBLIC_BASE_URL must use HTTPS"):
+        build_settings(**common, public_base_url="http://app.example.com")
+
+
+def test_public_base_url_must_be_an_origin() -> None:
+    with pytest.raises(ValidationError, match="PUBLIC_BASE_URL must be an origin"):
+        build_settings(
+            database_url="postgresql://postgres@localhost/test",
+            JWT_SECRET_KEY="test-secret-key",
+            ADMIN_PASSWORD="test-admin-password",
+            public_base_url="https://app.example.com/api",
+        )
+
+
 def test_settings_parse_csv_security_lists() -> None:
     settings = build_settings(
         database_url="postgresql://postgres@localhost/test",
@@ -67,6 +93,7 @@ def test_settings_parse_csv_security_lists_from_environment(
         "APPLE_SIGNIN_AUDIENCES",
         "org.willemaw.newsly, org.willemaw.newsly.ShareExtension",
     )
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://app.example.com")
 
     settings = build_settings()
 
@@ -78,6 +105,7 @@ def test_settings_parse_csv_security_lists_from_environment(
         "org.willemaw.newsly",
         "org.willemaw.newsly.ShareExtension",
     ]
+    assert str(settings.public_base_url) == "https://app.example.com/"
 
 
 def test_settings_grouped_views_do_not_expose_secrets() -> None:
@@ -98,6 +126,7 @@ def test_settings_grouped_views_do_not_expose_secrets() -> None:
     assert diagnostics["groups"]["auth"]["admin_password_configured"] is True
     assert diagnostics["groups"]["providers"]["openai_api_key_configured"] is True
     assert diagnostics["groups"]["observability"]["langfuse_secret_key_configured"] is True
+    assert diagnostics["groups"]["observability"]["public_base_url"] is None
     assert diagnostics["groups"]["integrations"]["x"]["x_client_secret_configured"] is True
     assert "jwt-secret-value" not in rendered
     assert "admin-secret-value" not in rendered

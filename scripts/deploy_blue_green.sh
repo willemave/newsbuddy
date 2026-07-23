@@ -98,8 +98,26 @@ for attempt in $(seq 1 60); do
   sleep 5
 done
 
+public_base_url="$(docker exec "newsly-api-${target_slot}" printenv PUBLIC_BASE_URL)"
+if [[ "${public_base_url}" != https://* ]]; then
+  echo "PUBLIC_BASE_URL must be an HTTPS origin" >&2
+  exit 1
+fi
+
 echo "Switching Nginx to ${target_slot}"
 "${switch_script}" "${target_slot}"
+
+echo "Verifying public HTTPS origin"
+if ! curl --fail --silent --show-error --max-time 15 \
+  --retry 2 --retry-delay 2 --retry-max-time 45 --retry-all-errors \
+  "${public_base_url%/}/health" >/dev/null; then
+  echo "Public HTTPS origin did not reach the new API slot" >&2
+  if [[ "${active_slot}" == "blue" || "${active_slot}" == "green" ]]; then
+    echo "Rolling back Nginx to ${active_slot}" >&2
+    "${switch_script}" "${active_slot}"
+  fi
+  exit 1
+fi
 
 echo "Updating workers and scheduler"
 compose up -d --no-deps workers scheduler

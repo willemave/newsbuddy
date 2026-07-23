@@ -4,9 +4,25 @@
 //
 
 import Observation
+import OSLog
 import SwiftUI
 import UIKit
 import WebKit
+
+private let learningDeckWebLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "org.willemaw.newsly",
+    category: "LearningDeckWebView"
+)
+
+struct LearningDeckWebLogOrigin: Equatable {
+    let scheme: String
+    let host: String
+
+    init(url: URL?) {
+        scheme = url?.scheme ?? "none"
+        host = url?.host ?? "none"
+    }
+}
 
 /// Bridges the SwiftUI reader to the underlying reveal.js `WKWebView`: exposes a
 /// load phase for loading/error overlays and forwards slide navigation commands.
@@ -19,7 +35,6 @@ final class LearningDeckReaderWebController {
     }
 
     private(set) var phase: LoadPhase = .loading
-
     @ObservationIgnored
     private weak var webView: WKWebView?
 
@@ -29,7 +44,23 @@ final class LearningDeckReaderWebController {
 
     func markLoading() { phase = .loading }
     func markLoaded() { phase = .loaded }
-    func markFailed() { phase = .failed }
+
+    func markFailed(error: Error, url: URL?) {
+        phase = .failed
+        let nsError = error as NSError
+        let origin = LearningDeckWebLogOrigin(url: url)
+        learningDeckWebLogger.error(
+            "Deck load failed domain=\(nsError.domain, privacy: .public) code=\(nsError.code) scheme=\(origin.scheme, privacy: .public) host=\(origin.host, privacy: .public)"
+        )
+    }
+
+    func markFailed(httpStatusCode: Int, url: URL?) {
+        phase = .failed
+        let origin = LearningDeckWebLogOrigin(url: url)
+        learningDeckWebLogger.error(
+            "Deck load failed status=\(httpStatusCode) scheme=\(origin.scheme, privacy: .public) host=\(origin.host, privacy: .public)"
+        )
+    }
 
     func goNext() { evaluate("if (window.Reveal && Reveal.next) { Reveal.next(); }") }
     func goPrevious() { evaluate("if (window.Reveal && Reveal.prev) { Reveal.prev(); }") }
@@ -125,7 +156,7 @@ struct LearningDeckWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            controller.markFailed()
+            recordFailure(error, in: webView)
         }
 
         func webView(
@@ -133,7 +164,7 @@ struct LearningDeckWebView: UIViewRepresentable {
             didFailProvisionalNavigation navigation: WKNavigation!,
             withError error: Error
         ) {
-            controller.markFailed()
+            recordFailure(error, in: webView)
         }
 
         func webView(
@@ -149,7 +180,10 @@ struct LearningDeckWebView: UIViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-            controller.markFailed()
+            controller.markFailed(
+                httpStatusCode: response.statusCode,
+                url: response.url
+            )
             decisionHandler(.cancel)
         }
 
@@ -166,6 +200,13 @@ struct LearningDeckWebView: UIViewRepresentable {
 
         private func injectSlideBridge(into webView: WKWebView) {
             webView.evaluateJavaScript(Self.installSlideChangedHookScript)
+        }
+
+        private func recordFailure(_ error: Error, in webView: WKWebView) {
+            guard !isNetworkCancellation(error) else { return }
+            let nsError = error as NSError
+            let failingURL = nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL
+            controller.markFailed(error: error, url: failingURL ?? webView.url)
         }
 
         private func announceIfNeeded(_ context: LearningDeckSlideContext) {

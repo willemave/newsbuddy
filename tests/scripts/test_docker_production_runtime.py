@@ -20,8 +20,10 @@ def test_production_compose_keeps_postgres_outside_app_containers() -> None:
     assert services["postgres"]["ports"] == ["127.0.0.1:5432:5432"]
 
     for service_name in ("api_blue", "api_green", "workers", "scheduler", "migrate"):
-        assert services[service_name]["environment"]["DATABASE_URL"].startswith(
-            "${NEWSLY_DATABASE_URL:"
+        environment = services[service_name]["environment"]
+        assert environment["DATABASE_URL"].startswith("${NEWSLY_DATABASE_URL:")
+        assert environment["PUBLIC_BASE_URL"] == (
+            "${NEWSLY_PUBLIC_BASE_URL:-https://racknerd-3b1b61d.willemsavenue.com}"
         )
 
 
@@ -34,6 +36,18 @@ def test_production_compose_defines_blue_green_api_slots() -> None:
     assert services["api_green"]["ports"] == ["127.0.0.1:8002:8000"]
     assert services["api_blue"]["environment"]["NEWSLY_RUNTIME_MODE"] == "api"
     assert services["api_green"]["environment"]["NEWSLY_RUNTIME_MODE"] == "api"
+    for service_name in ("api_blue", "api_green"):
+        environment = services[service_name]["environment"]
+        assert environment["FORWARDED_ALLOW_IPS"] == (
+            "${NEWSLY_FORWARDED_ALLOW_IPS:-127.0.0.1,172.16.0.0/12}"
+        )
+
+
+def test_api_launcher_trusts_only_explicitly_configured_proxy_peers() -> None:
+    launcher = (REPO_ROOT / "docker/run-api.sh").read_text()
+
+    assert "--proxy-headers" in launcher
+    assert '--forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}"' in launcher
 
 
 def test_production_compose_runs_workers_scheduler_and_migrations_separately() -> None:
@@ -62,9 +76,13 @@ def test_blue_green_deploy_orders_migration_health_switch_and_workers() -> None:
     inactive_api = deploy_script.index('compose up -d --no-deps "${target_service}"')
     health = deploy_script.index('"http://127.0.0.1:${target_port}/health"')
     switch = deploy_script.index('"${switch_script}" "${target_slot}"')
+    public_health = deploy_script.index('"${public_base_url%/}/health"')
     background = deploy_script.index("compose up -d --no-deps workers scheduler")
 
-    assert migration < inactive_api < health < switch < background
+    assert migration < inactive_api < health < switch < public_health < background
+    assert 'docker exec "newsly-api-${target_slot}" printenv PUBLIC_BASE_URL' in deploy_script
+    assert "--retry 2 --retry-delay 2 --retry-max-time 45 --retry-all-errors" in deploy_script
+    assert '"${switch_script}" "${active_slot}"' in deploy_script
 
 
 def test_nginx_routes_through_atomic_active_upstream() -> None:

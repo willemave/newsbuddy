@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
+from app.core.external_urls import external_url_for
 from app.models.api.learning_decks import (
     LearningDeckCreateRequest,
     LearningDeckListResponse,
@@ -136,7 +137,7 @@ def create_viewer_url(
         raise HTTPException(status_code=409, detail="Learning Deck is not ready")
     token, expires_at = build_private_learning_deck_token(deck=deck, user_id=user_id)
     return LearningDeckUrlResponse(
-        url=str(request.url_for("serve_private_learning_deck", token=token)),
+        url=external_url_for(request, "serve_private_learning_deck", token=token),
         expires_at=expires_at,
     )
 
@@ -161,7 +162,11 @@ def create_source_notes_url(
         raise HTTPException(status_code=409, detail="Learning Deck is not ready")
     token, expires_at = build_private_learning_deck_token(deck=deck, user_id=user_id)
     return LearningDeckUrlResponse(
-        url=str(request.url_for("serve_private_learning_deck_source_notes", token=token)),
+        url=external_url_for(
+            request,
+            "serve_private_learning_deck_source_notes",
+            token=token,
+        ),
         expires_at=expires_at,
     )
 
@@ -188,7 +193,7 @@ def enable_share(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     return LearningDeckShareResponse(
         share_enabled=True,
-        share_url=str(request.url_for("serve_shared_learning_deck", token=token)),
+        share_url=external_url_for(request, "serve_shared_learning_deck", token=token),
     )
 
 

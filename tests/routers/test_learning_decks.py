@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from app.models.contracts import ContentStatus, ContentType, TaskType
 from app.models.db import (
     Content,
@@ -94,7 +96,12 @@ def test_private_viewer_url_requires_completed_deck(
     db_session,
     test_user,
     content_factory,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setattr(
+        "app.core.external_urls.get_settings",
+        lambda: SimpleNamespace(public_base_url="https://public.example.com"),
+    )
     content = _create_visible_article(db_session, test_user, content_factory)
     create_response = client.post("/api/learning/decks", json={"content_id": content.id})
     deck_id = create_response.json()["id"]
@@ -111,8 +118,16 @@ def test_private_viewer_url_requires_completed_deck(
 
     ready = client.post(f"/api/learning/decks/{deck_id}/viewer-url")
     assert ready.status_code == 200
-    assert "/learning/signed/" in ready.json()["url"]
+    assert ready.json()["url"].startswith("https://public.example.com/learning/signed/")
     assert ready.json()["expires_at"]
+
+    source_notes = client.post(f"/api/learning/decks/{deck_id}/source-notes-url")
+    assert source_notes.status_code == 200
+    assert source_notes.json()["url"].startswith("https://public.example.com/learning/signed/")
+
+    share = client.post(f"/api/learning/decks/{deck_id}/share")
+    assert share.status_code == 200
+    assert share.json()["share_url"].startswith("https://public.example.com/learning/share/")
 
 
 def test_public_share_route_serves_latest_artifact_and_disable_revokes(

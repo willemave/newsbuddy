@@ -1,6 +1,107 @@
 import XCTest
 @testable import newsly
 
+final class LearningDeckURLValidatorTests: XCTestCase {
+    func testAcceptsSameOriginRemoteHTTPSURL() throws {
+        let apiBaseURL = URL(string: "https://racknerd.example.com:443")!
+
+        let resolved = try LearningDeckURLValidator.validate(
+            "https://racknerd.example.com/learning/signed/opaque-token/",
+            apiBaseURL: apiBaseURL
+        )
+
+        XCTAssertEqual(
+            resolved.absoluteString,
+            "https://racknerd.example.com/learning/signed/opaque-token/"
+        )
+    }
+
+    func testRejectsRemoteHTTPURLInsteadOfRepairingIt() {
+        let apiBaseURL = URL(string: "https://racknerd.example.com:443")!
+
+        XCTAssertThrowsError(
+            try LearningDeckURLValidator.validate(
+                "http://racknerd.example.com/learning/signed/opaque-token/",
+                apiBaseURL: apiBaseURL
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? LearningDeckURLValidationError,
+                .insecureRemoteURL
+            )
+        }
+    }
+
+    func testAllowsLoopbackHTTPForLocalDevelopment() throws {
+        let apiBaseURL = URL(string: "http://localhost:8000")!
+
+        let resolved = try LearningDeckURLValidator.validate(
+            "http://127.0.0.1:8000/learning/signed/local-token/",
+            apiBaseURL: apiBaseURL
+        )
+
+        XCTAssertEqual(
+            resolved.absoluteString,
+            "http://127.0.0.1:8000/learning/signed/local-token/"
+        )
+    }
+
+    func testDoesNotTreatHostnameBeginningWith127AsLoopback() {
+        let apiBaseURL = URL(string: "http://localhost:8000")!
+
+        XCTAssertThrowsError(
+            try LearningDeckURLValidator.validate(
+                "http://127.attacker.example/learning/signed/opaque-token/",
+                apiBaseURL: apiBaseURL
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? LearningDeckURLValidationError,
+                .insecureRemoteURL
+            )
+        }
+    }
+
+    func testRejectsNonLearningPath() {
+        let apiBaseURL = URL(string: "https://racknerd.example.com:443")!
+
+        XCTAssertThrowsError(
+            try LearningDeckURLValidator.validate(
+                "https://racknerd.example.com/not-a-deck",
+                apiBaseURL: apiBaseURL
+            )
+        ) { error in
+            XCTAssertEqual(error as? LearningDeckURLValidationError, .invalidURL)
+        }
+    }
+
+    func testRejectsHTTPSURLFromAnotherHost() {
+        let apiBaseURL = URL(string: "https://racknerd.example.com")!
+
+        XCTAssertThrowsError(
+            try LearningDeckURLValidator.validate(
+                "https://attacker.example.com/learning/signed/opaque-token/",
+                apiBaseURL: apiBaseURL
+            )
+        ) { error in
+            XCTAssertEqual(error as? LearningDeckURLValidationError, .insecureRemoteURL)
+        }
+    }
+}
+
+final class LearningDeckWebLogOriginTests: XCTestCase {
+    func testLogOriginExcludesSignedPath() {
+        let signedURL = URL(
+            string: "http://racknerd.example.com/learning/signed/sensitive-token/"
+        )!
+
+        let origin = LearningDeckWebLogOrigin(url: signedURL)
+
+        XCTAssertEqual(origin.scheme, "http")
+        XCTAssertEqual(origin.host, "racknerd.example.com")
+    }
+}
+
 @MainActor
 final class LearningDeckReaderReliabilityTests: XCTestCase {
     func testActiveRegenerationKeepsOldViewerWhilePollingForReplacement() async {

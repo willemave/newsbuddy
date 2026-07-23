@@ -28,6 +28,7 @@ the API, workers, and scheduler connect to it over the private
 ```bash
 NEWSLY_DATABASE_URL=postgresql+psycopg://newsly:...@postgres:5432/newsly
 CORS_ALLOW_ORIGINS=https://racknerd-3b1b61d.willemsavenue.com
+NEWSLY_PUBLIC_BASE_URL=https://racknerd-3b1b61d.willemsavenue.com
 MEDIA_BASE_DIR=/data/media
 LOGS_BASE_DIR=/data/logs
 IMAGES_BASE_DIR=/data/images
@@ -44,6 +45,13 @@ Then set at minimum:
 - `CORS_ALLOW_ORIGINS` with the public production origin, because wildcard CORS is rejected when `ENVIRONMENT=production`
 - your provider API keys
 
+The `NEWSLY_PUBLIC_BASE_URL` line is optional: production Compose defaults it to
+the RackNerd HTTPS origin shown above unless `.env.racknerd` overrides it.
+
+The API launcher trusts forwarded headers from loopback and Docker's private
+`172.16.0.0/12` range by default. Set `NEWSLY_FORWARDED_ALLOW_IPS` only if the
+production Docker network uses a different, explicitly known subnet.
+
 ## Deploy flow
 
 GitHub Actions:
@@ -54,8 +62,10 @@ GitHub Actions:
 4. runs Alembic migrations once
 5. starts the inactive API slot and waits for its direct health check
 6. atomically switches Nginx to that slot
-7. updates the single workers and scheduler containers
-8. retains the previous API slot and image as the immediate rollback target
+7. verifies the configured public HTTPS origin reaches the new slot, rolling
+   Nginx back if that probe fails
+8. updates the single workers and scheduler containers
+9. retains the previous API slot and image as the immediate rollback target
 
 The production services are defined in `docker-compose.production.yml`.
 `scripts/deploy_blue_green.sh` owns the release sequence. The active slot is

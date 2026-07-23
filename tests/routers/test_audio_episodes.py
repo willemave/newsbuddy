@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from app.models.contracts import ContentType, TaskType
 from app.models.db import (
@@ -441,7 +442,12 @@ def test_custom_narration_public_share_page_audio_and_revoke(
     db_session,
     test_user,
     tmp_path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setattr(
+        "app.core.external_urls.get_settings",
+        lambda: SimpleNamespace(public_base_url="https://public.example.com"),
+    )
     audio_path = tmp_path / "shared-narration.mp3"
     audio_path.write_bytes(b"shared-mp3")
     episode = AudioEpisode(
@@ -469,13 +475,14 @@ def test_custom_narration_public_share_page_audio_and_revoke(
     assert share_response.status_code == 200
     payload = share_response.json()
     assert payload["share_enabled"] is True
-    assert payload["share_page_url"]
-    assert payload["share_audio_url"]
+    assert payload["share_page_url"].startswith("https://public.example.com/audio/share/")
+    assert payload["share_audio_url"].startswith("https://public.example.com/audio/share/")
 
     page_response = client.get(payload["share_page_url"])
     assert page_response.status_code == 200
     assert "Shared narration" in page_response.text
     assert "<audio controls" in page_response.text
+    assert payload["share_audio_url"] in page_response.text
 
     audio_response = client.get(payload["share_audio_url"])
     assert audio_response.status_code == 200

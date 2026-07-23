@@ -1476,6 +1476,13 @@ Local `full` mode embeds PostgreSQL and Supervisor and runs bootstrap/migrations
 
 RackNerd production uses `docker-compose.production.yml` and an external `newsly-internal` network. PostgreSQL, workers, and the scheduler are singletons; the API has blue and green slots bound to loopback ports 8001 and 8002. `scripts/deploy_blue_green.sh` migrates once, starts and health-checks the inactive API, atomically reloads the Nginx upstream, then replaces workers and the scheduler. PostgreSQL state and shared file-backed assets remain under host `/data` and outlive app containers.
 
+`PUBLIC_BASE_URL` is the authoritative origin for absolute URLs returned outside the API boundary,
+including Learning Deck viewer/source/share links and audio-episode share links. Production startup
+requires an origin-only HTTPS value. Uvicorn accepts forwarded headers only from the configured
+loopback/Docker proxy ranges, while public URL construction remains independent of proxy-header
+interpretation. After an API slot switch, the deploy script probes that public HTTPS origin and
+rolls Nginx back to the prior slot if the probe fails.
+
 The previous API slot remains running as an immediate rollback target. Production migrations must therefore remain compatible with the old active API for the duration of the switch.
 
 ### 21.4 Schema and bootstrapping

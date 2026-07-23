@@ -10,6 +10,7 @@ from pydantic import (
     AliasChoices,
     BaseModel,
     Field,
+    HttpUrl,
     PostgresDsn,
     ValidationInfo,
     field_validator,
@@ -209,6 +210,7 @@ class ObservabilitySettingsView(BaseModel):
     """Grouped logging and tracing settings without exposing secrets."""
 
     environment: str
+    public_base_url: str | None
     debug: bool
     log_level: str
     langfuse_enabled: bool
@@ -236,6 +238,7 @@ class Settings(BaseSettings):
     # Application
     app_name: str = "News Aggregator"
     environment: str = "development"
+    public_base_url: HttpUrl | None = None
     debug: bool = False
     log_level: str = "INFO"
     cors_allow_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
@@ -580,8 +583,23 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security_settings(self) -> "Settings":
-        if self.environment.lower() == "production" and "*" in self.cors_allow_origins:
+        is_production = self.environment.lower() == "production"
+        if is_production and "*" in self.cors_allow_origins:
             raise ValueError("CORS_ALLOW_ORIGINS must be explicit in production")
+        public_base_url = self.public_base_url
+        if public_base_url is not None and (
+            public_base_url.username
+            or public_base_url.password
+            or public_base_url.query
+            or public_base_url.fragment
+            or public_base_url.path not in {"", "/"}
+        ):
+            raise ValueError("PUBLIC_BASE_URL must be an origin without credentials or a path")
+        if is_production:
+            if public_base_url is None:
+                raise ValueError("PUBLIC_BASE_URL must be set in production")
+            if public_base_url.scheme != "https":
+                raise ValueError("PUBLIC_BASE_URL must use HTTPS in production")
         if not self.apple_signin_audiences:
             raise ValueError("APPLE_SIGNIN_AUDIENCES must include at least one audience")
         return self
@@ -734,6 +752,7 @@ class Settings(BaseSettings):
     def observability(self) -> ObservabilitySettingsView:
         return ObservabilitySettingsView(
             environment=self.environment,
+            public_base_url=str(self.public_base_url) if self.public_base_url else None,
             debug=self.debug,
             log_level=self.log_level,
             langfuse_enabled=self.langfuse_enabled,
