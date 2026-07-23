@@ -430,22 +430,21 @@ private struct LearningDeckTimelineRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            LearningArtwork(icon: "rectangle.stack.fill", isDeck: true)
+            LearningArtwork(icon: "rectangle.stack", isDeck: true)
             VStack(alignment: .leading, spacing: 5) {
+                Text(deck.displayTitle)
+                    .font(.terracottaHeadlineSmall)
+                    .foregroundStyle(Color.onSurface)
+                    .lineLimit(3)
+                    .truncationMode(.tail)
                 HStack(spacing: 6) {
-                    Text("LEARNING DECK").kicker(color: .terracottaPrimary)
-                    Text("· \(ContentTimestampFormatter.compactRelativeText(from: activityDate))")
+                    Text(ContentTimestampFormatter.compactRelativeText(from: activityDate))
                         .font(.terracottaLabelSmall)
                         .foregroundStyle(Color.onSurfaceTertiary)
                     Text(deck.statusLabel.uppercased())
                         .font(.terracottaLabelSmall)
                         .foregroundStyle(Color.onSurfaceTertiary)
                 }
-                Text(deck.displayTitle)
-                    .font(.terracottaHeadlineSmall)
-                    .foregroundStyle(Color.onSurface)
-                    .lineLimit(3)
-                    .truncationMode(.tail)
                 Text(deck.timelineSubtitle)
                     .font(.terracottaBodySmall)
                     .foregroundStyle(Color.onSurfaceSecondary)
