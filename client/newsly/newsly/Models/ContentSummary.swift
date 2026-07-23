@@ -267,6 +267,10 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         }
     }
 
+    var isXBookmark: Bool {
+        savedSource == APISavedSource.x_bookmark.rawValue
+    }
+
     private static func normalizedText(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

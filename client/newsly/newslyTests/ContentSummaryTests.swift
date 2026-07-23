@@ -62,6 +62,7 @@ final class ContentSummaryTests: XCTestCase {
         let summary = try JSONDecoder().decode(ContentSummary.self, from: data)
 
         XCTAssertEqual(summary.savedSource, "x_bookmark")
+        XCTAssertTrue(summary.isXBookmark)
         XCTAssertEqual(summary.updating(isRead: true).savedSource, "x_bookmark")
     }
 

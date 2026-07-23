@@ -333,6 +333,14 @@ private struct KnowledgeSavedRow: View {
 
     private let imageSize = CGSize(width: 92, height: 76)
 
+    private var visibleSource: String? {
+        guard let source = content.source?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !source.isEmpty,
+              source.caseInsensitiveCompare("self submission") != .orderedSame
+        else { return nil }
+        return source
+    }
+
     private var hasStalled: Bool {
         guard content.savedLibraryItemState == .processing,
               let createdAt = ContentTimestampFormatter.parse(content.createdAt)
@@ -372,8 +380,18 @@ private struct KnowledgeSavedRow: View {
                 }
 
                 HStack(spacing: 5) {
-                    Text(content.source ?? content.platform ?? "Saved")
-                        .lineLimit(1)
+                    if content.isXBookmark {
+                        Text("X BOOKMARK")
+                            .kicker(color: .terracottaPrimary)
+                        if let visibleSource {
+                            Text("·")
+                            Text(visibleSource)
+                                .lineLimit(1)
+                        }
+                    } else {
+                        Text(content.source ?? content.platform ?? "Saved")
+                            .lineLimit(1)
+                    }
                     if let relativeTime = content.relativeTimeDisplay {
                         Text("·")
                         Text(relativeTime)
