@@ -214,8 +214,6 @@ def run_briefing_eval_case(
         processed = process_generated_layout(
             [dict(block) for block in case.fixture_blocks],
             sources=sources,
-            lens_key=case.lens_key,
-            window_index=case.window_index,
             figure_budget=figure_budget,
             ensure_source_figures=case.tier != "news",
         )
