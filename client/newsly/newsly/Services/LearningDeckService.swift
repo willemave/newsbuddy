@@ -29,27 +29,51 @@ enum LearningDeckURLValidator {
             let apiHost = apiBaseURL.host,
             url.user == nil,
             url.password == nil,
-            url.path.hasPrefix("/learning/signed/")
+            url.query == nil,
+            url.fragment == nil,
+            hasValidSignedPath(url.path)
         else {
             throw LearningDeckURLValidationError.invalidURL
         }
 
-        if isLoopback(host), isLoopback(apiHost) {
-            guard scheme == "http" || scheme == "https" else {
-                throw LearningDeckURLValidationError.invalidURL
+        let apiIsLoopback = isLoopback(apiHost)
+        if isLoopback(host) {
+            guard
+                apiIsLoopback,
+                scheme == "http" || scheme == "https",
+                effectivePort(for: url) == effectivePort(for: apiBaseURL)
+            else {
+                throw LearningDeckURLValidationError.insecureRemoteURL
             }
             return url
         }
 
+        // The authenticated API response is authoritative for the public
+        // viewer origin. It can legitimately be a canonical host while the
+        // app is connected through an alias or an older saved API hostname.
+        // WKWebView receives only this signed URL, never the API bearer token.
         guard
             scheme == "https",
-            apiScheme == "https",
-            host.caseInsensitiveCompare(apiHost) == .orderedSame,
-            effectivePort(for: url) == effectivePort(for: apiBaseURL)
+            apiIsLoopback || apiScheme == "https"
         else {
             throw LearningDeckURLValidationError.insecureRemoteURL
         }
         return url
+    }
+
+    private static func hasValidSignedPath(_ path: String) -> Bool {
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard
+            components.count == 4 || components.count == 5,
+            components[0].isEmpty,
+            components[1] == "learning",
+            components[2] == "signed",
+            !components[3].isEmpty
+        else {
+            return false
+        }
+
+        return components.count == 4 || components[4] == "source-notes"
     }
 
     private static func isLoopback(_ host: String) -> Bool {

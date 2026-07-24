@@ -16,6 +16,34 @@ final class LearningDeckURLValidatorTests: XCTestCase {
         )
     }
 
+    func testAcceptsCanonicalRemoteHTTPSURLWhenAPIUsesAnAlias() throws {
+        let apiBaseURL = URL(string: "https://api-alias.example.com:443")!
+
+        let resolved = try LearningDeckURLValidator.validate(
+            "https://public.example.com/learning/signed/opaque-token/",
+            apiBaseURL: apiBaseURL
+        )
+
+        XCTAssertEqual(
+            resolved.absoluteString,
+            "https://public.example.com/learning/signed/opaque-token/"
+        )
+    }
+
+    func testAcceptsSignedSourceNotesURL() throws {
+        let apiBaseURL = URL(string: "https://api-alias.example.com:443")!
+
+        let resolved = try LearningDeckURLValidator.validate(
+            "https://public.example.com/learning/signed/opaque-token/source-notes",
+            apiBaseURL: apiBaseURL
+        )
+
+        XCTAssertEqual(
+            resolved.absoluteString,
+            "https://public.example.com/learning/signed/opaque-token/source-notes"
+        )
+    }
+
     func testRejectsRemoteHTTPURLInsteadOfRepairingIt() {
         let apiBaseURL = URL(string: "https://racknerd.example.com:443")!
 
@@ -75,16 +103,57 @@ final class LearningDeckURLValidatorTests: XCTestCase {
         }
     }
 
-    func testRejectsHTTPSURLFromAnotherHost() {
+    func testRejectsRemoteLoopbackURL() {
         let apiBaseURL = URL(string: "https://racknerd.example.com")!
 
         XCTAssertThrowsError(
             try LearningDeckURLValidator.validate(
-                "https://attacker.example.com/learning/signed/opaque-token/",
+                "https://127.0.0.1/learning/signed/opaque-token/",
                 apiBaseURL: apiBaseURL
             )
         ) { error in
             XCTAssertEqual(error as? LearningDeckURLValidationError, .insecureRemoteURL)
+        }
+    }
+
+    func testRejectsSignedPrefixWithoutAToken() {
+        let apiBaseURL = URL(string: "https://racknerd.example.com")!
+
+        XCTAssertThrowsError(
+            try LearningDeckURLValidator.validate(
+                "https://racknerd.example.com/learning/signed/",
+                apiBaseURL: apiBaseURL
+            )
+        ) { error in
+            XCTAssertEqual(error as? LearningDeckURLValidationError, .invalidURL)
+        }
+    }
+
+    func testRejectsQueryOrFragmentOnSignedURL() {
+        let apiBaseURL = URL(string: "https://racknerd.example.com")!
+
+        for suffix in ["?redirect=https://attacker.example", "#fragment"] {
+            XCTAssertThrowsError(
+                try LearningDeckURLValidator.validate(
+                    "https://racknerd.example.com/learning/signed/opaque-token/\(suffix)",
+                    apiBaseURL: apiBaseURL
+                )
+            ) { error in
+                XCTAssertEqual(error as? LearningDeckURLValidationError, .invalidURL)
+            }
+        }
+    }
+
+    func testRejectsUnexpectedPathBelowSignedToken() {
+        let apiBaseURL = URL(string: "https://racknerd.example.com")!
+
+        XCTAssertThrowsError(
+            try LearningDeckURLValidator.validate(
+                "https://racknerd.example.com/learning/signed/opaque-token/redirect",
+                apiBaseURL: apiBaseURL
+            )
+        ) { error in
+            XCTAssertEqual(error as? LearningDeckURLValidationError, .invalidURL)
         }
     }
 }
@@ -180,6 +249,36 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
         XCTAssertTrue(stoppedPolling)
         XCTAssertFalse(viewModel.viewerResolutionFailed)
         XCTAssertEqual(viewModel.generationStatusLabel, "Taking longer than expected")
+    }
+
+    func testViewerResolutionStopsRetryingTerminalURLFailure() async {
+        let ready = makeLearningDeck(
+            viewerAvailable: true,
+            latestSuccessfulRunId: 12,
+            runStatus: .completed,
+            runId: 12
+        )
+        let service = MockLearningDeckService(
+            fetchResults: [.success(ready)],
+            viewerError: LearningDeckURLValidationError.insecureRemoteURL
+        )
+        let viewModel = makeReaderViewModel(
+            deck: makeLearningDeck(runStatus: .preparing),
+            service: service
+        )
+
+        viewModel.prepareViewer(initialURL: nil)
+
+        let stoppedPolling = await waitUntil {
+            !viewModel.isResolvingViewer && viewModel.viewerResolutionFailed
+        }
+        XCTAssertTrue(stoppedPolling)
+        XCTAssertEqual(service.fetchCallCount, 1)
+        XCTAssertEqual(service.viewerCallCount, 1)
+        XCTAssertEqual(
+            viewModel.generationNote,
+            LearningDeckURLValidationError.insecureRemoteURL.localizedDescription
+        )
     }
 
     private func makeReaderViewModel(
@@ -291,20 +390,24 @@ private final class MockLearningDeckService: LearningDeckServicing {
     private var fetchResults: [Result<LearningDeck, Error>]
     private let createResult: LearningDeck?
     private var viewerURLs: [URL]
+    private let viewerError: Error?
 
     private(set) var fetchCallCount = 0
+    private(set) var viewerCallCount = 0
     private(set) var createRequests: [CreateRequest] = []
 
     init(
         listedDecks: [LearningDeck] = [],
         fetchResults: [Result<LearningDeck, Error>] = [],
         createResult: LearningDeck? = nil,
-        viewerURLs: [URL] = []
+        viewerURLs: [URL] = [],
+        viewerError: Error? = nil
     ) {
         self.listedDecks = listedDecks
         self.fetchResults = fetchResults
         self.createResult = createResult
         self.viewerURLs = viewerURLs
+        self.viewerError = viewerError
     }
 
     func listDecks() async throws -> LearningDeckListResponse {
@@ -341,6 +444,10 @@ private final class MockLearningDeckService: LearningDeckServicing {
     }
 
     func viewerURL(deckId: Int) async throws -> URL {
+        viewerCallCount += 1
+        if let viewerError {
+            throw viewerError
+        }
         guard !viewerURLs.isEmpty else {
             throw LearningDeckTestError.unimplemented
         }

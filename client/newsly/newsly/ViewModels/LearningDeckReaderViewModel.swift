@@ -191,6 +191,11 @@ final class LearningDeckReaderViewModel {
             } catch where isNetworkCancellation(error) {
                 isResolvingViewer = false
                 return
+            } catch where !shouldRetryViewerResolution(after: error) {
+                isResolvingViewer = false
+                viewerResolutionFailed = true
+                generationNote = error.localizedDescription
+                return
             } catch {
                 attempts += 1
                 generationNote = "Connection interrupted. Still trying…"
@@ -203,6 +208,28 @@ final class LearningDeckReaderViewModel {
         viewerResolutionFailed = false
         generationStatusLabel = "Taking longer than expected"
         generationNote = "Your deck is still being prepared."
+    }
+
+    private func shouldRetryViewerResolution(after error: Error) -> Bool {
+        if error is LearningDeckURLValidationError {
+            return false
+        }
+
+        guard let apiError = error as? APIError else {
+            return true
+        }
+        switch apiError {
+        case .invalidURL, .decodingError, .unauthorized:
+            return false
+        case .httpError(let statusCode, _):
+            return statusCode == 408
+                || statusCode == 409
+                || statusCode == 425
+                || statusCode == 429
+                || statusCode >= 500
+        case .noData, .networkError, .unknown:
+            return true
+        }
     }
 
     // MARK: - Chat
