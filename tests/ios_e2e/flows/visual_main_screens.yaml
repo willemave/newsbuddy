@@ -63,7 +63,8 @@ appId: "${APP_ID}"
     id: learning.chat.${CHAT_SESSION_ID}
 - assertVisible:
     id: learning.deck.1
-- assertVisible: Narration
+- assertVisible:
+    id: learning.narration.1
 - waitForAnimationToEnd
 - assertScreenshot:
     path: "${BASELINE_DIR}/redesign-learning.png"
