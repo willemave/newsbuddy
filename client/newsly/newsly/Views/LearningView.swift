@@ -403,6 +403,9 @@ private struct LearningDeckTimelineRow: View {
         LearningTimelineRow(
             icon: "rectangle.on.rectangle",
             isBusy: deck.hasActiveLatestRun,
+            busyAccessibilityIdentifier: deck.hasActiveLatestRun
+                ? "learning.deck.\(deck.id).preparing"
+                : nil,
             activityDate: activityDate,
             title: deck.displayTitle,
             subtitle: deck.timelineSubtitle
