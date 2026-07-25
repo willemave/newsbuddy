@@ -57,6 +57,7 @@ struct ChatTimelineItem: Identifiable, Equatable {
     var message: ChatMessage
     var pendingMessageId: Int?
     var retryText: String?
+    var isQueued: Bool = false
 
     func isOrderedBefore(_ other: ChatTimelineItem) -> Bool {
         let lhsKey = (

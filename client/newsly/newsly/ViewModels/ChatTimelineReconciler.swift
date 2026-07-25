@@ -5,29 +5,6 @@
 
 import Foundation
 
-struct PendingSend: Equatable {
-    let localId: UUID
-    let text: String
-    var messageId: Int?
-    let createdAt: Date
-
-    var placeholderMessage: ChatMessage {
-        ChatMessage(
-            id: placeholderMessageId,
-            sourceMessageId: nil,
-            role: .user,
-            timestamp: createdAt,
-            content: text,
-            status: .processing
-        )
-    }
-
-    private var placeholderMessageId: Int {
-        let prefix = localId.uuidString.prefix(8)
-        return Int(prefix, radix: 16) ?? 0
-    }
-}
-
 struct ChatTimelineReconciler {
     func reconcile(
         current: [ChatTimelineItem],

@@ -26,7 +26,6 @@ struct ChatComposerDock: View {
 
     private var sendButtonDisabled: Bool {
         inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-        isSending ||
         isRecording ||
         isTranscribing
     }
@@ -154,12 +153,14 @@ struct ChatComposerDock: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .background(Color.surfaceContainerHighest)
+                // Raised surface plus a hairline, not a filled container: the darkest
+                // container rung sat between paper and border and read as disabled.
+                .background(Color.surfaceSecondary)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(
-                            isRecording ? Color.statusDestructive.opacity(0.6) : Color.outlineVariant.opacity(0.3),
+                            isRecording ? Color.statusDestructive.opacity(0.6) : Color.borderSubtle,
                             lineWidth: 1
                         )
                 )
@@ -167,7 +168,7 @@ struct ChatComposerDock: View {
                 .accessibilityIdentifier("knowledge.chat_input")
 
             Group {
-                if showsSendAction || isSending {
+                if showsSendAction {
                     sendButton
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 } else {
@@ -181,7 +182,7 @@ struct ChatComposerDock: View {
 
     private var voiceButton: some View {
         TapToTalkMicButton(
-            isEnabled: !isSending && !isVoiceActionInFlight && !isTranscribing,
+            isEnabled: !isVoiceActionInFlight && !isTranscribing,
             isRecording: isRecording,
             isTranscribing: isTranscribing,
             isBusy: isVoiceActionInFlight && !isRecording,
@@ -196,23 +197,16 @@ struct ChatComposerDock: View {
 
     private var sendButton: some View {
         Button(action: onSend) {
-            Group {
-                if isSending {
-                    ProgressView()
-                        .tint(Color.chatUserBubbleText)
-                } else {
-                    Image(systemName: "arrow.up")
-                        .font(.appSymbol(size: 16, weight: .semibold))
-                }
-            }
-            .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
-            .frame(width: 44, height: 44, alignment: .center)
-            .background(sendButtonDisabled ? Color.surfaceContainer : Color.chatUserBubble)
-            .clipShape(Circle())
+            Image(systemName: "arrow.up")
+                .font(.appSymbol(size: 16, weight: .semibold))
+                .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
+                .frame(width: 44, height: 44, alignment: .center)
+                .background(sendButtonDisabled ? Color.surfaceContainer : Color.chatUserBubble)
+                .clipShape(Circle())
         }
         .disabled(sendButtonDisabled)
         .contentShape(Circle())
-        .accessibilityLabel(isSending ? "Sending message" : "Send message")
+        .accessibilityLabel(isSending ? "Queue message" : "Send message")
         .accessibilityIdentifier("knowledge.chat_send")
     }
 

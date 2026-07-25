@@ -94,6 +94,69 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
         XCTAssertFalse(userItem?.message.hasFailed ?? true)
     }
 
+    func testMessagesQueuedDuringDeckAgentTurnDrainInFIFOOrder() async {
+        let firstTurnGate = AsyncGate()
+        var turn = 0
+        let chatService = MockLearningDeckReaderChatService(
+            createAssistantTurnHandler: { message, _, _ in
+                turn += 1
+                return AssistantTurnResponse(
+                    session: Self.session(),
+                    userMessage: Self.message(
+                        id: 100 + turn,
+                        role: .user,
+                        content: message,
+                        status: .processing
+                    ),
+                    messageId: 500 + turn,
+                    status: .processing
+                )
+            },
+            messageStatusHandler: { messageId in
+                if messageId == 501 {
+                    await firstTurnGate.wait()
+                }
+                return MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: messageId + 1_000,
+                        role: .assistant,
+                        content: "Reply \(messageId)",
+                        status: .completed
+                    ),
+                    error: nil
+                )
+            }
+        )
+        let viewModel = LearningDeckReaderViewModel(
+            deck: Self.deck(),
+            chatService: chatService,
+            deckService: LearningDeckService.shared
+        )
+
+        viewModel.performSendMessage(text: "First")
+        let didStartFirstTurn = await waitUntil {
+            chatService.createdTurns.map(\.message) == ["First"] && viewModel.isSending
+        }
+
+        viewModel.performSendMessage(text: "Second")
+        viewModel.performSendMessage(text: "Third")
+
+        XCTAssertTrue(didStartFirstTurn)
+        XCTAssertEqual(chatService.createdTurns.map(\.message), ["First"])
+        XCTAssertEqual(viewModel.timeline.filter(\.isQueued).map(\.message.content), ["Second", "Third"])
+
+        await firstTurnGate.open()
+        let didDrainQueue = await waitUntil {
+            chatService.createdTurns.map(\.message) == ["First", "Second", "Third"]
+                && !viewModel.isSending
+        }
+
+        XCTAssertTrue(didDrainQueue)
+        XCTAssertTrue(viewModel.timeline.allSatisfy { !$0.isQueued })
+    }
+
     private static func deck() -> LearningDeck {
         LearningDeck(
             id: 1,
