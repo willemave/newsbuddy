@@ -117,6 +117,18 @@ Expected effect: ~1–2.5 GB × 4 saved (content workers no longer each hold the
 
 ## Phase 2 — Threaded per-queue workers
 
+> AS BUILT (2026-07-25): the design below is the plan as written, and the shape it
+> settled into differs in one respect worth knowing before reading further.
+> Rather than adding `install_signal_handlers` / `warm_models` flags to
+> `SequentialTaskProcessor`, everything process-wide moved to
+> `ThreadedTaskProcessor`: it owns the signal handlers, the LISTEN connection and
+> `warm_queue_models()`. The claim loop only claims, processes and finalizes, and
+> always runs on a worker thread — there is no `--threads 1` special path, just a
+> pool of one that keeps the unsuffixed worker id. Each thread builds its own
+> `QueueService` (the option the plan left open). A claim loop that dies stops its
+> siblings and re-raises, so the supervisor recycles the process instead of
+> running it short-handed.
+
 ### Design
 
 New `ThreadedTaskProcessor` (suggested location: `app/pipeline/threaded_task_processor.py`)

@@ -60,9 +60,8 @@ class ThreadedTaskProcessor:
         self.queue_name = QueueService._normalize_queue_name(queue_name) or TaskQueue.CONTENT.value
         self.worker_slot = worker_slot
         self.threads = threads
-        self.settings = get_settings()
         self.processors: list[SequentialTaskProcessor] = []
-        self._listener = QueueNotificationListener(str(self.settings.database_url))
+        self._listener = QueueNotificationListener(str(get_settings().database_url))
         self._shutdown_requested = False
         self._worker_failure: BaseException | None = None
 

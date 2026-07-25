@@ -118,7 +118,6 @@ class SequentialTaskProcessor:
         self.queue_name = QueueService._normalize_queue_name(queue_name) or TaskQueue.CONTENT.value
         self.running = True
         self.worker_slot = worker_slot
-        self.thread_index = thread_index
         # Threads within a process must claim under distinct worker ids so that
         # locked_by and lease renewal stay per-claim. A lone thread keeps the
         # historical id so --threads 1 is an exact rollback.

@@ -23,7 +23,8 @@ def _fake_processor_class(instances: list, run_error: Exception | None = None):
             self.worker_slot = worker_slot
             self.thread_index = kwargs.get("thread_index")
             self.notification_listener = kwargs.get("notification_listener")
-            self.worker_id = f"{queue_name}-processor-{worker_slot}-t{self.thread_index}"
+            suffix = "" if self.thread_index is None else f"-t{self.thread_index}"
+            self.worker_id = f"{queue_name}-processor-{worker_slot}{suffix}"
             self.running = True
             self.thread_name: str | None = None
             instances.append(self)

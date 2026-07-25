@@ -159,8 +159,7 @@ class QueueNotificationListener:
     def _set_connected(self, connected: bool) -> None:
         with self._condition:
             self._connected = connected
-            if not connected:
-                # Release waiters so they drop back to polling instead of sitting
-                # on a condition nothing will signal.
-                self._generation += 1
-                self._condition.notify_all()
+        if not connected:
+            # Release waiters so they drop back to polling instead of sitting on
+            # a condition nothing will signal.
+            self.wake()
