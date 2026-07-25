@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import torch
-import torch.nn.functional as functional
-from transformers import AutoModelForCausalLM, AutoTokenizer
+if TYPE_CHECKING:
+    import torch
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
@@ -40,6 +39,8 @@ class _NewsRerankerRuntime:
 
 
 def _resolve_dtype(device: str) -> torch.dtype:
+    import torch
+
     if device == "cpu":
         return torch.float32
     return torch.float16
@@ -47,6 +48,10 @@ def _resolve_dtype(device: str) -> torch.dtype:
 
 @lru_cache(maxsize=1)
 def _get_news_reranker_runtime() -> _NewsRerankerRuntime:
+    # Imported lazily so importing this module (for warm_news_reranker_model) does
+    # not drag torch into every worker process.
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     settings = get_settings()
     device = resolve_transformer_device(settings.news_list_reranker_device)
     model_id = settings.news_list_reranker_model
@@ -91,6 +96,9 @@ def rerank_news_documents(
     cleaned_query = query.strip()
     if not cleaned_query or not documents:
         return [0.0] * len(documents)
+
+    import torch
+    import torch.nn.functional as functional
 
     settings = get_settings()
     runtime = _get_news_reranker_runtime()

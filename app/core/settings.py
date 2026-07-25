@@ -270,8 +270,10 @@ class Settings(BaseSettings):
     max_retries: int = 3
 
     # News list ranking
-    news_embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
-    news_embedding_device: str = "auto"  # auto, cpu, cuda, mps
+    # Hosted by default: a local sentence-transformers model costs 1-2.5 GB of RSS in
+    # every content worker. Any non-"openrouter:" value still loads locally.
+    news_embedding_model: str = "openrouter:qwen/qwen3-embedding-8b"
+    news_embedding_device: str = "auto"  # auto, cpu, cuda, mps (local models only)
     news_list_reranker_enabled: bool = False
     news_list_reranker_model: str = "Qwen/Qwen3-Reranker-4B"
     news_list_reranker_device: str = "auto"  # auto, cpu, cuda, mps

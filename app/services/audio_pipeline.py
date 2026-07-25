@@ -8,7 +8,6 @@ from typing import Any
 
 from app.core.logging import get_logger
 from app.scraping.youtube_config import load_youtube_client_config
-from app.services.whisper_local import get_whisper_local_service
 
 try:  # pragma: no cover - optional dependency in tests
     import yt_dlp
@@ -188,6 +187,10 @@ def transcribe_audio_file_with_metadata(path: Path) -> tuple[str, str | None]:
             },
         },
     )
+    # Imported lazily: whisper pulls in torch, which must stay out of the import
+    # graph of every non-media worker process.
+    from app.services.whisper_local import get_whisper_local_service
+
     service = get_whisper_local_service()
     transcript_text, detected_language = service.transcribe_audio(path)
     stripped = transcript_text.strip()

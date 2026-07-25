@@ -54,8 +54,20 @@ def get_news_embedding_model() -> Any:
     return SentenceTransformer(settings.news_embedding_model, device=device)
 
 
+def is_api_embedding_model(model_spec: str) -> bool:
+    """Return whether the spec resolves to a hosted embedding model."""
+    return model_spec.startswith(OPENROUTER_EMBEDDING_PREFIX)
+
+
 def warm_news_embedding_model() -> None:
-    """Warm the embedding model to avoid first-request latency."""
+    """Warm the embedding model to avoid first-request latency.
+
+    Hosted models have nothing to warm - loading them locally would defeat the
+    point of not holding a local model in every worker process.
+    """
+    settings = get_settings()
+    if is_api_embedding_model(settings.news_embedding_model):
+        return
     model = get_news_embedding_model()
     model.encode(["warmup"], normalize_embeddings=True, convert_to_numpy=True)
 

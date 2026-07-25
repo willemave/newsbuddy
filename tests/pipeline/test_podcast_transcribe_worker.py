@@ -50,7 +50,7 @@ class TestPodcastTranscribeWorker:
     @patch("app.pipeline.podcast_workers.get_db")
     @patch("app.pipeline.podcast_workers.content_to_domain")
     @patch("app.pipeline.podcast_workers.domain_to_content")
-    @patch("app.pipeline.podcast_workers.get_whisper_local_service")
+    @patch("app.services.whisper_local.get_whisper_local_service")
     @patch("app.pipeline.podcast_workers.Path.exists")
     @patch("app.pipeline.podcast_workers.open", create=True)
     def test_process_transcribe_task_success(
@@ -153,7 +153,7 @@ class TestPodcastTranscribeWorker:
 
     @patch("app.pipeline.podcast_workers.get_db")
     @patch("app.pipeline.podcast_workers.content_to_domain")
-    @patch("app.pipeline.podcast_workers.get_whisper_local_service")
+    @patch("app.services.whisper_local.get_whisper_local_service")
     @patch("app.pipeline.podcast_workers.Path.exists")
     def test_process_transcribe_task_openai_error(
         self,
@@ -192,7 +192,7 @@ class TestPodcastTranscribeWorker:
         """Test lazy initialization of transcription service."""
         assert worker.transcription_service is None
 
-        with patch("app.pipeline.podcast_workers.get_whisper_local_service") as mock_get_service:
+        with patch("app.services.whisper_local.get_whisper_local_service") as mock_get_service:
             mock_service = MagicMock()
             mock_get_service.return_value = mock_service
 
@@ -203,7 +203,7 @@ class TestPodcastTranscribeWorker:
 
     def test_get_transcription_service_initialization_error(self, worker):
         """Test transcription service initialization error."""
-        with patch("app.pipeline.podcast_workers.get_whisper_local_service") as mock_get_service:
+        with patch("app.services.whisper_local.get_whisper_local_service") as mock_get_service:
             mock_get_service.side_effect = ValueError("No API key")
 
             with pytest.raises(ValueError, match="No API key"):
@@ -212,7 +212,7 @@ class TestPodcastTranscribeWorker:
     @patch("app.pipeline.podcast_workers.get_db")
     @patch("app.pipeline.podcast_workers.content_to_domain")
     @patch("app.pipeline.podcast_workers.domain_to_content")
-    @patch("app.pipeline.podcast_workers.get_whisper_local_service")
+    @patch("app.services.whisper_local.get_whisper_local_service")
     @patch("app.pipeline.podcast_workers.Path.exists")
     @patch("app.pipeline.podcast_workers.open", create=True)
     def test_process_transcribe_task_no_language_detected(

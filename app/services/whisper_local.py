@@ -1,9 +1,6 @@
 import os
 from pathlib import Path
 
-import torch
-import whisper
-
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 
@@ -25,6 +22,8 @@ class WhisperLocalTranscriptionService:
         device_setting = getattr(settings, "whisper_device", "auto")
 
         if device_setting == "auto":
+            import torch
+
             if torch.cuda.is_available():
                 device = "cuda"
                 logger.info(f"CUDA available, using GPU: {torch.cuda.get_device_name(0)}")
@@ -44,6 +43,8 @@ class WhisperLocalTranscriptionService:
     def _load_model(self):
         """Lazy load the Whisper model."""
         if self.model is None:
+            import whisper
+
             logger.info(f"Loading Whisper model: {self.model_name}")
             try:
                 self.model = whisper.load_model(self.model_name, device=self.device)
@@ -130,6 +131,8 @@ class WhisperLocalTranscriptionService:
 
             # Clear GPU cache if using CUDA
             if self.device == "cuda":
+                import torch
+
                 torch.cuda.empty_cache()
 
             logger.info("Whisper model cleaned up")

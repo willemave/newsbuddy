@@ -24,7 +24,6 @@ from app.services.audio_pipeline import (
 )
 from app.services.content_bodies import sync_content_body_storage
 from app.services.queue import TaskType, get_queue_service
-from app.services.whisper_local import get_whisper_local_service
 
 # Resolve project root (two levels up from this file: app/ → project root)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -900,6 +899,10 @@ class PodcastTranscribeWorker:
     def _get_transcription_service(self):
         """Lazy load the transcription service."""
         if self.transcription_service is None:
+            # Imported lazily: whisper pulls in torch, which must stay out of the
+            # import graph of every non-media worker process.
+            from app.services.whisper_local import get_whisper_local_service
+
             try:
                 self.transcription_service = get_whisper_local_service()
                 logger.info(
