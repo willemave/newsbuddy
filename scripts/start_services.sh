@@ -25,7 +25,7 @@ Common options:
 Examples:
   scripts/start_services.sh all --env-file .env
   scripts/start_services.sh server --port 8000 --reload
-  scripts/start_services.sh workers --content-workers 4 --discussion-workers 1 --media-workers 1 --learning-workers 1 --llm-workers 1
+  scripts/start_services.sh workers --content-workers 1 --discussion-workers 1 --media-workers 1 --learning-workers 1 --llm-workers 1
   scripts/start_services.sh migrate --env-file .env
 EOF
 }
@@ -302,7 +302,7 @@ start_workers() {
 
   activate_runtime
 
-  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 4)}"
+  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 1)}"
   media_workers="${media_workers:-$(dotenv_get MEDIA_WORKER_PROCS "$(dotenv_get TRANSCRIBE_WORKER_PROCS 1)")}"
   audio_episode_workers="${audio_episode_workers:-$(dotenv_get AUDIO_EPISODE_WORKER_PROCS "$(dotenv_get TTS_WORKER_PROCS 1)")}"
   image_workers="${image_workers:-$(dotenv_get IMAGE_WORKER_PROCS 1)}"
@@ -633,7 +633,7 @@ start_all() {
 
   activate_runtime
 
-  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 4)}"
+  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 1)}"
   media_workers="${media_workers:-$(dotenv_get MEDIA_WORKER_PROCS "$(dotenv_get TRANSCRIBE_WORKER_PROCS 1)")}"
   audio_episode_workers="${audio_episode_workers:-$(dotenv_get AUDIO_EPISODE_WORKER_PROCS "$(dotenv_get TTS_WORKER_PROCS 1)")}"
   image_workers="${image_workers:-$(dotenv_get IMAGE_WORKER_PROCS 1)}"

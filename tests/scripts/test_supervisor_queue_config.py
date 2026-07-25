@@ -43,10 +43,12 @@ def test_supervisor_config_runs_all_queue_partitions() -> None:
         assert queue_arg in parser.get(section, "command")
 
 
-def test_supervisor_config_parallelizes_content_workers() -> None:
-    """Content workers should default to the higher parallelism from the plan."""
+def test_supervisor_config_runs_one_process_per_queue() -> None:
+    """Content parallelism comes from threads inside one process, not numprocs."""
     parser = _load_config("supervisor.conf")
-    assert parser.get("program:news_app_workers_content", "numprocs") == "4"
+    for queue in EXPECTED_QUEUE_VALUES:
+        section = f"program:news_app_workers_{queue}"
+        assert parser.get(section, "numprocs", fallback="1") == "1", section
 
 
 def test_supervisor_config_does_not_use_old_transcribe_queue() -> None:
@@ -83,14 +85,14 @@ def test_docker_supervisor_config_runs_all_queue_partitions() -> None:
         assert queue_arg in parser.get(section, "command")
 
 
-def test_docker_supervisor_config_parallelizes_content_workers() -> None:
-    """Docker content workers should also use the higher planned parallelism."""
+def test_docker_supervisor_config_runs_one_process_per_queue() -> None:
+    """The Docker runtime should also run a single process per queue."""
     parser = _load_config("docker/supervisord.worker-programs.conf")
-    command = parser.get("program:worker_content", "command")
 
-    assert "run-worker.sh content %(process_num)s" in command
-    assert parser.get("program:worker_content", "numprocs") == "4"
-    assert parser.get("program:worker_content", "numprocs_start") == "1"
+    assert "run-worker.sh content 1" in parser.get("program:worker_content", "command")
+    for queue in EXPECTED_QUEUE_VALUES:
+        section = f"program:worker_{queue}"
+        assert parser.get(section, "numprocs", fallback="1") == "1", section
 
 
 def test_docker_supervisor_config_does_not_use_old_transcribe_queue() -> None:

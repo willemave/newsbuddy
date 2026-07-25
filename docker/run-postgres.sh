@@ -12,4 +12,5 @@ exec runuser -u postgres -- \
   -D "${PGDATA}" \
   -p "${POSTGRES_PORT:-5432}" \
   -c "listen_addresses=0.0.0.0" \
-  -c "unix_socket_directories=/var/run/postgresql"
+  -c "unix_socket_directories=/var/run/postgresql" \
+  -c "max_connections=${POSTGRES_MAX_CONNECTIONS:-200}"

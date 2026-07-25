@@ -6,7 +6,8 @@ from unittest.mock import Mock, patch
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from app.pipeline.sequential_task_processor import SequentialTaskProcessor, _psycopg_conninfo
+from app.pipeline.queue_notifications import psycopg_conninfo
+from app.pipeline.sequential_task_processor import SequentialTaskProcessor
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.queue import TaskQueue, TaskType
 
@@ -32,7 +33,7 @@ class TestSequentialTaskProcessor:
     """Test cases for SequentialTaskProcessor."""
 
     def test_psycopg_conninfo_strips_sqlalchemy_driver_suffix(self):
-        conninfo = _psycopg_conninfo(
+        conninfo = psycopg_conninfo(
             "postgresql+psycopg://newsly:secret@127.0.0.1:5432/newsly?sslmode=prefer"
         )
 
@@ -93,21 +94,19 @@ class TestSequentialTaskProcessor:
         warm_embeddings.assert_not_called()
         warm_reranker.assert_not_called()
 
-    def test_ensure_queue_listener_uses_psycopg_compatible_conninfo(self, processor):
-        listener = Mock()
-        processor.settings.database_url = "postgresql+psycopg://postgres@localhost/newsly"
+    def test_worker_id_gains_a_thread_suffix_when_threaded(self):
+        """Threads in one process must claim under distinct worker ids."""
+        with (
+            patch("app.pipeline.sequential_task_processor.QueueService") as queue_service_cls,
+            patch("app.pipeline.sequential_task_processor.get_llm_service"),
+            patch("app.pipeline.sequential_task_processor.warm_news_embedding_model"),
+            patch("app.pipeline.sequential_task_processor.warm_news_reranker_model"),
+        ):
+            queue_service_cls._normalize_queue_name.return_value = "content"
 
-        with patch("app.pipeline.sequential_task_processor.psycopg") as mock_psycopg:
-            mock_psycopg.connect.return_value = listener
+            threaded = SequentialTaskProcessor(thread_index=3)
 
-            result = processor._ensure_queue_listener()
-
-        assert result is listener
-        mock_psycopg.connect.assert_called_once_with(
-            "postgresql://postgres@localhost/newsly",
-            autocommit=True,
-        )
-        listener.execute.assert_called_once_with("LISTEN processing_tasks")
+        assert threaded.worker_id == "content-processor-1-t3"
 
     def test_process_task_dispatches(self, processor):
         """Test processing uses dispatcher and returns TaskResult."""
@@ -493,16 +492,17 @@ class TestSequentialTaskProcessor:
             return None
 
         processor.queue_service.dequeue.side_effect = mock_dequeue
+        listener = Mock()
+        processor._notification_listener = listener
 
         with (
             patch("app.pipeline.sequential_task_processor.setup_logging"),
             patch("app.pipeline.sequential_task_processor.dispose_db_engine") as mock_dispose,
-            patch.object(processor, "_close_queue_listener") as mock_close_listener,
             patch("time.sleep") as mock_sleep,
         ):
             processor.run()
 
         assert call_count == 2
         mock_dispose.assert_called_once()
-        mock_close_listener.assert_called()
+        listener.reset.assert_called()
         mock_sleep.assert_any_call(10.0)

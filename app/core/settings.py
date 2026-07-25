@@ -260,6 +260,16 @@ class Settings(BaseSettings):
     # Worker configuration
     max_workers: int = 1
     worker_timeout_seconds: int = 300
+    # Claim-loop threads per worker process. One process per queue; concurrency
+    # comes from threads inside it. Set every value to 1 to get the historical
+    # sequential workers back.
+    worker_threads_default: int = Field(default=4, ge=1, le=32)
+    worker_threads_content: int = Field(default=6, ge=1, le=32)
+    worker_threads_media: int = Field(default=3, ge=1, le=32)
+    # Audio episodes already fan their chunks across an in-task TTS pool
+    # (elevenlabs_audio_episode_tts_max_workers); stacking claim threads on top
+    # would just multiply concurrent ElevenLabs calls.
+    worker_threads_audio_episode: int = Field(default=1, ge=1, le=32)
     checkout_timeout_minutes: int = 30
     queue_backpressure_max_pending_content: int = Field(default=150, ge=1)
     queue_backpressure_max_pending_process_news_item: int = Field(default=75, ge=1)
@@ -628,6 +638,13 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_container_storage_paths(cls, v: Path, info: ValidationInfo) -> Path:
         return _normalize_storage_path(v, info.field_name or "")
+
+    def worker_thread_count(self, queue_name: str) -> int:
+        """Return how many claim-loop threads a queue's worker process should run."""
+        configured = getattr(self, f"worker_threads_{queue_name}", None)
+        if isinstance(configured, int):
+            return configured
+        return self.worker_threads_default
 
     @property
     def queue(self) -> QueueSettingsView:

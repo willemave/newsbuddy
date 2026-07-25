@@ -5,11 +5,8 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from types import ModuleType
-from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 
 from app.core.db import dispose_db_engine
@@ -40,6 +37,7 @@ from app.pipeline.handlers.summarize import SummarizeHandler
 from app.pipeline.handlers.sync_integration import SyncIntegrationHandler
 from app.pipeline.handlers.transcribe import TranscribeHandler
 from app.pipeline.handlers.transcribe_tweet_video import TranscribeTweetVideoHandler
+from app.pipeline.queue_notifications import QueueNotificationListener
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_handler import TaskHandler
 from app.pipeline.task_models import TaskEnvelope, TaskResult, task_will_retry
@@ -51,13 +49,6 @@ from app.services.news_embeddings import warm_news_embedding_model
 from app.services.news_reranker import warm_news_reranker_model
 from app.services.queue import QueueService, TaskQueue, TaskType
 
-try:
-    import psycopg as _psycopg
-except ImportError:  # pragma: no cover
-    psycopg: ModuleType | None = None
-else:
-    psycopg = _psycopg
-
 logger = get_logger(__name__)
 
 _TRANSIENT_DATABASE_ERROR_SNIPPETS = (
@@ -65,20 +56,6 @@ _TRANSIENT_DATABASE_ERROR_SNIPPETS = (
     "server closed the connection unexpectedly",
     "terminating connection due to administrator command",
 )
-
-
-def _psycopg_conninfo(database_url: str) -> str:
-    """Return a psycopg-compatible connection string from a SQLAlchemy URL."""
-    normalized = str(database_url)
-    try:
-        url = make_url(normalized)
-    except Exception:  # noqa: BLE001
-        return normalized
-    if not url.drivername.startswith("postgresql"):
-        return normalized
-    if "+" not in url.drivername:
-        return normalized
-    return url.set(drivername="postgresql").render_as_string(hide_password=False)
 
 
 def _task_extra(
@@ -126,6 +103,10 @@ class SequentialTaskProcessor:
         self,
         queue_name: TaskQueue | str = TaskQueue.CONTENT,
         worker_slot: int = 1,
+        *,
+        thread_index: int | None = None,
+        notification_listener: QueueNotificationListener | None = None,
+        warm_models: bool = True,
     ) -> None:
         logger.debug("Initializing SequentialTaskProcessor...")
         self.queue_service = QueueService()
@@ -136,7 +117,7 @@ class SequentialTaskProcessor:
         self.settings = get_settings()
         logger.debug("Settings loaded")
         self.queue_name = QueueService._normalize_queue_name(queue_name) or TaskQueue.CONTENT.value
-        if self.queue_name == TaskQueue.CONTENT.value:
+        if warm_models and self.queue_name == TaskQueue.CONTENT.value:
             if self.settings.news_list_warm_embeddings:
                 try:
                     warm_news_embedding_model()
@@ -149,8 +130,14 @@ class SequentialTaskProcessor:
                     logger.exception("Failed to warm news reranker model")
         self.running = True
         self.worker_slot = worker_slot
-        self.worker_id = f"{self.queue_name}-processor-{self.worker_slot}"
-        self._queue_listener: Any | None = None
+        self.thread_index = thread_index
+        # Threads within a process must claim under distinct worker ids so that
+        # locked_by and lease renewal stay per-claim. A lone thread keeps the
+        # historical id so --threads 1 is an exact rollback.
+        thread_suffix = "" if thread_index is None else f"-t{thread_index}"
+        self.worker_id = f"{self.queue_name}-processor-{self.worker_slot}{thread_suffix}"
+        self._owns_listener = notification_listener is None
+        self._notification_listener = notification_listener
         logger.debug(
             "SequentialTaskProcessor initialized with worker_id: %s queue=%s",
             self.worker_id,
@@ -164,6 +151,13 @@ class SequentialTaskProcessor:
             queue_gateway=self.queue_gateway,
         )
         self.dispatcher = TaskDispatcher(self._build_handlers())
+
+    @property
+    def _listener(self) -> QueueNotificationListener:
+        """Return the notification listener, opening a private one on first use."""
+        if self._notification_listener is None:
+            self._notification_listener = QueueNotificationListener(str(self.settings.database_url))
+        return self._notification_listener
 
     def _build_handlers(self) -> list[TaskHandler]:
         """Build task handlers for dispatching."""
@@ -198,59 +192,16 @@ class SequentialTaskProcessor:
         if timeout_seconds <= 0:
             return
 
-        wait_result = self._wait_for_queue_notification(timeout_seconds)
-        if wait_result is not None:
+        if self._listener.wait(timeout_seconds) is not None:
             return
 
         time.sleep(timeout_seconds)
-
-    def _wait_for_queue_notification(self, timeout_seconds: float) -> bool | None:
-        """Wait for a queue notification using the dedicated LISTEN connection."""
-        listener = self._ensure_queue_listener()
-        if listener is None:
-            return None
-        try:
-            for _notify in listener.notifies(timeout=timeout_seconds, stop_after=1):
-                return True
-            return False
-        except Exception:  # noqa: BLE001
-            logger.warning("Queue notification wait failed; falling back to polling", exc_info=True)
-            self._close_queue_listener()
-            return None
-
-    def _ensure_queue_listener(self):
-        if self._queue_listener is not None:
-            return self._queue_listener
-        if psycopg is None:
-            return None
-        try:
-            conninfo = _psycopg_conninfo(str(self.settings.database_url))
-            self._queue_listener = psycopg.connect(conninfo, autocommit=True)
-            self._queue_listener.execute("LISTEN processing_tasks")
-            return self._queue_listener
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Unable to open queue notification listener; polling only",
-                exc_info=True,
-            )
-            self._queue_listener = None
-            return None
-
-    def _close_queue_listener(self) -> None:
-        if self._queue_listener is None:
-            return
-        try:
-            self._queue_listener.close()
-        except Exception:  # noqa: BLE001
-            logger.debug("Queue notification listener close failed", exc_info=True)
-        finally:
-            self._queue_listener = None
 
     def _recover_from_operational_error(self, exc: OperationalError) -> float:
         """Dispose pooled DB state and drop the listener after a DB operational error."""
         transient = _is_transient_database_operational_error(exc)
         dispose_db_engine()
-        self._close_queue_listener()
+        self._listener.reset()
         logger_method = logger.warning if transient else logger.error
         logger_method(
             "Database operational error in worker loop; resetting DB connections",
@@ -538,12 +489,18 @@ class SequentialTaskProcessor:
             )
             return None
 
-    def run(self, max_tasks: int | None = None) -> None:
+    def run(self, max_tasks: int | None = None, *, install_signal_handlers: bool = True) -> int:
         """
         Run the task processor.
 
         Args:
             max_tasks: Maximum number of tasks to process. None for unlimited.
+            install_signal_handlers: Install SIGINT/SIGTERM handlers. Must be False
+                when the loop runs on a worker thread, since Python only allows
+                handler installation from the main thread.
+
+        Returns:
+            The number of tasks processed successfully.
         """
         logger.debug("Entering run method with max_tasks=%s", max_tasks)
         logger.info(
@@ -554,17 +511,21 @@ class SequentialTaskProcessor:
 
         self._shutdown_requested = False
 
-        def signal_handler(_signum, _frame):
-            if not self._shutdown_requested:
-                logger.info("\n🛑 Received shutdown signal (Ctrl+C) - stopping gracefully...")
-                self._shutdown_requested = True
-                self.running = False
-            else:
-                logger.warning("\n⚠️  Force shutdown requested - exiting immediately")
-                sys.exit(1)
+        if install_signal_handlers:
 
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+            def signal_handler(_signum, _frame):
+                if not self._shutdown_requested:
+                    logger.info("\n🛑 Received shutdown signal (Ctrl+C) - stopping gracefully...")
+                    self._shutdown_requested = True
+                    self.running = False
+                else:
+                    logger.warning("\n⚠️  Force shutdown requested - exiting immediately")
+                    sys.exit(1)
+
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+
+        self._listener.start()
 
         processed_count = 0
         consecutive_empty_polls = 0
@@ -713,8 +674,14 @@ class SequentialTaskProcessor:
                 logger.error("Error in main loop: %s", exc, exc_info=True)
                 time.sleep(5)
 
-        self._close_queue_listener()
-        logger.info("Processor shutting down (processed %s tasks)", processed_count)
+        if self._owns_listener and self._notification_listener is not None:
+            self._notification_listener.close()
+        logger.info(
+            "Processor shutting down (worker_id: %s, processed %s tasks)",
+            self.worker_id,
+            processed_count,
+        )
+        return processed_count
 
     def run_single_task(self, task_data: dict[str, object]) -> bool:
         """

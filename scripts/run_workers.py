@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Run workers using the sequential task processor.
+Run one worker process for a queue, with N claim-loop threads inside it.
 """
 
 import argparse
 import os
 import sys
+import threading
 import time
 
 # Add parent directory so we can import from app
@@ -13,20 +14,25 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.db import init_db
 from app.core.logging import get_logger, setup_logging
-from app.pipeline.sequential_task_processor import SequentialTaskProcessor
+from app.core.settings import get_settings
+from app.pipeline.threaded_task_processor import ThreadedTaskProcessor
 from app.services.langfuse_tracing import flush_langfuse_tracing, initialize_langfuse_tracing
 from app.services.queue import TaskQueue, get_queue_service
 
 logger = get_logger(__name__)
 
+# Each claim thread holds one session while processing; the rest covers lease
+# heartbeats and finalization bursts.
+WORKER_DB_POOL_MARGIN = 4
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Run sequential task processor")
+    parser = argparse.ArgumentParser(description="Run the queue task processor")
     parser.add_argument(
         "--max-tasks",
         type=int,
         default=None,
-        help="Maximum number of tasks to process (default: unlimited)",
+        help="Maximum number of tasks to process per thread (default: unlimited)",
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument(
@@ -47,6 +53,15 @@ def main():
         default=1,
         help="Worker slot number for stable worker IDs",
     )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help=(
+            "Claim-loop threads in this process (default: per-queue setting). "
+            "Use 1 for the historical sequential worker."
+        ),
+    )
     args = parser.parse_args()
 
     # Setup logging
@@ -54,15 +69,24 @@ def main():
     setup_logging(level=log_level)
     initialize_langfuse_tracing()
 
+    threads = (
+        args.threads if args.threads is not None else get_settings().worker_thread_count(args.queue)
+    )
+    if threads < 1:
+        logger.error("--threads must be at least 1 (got %s)", threads)
+        return 1
+
     logger.info("=" * 60)
-    logger.info("Sequential Task Processor")
+    logger.info("Queue Task Processor")
     logger.info("=" * 60)
     logger.info("Queue: %s", args.queue)
     logger.info("Worker slot: %s", args.worker_slot)
+    logger.info("Claim threads: %s", threads)
 
-    # Initialize database
+    # Initialize database. Pool sizing follows the thread count so that the
+    # worker processes together stay well inside Postgres max_connections.
     logger.info("Initializing database...")
-    init_db()
+    init_db(pool_size=threads + WORKER_DB_POOL_MARGIN, max_overflow=threads)
 
     # Check initial queue stats
     queue_service = get_queue_service()
@@ -85,44 +109,41 @@ def main():
             logger.info(f"  {task_type}: {count}")
 
     # Start processor
-    logger.info("\nStarting sequential task processor...")
+    logger.info("\nStarting task processor...")
     if args.max_tasks:
-        logger.info(f"Will process up to {args.max_tasks} tasks")
+        logger.info(f"Will process up to {args.max_tasks} tasks per thread")
     logger.info("Press Ctrl+C to stop")
 
-    logger.debug("Creating SequentialTaskProcessor instance...")
-    processor = SequentialTaskProcessor(queue_name=args.queue, worker_slot=args.worker_slot)
-    logger.debug("SequentialTaskProcessor instance created")
+    processor = ThreadedTaskProcessor(
+        queue_name=args.queue,
+        worker_slot=args.worker_slot,
+        threads=threads,
+    )
 
     # Start stats thread if enabled
-    stats_thread = None
+    stats_stopped = threading.Event()
     if args.stats_interval > 0:
-        import threading
 
         def show_stats():
-            while processor.running:
-                time.sleep(args.stats_interval)
-                if processor.running:
-                    stats = queue_service.get_queue_stats()
-                    pending = stats.get("pending_by_queue", {}).get(args.queue, 0)
-                    by_status = stats.get("by_status", {})
-                    logger.info(
-                        "Queue stats (%s) - Pending: %s, Completed: %s, Failed: %s",
-                        args.queue,
-                        pending,
-                        by_status.get("completed", 0),
-                        by_status.get("failed", 0),
-                    )
+            while not stats_stopped.wait(args.stats_interval):
+                stats = queue_service.get_queue_stats()
+                pending = stats.get("pending_by_queue", {}).get(args.queue, 0)
+                by_status = stats.get("by_status", {})
+                logger.info(
+                    "Queue stats (%s) - Pending: %s, Completed: %s, Failed: %s",
+                    args.queue,
+                    pending,
+                    by_status.get("completed", 0),
+                    by_status.get("failed", 0),
+                )
 
-        stats_thread = threading.Thread(target=show_stats, daemon=True)
-        stats_thread.start()
+        threading.Thread(target=show_stats, daemon=True).start()
 
     try:
         logger.debug("Calling processor.run()...")
         processor.run(max_tasks=args.max_tasks)
     except KeyboardInterrupt:
         logger.info("\nShutting down gracefully...")
-        processor.running = False
 
         # Show final stats
         time.sleep(1)  # Let workers finish
@@ -137,6 +158,7 @@ def main():
         logger.error(f"Unexpected error: {e}", exc_info=True)
         return 1
     finally:
+        stats_stopped.set()
         flush_langfuse_tracing()
 
     return 0

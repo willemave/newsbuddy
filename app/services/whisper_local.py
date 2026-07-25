@@ -1,4 +1,5 @@
 import os
+import threading
 from pathlib import Path
 
 from app.core.logging import get_logger
@@ -6,6 +7,12 @@ from app.core.settings import get_settings
 
 logger = get_logger(__name__)
 settings = get_settings()
+
+# Transcription is the one CPU-bound step in the media pipeline, and the model is
+# a single shared object. Media workers run several claim threads so that
+# downloads and ffmpeg normalization of the next episodes overlap the current
+# transcription - but only one transcription runs at a time.
+_TRANSCRIPTION_SINGLE_FLIGHT = threading.Semaphore(1)
 
 
 class WhisperLocalTranscriptionService:
@@ -70,6 +77,11 @@ class WhisperLocalTranscriptionService:
         Returns:
             Tuple of (transcript, language_code)
         """
+        with _TRANSCRIPTION_SINGLE_FLIGHT:
+            return self._transcribe_audio_locked(audio_file_path)
+
+    def _transcribe_audio_locked(self, audio_file_path: Path) -> tuple[str, str | None]:
+        """Transcribe with the process-wide single-flight guard already held."""
         try:
             # Ensure model is loaded
             self._load_model()

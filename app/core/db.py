@@ -16,8 +16,15 @@ _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
 
 
-def init_db() -> None:
-    """Initialize database engine and session factory."""
+def init_db(*, pool_size: int | None = None, max_overflow: int | None = None) -> None:
+    """Initialize database engine and session factory.
+
+    Args:
+        pool_size: Override the configured pool size. Worker processes size their
+            pool from their thread count so many processes cannot exhaust
+            Postgres max_connections between them.
+        max_overflow: Override the configured overflow allowance.
+    """
     global _engine, _SessionLocal
 
     if _engine is not None:
@@ -41,8 +48,8 @@ def init_db() -> None:
         database_url,
         pool_pre_ping=True,
         echo=settings.debug,
-        pool_size=settings.database_pool_size,
-        max_overflow=settings.database_max_overflow,
+        pool_size=pool_size if pool_size is not None else settings.database_pool_size,
+        max_overflow=max_overflow if max_overflow is not None else settings.database_max_overflow,
     )
     _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 

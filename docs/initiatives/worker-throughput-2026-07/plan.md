@@ -94,6 +94,11 @@ Changes:
   variant or `openai/text-embedding-3-small`); pick one with reasonable dims/cost and
   note the choice in this doc. Keep the local path working when a non-prefixed model
   is configured.
+
+  DECIDED (implemented): `openrouter:qwen/qwen3-embedding-8b` — the same family as the
+  local `Qwen/Qwen3-Embedding-0.6B` default it replaces, and already the model
+  `scripts/compare_news_embedding_models.py` benchmarks the local path against. Any
+  value without the `openrouter:` prefix still loads locally.
 - `warm_news_embedding_model()` must become a no-op for `openrouter:` specs (there is
   nothing to warm), and `SequentialTaskProcessor.__init__` should skip warming
   accordingly. Consider flipping `news_list_warm_embeddings` default to False since
@@ -194,6 +199,12 @@ that owns N inner claim-loops for ONE queue:
   and scheduler. Verify prod's setting; if it's at 100, either raise it in the
   Postgres config used by the Docker runtime or size pools more conservatively.
   Record the decision in this doc.
+
+  DECIDED (implemented): the Docker runtime was on the stock `max_connections=100`.
+  Worker steady state is ~42 claim threads + 11 listener connections, and each claim
+  thread's lease heartbeat can briefly hold a second session, so the worst case sits
+  right at the old ceiling before the API server is counted. `docker/run-postgres.sh`
+  now starts Postgres with `max_connections=${POSTGRES_MAX_CONNECTIONS:-200}`.
 
 ### Process topology changes
 

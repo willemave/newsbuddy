@@ -220,7 +220,9 @@ for service in "${SERVICES[@]}"; do
             start_service "server" "python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
             ;;
         workers)
-            content_worker_procs="${CONTENT_WORKER_PROCS:-4}"
+            # One process per queue; concurrency comes from claim threads inside
+            # it (WORKER_THREADS_CONTENT etc.).
+            content_worker_procs="${CONTENT_WORKER_PROCS:-1}"
             if ! [[ "$content_worker_procs" =~ ^[0-9]+$ ]] || [ "$content_worker_procs" -lt 1 ]; then
                 echo -e "${RED}CONTENT_WORKER_PROCS must be a positive integer${NC}"
                 exit 1
