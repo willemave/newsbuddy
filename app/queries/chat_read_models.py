@@ -17,7 +17,11 @@ from app.models.api.chat import (
 from app.models.api.chat import (
     MessageProcessingStatus as MessageProcessingStatusDto,
 )
-from app.models.contracts import ChatMessageDisplayType, ChatMessageRole, MessageProcessingStatus
+from app.models.contracts import (
+    ChatMessageDisplayType,
+    ChatMessageRole,
+    MessageProcessingStatus,
+)
 from app.models.db import (
     ChatMessage,
     ChatSession,
@@ -26,8 +30,10 @@ from app.models.db import (
     NewsItem,
 )
 from app.models.domain.chat_render import ChatMessageRenderMetadata
+from app.models.domain.chat_sessions import KNOWLEDGE_SESSION_TYPE
 from app.models.domain.content_display import resolve_image_urls
 from app.models.domain.content_mapper import content_to_domain
+from app.services.dig_deeper import content_ids_awaiting_first_chat_turn
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
 from app.utils.news_titles import resolve_news_display_title
 from app.utils.pagination import PaginationCursor
@@ -179,6 +185,7 @@ def session_to_summary(
     article_presentation: ArticlePresentation | None = None,
     *,
     has_pending_message: bool = False,
+    is_waiting_for_content: bool = False,
     is_saved_to_knowledge: bool = False,
     has_messages: bool = True,
     last_message_preview: str | None = None,
@@ -208,6 +215,7 @@ def session_to_summary(
         article_thumbnail_url=article.thumbnail_url,
         is_archived=bool(session.is_archived),
         has_pending_message=has_pending_message,
+        is_waiting_for_content=is_waiting_for_content,
         is_saved_to_knowledge=is_saved_to_knowledge,
         has_messages=has_messages,
         last_message_preview=last_message_preview,
@@ -536,6 +544,12 @@ def build_session_summaries(
             row.content_id for row in knowledge_saves if row.content_id is not None
         }
 
+    waiting_chat_content_ids = content_ids_awaiting_first_chat_turn(
+        db,
+        user_id=user_id,
+        contents=list(contents_by_id.values()),
+    )
+
     result: list[ChatSessionSummaryDto] = []
     for session in sessions:
         article_presentation = ArticlePresentation()
@@ -568,6 +582,12 @@ def build_session_summaries(
             session.content_id in knowledge_saved_content_ids if session.content_id else False
         )
         has_messages = session_row_id in sessions_with_messages
+        is_waiting_for_content = bool(
+            not has_messages
+            and session.session_type == KNOWLEDGE_SESSION_TYPE
+            and session.content_id is not None
+            and session.content_id in waiting_chat_content_ids
+        )
 
         last_preview: str | None = None
         last_role: str | None = None
@@ -580,6 +600,7 @@ def build_session_summaries(
                 session,
                 article_presentation=article_presentation,
                 has_pending_message=has_pending,
+                is_waiting_for_content=is_waiting_for_content,
                 is_saved_to_knowledge=is_saved_to_knowledge,
                 has_messages=has_messages,
                 last_message_preview=last_preview,

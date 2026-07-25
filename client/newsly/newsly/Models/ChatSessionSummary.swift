@@ -34,6 +34,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     let articleImageUrl: String?
     let articleThumbnailUrl: String?
     let hasPendingMessage: Bool?
+    let isWaitingForContent: Bool?
     private let savedToKnowledgeValue: Bool?
     let hasMessages: Bool?
     let lastMessagePreview: String?
@@ -61,6 +62,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         case articleImageUrl = "article_image_url"
         case articleThumbnailUrl = "article_thumbnail_url"
         case hasPendingMessage = "has_pending_message"
+        case isWaitingForContent = "is_waiting_for_content"
         case savedToKnowledgeValue = "is_saved_to_knowledge"
         case hasMessages = "has_messages"
         case lastMessagePreview = "last_message_preview"
@@ -88,6 +90,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         articleImageUrl: String? = nil,
         articleThumbnailUrl: String? = nil,
         hasPendingMessage: Bool?,
+        isWaitingForContent: Bool? = nil,
         isSavedToKnowledge: Bool?,
         hasMessages: Bool?,
         lastMessagePreview: String?,
@@ -113,6 +116,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         self.articleImageUrl = articleImageUrl
         self.articleThumbnailUrl = articleThumbnailUrl
         self.hasPendingMessage = hasPendingMessage
+        self.isWaitingForContent = isWaitingForContent
         self.savedToKnowledgeValue = isSavedToKnowledge
         self.hasMessages = hasMessages
         self.lastMessagePreview = lastMessagePreview
@@ -142,6 +146,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
             articleImageUrl: response.articleImageUrl,
             articleThumbnailUrl: response.articleThumbnailUrl,
             hasPendingMessage: response.hasPendingMessage,
+            isWaitingForContent: response.isWaitingForContent,
             isSavedToKnowledge: response.isSavedToKnowledge,
             hasMessages: response.hasMessages,
             lastMessagePreview: response.lastMessagePreview,
@@ -178,6 +183,7 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
         try container.encodeIfPresent(articleImageUrl, forKey: .articleImageUrl)
         try container.encodeIfPresent(articleThumbnailUrl, forKey: .articleThumbnailUrl)
         try container.encodeIfPresent(hasPendingMessage, forKey: .hasPendingMessage)
+        try container.encodeIfPresent(isWaitingForContent, forKey: .isWaitingForContent)
         try container.encodeIfPresent(savedToKnowledgeValue, forKey: .savedToKnowledgeValue)
         try container.encodeIfPresent(hasMessages, forKey: .hasMessages)
         try container.encodeIfPresent(lastMessagePreview, forKey: .lastMessagePreview)
@@ -197,6 +203,11 @@ struct ChatSessionSummary: Codable, Identifiable, Hashable {
     /// True if the session has a message currently being processed
     var isProcessing: Bool {
         hasPendingMessage ?? false
+    }
+
+    /// True while a Share Sheet chat waits for its source and first turn.
+    var isPreparingChat: Bool {
+        isWaitingForContent ?? false
     }
 
     /// True if the linked content is saved to knowledge

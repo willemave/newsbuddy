@@ -27,8 +27,10 @@ from app.models.contracts import (
     TaskStatus,
     TaskType,
 )
-from app.models.db import LlmTask, LlmTaskAction, ProcessingTask, User
+from app.models.db import Content, LlmTask, LlmTaskAction, ProcessingTask, User
 from app.pipeline.task_specs import get_task_spec
+from app.services.content_submission import normalize_url
+from app.services.dig_deeper import get_or_create_dig_deeper_session
 from app.services.learning_decks import create_or_rerun_learning_deck
 from app.services.llm_tasks import (
     LlmTaskError,
@@ -53,9 +55,12 @@ from app.services.share_action_workflows import (
     FeedActionInput,
     LearningDeckActionInput,
     ShareActionInput,
+    ShareActionWorkflowSpec,
     allowed_share_actions,
     build_share_action_request,
     parse_share_action_input,
+    share_action_idempotency_key,
+    share_action_workflow_for_mode,
 )
 
 ShareActionAgentRunner = Callable[[Session, LlmTask], ShareActionAgentRunResult]
@@ -72,7 +77,6 @@ def create_share_action(
     """Create a Share Action LLM task and enqueue it for processing."""
     user_id = _require_user_id(current_user)
     mode = payload.mode
-    allowed_actions = allowed_share_actions(mode)
 
     llm_task = create_llm_task(
         db,
@@ -81,7 +85,7 @@ def create_share_action(
         mode=mode,
         workflow_key=f"share_action.{mode.value}.v1",
         approval_policy=_approval_policy_json(payload.approval_policy),
-        allowed_actions=allowed_actions,
+        allowed_actions=allowed_share_actions(mode),
         tool_policy={"execute_bash": True, "web_search": True, "files": "read_write"},
         prompt_pack=f"share_action.{mode.value}",
         input_json={
@@ -89,9 +93,6 @@ def create_share_action(
             "mode": mode.value,
             "instruction": payload.instruction,
             "chat_initial_message": payload.chat_initial_message,
-            "save_to_knowledge_and_mark_read": (
-                payload.save_to_knowledge_and_mark_read or mode == LlmTaskMode.CHAT
-            ),
             "interests_prompt": payload.interests_prompt,
         },
     )
@@ -124,7 +125,7 @@ def run_share_action_task(
     llm_task_id: int,
     agent_runner: ShareActionAgentRunner | None = None,
 ) -> LlmTask:
-    """Run one Share Action LLM task from VM agent through host action application."""
+    """Run one Share Action workflow through validated host action application."""
     task = db.query(LlmTask).filter(LlmTask.id == llm_task_id).first()
     if task is None:
         raise LlmTaskError("LLM task not found")
@@ -138,35 +139,54 @@ def run_share_action_task(
         task,
         status=LlmTaskStatus.PREPARING,
         workflow_state=LlmWorkflowState.PREPARING,
-        note="Preparing Share Action VM workspace",
-    )
-    db.commit()
-    set_llm_task_status(
-        db,
-        task,
-        status=LlmTaskStatus.RUNNING,
-        workflow_state=LlmWorkflowState.RUNNING,
-        note="Running Share Action agent",
+        note="Preparing Share Action workflow",
     )
     db.commit()
 
     try:
-        runner = agent_runner or _run_default_agent
-        agent_result = runner(db, task)
+        user = db.query(User).filter(User.id == task.user_id).first()
+        if user is None:
+            raise LlmTaskError("Share Action user not found")
+        workflow = share_action_workflow_for_mode(LlmTaskMode(str(task.mode)))
+        _prepare_share_action_source(db, task=task, user=user, workflow=workflow)
         set_llm_task_status(
             db,
             task,
-            status=LlmTaskStatus.APPLYING,
-            workflow_state=LlmWorkflowState.APPLYING,
-            note="Applying Share Action result",
-            output_json=agent_result.result.model_dump(mode="json"),
-            model_provider=agent_result.model_provider,
-            model_name=agent_result.model_name,
-            sandbox_provider=agent_result.sandbox_provider,
-            sandbox_id=agent_result.sandbox_id,
+            status=LlmTaskStatus.RUNNING,
+            workflow_state=LlmWorkflowState.RUNNING,
+            note=(
+                "Running deterministic chat handoff"
+                if task.mode == LlmTaskMode.CHAT.value and agent_runner is None
+                else "Running Share Action agent"
+            ),
         )
         db.commit()
-        _ensure_result_action(db, task=task, result=agent_result.result)
+        if task.mode == LlmTaskMode.CHAT.value and agent_runner is None:
+            set_llm_task_status(
+                db,
+                task,
+                status=LlmTaskStatus.APPLYING,
+                workflow_state=LlmWorkflowState.APPLYING,
+                note="Applying deterministic chat handoff",
+            )
+            db.commit()
+            _ensure_host_chat_action(db, task=task)
+        else:
+            agent_result = (agent_runner or _run_default_agent)(db, task)
+            set_llm_task_status(
+                db,
+                task,
+                status=LlmTaskStatus.APPLYING,
+                workflow_state=LlmWorkflowState.APPLYING,
+                note="Applying Share Action result",
+                output_json=agent_result.result.model_dump(mode="json"),
+                model_provider=agent_result.model_provider,
+                model_name=agent_result.model_name,
+                sandbox_provider=agent_result.sandbox_provider,
+                sandbox_id=agent_result.sandbox_id,
+            )
+            db.commit()
+            _ensure_result_action(db, task=task, result=agent_result.result)
         _apply_auto_approved_actions(db, task=task)
         if _has_pending_approval_actions(db, task=task):
             set_llm_task_status(
@@ -245,6 +265,61 @@ def _run_default_agent(_db: Session, task: LlmTask) -> ShareActionAgentRunResult
     return run_share_action_agent(task=task)
 
 
+def _prepare_share_action_source(
+    db: Session,
+    *,
+    task: LlmTask,
+    user: User,
+    workflow: ShareActionWorkflowSpec,
+) -> None:
+    """Persist the shared source once before agent or host action execution."""
+    if not workflow.save_shared_source_to_knowledge or _input_knowledge_content_id(task):
+        return
+
+    input_json = dict(task.input_json) if isinstance(task.input_json, dict) else {}
+    url = _clean_optional_text(input_json.get("url"))
+    if url is None:
+        raise LlmTaskError("Share Action URL is missing")
+    initial_message = _clean_optional_text(input_json.get("chat_initial_message"))
+    result = _submit_content(
+        db,
+        user=user,
+        action_input=ContentActionInput(
+            url=url,
+            instruction=_clean_optional_text(input_json.get("instruction")),
+            chat_initial_message=initial_message,
+        ),
+        share_and_chat=workflow.share_and_chat,
+        save_to_knowledge_and_mark_read=workflow.save_shared_source_to_knowledge,
+    )
+    input_json["knowledge_content_id"] = result.content_id
+    input_json["knowledge_task_id"] = result.job_id
+    task.input_json = input_json
+    db.commit()
+
+
+def _ensure_host_chat_action(db: Session, *, task: LlmTask) -> None:
+    """Dispatch the deterministic chat handoff directly to the host action ledger."""
+    input_json = task.input_json if isinstance(task.input_json, dict) else {}
+    url = _clean_optional_text(input_json.get("url"))
+    if url is None:
+        raise LlmTaskError("Share Action chat URL is missing")
+    workflow = share_action_workflow_for_mode(LlmTaskMode.CHAT)
+    action_input = ContentActionInput(
+        url=url,
+        chat_initial_message=_clean_optional_text(input_json.get("chat_initial_message")),
+    ).model_dump(mode="json", exclude_none=True)
+    request_llm_task_action(
+        db,
+        task=task,
+        action_name=workflow.host_action_name,
+        action_input=action_input,
+        rationale="Use the canonical content pipeline before starting chat",
+        idempotency_key=share_action_idempotency_key(workflow.host_action_name, action_input),
+    )
+    db.commit()
+
+
 def _approval_policy_json(
     approval_policy: dict[str, LlmTaskApprovalPolicy] | None,
 ) -> dict[str, str]:
@@ -305,24 +380,37 @@ def _apply_action(db: Session, *, task: LlmTask, action: LlmTaskAction) -> dict[
 
 def _apply_add_content_action(
     db: Session,
-    _task: LlmTask,
+    task: LlmTask,
     user: User,
     action_input: ShareActionInput,
 ) -> dict[str, Any]:
     if not isinstance(action_input, ContentActionInput):
         raise LlmTaskError("add_content action input has the wrong schema")
-    result = _submit_content(db, user=user, action_input=action_input)
+    prepared = _prepared_content_for_url(db, task=task, url=action_input.url)
+    if prepared is not None:
+        _enrich_prepared_content(prepared, action_input)
+        return _prepared_content_result(task, prepared)
+    result = _submit_content(
+        db,
+        user=user,
+        action_input=action_input,
+        save_to_knowledge_and_mark_read=True,
+    )
     return {"content_id": result.content_id, "task_id": result.job_id}
 
 
 def _apply_save_to_knowledge_action(
     db: Session,
-    _task: LlmTask,
+    task: LlmTask,
     user: User,
     action_input: ShareActionInput,
 ) -> dict[str, Any]:
     if not isinstance(action_input, ContentActionInput):
         raise LlmTaskError("save_to_knowledge action input has the wrong schema")
+    prepared = _prepared_content_for_url(db, task=task, url=action_input.url)
+    if prepared is not None:
+        _enrich_prepared_content(prepared, action_input)
+        return _prepared_content_result(task, prepared)
     result = _submit_content(
         db,
         user=user,
@@ -346,20 +434,34 @@ def _apply_subscribe_to_feed_action(
 
 def _apply_enqueue_chat_action(
     db: Session,
-    _task: LlmTask,
+    task: LlmTask,
     user: User,
     action_input: ShareActionInput,
 ) -> dict[str, Any]:
     if not isinstance(action_input, ContentActionInput):
         raise LlmTaskError("enqueue_chat action input has the wrong schema")
-    result = _submit_content(
-        db,
-        user=user,
-        action_input=action_input,
-        share_and_chat=True,
-        save_to_knowledge_and_mark_read=True,
-    )
-    return {"content_id": result.content_id, "task_id": result.job_id}
+    content = _prepared_content_for_url(db, task=task, url=action_input.url)
+    task_id = _input_knowledge_task_id(task)
+    if content is None:
+        result = _submit_content(
+            db,
+            user=user,
+            action_input=action_input,
+            share_and_chat=True,
+            save_to_knowledge_and_mark_read=True,
+        )
+        content = db.query(Content).filter(Content.id == result.content_id).one()
+        task_id = result.job_id
+    else:
+        _enrich_prepared_content(content, action_input)
+    session = get_or_create_dig_deeper_session(db, content, _require_user_id(user))
+    if session.id is None:
+        raise LlmTaskError("Share Action chat session was not created")
+    return {
+        "content_id": _require_content_id(content),
+        "task_id": task_id,
+        "chat_session_id": int(session.id),
+    }
 
 
 def _apply_create_learning_deck_action(
@@ -370,6 +472,18 @@ def _apply_create_learning_deck_action(
 ) -> dict[str, Any]:
     if not isinstance(action_input, LearningDeckActionInput):
         raise LlmTaskError("create_learning_deck action input has the wrong schema")
+    content_id = _input_knowledge_content_id(task)
+    if content_id is None:
+        content_result = _submit_content(
+            db,
+            user=user,
+            action_input=ContentActionInput(
+                url=action_input.source_url,
+                title=action_input.title,
+            ),
+            save_to_knowledge_and_mark_read=True,
+        )
+        content_id = content_result.content_id
     deck = create_or_rerun_learning_deck(
         db,
         current_user=user,
@@ -378,7 +492,36 @@ def _apply_create_learning_deck_action(
         submitted_via="share_action",
         share_action_task_id=require_llm_task_id(task),
     )
-    return {"learning_deck_id": deck.id, "source_url": action_input.source_url}
+    return {
+        "learning_deck_id": deck.id,
+        "source_url": action_input.source_url,
+        "content_id": content_id,
+    }
+
+
+def _prepared_content_for_url(db: Session, *, task: LlmTask, url: str) -> Content | None:
+    content_id = _input_knowledge_content_id(task)
+    input_json = task.input_json if isinstance(task.input_json, dict) else {}
+    source_url = _clean_optional_text(input_json.get("url"))
+    if content_id is None or source_url is None:
+        return None
+    if normalize_url(source_url) != normalize_url(url):
+        return None
+    return db.query(Content).filter(Content.id == content_id).first()
+
+
+def _enrich_prepared_content(content: Content, action_input: ContentActionInput) -> None:
+    if action_input.title and not content.title:
+        content.title = action_input.title
+    if action_input.platform and not content.platform:
+        content.platform = action_input.platform
+
+
+def _prepared_content_result(task: LlmTask, content: Content) -> dict[str, Any]:
+    return {
+        "content_id": _require_content_id(content),
+        "task_id": _input_knowledge_task_id(task),
+    }
 
 
 def _submit_content(
@@ -425,9 +568,7 @@ def _apply_add_links(
 ) -> dict[str, Any]:
     if not isinstance(action_input, AddLinksActionInput):
         raise LlmTaskError("add_links action input has the wrong schema")
-    save_to_knowledge_and_mark_read = bool(
-        action_input.save_to_knowledge_and_mark_read
-    ) or _input_save_to_knowledge_and_mark_read(task)
+    workflow = share_action_workflow_for_mode(LlmTaskMode(str(task.mode)))
     applied: list[dict[str, Any]] = []
     for candidate in action_input.content_urls[:20]:
         try:
@@ -435,7 +576,7 @@ def _apply_add_links(
                 db,
                 user=user,
                 action_input=candidate,
-                save_to_knowledge_and_mark_read=save_to_knowledge_and_mark_read,
+                save_to_knowledge_and_mark_read=workflow.save_shared_source_to_knowledge,
             )
         except Exception as exc:  # noqa: BLE001
             applied.append({"url": candidate.url, "error": str(exc)})
@@ -495,9 +636,16 @@ def _enqueue_llm_task(db: Session, *, llm_task_id: int, user_id: int) -> int:
     return int(task.id)
 
 
-def _input_save_to_knowledge_and_mark_read(task: LlmTask) -> bool:
+def _input_knowledge_content_id(task: LlmTask) -> int | None:
     input_json = task.input_json if isinstance(task.input_json, dict) else {}
-    return bool(input_json.get("save_to_knowledge_and_mark_read"))
+    value = input_json.get("knowledge_content_id")
+    return int(value) if isinstance(value, int) else None
+
+
+def _input_knowledge_task_id(task: LlmTask) -> int | None:
+    input_json = task.input_json if isinstance(task.input_json, dict) else {}
+    value = input_json.get("knowledge_task_id")
+    return int(value) if isinstance(value, int) else None
 
 
 def _clean_optional_text(value: object) -> str | None:
@@ -518,3 +666,9 @@ def _require_user_id(user: User) -> int:
     if user.id is None:
         raise LlmTaskError("User is missing an id")
     return int(user.id)
+
+
+def _require_content_id(content: Content) -> int:
+    if content.id is None:
+        raise LlmTaskError("Share Action content is missing an id")
+    return int(content.id)

@@ -5468,6 +5468,7 @@ struct APIChatSessionSummary: Codable {
     let articleImageUrl: String?
     let articleThumbnailUrl: String?
     let hasPendingMessage: Bool
+    let isWaitingForContent: Bool
     let isSavedToKnowledge: Bool
     let hasMessages: Bool
     let lastMessagePreview: String?
@@ -5495,6 +5496,7 @@ struct APIChatSessionSummary: Codable {
         articleImageUrl: String? = nil,
         articleThumbnailUrl: String? = nil,
         hasPendingMessage: Bool = false,
+        isWaitingForContent: Bool = false,
         isSavedToKnowledge: Bool = false,
         hasMessages: Bool = true,
         lastMessagePreview: String? = nil,
@@ -5521,6 +5523,7 @@ struct APIChatSessionSummary: Codable {
         self.articleImageUrl = articleImageUrl
         self.articleThumbnailUrl = articleThumbnailUrl
         self.hasPendingMessage = hasPendingMessage
+        self.isWaitingForContent = isWaitingForContent
         self.isSavedToKnowledge = isSavedToKnowledge
         self.hasMessages = hasMessages
         self.lastMessagePreview = lastMessagePreview
@@ -5549,6 +5552,7 @@ struct APIChatSessionSummary: Codable {
         case articleImageUrl = "article_image_url"
         case articleThumbnailUrl = "article_thumbnail_url"
         case hasPendingMessage = "has_pending_message"
+        case isWaitingForContent = "is_waiting_for_content"
         case isSavedToKnowledge = "is_saved_to_knowledge"
         case hasMessages = "has_messages"
         case lastMessagePreview = "last_message_preview"
@@ -5596,6 +5600,7 @@ struct APIChatSessionSummary: Codable {
         articleImageUrl = try container.decodeIfPresent(String.self, forKey: .articleImageUrl)
         articleThumbnailUrl = try container.decodeIfPresent(String.self, forKey: .articleThumbnailUrl)
         hasPendingMessage = try container.decode(Bool.self, forKey: .hasPendingMessage)
+        isWaitingForContent = try container.decode(Bool.self, forKey: .isWaitingForContent)
         isSavedToKnowledge = try container.decode(Bool.self, forKey: .isSavedToKnowledge)
         hasMessages = try container.decode(Bool.self, forKey: .hasMessages)
         lastMessagePreview = try container.decodeIfPresent(String.self, forKey: .lastMessagePreview)
@@ -5625,6 +5630,7 @@ struct APIChatSessionSummary: Codable {
         try container.encodeIfPresent(articleImageUrl, forKey: .articleImageUrl)
         try container.encodeIfPresent(articleThumbnailUrl, forKey: .articleThumbnailUrl)
         try container.encode(hasPendingMessage, forKey: .hasPendingMessage)
+        try container.encode(isWaitingForContent, forKey: .isWaitingForContent)
         try container.encode(isSavedToKnowledge, forKey: .isSavedToKnowledge)
         try container.encode(hasMessages, forKey: .hasMessages)
         try container.encodeIfPresent(lastMessagePreview, forKey: .lastMessagePreview)

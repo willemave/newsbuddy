@@ -2410,6 +2410,12 @@
             "title": "Is Saved To Knowledge",
             "type": "boolean"
           },
+          "is_waiting_for_content": {
+            "default": false,
+            "description": "True if a share-sheet chat is waiting for content processing or its first turn",
+            "title": "Is Waiting For Content",
+            "type": "boolean"
+          },
           "last_message_at": {
             "anyOf": [
               {
@@ -7940,12 +7946,6 @@
           "mode": {
             "$ref": "#/components/schemas/LlmTaskMode",
             "description": "ShareSheet action mode to run"
-          },
-          "save_to_knowledge_and_mark_read": {
-            "default": false,
-            "description": "When true, host-applied content actions should save resulting content to Knowledge and mark it read after submission.",
-            "title": "Save To Knowledge And Mark Read",
-            "type": "boolean"
           },
           "url": {
             "description": "Submitted http/https URL",
