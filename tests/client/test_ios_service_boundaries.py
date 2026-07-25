@@ -449,21 +449,21 @@ def test_share_extension_uses_shared_brand_style() -> None:
     assert "ShareExtensionStyle.font" in share_controller_source
     assert "ShareExtensionStyle.titleFont" in share_controller_source
 
-    assert 'static let brandColorAssetName = "ShareBrandPrimary"' in shared_style_source
-    assert "UIColor(named: brandColorAssetName)" in shared_style_source
+    assert "ReaderPalette.selectedUIColor(\\.brandPrimary)" in shared_style_source
     assert 'static let bodyFamily = "Lato-Regular"' in shared_style_source
     assert 'static let titleFamily = "Lora-Regular"' in shared_style_source
 
     assert "Shared/ShareExtensionStyle.swift" in project_source
-    assert (
+    assert "Shared/ReaderPalette.swift" in project_source
+    assert not (
         REPO_ROOT / "client/newsly/newsly/Assets.xcassets/ShareBrandPrimary.colorset/Contents.json"
     ).exists()
-    assert (
+    assert not (
         REPO_ROOT
         / "client/newsly/ShareExtension/Assets.xcassets/ShareBrandPrimary.colorset/Contents.json"
     ).exists()
     assert "`newsly/Shared/ShareExtensionStyle.swift`" in share_extension_docs
-    assert "`Assets.xcassets/ShareBrandPrimary.colorset`" in share_extension_docs
+    assert "`ReaderPalette.brandPrimary`" in share_extension_docs
 
 
 def test_voice_dictation_haptics_live_in_swiftui_mic_button() -> None:

@@ -11,14 +11,14 @@ iOS share extension target that receives shared URLs/text from other apps and fo
 - Learning Deck creation posts to `/api/learning/decks`.
 - Feed mode supports feed subscription behavior; chat mode hands shared material into the app chat flow.
 - The extension reads auth/shared state through app group/keychain configuration and must stay aligned with app entitlements.
-- Because the extension is a separate UIKit target, shared UIKit styling lives in `newsly/Shared/ShareExtensionStyle.swift`; the app and extension bundles both carry a `ShareBrandPrimary` color asset for the terracotta accent.
+- Because the extension is a separate UIKit target, shared UIKit styling lives in `newsly/Shared/ShareExtensionStyle.swift`; it resolves the accent from `ReaderPalette.brandPrimary`, which is compiled into both targets.
 
 ## Important files
 | File | Purpose |
 |---|---|
 | `ShareViewController.swift` | Share extension controller, mode routing, backend submission calls, and UI state. |
 | `../newsly/Shared/ShareExtensionStyle.swift` | Shared UIKit color and typography constants compiled into both app and extension targets. |
-| `Assets.xcassets/ShareBrandPrimary.colorset` | Extension-bundled terracotta brand accent used by selection and submit controls. |
+| `../newsly/Shared/ReaderPalette.swift` | Shared semantic color palette, including the extension's brand accent. |
 | `Info.plist` | Extension metadata and activation rules. |
 | `ShareExtension.entitlements` | App-group/keychain entitlements. |
 | `Base.lproj/MainInterface.storyboard` | Extension storyboard entrypoint. |
