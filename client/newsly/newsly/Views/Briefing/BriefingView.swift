@@ -25,11 +25,13 @@ private enum BriefingViewAlert: Identifiable {
 struct BriefingView: View {
     @ObservedObject var viewModel: BriefingViewModel
     private let narrationController: BriefingNarrationController
+    /// Sources push onto the tab's navigation stack rather than opening a sheet,
+    /// so the reader gets the standard back stack and edge-swipe.
+    private let onOpenContent: (ContentDetailRoute) -> Void
 
     @Environment(\.dynamicTypeSize) private var contentTextSize
     @StateObject private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
     @State private var playbackService = NarrationPlaybackService.shared
-    @State private var activeSource: BriefingSourceSheetItem?
     @State private var activeNarrationChapters: BriefingNarrationChapterSheetItem?
     @State private var chromeCollapse = BriefingChromeCollapseModel()
     @State private var mastheadHeight: CGFloat = 0
@@ -39,9 +41,13 @@ struct BriefingView: View {
     @State private var markingCategoryTitle: String?
     @State private var markAllReadFeedbackTrigger = 0
 
-    init(viewModel: BriefingViewModel) {
+    init(
+        viewModel: BriefingViewModel,
+        onOpenContent: @escaping (ContentDetailRoute) -> Void
+    ) {
         self.viewModel = viewModel
         self.narrationController = viewModel.narrationController
+        self.onOpenContent = onOpenContent
     }
 
     private var digSheetPresented: Binding<Bool> {
@@ -144,16 +150,6 @@ struct BriefingView: View {
             }
         }
         .sensoryFeedback(.success, trigger: markAllReadFeedbackTrigger)
-        .sheet(item: $activeSource) { item in
-            BriefingSourceSheet(
-                item: item,
-                contentIds: contentIdsForCurrentLens(matching: item.source.kind)
-            )
-            .dynamicTypeSize(contentTextSize)
-            .presentationDetents([.fraction(0.75), .large])
-            .presentationContentInteraction(.resizes)
-            .presentationDragIndicator(.visible)
-        }
         .sheet(item: $activeNarrationChapters) { item in
             if let narration = narrationController.narration(for: item.lensKey) {
                 BriefingNarrationChapterSheet(
@@ -471,13 +467,26 @@ struct BriefingView: View {
 
     private func openSource(_ sourceKey: String) {
         guard let source = viewModel.source(for: sourceKey) else { return }
-        activeSource = BriefingSourceSheetItem(source: source)
+        onOpenContent(contentRoute(for: source))
     }
 
     private func openDiscussion(_ source: APIBriefingSource) {
-        activeSource = BriefingSourceSheetItem(
-            source: source,
-            initialScrollTarget: .comments
+        onOpenContent(contentRoute(for: source, initialScrollTarget: .comments))
+    }
+
+    /// `APIBriefingSource.contentType` is optional, but `kind` is the same
+    /// vocabulary and is already what groups sibling sources for the carousel,
+    /// so it is the fallback rather than `.unknown`.
+    private func contentRoute(
+        for source: APIBriefingSource,
+        initialScrollTarget: ContentDetailScrollTarget? = nil
+    ) -> ContentDetailRoute {
+        ContentDetailRoute(
+            contentId: source.id,
+            contentType: source.contentType ?? APIContentType(rawValue: source.kind),
+            allContentIds: contentIdsForCurrentLens(matching: source.kind),
+            navigationSurface: .briefing,
+            initialScrollTarget: initialScrollTarget
         )
     }
 

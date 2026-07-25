@@ -122,56 +122,11 @@ struct BriefingDigSheet: View {
         }
     }
 }
-struct BriefingSourceSheetItem: Identifiable {
-    let source: APIBriefingSource
-    let initialScrollTarget: ContentDetailScrollTarget?
-
-    init(
-        source: APIBriefingSource,
-        initialScrollTarget: ContentDetailScrollTarget? = nil
-    ) {
-        self.source = source
-        self.initialScrollTarget = initialScrollTarget
-    }
-
-    var id: String {
-        source.sourceKey
-    }
-}
-
 struct BriefingSafariItem: Identifiable {
     let url: URL
 
     var id: String {
         url.absoluteString
-    }
-}
-
-/// Every briefing source opens the same reading screen the feeds use —
-/// news sources get the full short-news article view, not an abridged card.
-struct BriefingSourceSheet: View {
-    let item: BriefingSourceSheetItem
-    let contentIds: [Int]
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ContentDetailView(
-                contentId: item.source.id,
-                contentType: item.source.contentType,
-                allContentIds: contentIds,
-                navigationSurface: .briefing,
-                initialScrollTarget: item.initialScrollTarget
-            )
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -235,7 +190,7 @@ struct BriefingNarrationChapterSheet: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(Color.terracottaPrimary.opacity(index == selectedIndex ? 0.16 : 0.09))
+                    .fill(Color.brandPrimary.opacity(index == selectedIndex ? 0.16 : 0.09))
                     .frame(width: 36, height: 36)
 
                 chapterStatusIcon(chapter, index: index)
@@ -258,7 +213,7 @@ struct BriefingNarrationChapterSheet: View {
             if index == selectedIndex {
                 Image(systemName: "checkmark")
                     .font(.appSymbol(size: 12, weight: .bold))
-                    .foregroundStyle(Color.terracottaPrimary)
+                    .foregroundStyle(Color.brandPrimary)
             }
         }
         .frame(minHeight: 58)
@@ -270,12 +225,12 @@ struct BriefingNarrationChapterSheet: View {
         if isPreparing && index == selectedIndex {
             ProgressView()
                 .controlSize(.small)
-                .tint(Color.terracottaPrimary)
+                .tint(Color.brandPrimary)
         } else {
             Image(systemName: chapterStatusSystemName(chapter))
                 .font(.appSymbol(size: 12, weight: .semibold))
                 .foregroundStyle(
-                    chapter.isFailed ? Color.statusDestructive : Color.terracottaPrimary
+                    chapter.isFailed ? Color.statusDestructive : Color.brandPrimary
                 )
         }
     }
