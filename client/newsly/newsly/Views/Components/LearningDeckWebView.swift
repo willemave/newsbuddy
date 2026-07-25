@@ -25,7 +25,7 @@ struct LearningDeckWebLogOrigin: Equatable {
 }
 
 /// Bridges the SwiftUI reader to the underlying reveal.js `WKWebView`: exposes a
-/// load phase for loading/error overlays and forwards slide navigation commands.
+/// load phase for loading/error overlays and forwards deck-level commands.
 @Observable
 final class LearningDeckReaderWebController {
     enum LoadPhase {
@@ -62,8 +62,6 @@ final class LearningDeckReaderWebController {
         )
     }
 
-    func goNext() { evaluate("if (window.Reveal && Reveal.next) { Reveal.next(); }") }
-    func goPrevious() { evaluate("if (window.Reveal && Reveal.prev) { Reveal.prev(); }") }
     func toggleOverview() { evaluate("if (window.Reveal && Reveal.toggleOverview) { Reveal.toggleOverview(); }") }
 
     private func evaluate(_ javascript: String) {

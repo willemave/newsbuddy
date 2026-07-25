@@ -13,13 +13,11 @@ Recommended sequence:
    trafilatura, readability, or selectolax.
 3. Remove navigation, login, social, tag, author, pagination, and tracking links.
 4. Keep links that represent substantive articles, papers, podcast episodes, docs, or source pages.
-5. If `input.save_to_knowledge_and_mark_read` is true, keep the same action shape; the host will
-   save each accepted candidate to Knowledge and mark it read after submission.
-6. Write `output/result.json`.
+5. Write `output/result.json`. The host owns the Knowledge-save policy and will save each
+   accepted candidate and mark it read after submission.
 
-Do not create content rows directly. Include `save_to_knowledge_and_mark_read` from
-`input/request.json` in `output/result.json`; the host will validate and apply the `add_links`
-action after ranking.
+Do not create content rows directly. The host will validate and apply the `add_links` action
+after ranking.
 
 Required `output/result.json`:
 
@@ -27,7 +25,6 @@ Required `output/result.json`:
 {
   "action": "add_links",
   "primary_url": "https://example.com/source-page",
-  "save_to_knowledge_and_mark_read": false,
   "content_urls": [
     {
       "url": "https://example.com/linked-story",

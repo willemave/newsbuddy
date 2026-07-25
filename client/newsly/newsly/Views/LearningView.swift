@@ -36,7 +36,6 @@ struct LearningView: View {
     @State private var activeSheet: LearningSheetDestination?
     @State private var deckReaderDestination: LearningDeckReaderDestination?
     @FocusState private var isComposerFocused: Bool
-
     init(
         focusRequest: LearningFocusRequest? = nil,
         onFocusHandled: @escaping (LearningFocusRequest) -> Void = { _ in },
@@ -75,10 +74,6 @@ struct LearningView: View {
             decks: decks.decks,
             narrations: narrations.episodes
         )
-    }
-
-    private var timelineSections: [LearningTimelineSection] {
-        LearningTimelineGrouper.sections(for: timeline)
     }
 
     var body: some View {
@@ -131,6 +126,9 @@ struct LearningView: View {
             await viewModel.checkAndRefreshVoiceDictation()
             handleFocusRequest(focusRequest)
         }
+        .task(id: viewModel.hasActiveChatWork) {
+            await viewModel.pollActiveChatWork()
+        }
         .onChange(of: focusRequest) { _, request in handleFocusRequest(request) }
         .onChange(of: viewModel.completedVoiceRoute) { _, route in
             guard let route else { return }
@@ -162,7 +160,7 @@ struct LearningView: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.appSymbol(size: 28))
                         .foregroundStyle(
-                            viewModel.isCreatingSession ? Color.onSurfaceSecondary : Color.terracottaPrimary
+                            viewModel.isCreatingSession ? Color.onSurfaceSecondary : Color.brandPrimary
                         )
                         .frame(width: 44, height: 44)
                 }
@@ -192,8 +190,12 @@ struct LearningView: View {
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
-        .background(Color.surfaceContainer)
+        .background(Color.surfaceSecondary)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+                .stroke(Color.borderSubtle, lineWidth: 1)
+        )
         .padding(.horizontal, Spacing.appHorizontalMargin)
     }
 
@@ -219,13 +221,10 @@ struct LearningView: View {
             .padding(.vertical, 28)
             .appListRow()
         } else {
-            ForEach(Array(timelineSections.enumerated()), id: \.element.id) { sectionIndex, section in
-                dayDivider(section.label, isFirst: sectionIndex == 0)
-                    .appListRow()
-
-                ForEach(section.items) { item in
-                    timelineRow(item)
-                }
+            // Flat list, no day dividers: with roughly one entry per day the rules
+            // outnumbered the content. Each row carries its own date under the icon.
+            ForEach(timeline) { item in
+                timelineRow(item)
             }
         }
     }
@@ -296,17 +295,6 @@ struct LearningView: View {
             .accessibilityIdentifier("learning.narration.\(episode.id)")
             .appListRow()
         }
-    }
-
-    private func dayDivider(_ label: String, isFirst: Bool) -> some View {
-        HStack(spacing: 10) {
-            Text(isFirst ? "CONTINUE · \(label)" : label)
-                .kicker(color: .sectionDelimiter)
-            Rectangle().fill(Color.outlineVariant).frame(height: 1)
-        }
-        .padding(.horizontal, Spacing.appHorizontalMargin)
-        .padding(.top, 6)
-        .padding(.bottom, 2)
     }
 
     private func moreMenuButton(_ action: @escaping () -> Void) -> some View {
@@ -385,42 +373,25 @@ private struct LearningChatRow: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var isPreparing: Bool {
+        session.isPreparingChat || session.isProcessing
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(spacing: 5) {
-                LearningArtwork(icon: "bubble.left.and.bubble.right")
-
-                HStack(spacing: 4) {
-                    Text(ContentTimestampFormatter.compactRelativeText(from: activityDate))
-                        .font(.terracottaLabelSmall)
-                        .foregroundStyle(Color.onSurfaceTertiary)
-                    if session.isProcessing {
-                        ProgressView().controlSize(.mini)
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(session.displayTitle)
-                    .font(.terracottaHeadlineSmall)
-                    .foregroundStyle(Color.onSurface)
-                    .lineLimit(3)
-                    .truncationMode(.tail)
-                if let preview {
-                    Text(preview)
-                        .font(.terracottaBodySmall)
-                        .foregroundStyle(Color.onSurfaceSecondary)
-                        .lineLimit(2)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
+        LearningTimelineRow(
+            icon: "bubble.left.and.bubble.right",
+            isBusy: isPreparing,
+            busyAccessibilityIdentifier: isPreparing
+                ? "learning.chat.\(session.id).preparing"
+                : nil,
+            activityDate: activityDate,
+            title: session.displayTitle,
+            subtitle: preview
+        ) {
             Image(systemName: "chevron.right")
                 .font(.appSymbol(size: 11, weight: .semibold))
                 .foregroundStyle(Color.onSurfaceTertiary)
-                .padding(.top, 4)
         }
-        .learningTimelineRow()
     }
 }
 
@@ -429,34 +400,20 @@ private struct LearningDeckTimelineRow: View {
     let activityDate: Date
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            LearningArtwork(icon: "rectangle.stack", isDeck: true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(deck.displayTitle)
-                    .font(.terracottaHeadlineSmall)
-                    .foregroundStyle(Color.onSurface)
-                    .lineLimit(3)
-                    .truncationMode(.tail)
-                HStack(spacing: 6) {
-                    Text(ContentTimestampFormatter.compactRelativeText(from: activityDate))
-                        .font(.terracottaLabelSmall)
-                        .foregroundStyle(Color.onSurfaceTertiary)
-                    Text(deck.statusLabel.uppercased())
-                        .font(.terracottaLabelSmall)
-                        .foregroundStyle(Color.onSurfaceTertiary)
-                }
-                Text(deck.timelineSubtitle)
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        LearningTimelineRow(
+            icon: "rectangle.on.rectangle",
+            isBusy: deck.hasActiveLatestRun,
+            busyAccessibilityIdentifier: deck.hasActiveLatestRun
+                ? "learning.deck.\(deck.id).preparing"
+                : nil,
+            activityDate: activityDate,
+            title: deck.displayTitle,
+            subtitle: deck.timelineSubtitle
+        ) {
             Image(systemName: "chevron.right")
                 .font(.appSymbol(size: 11, weight: .semibold))
                 .foregroundStyle(Color.onSurfaceTertiary)
-                .padding(.top, 4)
         }
-        .learningTimelineRow()
     }
 }
 
@@ -467,31 +424,76 @@ private struct LearningNarrationRow: View {
     let isPlaying: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            LearningArtwork(icon: "waveform")
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text("NARRATION").kicker(color: .terracottaPrimary)
-                    Text("· \(ContentTimestampFormatter.compactRelativeText(from: activityDate))")
-                        .font(.terracottaLabelSmall)
-                        .foregroundStyle(Color.onSurfaceTertiary)
-                }
-                Text(episode.title)
-                    .font(.terracottaHeadlineSmall)
-                    .foregroundStyle(Color.onSurface)
-                    .lineLimit(3)
-                    .truncationMode(.tail)
-                Text(subtitle)
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        LearningTimelineRow(
+            icon: "waveform",
+            activityDate: activityDate,
+            title: episode.title,
+            subtitle: subtitle
+        ) {
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.appSymbol(size: 11, weight: .semibold))
-                .foregroundStyle(Color.terracottaPrimary)
+                .foregroundStyle(Color.brandPrimary)
                 .frame(width: 30, height: 30)
                 .background(Color.surfaceSecondary)
                 .clipShape(Circle())
+        }
+    }
+}
+
+/// Every timeline entry is the same two lines: a title that truncates rather than
+/// wraps, and the latest line of content under it. State that used to occupy its
+/// own text line (PREPARING CHAT, READY, NARRATION) is carried by the artwork glyph
+/// and a busy dot instead, so rows stay a fixed height whatever they are doing.
+///
+/// The date rides under the icon rather than in a day-divider bar above a group of
+/// rows — the timeline averages about one entry per day, so the dividers outnumbered
+/// the entries they were grouping.
+private struct LearningTimelineRow<Accessory: View>: View {
+    let icon: String
+    var isBusy = false
+    var busyAccessibilityIdentifier: String?
+    let activityDate: Date
+    let title: String
+    let subtitle: String?
+    @ViewBuilder var accessory: () -> Accessory
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(spacing: 3) {
+                LearningArtwork(
+                    icon: icon,
+                    isBusy: isBusy,
+                    busyAccessibilityIdentifier: busyAccessibilityIdentifier
+                )
+
+                Text(ContentTimestampFormatter.compactRelativeText(from: activityDate))
+                    .font(.terracottaLabelSmall)
+                    .foregroundStyle(Color.onSurfaceTertiary)
+                    .lineLimit(1)
+            }
+            // Optical, not geometric: the serif title's tall ascenders push the text
+            // block's visual mass below its layout center, so a tile centered by the
+            // stack reads high. Nudge down to match.
+            .offset(y: 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.terracottaHeadlineSmall)
+                    .foregroundStyle(Color.onSurface)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            accessory()
         }
         .learningTimelineRow()
     }
@@ -499,29 +501,56 @@ private struct LearningNarrationRow: View {
 
 private struct LearningArtwork: View {
     let icon: String
-    var isDeck = false
+    var isBusy = false
+    var busyAccessibilityIdentifier: String?
 
-    private let size = CGSize(width: 72, height: 64)
+    private let size: CGFloat = 38
 
     var body: some View {
         ZStack {
             Color.surfaceSecondary
-            if isDeck {
-                RoundedRectangle(cornerRadius: 5)
-                    .stroke(Color.terracottaPrimary.opacity(0.45), lineWidth: 1)
-                    .frame(width: 38, height: 27)
-                    .offset(x: 5, y: 4)
-            }
+            // Neutral: every row in the timeline carries one of these, so accenting
+            // them accented the whole screen. Regular weight rather than semibold —
+            // multi-stroke glyphs like the deck's stacked rectangles turn to mush
+            // when they are both small and heavy.
             Image(systemName: icon)
-                .font(.appSymbol(size: 17, weight: .semibold))
-                .foregroundStyle(Color.terracottaPrimary)
+                .font(.appSymbol(size: 16))
+                .foregroundStyle(Color.onSurfaceSecondary)
         }
-        .frame(width: size.width, height: size.height)
+        .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.outlineVariant.opacity(0.45), lineWidth: 0.5)
         }
+        .overlay(alignment: .topTrailing) {
+            if isBusy {
+                PreparingActivityDot()
+                    .padding(2.5)
+                    .background(Color.surfacePrimary, in: Circle())
+                    .offset(x: 3, y: -3)
+                    .accessibilityIdentifier(busyAccessibilityIdentifier ?? "")
+            }
+        }
+    }
+}
+
+/// Breathing dot standing in for a spinner on rows still being prepared.
+/// A `.mini` `ProgressView` renders as a low-resolution aperture at this size
+/// and read as a rendering artifact sitting next to the timestamp.
+private struct PreparingActivityDot: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isDimmed = false
+
+    var body: some View {
+        Circle()
+            .fill(Color.brandPrimary)
+            .frame(width: 5, height: 5)
+            .opacity(isDimmed ? 0.3 : 1)
+            .animation(reduceMotion ? nil : AppMotion.chatStatusPulse, value: isDimmed)
+            .onAppear { isDimmed = !reduceMotion }
+            .onChange(of: reduceMotion) { _, newValue in isDimmed = !newValue }
+            .accessibilityHidden(true)
     }
 }
 
@@ -529,7 +558,7 @@ private extension View {
     func learningTimelineRow() -> some View {
         self
             .padding(.horizontal, Spacing.appHorizontalMargin)
-            .padding(.vertical, 11)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
     }
 }

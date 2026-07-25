@@ -110,15 +110,17 @@ class ChatService {
         limit: Int = 25,
         cursor: String? = nil
     ) async throws -> ChatSessionListResponse {
-        return try await client.request(
-            APIEndpoints.chatSessionsList,
+        let descriptor = APIRequestDescriptor<ChatSessionListResponse>(
+            path: APIEndpoints.chatSessionsList,
             queryItems: sessionListQueryItems(
                 contentId: contentId,
                 newsItemId: newsItemId,
                 limit: limit,
                 cursor: cursor
-            )
+            ),
+            headers: ["Cache-Control": "no-cache"]
         )
+        return try await client.request(descriptor)
     }
 
     /// Create a new chat session

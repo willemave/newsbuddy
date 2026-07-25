@@ -44,13 +44,6 @@ class ShareActionCreateRequest(BaseModel):
         max_length=2000,
         description="Initial user question for chat mode",
     )
-    save_to_knowledge_and_mark_read: bool = Field(
-        False,
-        description=(
-            "When true, host-applied content actions should save resulting content to "
-            "Knowledge and mark it read after submission."
-        ),
-    )
     interests_prompt: str | None = Field(
         None,
         max_length=4000,
@@ -133,12 +126,6 @@ class ShareActionAgentResult(BaseModel):
     content_urls: list[ShareActionCandidate] = Field(default_factory=list)
     presentation: ShareActionPresentationCandidate | None = None
     chat: ShareActionChatCandidate | None = None
-    save_to_knowledge_and_mark_read: bool | None = Field(
-        None,
-        description=(
-            "Optional echo of the share request save/read preference for multi-content actions."
-        ),
-    )
     title: str | None = None
     platform: str | None = None
     content_type: str | None = None

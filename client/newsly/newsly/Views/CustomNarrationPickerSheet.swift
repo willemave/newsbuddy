@@ -201,7 +201,7 @@ struct CustomNarrationPickerSheet: View {
                     .font(.appSymbol(size: 22, weight: .semibold))
                     .foregroundStyle(
                         isSelected(item, kind: kind)
-                            ? Color.terracottaPrimary
+                            ? Color.brandPrimary
                             : Color.onSurfaceSecondary.opacity(0.55)
                     )
             }

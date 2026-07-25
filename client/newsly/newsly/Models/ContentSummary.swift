@@ -271,6 +271,36 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         savedSource == APISavedSource.x_bookmark.rawValue
     }
 
+    var knowledgeSourceLabels: [String] {
+        let source = Self.normalizedText(source)
+            .flatMap { value in
+                value.caseInsensitiveCompare("self submission") == .orderedSame ? nil : value
+            }
+
+        if isXBookmark {
+            return ["X Bookmark"] + (source.map { [$0] } ?? [])
+        }
+
+        if let source {
+            return [source]
+        }
+
+        if let host = URL(string: url)?.host {
+            return [host.replacingOccurrences(
+                of: "^www\\.",
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )]
+        }
+
+        if let platform = Self.normalizedText(platform),
+           platform.caseInsensitiveCompare("self submission") != .orderedSame {
+            return [platform]
+        }
+
+        return ["Saved"]
+    }
+
     private static func normalizedText(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

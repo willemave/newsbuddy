@@ -65,6 +65,8 @@ final class ChatSessionViewModel {
     @ObservationIgnored
     private var pendingSends: [UUID: PendingSend] = [:]
     @ObservationIgnored
+    private var sendQueue = PendingSendQueue()
+    @ObservationIgnored
     private var localIdentityAliases: [ChatTimelineID: UUID] = [:]
     @ObservationIgnored
     private var selectCouncilRequestId: UUID?
@@ -113,12 +115,23 @@ final class ChatSessionViewModel {
 
     func handleAppear() {
         isViewActive = true
+        startQueuedSendDrainIfPossible()
     }
 
     func performSendMessage(text overrideText: String? = nil) {
-        tasks.runReplacing(.send) { [weak self] in
+        _ = startSendMessage(text: overrideText)
+    }
+
+    private func startSendMessage(text overrideText: String?) -> Task<Void, Never>? {
+        guard let pending = stagePendingSend(text: overrideText) else { return nil }
+        if isSending || tasks.isRunning(.send) {
+            enqueuePendingSend(pending)
+            return nil
+        }
+        return tasks.runReplacing(.send) { [weak self] in
             guard let self else { return }
-            await self.sendMessage(text: overrideText)
+            await self.processPendingSend(pending)
+            await self.drainQueuedSends()
         }
     }
 
@@ -167,8 +180,10 @@ final class ChatSessionViewModel {
             )
 
             // Check if there's a processing message we need to poll for
-            if let processingMessage = timeline.first(where: { $0.message.isProcessing })?.message {
-                let pollingMessageId = processingMessage.sourceMessageId ?? processingMessage.id
+            if let pollingMessageId = timeline.lazy.compactMap({ item -> Int? in
+                guard item.message.isProcessing else { return nil }
+                return item.message.sourceMessageId ?? item.pendingMessageId
+            }).first {
                 await pollForMessageCompletion(messageId: pollingMessageId)
             }
             else if let pendingMessageId = initialPendingMessageId, detail.session.isProcessing {
@@ -194,6 +209,9 @@ final class ChatSessionViewModel {
         }
 
         isLoading = false
+        if !isSending {
+            await drainQueuedSends()
+        }
     }
 
     private func shouldAutoStartCouncil(detail: ChatSessionDetail) -> Bool {
@@ -283,18 +301,16 @@ final class ChatSessionViewModel {
     }
 
     func sendMessage(text overrideText: String? = nil) async {
-        let resolvedText = (overrideText ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !resolvedText.isEmpty, !isSending else { return }
+        await startSendMessage(text: overrideText)?.value
+    }
 
-        let signpostState = chatPerfSignposter.beginInterval("send-message")
-        defer { chatPerfSignposter.endInterval("send-message", signpostState) }
+    private func stagePendingSend(text overrideText: String?) -> PendingSend? {
+        let resolvedText = (overrideText ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !resolvedText.isEmpty else { return nil }
 
         if overrideText == nil {
             inputText = ""
         }
-        isSending = true
-        errorMessage = nil
-        startThinkingTimer()
         let localId = UUID()
         let pending = PendingSend(
             localId: localId,
@@ -304,6 +320,51 @@ final class ChatSessionViewModel {
         )
         pendingSends[localId] = pending
         upsertPendingSend(pending)
+        return pending
+    }
+
+    private func enqueuePendingSend(_ pending: PendingSend) {
+        sendQueue.enqueue(pending)
+        upsertPendingSend(pending)
+        logger.info(
+            "[ViewModel] message queued | sessionId=\(self.sessionId) queuedCount=\(self.sendQueue.count)"
+        )
+    }
+
+    private func drainQueuedSends() async {
+        while isViewActive, !Task.isCancelled, let queued = sendQueue.dequeue() {
+            let localId = queued.localId
+            guard let pending = pendingSends[localId], pending.messageId == nil else {
+                continue
+            }
+            await processPendingSend(pending)
+        }
+    }
+
+    private func startQueuedSendDrainIfPossible() {
+        guard
+            isViewActive,
+            !needsForegroundTranscriptRefresh,
+            !sendQueue.isEmpty,
+            !tasks.isRunning(.send)
+        else {
+            return
+        }
+        tasks.runReplacing(.send) { [weak self] in
+            await self?.drainQueuedSends()
+        }
+    }
+
+    private func processPendingSend(_ pending: PendingSend) async {
+        let signpostState = chatPerfSignposter.beginInterval("send-message")
+        defer { chatPerfSignposter.endInterval("send-message", signpostState) }
+
+        let localId = pending.localId
+        let resolvedText = pending.text
+        upsertPendingSend(pending)
+        isSending = true
+        errorMessage = nil
+        startThinkingTimer()
 
         defer {
             isSending = false
@@ -545,7 +606,14 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     }
 
     private func publishTimeline(_ items: [ChatTimelineItem]) {
-        timeline = items.sorted { $0.isOrderedBefore($1) }
+        timeline = items.map { item in
+            var resolved = item
+            if case .local(let localId) = item.id {
+                resolved.isQueued = sendQueue.contains(localId: localId)
+            }
+            return resolved
+        }
+        .sorted { $0.isOrderedBefore($1) }
         refreshDerivedTimelineState()
     }
 

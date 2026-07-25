@@ -61,6 +61,8 @@ struct ContentView: View {
                 BriefingTab(
                     path: $briefingPath,
                     viewModel: tabCoordinator.briefingVM,
+                    readingStateStore: readingStateStore,
+                    readStateCache: readStateCache,
                     contentTextSize: contentTextSize
                 )
             } else {

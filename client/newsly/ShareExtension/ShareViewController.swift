@@ -326,18 +326,14 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }
 
     private func updateBookmarkOnlyToggleAvailability() {
-        let shouldHideBookmarkOnlyToggle = linkHandlingMode == .createLearningDeck || linkHandlingMode == .chat
+        let shouldHideBookmarkOnlyToggle = linkHandlingMode != .addContent
         bookmarkOnlyToggleView.isHidden = shouldHideBookmarkOnlyToggle
         if shouldHideBookmarkOnlyToggle {
             bookmarkOnlyToggleView.isEnabled = false
             return
         }
 
-        let isAvailable = linkHandlingMode != .addFeed
-        if !isAvailable && bookmarkOnlyToggleView.isOn {
-            bookmarkOnlyToggleView.isOn = false
-        }
-        bookmarkOnlyToggleView.isEnabled = isAvailable
+        bookmarkOnlyToggleView.isEnabled = true
     }
 
     private func updateSubmitButtonTitle() {
@@ -404,8 +400,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         let payload = ShareActionRequest(
             url: url.absoluteString,
             mode: shareActionMode(),
-            chatInitialMessage: linkHandlingMode == .chat ? chatInitialMessage : nil,
-            saveToKnowledgeAndMarkRead: shouldSaveToKnowledgeAndMarkRead()
+            chatInitialMessage: linkHandlingMode == .chat ? chatInitialMessage : nil
         )
         let requestBody = try JSONEncoder().encode(payload)
 
@@ -458,11 +453,11 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
     private func shouldSaveToKnowledgeAndMarkRead() -> Bool {
         switch linkHandlingMode {
-        case .addContent, .addLinks:
+        case .addContent:
             return bookmarkOnlyToggleView.isOn
         case .chat:
             return true
-        case .addFeed, .createLearningDeck:
+        case .addLinks, .addFeed, .createLearningDeck:
             return false
         }
     }
@@ -486,13 +481,11 @@ private struct ShareActionRequest: Encodable {
     let url: String
     let mode: String
     let chatInitialMessage: String?
-    let saveToKnowledgeAndMarkRead: Bool
 
     enum CodingKeys: String, CodingKey {
         case url
         case mode
         case chatInitialMessage = "chat_initial_message"
-        case saveToKnowledgeAndMarkRead = "save_to_knowledge_and_mark_read"
     }
 }
 

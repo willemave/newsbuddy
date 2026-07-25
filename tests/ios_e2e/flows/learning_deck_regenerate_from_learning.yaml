@@ -29,5 +29,6 @@ appId: "${APP_ID}"
     timeout: 5000
 - tapOn: Regenerate
 - extendedWaitUntil:
-    visible: QUEUED
+    visible:
+      id: learning.deck.${DECK_ID}.preparing
     timeout: 8000

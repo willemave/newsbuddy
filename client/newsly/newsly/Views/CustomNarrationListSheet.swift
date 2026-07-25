@@ -94,7 +94,7 @@ struct CustomNarrationListSheet: View {
                     HStack(spacing: 12) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color.terracottaPrimary.opacity(0.14))
+                                .fill(Color.brandPrimary.opacity(0.14))
                                 .frame(width: 38, height: 38)
 
                             narrationIcon(episode)
@@ -116,7 +116,7 @@ struct CustomNarrationListSheet: View {
 
                         Image(systemName: viewModel.isPlaying(episode) ? "pause.fill" : "play.fill")
                             .font(.appSymbol(size: 12, weight: .semibold))
-                            .foregroundStyle(episode.isCompleted ? Color.terracottaPrimary : Color.onSurfaceSecondary)
+                            .foregroundStyle(episode.isCompleted ? Color.brandPrimary : Color.onSurfaceSecondary)
                             .frame(width: 30, height: 30)
                             .background(Color.surfaceSecondary)
                             .clipShape(Circle())
@@ -172,11 +172,11 @@ struct CustomNarrationListSheet: View {
                 if viewModel.isSharing(episode) {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(Color.terracottaPrimary)
+                        .tint(Color.brandPrimary)
                 } else {
                     Image(systemName: "square.and.arrow.up")
                         .font(.appSymbol(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.terracottaPrimary)
+                        .foregroundStyle(Color.brandPrimary)
                 }
             }
             .frame(width: 44, height: 44)
@@ -201,7 +201,7 @@ struct CustomNarrationListSheet: View {
         } else {
             Image(systemName: viewModel.isPlaying(episode) ? "speaker.wave.3.fill" : "waveform")
                 .font(.appSymbol(size: 14, weight: .semibold))
-                .foregroundStyle(Color.terracottaPrimary)
+                .foregroundStyle(Color.brandPrimary)
         }
     }
 }

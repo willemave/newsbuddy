@@ -16,7 +16,6 @@ struct SettingsReadStatusSection: View {
             Button(action: onMarkAll) {
                 SettingsRow(
                     icon: "checkmark.circle",
-                    iconColor: .brandPrimary,
                     title: "Mark All As Read"
                 ) {
                     if isProcessing {

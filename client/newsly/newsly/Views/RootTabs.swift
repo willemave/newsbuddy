@@ -8,6 +8,24 @@ import SwiftUI
 
 private let rootTabLogger = Logger(subsystem: "com.newsly", category: "ContentView")
 
+private func pushRootContentDetail(
+    _ route: ContentDetailRoute,
+    tab: String,
+    path: Binding<NavigationPath>
+) {
+    guard path.wrappedValue.isEmpty else {
+        rootTabLogger.info(
+            "[Navigation] ignoredDuplicatePush tab=\(tab, privacy: .public) contentId=\(route.contentId, privacy: .public) activePathCount=\(path.wrappedValue.count, privacy: .public)"
+        )
+        return
+    }
+
+    rootTabLogger.info(
+        "[Navigation] pushDetail tab=\(tab, privacy: .public) contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(path.wrappedValue.count, privacy: .public)"
+    )
+    path.wrappedValue.append(route)
+}
+
 struct LongFormTab: View {
     @Binding var path: NavigationPath
     @Namespace private var contentTransitionNamespace
@@ -52,17 +70,7 @@ struct LongFormTab: View {
     }
 
     private func pushDetail(_ route: ContentDetailRoute) {
-        guard path.isEmpty else {
-            rootTabLogger.info(
-                "[Navigation] ignoredDuplicatePush tab=long_form contentId=\(route.contentId, privacy: .public) activePathCount=\(path.count, privacy: .public)"
-            )
-            return
-        }
-
-        rootTabLogger.info(
-            "[Navigation] pushDetail tab=long_form contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(path.count, privacy: .public)"
-        )
-        path.append(route)
+        pushRootContentDetail(route, tab: "long_form", path: $path)
     }
 }
 
@@ -103,29 +111,30 @@ struct ShortFormTab: View {
     }
 
     private func pushDetail(_ route: ContentDetailRoute) {
-        guard path.isEmpty else {
-            rootTabLogger.info(
-                "[Navigation] ignoredDuplicatePush tab=fast_news contentId=\(route.contentId, privacy: .public) activePathCount=\(path.count, privacy: .public)"
-            )
-            return
-        }
-
-        rootTabLogger.info(
-            "[Navigation] pushDetail tab=fast_news contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(path.count, privacy: .public)"
-        )
-        path.append(route)
+        pushRootContentDetail(route, tab: "fast_news", path: $path)
     }
 }
 
 struct BriefingTab: View {
     @Binding var path: NavigationPath
+    @Namespace private var contentTransitionNamespace
     let viewModel: BriefingViewModel
+    let readingStateStore: ReadingStateStore
+    let readStateCache: ReadStateCache
     let contentTextSize: DynamicTypeSize
 
     var body: some View {
         NavigationStack(path: $path) {
-            BriefingView(viewModel: viewModel)
+            BriefingView(viewModel: viewModel, onOpenContent: pushDetail)
                 .dynamicTypeSize(contentTextSize)
+                .withContentRoutes(
+                    tab: .briefing,
+                    path: $path,
+                    readingStateStore: readingStateStore,
+                    readStateCache: readStateCache,
+                    contentTextSize: contentTextSize,
+                    contentTransitionNamespace: contentTransitionNamespace
+                )
         }
         .toolbar(.hidden, for: .tabBar)
         .tag(RootTab.briefing)
@@ -133,6 +142,10 @@ struct BriefingTab: View {
             Label("Briefing", systemImage: "newspaper")
                 .accessibilityIdentifier("tab.briefing")
         }
+    }
+
+    private func pushDetail(_ route: ContentDetailRoute) {
+        pushRootContentDetail(route, tab: "briefing", path: $path)
     }
 }
 

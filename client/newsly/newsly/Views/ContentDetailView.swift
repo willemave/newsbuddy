@@ -191,6 +191,7 @@ struct ContentDetailView: View {
                 .onChange(of: discussionCoordinator.commentsNavigationState) { _, _ in
                     resolvePendingCommentsNavigation(scrollProxy: scrollProxy)
                 }
+                .topScreenEdgeFade(opacity: topEdgeFadeOpacity)
                 .overlay(alignment: .topLeading) {
                     GeometryReader { proxy in
                         VStack(alignment: .leading, spacing: 0) {
@@ -480,6 +481,16 @@ struct ContentDetailView: View {
             )
             dismiss()
         }
+    }
+
+    /// Hero artwork is meant to bleed under the status bar, so the fade waits until
+    /// the hero has scrolled clear. Text-only detail views get it immediately.
+    private var topEdgeFadeOpacity: Double {
+        guard hasHeroImage else { return 1 }
+        let distance = DetailDesign.topEdgeFadeEndOffset - DetailDesign.topEdgeFadeStartOffset
+        guard distance > 0 else { return 1 }
+        let raw = (detailScrollOffsetY - DetailDesign.topEdgeFadeStartOffset) / distance
+        return Double(min(max(raw, 0), 1))
     }
 
     private var floatingBackOpacity: Double {

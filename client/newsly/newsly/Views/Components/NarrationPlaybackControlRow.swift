@@ -68,17 +68,17 @@ struct NarrationPlaybackControlRow: View {
         Button(action: onTogglePlayback) {
             ZStack {
                 Circle()
-                    .fill(Color.terracottaPrimary.opacity(0.12))
+                    .fill(Color.brandPrimary.opacity(0.12))
                     .frame(width: 36, height: 36)
 
                 if isPreparing {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(Color.terracottaPrimary)
+                        .tint(Color.brandPrimary)
                 } else {
                     Image(systemName: playbackIconName)
                         .font(.appSymbol(size: 12, weight: .bold))
-                        .foregroundStyle(Color.terracottaPrimary)
+                        .foregroundStyle(Color.brandPrimary)
                         .offset(x: playbackIconName == "play.fill" ? 1 : 0)
                 }
             }
@@ -100,7 +100,7 @@ struct NarrationPlaybackControlRow: View {
                 } label: {
                     Text(option.title)
                         .font(.appCaption2.weight(.semibold))
-                        .foregroundStyle(isSelected(option) ? Color.terracottaPrimary : Color.onSurfaceSecondary)
+                        .foregroundStyle(isSelected(option) ? Color.brandPrimary : Color.onSurfaceSecondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         // Visible pill matches the 36pt play/pause circle; the
@@ -108,7 +108,7 @@ struct NarrationPlaybackControlRow: View {
                         .frame(width: 48, height: 36)
                         .background(
                             Capsule()
-                                .fill(isSelected(option) ? Color.terracottaPrimary.opacity(0.12) : Color.clear)
+                                .fill(isSelected(option) ? Color.brandPrimary.opacity(0.12) : Color.clear)
                         )
                         .frame(width: 48, height: 44)
                         .contentShape(Rectangle())
@@ -201,12 +201,12 @@ private struct PlaybackProgressScrubber: View {
                         .position(x: width / 2, y: 8)
 
                     Capsule()
-                        .fill(Color.terracottaPrimary.opacity(0.8))
+                        .fill(Color.brandPrimary.opacity(0.8))
                         .frame(width: max(thumbX, 0), height: 3)
                         .position(x: max(thumbX / 2, 0), y: 8)
 
                     Circle()
-                        .fill(isEnabled ? Color.terracottaPrimary : Color.onSurfaceSecondary.opacity(0.45))
+                        .fill(isEnabled ? Color.brandPrimary : Color.onSurfaceSecondary.opacity(0.45))
                         .frame(width: 8, height: 8)
                         .position(x: thumbX, y: 8)
                 }

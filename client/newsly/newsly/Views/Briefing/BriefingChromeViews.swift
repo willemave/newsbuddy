@@ -85,53 +85,35 @@ struct BriefingFirstRunStrip: View {
         .accessibilityIdentifier("briefing.first_run.lenses")
     }
 }
-/// News categories revealed by the News pill, stacked into two packed rows
-/// that scroll together; the pager swipes through exactly these, so the
-/// selected pill follows the swipe.
+/// News categories revealed by the News pill, on a single scrolling row; the
+/// pager swipes through exactly these, so the selected pill follows the swipe.
+///
+/// This was two stacked rows, which put roughly 180pt of controls above the
+/// first sentence of news. One row costs a little more horizontal scrolling and
+/// buys back most of that height.
 struct BriefingCategoryStrip: View {
     @ObservedObject var viewModel: BriefingViewModel
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
 
-    /// Even indices on top, odd below, so neighbors in swipe order sit next
-    /// to each other. A handful of categories stays on a single row.
-    private var rows: [[APIBriefingLensSummary]] {
-        let lenses = viewModel.newsLenses
-        guard lenses.count >= 4 else { return [lenses] }
-        var top: [APIBriefingLensSummary] = []
-        var bottom: [APIBriefingLensSummary] = []
-        for (index, lens) in lenses.enumerated() {
-            if index.isMultiple(of: 2) {
-                top.append(lens)
-            } else {
-                bottom.append(lens)
-            }
-        }
-        return [top, bottom]
-    }
-
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                        HStack(spacing: 8) {
-                            ForEach(row, id: \.key) { lens in
-                                BriefingStripPill(
-                                    title: lens.title,
-                                    unreadCount: lens.unreadSourceCount,
-                                    isSelected: lens.key == viewModel.selectedLensKey,
-                                    accessibilityId: "briefing.lens.\(lens.key)",
-                                    minHeight: 30,
-                                    longPressAction: lens.unreadSourceCount > 0
-                                        ? { onRequestMarkAllRead(lens) }
-                                        : nil
-                                ) {
-                                    onSelectLens(lens.key)
-                                }
-                                .id(lens.key)
-                            }
+                HStack(spacing: 8) {
+                    ForEach(viewModel.newsLenses, id: \.key) { lens in
+                        BriefingStripPill(
+                            title: lens.title,
+                            unreadCount: lens.unreadSourceCount,
+                            isSelected: lens.key == viewModel.selectedLensKey,
+                            accessibilityId: "briefing.lens.\(lens.key)",
+                            minHeight: 30,
+                            longPressAction: lens.unreadSourceCount > 0
+                                ? { onRequestMarkAllRead(lens) }
+                                : nil
+                        ) {
+                            onSelectLens(lens.key)
                         }
+                        .id(lens.key)
                     }
                 }
                 .padding(.horizontal, Spacing.appHorizontalMargin)
@@ -213,18 +195,16 @@ private struct BriefingStripPill: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
 
+                // Bare digits rather than a badge: a capsule inside a capsule read as
+                // two nested shapes for what is really one label.
                 if unreadCount > 0 {
                     Text("\(unreadCount)")
                         .font(.appCaption2.weight(.bold).monospacedDigit())
-                        .foregroundStyle(isSelected ? Color.surfacePrimary : Color.brandPrimary)
+                        .foregroundStyle(
+                            isSelected ? Color.surfacePrimary.opacity(0.65) : Color.brandPrimary
+                        )
                         .contentTransition(.numericText(countsDown: true))
                         .animation(.easeInOut(duration: 0.3), value: unreadCount)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(isSelected ? Color.onSurface : Color.brandPrimary.opacity(0.12))
-                        )
                 }
             }
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurface)
@@ -375,7 +355,7 @@ struct BriefingNarrationChapterControls: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.appSymbol(size: 12, weight: .semibold))
-                .foregroundStyle(Color.terracottaPrimary)
+                .foregroundStyle(Color.brandPrimary)
                 .frame(width: 44, height: 36)
                 .contentShape(Rectangle())
         }

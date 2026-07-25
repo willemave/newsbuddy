@@ -173,6 +173,169 @@ final class ChatSessionViewModelTests: XCTestCase {
         )
     }
 
+    func testMessagesSentWhileAgentIsProcessingDrainInFIFOOrder() async {
+        let firstTurnGate = AsyncGate()
+        var sentTexts: [String] = []
+        let chatService = MockChatSessionService(
+            getSessionHandler: { _ in
+                let messages = sentTexts.enumerated().flatMap { index, text in
+                    [
+                        Self.message(
+                            id: 100 + index,
+                            role: .user,
+                            content: text,
+                            status: .completed
+                        ),
+                        Self.message(
+                            id: 200 + index,
+                            role: .assistant,
+                            content: "Reply \(index + 1)",
+                            status: .completed
+                        ),
+                    ]
+                }
+                return ChatSessionDetail(session: Self.session(), messages: messages)
+            },
+            sendMessageHandler: { sessionId, message in
+                sentTexts.append(message)
+                let turn = sentTexts.count
+                return SendChatMessageResponse(
+                    sessionId: sessionId,
+                    userMessage: Self.message(
+                        id: 100 + turn,
+                        role: .user,
+                        content: message,
+                        status: .processing
+                    ),
+                    messageId: 500 + turn,
+                    status: .processing
+                )
+            },
+            messageStatusHandler: { messageId in
+                if messageId == 501 {
+                    await firstTurnGate.wait()
+                }
+                return MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: messageId + 1_000,
+                        role: .assistant,
+                        content: "Completed \(messageId)",
+                        status: .completed
+                    ),
+                    error: nil
+                )
+            }
+        )
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService
+            )
+        )
+
+        viewModel.inputText = "First"
+        viewModel.performSendMessage()
+        let didStartFirstTurn = await waitUntil {
+            chatService.sentMessages.map(\.message) == ["First"] && viewModel.isSending
+        }
+
+        viewModel.inputText = "Second"
+        viewModel.performSendMessage()
+        viewModel.inputText = "Third"
+        viewModel.performSendMessage()
+
+        XCTAssertTrue(didStartFirstTurn)
+        XCTAssertEqual(chatService.sentMessages.map(\.message), ["First"])
+        XCTAssertEqual(viewModel.timeline.filter(\.isQueued).map(\.message.content), ["Second", "Third"])
+        XCTAssertEqual(viewModel.inputText, "")
+
+        await firstTurnGate.open()
+        let didDrainQueue = await waitUntil {
+            chatService.sentMessages.map(\.message) == ["First", "Second", "Third"]
+                && !viewModel.isSending
+        }
+
+        XCTAssertTrue(didDrainQueue)
+        XCTAssertEqual(chatService.sentMessages.map(\.message), ["First", "Second", "Third"])
+        XCTAssertTrue(viewModel.timeline.allSatisfy { !$0.isQueued })
+    }
+
+    func testQueuedSendResumesAfterForegroundWhenActiveSendFailsWhileInactive() async {
+        let firstSendGate = AsyncGate()
+        let chatService = MockChatSessionService(
+            getSessionHandler: { _ in
+                ChatSessionDetail(
+                    session: Self.session(),
+                    messages: [
+                        Self.message(id: 102, role: .user, content: "Second", status: .completed),
+                        Self.message(id: 202, role: .assistant, content: "Reply", status: .completed),
+                    ]
+                )
+            },
+            sendMessageHandler: { sessionId, message in
+                if message == "First" {
+                    await firstSendGate.wait()
+                    throw APIError.networkError(URLError(.networkConnectionLost))
+                }
+                return SendChatMessageResponse(
+                    sessionId: sessionId,
+                    userMessage: Self.message(
+                        id: 102,
+                        role: .user,
+                        content: message,
+                        status: .processing
+                    ),
+                    messageId: 502,
+                    status: .processing
+                )
+            },
+            messageStatusHandler: { messageId in
+                MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: 202,
+                        role: .assistant,
+                        content: "Reply",
+                        status: .completed
+                    ),
+                    error: nil
+                )
+            }
+        )
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService
+            )
+        )
+
+        viewModel.performSendMessage(text: "First")
+        let didStartFirst = await waitUntil { viewModel.isSending }
+        viewModel.performSendMessage(text: "Second")
+        viewModel.handleDisappear()
+        await firstSendGate.open()
+        let didFinishFirst = await waitUntil { !viewModel.isSending }
+
+        XCTAssertTrue(didStartFirst)
+        XCTAssertTrue(didFinishFirst)
+        XCTAssertEqual(chatService.sentMessages.map(\.message), ["First"])
+        XCTAssertEqual(viewModel.timeline.filter(\.isQueued).map(\.message.content), ["Second"])
+
+        viewModel.handleAppear()
+        let didResumeQueuedSend = await waitUntil {
+            chatService.sentMessages.map(\.message) == ["First", "Second"]
+                && !viewModel.isSending
+        }
+
+        XCTAssertTrue(didResumeQueuedSend)
+        XCTAssertTrue(viewModel.timeline.allSatisfy { !$0.isQueued })
+    }
+
     func testCancelCouncilSelectionClearsInFlightState() async {
         let chatService = MockChatSessionService(selectCouncilBranchHandler: { _, _ in
             try await Task.sleep(nanoseconds: 60_000_000_000)

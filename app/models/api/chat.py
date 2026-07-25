@@ -196,6 +196,12 @@ class ChatSessionSummaryDto(BaseModel):
         default=False,
         description="True if session has a message currently being processed",
     )
+    is_waiting_for_content: bool = Field(
+        default=False,
+        description=(
+            "True if a share-sheet chat is waiting for content processing or its first turn"
+        ),
+    )
     is_saved_to_knowledge: bool = Field(
         default=False,
         description="True if the linked content is saved to the user's knowledge library",

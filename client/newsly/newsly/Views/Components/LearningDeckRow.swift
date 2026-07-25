@@ -43,7 +43,7 @@ struct LearningDeckRow: View {
         case .cancelled:
             return "slash.circle"
         default:
-            return "rectangle.stack"
+            return "rectangle.on.rectangle"
         }
     }
 

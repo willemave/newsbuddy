@@ -156,9 +156,9 @@ struct DetailActionBar: View {
     @ViewBuilder
     private var learningDeckActionIcon: some View {
         if reduceMotion {
-            actionIcon("rectangle.stack")
+            actionIcon("rectangle.on.rectangle")
         } else {
-            actionIcon("rectangle.stack")
+            actionIcon("rectangle.on.rectangle")
                 .symbolEffect(.bounce, value: learningDeckHintBounce)
         }
     }

@@ -34,6 +34,10 @@ from app.models.domain.chat_render import (
     AssistantFeedOptionsResult,
     ChatMessageRenderMetadata,
 )
+from app.models.domain.chat_sessions import (
+    KNOWLEDGE_SESSION_TYPE,
+    LEGACY_KNOWLEDGE_SESSION_TYPES,
+)
 from app.models.internal.assistant import AssistantScreenContext
 from app.repositories import read_status_repository
 from app.repositories.search_repository import (
@@ -89,12 +93,6 @@ from app.utils.title_utils import derive_chat_session_title, resolve_content_dis
 
 logger = get_logger(__name__)
 
-KNOWLEDGE_SESSION_TYPE = "knowledge_chat"
-LEGACY_KNOWLEDGE_SESSION_TYPES = {
-    "assistant_quick",
-    "article_brain",
-    "topic",
-}
 ASSISTANT_SESSION_TYPES = {
     KNOWLEDGE_SESSION_TYPE,
     *LEGACY_KNOWLEDGE_SESSION_TYPES,

@@ -227,7 +227,7 @@ struct ArticleReaderView: View {
                 .foregroundStyle(Color.surfacePrimary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(Color.terracottaPrimary, in: Capsule())
+                .background(Color.brandPrimary, in: Capsule())
             }
             .buttonStyle(.plain)
         }

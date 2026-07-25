@@ -29,15 +29,9 @@ struct LearningDeckChatComposer: View {
                 ZStack {
                     Circle()
                         .fill(Color.surfacePrimary.opacity(0.001))
-                    if viewModel.isSending {
-                        ProgressView()
-                            .tint(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
-                            .transition(.opacity)
-                    } else {
-                        Image(systemName: "arrow.up")
-                            .font(.appSymbol(size: 16, weight: .semibold))
-                            .transition(.opacity)
-                    }
+                    Image(systemName: "arrow.up")
+                        .font(.appSymbol(size: 16, weight: .semibold))
+                        .transition(.opacity)
                 }
                 .foregroundStyle(sendButtonDisabled ? Color.onSurfaceSecondary : Color.chatUserBubbleText)
                 .animation(AppMotion.subtle, value: sendButtonDisabled)
@@ -48,14 +42,13 @@ struct LearningDeckChatComposer: View {
             }
             .buttonStyle(PressableButtonStyle())
             .disabled(sendButtonDisabled)
-            .accessibilityLabel(viewModel.isSending ? "Sending message" : "Send message")
+            .accessibilityLabel(viewModel.isSending ? "Queue message" : "Send message")
             .accessibilityIdentifier("learning_deck.chat.send")
         }
     }
 
     private var sendButtonDisabled: Bool {
-        viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            viewModel.isSending
+        viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func sendMessage() {

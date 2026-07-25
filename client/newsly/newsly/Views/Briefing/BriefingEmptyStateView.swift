@@ -42,7 +42,7 @@ struct BriefingEmptyStateView: View {
                     } label: {
                         Text("Manage sources")
                             .font(.appCallout.weight(.semibold))
-                            .foregroundStyle(Color.terracottaPrimary)
+                            .foregroundStyle(Color.brandPrimary)
                             .frame(minHeight: 44)
                     }
                     .buttonStyle(.plain)
@@ -86,7 +86,7 @@ struct BriefingEmptyStateView: View {
                 .foregroundStyle(Color.statusDestructive)
         case .idle:
             Circle()
-                .fill(Color.terracottaPrimary)
+                .fill(Color.brandPrimary)
                 .frame(width: 8, height: 8)
         }
     }

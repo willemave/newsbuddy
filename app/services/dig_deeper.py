@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.db import ChatSession, Content, ContentDiscussion
+from app.models.contracts import TaskStatus
+from app.models.db import ChatSession, Content, ContentDiscussion, ProcessingTask
+from app.models.domain.chat_sessions import KNOWLEDGE_SESSION_TYPE
+from app.models.metadata.state import extract_share_and_chat_requests
 from app.services.chat_agent import create_processing_message, process_message_async
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
@@ -21,10 +25,48 @@ from app.utils.title_utils import resolve_content_display_title
 
 logger = get_logger(__name__)
 
-KNOWLEDGE_SESSION_TYPE = "knowledge_chat"
 MAX_DISCUSSION_COMMENT_SNIPPETS = 8
 MAX_DISCUSSION_GROUP_SNIPPETS = 4
 MAX_DISCUSSION_SNIPPET_CHARS = 220
+
+
+def content_ids_awaiting_first_chat_turn(
+    db: Session,
+    *,
+    user_id: int,
+    contents: Sequence[Content],
+) -> set[int]:
+    """Return content IDs with a pending share-chat request or dig-deeper task."""
+    content_ids = {int(content.id) for content in contents if content.id is not None}
+    if not content_ids:
+        return set()
+
+    waiting_ids = {
+        int(content.id)
+        for content in contents
+        if content.id is not None
+        and any(
+            request.get("user_id") == user_id
+            for request in extract_share_and_chat_requests(content.content_metadata)
+        )
+    }
+    queued_tasks = (
+        db.query(ProcessingTask)
+        .filter(
+            ProcessingTask.content_id.in_(content_ids),
+            ProcessingTask.task_type == TaskType.DIG_DEEPER.value,
+            ProcessingTask.status.in_([TaskStatus.PENDING.value, TaskStatus.PROCESSING.value]),
+        )
+        .all()
+    )
+    waiting_ids.update(
+        int(task.content_id)
+        for task in queued_tasks
+        if task.content_id is not None
+        and isinstance(task.payload, dict)
+        and task.payload.get("user_id") == user_id
+    )
+    return waiting_ids
 
 
 def _require_session_id(session: ChatSession) -> int:
@@ -244,6 +286,7 @@ def get_or_create_dig_deeper_session(
     Returns:
         ChatSession for the content/user.
     """
+    title = resolve_display_title(content)
     existing = (
         db.query(ChatSession)
         .filter(
@@ -254,9 +297,15 @@ def get_or_create_dig_deeper_session(
         .first()
     )
     if existing:
+        changed = False
+        if existing.title != title:
+            existing.title = title
+            changed = True
+        if changed:
+            db.commit()
+            db.refresh(existing)
         return existing
 
-    title = resolve_display_title(content)
     session = ChatSession(
         user_id=user_id,
         content_id=content.id,

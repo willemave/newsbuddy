@@ -52,7 +52,7 @@ struct SubmissionStatusRow: View {
                         }
 
                         if submission.isSelfSubmission {
-                            TextBadge(text: "Submitted", color: .terracottaPrimary, style: .outlined)
+                            TextBadge(text: "Submitted", color: .brandPrimary, style: .outlined)
                         }
                     }
 
@@ -108,7 +108,7 @@ struct SubmissionStatusRow: View {
         if submission.isLearningDeck {
             switch submission.effectiveOutcome {
             case .completed:
-                return "rectangle.stack.fill"
+                return "rectangle.on.rectangle.fill"
             case .failed:
                 return "exclamationmark.triangle.fill"
             case .processing:
@@ -116,7 +116,7 @@ struct SubmissionStatusRow: View {
             case .queued:
                 return "clock.fill"
             default:
-                return "rectangle.stack"
+                return "rectangle.on.rectangle"
             }
         }
 
@@ -145,7 +145,7 @@ struct SubmissionStatusRow: View {
         case .subscribed, .already_subscribed, .completed:
             return .statusActive
         case .processing:
-            return .terracottaPrimary
+            return .brandPrimary
         case .queued:
             return .onSurfaceSecondary
         default:

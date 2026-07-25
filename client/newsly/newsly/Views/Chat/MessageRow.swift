@@ -25,6 +25,13 @@ struct MessageRow: View {
                 feedOptionActionModel: feedOptionActionModel
             )
 
+            if item.isQueued {
+                Label("Queued", systemImage: "clock")
+                    .font(.terracottaLabelSmall)
+                    .foregroundStyle(Color.onSurfaceTertiary)
+                    .accessibilityIdentifier("knowledge.chat_queued")
+            }
+
             if item.message.hasFailed, let retryText = item.retryText {
                 VStack(alignment: .trailing, spacing: 6) {
                     if let error = item.message.error, !error.isEmpty {

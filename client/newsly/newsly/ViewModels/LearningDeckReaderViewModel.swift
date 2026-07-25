@@ -106,6 +106,8 @@ final class LearningDeckReaderViewModel {
     private let tasks = TaskBag<LearningDeckReaderTaskKey>()
     @ObservationIgnored
     private var isViewActive = true
+    @ObservationIgnored
+    private var sendQueue = PendingSendQueue()
 
     init(
         deck: LearningDeck,
@@ -235,16 +237,22 @@ final class LearningDeckReaderViewModel {
     // MARK: - Chat
 
     func performSendMessage(text overrideText: String? = nil) {
-        guard !isSending else { return }
+        guard let pending = stagePendingSend(text: overrideText) else { return }
+        if isSending || tasks.isRunning(.send) {
+            enqueuePendingSend(pending)
+            return
+        }
         tasks.runReplacing(.send) { [weak self] in
             guard let self else { return }
-            await self.sendMessage(text: overrideText)
+            await self.processPendingSend(pending)
+            await self.drainQueuedSends()
         }
     }
 
     func handleAppear() {
         isViewActive = true
         resumeAcceptedSendIfNeeded()
+        startQueuedSendDrainIfPossible()
     }
 
     func handleDisappear() {
@@ -257,31 +265,68 @@ final class LearningDeckReaderViewModel {
         }
     }
 
-    func sendMessage(text overrideText: String? = nil) async {
+    private func stagePendingSend(text overrideText: String?) -> PendingSend? {
         let resolvedText = (overrideText ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !resolvedText.isEmpty, !isSending else { return }
+        guard !resolvedText.isEmpty else { return nil }
 
         if overrideText == nil {
             inputText = ""
         }
+        let pending = PendingSend(
+            localId: UUID(),
+            text: resolvedText,
+            messageId: nil,
+            createdAt: Date()
+        )
+        upsertDeckPendingSend(pending)
+        return pending
+    }
+
+    private func enqueuePendingSend(_ pending: PendingSend) {
+        sendQueue.enqueue(pending)
+        upsertDeckPendingSend(pending)
+    }
+
+    private func drainQueuedSends() async {
+        while isViewActive, !Task.isCancelled, let pending = sendQueue.dequeue() {
+            await processPendingSend(pending)
+        }
+    }
+
+    private func startQueuedSendDrainIfPossible() {
+        guard
+            isViewActive,
+            !isSending,
+            pendingForegroundMessageId == nil,
+            !sendQueue.isEmpty,
+            !tasks.isRunning(.send)
+        else {
+            return
+        }
+        tasks.runReplacing(.send) { [weak self] in
+            await self?.drainQueuedSends()
+        }
+    }
+
+    private func upsertDeckPendingSend(_ pending: PendingSend) {
+        upsertTimelineItem(
+            ChatTimelineItem(
+                id: .local(pending.localId),
+                message: pending.placeholderMessage,
+                pendingMessageId: pending.messageId,
+                retryText: pending.text
+            )
+        )
+    }
+
+    private func processPendingSend(_ pendingSend: PendingSend) async {
         errorMessage = nil
         isSending = true
         thinkingStartedAt = Date()
 
-        let localId = UUID()
-        let pending = ChatTimelineItem(
-            id: .local(localId),
-            message: ChatMessage(
-                id: Self.localMessageId(for: localId),
-                role: .user,
-                timestamp: Date(),
-                content: resolvedText,
-                status: .processing
-            ),
-            pendingMessageId: nil,
-            retryText: resolvedText
-        )
-        upsertTimelineItem(pending)
+        let localId = pendingSend.localId
+        let resolvedText = pendingSend.text
+        upsertDeckPendingSend(pendingSend)
 
         defer {
             isSending = false
@@ -331,7 +376,7 @@ final class LearningDeckReaderViewModel {
                     message: ChatMessage(
                         id: Self.localMessageId(for: localId),
                         role: .user,
-                        timestamp: pending.message.timestamp,
+                        timestamp: pendingSend.createdAt,
                         content: resolvedText,
                         status: .failed,
                         error: error.localizedDescription
@@ -375,6 +420,7 @@ final class LearningDeckReaderViewModel {
         tasks.runReplacing(.send) { [weak self] in
             guard let self else { return }
             await self.resumePolling(messageId: messageId)
+            await self.drainQueuedSends()
         }
     }
 
@@ -451,7 +497,14 @@ final class LearningDeckReaderViewModel {
     private func upsertTimelineItem(_ item: ChatTimelineItem) {
         var itemsById = Dictionary(uniqueKeysWithValues: timeline.map { ($0.id, $0) })
         itemsById[item.id] = item
-        timeline = itemsById.values.sorted { $0.isOrderedBefore($1) }
+        timeline = itemsById.values.map { item in
+            var resolved = item
+            if case .local(let localId) = item.id {
+                resolved.isQueued = sendQueue.contains(localId: localId)
+            }
+            return resolved
+        }
+        .sorted { $0.isOrderedBefore($1) }
     }
 
     private func removeTimelineItem(id: ChatTimelineID) {

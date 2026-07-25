@@ -5,6 +5,8 @@ import sys
 from types import SimpleNamespace
 from uuid import uuid4
 
+from e2b.exceptions import SandboxNotFoundException
+
 from app.core.settings import get_settings
 from app.services import agent_vm_sessions
 from app.services.agent_vm_sessions import create_agent_vm_session
@@ -117,8 +119,20 @@ class _FakeE2BSandbox:
 
     def set_timeout(self, timeout_seconds: int) -> None:
         if self.missing:
-            raise RuntimeError("The sandbox was not found")
+            raise SandboxNotFoundException(f"Sandbox {self.id} not found")
         self.timeout_refreshes.append(timeout_seconds)
+
+
+def test_missing_sandbox_error_does_not_match_template_or_dependency_failures() -> None:
+    assert agent_vm_sessions._is_missing_e2b_sandbox_error(
+        SandboxNotFoundException("Sandbox sandbox-123 not found")
+    )
+    assert not agent_vm_sessions._is_missing_e2b_sandbox_error(
+        RuntimeError("Sandbox template not found")
+    )
+    assert not agent_vm_sessions._is_missing_e2b_sandbox_error(
+        RuntimeError("Sandbox dependency not found")
+    )
 
 
 def _install_fake_e2b(monkeypatch) -> None:

@@ -29,7 +29,7 @@ struct ChatErrorBanner: View {
                     Button("Add Experts", action: onAddExperts)
                         .buttonStyle(.plain)
                         .font(.terracottaBodySmall.weight(.semibold))
-                        .foregroundStyle(Color.terracottaPrimary)
+                        .foregroundStyle(Color.brandPrimary)
                         .accessibilityIdentifier("knowledge.chat_error_add_experts")
                 } else {
                     Text(error)

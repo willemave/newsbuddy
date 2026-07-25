@@ -17,8 +17,10 @@ from app.models.contracts import (
     MessageProcessingStatus,
     NewsItemStatus,
     NewsItemVisibilityScope,
+    TaskStatus,
+    TaskType,
 )
-from app.models.db import ChatMessage, ChatSession, Content, NewsItem
+from app.models.db import ChatMessage, ChatSession, Content, NewsItem, ProcessingTask
 from app.services.chat_agent import ChatRunResult, create_processing_message, save_messages
 from app.utils.title_utils import derive_chat_session_title
 
@@ -327,6 +329,80 @@ def test_list_chat_sessions(client: TestClient, db_session: Session, test_user) 
 
     sessions = response.json()
     assert len(sessions) == 3
+
+
+def test_list_chat_sessions_marks_share_chat_waiting_for_first_turn(
+    client: TestClient, db_session: Session, test_user
+) -> None:
+    content = Content(
+        url="https://example.com/pending-share-chat",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.PROCESSING.value,
+        title="Pending Share Chat",
+        content_metadata={
+            "processing": {
+                "share_and_chat_requests": [
+                    {"user_id": test_user.id, "initial_message": "What matters here?"}
+                ]
+            }
+        },
+    )
+    db_session.add(content)
+    db_session.flush()
+    session = ChatSession(
+        user_id=test_user.id,
+        content_id=content.id,
+        title="Pending Share Chat",
+        session_type="knowledge_chat",
+        llm_model="openai:gpt-5.5",
+        llm_provider="openai",
+    )
+    db_session.add(session)
+    db_session.commit()
+
+    response = client.get("/api/content/chat/sessions")
+
+    assert response.status_code == 200
+    payload = next(row for row in response.json() if row["id"] == session.id)
+    assert payload["has_messages"] is False
+    assert payload["has_pending_message"] is False
+    assert payload["is_waiting_for_content"] is True
+
+
+def test_list_chat_sessions_keeps_preparing_state_during_chat_queue_handoff(
+    client: TestClient, db_session: Session, test_user
+) -> None:
+    content = Content(
+        url="https://example.com/queued-share-chat",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.COMPLETED.value,
+        title="Queued Share Chat",
+    )
+    db_session.add(content)
+    db_session.flush()
+    session = ChatSession(
+        user_id=test_user.id,
+        content_id=content.id,
+        title="Queued Share Chat",
+        session_type="knowledge_chat",
+        llm_model="openai:gpt-5.5",
+        llm_provider="openai",
+    )
+    task = ProcessingTask(
+        task_type=TaskType.DIG_DEEPER.value,
+        content_id=content.id,
+        payload={"user_id": test_user.id, "initial_message": "What matters here?"},
+        status=TaskStatus.PENDING.value,
+        queue_name="chat",
+    )
+    db_session.add_all([session, task])
+    db_session.commit()
+
+    response = client.get("/api/content/chat/sessions")
+
+    assert response.status_code == 200
+    payload = next(row for row in response.json() if row["id"] == session.id)
+    assert payload["is_waiting_for_content"] is True
 
 
 def test_list_chat_sessions_page_uses_cursor_ordering(

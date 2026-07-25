@@ -58,13 +58,17 @@ def test_generation_prompt_documents_rich_react_diagram_authoring() -> None:
     assert "stable, human-readable `id` attributes" in LEARNING_DECK_DESIGN_BRIEF
 
 
-def test_navigation_markup_carries_theme_and_landscape() -> None:
+def test_viewer_markup_carries_theme_and_uses_reveal_navigation() -> None:
     markup = learning_deck_navigation_controls_html()
     assert f'id="{DECK_THEME_STYLE_ID}"' in markup
     assert "Space+Grotesk" in markup  # Google Fonts link present
     assert "width: 1280" in markup  # landscape canvas width
-    assert "canvasHeight = isPhoneSized && !isPortrait ? 860 : 720" in markup
+    assert "canvasHeight = isPhoneSized ? (isPortrait ? 960 : 860) : 720" in markup
     assert "data-newsly-learning-deck-fullscreen" in markup
+    assert "data-newsly-learning-deck-prev" not in markup
+    assert "data-newsly-learning-deck-next" not in markup
+    assert "controls: true" in markup
+    assert "progress: false" in markup
     assert "scrollActivationWidth: null" in markup  # keep Reveal 5 in slide mode on phones
     assert 'view: "slide"' in markup
     assert "minScale: 0.05" in markup and "maxScale: 3" in markup

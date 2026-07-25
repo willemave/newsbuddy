@@ -378,9 +378,10 @@ def test_ios_timing_hacks_use_completion_or_task_boundaries() -> None:
     assert "await Task.yield()" in presenter_source
     assert "pendingOpenContentId" not in long_form_source
     assert "Task.sleep(nanoseconds: 300_000_000)" not in long_form_source
-    assert root_tabs_source.count("guard path.isEmpty else") == 2
-    assert "ignoredDuplicatePush tab=long_form" in root_tabs_source
-    assert "ignoredDuplicatePush tab=fast_news" in root_tabs_source
+    assert root_tabs_source.count("guard path.wrappedValue.isEmpty else") == 1
+    assert 'pushRootContentDetail(route, tab: "long_form"' in root_tabs_source
+    assert 'pushRootContentDetail(route, tab: "fast_news"' in root_tabs_source
+    assert 'pushRootContentDetail(route, tab: "briefing"' in root_tabs_source
 
 
 def test_swipe_snapback_uses_motion_tokens() -> None:

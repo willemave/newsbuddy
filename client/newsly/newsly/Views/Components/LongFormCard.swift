@@ -232,11 +232,11 @@ struct LongFormCard: View {
                 if isAudioPreparing {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(Color.terracottaPrimary)
+                        .tint(Color.brandPrimary)
                 } else {
                     Image(systemName: isAudioPlaying ? "pause.fill" : "play.fill")
                         .font(.appSymbol(size: 14, weight: .bold))
-                        .foregroundStyle(Color.terracottaPrimary)
+                        .foregroundStyle(Color.brandPrimary)
                         .contentTransition(.symbolEffect(.replace))
                         .animation(AppMotion.subtle, value: isAudioPlaying)
                         .offset(x: isAudioPlaying ? 0 : 1)

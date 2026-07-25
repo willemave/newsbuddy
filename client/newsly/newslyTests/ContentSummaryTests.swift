@@ -66,6 +66,33 @@ final class ContentSummaryTests: XCTestCase {
         XCTAssertEqual(summary.updating(isRead: true).savedSource, "x_bookmark")
     }
 
+    func testKnowledgeSourceLabelsUseSpecificSource() {
+        let summary = makeSummary(source: "arxiv.org")
+
+        XCTAssertEqual(summary.knowledgeSourceLabels, ["arxiv.org"])
+    }
+
+    func testKnowledgeSourceLabelsReplaceSelfSubmissionWithURLHost() {
+        let summary = makeSummary(
+            url: "https://www.example.com/research/paper",
+            source: "self submission"
+        )
+
+        XCTAssertEqual(summary.knowledgeSourceLabels, ["example.com"])
+    }
+
+    func testKnowledgeSourceLabelsKeepXOriginAndSpecificPublisher() {
+        let summary = makeSummary(source: "Example Publisher", savedSource: "x_bookmark")
+
+        XCTAssertEqual(summary.knowledgeSourceLabels, ["X Bookmark", "Example Publisher"])
+    }
+
+    func testKnowledgeSourceLabelsDoNotAddGenericSourceToXOrigin() {
+        let summary = makeSummary(source: "self submission", savedSource: "x_bookmark")
+
+        XCTAssertEqual(summary.knowledgeSourceLabels, ["X Bookmark"])
+    }
+
     func testNewsSummaryPayloadStillDecodesButIsHiddenFromDisplaySummary() throws {
         let data = """
         {
@@ -155,6 +182,10 @@ final class ContentSummaryTests: XCTestCase {
     private func makeSummary(
         contentType: APIContentType = .news,
         status: APIContentStatus = .completed,
+        url: String = "https://example.com/story",
+        source: String? = "Example",
+        platform: String? = "Hacker News",
+        savedSource: String? = nil,
         createdAt: String = "2026-03-18T05:00:00Z",
         processedAt: String? = nil,
         publicationDate: String? = nil,
@@ -165,10 +196,10 @@ final class ContentSummaryTests: XCTestCase {
         ContentSummary(
             id: 7,
             contentType: contentType,
-            url: "https://example.com/story",
+            url: url,
             title: "Example story",
-            source: "Example",
-            platform: "Hacker News",
+            source: source,
+            platform: platform,
             status: status,
             shortSummary: shortSummary,
             createdAt: createdAt,
@@ -184,7 +215,8 @@ final class ContentSummaryTests: XCTestCase {
             commentCount: nil,
             newsSummary: newsSummary,
             newsKeyPoints: nil,
-            keyTakeaway: keyTakeaway
+            keyTakeaway: keyTakeaway,
+            savedSource: savedSource
         )
     }
 }

@@ -605,7 +605,7 @@ struct MarkdownNSRenderer {
         let scales: [CGFloat] = [1.36, 1.22, 1.12, 1.02, 0.94, 0.88]
         let scale = scales[min(level - 1, 5)]
         // Option A: section headings are serif (matching the reader title), with a
-        // terracotta accent rule rendered directly above them (see appendHeadingAccentRule).
+        // accent rule rendered directly above them (see appendHeadingAccentRule).
         let weight: UIFont.Weight = .semibold
         let styledHeadingFont = UIFont.appSerif(size: baseFont.pointSize * scale, weight: weight)
         let paragraph = NSMutableParagraphStyle()
@@ -636,7 +636,7 @@ struct MarkdownNSRenderer {
         attrStr.addAttribute(.foregroundColor, value: textColor, range: range)
     }
 
-    /// Option A editorial accent: a short terracotta rule rendered on its own line
+    /// Option A editorial accent: a short accent rule rendered on its own line
     /// directly above a section heading, anchoring it against the body copy.
     private func appendHeadingAccentRule(to result: NSMutableAttributedString) {
         if result.length > 0, !result.string.hasSuffix("\n") {

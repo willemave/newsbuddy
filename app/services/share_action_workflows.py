@@ -46,7 +46,6 @@ class AddLinksActionInput(ShareActionInputModel):
     """Input for submitting a bounded list of extracted content URLs."""
 
     url: str
-    save_to_knowledge_and_mark_read: bool = False
     content_urls: list[ContentActionInput]
 
 
@@ -73,6 +72,8 @@ class ShareActionWorkflowSpec:
     accepted_result_actions: frozenset[str]
     input_model: type[ShareActionInput]
     build_input: ShareActionInputBuilder
+    save_shared_source_to_knowledge: bool = True
+    share_and_chat: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,11 @@ class ShareActionRequest:
 def allowed_share_actions(mode: LlmTaskMode) -> list[str]:
     """Return the only host action names allowed for one ShareSheet mode."""
     return [share_action_workflow_for_mode(mode).host_action_name]
+
+
+def share_action_idempotency_key(action_name: str, action_input: dict[str, Any]) -> str:
+    """Build the stable bounded idempotency key used for host-applied actions."""
+    return _action_idempotency_key(action_name, action_input)
 
 
 def build_share_action_request(
@@ -180,10 +186,6 @@ def _build_chat_input(task: LlmTask, result: ShareActionAgentResult) -> ContentA
 def _build_add_links_input(task: LlmTask, result: ShareActionAgentResult) -> AddLinksActionInput:
     return AddLinksActionInput(
         url=result.primary_url or _input_url(task),
-        save_to_knowledge_and_mark_read=(
-            bool(result.save_to_knowledge_and_mark_read)
-            or _input_save_to_knowledge_and_mark_read(task)
-        ),
         content_urls=[
             ContentActionInput(
                 url=candidate.url,
@@ -238,6 +240,7 @@ SHARE_ACTION_WORKFLOWS: dict[LlmTaskMode, ShareActionWorkflowSpec] = {
         accepted_result_actions=frozenset({"add_feed"}),
         input_model=FeedActionInput,
         build_input=_build_feed_input,
+        save_shared_source_to_knowledge=False,
     ),
     LlmTaskMode.CHAT: ShareActionWorkflowSpec(
         mode=LlmTaskMode.CHAT,
@@ -245,6 +248,7 @@ SHARE_ACTION_WORKFLOWS: dict[LlmTaskMode, ShareActionWorkflowSpec] = {
         accepted_result_actions=frozenset({"chat"}),
         input_model=ContentActionInput,
         build_input=_build_chat_input,
+        share_and_chat=True,
     ),
     LlmTaskMode.PRESENTATION: ShareActionWorkflowSpec(
         mode=LlmTaskMode.PRESENTATION,
@@ -294,8 +298,3 @@ def _input_interests_prompt(task: LlmTask) -> str | None:
     value = input_json.get("interests_prompt")
     cleaned = value.strip() if isinstance(value, str) else ""
     return cleaned or None
-
-
-def _input_save_to_knowledge_and_mark_read(task: LlmTask) -> bool:
-    input_json = task.input_json if isinstance(task.input_json, dict) else {}
-    return bool(input_json.get("save_to_knowledge_and_mark_read"))

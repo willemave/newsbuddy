@@ -240,14 +240,17 @@ def submit_user_content(
         existing_content_id = _require_content_id(existing)
         existing_content_type = _require_content_type(existing)
         existing_status = _require_content_status(existing)
-        source_url_updated = False
+        content_fields_updated = False
         metadata_updated = False
         if not existing.source_url:
             existing.source_url = raw_url
-            source_url_updated = True
+            content_fields_updated = True
+        if payload.title and not existing.title:
+            existing.title = payload.title
+            content_fields_updated = True
         if platform_hint and not existing.platform:
             existing.platform = platform_hint
-            source_url_updated = True
+            content_fields_updated = True
         if subscribe_to_feed:
             existing_metadata = normalize_metadata_shape(dict(existing.content_metadata or {}))
             existing_metadata = update_processing_state(
@@ -289,7 +292,7 @@ def submit_user_content(
                     existing_content_id,
                     content_type=existing_content_type,
                 )
-            if status_created or source_url_updated or metadata_updated:
+            if status_created or content_fields_updated or metadata_updated:
                 db.commit()
             if status_created:
                 enqueue_visible_long_form_image_if_needed(db, existing)
