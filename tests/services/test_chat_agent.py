@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
@@ -17,6 +18,7 @@ from app.models.db import ChatSession, Content
 from app.routers.api.chat import _extract_messages_for_display
 from app.services import chat_agent
 from app.services.chat_agent import (
+    ARTICLE_CHAT_TURN_SPEC,
     ChatDeps,
     _build_chat_deps,
     _build_context_prompt_parts,
@@ -27,6 +29,10 @@ from app.services.chat_agent import (
     generate_initial_suggestions,
     load_message_history,
     save_messages,
+)
+from app.services.sandbox_runtime import (
+    LocalPersonalLibrarySandboxSession,
+    SandboxRuntimeUnavailableError,
 )
 
 
@@ -157,6 +163,51 @@ def test_build_chat_deps_prefers_session_context_snapshot(db_session) -> None:
     assert deps.content is None
     assert "Overview text" not in deps.article_context
     assert "full article body" not in deps.article_context
+
+
+def test_build_chat_deps_uses_processed_content_for_knowledge_chat(db_session) -> None:
+    content = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://example.com/knowledge-article",
+        title="Knowledge article",
+        content_metadata={"content": "full processed article body"},
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+    session = ChatSession(
+        user_id=123,
+        content_id=content.id,
+        title="Knowledge chat",
+        session_type="knowledge_chat",
+        context_snapshot="Compact pre-processing snapshot",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.5",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    deps = _build_chat_deps(db_session, session, include_full_text=True)
+
+    assert deps.content is content
+    assert deps.context_label == "Article Context"
+    assert deps.article_context is not None
+    assert "full processed article body" in deps.article_context
+    assert "Compact pre-processing snapshot" not in deps.article_context
+
+
+def test_article_chat_enables_sandboxed_bash() -> None:
+    assert ARTICLE_CHAT_TURN_SPEC.tool_policy["execute_bash"] is True
+
+
+def test_local_chat_sandbox_rejects_bash(tmp_path: Path) -> None:
+    session = LocalPersonalLibrarySandboxSession(library_root=tmp_path)
+
+    with pytest.raises(SandboxRuntimeUnavailableError, match="requires the isolated E2B"):
+        session.execute_bash("touch ../escaped", timeout_seconds=5)
+
+    assert not (tmp_path.parent / "escaped").exists()
 
 
 def test_build_context_prompt_parts_marks_snapshot_as_reference_material() -> None:
@@ -394,6 +445,35 @@ def test_build_chat_deps_prepares_personal_library_runtime(
     assert deps.sandbox_session is not None
     files = deps.sandbox_session.list_files()
     assert "library-article" in files
+    deps.sandbox_session.close()
+
+
+def test_build_chat_deps_keeps_local_personal_library_read_only(
+    db_session,
+    test_user,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "personal_markdown_root", tmp_path / "personal_markdown")
+    monkeypatch.setattr(settings, "personal_markdown_enabled", False)
+    monkeypatch.setattr(settings, "chat_sandbox_provider", "local")
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Research chat",
+        session_type="knowledge_chat",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.5",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    deps = _build_chat_deps(db_session, session, include_full_text=True)
+
+    assert deps.sandbox_session is not None
+    with pytest.raises(SandboxRuntimeUnavailableError, match="requires the isolated E2B"):
+        deps.sandbox_session.execute_bash("printf 'available'", timeout_seconds=5)
     deps.sandbox_session.close()
 
 

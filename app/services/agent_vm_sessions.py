@@ -515,6 +515,12 @@ def _probe_e2b_sandbox(sandbox: Any) -> dict[str, Any]:
 
 
 def _is_missing_e2b_sandbox_error(exc: Exception) -> bool:
+    try:
+        from e2b.exceptions import SandboxNotFoundException
+    except ImportError:  # pragma: no cover - E2B is optional in local development
+        SandboxNotFoundException = ()
+    if isinstance(exc, SandboxNotFoundException):
+        return True
     message = str(exc).lower()
     return "sandbox was not found" in message or "sandbox not found" in message
 

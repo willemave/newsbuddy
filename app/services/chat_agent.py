@@ -23,6 +23,7 @@ from app.models.contracts import (
 )
 from app.models.db import ChatMessage, ChatSession, Content
 from app.models.domain.chat_render import ChatMessageRenderMetadata
+from app.models.domain.chat_sessions import KNOWLEDGE_SESSION_TYPE
 from app.services.chat_turn_runtime import (
     ChatUsageSnapshot as _ChatUsageSnapshot,
 )
@@ -76,7 +77,7 @@ ARTICLE_CHAT_TURN_SPEC = LlmTaskTurnSpec(
     approval_policy={"default": LlmTaskApprovalPolicy.APPROVAL_REQUIRED.value},
     allowed_actions=[],
     tool_policy={
-        "execute_bash": False,
+        "execute_bash": True,
         "web_search": True,
         "personal_library": "read_only",
     },
@@ -327,6 +328,50 @@ def _create_chat_agent(
         if parts:
             return "\n".join(parts)
         return ""
+
+    @agent.tool
+    def execute_bash(
+        ctx: RunContext[ChatDeps],
+        command: str,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, object]:
+        """Run a bash command in the chat sandbox for additional investigation."""
+        sandbox_session = ctx.deps.sandbox_session
+        if sandbox_session is None:
+            return {
+                "ok": False,
+                "error": ctx.deps.personal_library_error or "Chat sandbox is unavailable.",
+            }
+        bounded_timeout = min(max(timeout_seconds or 60, 1), 300)
+        try:
+            result = sandbox_session.execute_bash(
+                command,
+                timeout_seconds=bounded_timeout,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Chat sandbox command failed",
+                extra=build_log_extra(
+                    component="chat",
+                    operation="execute_bash",
+                    event_name="chat.tool.execute_bash",
+                    status="failed",
+                    session_id=ctx.deps.session.id,
+                    user_id=ctx.deps.session.user_id,
+                    context_data={"failure_class": type(exc).__name__},
+                ),
+            )
+            return {
+                "ok": False,
+                "error": "Sandbox command failed.",
+                "failure_class": type(exc).__name__,
+            }
+        return {
+            "ok": result.exit_code == 0,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
 
     @agent.tool
     def search_personal_library(
@@ -828,30 +873,34 @@ def _build_chat_deps(
     sandbox_session: PersonalLibrarySandboxSession | None = None
     personal_library_error: str | None = None
 
-    if session.context_snapshot:
+    if session.content_id:
+        content = db.query(Content).filter(Content.id == session.content_id).first()
+
+    use_live_content = content is not None and (
+        session.session_type == KNOWLEDGE_SESSION_TYPE or not session.context_snapshot
+    )
+    if use_live_content and content is not None:
+        max_system_article_tokens = int(CONTEXT_WINDOW_TOKENS * SYSTEM_AND_ARTICLE_BUDGET_RATIO)
+        system_tokens = _estimate_tokens(SYSTEM_PROMPT_TEXT)
+        header_text = "\n".join(_build_article_header(content, session))
+        header_tokens = _estimate_tokens(header_text)
+        available_tokens = max(max_system_article_tokens - system_tokens - header_tokens, 0)
+        article_context = build_article_context(
+            db,
+            content,
+            include_full_text=include_full_text,
+            max_tokens=available_tokens,
+        )
+    elif session.context_snapshot:
         article_context = session.context_snapshot
         context_label = "Session Context"
-    elif session.content_id:
-        content = db.query(Content).filter(Content.id == session.content_id).first()
-        if content:
-            max_system_article_tokens = int(CONTEXT_WINDOW_TOKENS * SYSTEM_AND_ARTICLE_BUDGET_RATIO)
-            system_tokens = _estimate_tokens(SYSTEM_PROMPT_TEXT)
-            header_text = "\n".join(_build_article_header(content, session))
-            header_tokens = _estimate_tokens(header_text)
-            available_tokens = max(max_system_article_tokens - system_tokens - header_tokens, 0)
-            article_context = build_article_context(
-                db,
-                content,
-                include_full_text=include_full_text,
-                max_tokens=available_tokens,
-            )
 
     if include_library_tools:
         sandbox_session, personal_library_error = _build_personal_library_runtime(db, session)
 
     return ChatDeps(
         session=session,
-        content=content,
+        content=content if use_live_content else None,
         article_context=article_context,
         context_label=context_label,
         sandbox_session=sandbox_session,
@@ -867,11 +916,12 @@ def _build_personal_library_runtime(
     session_id = _require_session_id(session)
     user_id = _require_session_user_id(session)
     settings = get_settings()
-    if not settings.personal_markdown_enabled or settings.chat_sandbox_provider == "disabled":
+    if settings.chat_sandbox_provider == "disabled":
         return None, None
 
     try:
-        sync_personal_markdown_library_for_user(db, user_id=user_id)
+        if settings.personal_markdown_enabled:
+            sync_personal_markdown_library_for_user(db, user_id=user_id)
         sandbox_session = create_personal_library_sandbox_session(user_id=user_id)
         return sandbox_session, None
     except SandboxRuntimeUnavailableError as exc:

@@ -63,6 +63,15 @@ class PersonalLibrarySandboxSession(ABC):
     provider: str
 
     @abstractmethod
+    def execute_bash(
+        self,
+        command: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> SandboxCommandOutput:
+        """Run a command inside the sandbox workspace."""
+
+    @abstractmethod
     def list_files(self, *, subpath: str = "", limit: int = 200) -> str:
         """List markdown files relative to the library root."""
 
@@ -85,6 +94,17 @@ class LocalPersonalLibrarySandboxSession(PersonalLibrarySandboxSession):
 
     library_root: Path
     provider: str = "local"
+
+    def execute_bash(
+        self,
+        command: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> SandboxCommandOutput:
+        del command, timeout_seconds
+        raise SandboxRuntimeUnavailableError(
+            "Bash execution requires the isolated E2B chat sandbox provider"
+        )
 
     def list_files(self, *, subpath: str = "", limit: int = 200) -> str:
         target = _resolve_local_relative_path(self.library_root, subpath)
@@ -188,6 +208,7 @@ class E2BPersonalLibrarySandboxSession(PersonalLibrarySandboxSession):
         self._sandbox = Sandbox.create(**create_kwargs)
         self._library_root = PurePosixPath(settings.chat_sandbox_library_root)
         self._max_output_chars = settings.chat_sandbox_max_output_chars
+        self._sandbox.commands.run(f"mkdir -p {shlex.quote(self._library_root.as_posix())}")
         record_vendor_usage_out_of_band(
             provider="e2b",
             model=settings.chat_sandbox_template or "default",
@@ -202,6 +223,19 @@ class E2BPersonalLibrarySandboxSession(PersonalLibrarySandboxSession):
             },
         )
         self._hydrate()
+
+    def execute_bash(
+        self,
+        command: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> SandboxCommandOutput:
+        result = self._sandbox.commands.run(
+            command,
+            cwd=self._library_root.as_posix(),
+            timeout=timeout_seconds,
+        )
+        return self._normalize_command_output(result)
 
     def list_files(self, *, subpath: str = "", limit: int = 200) -> str:
         target = self._resolve_sandbox_relative_path(subpath)
@@ -247,6 +281,9 @@ class E2BPersonalLibrarySandboxSession(PersonalLibrarySandboxSession):
 
     def _run_command(self, command: str) -> SandboxCommandOutput:
         result = self._sandbox.commands.run(command)
+        return self._normalize_command_output(result)
+
+    def _normalize_command_output(self, result: object) -> SandboxCommandOutput:
         stdout = _truncate_output(str(getattr(result, "stdout", "") or ""), self._max_output_chars)
         stderr = _truncate_output(str(getattr(result, "stderr", "") or ""), self._max_output_chars)
         exit_code = int(getattr(result, "exit_code", getattr(result, "exitCode", 0)) or 0)
