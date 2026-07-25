@@ -219,7 +219,7 @@ struct LearningDeckReaderView: View {
         .accessibilityIdentifier("learning_deck.reader.generating")
     }
 
-    // MARK: - Top chrome (close, progress, slide nav)
+    // MARK: - Top chrome
 
     private func topChrome(isLandscape: Bool) -> some View {
         ZStack {
@@ -231,7 +231,7 @@ struct LearningDeckReaderView: View {
                 closeButton
                 Spacer(minLength: 8)
                 if webController.phase == .loaded {
-                    navCluster(isLandscape: isLandscape)
+                    actionCluster(isLandscape: isLandscape)
                 }
             }
         }
@@ -264,13 +264,13 @@ struct LearningDeckReaderView: View {
         .accessibilityIdentifier("learning_deck.reader.close")
     }
 
-    private func navCluster(isLandscape: Bool) -> some View {
+    private func actionCluster(isLandscape: Bool) -> some View {
         HStack(spacing: 2) {
-            navButton("chevron.left", label: "Previous slide") { webController.goPrevious() }
-            navButton("chevron.right", label: "Next slide") { webController.goNext() }
-            navButton("square.grid.2x2", label: "Slide overview") { webController.toggleOverview() }
+            actionButton("square.grid.2x2", label: "Slide overview") {
+                webController.toggleOverview()
+            }
             if isLandscape {
-                navButton("bubble.left.and.text.bubble.right", label: "Open chat") {
+                actionButton("bubble.left.and.text.bubble.right", label: "Open chat") {
                     showLandscapeChat = true
                 }
             }
@@ -281,7 +281,11 @@ struct LearningDeckReaderView: View {
         .appShadow(.subtle)
     }
 
-    private func navButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
+    private func actionButton(
+        _ systemName: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.appSymbol(size: 14, weight: .semibold))

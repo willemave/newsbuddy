@@ -33,7 +33,7 @@ def _required_id(value: int | None) -> int:
     return value
 
 
-def test_learning_deck_host_wrapper_adds_mobile_fit_controls() -> None:
+def test_learning_deck_host_wrapper_uses_only_reveal_navigation() -> None:
     html = b"""<!doctype html>
 <html>
 <body>
@@ -49,9 +49,11 @@ def test_learning_deck_host_wrapper_adds_mobile_fit_controls() -> None:
     assert "visualViewport" in wrapped
     assert "width: 390, height: 720" not in wrapped
     assert "width: 1280" in wrapped
-    assert "canvasHeight = isPhoneSized && !isPortrait ? 860 : 720" in wrapped
-    assert "event.preventDefault()" in wrapped
-    assert "availableRoutes" in wrapped
+    assert "canvasHeight = isPhoneSized ? (isPortrait ? 960 : 860) : 720" in wrapped
+    assert "controls: true" in wrapped
+    assert "progress: false" in wrapped
+    assert "data-newsly-learning-deck-prev" not in wrapped
+    assert "data-newsly-learning-deck-next" not in wrapped
 
 
 def _create_visible_article(db_session, test_user, content_factory):

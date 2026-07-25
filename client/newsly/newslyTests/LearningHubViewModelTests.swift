@@ -123,6 +123,59 @@ final class LearningHubViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testActiveChatWorkIncludesShareChatWaitingForContent() async {
+        let chatService = MockLearningHubChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 1, isWaitingForContent: true)],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                )
+            ],
+            turnResponses: []
+        )
+        let viewModel = LearningHubViewModel(chatService: chatService)
+
+        await viewModel.loadLearning()
+
+        XCTAssertTrue(viewModel.hasActiveChatWork)
+        XCTAssertTrue(viewModel.sessions[0].isPreparingChat)
+    }
+
+    func testActiveChatPollingStopsWhenSessionFinishesPreparing() async {
+        let chatService = MockLearningHubChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 1, isWaitingForContent: true)],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 1)],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+            ],
+            turnResponses: []
+        )
+        let viewModel = LearningHubViewModel(
+            chatService: chatService,
+            activeChatPollIntervalNanoseconds: 1_000_000
+        )
+
+        await viewModel.loadLearning()
+        await viewModel.pollActiveChatWork()
+
+        XCTAssertFalse(viewModel.hasActiveChatWork)
+        XCTAssertEqual(chatService.requestedPageLimits.count, 2)
+    }
+
     func testLoadLearningIgnoresCancelledRefreshAndKeepsCurrentSessions() async {
         let chatService = MockLearningHubChatService(
             pageResponses: [
@@ -308,7 +361,11 @@ final class LearningHubViewModelTests: XCTestCase {
         )
     }
 
-    private func makeSession(id: Int, sessionType: String = "knowledge_chat") -> ChatSessionSummary {
+    private func makeSession(
+        id: Int,
+        sessionType: String = "knowledge_chat",
+        isWaitingForContent: Bool = false
+    ) -> ChatSessionSummary {
         ChatSessionSummary(
             id: id,
             contentId: nil,
@@ -325,6 +382,7 @@ final class LearningHubViewModelTests: XCTestCase {
             articleSummary: nil,
             articleSource: nil,
             hasPendingMessage: false,
+            isWaitingForContent: isWaitingForContent,
             isSavedToKnowledge: false,
             hasMessages: true,
             lastMessagePreview: nil,

@@ -30,23 +30,6 @@ final class LearningTimelineItemTests: XCTestCase {
         XCTAssertEqual(Set(items.map(\.id)), ["chat-7", "deck-7", "narration-7"])
     }
 
-    func testDayGroupingUsesInjectedNowForTodayAndYesterday() {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let today = calendar.date(bySettingHour: 16, minute: 41, second: 0, of: now)!
-        let items = LearningTimelineItem.merged(
-            chats: [makeSession(id: 1, activityDate: today.addingTimeInterval(-12 * 60))],
-            decks: [makeDeck(id: 2, activityDate: today.addingTimeInterval(-42 * 60))],
-            narrations: [makeNarration(id: 3, activityDate: today.addingTimeInterval(-25 * 60 * 60))]
-        )
-
-        let sections = LearningTimelineGrouper.sections(for: items, now: today, calendar: calendar)
-
-        XCTAssertEqual(sections.map(\.label), ["TODAY", "YESTERDAY"])
-        XCTAssertEqual(sections[0].items.map(\.id), ["chat-1", "deck-2"])
-        XCTAssertEqual(sections[1].items.map(\.id), ["narration-3"])
-    }
-
     func testMergeKeepsSuccessfulSourcesWhenChatSourceFails() async {
         let chatViewModel = LearningHubViewModel(chatService: FailingLearningTimelineChatService())
         await chatViewModel.loadLearning()

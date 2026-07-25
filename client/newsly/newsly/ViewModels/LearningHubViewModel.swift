@@ -65,12 +65,19 @@ final class LearningHubViewModel {
     private var deletedSessionIDs: Set<Int> = []
     @ObservationIgnored
     private var inFlightSessionListRequestCount = 0
+    @ObservationIgnored
+    private let activeChatPollIntervalNanoseconds: UInt64
+
+    var hasActiveChatWork: Bool {
+        sessions.contains { $0.isPreparingChat || $0.isProcessing }
+    }
 
     init(
         chatService: any LearningHubChatServicing,
         transcriptionService: (any SpeechTranscribing)? = nil,
         refreshTranscriptionAvailability: @escaping () async -> Bool = { false },
-        initialVoiceDictationAvailable: Bool = false
+        initialVoiceDictationAvailable: Bool = false,
+        activeChatPollIntervalNanoseconds: UInt64 = 3_000_000_000
     ) {
         let resolvedTranscriptionService = transcriptionService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
         self.chatService = chatService
@@ -78,6 +85,7 @@ final class LearningHubViewModel {
         self.voiceCoordinator = VoiceDictationCoordinator(transcriber: resolvedTranscriptionService)
         self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
         self.voiceDictationAvailable = initialVoiceDictationAvailable
+        self.activeChatPollIntervalNanoseconds = activeChatPollIntervalNanoseconds
     }
 
     func loadLearning() async {
@@ -108,6 +116,20 @@ final class LearningHubViewModel {
             nextCursor = nil
             hasMoreSessions = false
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func pollActiveChatWork() async {
+        guard hasActiveChatWork else { return }
+
+        while hasActiveChatWork, !Task.isCancelled {
+            do {
+                try await Task.sleep(nanoseconds: activeChatPollIntervalNanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await loadLearning()
         }
     }
 

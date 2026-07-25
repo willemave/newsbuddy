@@ -9,7 +9,7 @@ REVEAL_SLIDE_MODE_PATCH_MARKER = "__newslySlideModePatched"
 
 
 def with_learning_deck_navigation_controls(data: bytes) -> bytes:
-    """Add persistent previous/next controls to generated Reveal.js decks."""
+    """Add the themed mobile viewer shell to generated Reveal.js decks."""
     try:
         html = data.decode("utf-8")
     except UnicodeDecodeError:
@@ -162,32 +162,20 @@ def learning_deck_navigation_controls_html() -> str:
     data-newsly-learning-deck-fullscreen
     aria-label="Toggle fullscreen"
   >&#x26F6;</button>
-  <button type="button" data-newsly-learning-deck-prev aria-label="Previous slide">&lsaquo;</button>
-  <button type="button" data-newsly-learning-deck-next aria-label="Next slide">&rsaquo;</button>
 </div>
 <script {NAVIGATION_CONTROLS_MARKER}="script">
 (function () {{
   var fullscreenButton = document.querySelector("[data-newsly-learning-deck-fullscreen]");
-  var previousButton = document.querySelector("[data-newsly-learning-deck-prev]");
-  var nextButton = document.querySelector("[data-newsly-learning-deck-next]");
-  if (!fullscreenButton || !previousButton || !nextButton) return;
-  var lastActivationAt = 0;
+  if (!fullscreenButton) return;
   var lastFullscreenActivationAt = 0;
   var relayoutDeck = function () {{}};
 
   function withReveal(callback) {{
-    if (window.Reveal && typeof window.Reveal.next === "function") {{
+    if (window.Reveal && typeof window.Reveal.configure === "function") {{
       callback(window.Reveal);
       return;
     }}
     window.setTimeout(function () {{ withReveal(callback); }}, 150);
-  }}
-
-  function syncButtons(reveal) {{
-    if (!reveal || typeof reveal.availableRoutes !== "function") return;
-    var routes = reveal.availableRoutes();
-    setButtonAvailability(previousButton, Boolean(routes.left || routes.up));
-    setButtonAvailability(nextButton, Boolean(routes.right || routes.down));
   }}
 
   function setButtonAvailability(button, isAvailable) {{
@@ -262,45 +250,13 @@ def learning_deck_navigation_controls_html() -> str:
     }}, 150);
   }}
 
-  function move(direction, event) {{
-    if (event) {{
-      event.preventDefault();
-      event.stopPropagation();
-    }}
-    var now = Date.now();
-    if (now - lastActivationAt < 250) return;
-    lastActivationAt = now;
-    withReveal(function (reveal) {{
-      if (direction === "previous") {{
-        reveal.prev();
-      }} else {{
-        reveal.next();
-      }}
-      window.setTimeout(function () {{ syncButtons(reveal); }}, 120);
-    }});
-  }}
-
   function bindFullscreen(button) {{
     button.addEventListener("pointerdown", toggleFullscreen);
     button.addEventListener("touchstart", toggleFullscreen, {{ passive: false }});
     button.addEventListener("click", toggleFullscreen);
   }}
 
-  function bindNavigation(button, direction) {{
-    button.addEventListener("pointerdown", function (event) {{
-      move(direction, event);
-    }});
-    button.addEventListener("touchstart", function (event) {{
-      move(direction, event);
-    }}, {{ passive: false }});
-    button.addEventListener("click", function (event) {{
-      move(direction, event);
-    }});
-  }}
-
   bindFullscreen(fullscreenButton);
-  bindNavigation(previousButton, "previous");
-  bindNavigation(nextButton, "next");
   syncFullscreenButton();
   document.addEventListener("fullscreenchange", function () {{
     syncFullscreenButton();
@@ -327,7 +283,7 @@ def learning_deck_navigation_controls_html() -> str:
       var smallestScreenSide = Math.min(screenWidth, screenHeight);
       var isPortrait = size.height > size.width;
       var isPhoneSized = Math.min(size.width, size.height, smallestScreenSide) < 700;
-      var canvasHeight = isPhoneSized && !isPortrait ? 860 : 720;
+      var canvasHeight = isPhoneSized ? (isPortrait ? 960 : 860) : 720;
       document.documentElement.classList.toggle(
         "newsly-learning-deck-portrait",
         isPhoneSized && isPortrait
@@ -373,7 +329,6 @@ def learning_deck_navigation_controls_html() -> str:
       if (typeof reveal.layout === "function") {{
         reveal.layout();
       }}
-      syncButtons(reveal);
       syncFullscreenButton();
     }}
     relayoutDeck = applyFit;
@@ -381,6 +336,7 @@ def learning_deck_navigation_controls_html() -> str:
     if (typeof reveal.configure === "function") {{
       reveal.configure({{
         controls: true,
+        progress: false,
         minScale: 0.05,
         maxScale: 3,
         view: "slide",
