@@ -3,7 +3,7 @@
 //  newsly
 //
 //  Option A editorial section header used across the reader summary surfaces
-//  (Fast Read / Long Read): a short terracotta overline rule above a serif
+//  (Fast Read / Long Read): a short accent overline rule above a serif
 //  title, with no leading icon. The accent lives only in the rule; the title
 //  text stays monochrome per the single-accent doctrine.
 //

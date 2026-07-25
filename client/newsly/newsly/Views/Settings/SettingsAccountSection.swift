@@ -24,7 +24,6 @@ struct SettingsAccountSection: View {
                     Button(action: onLinkCLI) {
                         SettingsRow(
                             icon: "qrcode.viewfinder",
-                            iconColor: .brandPrimary,
                             title: "Link CLI"
                         ) {
                             if isApprovingCLILink {
@@ -65,7 +64,7 @@ private struct AccountCard: View {
                 .font(.appSans(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: Spacing.iconSize, height: Spacing.iconSize)
-                .background(Color.terracottaPrimary, in: Circle())
+                .background(Color.brandPrimary, in: Circle())
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {

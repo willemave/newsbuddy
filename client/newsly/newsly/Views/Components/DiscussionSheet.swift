@@ -351,10 +351,10 @@ struct DiscussionSheet: View {
                                     Text("+\(childCount)")
                                         .font(.appCaption2)
                                         .fontWeight(.semibold)
-                                        .foregroundColor(.terracottaPrimary)
+                                        .foregroundColor(.brandPrimary)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 1)
-                                        .background(Color.terracottaPrimary.opacity(0.12))
+                                        .background(Color.brandPrimary.opacity(0.12))
                                         .clipShape(Capsule())
 
                                     Image(systemName: "chevron.right")
@@ -369,7 +369,7 @@ struct DiscussionSheet: View {
                         .overlay(alignment: .leading) {
                             if comment.depth > 0 {
                                 RoundedRectangle(cornerRadius: 1.5)
-                                    .fill(Color.terracottaPrimary)
+                                    .fill(Color.brandPrimary)
                                     .frame(width: 3)
                                     .padding(.vertical, 4)
                             }
@@ -468,7 +468,7 @@ struct DiscussionSheet: View {
                                     .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .tint(Color.terracottaPrimary)
+                                .tint(Color.brandPrimary)
                                 .disabled(isLinkActionDisabled(addState))
                             }
                         }

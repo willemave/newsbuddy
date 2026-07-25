@@ -14,7 +14,6 @@ struct SettingsFeedbackSection: View {
             Button(action: onGiveFeedback) {
                 SettingsRow(
                     icon: "bubble.left.and.bubble.right",
-                    iconColor: .brandPrimary,
                     title: "Give Feedback"
                 ) {
                     NavigationChevron()

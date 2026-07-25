@@ -52,10 +52,6 @@ extension Color {
         Color(UIColor.appChromeAccent)
     }
 
-    // Backward-compatible accent aliases.
-    static var terracottaPrimary: Color { Color.brandPrimary }
-    static var terracottaDark: Color { Color.brandPrimaryStrong }
-
     // Editorial text colors.
     static var onSurface: Color {
         Color(UIColor.appOnSurface)
@@ -585,11 +581,21 @@ extension View {
         self.background(Color.surfacePrimary)
     }
 
+    /// Pull generated artwork toward the palette. Saved-item thumbnails arrive in
+    /// whatever colors the generator picked — often heavily saturated — and at list
+    /// size they read as noise beside the type rather than as content.
+    func listThumbnailTreatment() -> some View {
+        saturation(0.55)
+    }
+
     /// Fade scrolled content out under the status bar instead of letting it collide
     /// with the clock and Dynamic Island. Solid over the status bar, then a short fade.
-    func topScreenEdgeFade(fadeHeight: CGFloat = 14) -> some View {
+    /// Screens with full-bleed artwork under the status bar drive `opacity` from scroll
+    /// position so the fade only arrives once that artwork is gone.
+    func topScreenEdgeFade(fadeHeight: CGFloat = 14, opacity: Double = 1) -> some View {
         overlay(alignment: .top) {
             TopScreenEdgeFade(fadeHeight: fadeHeight)
+                .opacity(opacity)
                 .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
         }

@@ -127,7 +127,7 @@ struct CompactTabBar: View {
                 fallbackBar
             }
         }
-        .frame(maxWidth: 292)
+        .frame(maxWidth: 264)
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 8)
         .padding(.bottom, 6)
@@ -143,6 +143,7 @@ struct CompactTabBar: View {
         GlassEffectContainer(spacing: 4) {
             tabItems
                 .padding(5)
+                .background(barFill)
                 .glassEffect(.regular, in: .capsule)
         }
     }
@@ -150,11 +151,20 @@ struct CompactTabBar: View {
     private var fallbackBar: some View {
         tabItems
             .padding(5)
-            .background(Capsule().fill(.ultraThinMaterial))
+            .background(barFill)
             .overlay {
                 Capsule().stroke(Color.outlineVariant.opacity(0.4), lineWidth: 0.5)
             }
             .appShadow(.floating)
+    }
+
+    /// Opaque, not translucent. Thin material let scrolled body text read straight
+    /// through the bar, and tinting the glass did not fix it — glass keeps sampling
+    /// its backdrop, and the capsule rim refracts content regardless of tint. On
+    /// iOS 26 the glass layer still sits behind this fill, so the bar keeps the
+    /// glass rim and highlight without the text bleeding through.
+    private var barFill: some View {
+        Capsule().fill(Color.surfaceSecondary)
     }
 
     private var tabItems: some View {

@@ -16,7 +16,6 @@ struct SettingsSourcesSection: View {
                 } label: {
                     SettingsRow(
                         icon: "list.bullet.rectangle",
-                        iconColor: .brandPrimary,
                         title: "Feed Sources"
                     )
                 }
@@ -29,7 +28,6 @@ struct SettingsSourcesSection: View {
                 } label: {
                     SettingsRow(
                         icon: "waveform",
-                        iconColor: .brandPrimary,
                         title: "Podcast Sources"
                     )
                 }

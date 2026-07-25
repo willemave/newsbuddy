@@ -69,7 +69,6 @@ struct TwitterSettingsView: View {
                 } label: {
                     SettingsRow(
                         icon: "link.badge.plus",
-                        iconColor: .brandPrimary,
                         title: xConnection?.connectActionTitle ?? "Connect X",
                         subtitle: xConnection?.connectActionSubtitle
                             ?? "Authorize bookmark sync from your X account"

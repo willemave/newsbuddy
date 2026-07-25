@@ -90,10 +90,10 @@ struct ChatSessionCard: View {
             Text("READY")
                 .font(.terracottaLabelSmall)
                 .tracking(0.5)
-                .foregroundColor(.terracottaPrimary)
+                .foregroundColor(.brandPrimary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Color.terracottaPrimary.opacity(0.1))
+                .background(Color.brandPrimary.opacity(0.1))
                 .cornerRadius(4)
 
         case .none:

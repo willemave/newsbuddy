@@ -187,7 +187,7 @@ struct StructuredSummaryView: View {
                 .frame(width: 22, height: 22)
                 .background(
                     Circle()
-                        .fill(Color.terracottaDark.opacity(0.8))
+                        .fill(Color.brandPrimaryStrong.opacity(0.8))
                 )
 
             Text(question)

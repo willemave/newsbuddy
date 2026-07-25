@@ -34,7 +34,7 @@ struct LearningDeckEmptyRow: View {
             ZStack {
                 RoundedRectangle(cornerRadius: DeckRowMetrics.iconRadius, style: .continuous)
                     .fill(Color.surfaceSecondary)
-                Image(systemName: "rectangle.stack")
+                Image(systemName: "rectangle.on.rectangle")
                     .font(.appSymbol(size: 20, weight: .semibold))
                     .foregroundStyle(Color.onSurfaceSecondary)
             }

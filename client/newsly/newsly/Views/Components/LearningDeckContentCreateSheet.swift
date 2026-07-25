@@ -70,7 +70,7 @@ struct LearningDeckContentCreateSheet: View {
 struct LearningDeckEntryHint: View {
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "rectangle.stack")
+            Image(systemName: "rectangle.on.rectangle")
                 .font(.appSymbol(size: 18, weight: .semibold))
                 .foregroundStyle(Color.brandPrimary)
 

@@ -19,7 +19,6 @@ struct SettingsTwitterSection: View {
                 } label: {
                     SettingsRow(
                         icon: "at",
-                        iconColor: .brandPrimary,
                         title: "X / Twitter",
                         subtitle: xConnection?.settingsSubtitle
                     )

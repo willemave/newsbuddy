@@ -23,7 +23,6 @@ struct SettingsDisplaySection: View {
         VStack(spacing: 0) {
             textSizeSlider(
                 icon: "textformat.size",
-                iconColor: .brandPrimary,
                 title: "App Text Size",
                 value: Binding(
                     get: { Double(settings.appTextSizeIndex) },
@@ -36,7 +35,6 @@ struct SettingsDisplaySection: View {
 
             textSizeSlider(
                 icon: "book",
-                iconColor: .brandPrimary,
                 title: "Content Text Size",
                 value: Binding(
                     get: { Double(settings.contentTextSizeIndex) },
@@ -49,14 +47,13 @@ struct SettingsDisplaySection: View {
 
     private func textSizeSlider(
         icon: String,
-        iconColor: Color,
         title: String,
         value: Binding<Double>,
         range: ClosedRange<Double>
     ) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                SettingsIcon(systemName: icon, color: iconColor)
+                SettingsIcon(systemName: icon)
 
                 Text(title)
                     .font(.listTitle)
@@ -74,7 +71,7 @@ struct SettingsDisplaySection: View {
                     .accessibilityHidden(true)
 
                 Slider(value: value, in: range, step: 1)
-                    .tint(Color.brandPrimary)
+                    .tint(Color.onSurface)
                     .frame(minHeight: 44)
                     .accessibilityLabel(title)
                     .accessibilityValue(textSizeAccessibilityValue(value.wrappedValue, range: range))

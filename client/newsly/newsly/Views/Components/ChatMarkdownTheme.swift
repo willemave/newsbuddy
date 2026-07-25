@@ -10,7 +10,7 @@ import SwiftUI
 
 extension Theme {
     /// A compact markdown theme optimized for chat bubbles.
-    /// Uses the app sans family for body text and terracotta accent for strong text.
+    /// Uses the app sans family for body text and the brand accent for strong text.
     static let chat = Theme()
         // MARK: - Text styles
         .text {

@@ -34,7 +34,7 @@ struct LongFormBootstrapStateView: View {
             HStack(spacing: 10) {
                 Image(systemName: Self.totalSourceItemsProcessing(in: sources) > 0 ? "clock.arrow.circlepath" : "dot.radiowaves.left.and.right")
                     .font(.appSymbol(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.terracottaPrimary)
+                    .foregroundStyle(Color.brandPrimary)
 
                 Text(Self.bootstrapHeadline(sources: sources))
                     .font(.appTitle3.weight(.semibold))
@@ -47,7 +47,7 @@ struct LongFormBootstrapStateView: View {
 
             Text(Self.bootstrapCheckBackSummary(sources: sources))
                 .font(.listSubtitle.weight(.medium))
-                .foregroundStyle(Color.terracottaPrimary)
+                .foregroundStyle(Color.brandPrimary)
         }
     }
 

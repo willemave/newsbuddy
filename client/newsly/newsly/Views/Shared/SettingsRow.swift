@@ -9,18 +9,21 @@ import SwiftUI
 
 // MARK: - Settings Icon
 
-/// Colored rounded-square icon matching iOS Settings style.
-/// Normalises visual weight across all SF Symbol glyphs.
+/// Plain glyph in a fixed-width slot so rows stay aligned.
+///
+/// Deliberately not the filled iOS Settings tile: there the tiles differ in hue and
+/// aid scanning, but every row here carried the same brand color, which turned the
+/// screen into a column of identical bright rectangles. `color` stays for rows that
+/// carry real semantics — destructive actions in particular.
 struct SettingsIcon: View {
     let systemName: String
-    let color: Color
+    var color: Color = .onSurfaceSecondary
 
     var body: some View {
         Image(systemName: systemName)
-            .font(.appSymbol(size: 14, weight: .semibold))
-            .foregroundStyle(.white)
+            .font(.appSymbol(size: 17, weight: .regular))
+            .foregroundStyle(color)
             .frame(width: Spacing.iconSize, height: Spacing.iconSize)
-            .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .accessibilityHidden(true)
     }
 }
@@ -36,7 +39,7 @@ struct SettingsRow<Accessory: View>: View {
 
     init(
         icon: String,
-        iconColor: Color = .brandPrimary,
+        iconColor: Color = .onSurfaceSecondary,
         title: String,
         subtitle: String? = nil,
         @ViewBuilder accessory: @escaping () -> Accessory
@@ -78,7 +81,7 @@ struct SettingsRow<Accessory: View>: View {
 extension SettingsRow where Accessory == NavigationChevron {
     init(
         icon: String,
-        iconColor: Color = .brandPrimary,
+        iconColor: Color = .onSurfaceSecondary,
         title: String,
         subtitle: String? = nil
     ) {
@@ -112,7 +115,7 @@ struct SettingsToggleRow: View {
 
     init(
         icon: String,
-        iconColor: Color = .brandPrimary,
+        iconColor: Color = .onSurfaceSecondary,
         title: String,
         subtitle: String? = nil,
         isOn: Binding<Bool>
@@ -152,7 +155,7 @@ struct SettingsToggleRow: View {
 
 #Preview {
     VStack(spacing: 0) {
-        SettingsRow(icon: "books.vertical", iconColor: .brandTertiary, title: "Saved")
+        SettingsRow(icon: "books.vertical", title: "Saved")
 
         RowDivider()
 
@@ -162,7 +165,6 @@ struct SettingsToggleRow: View {
 
         SettingsToggleRow(
             icon: "eye",
-            iconColor: .brandSecondary,
             title: "Show Read Articles",
             subtitle: "Display both read and unread",
             isOn: .constant(true)

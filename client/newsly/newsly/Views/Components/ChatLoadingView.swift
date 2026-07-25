@@ -20,7 +20,7 @@ struct ChatLoadingView: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [Color.terracottaPrimary.opacity(0.15), Color.clear],
+                            colors: [Color.brandPrimary.opacity(0.15), Color.clear],
                             center: .center,
                             startRadius: 20,
                             endRadius: 60
@@ -33,7 +33,7 @@ struct ChatLoadingView: View {
                 HStack(spacing: 4) {
                     ForEach(0..<3) { index in
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.terracottaPrimary.opacity(0.6 + Double(index) * 0.15))
+                            .fill(Color.brandPrimary.opacity(0.6 + Double(index) * 0.15))
                             .frame(width: 12, height: 12)
                             .offset(y: reduceMotion ? 0 : bubbleOffset)
                             .animation(

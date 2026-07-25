@@ -34,7 +34,7 @@ struct SettingsCouncilSection: View {
 
     private var sectionTitle: some View {
         HStack(spacing: 12) {
-            SettingsIcon(systemName: "person.3.sequence.fill", color: .brandPrimary)
+            SettingsIcon(systemName: "person.3.sequence.fill")
                 .frame(width: 36, height: 36, alignment: .leading)
 
             Text("Your Experts")
@@ -99,7 +99,7 @@ struct SettingsCouncilSection: View {
                 Button(action: onAddExpert) {
                     Image(systemName: "plus.circle.fill")
                         .font(.appSymbol(size: 24))
-                        .foregroundStyle(Color.brandPrimary)
+                        .foregroundStyle(Color.onSurfaceSecondary)
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
@@ -133,7 +133,7 @@ struct SettingsCouncilSection: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .frame(minHeight: 44)
-                .background(Color.terracottaPrimary, in: RoundedRectangle(cornerRadius: 10))
+                .background(Color.brandPrimary, in: RoundedRectangle(cornerRadius: 10))
             }
             .buttonStyle(.plain)
             .contentShape(Rectangle())
@@ -154,7 +154,9 @@ struct SettingsCouncilSection: View {
         newExpertName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Save is this card's one accented action; the avatars stay neutral so it reads
+    /// as the primary thing on screen.
     private var expertColor: Color {
-        .brandPrimary
+        .onSurfaceSecondary
     }
 }

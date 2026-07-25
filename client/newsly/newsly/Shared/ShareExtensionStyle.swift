@@ -6,16 +6,11 @@
 import UIKit
 
 enum ShareExtensionStyle {
-    static let brandColorAssetName = "ShareBrandPrimary"
     static let bodyFamily = "Lato-Regular"
     static let titleFamily = "Lora-Regular"
 
     static var brandAccent: UIColor {
-        UIColor(named: brandColorAssetName) ?? UIColor { traitCollection in
-            traitCollection.userInterfaceStyle == .dark
-                ? UIColor(red: 0.878, green: 0.529, blue: 0.373, alpha: 1.0)
-                : UIColor(red: 0.757, green: 0.373, blue: 0.235, alpha: 1.0)
-        }
+        ReaderPalette.selectedUIColor(\.brandPrimary)
     }
 
     static func font(textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {

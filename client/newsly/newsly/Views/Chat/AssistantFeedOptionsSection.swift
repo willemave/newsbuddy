@@ -77,7 +77,7 @@ struct AssistantFeedOptionsSection: View {
                     HStack(spacing: 8) {
                         Image(systemName: option.systemIcon)
                             .font(.appSymbol(size: 13, weight: .semibold))
-                            .foregroundStyle(Color.terracottaPrimary)
+                            .foregroundStyle(Color.brandPrimary)
                         Text(option.feedTypeLabel.uppercased())
                             .font(.appCaption2.weight(.semibold))
                             .foregroundStyle(Color.onSurfaceSecondary)

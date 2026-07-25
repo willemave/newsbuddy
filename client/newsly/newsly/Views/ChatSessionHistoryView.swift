@@ -109,7 +109,7 @@ struct ChatSessionHistoryView: View {
         VStack(spacing: 20) {
             Image(systemName: "brain.head.profile")
                 .font(.appSymbol(size: 48, weight: .light))
-                .foregroundStyle(Color.terracottaPrimary.opacity(0.7))
+                .foregroundStyle(Color.brandPrimary.opacity(0.7))
 
             VStack(spacing: 6) {
                 Text("No chats yet")
