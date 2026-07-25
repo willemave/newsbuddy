@@ -47,6 +47,7 @@ TOKEN_EXPIRY_SKEW_SECONDS = 60
 BOOKMARK_SYNC_MAX_PAGES = 5
 BOOKMARK_SYNC_PAGE_SIZE = 10
 BOOKMARKS_CHANNEL = "bookmarks"
+SYNC_INTERVAL_GRACE_SECONDS = 5
 USERNAME_REGEX = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 UNRECOVERABLE_X_REFRESH_ERROR_MARKERS = (
     "X API 400: invalid_request",
@@ -713,7 +714,7 @@ def _should_skip_scheduled_sync(sync_state: UserIntegrationSyncState) -> bool:
         return False
     min_interval_minutes = get_settings().x_sync_min_interval_minutes
     elapsed_seconds = (_now_naive_utc() - last_synced_at).total_seconds()
-    return elapsed_seconds < min_interval_minutes * 60
+    return _is_within_sync_interval(elapsed_seconds, min_interval_minutes)
 
 
 def _should_skip_channel_sync(
@@ -725,7 +726,12 @@ def _should_skip_channel_sync(
     if last_synced_at is None:
         return False
     elapsed_seconds = (_now_naive_utc() - last_synced_at).total_seconds()
-    return elapsed_seconds < min_interval_minutes * 60
+    return _is_within_sync_interval(elapsed_seconds, min_interval_minutes)
+
+
+def _is_within_sync_interval(elapsed_seconds: float, min_interval_minutes: int) -> bool:
+    """Allow small scheduler jitter at the configured interval boundary."""
+    return elapsed_seconds + SYNC_INTERVAL_GRACE_SECONDS < min_interval_minutes * 60
 
 
 def _resolve_last_synced_item_id(

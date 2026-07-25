@@ -647,6 +647,16 @@ def test_sync_x_sources_skips_recent_scheduled_runs(db_session, test_user, monke
     assert summary.channels == {}
 
 
+def test_sync_interval_allows_small_scheduler_jitter() -> None:
+    """A cron tick just before the interval boundary should still run."""
+    assert x_integration._is_within_sync_interval(14 * 60 + 58, 15) is False
+
+
+def test_sync_interval_still_skips_meaningfully_early_runs() -> None:
+    """The jitter allowance should not turn the cooldown into a loose suggestion."""
+    assert x_integration._is_within_sync_interval(14 * 60 + 50, 15) is True
+
+
 def test_sync_x_sources_failure_does_not_consume_scheduled_retry_window(
     db_session,
     test_user,

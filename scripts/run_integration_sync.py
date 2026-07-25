@@ -1,7 +1,7 @@
 """Enqueue scheduled X integration sync tasks for connected users.
 
 Suggested cron:
-0 * * * * cd /opt/news_app && /opt/news_app/.venv/bin/python \
+*/15 * * * * cd /opt/news_app && /opt/news_app/.venv/bin/python \
 scripts/run_integration_sync.py >> /var/log/news_app/integration-sync.log 2>&1
 """
 # ruff: noqa: E402
