@@ -333,14 +333,6 @@ private struct KnowledgeSavedRow: View {
 
     private let imageSize = CGSize(width: 92, height: 76)
 
-    private var visibleSource: String? {
-        guard let source = content.source?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !source.isEmpty,
-              source.caseInsensitiveCompare("self submission") != .orderedSame
-        else { return nil }
-        return source
-    }
-
     private var hasStalled: Bool {
         guard content.savedLibraryItemState == .processing,
               let createdAt = ContentTimestampFormatter.parse(content.createdAt)
@@ -360,10 +352,13 @@ private struct KnowledgeSavedRow: View {
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
 
+                // Stalled and unavailable items are common enough in a saved list that
+                // alarm coloring on every row reads as an emergency. State is carried by
+                // the glyph and label; recovery lives in the detail view.
                 if hasStalled {
                     Label("Preparation stalled", systemImage: "exclamationmark.circle")
                         .font(.terracottaBodySmall)
-                        .foregroundStyle(Color.statusDestructive)
+                        .foregroundStyle(Color.onSurfaceTertiary)
                 } else if content.savedLibraryItemState == .processing {
                     Label("Preparing", systemImage: "hourglass")
                         .font(.terracottaBodySmall)
@@ -371,7 +366,7 @@ private struct KnowledgeSavedRow: View {
                 } else if content.savedLibraryItemState == .unavailable {
                     Label("Unavailable", systemImage: "exclamationmark.circle")
                         .font(.terracottaBodySmall)
-                        .foregroundStyle(Color.statusDestructive)
+                        .foregroundStyle(Color.onSurfaceTertiary)
                 } else if let summary = content.summaryDisplayText {
                     Text(summary)
                         .font(.terracottaBodySmall)
@@ -380,25 +375,24 @@ private struct KnowledgeSavedRow: View {
                 }
 
                 HStack(spacing: 5) {
-                    if content.isXBookmark {
-                        Text("X BOOKMARK")
-                            .kicker(color: .terracottaPrimary)
-                        if let visibleSource {
+                    ForEach(Array(content.knowledgeSourceLabels.enumerated()), id: \.offset) { index, source in
+                        if index > 0 {
                             Text("·")
-                            Text(visibleSource)
-                                .lineLimit(1)
+                                .foregroundStyle(Color.onSurfaceTertiary)
                         }
-                    } else {
-                        Text(content.source ?? content.platform ?? "Saved")
+                        // Metadata, not a link — accent here made source names look tappable.
+                        Text(source.uppercased())
+                            .kicker(color: .onSurfaceTertiary)
                             .lineLimit(1)
                     }
                     if let relativeTime = content.relativeTimeDisplay {
                         Text("·")
+                            .foregroundStyle(Color.onSurfaceTertiary)
                         Text(relativeTime)
+                            .foregroundStyle(Color.onSurfaceTertiary)
                     }
                 }
                 .font(.terracottaLabelSmall)
-                .foregroundStyle(Color.onSurfaceTertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -424,13 +418,14 @@ private struct KnowledgeSavedRow: View {
                 .aspectRatio(contentMode: .fill)
                 .frame(width: imageSize.width, height: imageSize.height)
                 .clipped()
+                .listThumbnailTreatment()
         } placeholder: {
             ZStack {
                 Color.surfaceSecondary
                 if hasStalled {
                     Image(systemName: "exclamationmark.circle")
                         .font(.appSymbol(size: 18, weight: .medium))
-                        .foregroundStyle(Color.statusDestructive)
+                        .foregroundStyle(Color.onSurfaceTertiary)
                 } else if content.savedLibraryItemState == .processing {
                     ProgressView().controlSize(.small)
                 } else {
