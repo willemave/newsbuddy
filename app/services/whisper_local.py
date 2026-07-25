@@ -16,60 +16,61 @@ _TRANSCRIPTION_SINGLE_FLIGHT = threading.Semaphore(1)
 
 
 class WhisperLocalTranscriptionService:
-    """Local Whisper service for audio transcription using OpenAI's Whisper model."""
+    """Local Whisper service for audio transcription, backed by faster-whisper."""
 
     def __init__(self):
         self.model_name = getattr(settings, "whisper_model_size", "base")
         self.device = self._get_device()
+        self.compute_type = "float16" if self.device == "cuda" else "int8"
         self.model = None
-        logger.info(f"Whisper service: model={self.model_name}, device={self.device}")
+        logger.info(
+            f"Whisper service: model={self.model_name}, "
+            f"device={self.device}, compute_type={self.compute_type}"
+        )
 
     def _get_device(self) -> str:
-        """Determine the best device to use for inference."""
+        """Determine the best device to use for inference.
+
+        CTranslate2 runs on CPU or CUDA only - there is no MPS backend, and int8
+        on CPU is what Apple Silicon ends up using.
+        """
         device_setting = getattr(settings, "whisper_device", "auto")
+        if device_setting != "auto":
+            return "cpu" if device_setting == "mps" else device_setting
 
-        if device_setting == "auto":
-            import torch
+        if self._cuda_is_available():
+            logger.info("CUDA available, using GPU for inference")
+            return "cuda"
+        logger.info("Using CPU for inference")
+        return "cpu"
 
-            if torch.cuda.is_available():
-                device = "cuda"
-                logger.info(f"CUDA available, using GPU: {torch.cuda.get_device_name(0)}")
-            elif torch.backends.mps.is_available():
-                # MPS has issues with sparse tensors in Whisper, use CPU instead
-                device = "cpu"
-                logger.info(
-                    "MPS (Apple Silicon) detected, but using CPU due to sparse tensor compatibility"
-                )
-            else:
-                device = "cpu"
-                logger.info("Using CPU for inference")
-            return device
+    @staticmethod
+    def _cuda_is_available() -> bool:
+        from ctranslate2 import get_cuda_device_count
 
-        return device_setting
+        try:
+            return get_cuda_device_count() > 0
+        except Exception:  # noqa: BLE001
+            logger.debug("CUDA device probe failed; assuming CPU", exc_info=True)
+            return False
 
     def _load_model(self):
         """Lazy load the Whisper model."""
-        if self.model is None:
-            import whisper
+        if self.model is not None:
+            return
 
-            logger.info(f"Loading Whisper model: {self.model_name}")
-            try:
-                self.model = whisper.load_model(self.model_name, device=self.device)
-                logger.info(f"Model loaded successfully on {self.device}")
-            except (RuntimeError, NotImplementedError) as e:
-                error_msg = str(e).lower()
-                if "mps" in error_msg or "sparse" in error_msg or "_sparse_coo_tensor" in error_msg:
-                    logger.warning(
-                        f"Failed to load model on {self.device}, falling back to CPU: {e}"
-                    )
-                    self.device = "cpu"
-                    self.model = whisper.load_model(self.model_name, device=self.device)
-                    logger.info("Model loaded successfully on CPU after MPS failure")
-                else:
-                    raise
+        from faster_whisper import WhisperModel
+
+        logger.info(f"Loading Whisper model: {self.model_name}")
+        self.model = WhisperModel(
+            self.model_name,
+            device=self.device,
+            compute_type=self.compute_type,
+        )
+        logger.info(f"Model loaded successfully on {self.device}")
 
     def transcribe_audio(self, audio_file_path: Path) -> tuple[str, str | None]:
-        """Transcribe audio file using local Whisper model.
+        """Transcribe audio file using the local Whisper model.
 
         Args:
             audio_file_path: Path to the audio file to transcribe
@@ -83,46 +84,23 @@ class WhisperLocalTranscriptionService:
     def _transcribe_audio_locked(self, audio_file_path: Path) -> tuple[str, str | None]:
         """Transcribe with the process-wide single-flight guard already held."""
         try:
-            # Ensure model is loaded
             self._load_model()
 
-            # Verify file exists
             if not audio_file_path.exists():
                 raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
 
             file_size_mb = os.path.getsize(audio_file_path) / (1024 * 1024)
             logger.info(f"Starting transcription of {audio_file_path} ({file_size_mb:.1f} MB)")
 
-            # Transcribe the audio
-            try:
-                result = self.model.transcribe(
-                    str(audio_file_path),
-                    fp16=self.device != "cpu",  # Use FP16 on GPU for faster inference
-                    language=None,  # Auto-detect language
-                    task="transcribe",  # Transcribe in original language
-                    verbose=False,
-                )
-            except (RuntimeError, NotImplementedError) as e:
-                error_msg = str(e).lower()
-                if "mps" in error_msg or "sparse" in error_msg or "_sparse_coo_tensor" in error_msg:
-                    logger.warning(f"MPS transcription failed, retrying with CPU: {e}")
-                    # Reload model on CPU
-                    self.cleanup_service()
-                    self.device = "cpu"
-                    self._load_model()
-                    # Retry transcription
-                    result = self.model.transcribe(
-                        str(audio_file_path),
-                        fp16=False,  # Disable FP16 on CPU
-                        language=None,
-                        task="transcribe",
-                        verbose=False,
-                    )
-                else:
-                    raise
-
-            transcript = result["text"].strip()
-            detected_language = result.get("language", None)
+            # Segments are produced lazily, so transcription only really runs as
+            # the iterator is consumed.
+            segments, info = self.model.transcribe(
+                str(audio_file_path),
+                language=None,  # Auto-detect language
+                task="transcribe",  # Transcribe in original language
+            )
+            transcript = "".join(segment.text for segment in segments).strip()
+            detected_language = getattr(info, "language", None)
 
             logger.info(
                 f"Successfully transcribed audio. "
@@ -140,13 +118,6 @@ class WhisperLocalTranscriptionService:
         if self.model is not None:
             del self.model
             self.model = None
-
-            # Clear GPU cache if using CUDA
-            if self.device == "cuda":
-                import torch
-
-                torch.cuda.empty_cache()
-
             logger.info("Whisper model cleaned up")
 
 

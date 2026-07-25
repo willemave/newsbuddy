@@ -13,7 +13,13 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-HEAVY_MODULES = ("torch", "whisper", "transformers", "sentence_transformers")
+HEAVY_MODULES = (
+    "torch",
+    "transformers",
+    "sentence_transformers",
+    "faster_whisper",
+    "ctranslate2",
+)
 
 _PROBE = """
 import json
