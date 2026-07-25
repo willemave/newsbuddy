@@ -3,112 +3,166 @@
 from __future__ import annotations
 
 import threading
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from sqlalchemy.orm import sessionmaker
 
 from app.models.db import ProcessingTask
-from app.pipeline.threaded_task_processor import ThreadedTaskProcessor
+from app.pipeline.threaded_task_processor import ThreadedTaskProcessor, warm_queue_models
 from app.services.queue import QueueService, TaskQueue, TaskStatus, TaskType
 
 
-class _FakeProcessor:
-    """Stand-in for a claim loop that records how it was constructed and run."""
+def _fake_processor_class(instances: list, run_error: Exception | None = None):
+    """Build a claim-loop stand-in that records how it was constructed and run."""
 
-    instances: list[_FakeProcessor] = []
+    class _FakeProcessor:
+        def __init__(self, queue_name, worker_slot, **kwargs):
+            self.queue_name = queue_name
+            self.worker_slot = worker_slot
+            self.thread_index = kwargs.get("thread_index")
+            self.notification_listener = kwargs.get("notification_listener")
+            self.worker_id = f"{queue_name}-processor-{worker_slot}-t{self.thread_index}"
+            self.running = True
+            self.thread_name: str | None = None
+            instances.append(self)
 
-    def __init__(self, queue_name, worker_slot, **kwargs):
-        self.queue_name = queue_name
-        self.worker_slot = worker_slot
-        self.thread_index = kwargs.get("thread_index")
-        self.notification_listener = kwargs.get("notification_listener")
-        self.warm_models = kwargs.get("warm_models")
-        self.worker_id = f"{queue_name}-processor-{worker_slot}-t{self.thread_index}"
-        self.running = True
-        self.install_signal_handlers = None
-        self.thread_name: str | None = None
-        _FakeProcessor.instances.append(self)
+        def run(self, max_tasks=None):
+            self.thread_name = threading.current_thread().name
+            if run_error is not None:
+                raise run_error
+            return 1
 
-    def run(self, max_tasks=None, *, install_signal_handlers=True):
-        self.install_signal_handlers = install_signal_handlers
-        self.thread_name = threading.current_thread().name
-        return 1
-
-
-@pytest.fixture(autouse=True)
-def _reset_fake_processors():
-    _FakeProcessor.instances = []
-    yield
-    _FakeProcessor.instances = []
+    return _FakeProcessor
 
 
-def _run_with_fake_processors(threads: int) -> ThreadedTaskProcessor:
+def _run_with_fake_processors(threads: int, run_error: Exception | None = None) -> list:
+    instances: list = []
     processor = ThreadedTaskProcessor(TaskQueue.CONTENT, worker_slot=1, threads=threads)
-    with patch(
-        "app.pipeline.threaded_task_processor.SequentialTaskProcessor",
-        _FakeProcessor,
+    with (
+        patch(
+            "app.pipeline.threaded_task_processor.SequentialTaskProcessor",
+            _fake_processor_class(instances, run_error),
+        ),
+        patch("app.pipeline.threaded_task_processor.warm_queue_models"),
     ):
         processor.run()
-    return processor
+    return instances
 
 
-def test_single_thread_runs_the_plain_sequential_loop() -> None:
-    """--threads 1 must be an exact rollback: no thread index, signals installed."""
-    _run_with_fake_processors(threads=1)
+def test_a_lone_claim_loop_keeps_the_historical_worker_id() -> None:
+    """--threads 1 stays a clean rollback: no thread suffix in the worker id."""
+    instances = _run_with_fake_processors(threads=1)
 
-    assert len(_FakeProcessor.instances) == 1
-    only = _FakeProcessor.instances[0]
-    assert only.thread_index is None
-    assert only.install_signal_handlers is True
-    assert only.thread_name == threading.current_thread().name
+    assert len(instances) == 1
+    assert instances[0].thread_index is None
 
 
 def test_each_thread_claims_under_its_own_worker_id() -> None:
     """Threads share a process but must not share a claim identity."""
-    _run_with_fake_processors(threads=3)
+    instances = _run_with_fake_processors(threads=3)
 
-    assert [instance.thread_index for instance in _FakeProcessor.instances] == [1, 2, 3]
-    assert len({instance.worker_id for instance in _FakeProcessor.instances}) == 3
+    assert [instance.thread_index for instance in instances] == [1, 2, 3]
+    assert len({instance.worker_id for instance in instances}) == 3
 
 
-def test_worker_threads_do_not_install_signal_handlers() -> None:
-    """Only the main thread may install handlers; a worker thread raises if it tries."""
-    _run_with_fake_processors(threads=2)
+def test_claim_loops_run_off_the_main_thread() -> None:
+    """Signal handlers live on the main thread; the loops must not block it."""
+    instances = _run_with_fake_processors(threads=2)
 
-    assert all(instance.install_signal_handlers is False for instance in _FakeProcessor.instances)
-    assert all(
-        instance.thread_name != threading.current_thread().name
-        for instance in _FakeProcessor.instances
-    )
+    assert all(instance.thread_name != threading.current_thread().name for instance in instances)
+
+
+def test_signal_handlers_are_installed_by_the_owning_process() -> None:
+    """Claim loops cannot install handlers off the main thread; the pool must."""
+    processor = ThreadedTaskProcessor(TaskQueue.CONTENT, threads=2)
+    with (
+        patch(
+            "app.pipeline.threaded_task_processor.SequentialTaskProcessor",
+            _fake_processor_class([]),
+        ),
+        patch("app.pipeline.threaded_task_processor.warm_queue_models"),
+        patch("signal.signal") as mock_signal,
+    ):
+        processor.run()
+
+    assert mock_signal.call_count >= 2
 
 
 def test_threads_share_one_notification_listener() -> None:
     """N threads must not open N idle LISTEN connections."""
-    _run_with_fake_processors(threads=4)
+    instances = _run_with_fake_processors(threads=4)
 
-    listeners = {id(instance.notification_listener) for instance in _FakeProcessor.instances}
+    listeners = {id(instance.notification_listener) for instance in instances}
     assert len(listeners) == 1
-    assert _FakeProcessor.instances[0].notification_listener is not None
+    assert instances[0].notification_listener is not None
 
 
 def test_models_are_warmed_once_per_process() -> None:
-    """Model warmups are process-wide, so only one thread should do them."""
-    _run_with_fake_processors(threads=3)
+    """Warmups are a process concern, not something each claim loop repeats."""
+    processor = ThreadedTaskProcessor(TaskQueue.CONTENT, threads=3)
+    with (
+        patch(
+            "app.pipeline.threaded_task_processor.SequentialTaskProcessor",
+            _fake_processor_class([]),
+        ),
+        patch("app.pipeline.threaded_task_processor.warm_queue_models") as warm,
+    ):
+        processor.run()
 
-    assert [instance.warm_models for instance in _FakeProcessor.instances] == [True, False, False]
+    warm.assert_called_once()
 
 
 def test_shutdown_stops_every_claim_loop() -> None:
     """A shutdown request has to reach all loops, not just the one that saw it."""
-    processor = ThreadedTaskProcessor(TaskQueue.CONTENT, threads=3)
-    with patch(
-        "app.pipeline.threaded_task_processor.SequentialTaskProcessor",
-        _FakeProcessor,
-    ):
-        processor.run()
+    instances = _run_with_fake_processors(threads=3)
 
-    assert all(not instance.running for instance in _FakeProcessor.instances)
+    assert all(not instance.running for instance in instances)
+
+
+def test_a_crashed_claim_loop_takes_the_process_down() -> None:
+    """A dead loop cannot be restarted in-process; the supervisor must recycle it."""
+    failure = RuntimeError("claim loop died")
+
+    with pytest.raises(RuntimeError, match="claim loop died"):
+        _run_with_fake_processors(threads=3, run_error=failure)
+
+
+def test_warming_loads_the_reranker_only_when_it_is_enabled() -> None:
+    """Content workers eagerly load the reranker only when it is turned on."""
+    settings = SimpleNamespace(
+        news_list_warm_embeddings=False,
+        news_list_reranker_enabled=True,
+    )
+
+    with (
+        patch("app.pipeline.threaded_task_processor.get_settings", return_value=settings),
+        patch("app.pipeline.threaded_task_processor.warm_news_embedding_model") as warm_embeddings,
+        patch("app.pipeline.threaded_task_processor.warm_news_reranker_model") as warm_reranker,
+    ):
+        warm_queue_models(TaskQueue.CONTENT.value)
+
+    warm_embeddings.assert_not_called()
+    warm_reranker.assert_called_once_with()
+
+
+def test_warming_is_skipped_for_non_content_queues() -> None:
+    """Only content workers need the news ranking models."""
+    settings = SimpleNamespace(
+        news_list_warm_embeddings=True,
+        news_list_reranker_enabled=True,
+    )
+
+    with (
+        patch("app.pipeline.threaded_task_processor.get_settings", return_value=settings),
+        patch("app.pipeline.threaded_task_processor.warm_news_embedding_model") as warm_embeddings,
+        patch("app.pipeline.threaded_task_processor.warm_news_reranker_model") as warm_reranker,
+    ):
+        warm_queue_models(TaskQueue.MEDIA.value)
+
+    warm_embeddings.assert_not_called()
+    warm_reranker.assert_not_called()
 
 
 def test_concurrent_claims_never_hand_out_a_task_twice(

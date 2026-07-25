@@ -11,6 +11,8 @@ from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.pipeline.queue_notifications import QueueNotificationListener
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
+from app.services.news_embeddings import warm_news_embedding_model
+from app.services.news_reranker import warm_news_reranker_model
 from app.services.queue import QueueService, TaskQueue
 
 logger = get_logger(__name__)
@@ -18,13 +20,34 @@ logger = get_logger(__name__)
 _THREAD_JOIN_POLL_SECONDS = 0.5
 
 
+def warm_queue_models(queue_name: str) -> None:
+    """Load the models a queue's handlers need, once per worker process."""
+    if queue_name != TaskQueue.CONTENT.value:
+        return
+    settings = get_settings()
+    if settings.news_list_warm_embeddings:
+        try:
+            warm_news_embedding_model()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to warm news embedding model")
+    if settings.news_list_reranker_enabled:
+        try:
+            warm_news_reranker_model()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to warm news reranker model")
+
+
 class ThreadedTaskProcessor:
     """Run N claim loops for one queue inside a single worker process.
 
-    The queue itself is already safe for concurrent claims (FOR UPDATE SKIP
-    LOCKED plus per-task leases), and the workload is dominated by network I/O
-    and subprocesses, so threads buy throughput without a second process paying
-    the import and model memory cost again.
+    Owns everything that is process-wide rather than per-claim-loop: signal
+    handlers, the LISTEN connection, and model warmups. The claim loops
+    themselves stay ignorant of all three.
+
+    The queue is already safe for concurrent claims (FOR UPDATE SKIP LOCKED plus
+    per-task leases), and the workload is dominated by network I/O and
+    subprocesses, so threads buy throughput without a second process paying the
+    import and model memory cost again.
     """
 
     def __init__(
@@ -36,11 +59,12 @@ class ThreadedTaskProcessor:
     ) -> None:
         self.queue_name = QueueService._normalize_queue_name(queue_name) or TaskQueue.CONTENT.value
         self.worker_slot = worker_slot
-        self.threads = max(int(threads), 1)
+        self.threads = threads
         self.settings = get_settings()
         self.processors: list[SequentialTaskProcessor] = []
         self._listener = QueueNotificationListener(str(self.settings.database_url))
         self._shutdown_requested = False
+        self._worker_failure: BaseException | None = None
 
     def run(self, max_tasks: int | None = None) -> None:
         """Run every claim loop until shutdown.
@@ -48,23 +72,23 @@ class ThreadedTaskProcessor:
         Args:
             max_tasks: Per-thread cap on successfully processed tasks, or None
                 for unlimited.
-        """
-        if self.threads == 1:
-            # Rollback path: byte-for-byte the historical single-loop worker,
-            # including its unsuffixed worker id.
-            SequentialTaskProcessor(self.queue_name, self.worker_slot).run(max_tasks=max_tasks)
-            return
 
+        Raises:
+            BaseException: The first error to escape a claim loop, re-raised
+                after the remaining loops stop, so the supervisor restarts a
+                process whose threads died instead of leaving it short-handed.
+        """
         self._install_signal_handlers()
+        warm_queue_models(self.queue_name)
         self._listener.start()
         self.processors = [
             SequentialTaskProcessor(
                 self.queue_name,
                 self.worker_slot,
-                thread_index=index,
+                # A lone claim loop keeps the historical unsuffixed worker id, so
+                # --threads 1 stays a clean rollback.
+                thread_index=index if self.threads > 1 else None,
                 notification_listener=self._listener,
-                # Model warmups are process-wide; one thread doing it is enough.
-                warm_models=index == 1,
             )
             for index in range(1, self.threads + 1)
         ]
@@ -107,6 +131,9 @@ class ThreadedTaskProcessor:
             ),
         )
 
+        if self._worker_failure is not None:
+            raise self._worker_failure
+
     def _run_processor(
         self,
         processor: SequentialTaskProcessor,
@@ -114,11 +141,8 @@ class ThreadedTaskProcessor:
         processed_by_worker: dict[str, int],
     ) -> None:
         try:
-            processed_by_worker[processor.worker_id] = processor.run(
-                max_tasks=max_tasks,
-                install_signal_handlers=False,
-            )
-        except Exception:  # noqa: BLE001
+            processed_by_worker[processor.worker_id] = processor.run(max_tasks=max_tasks)
+        except BaseException as exc:
             processed_by_worker[processor.worker_id] = 0
             logger.exception(
                 "Worker thread exited with an unhandled error",
@@ -128,6 +152,11 @@ class ThreadedTaskProcessor:
                     context_data={"worker_id": processor.worker_id},
                 ),
             )
+            # A dead claim loop is unrecoverable in-process: stop the rest so the
+            # supervisor restarts a whole worker instead of a degraded one.
+            if self._worker_failure is None:
+                self._worker_failure = exc
+            self._request_shutdown()
 
     def _join_all(self, worker_threads: list[threading.Thread]) -> None:
         """Join every thread while leaving the main thread free to take signals."""
@@ -145,7 +174,7 @@ class ThreadedTaskProcessor:
         def signal_handler(_signum, _frame):
             if not self._shutdown_requested:
                 logger.info(
-                    "\n🛑 Received shutdown signal - stopping %s worker threads...",
+                    "\n🛑 Received shutdown signal - stopping %s worker thread(s)...",
                     self.threads,
                 )
                 self._shutdown_requested = True

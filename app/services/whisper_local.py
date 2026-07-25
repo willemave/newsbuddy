@@ -78,29 +78,25 @@ class WhisperLocalTranscriptionService:
         Returns:
             Tuple of (transcript, language_code)
         """
-        with _TRANSCRIPTION_SINGLE_FLIGHT:
-            return self._transcribe_audio_locked(audio_file_path)
-
-    def _transcribe_audio_locked(self, audio_file_path: Path) -> tuple[str, str | None]:
-        """Transcribe with the process-wide single-flight guard already held."""
         try:
-            self._load_model()
+            with _TRANSCRIPTION_SINGLE_FLIGHT:
+                self._load_model()
 
-            if not audio_file_path.exists():
-                raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
+                if not audio_file_path.exists():
+                    raise FileNotFoundError(f"Audio file not found: {audio_file_path}")
 
-            file_size_mb = os.path.getsize(audio_file_path) / (1024 * 1024)
-            logger.info(f"Starting transcription of {audio_file_path} ({file_size_mb:.1f} MB)")
+                file_size_mb = os.path.getsize(audio_file_path) / (1024 * 1024)
+                logger.info(f"Starting transcription of {audio_file_path} ({file_size_mb:.1f} MB)")
 
-            # Segments are produced lazily, so transcription only really runs as
-            # the iterator is consumed.
-            segments, info = self.model.transcribe(
-                str(audio_file_path),
-                language=None,  # Auto-detect language
-                task="transcribe",  # Transcribe in original language
-            )
-            transcript = "".join(segment.text for segment in segments).strip()
-            detected_language = getattr(info, "language", None)
+                # Segments are produced lazily, so transcription only really runs
+                # as the iterator is consumed - which must happen under the guard.
+                segments, info = self.model.transcribe(
+                    str(audio_file_path),
+                    language=None,  # Auto-detect language
+                    task="transcribe",  # Transcribe in original language
+                )
+                transcript = "".join(segment.text for segment in segments).strip()
+                detected_language = getattr(info, "language", None)
 
             logger.info(
                 f"Successfully transcribed audio. "

@@ -1,7 +1,9 @@
-"""Sequential task processor for robust, simple task processing."""
+"""One queue claim loop: dequeue, process, finalize, idle, repeat.
 
-import signal
-import sys
+Process-wide concerns - signal handling, the LISTEN connection, model warmups -
+belong to whoever runs these loops (see `threaded_task_processor.py`).
+"""
+
 import threading
 import time
 from contextlib import contextmanager
@@ -45,8 +47,6 @@ from app.pipeline.task_specs import get_task_spec
 from app.pipeline.worker import get_llm_service
 from app.services.gateways.task_queue_gateway import TaskQueueGateway
 from app.services.langfuse_tracing import langfuse_trace_context
-from app.services.news_embeddings import warm_news_embedding_model
-from app.services.news_reranker import warm_news_reranker_model
 from app.services.queue import QueueService, TaskQueue, TaskType
 
 logger = get_logger(__name__)
@@ -97,7 +97,7 @@ def _is_transient_database_operational_error(exc: OperationalError) -> bool:
 
 
 class SequentialTaskProcessor:
-    """Sequential task processor - processes tasks one at a time."""
+    """One claim loop: processes tasks one at a time under a single worker id."""
 
     def __init__(
         self,
@@ -106,7 +106,6 @@ class SequentialTaskProcessor:
         *,
         thread_index: int | None = None,
         notification_listener: QueueNotificationListener | None = None,
-        warm_models: bool = True,
     ) -> None:
         logger.debug("Initializing SequentialTaskProcessor...")
         self.queue_service = QueueService()
@@ -117,17 +116,6 @@ class SequentialTaskProcessor:
         self.settings = get_settings()
         logger.debug("Settings loaded")
         self.queue_name = QueueService._normalize_queue_name(queue_name) or TaskQueue.CONTENT.value
-        if warm_models and self.queue_name == TaskQueue.CONTENT.value:
-            if self.settings.news_list_warm_embeddings:
-                try:
-                    warm_news_embedding_model()
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to warm news embedding model")
-            if self.settings.news_list_reranker_enabled:
-                try:
-                    warm_news_reranker_model()
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to warm news reranker model")
         self.running = True
         self.worker_slot = worker_slot
         self.thread_index = thread_index
@@ -136,8 +124,12 @@ class SequentialTaskProcessor:
         # historical id so --threads 1 is an exact rollback.
         thread_suffix = "" if thread_index is None else f"-t{thread_index}"
         self.worker_id = f"{self.queue_name}-processor-{self.worker_slot}{thread_suffix}"
-        self._owns_listener = notification_listener is None
-        self._notification_listener = notification_listener
+        # Waited on, never started or closed here: the process that owns the
+        # listener owns its lifecycle. An unstarted listener simply reports no
+        # notifications, and the loop falls back to polling.
+        self._listener = notification_listener or QueueNotificationListener(
+            str(self.settings.database_url)
+        )
         logger.debug(
             "SequentialTaskProcessor initialized with worker_id: %s queue=%s",
             self.worker_id,
@@ -151,13 +143,6 @@ class SequentialTaskProcessor:
             queue_gateway=self.queue_gateway,
         )
         self.dispatcher = TaskDispatcher(self._build_handlers())
-
-    @property
-    def _listener(self) -> QueueNotificationListener:
-        """Return the notification listener, opening a private one on first use."""
-        if self._notification_listener is None:
-            self._notification_listener = QueueNotificationListener(str(self.settings.database_url))
-        return self._notification_listener
 
     def _build_handlers(self) -> list[TaskHandler]:
         """Build task handlers for dispatching."""
@@ -489,15 +474,15 @@ class SequentialTaskProcessor:
             )
             return None
 
-    def run(self, max_tasks: int | None = None, *, install_signal_handlers: bool = True) -> int:
+    def run(self, max_tasks: int | None = None) -> int:
         """
-        Run the task processor.
+        Run the claim loop until `running` is cleared.
+
+        Shutdown is the caller's job: this loop runs on a worker thread, where
+        signal handlers cannot be installed.
 
         Args:
             max_tasks: Maximum number of tasks to process. None for unlimited.
-            install_signal_handlers: Install SIGINT/SIGTERM handlers. Must be False
-                when the loop runs on a worker thread, since Python only allows
-                handler installation from the main thread.
 
         Returns:
             The number of tasks processed successfully.
@@ -508,24 +493,6 @@ class SequentialTaskProcessor:
             self.worker_id,
             self.queue_name,
         )
-
-        self._shutdown_requested = False
-
-        if install_signal_handlers:
-
-            def signal_handler(_signum, _frame):
-                if not self._shutdown_requested:
-                    logger.info("\n🛑 Received shutdown signal (Ctrl+C) - stopping gracefully...")
-                    self._shutdown_requested = True
-                    self.running = False
-                else:
-                    logger.warning("\n⚠️  Force shutdown requested - exiting immediately")
-                    sys.exit(1)
-
-            signal.signal(signal.SIGINT, signal_handler)
-            signal.signal(signal.SIGTERM, signal_handler)
-
-        self._listener.start()
 
         processed_count = 0
         consecutive_empty_polls = 0
@@ -674,8 +641,6 @@ class SequentialTaskProcessor:
                 logger.error("Error in main loop: %s", exc, exc_info=True)
                 time.sleep(5)
 
-        if self._owns_listener and self._notification_listener is not None:
-            self._notification_listener.close()
         logger.info(
             "Processor shutting down (worker_id: %s, processed %s tasks)",
             self.worker_id,
@@ -737,17 +702,3 @@ class SequentialTaskProcessor:
             )
 
         return result.success
-
-
-if __name__ == "__main__":
-    processor = SequentialTaskProcessor()
-
-    max_tasks = None
-    if len(sys.argv) > 1:
-        try:
-            max_tasks = int(sys.argv[1])
-        except ValueError:
-            logger.error("Invalid max_tasks argument: %s", sys.argv[1])
-            sys.exit(1)
-
-    processor.run(max_tasks=max_tasks)

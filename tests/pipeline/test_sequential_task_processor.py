@@ -1,6 +1,5 @@
 """Tests for the sequential task processor."""
 
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -9,7 +8,7 @@ from sqlalchemy.exc import OperationalError
 from app.pipeline.queue_notifications import psycopg_conninfo
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
 from app.pipeline.task_models import TaskEnvelope, TaskResult
-from app.services.queue import TaskQueue, TaskType
+from app.services.queue import TaskType
 
 
 @pytest.fixture
@@ -18,8 +17,6 @@ def processor():
     with (
         patch("app.pipeline.sequential_task_processor.QueueService") as mock_queue_service_cls,
         patch("app.pipeline.sequential_task_processor.get_llm_service"),
-        patch("app.pipeline.sequential_task_processor.warm_news_embedding_model"),
-        patch("app.pipeline.sequential_task_processor.warm_news_reranker_model"),
     ):
         mock_queue_service_cls._normalize_queue_name.return_value = "content"
         instance = SequentialTaskProcessor()
@@ -46,61 +43,11 @@ class TestSequentialTaskProcessor:
         assert processor.queue_service is not None
         assert processor.llm_service is not None
 
-    def test_init_warms_reranker_when_enabled_for_content_queue(self):
-        """Content workers eagerly load the reranker only when it is enabled."""
-        settings = SimpleNamespace(
-            news_list_warm_embeddings=False,
-            news_list_reranker_enabled=True,
-        )
-        with (
-            patch("app.pipeline.sequential_task_processor.QueueService") as queue_service_cls,
-            patch("app.pipeline.sequential_task_processor.get_llm_service"),
-            patch("app.pipeline.sequential_task_processor.get_settings", return_value=settings),
-            patch(
-                "app.pipeline.sequential_task_processor.warm_news_embedding_model"
-            ) as warm_embeddings,
-            patch(
-                "app.pipeline.sequential_task_processor.warm_news_reranker_model"
-            ) as warm_reranker,
-        ):
-            queue_service_cls._normalize_queue_name.return_value = TaskQueue.CONTENT.value
-
-            SequentialTaskProcessor(queue_name=TaskQueue.CONTENT)
-
-        warm_embeddings.assert_not_called()
-        warm_reranker.assert_called_once_with()
-
-    def test_init_does_not_warm_news_models_for_non_content_queue(self):
-        """Only content workers need news ranking model warmups."""
-        settings = SimpleNamespace(
-            news_list_warm_embeddings=True,
-            news_list_reranker_enabled=True,
-        )
-        with (
-            patch("app.pipeline.sequential_task_processor.QueueService") as queue_service_cls,
-            patch("app.pipeline.sequential_task_processor.get_llm_service"),
-            patch("app.pipeline.sequential_task_processor.get_settings", return_value=settings),
-            patch(
-                "app.pipeline.sequential_task_processor.warm_news_embedding_model"
-            ) as warm_embeddings,
-            patch(
-                "app.pipeline.sequential_task_processor.warm_news_reranker_model"
-            ) as warm_reranker,
-        ):
-            queue_service_cls._normalize_queue_name.return_value = TaskQueue.MEDIA.value
-
-            SequentialTaskProcessor(queue_name=TaskQueue.MEDIA)
-
-        warm_embeddings.assert_not_called()
-        warm_reranker.assert_not_called()
-
     def test_worker_id_gains_a_thread_suffix_when_threaded(self):
         """Threads in one process must claim under distinct worker ids."""
         with (
             patch("app.pipeline.sequential_task_processor.QueueService") as queue_service_cls,
             patch("app.pipeline.sequential_task_processor.get_llm_service"),
-            patch("app.pipeline.sequential_task_processor.warm_news_embedding_model"),
-            patch("app.pipeline.sequential_task_processor.warm_news_reranker_model"),
         ):
             queue_service_cls._normalize_queue_name.return_value = "content"
 
@@ -329,17 +276,6 @@ class TestSequentialTaskProcessor:
         assert mock_sleep.called
         mock_sleep.assert_any_call(0.1)
 
-    def test_run_signal_handler(self, processor):
-        """Test signal handler setup."""
-        with (
-            patch("signal.signal") as mock_signal,
-            patch("app.pipeline.sequential_task_processor.setup_logging"),
-        ):
-            processor.running = False
-            processor.run()
-
-            assert mock_signal.call_count >= 2
-
     def test_run_single_task(self, processor):
         """Test run_single_task method."""
         task_data = {
@@ -493,7 +429,7 @@ class TestSequentialTaskProcessor:
 
         processor.queue_service.dequeue.side_effect = mock_dequeue
         listener = Mock()
-        processor._notification_listener = listener
+        processor._listener = listener
 
         with (
             patch("app.pipeline.sequential_task_processor.setup_logging"),

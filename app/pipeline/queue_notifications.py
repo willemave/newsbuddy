@@ -75,9 +75,9 @@ class QueueNotificationListener:
         Returns None when notifications are unavailable so that callers fall back
         to plain polling for their idle interval.
         """
-        if psycopg is None or not self._connected:
-            return None
         with self._condition:
+            if not self._connected:
+                return None
             start_generation = self._generation
             return self._condition.wait_for(
                 lambda: self._generation != start_generation or self._stopping.is_set(),
@@ -157,8 +157,10 @@ class QueueNotificationListener:
             logger.debug("Queue notification listener close failed", exc_info=True)
 
     def _set_connected(self, connected: bool) -> None:
-        self._connected = connected
-        if not connected:
-            # Release waiters so they drop back to polling instead of sitting on a
-            # condition nothing will signal.
-            self.wake()
+        with self._condition:
+            self._connected = connected
+            if not connected:
+                # Release waiters so they drop back to polling instead of sitting
+                # on a condition nothing will signal.
+                self._generation += 1
+                self._condition.notify_all()
