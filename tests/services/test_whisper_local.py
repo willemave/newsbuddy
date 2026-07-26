@@ -98,3 +98,38 @@ def test_transcription_runs_one_at_a_time(audio_file: Path) -> None:
 
     assert inside.is_set()
     assert peak_concurrent == 1
+
+
+def test_service_initialization_is_singleton_under_concurrency() -> None:
+    """Concurrent media loops must still share exactly one model owner."""
+    original_service = whisper_local._whisper_service
+    whisper_local._whisper_service = None
+    created = 0
+    start = threading.Barrier(5)
+
+    class FakeService:
+        def __init__(self) -> None:
+            nonlocal created
+            created += 1
+            threading.Event().wait(0.05)
+
+    results: list[object] = []
+
+    def get_service() -> None:
+        start.wait(timeout=5)
+        results.append(whisper_local.get_whisper_local_service())
+
+    try:
+        with patch.object(whisper_local, "WhisperLocalTranscriptionService", FakeService):
+            threads = [threading.Thread(target=get_service) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            start.wait(timeout=5)
+            for thread in threads:
+                thread.join(timeout=10)
+    finally:
+        whisper_local._whisper_service = original_service
+
+    assert created == 1
+    assert len(results) == 4
+    assert len({id(service) for service in results}) == 1

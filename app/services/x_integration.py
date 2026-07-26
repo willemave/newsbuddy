@@ -36,6 +36,11 @@ from app.services.x_api import (
     refresh_oauth_token,
 )
 from app.services.x_bookmark_destinations import reconcile_x_bookmark_destination
+from app.services.x_sync_schedule import (
+    get_channel_state,
+    should_skip_channel_sync,
+    should_skip_sync,
+)
 from app.services.x_tweet_metadata import build_tweet_snapshot_metadata
 
 logger = get_logger(__name__)
@@ -47,7 +52,6 @@ TOKEN_EXPIRY_SKEW_SECONDS = 60
 BOOKMARK_SYNC_MAX_PAGES = 5
 BOOKMARK_SYNC_PAGE_SIZE = 10
 BOOKMARKS_CHANNEL = "bookmarks"
-SYNC_INTERVAL_GRACE_SECONDS = 5
 USERNAME_REGEX = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 UNRECOVERABLE_X_REFRESH_ERROR_MARKERS = (
     "X API 400: invalid_request",
@@ -371,7 +375,11 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
         )
 
     sync_state = _get_or_create_sync_state(db, connection_id=_require_connection_id(connection))
-    if not force and _should_skip_scheduled_sync(sync_state):
+    if not force and should_skip_sync(
+        sync_state.last_synced_at,
+        now=_now_naive_utc(),
+        min_interval_minutes=get_settings().x_sync_min_interval_minutes,
+    ):
         return XSyncSummary(
             status="skipped_recently",
             fetched=0,
@@ -394,9 +402,10 @@ def sync_x_sources_for_user(db: Session, *, user_id: int, force: bool = False) -
             connection=connection,
             access_token=access_token,
         )
-        bookmark_state = _get_channel_state(existing_sync_metadata, BOOKMARKS_CHANNEL)
-        if _should_skip_channel_sync(
+        bookmark_state = get_channel_state(existing_sync_metadata, BOOKMARKS_CHANNEL)
+        if should_skip_channel_sync(
             bookmark_state,
+            now=_now_naive_utc(),
             min_interval_minutes=get_settings().x_bookmark_sync_min_interval_minutes,
         ):
             bookmark_summary = _skipped_channel_summary()
@@ -474,7 +483,7 @@ def _sync_bookmark_channel(
     provider_user_id: str,
     existing_sync_metadata: dict[str, Any],
 ) -> XSyncChannelSummary:
-    bookmark_state = _get_channel_state(existing_sync_metadata, BOOKMARKS_CHANNEL)
+    bookmark_state = get_channel_state(existing_sync_metadata, BOOKMARKS_CHANNEL)
     last_synced_id = _clean_optional_string(bookmark_state.get("last_synced_item_id"))
     user_id = _require_user_id(user)
     newest_seen_id: str | None = None
@@ -690,50 +699,6 @@ def _upsert_synced_item(
     return synced_item
 
 
-def _get_channel_state(sync_metadata: dict[str, Any], channel: str) -> dict[str, Any]:
-    state = sync_metadata.get(channel)
-    return state if isinstance(state, dict) else {}
-
-
-def _parse_channel_last_synced_at(state: dict[str, Any]) -> datetime | None:
-    raw_value = state.get("last_synced_at")
-    if not isinstance(raw_value, str) or not raw_value.strip():
-        return None
-    try:
-        parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is not None:
-        return parsed.astimezone(UTC).replace(tzinfo=None)
-    return parsed
-
-
-def _should_skip_scheduled_sync(sync_state: UserIntegrationSyncState) -> bool:
-    last_synced_at = sync_state.last_synced_at
-    if last_synced_at is None:
-        return False
-    min_interval_minutes = get_settings().x_sync_min_interval_minutes
-    elapsed_seconds = (_now_naive_utc() - last_synced_at).total_seconds()
-    return _is_within_sync_interval(elapsed_seconds, min_interval_minutes)
-
-
-def _should_skip_channel_sync(
-    previous_state: dict[str, Any],
-    *,
-    min_interval_minutes: int,
-) -> bool:
-    last_synced_at = _parse_channel_last_synced_at(previous_state)
-    if last_synced_at is None:
-        return False
-    elapsed_seconds = (_now_naive_utc() - last_synced_at).total_seconds()
-    return _is_within_sync_interval(elapsed_seconds, min_interval_minutes)
-
-
-def _is_within_sync_interval(elapsed_seconds: float, min_interval_minutes: int) -> bool:
-    """Allow small scheduler jitter at the configured interval boundary."""
-    return elapsed_seconds + SYNC_INTERVAL_GRACE_SECONDS < min_interval_minutes * 60
-
-
 def _resolve_last_synced_item_id(
     previous_state: dict[str, Any],
     newest_item_id: str | None,
@@ -748,7 +713,7 @@ def _build_sync_metadata_payload(
     existing_sync_metadata: dict[str, Any],
     bookmark_summary: XSyncChannelSummary,
 ) -> dict[str, Any]:
-    previous_bookmark_state = _get_channel_state(existing_sync_metadata, BOOKMARKS_CHANNEL)
+    previous_bookmark_state = get_channel_state(existing_sync_metadata, BOOKMARKS_CHANNEL)
     return {
         BOOKMARKS_CHANNEL: {
             "status": bookmark_summary.status,

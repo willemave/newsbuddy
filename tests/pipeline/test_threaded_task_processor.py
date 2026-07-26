@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import queue
 import threading
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -27,10 +28,12 @@ def _fake_processor_class(instances: list, run_error: Exception | None = None):
             self.worker_id = f"{queue_name}-processor-{worker_slot}{suffix}"
             self.running = True
             self.thread_name: str | None = None
+            self.max_tasks: int | None = None
             instances.append(self)
 
         def run(self, max_tasks=None):
             self.thread_name = threading.current_thread().name
+            self.max_tasks = max_tasks
             if run_error is not None:
                 raise run_error
             return 1
@@ -38,7 +41,12 @@ def _fake_processor_class(instances: list, run_error: Exception | None = None):
     return _FakeProcessor
 
 
-def _run_with_fake_processors(threads: int, run_error: Exception | None = None) -> list:
+def _run_with_fake_processors(
+    threads: int,
+    run_error: Exception | None = None,
+    *,
+    max_tasks: int | None = None,
+) -> list:
     instances: list = []
     processor = ThreadedTaskProcessor(TaskQueue.CONTENT, worker_slot=1, threads=threads)
     with (
@@ -48,7 +56,7 @@ def _run_with_fake_processors(threads: int, run_error: Exception | None = None) 
         ),
         patch("app.pipeline.threaded_task_processor.warm_queue_models"),
     ):
-        processor.run()
+        processor.run(max_tasks=max_tasks)
     return instances
 
 
@@ -122,6 +130,60 @@ def test_shutdown_stops_every_claim_loop() -> None:
     assert all(not instance.running for instance in instances)
 
 
+def test_max_tasks_is_one_exact_process_wide_budget() -> None:
+    """Bounded drains must not multiply the limit or strand idle claim loops."""
+    instances = _run_with_fake_processors(threads=6, max_tasks=3)
+
+    assert len(instances) == 1
+    assert instances[0].max_tasks == 3
+    assert instances[0].thread_index is None
+
+
+def test_invalid_thread_count_is_rejected_at_the_processor_boundary() -> None:
+    with pytest.raises(ValueError, match="threads must be at least 1"):
+        ThreadedTaskProcessor(TaskQueue.CONTENT, threads=0)
+
+
+def test_threaded_processor_drains_each_task_once() -> None:
+    """The owning processor must start, join, and stop a real pool of claim loops."""
+    pending: queue.Queue[int] = queue.Queue()
+    for task_id in range(40):
+        pending.put(task_id)
+    processed: list[int] = []
+    processed_lock = threading.Lock()
+
+    class DrainingProcessor:
+        def __init__(self, queue_name, worker_slot, **kwargs):
+            thread_index = kwargs.get("thread_index")
+            self.worker_id = f"{queue_name}-processor-{worker_slot}-t{thread_index}"
+            self.running = True
+
+        def run(self, max_tasks=None):
+            count = 0
+            while self.running:
+                try:
+                    task_id = pending.get_nowait()
+                except queue.Empty:
+                    return count
+                with processed_lock:
+                    processed.append(task_id)
+                count += 1
+            return count
+
+    processor = ThreadedTaskProcessor(TaskQueue.CONTENT, threads=6)
+    with (
+        patch(
+            "app.pipeline.threaded_task_processor.SequentialTaskProcessor",
+            DrainingProcessor,
+        ),
+        patch("app.pipeline.threaded_task_processor.warm_queue_models"),
+    ):
+        processor.run()
+
+    assert sorted(processed) == list(range(40))
+    assert pending.empty()
+
+
 def test_a_crashed_claim_loop_takes_the_process_down() -> None:
     """A dead loop cannot be restarted in-process; the supervisor must recycle it."""
     failure = RuntimeError("claim loop died")
@@ -166,7 +228,7 @@ def test_warming_is_skipped_for_non_content_queues() -> None:
     warm_reranker.assert_not_called()
 
 
-def test_concurrent_claims_never_hand_out_a_task_twice(
+def test_queue_service_concurrent_claims_never_hand_out_a_task_twice(
     postgres_harness,
     db_session_factory: sessionmaker,
 ) -> None:

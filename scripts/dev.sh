@@ -222,19 +222,21 @@ for service in "${SERVICES[@]}"; do
         workers)
             # One process per queue; concurrency comes from claim threads inside
             # it (WORKER_THREADS_CONTENT etc.).
-            content_worker_procs="${CONTENT_WORKER_PROCS:-1}"
-            if ! [[ "$content_worker_procs" =~ ^[0-9]+$ ]] || [ "$content_worker_procs" -lt 1 ]; then
-                echo -e "${RED}CONTENT_WORKER_PROCS must be a positive integer${NC}"
+            content_worker_threads="${WORKER_THREADS_CONTENT:-${CONTENT_WORKER_PROCS:-}}"
+            if [[ -n "$content_worker_threads" ]] && \
+               { ! [[ "$content_worker_threads" =~ ^[0-9]+$ ]] || [ "$content_worker_threads" -lt 1 ]; }; then
+                echo -e "${RED}WORKER_THREADS_CONTENT must be a positive integer${NC}"
                 exit 1
             fi
-            llm_worker_procs="${LLM_WORKER_PROCS:-1}"
-            if ! [[ "$llm_worker_procs" =~ ^[0-9]+$ ]] || [ "$llm_worker_procs" -lt 1 ]; then
-                echo -e "${RED}LLM_WORKER_PROCS must be a positive integer${NC}"
+            llm_worker_threads="${WORKER_THREADS_LLM:-${LLM_WORKER_PROCS:-}}"
+            if [[ -n "$llm_worker_threads" ]] && \
+               { ! [[ "$llm_worker_threads" =~ ^[0-9]+$ ]] || [ "$llm_worker_threads" -lt 1 ]; }; then
+                echo -e "${RED}WORKER_THREADS_LLM must be a positive integer${NC}"
                 exit 1
             fi
-            for slot in $(seq 1 "$content_worker_procs"); do
-                start_service "workers-content-$slot" "python scripts/run_workers.py --queue content --worker-slot $slot --stats-interval 60"
-            done
+            content_worker_args="${content_worker_threads:+ --threads $content_worker_threads}"
+            llm_worker_args="${llm_worker_threads:+ --threads $llm_worker_threads}"
+            start_service "workers-content" "python scripts/run_workers.py --queue content --worker-slot 1 --stats-interval 60$content_worker_args"
             start_service "workers-media" "python scripts/run_workers.py --queue media --worker-slot 1 --stats-interval 60"
             start_service "workers-audio-episode" "python scripts/run_workers.py --queue audio_episode --worker-slot 1 --stats-interval 60"
             start_service "workers-image" "python scripts/run_workers.py --queue image --worker-slot 1 --stats-interval 60"
@@ -244,9 +246,7 @@ for service in "${SERVICES[@]}"; do
             start_service "workers-twitter" "python scripts/run_workers.py --queue twitter --worker-slot 1 --stats-interval 60"
             start_service "workers-chat" "python scripts/run_workers.py --queue chat --worker-slot 1 --stats-interval 60"
             start_service "workers-learning" "python scripts/run_workers.py --queue learning --worker-slot 1 --stats-interval 60"
-            for slot in $(seq 1 "$llm_worker_procs"); do
-                start_service "workers-llm-$slot" "python scripts/run_workers.py --queue llm --worker-slot $slot --stats-interval 60"
-            done
+            start_service "workers-llm" "python scripts/run_workers.py --queue llm --worker-slot 1 --stats-interval 60$llm_worker_args"
             ;;
         scrapers)
             start_service "scrapers" "python scripts/run_scrapers.py"

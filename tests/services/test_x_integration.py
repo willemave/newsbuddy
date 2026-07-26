@@ -23,6 +23,7 @@ from app.services.x_integration import (
     start_x_oauth,
     sync_x_sources_for_user,
 )
+from app.services.x_sync_schedule import is_within_sync_interval
 
 
 def _build_connection(test_user, scopes: list[str]) -> UserIntegrationConnection:
@@ -649,12 +650,12 @@ def test_sync_x_sources_skips_recent_scheduled_runs(db_session, test_user, monke
 
 def test_sync_interval_allows_small_scheduler_jitter() -> None:
     """A cron tick just before the interval boundary should still run."""
-    assert x_integration._is_within_sync_interval(14 * 60 + 58, 15) is False
+    assert is_within_sync_interval(14 * 60 + 58, 15) is False
 
 
 def test_sync_interval_still_skips_meaningfully_early_runs() -> None:
     """The jitter allowance should not turn the cooldown into a loose suggestion."""
-    assert x_integration._is_within_sync_interval(14 * 60 + 50, 15) is True
+    assert is_within_sync_interval(14 * 60 + 50, 15) is True
 
 
 def test_sync_x_sources_failure_does_not_consume_scheduled_retry_window(

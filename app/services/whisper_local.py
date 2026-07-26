@@ -13,6 +13,7 @@ settings = get_settings()
 # downloads and ffmpeg normalization of the next episodes overlap the current
 # transcription - but only one transcription runs at a time.
 _TRANSCRIPTION_SINGLE_FLIGHT = threading.Semaphore(1)
+_SERVICE_INIT_LOCK = threading.Lock()
 
 
 class WhisperLocalTranscriptionService:
@@ -111,19 +112,23 @@ class WhisperLocalTranscriptionService:
 
     def cleanup_service(self):
         """Clean up the model from memory."""
-        if self.model is not None:
-            del self.model
-            self.model = None
-            logger.info("Whisper model cleaned up")
+        with _TRANSCRIPTION_SINGLE_FLIGHT:
+            if self.model is not None:
+                del self.model
+                self.model = None
+                logger.info("Whisper model cleaned up")
 
 
 # Global instance
-_whisper_service = None
+_whisper_service: WhisperLocalTranscriptionService | None = None
 
 
 def get_whisper_local_service() -> WhisperLocalTranscriptionService:
     """Get the global Whisper local transcription service instance."""
     global _whisper_service
-    if _whisper_service is None:
-        _whisper_service = WhisperLocalTranscriptionService()
+    if _whisper_service is not None:
+        return _whisper_service
+    with _SERVICE_INIT_LOCK:
+        if _whisper_service is None:
+            _whisper_service = WhisperLocalTranscriptionService()
     return _whisper_service

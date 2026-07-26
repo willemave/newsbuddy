@@ -32,7 +32,10 @@ def main():
         "--max-tasks",
         type=int,
         default=None,
-        help="Maximum number of tasks to process per thread (default: unlimited)",
+        help=(
+            "Maximum number of tasks to process before exiting. "
+            "Bounded runs use one claim loop to keep the cap exact."
+        ),
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument(
@@ -111,7 +114,7 @@ def main():
     # Start processor
     logger.info("\nStarting task processor...")
     if args.max_tasks:
-        logger.info(f"Will process up to {args.max_tasks} tasks per thread")
+        logger.info(f"Will process up to {args.max_tasks} tasks")
     logger.info("Press Ctrl+C to stop")
 
     processor = ThreadedTaskProcessor(

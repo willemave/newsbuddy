@@ -25,7 +25,7 @@ Common options:
 Examples:
   scripts/start_services.sh all --env-file .env
   scripts/start_services.sh server --port 8000 --reload
-  scripts/start_services.sh workers --content-workers 1 --discussion-workers 1 --media-workers 1 --learning-workers 1 --llm-workers 1
+  scripts/start_services.sh workers --content-workers 6 --discussion-workers 4 --media-workers 3 --learning-workers 4 --llm-workers 4
   scripts/start_services.sh migrate --env-file .env
 EOF
 }
@@ -91,6 +91,24 @@ values = dotenv_values(env_file)
 value = values.get(key_name, default_value)
 print("" if value is None else value)
 PY
+}
+
+resolve_worker_threads() {
+  local settings_key="$1"
+  local legacy_process_key="$2"
+  local legacy_alias_key="${3:-}"
+  local configured
+
+  configured="$(dotenv_get "${settings_key}" "")"
+  if [[ -z "${configured}" ]]; then
+    # Preserve old local overrides, but reinterpret them as thread counts so a
+    # legacy *_WORKER_PROCS=4 cannot create four threaded worker processes.
+    configured="$(dotenv_get "${legacy_process_key}" "")"
+  fi
+  if [[ -z "${configured}" && -n "${legacy_alias_key}" ]]; then
+    configured="$(dotenv_get "${legacy_alias_key}" "")"
+  fi
+  printf '%s\n' "${configured}"
 }
 
 print_database_target() {
@@ -302,17 +320,17 @@ start_workers() {
 
   activate_runtime
 
-  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 1)}"
-  media_workers="${media_workers:-$(dotenv_get MEDIA_WORKER_PROCS "$(dotenv_get TRANSCRIBE_WORKER_PROCS 1)")}"
-  audio_episode_workers="${audio_episode_workers:-$(dotenv_get AUDIO_EPISODE_WORKER_PROCS "$(dotenv_get TTS_WORKER_PROCS 1)")}"
-  image_workers="${image_workers:-$(dotenv_get IMAGE_WORKER_PROCS 1)}"
-  onboarding_workers="${onboarding_workers:-$(dotenv_get ONBOARDING_WORKER_PROCS 1)}"
-  backfill_workers="${backfill_workers:-$(dotenv_get BACKFILL_WORKER_PROCS 1)}"
-  discussion_workers="${discussion_workers:-$(dotenv_get DISCUSSION_WORKER_PROCS 1)}"
-  twitter_workers="${twitter_workers:-$(dotenv_get TWITTER_WORKER_PROCS 1)}"
-  chat_workers="${chat_workers:-$(dotenv_get CHAT_WORKER_PROCS 1)}"
-  learning_workers="${learning_workers:-$(dotenv_get LEARNING_WORKER_PROCS 1)}"
-  llm_workers="${llm_workers:-$(dotenv_get LLM_WORKER_PROCS 1)}"
+  content_workers="${content_workers:-$(resolve_worker_threads WORKER_THREADS_CONTENT CONTENT_WORKER_PROCS)}"
+  media_workers="${media_workers:-$(resolve_worker_threads WORKER_THREADS_MEDIA MEDIA_WORKER_PROCS TRANSCRIBE_WORKER_PROCS)}"
+  audio_episode_workers="${audio_episode_workers:-$(resolve_worker_threads WORKER_THREADS_AUDIO_EPISODE AUDIO_EPISODE_WORKER_PROCS TTS_WORKER_PROCS)}"
+  image_workers="${image_workers:-$(resolve_worker_threads WORKER_THREADS_IMAGE IMAGE_WORKER_PROCS)}"
+  onboarding_workers="${onboarding_workers:-$(resolve_worker_threads WORKER_THREADS_ONBOARDING ONBOARDING_WORKER_PROCS)}"
+  backfill_workers="${backfill_workers:-$(resolve_worker_threads WORKER_THREADS_BACKFILL BACKFILL_WORKER_PROCS)}"
+  discussion_workers="${discussion_workers:-$(resolve_worker_threads WORKER_THREADS_DISCUSSION DISCUSSION_WORKER_PROCS)}"
+  twitter_workers="${twitter_workers:-$(resolve_worker_threads WORKER_THREADS_TWITTER TWITTER_WORKER_PROCS)}"
+  chat_workers="${chat_workers:-$(resolve_worker_threads WORKER_THREADS_CHAT CHAT_WORKER_PROCS)}"
+  learning_workers="${learning_workers:-$(resolve_worker_threads WORKER_THREADS_LEARNING LEARNING_WORKER_PROCS)}"
+  llm_workers="${llm_workers:-$(resolve_worker_threads WORKER_THREADS_LLM LLM_WORKER_PROCS)}"
 
   local database_target
   database_target="$(print_database_target)"
@@ -323,69 +341,71 @@ start_workers() {
 
   ensure_playwright_chromium
 
-  if ! [[ "${content_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${media_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${audio_episode_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${image_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${onboarding_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${backfill_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${discussion_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${twitter_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${chat_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${learning_workers}" =~ ^[0-9]+$ ]] || \
-     ! [[ "${llm_workers}" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: worker counts must be non-negative integers" >&2
-    exit 1
-  fi
-
-  local total_workers=$((content_workers + media_workers + audio_episode_workers + image_workers + onboarding_workers + backfill_workers + discussion_workers + twitter_workers + chat_workers + learning_workers + llm_workers))
-  if [[ "${total_workers}" -le 0 ]]; then
+  local -a thread_overrides=(
+    "${content_workers}" "${media_workers}" "${audio_episode_workers}"
+    "${image_workers}" "${onboarding_workers}" "${backfill_workers}"
+    "${discussion_workers}" "${twitter_workers}" "${chat_workers}"
+    "${learning_workers}" "${llm_workers}"
+  )
+  local enabled_workers=0
+  local thread_override
+  for thread_override in "${thread_overrides[@]}"; do
+    if [[ -n "${thread_override}" && ! "${thread_override}" =~ ^[0-9]+$ ]]; then
+      echo "ERROR: worker thread counts must be non-negative integers" >&2
+      exit 1
+    fi
+    if [[ -z "${thread_override}" || "${thread_override}" -gt 0 ]]; then
+      enabled_workers=$((enabled_workers + 1))
+    fi
+  done
+  if [[ "${enabled_workers}" -le 0 ]]; then
     echo "ERROR: at least one worker must be enabled" >&2
     exit 1
   fi
 
   local -a pids=()
 
-  launch_worker_pool() {
+  launch_worker() {
     local queue="$1"
-    local count="$2"
-    local slot=1
+    local threads="$2"
+    if [[ "${threads}" == "0" ]]; then
+      return
+    fi
 
-    while [[ "${slot}" -le "${count}" ]]; do
-      local -a cmd=(
-        python scripts/run_workers.py
-        --queue "${queue}"
-        --worker-slot "${slot}"
-        --stats-interval "${stats_interval}"
-      )
+    local -a cmd=(
+      python scripts/run_workers.py
+      --queue "${queue}"
+      --worker-slot 1
+      --stats-interval "${stats_interval}"
+    )
+    if [[ -n "${threads}" ]]; then
+      cmd+=(--threads "${threads}")
+    fi
+    if [[ "${debug_enabled}" == "true" ]]; then
+      cmd+=(--debug)
+    fi
+    if [[ -n "${max_tasks}" ]]; then
+      cmd+=(--max-tasks "${max_tasks}")
+    fi
 
-      if [[ "${debug_enabled}" == "true" ]]; then
-        cmd+=(--debug)
-      fi
-      if [[ -n "${max_tasks}" ]]; then
-        cmd+=(--max-tasks "${max_tasks}")
-      fi
-
-      echo "Launching ${queue} worker ${slot}: ${cmd[*]}"
-      "${cmd[@]}" &
-      pids+=("$!")
-      slot=$((slot + 1))
-    done
+    echo "Launching ${queue} worker: ${cmd[*]}"
+    "${cmd[@]}" &
+    pids+=("$!")
   }
 
   trap 'for pid in "${pids[@]}"; do kill -TERM "$pid" 2>/dev/null || true; done; wait || true; exit 0' INT TERM
 
-  launch_worker_pool content "${content_workers}"
-  launch_worker_pool media "${media_workers}"
-  launch_worker_pool audio_episode "${audio_episode_workers}"
-  launch_worker_pool image "${image_workers}"
-  launch_worker_pool onboarding "${onboarding_workers}"
-  launch_worker_pool backfill "${backfill_workers}"
-  launch_worker_pool discussion "${discussion_workers}"
-  launch_worker_pool twitter "${twitter_workers}"
-  launch_worker_pool chat "${chat_workers}"
-  launch_worker_pool learning "${learning_workers}"
-  launch_worker_pool llm "${llm_workers}"
+  launch_worker content "${content_workers}"
+  launch_worker media "${media_workers}"
+  launch_worker audio_episode "${audio_episode_workers}"
+  launch_worker image "${image_workers}"
+  launch_worker onboarding "${onboarding_workers}"
+  launch_worker backfill "${backfill_workers}"
+  launch_worker discussion "${discussion_workers}"
+  launch_worker twitter "${twitter_workers}"
+  launch_worker chat "${chat_workers}"
+  launch_worker learning "${learning_workers}"
+  launch_worker llm "${llm_workers}"
 
   local exit_code=0
   for pid in "${pids[@]}"; do
@@ -633,17 +653,17 @@ start_all() {
 
   activate_runtime
 
-  content_workers="${content_workers:-$(dotenv_get CONTENT_WORKER_PROCS 1)}"
-  media_workers="${media_workers:-$(dotenv_get MEDIA_WORKER_PROCS "$(dotenv_get TRANSCRIBE_WORKER_PROCS 1)")}"
-  audio_episode_workers="${audio_episode_workers:-$(dotenv_get AUDIO_EPISODE_WORKER_PROCS "$(dotenv_get TTS_WORKER_PROCS 1)")}"
-  image_workers="${image_workers:-$(dotenv_get IMAGE_WORKER_PROCS 1)}"
-  onboarding_workers="${onboarding_workers:-$(dotenv_get ONBOARDING_WORKER_PROCS 1)}"
-  backfill_workers="${backfill_workers:-$(dotenv_get BACKFILL_WORKER_PROCS 1)}"
-  discussion_workers="${discussion_workers:-$(dotenv_get DISCUSSION_WORKER_PROCS 1)}"
-  twitter_workers="${twitter_workers:-$(dotenv_get TWITTER_WORKER_PROCS 1)}"
-  chat_workers="${chat_workers:-$(dotenv_get CHAT_WORKER_PROCS 1)}"
-  learning_workers="${learning_workers:-$(dotenv_get LEARNING_WORKER_PROCS 1)}"
-  llm_workers="${llm_workers:-$(dotenv_get LLM_WORKER_PROCS 1)}"
+  content_workers="${content_workers:-$(resolve_worker_threads WORKER_THREADS_CONTENT CONTENT_WORKER_PROCS)}"
+  media_workers="${media_workers:-$(resolve_worker_threads WORKER_THREADS_MEDIA MEDIA_WORKER_PROCS TRANSCRIBE_WORKER_PROCS)}"
+  audio_episode_workers="${audio_episode_workers:-$(resolve_worker_threads WORKER_THREADS_AUDIO_EPISODE AUDIO_EPISODE_WORKER_PROCS TTS_WORKER_PROCS)}"
+  image_workers="${image_workers:-$(resolve_worker_threads WORKER_THREADS_IMAGE IMAGE_WORKER_PROCS)}"
+  onboarding_workers="${onboarding_workers:-$(resolve_worker_threads WORKER_THREADS_ONBOARDING ONBOARDING_WORKER_PROCS)}"
+  backfill_workers="${backfill_workers:-$(resolve_worker_threads WORKER_THREADS_BACKFILL BACKFILL_WORKER_PROCS)}"
+  discussion_workers="${discussion_workers:-$(resolve_worker_threads WORKER_THREADS_DISCUSSION DISCUSSION_WORKER_PROCS)}"
+  twitter_workers="${twitter_workers:-$(resolve_worker_threads WORKER_THREADS_TWITTER TWITTER_WORKER_PROCS)}"
+  chat_workers="${chat_workers:-$(resolve_worker_threads WORKER_THREADS_CHAT CHAT_WORKER_PROCS)}"
+  learning_workers="${learning_workers:-$(resolve_worker_threads WORKER_THREADS_LEARNING LEARNING_WORKER_PROCS)}"
+  llm_workers="${llm_workers:-$(resolve_worker_threads WORKER_THREADS_LLM LLM_WORKER_PROCS)}"
 
   local database_target
   database_target="$(print_database_target)"
@@ -685,19 +705,25 @@ start_all() {
   local -a workers_cmd=(
     "${SCRIPT_DIR}/start_services.sh" workers
     --env-file "${ENV_FILE}"
-    --content-workers "${content_workers}"
-    --media-workers "${media_workers}"
-    --audio-episode-workers "${audio_episode_workers}"
-    --image-workers "${image_workers}"
-    --onboarding-workers "${onboarding_workers}"
-    --backfill-workers "${backfill_workers}"
-    --discussion-workers "${discussion_workers}"
-    --twitter-workers "${twitter_workers}"
-    --chat-workers "${chat_workers}"
-    --learning-workers "${learning_workers}"
-    --llm-workers "${llm_workers}"
     --stats-interval "${stats_interval}"
   )
+  local -a worker_flags=(
+    --content-workers --media-workers --audio-episode-workers --image-workers
+    --onboarding-workers --backfill-workers --discussion-workers --twitter-workers
+    --chat-workers --learning-workers --llm-workers
+  )
+  local -a worker_values=(
+    "${content_workers}" "${media_workers}" "${audio_episode_workers}"
+    "${image_workers}" "${onboarding_workers}" "${backfill_workers}"
+    "${discussion_workers}" "${twitter_workers}" "${chat_workers}"
+    "${learning_workers}" "${llm_workers}"
+  )
+  local worker_index
+  for worker_index in "${!worker_flags[@]}"; do
+    if [[ -n "${worker_values[$worker_index]}" ]]; then
+      workers_cmd+=("${worker_flags[$worker_index]}" "${worker_values[$worker_index]}")
+    fi
+  done
   if [[ "${debug_mode}" == "true" ]]; then
     workers_cmd+=(--debug)
   fi

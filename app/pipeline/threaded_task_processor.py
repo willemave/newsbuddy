@@ -57,6 +57,8 @@ class ThreadedTaskProcessor:
         *,
         threads: int = 1,
     ) -> None:
+        if threads < 1:
+            raise ValueError("threads must be at least 1")
         self.queue_name = QueueService._normalize_queue_name(queue_name) or TaskQueue.CONTENT.value
         self.worker_slot = worker_slot
         self.threads = threads
@@ -77,6 +79,14 @@ class ThreadedTaskProcessor:
                 after the remaining loops stop, so the supervisor restarts a
                 process whose threads died instead of leaving it short-handed.
         """
+        if max_tasks is not None and max_tasks < 1:
+            raise ValueError("max_tasks must be at least 1")
+
+        # A bounded run preserves the historical process-wide contract by using
+        # one claim loop. This keeps the cap exact without a second shared state
+        # machine for reserving and returning task-budget permits.
+        claim_loop_count = 1 if max_tasks is not None else self.threads
+
         self._install_signal_handlers()
         warm_queue_models(self.queue_name)
         self._listener.start()
@@ -86,17 +96,17 @@ class ThreadedTaskProcessor:
                 self.worker_slot,
                 # A lone claim loop keeps the historical unsuffixed worker id, so
                 # --threads 1 stays a clean rollback.
-                thread_index=index if self.threads > 1 else None,
+                thread_index=index if claim_loop_count > 1 else None,
                 notification_listener=self._listener,
             )
-            for index in range(1, self.threads + 1)
+            for index in range(1, claim_loop_count + 1)
         ]
 
         logger.info(
             "Starting threaded task processor (queue=%s, slot=%s, threads=%s)",
             self.queue_name,
             self.worker_slot,
-            self.threads,
+            claim_loop_count,
             extra=self._log_extra(operation="start", status="started"),
         )
 
@@ -199,5 +209,5 @@ class ThreadedTaskProcessor:
             status=status,
             queue_name=self.queue_name,
             source="queue",
-            context_data={"threads": self.threads, **(context_data or {})},
+            context_data={"configured_threads": self.threads, **(context_data or {})},
         )

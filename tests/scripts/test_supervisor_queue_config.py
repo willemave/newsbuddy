@@ -110,3 +110,15 @@ def test_full_and_worker_docker_profiles_share_worker_programs() -> None:
     for config_path in ("docker/supervisord.conf", "docker/supervisord.workers.conf"):
         parser = _load_config(config_path)
         assert parser.get("include", "files") == ("/app/docker/supervisord.worker-programs.conf")
+
+
+def test_local_launchers_use_one_process_per_queue() -> None:
+    """Local overrides tune threads; they must not multiply threaded processes."""
+    project_root = Path(__file__).resolve().parents[2]
+    start_services = (project_root / "scripts/start_services.sh").read_text()
+    dev_script = (project_root / "scripts/dev.sh").read_text()
+
+    assert 'cmd+=(--threads "${threads}")' in start_services
+    assert '--worker-slot "${slot}"' not in start_services
+    assert 'seq 1 "$content_worker_procs"' not in dev_script
+    assert 'seq 1 "$llm_worker_procs"' not in dev_script
