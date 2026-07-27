@@ -91,7 +91,7 @@ def test_onboarding_complete_seeds_configs_tasks_and_visible_content(
         lambda url: {"feed_url": url},
     )
     monkeypatch.setattr(
-        "app.services.onboarding.get_task_queue_gateway",
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
         lambda: _FakeQueueGateway(),
     )
 

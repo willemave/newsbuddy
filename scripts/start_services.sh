@@ -25,7 +25,7 @@ Common options:
 Examples:
   scripts/start_services.sh all --env-file .env
   scripts/start_services.sh server --port 8000 --reload
-  scripts/start_services.sh workers --content-workers 6 --discussion-workers 4 --media-workers 3 --learning-workers 4 --llm-workers 4
+  scripts/start_services.sh workers --content-workers 6 --discussion-workers 4 --media-workers 3 --llm-workers 4
   scripts/start_services.sh migrate --env-file .env
 EOF
 }
@@ -234,7 +234,6 @@ start_workers() {
   local discussion_workers=""
   local twitter_workers=""
   local chat_workers=""
-  local learning_workers=""
   local llm_workers=""
 
   while [[ $# -gt 0 ]]; do
@@ -291,10 +290,6 @@ start_workers() {
         chat_workers="$2"
         shift 2
         ;;
-      --learning-workers)
-        learning_workers="$2"
-        shift 2
-        ;;
       --llm-workers)
         llm_workers="$2"
         shift 2
@@ -329,7 +324,6 @@ start_workers() {
   discussion_workers="${discussion_workers:-$(resolve_worker_threads WORKER_THREADS_DISCUSSION DISCUSSION_WORKER_PROCS)}"
   twitter_workers="${twitter_workers:-$(resolve_worker_threads WORKER_THREADS_TWITTER TWITTER_WORKER_PROCS)}"
   chat_workers="${chat_workers:-$(resolve_worker_threads WORKER_THREADS_CHAT CHAT_WORKER_PROCS)}"
-  learning_workers="${learning_workers:-$(resolve_worker_threads WORKER_THREADS_LEARNING LEARNING_WORKER_PROCS)}"
   llm_workers="${llm_workers:-$(resolve_worker_threads WORKER_THREADS_LLM LLM_WORKER_PROCS)}"
 
   local database_target
@@ -345,7 +339,7 @@ start_workers() {
     "${content_workers}" "${media_workers}" "${audio_episode_workers}"
     "${image_workers}" "${onboarding_workers}" "${backfill_workers}"
     "${discussion_workers}" "${twitter_workers}" "${chat_workers}"
-    "${learning_workers}" "${llm_workers}"
+    "${llm_workers}"
   )
   local enabled_workers=0
   local thread_override
@@ -404,7 +398,6 @@ start_workers() {
   launch_worker discussion "${discussion_workers}"
   launch_worker twitter "${twitter_workers}"
   launch_worker chat "${chat_workers}"
-  launch_worker learning "${learning_workers}"
   launch_worker llm "${llm_workers}"
 
   local exit_code=0
@@ -548,7 +541,6 @@ start_all() {
   local discussion_workers=""
   local twitter_workers=""
   local chat_workers=""
-  local learning_workers=""
   local llm_workers=""
   local stats_interval="30"
   local max_tasks=""
@@ -620,10 +612,6 @@ start_all() {
         chat_workers="$2"
         shift 2
         ;;
-      --learning-workers)
-        learning_workers="$2"
-        shift 2
-        ;;
       --llm-workers)
         llm_workers="$2"
         shift 2
@@ -662,7 +650,6 @@ start_all() {
   discussion_workers="${discussion_workers:-$(resolve_worker_threads WORKER_THREADS_DISCUSSION DISCUSSION_WORKER_PROCS)}"
   twitter_workers="${twitter_workers:-$(resolve_worker_threads WORKER_THREADS_TWITTER TWITTER_WORKER_PROCS)}"
   chat_workers="${chat_workers:-$(resolve_worker_threads WORKER_THREADS_CHAT CHAT_WORKER_PROCS)}"
-  learning_workers="${learning_workers:-$(resolve_worker_threads WORKER_THREADS_LEARNING LEARNING_WORKER_PROCS)}"
   llm_workers="${llm_workers:-$(resolve_worker_threads WORKER_THREADS_LLM LLM_WORKER_PROCS)}"
 
   local database_target
@@ -710,13 +697,13 @@ start_all() {
   local -a worker_flags=(
     --content-workers --media-workers --audio-episode-workers --image-workers
     --onboarding-workers --backfill-workers --discussion-workers --twitter-workers
-    --chat-workers --learning-workers --llm-workers
+    --chat-workers --llm-workers
   )
   local -a worker_values=(
     "${content_workers}" "${media_workers}" "${audio_episode_workers}"
     "${image_workers}" "${onboarding_workers}" "${backfill_workers}"
     "${discussion_workers}" "${twitter_workers}" "${chat_workers}"
-    "${learning_workers}" "${llm_workers}"
+    "${llm_workers}"
   )
   local worker_index
   for worker_index in "${!worker_flags[@]}"; do

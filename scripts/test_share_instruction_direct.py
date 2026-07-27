@@ -10,8 +10,6 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import HttpUrl, TypeAdapter
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -67,7 +65,7 @@ def main(urls: Iterable[str], instruction: str, email: str) -> None:
 
         for url in urls:
             payload = SubmitContentRequest(
-                url=TypeAdapter(HttpUrl).validate_python(url),
+                url=url,
                 content_type=ContentType.ARTICLE,
                 title=None,
                 instruction=instruction,

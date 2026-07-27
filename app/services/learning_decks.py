@@ -162,14 +162,6 @@ def create_or_rerun_learning_deck(
 
     try:
         deck = _get_or_create_deck(db, user_id=user_id, source=source)
-        active_legacy_run = _active_legacy_learning_deck_run(db, user_id=user_id)
-        if active_legacy_run is not None:
-            if active_legacy_run.deck_id == deck.id:
-                db.commit()
-                db.refresh(deck)
-                return deck
-            db.rollback()
-            raise LearningDeckError("A Learning Deck is already generating", status_code=409)
         active_task = _active_learning_deck_task(db, user_id=user_id)
         if active_task is not None:
             if active_task.subject_id == deck.id:
@@ -554,23 +546,6 @@ def _active_learning_deck_task(db: Session, *, user_id: int) -> LlmTask | None:
             LlmTask.status.in_(ACTIVE_LLM_TASK_STATUSES),
         )
         .order_by(desc(LlmTask.created_at), desc(LlmTask.id))
-        .first()
-    )
-
-
-def _active_legacy_learning_deck_run(
-    db: Session,
-    *,
-    user_id: int,
-) -> LearningDeckRun | None:
-    """Honor in-flight pre-cutover runs until the legacy queue drains."""
-    return (
-        db.query(LearningDeckRun)
-        .filter(
-            LearningDeckRun.user_id == user_id,
-            LearningDeckRun.status.in_(ACTIVE_RUN_STATUSES),
-        )
-        .order_by(desc(LearningDeckRun.created_at), desc(LearningDeckRun.id))
         .first()
     )
 

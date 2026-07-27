@@ -25,7 +25,6 @@ def test_settings_default_directories(monkeypatch, tmp_path):
 
     assert settings.media_base_dir == tmp_path / "data" / "media"
     assert settings.logs_base_dir == tmp_path / "logs"
-    assert settings.podcast_media_dir == (tmp_path / "data" / "media" / "podcasts").resolve()
     assert (
         settings.tweet_video_media_dir == (tmp_path / "data" / "media" / "tweet_videos").resolve()
     )

@@ -137,6 +137,23 @@ class TestContentToDomain:
 class TestDomainToContent:
     """Test converting domain ContentData to database Content."""
 
+    def test_content_data_keeps_validated_metadata_projection(self):
+        """Pydantic coercions should be retained instead of validating and discarding them."""
+        domain_content = ContentData(
+            content_type=ContentType.ARTICLE,
+            url=HttpUrl("https://example.com/validated-metadata"),
+            metadata={
+                "author": "Example Author",
+                "word_count": "1200",
+                "publication_date": "2026-07-25T10:30:00Z",
+                "provider_payload": {"request_id": "req-1"},
+            },
+        )
+
+        assert domain_content.metadata["word_count"] == 1200
+        assert domain_content.metadata["publication_date"] == "2026-07-25T10:30:00Z"
+        assert domain_content.metadata["provider_payload"] == {"request_id": "req-1"}
+
     def test_convert_new_article_domain(self):
         """Test converting new article domain model to database."""
         domain_content = ContentData(

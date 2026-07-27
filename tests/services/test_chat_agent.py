@@ -11,11 +11,12 @@ from pydantic_ai.messages import (
     TextPart,
     UserPromptPart,
 )
+from sqlalchemy.orm import object_session
 
 from app.core.settings import get_settings
-from app.models.contracts import ContentType
-from app.models.db import ChatSession, Content
-from app.routers.api.chat import _extract_messages_for_display
+from app.models.contracts import ContentType, LlmTaskStatus, MessageProcessingStatus
+from app.models.db import ChatMessage, ChatSession, Content, LlmTask
+from app.queries.chat_read_models import extract_messages_for_display
 from app.services import chat_agent
 from app.services.chat_agent import (
     ARTICLE_CHAT_TURN_SPEC,
@@ -30,6 +31,7 @@ from app.services.chat_agent import (
     load_message_history,
     save_messages,
 )
+from app.services.chat_turn_runtime import ChatUsageSnapshot
 from app.services.sandbox_runtime import (
     LocalPersonalLibrarySandboxSession,
     SandboxRuntimeUnavailableError,
@@ -160,7 +162,8 @@ def test_build_chat_deps_prefers_session_context_snapshot(db_session) -> None:
 
     assert deps.article_context == "News bullets:\n- Bullet A\n- Bullet B"
     assert deps.context_label == "Session Context"
-    assert deps.content is None
+    assert deps.has_content is False
+    assert not any(isinstance(value, (ChatSession, Content)) for value in vars(deps).values())
     assert "Overview text" not in deps.article_context
     assert "full article body" not in deps.article_context
 
@@ -190,7 +193,8 @@ def test_build_chat_deps_uses_processed_content_for_knowledge_chat(db_session) -
 
     deps = _build_chat_deps(db_session, session, include_full_text=True)
 
-    assert deps.content is content
+    assert deps.has_content is True
+    assert not any(isinstance(value, (ChatSession, Content)) for value in vars(deps).values())
     assert deps.context_label == "Article Context"
     assert deps.article_context is not None
     assert "full processed article body" in deps.article_context
@@ -234,18 +238,10 @@ def test_build_context_prompt_parts_marks_snapshot_as_reference_material() -> No
 
 
 def test_build_run_user_prompt_includes_snapshot_context() -> None:
-    session = ChatSession(
-        user_id=123,
-        title="News chat",
-        session_type="article_brain",
-        context_snapshot="News bullets:\n- Bullet A\n- Bullet B",
-        llm_provider="anthropic",
-        llm_model="anthropic:claude-opus-4-6",
-    )
-
     deps = ChatDeps(
-        session=session,
-        content=None,
+        session_id=123,
+        user_id=123,
+        has_context_snapshot=True,
         article_context="News bullets:\n- Bullet A\n- Bullet B",
         context_label="Session Context",
     )
@@ -371,35 +367,188 @@ def test_generate_initial_suggestions_persists_assistant_only_transcript(
     db_session.add(session)
     db_session.commit()
     db_session.refresh(session)
+    user_id = int(test_user.id)
+    assert session.id is not None
+    session_id = int(session.id)
+    db_session.close()
 
-    async def _fake_run_in_threadpool(*_args, **_kwargs):
+    agent_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    usage_calls: list[tuple[object, ChatUsageSnapshot, int, int | None, str]] = []
+
+    async def _fake_run_in_threadpool(*args, **kwargs):
+        assert not db_session.in_transaction()
+        assert object_session(session) is None
+        agent_calls.append((args, kwargs))
         return SimpleNamespace(
             output="Here are a few useful directions.",
             all_messages=[],
-            tool_calls=[],
+            tool_calls=[SimpleNamespace(name="search_personal_library")],
         )
+
+    def _fake_build_chat_deps(_db, current_session, **_kwargs):  # noqa: ANN001
+        assert _db is not db_session
+        return ChatDeps(
+            session_id=int(current_session.id),
+            user_id=int(current_session.user_id),
+            content_id=current_session.content_id,
+            has_content=True,
+            article_context="Article context",
+        )
+
+    def _capture_usage(result, snapshot, session_id, message_id, context):  # noqa: ANN001
+        usage_calls.append((result, snapshot, session_id, message_id, context))
+
+    monkeypatch.setattr(
+        chat_agent,
+        "_build_chat_deps",
+        _fake_build_chat_deps,
+    )
+    monkeypatch.setattr(chat_agent, "resolve_effective_api_key", lambda **_kwargs: None)
+    monkeypatch.setattr(chat_agent, "_log_chat_usage", _capture_usage)
+    monkeypatch.setattr(chat_agent, "run_in_threadpool", _fake_run_in_threadpool)
+
+    result = asyncio.run(
+        generate_initial_suggestions(
+            session_id,
+            source="queue",
+            task_id=77,
+        )
+    )
+
+    assert result is not None
+    assert result.output_text == "Here are a few useful directions."
+    assert [getattr(call, "name", None) for call in result.tool_calls] == [
+        "search_personal_library"
+    ]
+    display_messages = extract_messages_for_display(db_session, session_id)
+    assert [message.role.value for message in display_messages] == ["assistant"]
+    assert display_messages[0].content == "Here are a few useful directions."
+    assert "You are starting a new conversation" not in display_messages[0].content
+
+    assert len(agent_calls) == 1
+    args, kwargs = agent_calls[0]
+    assert args[1] == "openai:gpt-5.4"
+    assert args[2] == chat_agent.INITIAL_QUESTIONS_PROMPT
+    assert args[4] == []
+    assert kwargs["trace_name"] == "chat.initial_suggestions"
+    assert kwargs["source"] == "queue"
+    assert kwargs["task_id"] == 77
+    assert len(usage_calls) == 1
+    _, usage_snapshot, usage_session_id, usage_message_id, usage_context = usage_calls[0]
+    assert usage_snapshot.user_id == user_id
+    assert usage_snapshot.model == "openai:gpt-5.4"
+    assert usage_session_id == session_id
+    assert usage_message_id is None
+    assert usage_context == "initial_suggestions"
+
+    task = db_session.query(LlmTask).filter(LlmTask.user_id == user_id).one()
+    assert task.status == LlmTaskStatus.COMPLETED.value
+    assert task.input_json["operation"] == "initial_suggestions"
+    assert task.input_json["queue_task_id"] == 77
+    assert task.output_json["chat_session_id"] == session_id
+    assert task.output_json["message_id"] == display_messages[0].source_message_id
+    assert task.output_json["tool_names"] == ["search_personal_library"]
+
+
+def test_generate_initial_suggestions_skips_sessions_without_context(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Empty chat",
+        session_type="knowledge_chat",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.4",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    user_id = int(test_user.id)
+    assert session.id is not None
+    session_id = int(session.id)
+    db_session.close()
+
+    async def _unexpected_agent_call(*_args, **_kwargs):
+        raise AssertionError("No-context suggestions must not call the model")
+
+    monkeypatch.setattr(chat_agent, "run_in_threadpool", _unexpected_agent_call)
+
+    result = asyncio.run(generate_initial_suggestions(session_id))
+
+    assert result is None
+    assert db_session.query(LlmTask).filter(LlmTask.user_id == user_id).count() == 0
+    assert db_session.query(ChatMessage).filter(ChatMessage.session_id == session_id).count() == 0
+
+
+def test_generate_initial_suggestions_records_failure_without_partial_message(
+    db_session,
+    test_user,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    content = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://example.com/failing-article",
+        title="Failing article",
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+    session = ChatSession(
+        user_id=test_user.id,
+        content_id=content.id,
+        title="Failing article chat",
+        session_type="knowledge_chat",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.4",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    user_id = int(test_user.id)
+    assert session.id is not None
+    session_id = int(session.id)
+    db_session.close()
+    sandbox_closed: list[bool] = []
+    sandbox = LocalPersonalLibrarySandboxSession(library_root=tmp_path)
+    monkeypatch.setattr(sandbox, "close", lambda: sandbox_closed.append(True))
 
     monkeypatch.setattr(
         chat_agent,
         "_build_chat_deps",
         lambda _db, current_session, **_kwargs: ChatDeps(
-            session=current_session,
-            content=content,
+            session_id=int(current_session.id),
+            user_id=int(current_session.user_id),
+            content_id=current_session.content_id,
+            has_content=True,
             article_context="Article context",
+            sandbox_session=sandbox,
         ),
     )
     monkeypatch.setattr(chat_agent, "resolve_effective_api_key", lambda **_kwargs: None)
-    monkeypatch.setattr(chat_agent, "_log_chat_usage", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(chat_agent, "run_in_threadpool", _fake_run_in_threadpool)
+    monkeypatch.setattr(
+        chat_agent,
+        "_log_chat_usage",
+        lambda *_args, **_kwargs: pytest.fail("Failed calls must not record usage"),
+    )
 
-    assert session.id is not None
-    result = asyncio.run(generate_initial_suggestions(db_session, session))
+    async def _failing_agent_call(*_args, **_kwargs):
+        assert not db_session.in_transaction()
+        raise RuntimeError("provider unavailable")
 
-    assert result is not None
-    display_messages = _extract_messages_for_display(db_session, session.id)
-    assert [message.role.value for message in display_messages] == ["assistant"]
-    assert display_messages[0].content == "Here are a few useful directions."
-    assert "You are starting a new conversation" not in display_messages[0].content
+    monkeypatch.setattr(chat_agent, "run_in_threadpool", _failing_agent_call)
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        asyncio.run(generate_initial_suggestions(session_id))
+
+    assert sandbox_closed == [True]
+    assert db_session.query(ChatMessage).filter(ChatMessage.session_id == session_id).count() == 0
+    task = db_session.query(LlmTask).filter(LlmTask.user_id == user_id).one()
+    assert task.status == LlmTaskStatus.FAILED.value
+    assert task.error_type == "RuntimeError"
+    assert task.error_message == "provider unavailable"
 
 
 def test_build_chat_deps_prepares_personal_library_runtime(
@@ -540,8 +689,9 @@ def test_run_chat_turn_builds_deps_with_library_tools_enabled(
         del db, include_full_text
         captured_flags.append(include_library_tools)
         return ChatDeps(
-            session=current_session,
-            content=None,
+            session_id=int(current_session.id),
+            user_id=int(current_session.user_id),
+            content_id=current_session.content_id,
             article_context=None,
         )
 
@@ -565,3 +715,81 @@ def test_run_chat_turn_builds_deps_with_library_tools_enabled(
 
     assert result.output_text == "Mocked assistant reply"
     assert captured_flags == [True]
+
+
+def test_process_message_async_persists_completion_usage_and_ledger(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Detached article chat",
+        session_type="knowledge_chat",
+        context_snapshot="Saved context",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.5",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+    session_id = int(session.id)
+    message = create_processing_message(db_session, session_id, "What changed?")
+    assert message.id is not None
+    message_id = int(message.id)
+    usage_calls: list[tuple[int, int | None, str]] = []
+
+    monkeypatch.setattr(
+        chat_agent,
+        "_build_chat_deps",
+        lambda _db, current_session, **_kwargs: ChatDeps(
+            session_id=int(current_session.id),
+            user_id=int(current_session.user_id),
+            content_id=current_session.content_id,
+            has_context_snapshot=True,
+            article_context="Saved context",
+            context_label="Session Context",
+        ),
+    )
+    monkeypatch.setattr(chat_agent, "load_message_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(chat_agent, "resolve_effective_api_key", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        chat_agent,
+        "_log_chat_usage",
+        lambda _result, _snapshot, sid, mid, context: usage_calls.append((sid, mid, context)),
+    )
+
+    async def _fake_run_in_threadpool(_func, _model, prompt, deps, history, **_kwargs):
+        assert prompt == "What changed?"
+        assert deps.session_id == session_id
+        assert deps.user_id == test_user.id
+        assert history == []
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="model-facing prompt")]),
+            ModelResponse(parts=[TextPart(content="A detached answer")]),
+        ]
+        return SimpleNamespace(
+            output="A detached answer",
+            tool_calls=[],
+            new_messages=lambda: messages,
+        )
+
+    monkeypatch.setattr(chat_agent, "run_in_threadpool", _fake_run_in_threadpool)
+
+    asyncio.run(chat_agent.process_message_async(session_id, message_id, "What changed?"))
+
+    db_session.expire_all()
+    persisted_message = db_session.query(ChatMessage).filter_by(id=message_id).one()
+    ledger = (
+        db_session.query(LlmTask)
+        .filter(LlmTask.workflow_key == "chat.article.v1")
+        .order_by(LlmTask.id.desc())
+        .first()
+    )
+    assert persisted_message.status == MessageProcessingStatus.COMPLETED.value
+    assert json.loads(persisted_message.message_list)[0]["parts"][0]["content"] == "What changed?"
+    assert usage_calls == [(session_id, message_id, "async")]
+    assert ledger is not None
+    assert ledger.status == LlmTaskStatus.COMPLETED.value
+    assert ledger.output_json["message_id"] == message_id

@@ -47,11 +47,6 @@ class ScraperRunner:
             DiscussionCommentsScraper(),
         ]
 
-    def run_all(self) -> dict[str, int]:
-        """Run all scrapers and return results. Returns counts for backward compatibility."""
-        stats = self.run_all_with_stats()
-        return {name: stat.saved for name, stat in stats.items()}
-
     def run_all_with_stats(self) -> dict[str, ScraperStats]:
         """Run all scrapers and return detailed statistics."""
         logger.info(
@@ -118,11 +113,6 @@ class ScraperRunner:
         )
 
         return results
-
-    def run_scraper(self, name: str) -> int | None:
-        """Run a specific scraper by name. Returns count for backward compatibility."""
-        stats = self.run_scraper_with_stats(name)
-        return stats.saved if stats else None
 
     def run_scraper_with_stats(self, name: str) -> ScraperStats | None:
         """Run a specific scraper by name and return detailed statistics."""

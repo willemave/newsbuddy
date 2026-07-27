@@ -59,6 +59,10 @@ class FakeSubmission:
         self.num_comments = num_comments
         self.comment_sort: str | None = None
         self.comments = FakeCommentForest(comments)
+        self.author: FakeAuthor | None = None
+        self.score = 0
+        self.created_utc = 0
+        self.subreddit: object | None = None
 
 
 class FakeRedditClient:

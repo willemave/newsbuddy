@@ -8,7 +8,7 @@ import feedparser
 
 from app.models.contracts import ContentStatus, ContentType
 from app.models.domain.content import ContentData
-from app.pipeline.podcast_workers import PodcastDownloadWorker
+from app.pipeline.podcast_workers import PodcastMediaWorker
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 
 
@@ -177,7 +177,7 @@ class TestPodcastAudioExtraction:
         mock_feed.feed = {"title": "Lenny's Podcast"}
 
         with (
-            patch("app.scraping.podcast_unified.feedparser.parse", return_value=mock_feed),
+            patch("app.scraping.podcast_unified.fetch_and_parse_feed", return_value=mock_feed),
             patch.object(
                 PodcastUnifiedScraper,
                 "_load_podcast_feeds",
@@ -201,12 +201,12 @@ class TestPodcastAudioExtraction:
             assert item["metadata"]["feed_name"] == "Lenny's Podcast"
 
 
-class TestPodcastDownloadWorker:
-    """Test podcast download worker functionality."""
+class TestPodcastMediaWorkerHelpers:
+    """Test podcast media worker helper functionality."""
 
     def test_extract_anchor_redirect_url(self):
         """Test extracting actual audio URL from Anchor.fm redirect."""
-        worker = PodcastDownloadWorker()
+        worker = PodcastMediaWorker()
 
         redirect_url = "https://anchor.fm/s/f06c2370/podcast/play/103731634/https%3A%2F%2Fd3ctxlq1ktw2nl.cloudfront.net%2Fstaging%2F2025-5-14%2F394074513-44100-2-77e5a2cb613f6.mp3"
 
@@ -219,7 +219,7 @@ class TestPodcastDownloadWorker:
 
     def test_extract_normal_url(self):
         """Test that normal URLs are returned unchanged."""
-        worker = PodcastDownloadWorker()
+        worker = PodcastMediaWorker()
 
         normal_url = "https://example.com/episode.mp3"
 
@@ -229,14 +229,14 @@ class TestPodcastDownloadWorker:
 
     def test_validate_url_valid(self):
         """Test URL validation with valid URL."""
-        worker = PodcastDownloadWorker()
+        worker = PodcastMediaWorker()
 
         assert worker._validate_url("https://example.com/episode.mp3") is True
         assert worker._validate_url("http://example.com/episode.mp3") is True
 
     def test_validate_url_invalid(self):
         """Test URL validation with invalid URLs."""
-        worker = PodcastDownloadWorker()
+        worker = PodcastMediaWorker()
 
         assert worker._validate_url("not a url") is False
         assert worker._validate_url("") is False
@@ -245,7 +245,7 @@ class TestPodcastDownloadWorker:
 
     def test_process_download_no_audio_url(self):
         """Test download fails gracefully when no audio URL in metadata."""
-        worker = PodcastDownloadWorker()
+        worker = PodcastMediaWorker()
 
         # Mock database and content, and the domain converter
         with (
@@ -277,7 +277,7 @@ class TestPodcastDownloadWorker:
 
             mock_db.query.return_value.filter.return_value.first.return_value = mock_content
 
-            result = worker.process_download_task(1)
+            result = worker.process_media_task(1)
 
             assert result is False
             assert mock_content.status == ContentStatus.FAILED.value
@@ -286,7 +286,7 @@ class TestPodcastDownloadWorker:
 
     def test_process_download_invalid_url(self):
         """Test download fails gracefully with invalid audio URL."""
-        worker = PodcastDownloadWorker()
+        worker = PodcastMediaWorker()
 
         with (
             patch("app.pipeline.podcast_workers.get_db") as mock_get_db,
@@ -304,6 +304,7 @@ class TestPodcastDownloadWorker:
                 content_metadata={"feed_name": "Test Feed", "audio_url": "not a valid url"},
                 status=ContentStatus.NEW.value,
                 error_message=None,
+                retry_count=0,
             )
 
             mock_domain_content = ContentData(
@@ -317,7 +318,7 @@ class TestPodcastDownloadWorker:
 
             mock_db.query.return_value.filter.return_value.first.return_value = mock_content
 
-            result = worker.process_download_task(1)
+            result = worker.process_media_task(1)
 
             assert result is False
             assert mock_content.status == ContentStatus.FAILED.value
@@ -344,7 +345,7 @@ class TestPodcastIntegration:
         mock_feed.feed = {"title": "Test Feed"}
 
         with (
-            patch("app.scraping.podcast_unified.feedparser.parse", return_value=mock_feed),
+            patch("app.scraping.podcast_unified.fetch_and_parse_feed", return_value=mock_feed),
             patch.object(
                 PodcastUnifiedScraper,
                 "_load_podcast_feeds",

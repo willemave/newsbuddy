@@ -9,14 +9,17 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.models.api.content_actions import ConvertNewsResponse
+from app.models.api.news import ConvertNewsItemResponse
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, NewsItem
 from app.repositories import knowledge_repository
 from app.services import knowledge as knowledge_service
 from app.services.content_bodies import persist_content_body
 from app.services.news_article_bodies import get_news_item_article_body_resolver
+from app.services.news_feed import get_visible_news_item
 from app.services.queue import TaskType, get_queue_service
 from app.services.source_metadata import SOURCE_METADATA_KEY, dump_source_metadata
+from app.utils.news_titles import get_news_article_title
 from app.utils.url_utils import is_http_url, normalize_http_url
 
 logger = get_logger(__name__)
@@ -213,6 +216,45 @@ def execute(db: Session, *, content_id: int, user_id: int) -> ConvertNewsRespons
         status="success",
         new_content_id=article.id,
         original_content_id=content_id,
+        already_exists=already_exists,
+        message=(
+            "Article already exists in system"
+            if already_exists
+            else "Article created and queued for processing"
+        ),
+    )
+
+
+def execute_news_item(
+    db: Session,
+    *,
+    user_id: int,
+    news_item_id: int,
+) -> ConvertNewsItemResponse:
+    """Convert a visible news item into saved article content."""
+    item = get_visible_news_item(db, user_id=user_id, news_item_id=news_item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="News item not found")
+
+    article_url = normalize_http_url(item.article_url or item.canonical_story_url)
+    if not is_http_url(article_url):
+        raise HTTPException(status_code=400, detail="No article URL found for news item")
+    canonical_article_url = cast(str, article_url)
+
+    article, already_exists = convert_article_url_to_content(
+        db,
+        article_url=canonical_article_url,
+        title=get_news_article_title(item.raw_metadata) or item.article_title,
+        source=item.article_domain,
+        news_item=item,
+    )
+    if item.id is None or article.id is None:
+        raise HTTPException(status_code=500, detail="Converted content is missing required ids")
+    ensure_article_saved_to_knowledge(db, user_id=user_id, content_id=article.id)
+
+    return ConvertNewsItemResponse(
+        news_item_id=item.id,
+        new_content_id=article.id,
         already_exists=already_exists,
         message=(
             "Article already exists in system"

@@ -299,27 +299,6 @@ def request_llm_task_action(
     )
 
 
-def propose_llm_task_action(
-    db: Session,
-    *,
-    task: LlmTask,
-    action_name: str,
-    action_input: dict[str, Any],
-    rationale: str | None = None,
-    idempotency_key: str | None = None,
-) -> LlmTaskAction:
-    """Record a visible proposed action without auto-applying it."""
-    return _create_action(
-        db,
-        task=task,
-        action_name=action_name,
-        action_input=action_input,
-        rationale=rationale,
-        idempotency_key=idempotency_key,
-        force_proposed=True,
-    )
-
-
 def approve_llm_task_action(
     db: Session,
     *,

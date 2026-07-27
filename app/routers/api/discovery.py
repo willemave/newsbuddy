@@ -10,6 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.commands import add_discovery_items as add_discovery_items_command
+from app.commands import dismiss_discovery_suggestions as dismiss_discovery_suggestions_command
 from app.commands import (
     subscribe_discovery_suggestions as subscribe_discovery_suggestions_command,
 )
@@ -37,7 +38,6 @@ from app.models.db import (
     UserScraperConfig,
 )
 from app.models.db.users import User
-from app.repositories.discovery_repository import list_user_suggestions_by_ids
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.podcast_search import search_podcast_episodes
 from app.services.queue import TaskType
@@ -378,21 +378,11 @@ def dismiss_discovery_suggestions(
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryDismissResponse:
-    user_id = require_user_id(current_user)
-    suggestions = list_user_suggestions_by_ids(
+    return dismiss_discovery_suggestions_command.execute(
         db,
-        user_id=user_id,
-        suggestion_ids=payload.suggestion_ids,
+        user_id=require_user_id(current_user),
+        payload=payload,
     )
-
-    dismissed: list[int] = []
-    for suggestion in suggestions:
-        suggestion.status = "dismissed"
-        if suggestion.id is not None:
-            dismissed.append(suggestion.id)
-
-    db.commit()
-    return DiscoveryDismissResponse(dismissed=dismissed)
 
 
 @router.post(
@@ -404,17 +394,7 @@ def clear_discovery_suggestions(
     db: Session = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ) -> DiscoveryDismissResponse:
-    user_id = require_user_id(current_user)
-    suggestions = (
-        db.query(FeedDiscoverySuggestion).filter(FeedDiscoverySuggestion.user_id == user_id).all()
+    return dismiss_discovery_suggestions_command.clear_all(
+        db,
+        user_id=require_user_id(current_user),
     )
-
-    dismissed: list[int] = []
-    for suggestion in suggestions:
-        if suggestion.status != "dismissed":
-            suggestion.status = "dismissed"
-            if suggestion.id is not None:
-                dismissed.append(suggestion.id)
-
-    db.commit()
-    return DiscoveryDismissResponse(dismissed=dismissed)

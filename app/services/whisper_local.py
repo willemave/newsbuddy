@@ -110,14 +110,6 @@ class WhisperLocalTranscriptionService:
             logger.error(f"Error transcribing audio with local Whisper: {e}")
             raise
 
-    def cleanup_service(self):
-        """Clean up the model from memory."""
-        with _TRANSCRIPTION_SINGLE_FLIGHT:
-            if self.model is not None:
-                del self.model
-                self.model = None
-                logger.info("Whisper model cleaned up")
-
 
 # Global instance
 _whisper_service: WhisperLocalTranscriptionService | None = None

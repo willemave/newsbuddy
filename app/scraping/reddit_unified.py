@@ -7,11 +7,10 @@ from urllib.parse import urlparse
 import praw
 import prawcore
 
-from app.constants import SUMMARY_KIND_SHORT_NEWS, SUMMARY_VERSION_V1
 from app.core.db import get_db
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.contracts import ContentType
+from app.models.contracts import ContentType, SummaryKind, SummaryVersion
 from app.scraping.base import BaseScraper
 from app.services.scraper_configs import list_active_configs_by_type
 
@@ -212,8 +211,8 @@ class RedditUnifiedScraper(BaseScraper):
                         "key_points": [summary_text[:220]],
                         "summary": summary_text[:500],
                     }
-                    metadata["summary_kind"] = SUMMARY_KIND_SHORT_NEWS
-                    metadata["summary_version"] = SUMMARY_VERSION_V1
+                    metadata["summary_kind"] = SummaryKind.SHORT_NEWS.value
+                    metadata["summary_version"] = SummaryVersion.V1.value
 
                 items.append(
                     {

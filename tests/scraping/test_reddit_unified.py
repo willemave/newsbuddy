@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from pytest_mock import MockerFixture
 
-from app.constants import SUMMARY_KIND_SHORT_NEWS, SUMMARY_VERSION_V1
+from app.models.contracts import SummaryKind, SummaryVersion
 from app.scraping.reddit_unified import RedditTarget, RedditUnifiedScraper
 
 
@@ -124,8 +124,8 @@ def test_reddit_scraper_includes_self_posts_as_ready_summaries(
         "key_points": ["Looking for advice on a medium-energy dog for an apartment."],
         "summary": "Looking for advice on a medium-energy dog for an apartment.",
     }
-    assert item["metadata"]["summary_kind"] == SUMMARY_KIND_SHORT_NEWS
-    assert item["metadata"]["summary_version"] == SUMMARY_VERSION_V1
+    assert item["metadata"]["summary_kind"] == SummaryKind.SHORT_NEWS.value
+    assert item["metadata"]["summary_version"] == SummaryVersion.V1.value
     assert item["metadata"]["items"][0]["summary"] == (
         "Looking for advice on a medium-energy dog for an apartment."
     )

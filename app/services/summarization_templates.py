@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlparse
 
-from app.constants import SUMMARY_VERSION_V1, SUMMARY_VERSION_V2
+from app.models.contracts import SummaryVersion
 
 EDITORIAL_PROMPT_TYPES = {
     "editorial_narrative",
@@ -67,8 +67,8 @@ def is_editorial_prompt_type(prompt_type: str) -> bool:
 def resolve_editorial_summary_version(prompt_type: str) -> int:
     """Return summary version for editorial narrative outputs."""
     if prompt_type in SPECIALIZED_EDITORIAL_PROMPT_TYPES:
-        return SUMMARY_VERSION_V2
-    return SUMMARY_VERSION_V1
+        return SummaryVersion.V2.value
+    return SummaryVersion.V1.value
 
 
 def resolve_summarization_prompt_route(

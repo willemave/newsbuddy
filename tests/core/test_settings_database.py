@@ -108,6 +108,20 @@ def test_settings_parse_csv_security_lists_from_environment(
     assert str(settings.public_base_url) == "https://app.example.com/"
 
 
+def test_settings_accept_legacy_twitter_bearer_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://postgres@localhost/test")
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("ADMIN_PASSWORD", "test-admin-password")
+    monkeypatch.delenv("X_APP_BEARER_TOKEN", raising=False)
+    monkeypatch.setenv("TWITTER_AUTH_TOKEN", "legacy-bearer-token")
+
+    settings = build_settings()
+
+    assert settings.x_app_bearer_token == "legacy-bearer-token"
+
+
 def test_settings_grouped_views_do_not_expose_secrets() -> None:
     settings = build_settings(
         database_url="postgresql://postgres@localhost/test",
@@ -128,6 +142,7 @@ def test_settings_grouped_views_do_not_expose_secrets() -> None:
     assert diagnostics["groups"]["observability"]["langfuse_secret_key_configured"] is True
     assert diagnostics["groups"]["observability"]["public_base_url"] is None
     assert diagnostics["groups"]["integrations"]["x"]["x_client_secret_configured"] is True
+    assert "twitter_ct0_configured" not in diagnostics["groups"]["integrations"]["x"]
     assert "jwt-secret-value" not in rendered
     assert "admin-secret-value" not in rendered
     assert "openai-secret-value" not in rendered

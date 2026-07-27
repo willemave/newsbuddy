@@ -5,10 +5,7 @@ from unittest.mock import Mock
 
 from sqlalchemy.orm import sessionmaker
 
-from app.constants import (
-    SUMMARY_KIND_LONGFORM_ARTIFACT,
-    SUMMARY_VERSION_V1,
-)
+from app.models.contracts import SummaryKind, SummaryVersion
 from app.models.db import Content, ContentStatusEntry
 from app.models.metadata.longform_artifacts import LongformArtifactEnvelope
 from app.models.metadata.summaries import NewsSummary
@@ -278,8 +275,8 @@ def test_summarize_article_enqueues_image_when_visible_in_inbox(
     )
     db_session.refresh(content)
     assert content.content_metadata is not None
-    assert content.content_metadata["summary_kind"] == SUMMARY_KIND_LONGFORM_ARTIFACT
-    assert content.content_metadata["summary_version"] == SUMMARY_VERSION_V1
+    assert content.content_metadata["summary_kind"] == SummaryKind.LONGFORM_ARTIFACT.value
+    assert content.content_metadata["summary_version"] == SummaryVersion.V1.value
     assert content.content_metadata["feed_preview"]["artifact_type"] == "argument"
 
 
@@ -334,8 +331,8 @@ def test_summarize_pdf_article_writes_longform_artifact(db_session) -> None:
     assert llm_service.summarize.call_args.kwargs["content_type"] == "longform_artifact"
     db_session.refresh(content)
     assert content.content_metadata is not None
-    assert content.content_metadata["summary_kind"] == SUMMARY_KIND_LONGFORM_ARTIFACT
-    assert content.content_metadata["summary_version"] == SUMMARY_VERSION_V1
+    assert content.content_metadata["summary_kind"] == SummaryKind.LONGFORM_ARTIFACT.value
+    assert content.content_metadata["summary_version"] == SummaryVersion.V1.value
     assert content.content_metadata["selection_trace"]["selected"] == "findings"
 
 

@@ -25,6 +25,11 @@ from app.models.internal.admin_eval import (
     ModelPricing,
 )
 from app.services.content_bodies import get_content_body_resolver
+from app.services.eval_common import (
+    build_news_context,
+    extract_result_payload,
+    resolve_summary_prompt_settings,
+)
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt
 from app.services.llm_summarization import (
@@ -383,9 +388,9 @@ def _run_single_model_eval(
     model_alias: str,
     model_spec: str,
 ) -> dict[str, Any]:
-    prompt_type, max_bullet_points, max_quotes = _resolve_prompt_settings(
+    prompt_type, max_bullet_points, max_quotes = resolve_summary_prompt_settings(
         source.content_type,
-        request,
+        longform_template=request.longform_template,
     )
     system_prompt, user_template = generate_summary_prompt(
         prompt_type,
@@ -433,7 +438,7 @@ def _run_single_model_eval(
         )
         latency_ms = int((time.perf_counter() - started) * 1000)
 
-        payload = _extract_result_payload(result)
+        payload = extract_result_payload(result)
         generated_title = payload.get("title") if isinstance(payload, dict) else None
         output_chars = len(json.dumps(payload, ensure_ascii=False))
         usage = _extract_usage(result)
@@ -539,35 +544,6 @@ def _run_single_model_eval(
         }
 
 
-def _extract_result_payload(result: Any) -> dict[str, Any]:
-    output = getattr(result, "output", None)
-    if output is None:
-        output = getattr(result, "data", None)
-    if output is None:
-        raise ValueError("Model result did not include output payload")
-    if hasattr(output, "model_dump"):
-        return output.model_dump(mode="json", exclude_none=True)
-    if isinstance(output, dict):
-        return output
-    raise ValueError("Model result payload is not JSON serializable")
-
-
-def _resolve_prompt_settings(
-    content_type: EvalContentType,
-    request: AdminEvalRunRequest,
-) -> tuple[str, int, int]:
-    if content_type == "news":
-        return "news", 4, 0
-
-    if request.longform_template == "interleaved_v2":
-        return "interleaved", 8, 8
-    if request.longform_template == "structured_v1":
-        return "structured", 12, 8
-    if request.longform_template == "editorial_narrative_v1":
-        return "editorial_narrative", 10, 4
-    return "long_bullets", 30, 3
-
-
 def _extract_input_text(
     content_type: str,
     metadata: dict[str, Any],
@@ -587,7 +563,7 @@ def _extract_input_text(
         if not isinstance(text, str) or not text.strip():
             return None
 
-        context = _build_news_context(metadata)
+        context = build_news_context(metadata)
         if context:
             return f"Context:\n{context}\n\nArticle Content:\n{text}"
         return text
@@ -627,62 +603,6 @@ def _should_disable_model_after_error(error_text: str) -> bool:
         "authentication",
     )
     return any(marker in lowered for marker in fatal_markers)
-
-
-def _build_news_context(metadata: dict[str, Any]) -> str:
-    """Build aggregator context string for news items."""
-    article = metadata.get("article", {})
-    aggregator = metadata.get("aggregator", {})
-    lines: list[str] = []
-
-    article_title = article.get("title") or ""
-    article_url = article.get("url") or ""
-
-    if article_title:
-        lines.append(f"Article Title: {article_title}")
-    if article_url:
-        lines.append(f"Article URL: {article_url}")
-
-    if aggregator:
-        name = aggregator.get("name") or metadata.get("platform")
-        agg_title = aggregator.get("title")
-        agg_url = metadata.get("discussion_url") or aggregator.get("url")
-        author = aggregator.get("author")
-
-        context_bits = []
-        if name:
-            context_bits.append(name)
-        if author:
-            context_bits.append(f"by {author}")
-        if agg_title and agg_title != article_title:
-            lines.append(f"Aggregator Headline: {agg_title}")
-        if context_bits:
-            lines.append("Aggregator Context: " + ", ".join(context_bits))
-        if agg_url:
-            lines.append(f"Discussion URL: {agg_url}")
-
-        extra = aggregator.get("metadata") or {}
-        highlights = []
-        for field in ["score", "comments_count", "likes", "retweets", "replies"]:
-            value = extra.get(field)
-            if value is not None:
-                highlights.append(f"{field}={value}")
-        if highlights:
-            lines.append("Signals: " + ", ".join(highlights))
-
-    summary_payload = metadata.get("summary") if isinstance(metadata, dict) else {}
-    excerpt = metadata.get("excerpt")
-    if not excerpt and isinstance(summary_payload, dict):
-        excerpt = (
-            summary_payload.get("overview")
-            or summary_payload.get("summary")
-            or summary_payload.get("hook")
-            or summary_payload.get("takeaway")
-        )
-    if excerpt:
-        lines.append(f"Aggregator Summary: {excerpt}")
-
-    return "\n".join(lines)
 
 
 def _resolve_model_availability(

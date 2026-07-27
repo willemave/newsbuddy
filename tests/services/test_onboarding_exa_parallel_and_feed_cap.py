@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from app.services.exa_client import ExaSearchResult
-from app.services.onboarding import (
-    _build_discovery_response,
-    _DiscoverOutput,
-    _run_discovery_exa_queries,
-)
+from app.services.onboarding.internal_models import _DiscoverOutput
+from app.services.onboarding.search import _run_discovery_exa_queries
+from app.services.onboarding.suggestion_projection import _build_discovery_response
 
 
 def test_build_discovery_response_does_not_backfill_static_defaults() -> None:
@@ -36,7 +34,7 @@ def test_run_discovery_exa_queries_uses_query_metadata(monkeypatch) -> None:
             )
         ]
 
-    monkeypatch.setattr("app.services.onboarding.exa_search", fake_exa_search)
+    monkeypatch.setattr("app.services.onboarding.search.exa_search", fake_exa_search)
 
     queries = ["whales feed", "parks feed", "legaltech feed"]
     results = _run_discovery_exa_queries(

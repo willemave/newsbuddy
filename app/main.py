@@ -54,6 +54,11 @@ settings = get_settings()
 logger = setup_logging()
 ADMIN_STATIC_DIR = Path(__file__).resolve().parent / "admin_web" / "static"
 VERSIONED_IMAGE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+MAX_LOGGABLE_REQUEST_BODY_BYTES = 64 * 1024
+_LOGGABLE_REQUEST_CONTENT_TYPES = {
+    "application/json",
+    "application/x-www-form-urlencoded",
+}
 
 
 def _resolve_static_mount_paths() -> tuple[Path, Path]:
@@ -127,14 +132,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
     This catches 422 errors before they reach endpoint code.
     """
-    # Get raw body for logging
-    body = None
-    try:
-        body = await request.body()
-    except Exception:
-        payload_summary = {"shape": "unavailable"}
-    else:
-        payload_summary = summarize_request_payload(body, request.headers.get("content-type"))
+    payload_summary = getattr(
+        request.state,
+        "request_payload_summary",
+        {"shape": "unavailable"},
+    )
 
     route_name, route_path = _route_details(request)
     logger.error(
@@ -201,6 +203,74 @@ def _static_image_cache_control(path: str, query_param_keys: set[str]) -> str | 
     return VERSIONED_IMAGE_CACHE_CONTROL
 
 
+def _normalized_content_type(content_type: str | None) -> str:
+    """Return a media type without parameters."""
+    return (content_type or "").split(";", 1)[0].strip().lower()
+
+
+def _declared_content_length(request: Request) -> int | None:
+    """Return a valid declared body size when the request provides one."""
+    raw_content_length = request.headers.get("content-length")
+    if raw_content_length is None:
+        return None
+    try:
+        content_length = int(raw_content_length)
+    except ValueError:
+        return None
+    return content_length if content_length >= 0 else None
+
+
+def _request_body_logging_skip_reason(
+    *,
+    content_type: str | None,
+    content_length: int | None,
+) -> str | None:
+    """Return why the middleware must not buffer a request body, if applicable."""
+    normalized_type = _normalized_content_type(content_type)
+    if content_length == 0:
+        return "empty"
+    if normalized_type.startswith("multipart/"):
+        return "multipart"
+    if normalized_type == "application/octet-stream":
+        return "binary"
+    if normalized_type not in _LOGGABLE_REQUEST_CONTENT_TYPES:
+        return "unsupported_content_type"
+    if content_length is None:
+        return "unknown_size"
+    if content_length > MAX_LOGGABLE_REQUEST_BODY_BYTES:
+        return "size_limit"
+    return None
+
+
+async def _request_payload_summary(
+    request: Request,
+) -> tuple[bytes | None, dict[str, object]]:
+    """Summarize a small structured body without buffering upload or large bodies."""
+    content_type = request.headers.get("content-type")
+    content_length = _declared_content_length(request)
+    skip_reason = _request_body_logging_skip_reason(
+        content_type=content_type,
+        content_length=content_length,
+    )
+    if skip_reason is not None:
+        return None, {
+            "body_bytes": content_length,
+            "content_type": content_type,
+            "shape": "not_inspected",
+            "reason": skip_reason,
+        }
+
+    try:
+        body_bytes = await request.body()
+    except Exception:
+        return None, {
+            "body_bytes": content_length,
+            "content_type": content_type,
+            "shape": "unavailable",
+        }
+    return body_bytes, summarize_request_payload(body_bytes, content_type)
+
+
 # Request logging middleware with timing
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -212,15 +282,10 @@ async def log_requests(request: Request, call_next):
     request.state.request_id = request_id
     route_name, route_path = _route_details(request)
 
-    body_bytes: bytes | None = None
-    payload_summary: dict[str, object] | None = None
     content_type = request.headers.get("content-type")
-    try:
-        body_bytes = await request.body()
-    except Exception:
-        body_bytes = None
-    else:
-        payload_summary = summarize_request_payload(body_bytes, content_type)
+    content_length = _declared_content_length(request)
+    body_bytes, payload_summary = await _request_payload_summary(request)
+    request.state.request_payload_summary = payload_summary
 
     with bound_log_context(request_id=request_id, source="http"):
         if not skip_logging:
@@ -319,7 +384,9 @@ async def log_requests(request: Request, call_next):
                     "client_ip": request.client.host if request.client else None,
                     "user_agent": request.headers.get("user-agent"),
                     "content_type": content_type,
-                    "request_bytes": len(body_bytes or b""),
+                    "request_bytes": (
+                        len(body_bytes) if body_bytes is not None else content_length
+                    ),
                     "response_bytes": response.headers.get("content-length"),
                     "auth_present": bool(request.headers.get("authorization")),
                 },

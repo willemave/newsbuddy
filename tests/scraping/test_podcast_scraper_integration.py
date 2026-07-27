@@ -1,4 +1,4 @@
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import feedparser
 import pytest
@@ -58,7 +58,7 @@ def mock_podcast_config():
 class TestPodcastScraperIntegration:
     """Test integration between podcast scraper and unified system."""
 
-    @patch("app.scraping.podcast_unified.feedparser.parse")
+    @patch("app.scraping.podcast_unified.fetch_and_parse_feed")
     @patch("app.scraping.base.get_db")
     @patch("app.scraping.base.get_queue_service")
     def test_podcast_scraper_creates_correct_content(
@@ -79,6 +79,7 @@ class TestPodcastScraperIntegration:
         mock_db.query.return_value.filter.return_value.first.return_value = (
             None  # No existing content
         )
+        mock_db.query.return_value.filter.return_value.all.return_value = []
 
         # Mock queue service
         queue_service = Mock()
@@ -132,11 +133,15 @@ class TestPodcastScraperIntegration:
         assert episode2.content_metadata["duration_seconds"] == 4530  # 1:15:30 = 4530 seconds
 
         # Verify tasks were queued
-        assert queue_service.enqueue.call_count == 2
-        queue_service.enqueue.assert_any_call(TaskType.PROCESS_CONTENT, content_id=1)
-        queue_service.enqueue.assert_any_call(TaskType.PROCESS_CONTENT, content_id=2)
+        queue_service.enqueue_many_in_session.assert_called_once()
+        queued_requests = queue_service.enqueue_many_in_session.call_args.args[1]
+        assert [request.task_type for request in queued_requests] == [
+            TaskType.PROCESS_CONTENT,
+            TaskType.PROCESS_CONTENT,
+        ]
+        assert [request.content_id for request in queued_requests] == [1, 2]
 
-    @patch("app.scraping.podcast_unified.feedparser.parse")
+    @patch("app.scraping.podcast_unified.fetch_and_parse_feed")
     @patch("app.scraping.base.get_db")
     @patch("app.scraping.base.get_queue_service")
     def test_podcast_scraper_skips_existing_urls(
@@ -158,16 +163,20 @@ class TestPodcastScraperIntegration:
 
         # Create existing content for first episode
         existing_content = Content()
+        existing_content.id = 1
         existing_content.url = "https://example.com/episodes/1"
+        existing_content.content_type = ContentType.PODCAST.value
 
-        mock_db.query.return_value.filter.return_value.first.side_effect = [
-            existing_content,  # First episode exists
-            None,  # Second episode doesn't exist
-        ]
+        mock_db.query.return_value.filter.return_value.all.return_value = [existing_content]
 
         # Track added content
         added_contents = []
-        mock_db.add.side_effect = lambda x: added_contents.append(x)
+
+        def add_content(content):
+            added_contents.append(content)
+            content.id = 2
+
+        mock_db.add.side_effect = add_content
 
         # Run scraper
         with patch.object(
@@ -183,11 +192,10 @@ class TestPodcastScraperIntegration:
         assert len(added_contents) == 1
         assert added_contents[0].url == "https://example.com/episodes/2"
 
-    @patch("app.scraping.podcast_unified.feedparser.parse")
+    @patch("app.scraping.podcast_unified.fetch_and_parse_feed")
     def test_podcast_scraper_summarizes_missing_audio_entries(
         self,
         mock_feedparser,
-        caplog,
     ):
         """Entries without audio should be summarized once per feed."""
         mock_feedparser.return_value = Mock(
@@ -199,27 +207,36 @@ class TestPodcastScraperIntegration:
             ],
         )
 
-        with patch.object(
-            PodcastUnifiedScraper,
-            "_load_podcast_feeds",
-            return_value=[
-                {
-                    "name": "Test Podcast",
-                    "url": "https://example.com/feed.xml",
-                    "limit": 5,
-                }
-            ],
+        with (
+            patch("app.scraping.podcast_unified.logger.info") as info_log,
+            patch.object(
+                PodcastUnifiedScraper,
+                "_load_podcast_feeds",
+                return_value=[
+                    {
+                        "name": "Test Podcast",
+                        "url": "https://example.com/feed.xml",
+                        "limit": 5,
+                    }
+                ],
+            ),
         ):
             scraper = PodcastUnifiedScraper()
-            with caplog.at_level("INFO"):
-                items = scraper.scrape()
+            items = scraper.scrape()
 
         assert items == []
-        assert any(
-            "Skipped 2 podcast entries without audio enclosures from Test Podcast" in message
-            for message in caplog.messages
+        assert (
+            call(
+                "Skipped %s podcast entries without audio enclosures from %s",
+                2,
+                "Test Podcast",
+            )
+            in info_log.call_args_list
         )
-        assert not any("No audio enclosure found for:" in message for message in caplog.messages)
+        assert not any(
+            args and "No audio enclosure found for:" in str(args[0])
+            for args, _kwargs in info_log.call_args_list
+        )
 
     def test_podcast_feed_parsing_edge_cases(self):
         """Test edge cases in podcast feed parsing."""

@@ -42,13 +42,3 @@ SUPPORTED_AGGREGATOR_KEYS = frozenset(
         "techmeme",
     }
 )
-
-# Summary kind/version constants
-SUMMARY_KIND_LONG_INTERLEAVED = "long_interleaved"
-SUMMARY_KIND_LONG_STRUCTURED = "long_structured"
-SUMMARY_KIND_LONG_BULLETS = "long_bullets"
-SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE = "long_editorial_narrative"
-SUMMARY_KIND_SHORT_NEWS = "short_news"
-SUMMARY_KIND_LONGFORM_ARTIFACT = "longform_artifact"
-SUMMARY_VERSION_V1 = 1
-SUMMARY_VERSION_V2 = 2

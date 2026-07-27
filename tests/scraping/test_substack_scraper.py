@@ -1,25 +1,11 @@
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import feedparser
 import pytest
 
-from app.models.contracts import ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType, TaskType
 from app.models.db import Content
-from app.scraping.substack_unified import SubstackScraper, load_substack_feeds
-
-# Sample YAML content
-SAMPLE_YAML = """
-feeds:
-  - url: "http://test.com/feed"
-"""
-
-SAMPLE_YAML_WITH_LIMIT = """
-feeds:
-  - url: "http://test.com/feed"
-    name: "Test Feed"
-    limit: 2
-"""
+from app.scraping.substack_unified import SubstackScraper
 
 # Sample feedparser entry
 mock_entry_article = {
@@ -48,6 +34,8 @@ def mock_db_session():
         mock_session = MagicMock()
         # Configure query chains to simulate no existing data
         mock_session.query.return_value.filter.return_value.first.return_value = None
+        mock_session.query.return_value.filter.return_value.all.return_value = []
+        mock_session.add.side_effect = lambda content: setattr(content, "id", 1)
         mock_get_db.return_value.__enter__.return_value = mock_session
         yield mock_session
 
@@ -61,31 +49,7 @@ def mock_queue_service():
         yield mock_service
 
 
-def test_load_substack_feeds(tmp_path: Path):
-    """Test loading feeds from a YAML file."""
-    config_path = tmp_path / "substack.yml"
-    config_path.write_text(SAMPLE_YAML, encoding="utf-8")
-
-    feeds = load_substack_feeds(config_path)
-    assert len(feeds) == 1
-    assert feeds[0]["url"] == "http://test.com/feed"
-    assert feeds[0]["name"] == "Unknown Substack"  # Default name when not specified
-    assert feeds[0]["limit"] == 10  # Default limit when not specified
-
-
-def test_load_substack_feeds_with_limit(tmp_path: Path):
-    """Test loading feeds with limit from a YAML file."""
-    config_path = tmp_path / "substack.yml"
-    config_path.write_text(SAMPLE_YAML_WITH_LIMIT, encoding="utf-8")
-
-    feeds = load_substack_feeds(config_path)
-    assert len(feeds) == 1
-    assert feeds[0]["url"] == "http://test.com/feed"
-    assert feeds[0]["name"] == "Test Feed"
-    assert feeds[0]["limit"] == 2  # Specific limit from config
-
-
-@patch("app.scraping.substack_unified.feedparser.parse")
+@patch("app.scraping.substack_unified.fetch_and_parse_feed")
 def test_scrape_process_and_filter(mock_feedparser_parse, mock_db_session, mock_queue_service):
     """Test the full scrape and process flow, including filtering."""
     # Mock feedparser results
@@ -118,7 +82,7 @@ def test_scrape_process_and_filter(mock_feedparser_parse, mock_db_session, mock_
         assert item["metadata"]["author"] == "Test Author"
 
 
-@patch("app.scraping.substack_unified.feedparser.parse")
+@patch("app.scraping.substack_unified.fetch_and_parse_feed")
 def test_scrape_filters_podcasts(mock_feedparser_parse, mock_db_session, mock_queue_service):
     """Test that podcast entries are filtered out."""
     # Mock feedparser results with podcast entry
@@ -141,7 +105,7 @@ def test_scrape_filters_podcasts(mock_feedparser_parse, mock_db_session, mock_qu
         assert len(items) == 0
 
 
-@patch("app.scraping.substack_unified.feedparser.parse")
+@patch("app.scraping.substack_unified.fetch_and_parse_feed")
 def test_scrape_skips_logging_for_encoding_override(
     mock_feedparser_parse, mock_db_session, mock_queue_service
 ):
@@ -158,20 +122,23 @@ def test_scrape_skips_logging_for_encoding_override(
     }
     mock_feedparser_parse.return_value = mock_feed_result
 
-    with patch.object(
-        SubstackScraper,
-        "_load_feeds",
-        return_value=[{"url": "http://test.com/feed", "name": "Encoding Feed", "limit": 10}],
+    with (
+        patch.object(
+            SubstackScraper,
+            "_load_feeds",
+            return_value=[{"url": "http://test.com/feed", "name": "Encoding Feed", "limit": 10}],
+        ),
+        patch("app.scraping.substack_unified.logger.warning") as warning,
+        patch("app.scraping.substack_unified.logger.exception") as exception,
     ):
         scraper = SubstackScraper()
-        scraper.error_logger = MagicMock()
-
         scraper.scrape()
 
-        scraper.error_logger.log_feed_error.assert_not_called()
+        warning.assert_not_called()
+        exception.assert_not_called()
 
 
-@patch("app.scraping.substack_unified.feedparser.parse")
+@patch("app.scraping.substack_unified.fetch_and_parse_feed")
 def test_scrape_handles_missing_link(mock_feedparser_parse, mock_db_session, mock_queue_service):
     """Test handling of entries without links."""
     # Mock entry without link
@@ -203,7 +170,7 @@ def test_scrape_handles_missing_link(mock_feedparser_parse, mock_db_session, moc
 
 def test_run_saves_to_database(mock_db_session, mock_queue_service):
     """Test that run() saves items to database and queues tasks."""
-    with patch("app.scraping.substack_unified.feedparser.parse") as mock_feedparser_parse:
+    with patch("app.scraping.substack_unified.fetch_and_parse_feed") as mock_feedparser_parse:
         # Mock feedparser results
         mock_feed_result = MagicMock()
         mock_feed_result.bozo = 0
@@ -225,8 +192,9 @@ def test_run_saves_to_database(mock_db_session, mock_queue_service):
 
             # Verify database operations
             mock_db_session.add.assert_called_once()
-            mock_db_session.commit.assert_called_once()
-            mock_db_session.refresh.assert_called_once()
+            mock_db_session.flush.assert_called_once()
+            mock_db_session.commit.assert_not_called()
+            mock_db_session.refresh.assert_not_called()
 
             # Verify the created content object
             created_content = mock_db_session.add.call_args[0][0]
@@ -238,12 +206,16 @@ def test_run_saves_to_database(mock_db_session, mock_queue_service):
             assert created_content.status == ContentStatus.NEW.value
 
             # Verify task was queued
-            mock_queue_service.enqueue.assert_called_once()
+            mock_queue_service.enqueue_many_in_session.assert_called_once()
+            queued_requests = mock_queue_service.enqueue_many_in_session.call_args.args[1]
+            assert len(queued_requests) == 1
+            assert queued_requests[0].task_type == TaskType.PROCESS_CONTENT
+            assert queued_requests[0].content_id == 1
 
 
 def test_run_skips_existing_urls(mock_db_session, mock_queue_service):
     """Test that run() skips URLs that already exist."""
-    with patch("app.scraping.substack_unified.feedparser.parse") as mock_feedparser_parse:
+    with patch("app.scraping.substack_unified.fetch_and_parse_feed") as mock_feedparser_parse:
         # Mock feedparser results
         mock_feed_result = MagicMock()
         mock_feed_result.bozo = 0
@@ -254,7 +226,8 @@ def test_run_skips_existing_urls(mock_db_session, mock_queue_service):
         # Mock existing content in database
         existing_content = Content()
         existing_content.url = "https://test.com/article"
-        mock_db_session.query.return_value.filter.return_value.first.return_value = existing_content
+        existing_content.content_type = ContentType.ARTICLE.value
+        mock_db_session.query.return_value.filter.return_value.all.return_value = [existing_content]
 
         # Create scraper with mocked feeds
         with patch.object(
@@ -268,7 +241,7 @@ def test_run_skips_existing_urls(mock_db_session, mock_queue_service):
             # Verify no new items were saved
             assert saved_count == 0
             mock_db_session.add.assert_not_called()
-            mock_queue_service.enqueue.assert_not_called()
+            mock_queue_service.enqueue_many_in_session.assert_not_called()
 
 
 def test_url_normalization():
@@ -285,7 +258,7 @@ def test_url_normalization():
     assert scraper._normalize_url("http://test.com/article/") == "https://test.com/article"
 
 
-@patch("app.scraping.substack_unified.feedparser.parse")
+@patch("app.scraping.substack_unified.fetch_and_parse_feed")
 def test_scrape_respects_limit(mock_feedparser_parse, mock_db_session, mock_queue_service):
     """Test that scraper respects the limit configuration."""
     # Create multiple entries

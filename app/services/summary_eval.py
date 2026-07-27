@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_ai import Agent
 
 from app.core.model_defaults import SMART_ANTHROPIC_MODEL_SPEC
+from app.services.eval_common import extract_result_payload, resolve_summary_prompt_settings
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_models import build_pydantic_model
 from app.services.llm_prompts import generate_summary_prompt
 from app.services.llm_summarization import (
+    SummarizationPromptType,
     resolve_summarization_output_type,
     resolve_summarization_spec,
 )
@@ -27,14 +29,6 @@ LongformTemplate = Literal[
     "structured_v1",
     "editorial_narrative_v1",
 ]
-PromptType = Literal[
-    "long_bullets",
-    "interleaved",
-    "structured",
-    "news",
-    "editorial_narrative",
-]
-
 DEFAULT_SUMMARY_EVAL_DATASET = Path("tests") / "evals" / "summary_generation.yaml"
 SUMMARY_EVAL_CALL_TIMEOUT_SECONDS = 120.0
 
@@ -150,22 +144,6 @@ def load_summary_eval_suite(path: str | Path) -> SummaryEvalSuite:
     return SummaryEvalSuite.model_validate(payload)
 
 
-def _resolve_prompt_settings(
-    content_type: SummaryEvalContentType,
-    *,
-    longform_template: LongformTemplate,
-) -> tuple[PromptType, int, int]:
-    if content_type == "news":
-        return "news", 4, 0
-    if longform_template == "interleaved_v2":
-        return "interleaved", 8, 8
-    if longform_template == "structured_v1":
-        return "structured", 12, 8
-    if longform_template == "editorial_narrative_v1":
-        return "editorial_narrative", 10, 4
-    return "long_bullets", 30, 3
-
-
 def _build_user_message(user_template: str, content_payload: str, title: str | None) -> str:
     """Build the final user prompt for one eval call."""
     if title:
@@ -188,25 +166,11 @@ def _resolve_generation_model_spec(
     if defaults.longform_template == "editorial_narrative_v1":
         return resolve_summarization_spec(case.content_type)[2]
 
-    prompt_type, _, _ = _resolve_prompt_settings(
+    prompt_type, _, _ = resolve_summary_prompt_settings(
         case.content_type,
         longform_template=defaults.longform_template,
     )
     return resolve_summarization_spec(prompt_type)[2]
-
-
-def _extract_result_payload(result: Any) -> dict[str, Any]:
-    """Normalize pydantic-ai result output into a JSON-serializable dict."""
-    output = getattr(result, "output", None)
-    if output is None:
-        output = getattr(result, "data", None)
-    if output is None:
-        raise ValueError("Model result did not include output payload")
-    if hasattr(output, "model_dump"):
-        return output.model_dump(mode="json", exclude_none=True)
-    if isinstance(output, dict):
-        return output
-    raise ValueError("Model result payload is not JSON serializable")
 
 
 def _run_summary_generation(
@@ -216,7 +180,7 @@ def _run_summary_generation(
     longform_template: LongformTemplate,
 ) -> tuple[str, dict[str, Any]]:
     """Run one live summary-generation call and return prompt type + payload."""
-    prompt_type, max_bullet_points, max_quotes = _resolve_prompt_settings(
+    prompt_type, max_bullet_points, max_quotes = resolve_summary_prompt_settings(
         case.content_type,
         longform_template=longform_template,
     )
@@ -227,7 +191,7 @@ def _run_summary_generation(
     )
     agent = get_basic_agent(
         model_spec,
-        resolve_summarization_output_type(prompt_type),
+        resolve_summarization_output_type(cast(SummarizationPromptType, prompt_type)),
         system_prompt,
     )
     user_message = _build_user_message(user_template, case.input_text, case.source_title)
@@ -235,7 +199,7 @@ def _run_summary_generation(
         user_message,
         model_settings={"timeout": SUMMARY_EVAL_CALL_TIMEOUT_SECONDS},
     )
-    return prompt_type, _extract_result_payload(result)
+    return prompt_type, extract_result_payload(result)
 
 
 def build_title_judge_prompt(

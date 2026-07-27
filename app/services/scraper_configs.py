@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -23,7 +23,6 @@ from app.models.db import (
     ProcessingTask,
     UserScraperConfig,
 )
-from app.models.db.users import User
 from app.models.internal.scraper_configs import (
     ALLOWED_SCRAPER_TYPES,
     CreateUserScraperConfig,
@@ -582,14 +581,44 @@ def ensure_inbox_status(
     return True
 
 
+def ensure_inbox_statuses(
+    db: Session,
+    entries: Iterable[tuple[int | None, int, str | None]],
+) -> set[tuple[int, int]]:
+    """Ensure inbox rows for a batch with one existing-identity query."""
+    requested = {
+        (int(user_id), int(content_id))
+        for user_id, content_id, content_type in entries
+        if user_id is not None and should_add_to_inbox(content_type)
+    }
+    if not requested:
+        return set()
+
+    existing = {
+        (int(user_id), int(content_id))
+        for user_id, content_id in db.query(
+            ContentStatusEntry.user_id,
+            ContentStatusEntry.content_id,
+        )
+        .filter(tuple_(ContentStatusEntry.user_id, ContentStatusEntry.content_id).in_(requested))
+        .all()
+    }
+    missing = requested.difference(existing)
+    db.add_all(
+        [
+            ContentStatusEntry(
+                user_id=user_id,
+                content_id=content_id,
+                status=CONTENT_STATUS_INBOX,
+            )
+            for user_id, content_id in sorted(missing)
+        ]
+    )
+    return missing
+
+
 def should_add_to_inbox(content_type: str | None) -> bool:
     """Return True when a content type should be added to the inbox."""
     if not content_type:
         return False
     return content_type in ("article", "podcast", "news", "unknown")
-
-
-def list_active_user_ids(db: Session) -> list[int]:
-    """Return active user ids for inbox backfills."""
-    rows = db.query(User.id).filter(User.is_active.is_(True)).all()
-    return [row[0] for row in rows]

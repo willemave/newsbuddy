@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import create_engine, func, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 from admin.log_parsing import (
@@ -126,11 +127,13 @@ def db_query(
 
 
 def db_explain(context: RemoteContext, *, sql: str) -> dict[str, Any]:
-    """Run EXPLAIN QUERY PLAN for a read-only SQL query."""
+    """Run the configured database's native EXPLAIN for a read-only query."""
     normalized_sql = validate_readonly_sql(sql)
     explain_sql = normalized_sql
-    if not explain_sql.lower().startswith("explain query plan"):
-        explain_sql = f"EXPLAIN QUERY PLAN {explain_sql}"
+    if not explain_sql.lower().startswith("explain"):
+        backend = make_url(context.database_url).get_backend_name()
+        prefix = "EXPLAIN QUERY PLAN" if backend == "sqlite" else "EXPLAIN"
+        explain_sql = f"{prefix} {explain_sql}"
     rows, columns = _execute_sql(context.database_url, explain_sql, limit=MAX_ROW_LIMIT)
     return {
         "sql": explain_sql,
@@ -812,7 +815,8 @@ def _execute_sql(
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
         with engine.connect() as connection:
-            connection.execute(text("SET TRANSACTION READ ONLY"))
+            if engine.dialect.name != "sqlite":
+                connection.execute(text("SET TRANSACTION READ ONLY"))
             result = connection.execute(text(sql))
             rows = result.fetchmany(limit)
             columns = list(result.keys())

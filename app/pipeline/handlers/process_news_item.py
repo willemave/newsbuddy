@@ -31,7 +31,7 @@ class ProcessNewsItemHandler:
                 result = process_news_item(
                     db,
                     news_item_id=news_item_id,
-                    summarizer=context.llm_service,
+                    summarizer=context.summarizer,
                 )
             if result.success:
                 return TaskResult.ok()

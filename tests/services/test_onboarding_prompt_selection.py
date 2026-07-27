@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from app.services.onboarding import _DiscoveryWebResult, _select_prompt_results
+from app.services.onboarding.internal_models import _DiscoveryWebResult
+from app.services.onboarding.query_heuristics import _select_prompt_results
 
 
 def test_select_prompt_results_balances_lanes(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.onboarding.DISCOVERY_PROMPT_MAX_WEB_RESULTS", 4)
+    monkeypatch.setattr(
+        "app.services.onboarding.query_heuristics.DISCOVERY_PROMPT_MAX_WEB_RESULTS",
+        4,
+    )
     results = [
         _DiscoveryWebResult(title="A1", url="https://a1.example", lane_name="lane-a"),
         _DiscoveryWebResult(title="A2", url="https://a2.example", lane_name="lane-a"),

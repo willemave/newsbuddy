@@ -1,11 +1,44 @@
 """Tests for gateway facades in app.services.gateways."""
 
+import subprocess
+import sys
+from io import BytesIO
 from unittest.mock import Mock
+
+from botocore.exceptions import ClientError
 
 from app.models.contracts import ContentType, TaskQueue, TaskType
 from app.services.gateways.http_gateway import HttpGateway, get_http_gateway
 from app.services.gateways.llm_gateway import LlmGateway, get_llm_gateway
+from app.services.gateways.object_storage_gateway import S3CompatibleObjectStorageGateway
 from app.services.gateways.task_queue_gateway import TaskQueueGateway, get_task_queue_gateway
+
+
+def _s3_gateway(client: Mock) -> S3CompatibleObjectStorageGateway:
+    gateway = S3CompatibleObjectStorageGateway.__new__(S3CompatibleObjectStorageGateway)
+    gateway._bucket = "content-bodies"
+    gateway._client = client
+    return gateway
+
+
+def test_gateway_package_import_does_not_load_concrete_gateways() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import app.services.gateways; "
+                "assert 'app.services.gateways.http_gateway' not in sys.modules; "
+                "assert 'app.services.gateways.llm_gateway' not in sys.modules; "
+                "assert 'app.services.gateways.task_queue_gateway' not in sys.modules"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_http_gateway_forwards_calls_and_close():
@@ -215,3 +248,102 @@ def test_get_task_queue_gateway_returns_cached_instance(monkeypatch):
         assert len(created) == 1
     finally:
         module._task_queue_gateway = original_gateway
+
+
+def test_s3_put_returns_payload_metadata_without_head(monkeypatch):
+    """S3 writes should not pay for a follow-up HEAD request."""
+    from app.services.gateways import object_storage_gateway as module
+
+    usage_rows = []
+    monkeypatch.setattr(
+        module,
+        "record_vendor_usage_out_of_band",
+        lambda **kwargs: usage_rows.append(kwargs),
+    )
+    client = Mock()
+    gateway = _s3_gateway(client)
+
+    metadata = gateway.put_bytes(
+        key="articles/1.md",
+        data=b"hello",
+        content_type="text/markdown",
+    )
+
+    client.put_object.assert_called_once_with(
+        Bucket="content-bodies",
+        Key="articles/1.md",
+        Body=b"hello",
+        ContentType="text/markdown",
+    )
+    client.head_object.assert_not_called()
+    assert metadata.provider == "s3_compatible"
+    assert metadata.bucket == "content-bodies"
+    assert metadata.key == "articles/1.md"
+    assert metadata.size_bytes == 5
+    assert [row["operation"] for row in usage_rows] == ["object_storage.put"]
+    assert usage_rows[0]["metadata"]["size_bytes"] == 5
+
+
+def test_s3_reads_and_probes_do_not_record_usage(monkeypatch):
+    """Read-heavy storage calls should avoid out-of-band database writes."""
+    from app.services.gateways import object_storage_gateway as module
+
+    usage_rows = []
+    monkeypatch.setattr(
+        module,
+        "record_vendor_usage_out_of_band",
+        lambda **kwargs: usage_rows.append(kwargs),
+    )
+    client = Mock()
+    client.get_object.return_value = {"Body": BytesIO(b"hello")}
+    client.head_object.return_value = {"ContentLength": 5}
+    gateway = _s3_gateway(client)
+
+    assert gateway.get_bytes(key="articles/1.md") == b"hello"
+    assert gateway.head(key="articles/1.md").size_bytes == 5
+    assert gateway.exists(key="articles/1.md") is True
+
+    assert usage_rows == []
+
+
+def test_s3_exists_returns_false_for_missing_key_without_usage(monkeypatch):
+    """Missing-key HEAD responses should remain a false exists result."""
+    from app.services.gateways import object_storage_gateway as module
+
+    usage_rows = []
+    monkeypatch.setattr(
+        module,
+        "record_vendor_usage_out_of_band",
+        lambda **kwargs: usage_rows.append(kwargs),
+    )
+    client = Mock()
+    client.head_object.side_effect = ClientError(
+        {"Error": {"Code": "NoSuchKey"}},
+        "HeadObject",
+    )
+    gateway = _s3_gateway(client)
+
+    assert gateway.exists(key="missing.md") is False
+    assert usage_rows == []
+
+
+def test_s3_delete_records_usage(monkeypatch):
+    """Deletes remain mutation calls in vendor usage accounting."""
+    from app.services.gateways import object_storage_gateway as module
+
+    usage_rows = []
+    monkeypatch.setattr(
+        module,
+        "record_vendor_usage_out_of_band",
+        lambda **kwargs: usage_rows.append(kwargs),
+    )
+    client = Mock()
+    gateway = _s3_gateway(client)
+
+    gateway.delete(key="articles/1.md")
+
+    client.delete_object.assert_called_once_with(
+        Bucket="content-bodies",
+        Key="articles/1.md",
+    )
+    assert [row["operation"] for row in usage_rows] == ["object_storage.delete"]

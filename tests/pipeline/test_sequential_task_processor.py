@@ -1,5 +1,7 @@
 """Tests for the sequential task processor."""
 
+import subprocess
+import sys
 from unittest.mock import Mock, patch
 
 import pytest
@@ -8,7 +10,8 @@ from sqlalchemy.exc import OperationalError
 from app.pipeline.queue_notifications import psycopg_conninfo
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
 from app.pipeline.task_models import TaskEnvelope, TaskResult
-from app.services.queue import TaskType
+from app.pipeline.task_specs import TASK_SPECS
+from app.services.queue import TaskQueue, TaskType
 
 
 @pytest.fixture
@@ -36,6 +39,25 @@ class TestSequentialTaskProcessor:
 
         assert conninfo == "postgresql://newsly:secret@127.0.0.1:5432/newsly?sslmode=prefer"
 
+    def test_module_import_does_not_eagerly_load_handlers_or_content_worker(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; import app.pipeline.sequential_task_processor; "
+                    "assert not any(name.startswith('app.pipeline.handlers.') "
+                    "for name in sys.modules); "
+                    "assert 'app.pipeline.worker' not in sys.modules"
+                ),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+
     def test_init(self, processor):
         """Test processor initialization."""
         assert processor.running is True
@@ -54,6 +76,39 @@ class TestSequentialTaskProcessor:
             threaded = SequentialTaskProcessor(thread_index=3)
 
         assert threaded.worker_id == "content-processor-1-t3"
+
+    @pytest.mark.parametrize("queue", list(TaskQueue))
+    def test_handler_composition_matches_queue_task_specs(self, queue):
+        """A queue process should expose exactly the task types assigned to it."""
+        with patch("app.pipeline.sequential_task_processor.get_llm_service"):
+            processor = SequentialTaskProcessor(queue)
+
+        expected_task_types = {
+            task_type for task_type, spec in TASK_SPECS.items() if spec.queue == queue
+        }
+        assert set(processor.dispatcher._handlers) == expected_task_types
+
+    def test_media_queue_does_not_initialize_context_llm_service(self):
+        with (
+            patch("app.pipeline.sequential_task_processor.get_llm_service") as llm_service,
+            patch("app.pipeline.sequential_task_processor.build_handlers_for_queue") as handlers,
+        ):
+            processor = SequentialTaskProcessor(TaskQueue.MEDIA)
+
+        assert processor.llm_service is None
+        llm_service.assert_not_called()
+        handlers.assert_called_once_with(TaskQueue.MEDIA.value)
+
+    @pytest.mark.parametrize("queue", [TaskQueue.CONTENT, TaskQueue.DISCUSSION])
+    def test_llm_queues_initialize_context_llm_service(self, queue):
+        with (
+            patch("app.pipeline.sequential_task_processor.get_llm_service") as llm_service,
+            patch("app.pipeline.sequential_task_processor.build_handlers_for_queue"),
+        ):
+            processor = SequentialTaskProcessor(queue)
+
+        assert processor.llm_service is llm_service.return_value
+        llm_service.assert_called_once_with()
 
     def test_process_task_dispatches(self, processor):
         """Test processing uses dispatcher and returns TaskResult."""
@@ -111,7 +166,7 @@ class TestSequentialTaskProcessor:
         """Test default error message when handler returns none."""
         task = TaskEnvelope(
             id=1,
-            task_type=TaskType.DOWNLOAD_AUDIO,
+            task_type=TaskType.PROCESS_PODCAST_MEDIA,
             retry_count=0,
             payload={},
         )
@@ -120,7 +175,7 @@ class TestSequentialTaskProcessor:
         result = processor.process_task(task)
 
         assert result.success is False
-        assert result.error_message == "download_audio returned False"
+        assert result.error_message == "process_podcast_media returned False"
 
     def test_run_processes_tasks_sequentially(self, processor):
         """Test that run method processes tasks sequentially."""
@@ -162,7 +217,7 @@ class TestSequentialTaskProcessor:
         """Test retry logic for failed tasks."""
         task_data = {
             "id": 1,
-            "task_type": TaskType.DOWNLOAD_AUDIO.value,
+            "task_type": TaskType.PROCESS_PODCAST_MEDIA.value,
             "retry_count": 1,
             "content_id": 789,
         }
@@ -222,7 +277,7 @@ class TestSequentialTaskProcessor:
         """Test behavior when max retries exceeded."""
         task_data = {
             "id": 1,
-            "task_type": TaskType.TRANSCRIBE.value,
+            "task_type": TaskType.PROCESS_PODCAST_MEDIA.value,
             "retry_count": 3,
             "content_id": 999,
         }
@@ -306,7 +361,7 @@ class TestSequentialTaskProcessor:
         """Test run_single_task with failed task that should retry."""
         task_data = {
             "id": 1,
-            "task_type": TaskType.DOWNLOAD_AUDIO.value,
+            "task_type": TaskType.PROCESS_PODCAST_MEDIA.value,
             "retry_count": 0,
             "content_id": 456,
         }

@@ -51,8 +51,6 @@ class TaskType(StrEnum):
     ENRICH_NEWS_ITEM_ARTICLE = "enrich_news_item_article"
     PROCESS_NEWS_ITEM = "process_news_item"
     PROCESS_PODCAST_MEDIA = "process_podcast_media"
-    DOWNLOAD_AUDIO = "download_audio"
-    TRANSCRIBE = "transcribe"
     DOWNLOAD_TWEET_VIDEO_AUDIO = "download_tweet_video_audio"
     TRANSCRIBE_TWEET_VIDEO = "transcribe_tweet_video"
     SUMMARIZE = "summarize"
@@ -64,7 +62,6 @@ class TaskType(StrEnum):
     DIG_DEEPER = "dig_deeper"
     SYNC_INTEGRATION = "sync_integration"
     GENERATE_AUDIO_EPISODE = "generate_audio_episode"
-    GENERATE_LEARNING_DECK = "generate_learning_deck"
     RUN_LLM_TASK = "run_llm_task"
     BRIEFING_REFRESH = "briefing_refresh"
 
@@ -81,7 +78,6 @@ class TaskQueue(StrEnum):
     DISCUSSION = "discussion"
     TWITTER = "twitter"
     CHAT = "chat"
-    LEARNING = "learning"
     LLM = "llm"
 
 

@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 
+from app.commands import convert_news_to_article as convert_news_to_article_command
 from app.commands import refresh_content_discussion as refresh_content_discussion_command
-from app.commands.convert_news_to_article import (
-    convert_article_url_to_content,
-    ensure_article_saved_to_knowledge,
-)
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.models.api.audio_episodes import AudioEpisodeDelivery, AudioEpisodeResponse
@@ -28,12 +25,9 @@ from app.services.audio_episodes import (
 )
 from app.services.news_feed import (
     bulk_mark_news_items_read,
-    get_visible_news_item,
     get_visible_news_item_detail,
     list_visible_news_items,
 )
-from app.utils.news_titles import get_news_article_title
-from app.utils.url_utils import is_http_url, normalize_http_url
 
 router = APIRouter(tags=["news"], responses={404: {"description": "Not found"}})
 
@@ -191,34 +185,8 @@ def convert_news_item_to_article(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ConvertNewsItemResponse:
     """Convert one representative news item into saved article content."""
-    user_id = require_user_id(current_user)
-    item = get_visible_news_item(db, user_id=user_id, news_item_id=news_item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="News item not found")
-
-    article_url = normalize_http_url(item.article_url or item.canonical_story_url)
-    if not is_http_url(article_url):
-        raise HTTPException(status_code=400, detail="No article URL found for news item")
-    canonical_article_url = cast(str, article_url)
-
-    article, already_exists = convert_article_url_to_content(
+    return convert_news_to_article_command.execute_news_item(
         db,
-        article_url=canonical_article_url,
-        title=get_news_article_title(item.raw_metadata) or item.article_title,
-        source=item.article_domain,
-        news_item=item,
-    )
-    if item.id is None or article.id is None:
-        raise HTTPException(status_code=500, detail="Converted content is missing required ids")
-    ensure_article_saved_to_knowledge(db, user_id=user_id, content_id=article.id)
-
-    return ConvertNewsItemResponse(
-        news_item_id=item.id,
-        new_content_id=article.id,
-        already_exists=already_exists,
-        message=(
-            "Article already exists in system"
-            if already_exists
-            else "Article created and queued for processing"
-        ),
+        user_id=require_user_id(current_user),
+        news_item_id=news_item_id,
     )

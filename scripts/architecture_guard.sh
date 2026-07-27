@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+python3 scripts/check_module_size_guardrails.py
 uv run ruff check \
   app/core \
-  app/models/metadata_access.py \
+  app/models/metadata/access.py \
   app/pipeline/task_specs.py \
   app/services/content_lifecycle.py \
   app/queries/list_submission_statuses.py \

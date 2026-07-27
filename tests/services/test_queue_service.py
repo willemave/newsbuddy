@@ -7,7 +7,13 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.db import ProcessingTask
-from app.services.queue import QueueService, TaskQueue, TaskStatus, TaskType
+from app.services.queue import (
+    QueueService,
+    TaskEnqueueRequest,
+    TaskQueue,
+    TaskStatus,
+    TaskType,
+)
 
 
 def _patch_db(monkeypatch, db_session) -> QueueService:
@@ -134,7 +140,7 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
 
     content_task_id = queue.enqueue(TaskType.SUMMARIZE, content_id=1)
     image_task_id = queue.enqueue(TaskType.GENERATE_IMAGE, content_id=9)
-    transcribe_task_id = queue.enqueue(TaskType.TRANSCRIBE, content_id=2)
+    podcast_media_task_id = queue.enqueue(TaskType.PROCESS_PODCAST_MEDIA, content_id=2)
     tweet_video_task_id = queue.enqueue(TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO, content_id=4)
     audio_episode_task_id = queue.enqueue(
         TaskType.GENERATE_AUDIO_EPISODE,
@@ -167,7 +173,7 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
                 [
                     content_task_id,
                     image_task_id,
-                    transcribe_task_id,
+                    podcast_media_task_id,
                     tweet_video_task_id,
                     audio_episode_task_id,
                     backfill_task_id,
@@ -183,7 +189,7 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
 
     assert tasks[content_task_id].queue_name == TaskQueue.CONTENT.value
     assert tasks[image_task_id].queue_name == TaskQueue.IMAGE.value
-    assert tasks[transcribe_task_id].queue_name == TaskQueue.MEDIA.value
+    assert tasks[podcast_media_task_id].queue_name == TaskQueue.MEDIA.value
     assert tasks[tweet_video_task_id].queue_name == TaskQueue.MEDIA.value
     assert tasks[audio_episode_task_id].queue_name == TaskQueue.AUDIO_EPISODE.value
     assert tasks[backfill_task_id].queue_name == TaskQueue.BACKFILL.value
@@ -191,6 +197,50 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
     assert tasks[onboarding_task_id].queue_name == TaskQueue.ONBOARDING.value
     assert tasks[integration_task_id].queue_name == TaskQueue.TWITTER.value
     assert tasks[chat_task_id].queue_name == TaskQueue.CHAT.value
+
+
+def test_enqueue_many_preserves_order_dedupe_and_uses_one_notification(
+    db_session,
+    monkeypatch,
+):
+    """A scraper batch should use one queue transaction and one worker wake-up."""
+    queue = _patch_db(monkeypatch, db_session)
+    execute_calls = []
+    original_execute = db_session.execute
+
+    def recording_execute(statement, *args, **kwargs):
+        execute_calls.append(str(statement))
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", recording_execute)
+
+    task_ids = queue.enqueue_many(
+        [
+            TaskEnqueueRequest(TaskType.PROCESS_CONTENT, content_id=41),
+            TaskEnqueueRequest(TaskType.PROCESS_CONTENT, content_id=41),
+            TaskEnqueueRequest(
+                TaskType.ENRICH_NEWS_ITEM_ARTICLE,
+                payload={"news_item_id": 7},
+                dedupe=False,
+            ),
+        ]
+    )
+
+    assert task_ids[0] == task_ids[1]
+    assert task_ids[2] != task_ids[0]
+    tasks = db_session.query(ProcessingTask).order_by(ProcessingTask.id.asc()).all()
+    assert len(tasks) == 2
+    assert (tasks[0].task_type, tasks[0].content_id, tasks[0].payload) == (
+        TaskType.PROCESS_CONTENT.value,
+        41,
+        {},
+    )
+    assert (tasks[1].task_type, tasks[1].content_id, tasks[1].payload) == (
+        TaskType.ENRICH_NEWS_ITEM_ARTICLE.value,
+        None,
+        {"news_item_id": 7},
+    )
+    assert sum("pg_notify" in statement for statement in execute_calls) == 1
 
 
 def test_enqueue_dedupes_content_tasks_by_default(db_session, monkeypatch):
@@ -298,7 +348,7 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
                 queue_name=TaskQueue.CONTENT.value,
             ),
             ProcessingTask(
-                task_type=TaskType.TRANSCRIBE.value,
+                task_type=TaskType.PROCESS_PODCAST_MEDIA.value,
                 status=TaskStatus.PENDING.value,
                 payload={},
                 queue_name=TaskQueue.MEDIA.value,
@@ -362,10 +412,10 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
     assert content_task["task_type"] == TaskType.SUMMARIZE.value
     assert content_task["queue_name"] == TaskQueue.CONTENT.value
 
-    transcribe_task = queue.dequeue(worker_id="media-test", queue_name=TaskQueue.MEDIA)
-    assert transcribe_task is not None
-    assert transcribe_task["task_type"] == TaskType.TRANSCRIBE.value
-    assert transcribe_task["queue_name"] == TaskQueue.MEDIA.value
+    podcast_media_task = queue.dequeue(worker_id="media-test", queue_name=TaskQueue.MEDIA)
+    assert podcast_media_task is not None
+    assert podcast_media_task["task_type"] == TaskType.PROCESS_PODCAST_MEDIA.value
+    assert podcast_media_task["queue_name"] == TaskQueue.MEDIA.value
 
     audio_episode_task = queue.dequeue(
         worker_id="audio-episode-test",

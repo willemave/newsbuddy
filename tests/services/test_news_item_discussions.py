@@ -132,13 +132,13 @@ def _fake_hn_payload(
 
 
 def test_fetch_hackernews_comments_marks_dead_firebase_item_terminal(monkeypatch) -> None:
-    def _fake_fetch_json(_client, url: str, *, retryable_404: bool = False):
-        assert retryable_404 is False
-        if "hacker-news.firebaseio.com" in url:
-            return {"id": 123, "type": "story", "dead": True}
-        raise AssertionError("dead HN items should not fetch Algolia comments")
+    def _fake_fetch(*, external_id: str, discussion_url: str, comment_cap: int):
+        assert external_id == "123"
+        assert discussion_url == "https://news.ycombinator.com/item?id=123"
+        assert comment_cap == 1_000
+        raise TerminalNewsItemDiscussionUnavailable("Hacker News discussion is gone")
 
-    monkeypatch.setattr("app.services.news_item_discussions._fetch_json", _fake_fetch_json)
+    monkeypatch.setattr("app.services.news_item_discussions.fetch_hackernews_comments", _fake_fetch)
 
     with pytest.raises(TerminalNewsItemDiscussionUnavailable) as exc_info:
         _fetch_hackernews_comments(

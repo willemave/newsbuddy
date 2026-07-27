@@ -30,7 +30,6 @@ def test_supervisor_config_runs_all_queue_partitions() -> None:
         "program:news_app_workers_discussion": "--queue discussion",
         "program:news_app_workers_twitter": "--queue twitter",
         "program:news_app_workers_chat": "--queue chat",
-        "program:news_app_workers_learning": "--queue learning",
         "program:news_app_workers_llm": "--queue llm",
     }
 
@@ -74,7 +73,6 @@ def test_docker_supervisor_config_runs_all_queue_partitions() -> None:
         "program:worker_discussion": "run-worker.sh discussion",
         "program:worker_twitter": "run-worker.sh twitter",
         "program:worker_chat": "run-worker.sh chat",
-        "program:worker_learning": "run-worker.sh learning",
         "program:worker_llm": "run-worker.sh llm",
     }
 

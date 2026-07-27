@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict, deque
-from collections.abc import Callable, Iterable
+from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from html import unescape
 from typing import Any
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
-import praw
-import prawcore
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
@@ -21,21 +18,30 @@ from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.db import Content, ContentDiscussion, NewsItem
 from app.services.content_metadata_merge import refresh_merge_content_metadata
+from app.services.discussion_comments import (
+    DiscussionFetchError,
+    NormalizedDiscussion,
+    TerminalDiscussionUnavailable,
+    compact_text,
+    extract_hackernews_item_id,
+    extract_reddit_submission_id,
+    fetch_hackernews_comments,
+    fetch_reddit_comments,
+    get_reddit_client,
+    is_hackernews_discussion,
+    is_reddit_discussion,
+    normalize_reddit_discussion_url,
+)
 from app.utils.url_utils import normalize_http_url
 
 logger = get_logger(__name__)
 settings = get_settings()
 
 DEFAULT_DISCUSSION_COMMENT_CAP = 500
-HN_API_BASE = "https://hacker-news.firebaseio.com/v0"
-URL_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
 TECHMEME_TOKEN_PATTERN = re.compile(r"/(\d{6})/(p\d+)")
 TECHMEME_ANCHOR_PATTERN = re.compile(r"a(\d{6}p\d+)")
-HN_ITEM_PATTERN = re.compile(r"item\?id=(\d+)")
-REDDIT_COMMENTS_PATTERN = re.compile(r"/comments/([a-z0-9]+)/?", re.IGNORECASE)
 TOP_COMMENT_SKIP_AUTHORS = {"AutoModerator", "[deleted]", "automoderator"}
 TOP_COMMENT_SKIP_SUFFIXES = ("-ModTeam",)
-REDDIT_DEFAULT_USER_AGENT = "news_app.discussion/1.0 (by u/anonymous)"
 
 SOCIAL_DOMAINS: frozenset[str] = frozenset(
     {
@@ -53,16 +59,6 @@ SOCIAL_DOMAINS: frozenset[str] = frozenset(
         "www.linkedin.com",
     }
 )
-
-_reddit_client: praw.Reddit | None = None
-
-
-class DiscussionFetchError(Exception):
-    """Error wrapper with retryability hints for discussion fetches."""
-
-    def __init__(self, message: str, *, retryable: bool = True) -> None:
-        super().__init__(message)
-        self.retryable = retryable
 
 
 @dataclass(frozen=True)
@@ -237,10 +233,10 @@ def _build_discussion_payload(
     if _is_techmeme(platform, discussion_url):
         return _build_techmeme_payload(source_url, metadata)
 
-    if _is_hackernews(platform, discussion_url):
+    if is_hackernews_discussion(platform, discussion_url):
         return _build_hackernews_payload(source_url, comment_cap)
 
-    if _is_reddit(platform, discussion_url):
+    if is_reddit_discussion(platform, discussion_url):
         return _build_reddit_payload(source_url, comment_cap)
 
     return _unsupported_payload(source_url, platform)
@@ -308,7 +304,7 @@ def _build_techmeme_payload(
 
 
 def _build_hackernews_payload(discussion_url: str, comment_cap: int) -> DiscussionPayload:
-    item_id = _extract_hn_item_id(discussion_url)
+    item_id = extract_hackernews_item_id(discussion_url)
     if not item_id:
         return DiscussionPayload(
             status="partial",
@@ -325,107 +321,24 @@ def _build_hackernews_payload(discussion_url: str, comment_cap: int) -> Discussi
             error_message="Unable to parse Hacker News item id",
         )
 
-    timeout = httpx.Timeout(timeout=settings.http_timeout_seconds, connect=10.0)
-    comments: list[dict[str, Any]] = []
-    url_titles: dict[str, str] = {}
-    fetched_count = 0
-    cap_reached = False
-    total_seen = 0
-
-    with httpx.Client(timeout=timeout) as client:
-        root_item = _fetch_hn_item(client, item_id)
-        if not isinstance(root_item, dict):
-            return DiscussionPayload(
-                status="partial",
-                mode="comments",
-                payload={
-                    "mode": "comments",
-                    "source_url": discussion_url,
-                    "discussion_groups": [],
-                    "comments": [],
-                    "compact_comments": [],
-                    "links": [],
-                    "stats": {
-                        "cap": comment_cap,
-                        "fetched_count": 0,
-                        "cap_reached": False,
-                        "total_seen": 0,
-                    },
-                },
-                error_message="Unable to load Hacker News story",
-            )
-
-        queue: deque[tuple[int, int, int | None]] = deque(
-            (int(child_id), 0, None) for child_id in root_item.get("kids", [])
+    try:
+        discussion = fetch_hackernews_comments(
+            external_id=item_id,
+            discussion_url=discussion_url,
+            comment_cap=comment_cap,
         )
-
-        while queue:
-            comment_id, depth, parent_id = queue.popleft()
-            total_seen += 1
-
-            if fetched_count >= comment_cap:
-                cap_reached = True
-                break
-
-            comment_item = _fetch_hn_item(client, str(comment_id))
-            if not isinstance(comment_item, dict):
-                continue
-            if comment_item.get("type") != "comment":
-                continue
-            if comment_item.get("deleted") or comment_item.get("dead"):
-                continue
-
-            raw_html = str(comment_item.get("text") or "")
-            url_titles.update(_extract_anchor_titles_from_html(raw_html))
-            text = _clean_html_text(raw_html)
-            if not text:
-                continue
-
-            comments.append(
-                {
-                    "comment_id": str(comment_item.get("id") or comment_id),
-                    "parent_id": str(parent_id) if parent_id is not None else None,
-                    "author": comment_item.get("by") or "unknown",
-                    "text": text,
-                    "compact_text": _compact_text(text),
-                    "depth": depth,
-                    "created_at": _unix_to_iso(comment_item.get("time")),
-                    "source_url": discussion_url,
-                }
-            )
-            fetched_count += 1
-
-            for child_id in comment_item.get("kids", []):
-                with_id = int(child_id)
-                queue.append((with_id, depth + 1, int(comment_item.get("id") or comment_id)))
-
-    links = _extract_links_from_comments(comments, url_titles=url_titles)
-    status = "completed" if comments else "partial"
-    return DiscussionPayload(
-        status=status,
-        mode="comments",
-        payload={
-            "mode": "comments",
-            "source_url": discussion_url,
-            "discussion_groups": [],
-            "comments": comments,
-            "compact_comments": [item["compact_text"] for item in comments],
-            "links": links,
-            "stats": {
-                "cap": comment_cap,
-                "fetched_count": fetched_count,
-                "cap_reached": cap_reached,
-                "total_seen": total_seen,
-                "declared_comment_count": root_item.get("descendants"),
-            },
-        },
-        error_message=None if comments else "No Hacker News comments found",
-    )
+    except TerminalDiscussionUnavailable:
+        return _empty_provider_payload(
+            source_url=discussion_url,
+            comment_cap=comment_cap,
+            error_message="No Hacker News comments found",
+        )
+    return _legacy_provider_payload(discussion)
 
 
 def _build_reddit_payload(discussion_url: str, comment_cap: int) -> DiscussionPayload:
-    canonical_url = _normalize_reddit_discussion_url(discussion_url) or discussion_url
-    submission_id = _extract_reddit_submission_id(canonical_url)
+    canonical_url = normalize_reddit_discussion_url(discussion_url) or discussion_url
+    submission_id = extract_reddit_submission_id(canonical_url)
     if not submission_id:
         return DiscussionPayload(
             status="partial",
@@ -448,98 +361,66 @@ def _build_reddit_payload(discussion_url: str, comment_cap: int) -> DiscussionPa
             "Reddit API credentials not configured",
             retryable=False,
         )
+    discussion = fetch_reddit_comments(
+        external_id=submission_id,
+        discussion_url=canonical_url,
+        comment_cap=comment_cap,
+        reddit_client=client,
+    )
+    return _legacy_provider_payload(discussion)
 
-    comments: list[dict[str, Any]] = []
-    url_titles: dict[str, str] = {}
-    cap_reached = False
-    total_seen = 0
 
-    try:
-        submission = client.submission(id=submission_id)
-        submission.comment_sort = "top"
-        _ = submission.title  # Force fetch to surface API/auth errors.
-        submission.comments.replace_more(limit=0)
-    except Exception as exc:  # noqa: BLE001
-        raise DiscussionFetchError(
-            f"Reddit API request failed: {exc}",
-            retryable=_is_retryable_reddit_error(exc),
-        ) from exc
-
-    def walk(nodes: Iterable[Any], depth: int, parent_id: str | None) -> None:
-        nonlocal cap_reached, total_seen
-        for node in nodes:
-            if len(comments) >= comment_cap:
-                cap_reached = True
-                return
-
-            if _is_reddit_more_comments(node):
-                continue
-
-            total_seen += 1
-            body_html = getattr(node, "body_html", None) or ""
-            if body_html:
-                url_titles.update(_extract_anchor_titles_from_html(str(body_html)))
-            body = getattr(node, "body", None) or body_html or ""
-            text = _clean_html_text(str(body))
-            comment_id = str(getattr(node, "id", "") or "").strip()
-
-            if text and comment_id:
-                author_obj = getattr(node, "author", None)
-                author = getattr(author_obj, "name", None) or "unknown"
-                comments.append(
-                    {
-                        "comment_id": comment_id,
-                        "parent_id": parent_id,
-                        "author": author,
-                        "text": text,
-                        "compact_text": _compact_text(text),
-                        "depth": depth,
-                        "created_at": _unix_to_iso(getattr(node, "created_utc", None)),
-                        "source_url": canonical_url,
-                    }
-                )
-
-            replies = getattr(node, "replies", None)
-            if replies:
-                next_parent_id = comment_id or parent_id
-                walk(replies, depth + 1, next_parent_id)
-                if cap_reached:
-                    return
-
-    walk(submission.comments, depth=0, parent_id=None)
-
-    links = _extract_links_from_comments(comments, url_titles=url_titles)
-    status = "completed" if comments else "partial"
+def _legacy_provider_payload(discussion: NormalizedDiscussion) -> DiscussionPayload:
+    source_override = discussion.discussion_url if discussion.platform == "hackernews" else None
+    comments = [comment.as_payload(source_url=source_override) for comment in discussion.comments]
+    platform_label = "Hacker News" if discussion.platform == "hackernews" else "Reddit"
     return DiscussionPayload(
-        status=status,
+        status="completed" if comments else "partial",
         mode="comments",
         payload={
             "mode": "comments",
-            "source_url": canonical_url,
+            "source_url": discussion.discussion_url,
             "discussion_groups": [],
             "comments": comments,
-            "compact_comments": [item["compact_text"] for item in comments],
-            "links": links,
+            "compact_comments": [comment["compact_text"] for comment in comments],
+            "links": [link.as_payload() for link in discussion.links],
             "stats": {
-                "cap": comment_cap,
-                "fetched_count": len(comments),
-                "cap_reached": cap_reached,
-                "total_seen": total_seen,
-                "declared_comment_count": getattr(submission, "num_comments", None),
+                "cap": discussion.comment_cap,
+                "fetched_count": discussion.fetched_count,
+                "cap_reached": discussion.cap_reached,
+                "total_seen": discussion.total_seen,
+                "declared_comment_count": discussion.thread.comment_count,
             },
         },
-        error_message=None if comments else "No Reddit comments found",
+        error_message=None if comments else f"No {platform_label} comments found",
     )
 
 
-def _fetch_hn_item(client: httpx.Client, item_id: str) -> dict[str, Any] | None:
-    url = f"{HN_API_BASE}/item/{item_id}.json"
-    response = client.get(url)
-    response.raise_for_status()
-    payload = response.json()
-    if isinstance(payload, dict):
-        return payload
-    return None
+def _empty_provider_payload(
+    *,
+    source_url: str,
+    comment_cap: int,
+    error_message: str,
+) -> DiscussionPayload:
+    return DiscussionPayload(
+        status="partial",
+        mode="comments",
+        payload={
+            "mode": "comments",
+            "source_url": source_url,
+            "discussion_groups": [],
+            "comments": [],
+            "compact_comments": [],
+            "links": [],
+            "stats": {
+                "cap": comment_cap,
+                "fetched_count": 0,
+                "cap_reached": False,
+                "total_seen": 0,
+            },
+        },
+        error_message=error_message,
+    )
 
 
 def _fetch_techmeme_discussion_groups(
@@ -694,122 +575,13 @@ def _extract_social_comments_from_groups(
                     "parent_id": None,
                     "author": domain,
                     "text": title,
-                    "compact_text": _compact_text(title),
+                    "compact_text": compact_text(title),
                     "depth": 0,
                     "created_at": None,
                     "source_url": url,
                 }
             )
     return comments
-
-
-def _extract_links_from_comments(
-    comments: list[dict[str, Any]],
-    url_titles: dict[str, str] | None = None,
-) -> list[dict[str, Any]]:
-    links: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    for comment in comments:
-        text = str(comment.get("text") or "")
-        comment_id = str(comment.get("comment_id") or "") or None
-        for url in _extract_urls(text):
-            normalized_url = normalize_http_url(url)
-            if not normalized_url or normalized_url in seen:
-                continue
-            seen.add(normalized_url)
-            entry: dict[str, Any] = {
-                "url": normalized_url,
-                "source": "comment",
-                "comment_id": comment_id,
-            }
-            if url_titles and normalized_url in url_titles:
-                entry["title"] = url_titles[normalized_url]
-            links.append(entry)
-
-    return links
-
-
-def _extract_urls(text: str) -> list[str]:
-    if not text:
-        return []
-    return URL_PATTERN.findall(text)
-
-
-_TRIVIAL_ANCHOR_TEXTS = frozenset(
-    {
-        "here",
-        "link",
-        "click here",
-        "this",
-        "source",
-        "this link",
-        "more",
-        "read more",
-        "article",
-        "url",
-    }
-)
-
-
-def _is_url_like_text(text: str, url: str) -> bool:
-    """Return True if anchor text is essentially just the URL itself."""
-    stripped = text.strip().rstrip("/")
-    url_stripped = url.strip().rstrip("/")
-    if stripped == url_stripped:
-        return True
-    # Also match when anchor text is URL without scheme.
-    for prefix in ("https://", "http://"):
-        if url_stripped.startswith(prefix) and stripped == url_stripped[len(prefix) :]:
-            return True
-        without_scheme = url_stripped[len(prefix) :]
-        if (
-            url_stripped.startswith(prefix)
-            and without_scheme.startswith("www.")
-            and stripped == without_scheme[4:]
-        ):
-            return True
-    return False
-
-
-def _extract_anchor_titles_from_html(html: str) -> dict[str, str]:
-    """Extract {normalized_url: anchor_text} from <a> tags in HTML.
-
-    Skips anchors with trivial text (e.g. "here", "link") or text that is
-    just the URL itself.
-    """
-    if not html:
-        return {}
-    soup = BeautifulSoup(html, "html.parser")
-    titles: dict[str, str] = {}
-    for anchor in soup.find_all("a", href=True):
-        href_value = anchor.get("href")
-        href = href_value if isinstance(href_value, str) else ""
-        text = anchor.get_text(" ", strip=True)
-        if not href or not text:
-            continue
-        if text.lower() in _TRIVIAL_ANCHOR_TEXTS:
-            continue
-        if _is_url_like_text(text, href):
-            continue
-        normalized = normalize_http_url(href)
-        if normalized and normalized not in titles:
-            titles[normalized] = text
-    return titles
-
-
-def _compact_text(text: str, max_chars: int = 400) -> str:
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= max_chars:
-        return cleaned
-    return cleaned[: max_chars - 3].rstrip() + "..."
-
-
-def _clean_html_text(value: str) -> str:
-    if not value:
-        return ""
-    soup = BeautifulSoup(unescape(value), "html.parser")
-    return " ".join(soup.get_text(" ", strip=True).split())
 
 
 def _normalize_label(raw: str) -> str:
@@ -833,86 +605,9 @@ def _dedupe_group_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
     return deduped
 
 
-def _get_reddit_client() -> praw.Reddit | None:
-    global _reddit_client
-    if _reddit_client is not None:
-        return _reddit_client
-
-    client_id = settings.reddit_client_id
-    client_secret = settings.reddit_client_secret
-    if not client_id or not client_secret:
-        return None
-
-    reddit_kwargs: dict[str, Any] = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "user_agent": settings.reddit_user_agent or REDDIT_DEFAULT_USER_AGENT,
-        "check_for_updates": False,
-        "timeout": settings.http_timeout_seconds,
-    }
-
-    if not settings.reddit_read_only and settings.reddit_username and settings.reddit_password:
-        reddit_kwargs["username"] = settings.reddit_username
-        reddit_kwargs["password"] = settings.reddit_password
-
-    client = praw.Reddit(**reddit_kwargs)
-    client.read_only = settings.reddit_read_only or not (
-        settings.reddit_username and settings.reddit_password
-    )
-    _reddit_client = client
-    return _reddit_client
-
-
-def _is_retryable_reddit_error(exc: Exception) -> bool:
-    if isinstance(exc, prawcore.exceptions.TooManyRequests):
-        return True
-
-    if isinstance(
-        exc,
-        (
-            prawcore.exceptions.Forbidden,
-            prawcore.exceptions.NotFound,
-            prawcore.exceptions.BadRequest,
-            prawcore.exceptions.OAuthException,
-        ),
-    ):
-        return False
-
-    response = getattr(exc, "response", None)
-    status_code = getattr(response, "status_code", None)
-    if isinstance(status_code, int):
-        if status_code == 429 or status_code >= 500:
-            return True
-        if 400 <= status_code < 500:
-            return False
-
-    message = str(exc).lower()
-    return "blocked by network security" not in message
-
-
-def _is_reddit_more_comments(node: Any) -> bool:
-    return node.__class__.__name__ == "MoreComments"
-
-
-def _normalize_reddit_discussion_url(url: str) -> str | None:
-    normalized = normalize_http_url(url)
-    if not normalized:
-        return None
-
-    parsed = urlparse(normalized)
-    host = parsed.netloc.lower()
-    if host in {"reddit.com", "old.reddit.com", "www.reddit.com"}:
-        rebuilt = parsed._replace(scheme="https", netloc="www.reddit.com")
-        return urlunparse(rebuilt)
-    return normalized
-
-
-def _extract_reddit_submission_id(url: str) -> str | None:
-    parsed = urlparse(url)
-    match = REDDIT_COMMENTS_PATTERN.search(parsed.path)
-    if not match:
-        return None
-    return match.group(1).lower()
+def _get_reddit_client() -> Any | None:
+    """Compatibility seam for legacy tests and configured PRAW access."""
+    return get_reddit_client()
 
 
 def _extract_discussion_url(metadata: dict[str, Any]) -> str | None:
@@ -926,24 +621,6 @@ def _normalize_platform(platform: Any) -> str:
     return platform.strip().lower()
 
 
-def _is_hackernews(platform: str, discussion_url: str | None) -> bool:
-    if platform in {"hackernews", "hn"}:
-        return True
-    if not discussion_url:
-        return False
-    host = urlparse(discussion_url).netloc.lower()
-    return "ycombinator.com" in host and "item" in discussion_url
-
-
-def _is_reddit(platform: str, discussion_url: str | None) -> bool:
-    if platform == "reddit":
-        return True
-    if not discussion_url:
-        return False
-    host = urlparse(discussion_url).netloc.lower()
-    return "reddit.com" in host or host.endswith("redd.it")
-
-
 def _is_techmeme(platform: str, discussion_url: str | None) -> bool:
     if platform == "techmeme":
         return True
@@ -951,30 +628,6 @@ def _is_techmeme(platform: str, discussion_url: str | None) -> bool:
         return False
     host = urlparse(discussion_url).netloc.lower()
     return "techmeme.com" in host
-
-
-def _extract_hn_item_id(url: str) -> str | None:
-    match = HN_ITEM_PATTERN.search(url)
-    if match:
-        return match.group(1)
-
-    parsed = urlparse(url)
-    if parsed.path.endswith(".json"):
-        parts = [part for part in parsed.path.split("/") if part]
-        if len(parts) >= 2 and parts[-2] == "item":
-            item_id = parts[-1].replace(".json", "")
-            if item_id.isdigit():
-                return item_id
-    return None
-
-
-def _unix_to_iso(raw_timestamp: Any) -> str | None:
-    if raw_timestamp is None:
-        return None
-    try:
-        return datetime.fromtimestamp(float(raw_timestamp), tz=UTC).isoformat()
-    except Exception:  # noqa: BLE001
-        return None
 
 
 def _upsert_content_discussion(

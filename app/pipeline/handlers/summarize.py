@@ -5,18 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from app.constants import (
-    SUMMARY_KIND_LONG_BULLETS,
-    SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE,
-    SUMMARY_KIND_LONG_INTERLEAVED,
-    SUMMARY_KIND_LONG_STRUCTURED,
-    SUMMARY_KIND_LONGFORM_ARTIFACT,
-    SUMMARY_KIND_SHORT_NEWS,
-    SUMMARY_VERSION_V1,
-    SUMMARY_VERSION_V2,
-)
 from app.core.logging import get_logger
-from app.models.contracts import ContentStatus, ContentType
+from app.models.contracts import ContentStatus, ContentType, SummaryKind, SummaryVersion
 from app.models.db import Content
 from app.models.metadata.longform_artifacts import LongformArtifactEnvelope
 from app.models.metadata.state import (
@@ -384,7 +374,7 @@ class SummarizeHandler:
                 try:
                     summarization_metadata = dict(metadata)
                     summarization_metadata["source_content_type"] = content.content_type
-                    summary = context.llm_service.summarize(
+                    summary = context.summarizer.summarize(
                         text_to_summarize,
                         content_type=summarization_type,
                         title=content.title,
@@ -450,32 +440,32 @@ class SummarizeHandler:
                     metadata = dict(base_metadata)
                     share_and_chat_requests = extract_share_and_chat_requests(metadata)
                     summary_dict = (
-                        summary.model_dump(mode="json", by_alias=True)
-                        if hasattr(summary, "model_dump")
-                        else summary
+                        summary
+                        if isinstance(summary, dict)
+                        else summary.model_dump(mode="json", by_alias=True)
                     )
 
                     if isinstance(summary, NewsSummary):
-                        summary_kind = SUMMARY_KIND_SHORT_NEWS
-                        summary_version = SUMMARY_VERSION_V1
+                        summary_kind = SummaryKind.SHORT_NEWS.value
+                        summary_version = SummaryVersion.V1.value
                     elif isinstance(summary, LongformArtifactEnvelope):
-                        summary_kind = SUMMARY_KIND_LONGFORM_ARTIFACT
-                        summary_version = SUMMARY_VERSION_V1
+                        summary_kind = SummaryKind.LONGFORM_ARTIFACT.value
+                        summary_version = SummaryVersion.V1.value
                     elif isinstance(summary, EditorialNarrativeSummary):
-                        summary_kind = SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE
+                        summary_kind = SummaryKind.LONG_EDITORIAL_NARRATIVE.value
                         summary_version = resolve_editorial_summary_version(summarization_type)
                     elif isinstance(summary, BulletedSummary):
-                        summary_kind = SUMMARY_KIND_LONG_BULLETS
-                        summary_version = SUMMARY_VERSION_V1
+                        summary_kind = SummaryKind.LONG_BULLETS.value
+                        summary_version = SummaryVersion.V1.value
                     elif isinstance(summary, InterleavedSummaryV2):
-                        summary_kind = SUMMARY_KIND_LONG_INTERLEAVED
-                        summary_version = SUMMARY_VERSION_V2
+                        summary_kind = SummaryKind.LONG_INTERLEAVED.value
+                        summary_version = SummaryVersion.V2.value
                     elif isinstance(summary, InterleavedSummary):
-                        summary_kind = SUMMARY_KIND_LONG_INTERLEAVED
-                        summary_version = SUMMARY_VERSION_V1
+                        summary_kind = SummaryKind.LONG_INTERLEAVED.value
+                        summary_version = SummaryVersion.V1.value
                     else:
-                        summary_kind = SUMMARY_KIND_LONG_STRUCTURED
-                        summary_version = SUMMARY_VERSION_V1
+                        summary_kind = SummaryKind.LONG_STRUCTURED.value
+                        summary_version = SummaryVersion.V1.value
 
                     metadata["summary_kind"] = summary_kind
                     metadata["summary_version"] = summary_version

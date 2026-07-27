@@ -184,10 +184,6 @@ class DiscoverySettingsView(BaseModel):
 class XIntegrationSettingsView(BaseModel):
     """Grouped X/Twitter integration settings without exposing secrets."""
 
-    twitter_auth_token_configured: bool
-    twitter_ct0_configured: bool
-    twitter_user_agent_configured: bool
-    twitter_query_id_cache: Path | None
     x_app_bearer_token_configured: bool
     x_client_id_configured: bool
     x_client_secret_configured: bool
@@ -360,7 +356,6 @@ class Settings(BaseSettings):
     elevenlabs_podcast_host_voice_id: str | None = None
     elevenlabs_podcast_guest_voice_id: str | None = None
     elevenlabs_narration_tts_model: str = "eleven_turbo_v2_5"
-    elevenlabs_dialogue_tts_model: str = "eleven_v3"
     elevenlabs_narration_tts_output_format: str = "mp3_44100_128"
     elevenlabs_narration_tts_speed: float = Field(default=1.0, ge=0.7, le=1.2)
     elevenlabs_audio_episode_tts_max_workers: int = Field(default=4, ge=1, le=8)
@@ -412,12 +407,6 @@ class Settings(BaseSettings):
     podcast_search_provider_timeout_seconds: int = Field(default=6, ge=1, le=30)
     podcast_search_circuit_breaker_failures: int = Field(default=3, ge=1, le=10)
     podcast_search_circuit_breaker_cooldown_seconds: int = Field(default=120, ge=10, le=1800)
-
-    # Twitter (tweet share scraping)
-    twitter_auth_token: str | None = None
-    twitter_ct0: str | None = None
-    twitter_user_agent: str | None = None
-    twitter_query_id_cache: Path | None = None
 
     # X API (official v2 + OAuth)
     x_app_bearer_token: str | None = Field(
@@ -519,7 +508,6 @@ class Settings(BaseSettings):
     llm_task_sandbox_allow_internet_access: bool = True
     llm_task_sandbox_root: str = "/tmp/newsly"
     llm_task_sandbox_max_output_chars: int = Field(default=20_000, ge=1_000, le=200_000)
-    llm_task_agent_api_base_url: str = "http://127.0.0.1:8000"
     llm_task_tool_token_ttl_seconds: int = Field(default=7200, ge=60, le=86_400)
     learning_deck_signed_url_ttl_seconds: int = Field(default=900, ge=60, le=86_400)
     learning_deck_max_index_html_bytes: int = Field(default=2_000_000, ge=10_000)
@@ -752,10 +740,6 @@ class Settings(BaseSettings):
     def integrations(self) -> IntegrationSettingsView:
         return IntegrationSettingsView(
             x=XIntegrationSettingsView(
-                twitter_auth_token_configured=bool(self.twitter_auth_token),
-                twitter_ct0_configured=bool(self.twitter_ct0),
-                twitter_user_agent_configured=bool(self.twitter_user_agent),
-                twitter_query_id_cache=self.twitter_query_id_cache,
                 x_app_bearer_token_configured=bool(self.x_app_bearer_token),
                 x_client_id_configured=bool(self.x_client_id),
                 x_client_secret_configured=bool(self.x_client_secret),
@@ -804,16 +788,6 @@ class Settings(BaseSettings):
             "redacted": True,
             "groups": {name: view.model_dump(mode="json") for name, view in groups.items()},
         }
-
-    @property
-    def podcast_media_dir(self) -> Path:
-        """Return the directory for storing podcast media files.
-
-        Returns:
-            Path: Absolute directory path for podcast media output.
-        """
-
-        return (self.storage.media_base_dir / "podcasts").resolve()
 
     @property
     def tweet_video_media_dir(self) -> Path:

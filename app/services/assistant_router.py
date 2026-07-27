@@ -53,21 +53,35 @@ from app.services.chat_agent import (
     update_message_completed,
     update_message_failed,
 )
+from app.services.chat_turn_runtime import DetachedChatTurn as _DetachedChatTurn
 from app.services.chat_turn_runtime import (
-    ChatUsageSnapshot as _ChatUsageSnapshot,
+    DetachedChatTurnLifecycle as _DetachedChatTurnLifecycle,
 )
 from app.services.chat_turn_runtime import (
     close_sandbox_session as _close_sandbox_session,
 )
+from app.services.chat_turn_runtime import (
+    complete_detached_chat_turn as _complete_detached_chat_turn,
+)
+from app.services.chat_turn_runtime import extract_tool_names as _extract_tool_names
 from app.services.chat_turn_runtime import get_or_create_cached_agent as _get_or_create_cached_agent
 from app.services.chat_turn_runtime import (
     log_chat_usage as _log_chat_usage,
 )
 from app.services.chat_turn_runtime import (
+    mark_detached_chat_turn_running as _mark_detached_chat_turn_running,
+)
+from app.services.chat_turn_runtime import (
+    persist_detached_turn_failure as _persist_detached_turn_failure,
+)
+from app.services.chat_turn_runtime import (
     personal_library_unavailable_message as _personal_library_unavailable_message,
 )
 from app.services.chat_turn_runtime import (
-    require_session_id as _require_session_id,
+    snapshot_detached_chat_turn as _snapshot_detached_chat_turn,
+)
+from app.services.chat_turn_runtime import (
+    start_detached_chat_turn as _start_detached_chat_turn,
 )
 from app.services.exa_client import exa_search
 from app.services.knowledge_search import search_knowledge as search_knowledge_hits
@@ -77,7 +91,6 @@ from app.services.llm_models import (
     DEFAULT_PROVIDER,
     build_pydantic_model,
     resolve_effective_api_key,
-    resolve_model_provider,
 )
 from app.services.llm_task_turn_tracker import LlmTaskTurnSpec, LlmTaskTurnTracker
 from app.services.news_feed import list_unread_visible_news_items
@@ -1277,6 +1290,188 @@ def _build_assistant_personal_library_runtime(
         return None, str(exc)
 
 
+@dataclass(frozen=True)
+class _PreparedAssistantTurn:
+    deps: AssistantDeps
+    history: list[ModelMessage]
+    provider_api_key: str | None
+    history_ms: float
+    context_ms: float
+
+
+@dataclass(frozen=True)
+class _ExecutedAssistantTurn:
+    raw_result: object
+    new_messages: list[ModelMessage]
+    render_metadata: ChatMessageRenderMetadata | None
+    output_chars: int
+    tool_names: list[str]
+
+
+def _prepare_assistant_background_turn(
+    db: Session,
+    session: ChatSession,
+    turn: _DetachedChatTurn,
+    *,
+    screen_context: AssistantScreenContext,
+) -> _PreparedAssistantTurn:
+    history_start = perf_counter()
+    history = load_message_history(
+        db,
+        turn.session_id,
+        exclude_message_id=turn.message_id,
+        completed_only=True,
+    )
+    history_ms = (perf_counter() - history_start) * 1000
+    logger.info(
+        "Assistant history loaded",
+        extra=build_log_extra(
+            component="assistant_turn",
+            operation="load_history",
+            event_name="assistant.turn.history_loaded",
+            status="completed",
+            duration_ms=history_ms,
+            session_id=turn.session_id,
+            message_id=turn.message_id,
+            user_id=turn.user_id,
+            content_id=turn.content_id,
+            context_data={
+                "history_count": len(history),
+                "llm_task_id": turn.llm_task_id,
+            },
+        ),
+    )
+
+    context_start = perf_counter()
+    context_snapshot = session.context_snapshot or build_screen_context_snapshot(
+        db,
+        user_id=turn.user_id,
+        screen_context=screen_context,
+    )
+    context_ms = (perf_counter() - context_start) * 1000
+    sandbox_session, personal_library_error = _build_assistant_personal_library_runtime(
+        db=db,
+        user_id=turn.user_id,
+    )
+    deps = AssistantDeps(
+        user_id=turn.user_id,
+        session_id=turn.session_id,
+        screen_context=screen_context,
+        context_snapshot=context_snapshot,
+        session_factory=get_session_factory(),
+        sandbox_session=sandbox_session,
+        personal_library_error=personal_library_error,
+    )
+    logger.info(
+        "Assistant context built",
+        extra=build_log_extra(
+            component="assistant_turn",
+            operation="build_context",
+            event_name="assistant.turn.context_built",
+            status="completed",
+            duration_ms=context_ms,
+            session_id=turn.session_id,
+            message_id=turn.message_id,
+            user_id=turn.user_id,
+            content_id=turn.content_id,
+            context_data={
+                "screen_type": screen_context.screen_type,
+                "context_chars": len(context_snapshot or ""),
+                "llm_task_id": turn.llm_task_id,
+            },
+        ),
+    )
+    return _PreparedAssistantTurn(
+        deps=deps,
+        history=history,
+        provider_api_key=resolve_effective_api_key(
+            db=db,
+            user_id=turn.user_id,
+            model_spec=turn.model,
+        ),
+        history_ms=history_ms,
+        context_ms=context_ms,
+    )
+
+
+async def _execute_assistant_background_turn(
+    prepared: _PreparedAssistantTurn,
+    turn: _DetachedChatTurn,
+    *,
+    user_prompt: str,
+) -> _ExecutedAssistantTurn:
+    logger.info(
+        "Assistant LLM call started",
+        extra=build_log_extra(
+            component="assistant_turn",
+            operation="llm_call",
+            event_name="assistant.turn.llm_started",
+            status="started",
+            session_id=turn.session_id,
+            message_id=turn.message_id,
+            user_id=turn.user_id,
+            content_id=turn.content_id,
+            source=turn.source,
+            context_data={
+                "model": turn.model,
+                "screen_type": prepared.deps.screen_context.screen_type,
+                "llm_task_id": turn.llm_task_id,
+            },
+        ),
+    )
+    result = await run_in_threadpool(
+        run_assistant_turn_sync,
+        turn.model,
+        user_prompt,
+        prepared.deps,
+        prepared.history,
+        provider_api_key=prepared.provider_api_key,
+    )
+    new_messages = result.new_messages()
+    tool_names = _extract_tool_names(result)
+    return _ExecutedAssistantTurn(
+        raw_result=result,
+        new_messages=new_messages,
+        render_metadata=_extract_render_metadata(new_messages),
+        output_chars=len(str(getattr(result, "output", "") or "")),
+        tool_names=tool_names,
+    )
+
+
+def _persist_assistant_background_turn(
+    db: Session,
+    executed: _ExecutedAssistantTurn,
+    turn: _DetachedChatTurn,
+    *,
+    user_prompt: str,
+) -> dict[str, object]:
+    if turn.message_id is None:
+        raise ValueError("Assistant turn is missing a message id")
+    update_message_completed(
+        db,
+        turn.message_id,
+        executed.new_messages,
+        display_user_prompt=user_prompt,
+        render_metadata=executed.render_metadata,
+        commit=False,
+    )
+    return {
+        "chat_session_id": turn.session_id,
+        "message_id": turn.message_id,
+        "content_id": turn.content_id,
+        "news_item_id": turn.news_item_id,
+        "output_chars": executed.output_chars,
+    }
+
+
+def _stage_assistant_message_failed(
+    db: Session,
+    message_id: int,
+    error: str,
+) -> object:
+    return update_message_failed(db, message_id, error, commit=False)
+
+
 async def process_assistant_turn_async(
     session_id: int,
     message_id: int,
@@ -1285,10 +1480,12 @@ async def process_assistant_turn_async(
     screen_context: AssistantScreenContext,
     source: str = "assistant",
 ) -> None:
-    """Process an assistant turn asynchronously."""
+    """Process one assistant turn without retaining a DB session across I/O."""
     total_start = perf_counter()
-    SessionLocal = get_session_factory()
-    db: Session | None = SessionLocal()
+    session_factory = get_session_factory()
+    tracker = LlmTaskTurnTracker(task_id=None)
+    turn: _DetachedChatTurn | None = None
+    prepared: _PreparedAssistantTurn | None = None
     logger.info(
         "Assistant turn started",
         extra=build_log_extra(
@@ -1305,212 +1502,91 @@ async def process_assistant_turn_async(
             },
         ),
     )
-    deps: AssistantDeps | None = None
-    assistant_llm_task = LlmTaskTurnTracker(task_id=None)
-    assistant_llm_task_id: int | None = None
+
+    lifecycle = _DetachedChatTurnLifecycle(
+        task_spec=CONTEXTUAL_ASSISTANT_TURN_SPEC,
+        running_note="Running contextual assistant agent",
+        completed_note="Contextual assistant turn completed",
+        failed_note="Contextual assistant turn failed",
+        usage_context=source,
+    )
+
     try:
-        if db is None:
-            raise RuntimeError("Database session was not initialized")
-        session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-        if session is None:
-            logger.error("Assistant session %s not found", session_id)
-            return
-        session_row_id = _require_session_id(session)
-        session_usage_snapshot = _ChatUsageSnapshot.from_session(session)
-        session_user_id = session_usage_snapshot.user_id
-        model_spec = session_usage_snapshot.model
-        session_content_id = session_usage_snapshot.content_id
-        session_news_item_id = session.news_item_id
-        provider = resolve_model_provider(model_spec)
-        assistant_llm_task = LlmTaskTurnTracker.create(
-            db,
-            user_id=session_user_id,
-            spec=CONTEXTUAL_ASSISTANT_TURN_SPEC,
-            input_json={
-                "chat_session_id": session_row_id,
-                "content_id": session_content_id,
-                "news_item_id": session_news_item_id,
-                "source": source,
-                "screen_type": screen_context.screen_type,
-                "assistant_action": screen_context.assistant_action,
-                "prompt_chars": len(user_prompt),
-                "model": model_spec,
-            },
-        )
-        assistant_llm_task_id = assistant_llm_task.task_id
+        with session_factory() as prepare_db:
+            session = prepare_db.query(ChatSession).filter(ChatSession.id == session_id).first()
+            if session is None:
+                logger.error("Assistant session %s not found", session_id)
+                return
 
-        history_start = perf_counter()
-        history = load_message_history(
-            db,
-            session_row_id,
-            exclude_message_id=message_id,
-            completed_only=True,
-        )
-        history_ms = (perf_counter() - history_start) * 1000
-        logger.info(
-            "Assistant history loaded",
-            extra=build_log_extra(
-                component="assistant_turn",
-                operation="load_history",
-                event_name="assistant.turn.history_loaded",
-                status="completed",
-                duration_ms=history_ms,
-                session_id=session_row_id,
+            turn = _snapshot_detached_chat_turn(
+                session,
                 message_id=message_id,
-                user_id=session_user_id,
-                content_id=session_content_id,
-                context_data={
-                    "history_count": len(history),
-                    "llm_task_id": assistant_llm_task_id,
-                },
-            ),
-        )
-
-        context_start = perf_counter()
-        context_snapshot = session.context_snapshot or build_screen_context_snapshot(
-            db, user_id=session_user_id, screen_context=screen_context
-        )
-        context_ms = (perf_counter() - context_start) * 1000
-        sandbox_session, personal_library_error = _build_assistant_personal_library_runtime(
-            db=db,
-            user_id=session_user_id,
-        )
-        deps = AssistantDeps(
-            user_id=session_user_id,
-            session_id=session_row_id,
-            screen_context=screen_context,
-            context_snapshot=context_snapshot,
-            session_factory=get_session_factory(),
-            sandbox_session=sandbox_session,
-            personal_library_error=personal_library_error,
-        )
-        logger.info(
-            "Assistant context built",
-            extra=build_log_extra(
-                component="assistant_turn",
-                operation="build_context",
-                event_name="assistant.turn.context_built",
-                status="completed",
-                duration_ms=context_ms,
-                session_id=session_row_id,
-                message_id=message_id,
-                user_id=session_user_id,
-                content_id=session_content_id,
-                context_data={
-                    "screen_type": screen_context.screen_type,
-                    "context_chars": len(context_snapshot or ""),
-                    "llm_task_id": assistant_llm_task_id,
-                },
-            ),
-        )
-        provider_api_key = resolve_effective_api_key(
-            db=db,
-            user_id=session_user_id,
-            model_spec=model_spec,
-        )
-        assistant_llm_task.running(
-            db,
-            note="Running contextual assistant agent",
-            model_provider=provider,
-            model_name=model_spec,
-        )
-        db.close()
-        db = None
-        logger.info(
-            "Assistant LLM call started",
-            extra=build_log_extra(
-                component="assistant_turn",
-                operation="llm_call",
-                event_name="assistant.turn.llm_started",
-                status="started",
-                session_id=session_row_id,
-                message_id=message_id,
-                user_id=session_user_id,
-                content_id=session_content_id,
                 source=source,
-                context_data={
-                    "model": model_spec,
+                task_id=None,
+            )
+            turn, tracker = _start_detached_chat_turn(
+                prepare_db,
+                turn=turn,
+                lifecycle=lifecycle,
+                input_json={
+                    "chat_session_id": turn.session_id,
+                    "content_id": turn.content_id,
+                    "news_item_id": turn.news_item_id,
+                    "source": turn.source,
                     "screen_type": screen_context.screen_type,
-                    "llm_task_id": assistant_llm_task_id,
+                    "assistant_action": screen_context.assistant_action,
+                    "prompt_chars": len(user_prompt),
+                    "model": turn.model,
                 },
-            ),
+            )
+            prepared = _prepare_assistant_background_turn(
+                prepare_db,
+                session,
+                turn,
+                screen_context=screen_context,
+            )
+            _mark_detached_chat_turn_running(
+                prepare_db,
+                turn=turn,
+                tracker=tracker,
+                lifecycle=lifecycle,
+            )
+
+        external_start = perf_counter()
+        executed = await _execute_assistant_background_turn(
+            prepared,
+            turn,
+            user_prompt=user_prompt,
         )
-        agent_start = perf_counter()
-        result = await run_in_threadpool(
-            run_assistant_turn_sync,
-            model_spec,
-            user_prompt,
-            deps,
-            history,
-            provider_api_key=provider_api_key,
-        )
-        agent_ms = (perf_counter() - agent_start) * 1000
-        render_metadata = _extract_render_metadata(result.new_messages())
+        external_ms = (perf_counter() - external_start) * 1000
         _log_chat_usage(
-            result,
-            session_usage_snapshot,
-            session_id,
-            message_id,
-            source,
+            executed.raw_result,
+            turn.usage_snapshot,
+            turn.session_id,
+            turn.message_id,
+            lifecycle.usage_context,
         )
-        with SessionLocal() as persist_db:
-            update_message_completed(
+
+        with session_factory() as persist_db:
+            persisted_session = (
+                persist_db.query(ChatSession).filter(ChatSession.id == turn.session_id).first()
+            )
+            if persisted_session is None:
+                raise RuntimeError(f"Assistant session {turn.session_id} disappeared")
+            output_json = _persist_assistant_background_turn(
                 persist_db,
-                message_id,
-                result.new_messages(),
-                display_user_prompt=user_prompt,
-                render_metadata=render_metadata,
+                executed,
+                turn,
+                user_prompt=user_prompt,
             )
-            session_to_update = (
-                persist_db.query(ChatSession).filter(ChatSession.id == session_id).first()
-            )
-            if session_to_update is None:
-                raise ValueError(f"Assistant session {session_id} not found")
-            session_to_update.last_message_at = datetime.now(UTC)
-            session_to_update.updated_at = datetime.now(UTC)
-            persist_db.commit()
-            assistant_llm_task.completed(
+            _complete_detached_chat_turn(
                 persist_db,
-                note="Contextual assistant turn completed",
-                output_json={
-                    "chat_session_id": session_id,
-                    "message_id": message_id,
-                    "content_id": session_content_id,
-                    "news_item_id": session_news_item_id,
-                    "output_chars": len(str(getattr(result, "output", "") or "")),
-                },
-                model_provider=provider,
-                model_name=model_spec,
+                session=persisted_session,
+                turn=turn,
+                tracker=tracker,
+                lifecycle=lifecycle,
+                output_json=output_json,
             )
-        tool_calls = getattr(result, "tool_calls", []) or []
-        tool_names = [
-            getattr(call, "name", None)
-            or getattr(call, "tool_name", None)
-            or getattr(call, "function_name", None)
-            for call in tool_calls
-        ]
-        logger.info(
-            "Assistant turn completed",
-            extra=build_log_extra(
-                component="assistant_turn",
-                operation="process_turn",
-                event_name="assistant.turn",
-                status="completed",
-                duration_ms=(perf_counter() - total_start) * 1000,
-                session_id=session_id,
-                message_id=message_id,
-                user_id=session_user_id,
-                content_id=session_content_id,
-                source=source,
-                context_data={
-                    "model": model_spec,
-                    "tool_names": tool_names,
-                    "tool_count": len([name for name in tool_names if name]),
-                    "agent_ms": round(agent_ms, 2),
-                    "llm_task_id": assistant_llm_task_id,
-                },
-            ),
-        )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "Assistant turn failed",
@@ -1525,32 +1601,50 @@ async def process_assistant_turn_async(
                 source=source,
                 context_data={
                     "failure_class": type(exc).__name__,
-                    "llm_task_id": assistant_llm_task_id,
+                    "llm_task_id": turn.llm_task_id if turn is not None else None,
                 },
             ),
         )
-        if db is not None:
-            db.rollback()
-            update_message_failed(db, message_id, str(exc))
-            assistant_llm_task.failed(
-                db,
-                note="Contextual assistant turn failed",
-                error_type=type(exc).__name__,
-                error_message=str(exc),
-            )
-        else:
-            with SessionLocal() as fail_db:
-                update_message_failed(fail_db, message_id, str(exc))
-                assistant_llm_task.failed(
-                    fail_db,
-                    note="Contextual assistant turn failed",
-                    error_type=type(exc).__name__,
-                    error_message=str(exc),
-                )
+        _persist_detached_turn_failure(
+            session_factory=session_factory,
+            tracker=tracker,
+            lifecycle=lifecycle,
+            message_id=message_id,
+            error=exc,
+            mark_message_failed=_stage_assistant_message_failed,
+        )
+        return
     finally:
-        _close_sandbox_session(deps.sandbox_session if deps is not None else None)
-        if db is not None:
-            db.close()
+        if prepared is not None:
+            _close_sandbox_session(prepared.deps.sandbox_session)
+
+    if turn is None or prepared is None:
+        raise RuntimeError("Assistant turn completed without runtime state")
+
+    logger.info(
+        "Assistant turn completed",
+        extra=build_log_extra(
+            component="assistant_turn",
+            operation="process_turn",
+            event_name="assistant.turn",
+            status="completed",
+            duration_ms=(perf_counter() - total_start) * 1000,
+            session_id=turn.session_id,
+            message_id=turn.message_id,
+            user_id=turn.user_id,
+            content_id=turn.content_id,
+            source=turn.source,
+            context_data={
+                "model": turn.model,
+                "tool_names": executed.tool_names,
+                "tool_count": len(executed.tool_names),
+                "agent_ms": round(external_ms, 2),
+                "history_ms": round(prepared.history_ms, 2),
+                "context_ms": round(prepared.context_ms, 2),
+                "llm_task_id": turn.llm_task_id,
+            },
+        ),
+    )
 
 
 def seed_assistant_message(

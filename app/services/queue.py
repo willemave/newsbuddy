@@ -1,10 +1,8 @@
-import json
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, text, update
-from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy import and_, or_, select, update
 
 from app.core.db import get_db
 from app.core.logging import get_logger
@@ -13,16 +11,41 @@ from app.core.settings import get_settings
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
 from app.models.db import ProcessingTask
 from app.pipeline.retry_policy import retry_will_be_scheduled
-from app.pipeline.task_specs import TASK_SPECS, get_task_spec
+from app.pipeline.task_specs import TASK_SPECS
+from app.services.queue_enqueue import (
+    QueueEnqueueMixin,
+    TaskEnqueueRequest,
+    build_task_dedupe_key,
+)
+from app.services.queue_metrics import (
+    get_backpressure_status,
+    get_queue_stats,
+)
+from app.services.queue_retention import (
+    DEFAULT_TASK_CLEANUP_BATCH_SIZE,
+    DEFAULT_TASK_CLEANUP_MAX_DELETE,
+    DEFAULT_TASK_RETENTION_DAYS,
+    build_terminal_task_retention_filter,
+    cleanup_terminal_tasks_in_session,
+)
 
 logger = get_logger(__name__)
 
+__all__ = [
+    "DEFAULT_TASK_CLEANUP_BATCH_SIZE",
+    "DEFAULT_TASK_CLEANUP_MAX_DELETE",
+    "DEFAULT_TASK_RETENTION_DAYS",
+    "QueueService",
+    "TASK_QUEUE_BY_TYPE",
+    "TaskEnqueueRequest",
+    "build_task_dedupe_key",
+    "build_task_queue_mismatch_filter",
+    "build_terminal_task_retention_filter",
+    "cleanup_terminal_tasks_in_session",
+    "get_queue_service",
+]
 
-ACTIVE_TASK_STATUSES: tuple[str, str] = (
-    TaskStatus.PENDING.value,
-    TaskStatus.PROCESSING.value,
-)
-ACTIVE_DEDUPE_INDEX_WHERE = text("dedupe_key IS NOT NULL AND status IN ('pending', 'processing')")
+
 TASK_QUEUE_BY_TYPE: dict[TaskType, TaskQueue] = {
     task_type: task_spec.queue for task_type, task_spec in TASK_SPECS.items()
 }
@@ -41,35 +64,6 @@ def _task_lease_seconds() -> int:
     """Return the default worker lease duration in seconds."""
     settings = get_settings()
     return max(int(settings.queue.worker_timeout_seconds), 1)
-
-
-def _normalize_payload_for_dedupe(payload: dict[str, Any] | None) -> str | None:
-    """Serialize payload to a stable dedupe fragment when needed."""
-    if not payload:
-        return None
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-
-
-def build_task_dedupe_key(
-    *,
-    task_type: TaskType,
-    content_id: int | None,
-    queue_name: TaskQueue | str,
-    payload: dict[str, Any] | None = None,
-    should_dedupe: bool = True,
-) -> str | None:
-    """Build a stable dedupe key for active work items."""
-    if not should_dedupe:
-        return None
-
-    queue_value = queue_name.value if isinstance(queue_name, TaskQueue) else queue_name
-    parts = [queue_value, task_type.value]
-    if content_id is not None:
-        parts.append(f"content:{content_id}")
-    payload_fragment = _normalize_payload_for_dedupe(payload)
-    if payload_fragment is not None and content_id is None:
-        parts.append(f"payload:{payload_fragment}")
-    return "|".join(parts)
 
 
 def build_task_queue_mismatch_filter(task_type: TaskType | str | None = None):
@@ -93,17 +87,6 @@ def build_task_queue_mismatch_filter(task_type: TaskType | str | None = None):
             )
             for task_type_value, expected_queue in expected_queues.items()
         ]
-    )
-
-
-def _lookup_active_task_by_dedupe_key(db, *, dedupe_key: str, active_task_order):
-    """Return the newest active task for one dedupe key."""
-    return (
-        db.query(ProcessingTask)
-        .filter(ProcessingTask.dedupe_key == dedupe_key)
-        .filter(ProcessingTask.status.in_(ACTIVE_TASK_STATUSES))
-        .order_by(active_task_order.desc(), ProcessingTask.id.desc())
-        .first()
     )
 
 
@@ -143,10 +126,7 @@ def _claimable_task_filters(now: datetime):
     return or_(
         and_(
             ProcessingTask.status == TaskStatus.PENDING.value,
-            or_(
-                ProcessingTask.available_at.is_(None),
-                ProcessingTask.available_at <= now,
-            ),
+            ProcessingTask.available_at <= now,
         ),
         and_(
             ProcessingTask.status == TaskStatus.PROCESSING.value,
@@ -156,7 +136,7 @@ def _claimable_task_filters(now: datetime):
     )
 
 
-class QueueService:
+class QueueService(QueueEnqueueMixin):
     """Simple database-backed task queue."""
 
     def __init__(self) -> None:
@@ -165,16 +145,9 @@ class QueueService:
         self._retry_bucket_cursor: dict[tuple[str | None, str | None], int] = {}
         self._retry_bucket_cache: dict[tuple[str | None, str | None], tuple[float, list[int]]] = {}
 
-    @staticmethod
-    def _normalize_queue_name(
-        queue_name: TaskQueue | str | None,
-    ) -> str | None:
-        """Normalize queue names for DB filtering."""
-        if queue_name is None:
-            return None
-        if isinstance(queue_name, TaskQueue):
-            return queue_name.value
-        return TaskQueue(queue_name).value
+    def _queue_db(self):
+        """Keep the historical DB patch seam for callers and tests."""
+        return get_db()
 
     def _ordered_retry_counts(
         self,
@@ -210,13 +183,13 @@ class QueueService:
                     return retry_counts
 
         retry_rows = (
-            db.query(func.coalesce(ProcessingTask.retry_count, 0).label("retry_count"))
+            db.query(ProcessingTask.retry_count.label("retry_count"))
             .filter(*base_filters)
             .distinct()
             .order_by("retry_count")
             .all()
         )
-        retry_counts = [int(row.retry_count or 0) for row in retry_rows]
+        retry_counts = [int(row.retry_count) for row in retry_rows]
         if retry_counts:
             self._retry_bucket_cache[cursor_key] = (
                 now_monotonic + RETRY_BUCKET_CACHE_SECONDS,
@@ -225,155 +198,6 @@ class QueueService:
         else:
             self._retry_bucket_cache.pop(cursor_key, None)
         return retry_counts
-
-    def enqueue(
-        self,
-        task_type: TaskType,
-        content_id: int | None = None,
-        payload: dict[str, Any] | None = None,
-        queue_name: TaskQueue | str | None = None,
-        dedupe: bool | None = None,
-        dedupe_key: str | None = None,
-    ) -> int:
-        """
-        Add a task to the queue.
-
-        Returns:
-            Task ID
-        """
-        task_spec = get_task_spec(task_type)
-        target_queue = self._normalize_queue_name(queue_name) or task_spec.queue.value
-        task_payload = task_spec.normalize_payload(payload)
-        active_task_order = func.coalesce(
-            ProcessingTask.available_at,
-            ProcessingTask.created_at,
-        )
-        with get_db() as db:
-            should_dedupe = dedupe if dedupe is not None else task_spec.dedupe_by_content
-            resolved_dedupe_key = dedupe_key
-            if resolved_dedupe_key is None:
-                resolved_dedupe_key = build_task_dedupe_key(
-                    task_type=task_type,
-                    content_id=content_id,
-                    payload=task_payload,
-                    queue_name=target_queue,
-                    should_dedupe=should_dedupe,
-                )
-            if resolved_dedupe_key is not None:
-                inserted_task_id = db.execute(
-                    postgresql_insert(ProcessingTask)
-                    .values(
-                        task_type=task_type.value,
-                        content_id=content_id,
-                        payload=task_payload,
-                        status=TaskStatus.PENDING.value,
-                        queue_name=target_queue,
-                        available_at=_utc_now(),
-                        dedupe_key=resolved_dedupe_key,
-                    )
-                    .on_conflict_do_nothing(
-                        index_elements=[ProcessingTask.dedupe_key],
-                        index_where=ACTIVE_DEDUPE_INDEX_WHERE,
-                    )
-                    .returning(ProcessingTask.id)
-                ).scalar_one_or_none()
-                if inserted_task_id is not None:
-                    task_id = int(inserted_task_id)
-                    notification_payload = json.dumps(
-                        {
-                            "task_id": task_id,
-                            "task_type": task_type.value,
-                            "queue_name": target_queue,
-                        },
-                        separators=(",", ":"),
-                    )
-                    db.execute(select(func.pg_notify("processing_tasks", notification_payload)))
-
-                    logger.info(
-                        "Task enqueued",
-                        extra=build_log_extra(
-                            component="queue",
-                            operation="enqueue",
-                            event_name="task.enqueued",
-                            status="completed",
-                            task_id=task_id,
-                            task_type=task_type.value,
-                            queue_name=target_queue,
-                            content_id=content_id,
-                            context_data={"has_payload": bool(payload)},
-                        ),
-                    )
-                    return task_id
-
-                existing_task = _lookup_active_task_by_dedupe_key(
-                    db,
-                    dedupe_key=resolved_dedupe_key,
-                    active_task_order=active_task_order,
-                )
-                if existing_task:
-                    existing_task_id = existing_task.id
-                    if existing_task_id is None:
-                        raise ValueError("Existing processing task is missing an id")
-                    logger.info(
-                        "Reusing existing task",
-                        extra=build_log_extra(
-                            component="queue",
-                            operation="enqueue",
-                            event_name="task.reused",
-                            status="completed",
-                            task_id=int(existing_task_id),
-                            task_type=task_type.value,
-                            queue_name=target_queue,
-                            content_id=content_id,
-                        ),
-                    )
-                    return int(existing_task_id)
-                raise RuntimeError(
-                    "Task dedupe conflict did not return "
-                    "an inserted task or an existing active task"
-                )
-
-            task = ProcessingTask(
-                task_type=task_type.value,
-                content_id=content_id,
-                payload=task_payload,
-                status=TaskStatus.PENDING.value,
-                queue_name=target_queue,
-                available_at=_utc_now(),
-                dedupe_key=resolved_dedupe_key,
-            )
-            db.add(task)
-            db.flush()
-            task_row_id = task.id
-            if task_row_id is None:
-                raise ValueError("Processing task insert did not produce an id")
-            task_id = int(task_row_id)
-
-            notification_payload = json.dumps(
-                {
-                    "task_id": task_id,
-                    "task_type": task_type.value,
-                    "queue_name": target_queue,
-                },
-                separators=(",", ":"),
-            )
-            db.execute(select(func.pg_notify("processing_tasks", notification_payload)))
-
-            logger.info(
-                "Task enqueued",
-                extra=build_log_extra(
-                    component="queue",
-                    operation="enqueue",
-                    event_name="task.enqueued",
-                    status="completed",
-                    task_id=task_id,
-                    task_type=task_type.value,
-                    queue_name=target_queue,
-                    content_id=content_id,
-                    context_data={"has_payload": bool(payload)},
-                ),
-            )
-            return task_id
 
     def dequeue(
         self,
@@ -395,7 +219,7 @@ class QueueService:
         with get_db() as db:
             now = _utc_now()
             normalized_queue = self._normalize_queue_name(queue_name)
-            task_order = func.coalesce(ProcessingTask.available_at, ProcessingTask.created_at)
+            task_order = ProcessingTask.available_at
             base_filters = [_claimable_task_filters(now)]
             if task_type:
                 base_filters.append(ProcessingTask.task_type == task_type.value)
@@ -424,7 +248,7 @@ class QueueService:
                         select(ProcessingTask.id)
                         .where(
                             *base_filters,
-                            func.coalesce(ProcessingTask.retry_count, 0) == selected_retry,
+                            ProcessingTask.retry_count == selected_retry,
                         )
                         .order_by(
                             task_order.asc(),
@@ -465,7 +289,7 @@ class QueueService:
                     if task_row is None:
                         continue
                     task_data = dict(task_row)
-                    task_data["retry_count"] = int(task_data.get("retry_count") or 0)
+                    task_data["retry_count"] = int(task_data["retry_count"])
                     _log_dequeued_task(task_data, worker_id=worker_id)
                     return task_data
 
@@ -753,105 +577,50 @@ class QueueService:
                 ),
             )
 
-    def get_queue_stats(self) -> dict[str, Any]:
-        """Get queue statistics."""
+    def cleanup_terminal_tasks(
+        self,
+        *,
+        retention_days: int = DEFAULT_TASK_RETENTION_DAYS,
+        batch_size: int = DEFAULT_TASK_CLEANUP_BATCH_SIZE,
+        max_delete: int = DEFAULT_TASK_CLEANUP_MAX_DELETE,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Delete expired terminal tasks in bounded, separately committed batches."""
         with get_db() as db:
-            stats = {}
-
-            # Count by status
-            status_counts = (
-                db.query(ProcessingTask.status, func.count(ProcessingTask.id))
-                .group_by(ProcessingTask.status)
-                .all()
+            result = cleanup_terminal_tasks_in_session(
+                db,
+                retention_days=retention_days,
+                batch_size=batch_size,
+                max_delete=max_delete,
+                now=now,
             )
+        logger.info(
+            "Cleaned up terminal processing tasks",
+            extra=build_log_extra(
+                component="queue",
+                operation="cleanup_terminal_tasks",
+                event_name="task.cleanup_completed",
+                status="completed",
+                context_data={
+                    "deleted_count": result["deleted_count"],
+                    "batch_count": result["batch_count"],
+                    "batch_size": result["batch_size"],
+                    "max_delete": result["max_delete"],
+                    "has_more": result["has_more"],
+                    "retention_days": result["retention_days"],
+                    "cutoff": result["cutoff"].isoformat(),
+                },
+            ),
+        )
+        return result
 
-            stats["by_status"] = {status: count for status, count in status_counts}
-
-            # Count by type
-            type_counts = (
-                db.query(ProcessingTask.task_type, func.count(ProcessingTask.id))
-                .filter(ProcessingTask.status == TaskStatus.PENDING.value)
-                .group_by(ProcessingTask.task_type)
-                .all()
-            )
-
-            stats["pending_by_type"] = {task_type: count for task_type, count in type_counts}
-
-            queue_counts = (
-                db.query(ProcessingTask.queue_name, func.count(ProcessingTask.id))
-                .filter(ProcessingTask.status == TaskStatus.PENDING.value)
-                .group_by(ProcessingTask.queue_name)
-                .all()
-            )
-            stats["pending_by_queue"] = {queue_name: count for queue_name, count in queue_counts}
-
-            queue_type_counts = (
-                db.query(
-                    ProcessingTask.queue_name,
-                    ProcessingTask.task_type,
-                    func.count(ProcessingTask.id),
-                )
-                .filter(ProcessingTask.status == TaskStatus.PENDING.value)
-                .group_by(ProcessingTask.queue_name, ProcessingTask.task_type)
-                .all()
-            )
-            pending_by_queue_type: dict[str, dict[str, int]] = {}
-            for queue_name, task_type, count in queue_type_counts:
-                if queue_name not in pending_by_queue_type:
-                    pending_by_queue_type[queue_name] = {}
-                pending_by_queue_type[queue_name][task_type] = count
-            stats["pending_by_queue_type"] = pending_by_queue_type
-
-            # Failed tasks in last hour
-            one_hour_ago = _utc_now() - timedelta(hours=1)
-            recent_failures = (
-                db.query(func.count(ProcessingTask.id))
-                .filter(
-                    and_(
-                        ProcessingTask.status == TaskStatus.FAILED.value,
-                        ProcessingTask.completed_at >= one_hour_ago,
-                    )
-                )
-                .scalar()
-            )
-
-            stats["recent_failures"] = recent_failures
-
-            return stats
+    def get_queue_stats(self) -> dict[str, Any]:
+        with get_db() as db:
+            return get_queue_stats(db)
 
     def get_backpressure_status(self) -> dict[str, Any]:
-        """Return whether pending queue backlog is healthy enough for cron enqueue work."""
-        queue_settings = get_settings().queue
-        stats = self.get_queue_stats()
-        pending_by_queue = stats.get("pending_by_queue", {})
-        pending_by_queue_type = stats.get("pending_by_queue_type", {})
-        content_pending = int(pending_by_queue.get(TaskQueue.CONTENT.value, 0))
-        content_pending_by_type = pending_by_queue_type.get(TaskQueue.CONTENT.value, {})
-        pending_process_news_item = int(
-            content_pending_by_type.get(TaskType.PROCESS_NEWS_ITEM.value, 0)
-        )
-        reasons: list[str] = []
-        if content_pending >= queue_settings.queue_backpressure_max_pending_content:
-            reasons.append("content_queue_backlog")
-        if (
-            pending_process_news_item
-            >= queue_settings.queue_backpressure_max_pending_process_news_item
-        ):
-            reasons.append("process_news_item_backlog")
-        return {
-            "should_throttle": bool(reasons),
-            "reasons": reasons,
-            "counts": {
-                "pending_content": content_pending,
-                "pending_process_news_item": pending_process_news_item,
-            },
-            "thresholds": {
-                "pending_content": queue_settings.queue_backpressure_max_pending_content,
-                "pending_process_news_item": (
-                    queue_settings.queue_backpressure_max_pending_process_news_item
-                ),
-            },
-        }
+        with get_db() as db:
+            return get_backpressure_status(db, get_settings().queue)
 
 
 # Global instance

@@ -1,4 +1,4 @@
-"""Tests for the download-audio task handler."""
+"""Tests for the unified podcast-media task handler."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 from app.models.contracts import ContentType
 from app.models.db import Content
-from app.pipeline.handlers.download_audio import DownloadAudioHandler
+from app.pipeline.handlers.process_podcast_media import ProcessPodcastMediaHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
 from app.services.queue import TaskType
@@ -27,7 +27,7 @@ def _build_context(db_session) -> TaskContext:
     )
 
 
-def test_download_audio_handler_marks_youtube_auth_failure_non_retryable(
+def test_process_podcast_media_marks_youtube_auth_failure_non_retryable(
     monkeypatch,
     db_session,
 ) -> None:
@@ -45,13 +45,17 @@ def test_download_audio_handler_marks_youtube_auth_failure_non_retryable(
     db_session.refresh(content)
 
     monkeypatch.setattr(
-        "app.pipeline.handlers.download_audio.PodcastMediaWorker.process_media_task",
+        "app.pipeline.handlers.process_podcast_media.PodcastMediaWorker.process_media_task",
         lambda _self, _content_id: False,
     )
 
-    handler = DownloadAudioHandler()
+    handler = ProcessPodcastMediaHandler()
     context = _build_context(db_session)
-    task = TaskEnvelope(id=1, task_type=TaskType.DOWNLOAD_AUDIO, content_id=content.id)
+    task = TaskEnvelope(
+        id=1,
+        task_type=TaskType.PROCESS_PODCAST_MEDIA,
+        content_id=content.id,
+    )
 
     result = handler.handle(task, context)
 

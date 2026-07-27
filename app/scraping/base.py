@@ -1,31 +1,72 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
+
+from sqlalchemy import tuple_
+from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.logging import get_logger
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content
 from app.models.domain.scraper_runs import ScraperStats
-from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
+from app.services.long_form_images import (
+    has_active_generate_image_task,
+    has_generated_long_form_image,
+    is_visible_long_form_image_candidate,
+)
 from app.services.news_ingestion import (
+    NewsItemUpsertInput,
     build_news_item_upsert_input_from_scraped_item,
     should_enqueue_news_item_enrichment,
-    upsert_news_item,
+    upsert_news_items,
 )
 from app.services.news_item_discussions import (
-    should_enqueue_news_item_discussion_refresh,
-    sync_news_item_discussion_from_news_item,
+    news_item_discussion_refresh_ids,
+    sync_news_item_discussions_from_news_items,
 )
-from app.services.queue import TaskType, get_queue_service
+from app.services.queue import TaskEnqueueRequest, TaskType, get_queue_service
 from app.services.scraper_configs import (
-    ensure_inbox_status,
-    list_active_user_ids,
-    should_add_to_inbox,
+    ensure_inbox_statuses,
 )
 from app.utils.url_utils import is_http_url, normalize_http_url
 
 logger = get_logger(__name__)
+
+type _NewsEntry = tuple[dict[str, Any], NewsItemUpsertInput]
+type _ContentEntry = tuple[dict[str, Any], str, str, str, dict[str, Any]]
+
+
+@dataclass
+class _SaveStats:
+    saved: int = 0
+    duplicates: int = 0
+    errors: int = 0
+    error_details: list[str] = field(default_factory=list)
+    processed_by_config_id: dict[int, int] = field(default_factory=dict)
+
+    def merge(self, other: _SaveStats) -> None:
+        self.saved += other.saved
+        self.duplicates += other.duplicates
+        self.errors += other.errors
+        self.error_details.extend(other.error_details)
+        for config_id, count in other.processed_by_config_id.items():
+            self.processed_by_config_id[config_id] = (
+                self.processed_by_config_id.get(config_id, 0) + count
+            )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "saved": self.saved,
+            "duplicates": self.duplicates,
+            "errors": self.errors,
+            "error_details": self.error_details,
+            "processed_by_config_id": self.processed_by_config_id,
+        }
+
 
 """
 Source and Platform Conventions (updated):
@@ -109,183 +150,246 @@ class BaseScraper(ABC):
 
     def _save_items_with_stats(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         """Save scraped items to database and return detailed statistics."""
-        saved_count = 0
-        duplicate_count = 0
-        error_count = 0
-        error_details = []
-        processed_by_config_id: dict[int, int] = {}
+        stats = _SaveStats()
+
+        news_entries: list[_NewsEntry] = []
+        content_entries: list[_ContentEntry] = []
+        for item in items:
+            try:
+                content_type = item["content_type"]
+                if not isinstance(content_type, ContentType):
+                    raise TypeError("Scraped item content_type must be a ContentType")
+                content_type_value = content_type.value
+                metadata = item.get("metadata", {})
+                if content_type_value == ContentType.NEWS.value:
+                    news_entries.append(
+                        (item, build_news_item_upsert_input_from_scraped_item(item))
+                    )
+                    continue
+                if not isinstance(metadata, dict):
+                    raise TypeError("Scraped item metadata must be an object")
+
+                item_url = item["url"]
+                raw_url = item.get("source_url") or item_url
+                if not isinstance(item_url, str) or not isinstance(raw_url, str):
+                    raise TypeError("Scraped item URLs must be strings")
+                canonical_url = normalize_http_url(item_url) or normalize_http_url(raw_url)
+                if canonical_url is None or not is_http_url(canonical_url):
+                    logger.warning(
+                        "Skipping scraped item with invalid URL: %s",
+                        raw_url,
+                        extra={
+                            "component": "scraper_base",
+                            "operation": "save_item",
+                            "context_data": {
+                                "raw_url": raw_url,
+                                "content_type": content_type_value,
+                            },
+                        },
+                    )
+                    stats.errors += 1
+                    stats.error_details.append(f"Invalid URL: {raw_url}")
+                    continue
+                content_entries.append(
+                    (
+                        item,
+                        content_type_value,
+                        raw_url,
+                        canonical_url,
+                        cast(dict[str, Any], metadata),
+                    )
+                )
+            except Exception as exc:
+                logger.error("Error preparing scraped item: %s", exc)
+                stats.errors += 1
+                stats.error_details.append(
+                    f"Error preparing {item.get('url', 'unknown')}: {str(exc)}"
+                )
+
+        if news_entries or content_entries:
+            stats.merge(self._persist_with_failure_isolation(news_entries, content_entries))
+        return stats.as_dict()
+
+    def _persist_with_failure_isolation(
+        self,
+        news_entries: list[_NewsEntry],
+        content_entries: list[_ContentEntry],
+    ) -> _SaveStats:
+        """Use one fast transaction, falling back to isolated writes only on failure."""
+        try:
+            return self._persist_prepared_batch(news_entries, content_entries)
+        except Exception as batch_error:  # noqa: BLE001 - recovery boundary
+            total_items = len(news_entries) + len(content_entries)
+            if total_items <= 1:
+                item = (news_entries[0] if news_entries else content_entries[0])[0]
+                return self._failed_item_stats(item, batch_error)
+
+            logger.warning(
+                "Scraper batch persistence failed; retrying %s items independently: %s",
+                total_items,
+                batch_error,
+            )
+            stats = _SaveStats()
+            for news_entry in news_entries:
+                stats.merge(self._persist_one(news_entry=news_entry))
+            for content_entry in content_entries:
+                stats.merge(self._persist_one(content_entry=content_entry))
+            return stats
+
+    def _persist_one(
+        self,
+        *,
+        news_entry: _NewsEntry | None = None,
+        content_entry: _ContentEntry | None = None,
+    ) -> _SaveStats:
+        if (news_entry is None) == (content_entry is None):
+            raise ValueError("Exactly one prepared scraper entry is required")
+        try:
+            return self._persist_prepared_batch(
+                [news_entry] if news_entry is not None else [],
+                [content_entry] if content_entry is not None else [],
+            )
+        except Exception as exc:  # noqa: BLE001 - preserve per-item isolation
+            if news_entry is not None:
+                item = news_entry[0]
+            else:
+                assert content_entry is not None
+                item = content_entry[0]
+            return self._failed_item_stats(item, exc)
+
+    @staticmethod
+    def _failed_item_stats(item: dict[str, Any], exc: Exception) -> _SaveStats:
+        item_url = item.get("url", "unknown")
+        logger.error("Error saving item %s: %s", item_url, exc)
+        return _SaveStats(
+            errors=1,
+            error_details=[f"Error saving {item_url}: {str(exc)}"],
+        )
+
+    def _persist_prepared_batch(
+        self,
+        news_entries: list[_NewsEntry],
+        content_entries: list[_ContentEntry],
+    ) -> _SaveStats:
+        stats = _SaveStats()
+        queue_requests: list[TaskEnqueueRequest] = []
 
         with get_db() as db:
-            active_user_ids: list[int] | None = None
-            for item in items:
-                try:
-                    user_id = item.get("user_id")
-                    content_type_value = item["content_type"].value
-                    metadata = item.get("metadata", {})
+            news_results = upsert_news_items(db, [payload for _, payload in news_entries])
+            news_items = [news_item for news_item, _ in news_results]
+            discussion_rows = sync_news_item_discussions_from_news_items(db, news_items)
+            refresh_ids = news_item_discussion_refresh_ids(db, rows=discussion_rows)
 
-                    if content_type_value == ContentType.NEWS.value:
-                        payload = build_news_item_upsert_input_from_scraped_item(item)
-                        news_item, was_created = upsert_news_item(db, payload)
-                        db.commit()
-                        db.refresh(news_item)
-                        discussion_row = sync_news_item_discussion_from_news_item(db, news_item)
-                        if discussion_row is not None:
-                            db.commit()
-                            if should_enqueue_news_item_discussion_refresh(
-                                db,
-                                row=discussion_row,
-                            ):
-                                self.queue_service.enqueue(
-                                    TaskType.FETCH_NEWS_ITEM_DISCUSSION,
-                                    payload={"news_item_id": discussion_row.news_item_id},
-                                )
-                        if should_enqueue_news_item_enrichment(
-                            news_item=news_item,
-                            was_created=was_created,
-                        ):
-                            self.queue_service.enqueue(
-                                TaskType.ENRICH_NEWS_ITEM_ARTICLE,
-                                payload={"news_item_id": news_item.id},
-                                dedupe=False,
-                            )
-                        if was_created:
-                            saved_count += 1
-                        else:
-                            duplicate_count += 1
-                        _record_processed_config_item(processed_by_config_id, item)
-                        continue
-
-                    raw_url = item.get("source_url") or item["url"]
-                    canonical_url = normalize_http_url(item["url"]) or normalize_http_url(raw_url)
-
-                    if not canonical_url and content_type_value == ContentType.NEWS.value:
-                        article = metadata.get("article")
-                        if isinstance(article, dict):
-                            canonical_url = normalize_http_url(article.get("url"))
-
-                    if not is_http_url(canonical_url):
-                        logger.warning(
-                            "Skipping scraped item with invalid URL: %s",
-                            raw_url,
-                            extra={
-                                "component": "scraper_base",
-                                "operation": "save_item",
-                                "context_data": {
-                                    "raw_url": raw_url,
-                                    "content_type": content_type_value,
-                                },
-                            },
+            for (item, _), (news_item, was_created) in zip(
+                news_entries,
+                news_results,
+                strict=True,
+            ):
+                news_item_id = news_item.id
+                if news_item_id is None:
+                    raise ValueError("News item insert did not produce an id")
+                if news_item_id in refresh_ids:
+                    queue_requests.append(
+                        TaskEnqueueRequest(
+                            TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+                            payload={"news_item_id": int(news_item_id)},
                         )
-                        error_count += 1
-                        error_details.append(f"Invalid URL: {raw_url}")
-                        continue
-                    # Check if already exists
-                    existing = (
-                        db.query(Content)
-                        .filter(
-                            Content.url == canonical_url,
-                            Content.content_type == content_type_value,
-                        )
-                        .first()
                     )
+                if should_enqueue_news_item_enrichment(
+                    news_item=news_item,
+                    was_created=was_created,
+                ):
+                    queue_requests.append(
+                        TaskEnqueueRequest(
+                            TaskType.ENRICH_NEWS_ITEM_ARTICLE,
+                            payload={"news_item_id": int(news_item_id)},
+                            dedupe=False,
+                        )
+                    )
+                if was_created:
+                    stats.saved += 1
+                else:
+                    stats.duplicates += 1
+                _record_processed_config_item(stats.processed_by_config_id, item)
 
-                    if existing:
-                        existing_id = existing.id
-                        inbox_created = False
-                        if should_add_to_inbox(content_type_value) and existing_id is not None:
-                            if user_id is not None:
-                                inbox_created = ensure_inbox_status(
-                                    db,
-                                    user_id=user_id,
-                                    content_id=existing_id,
-                                    content_type=content_type_value,
-                                )
-                            elif content_type_value == ContentType.NEWS.value:
-                                if active_user_ids is None:
-                                    active_user_ids = list_active_user_ids(db)
-                                for active_user_id in active_user_ids:
-                                    if ensure_inbox_status(
-                                        db,
-                                        user_id=active_user_id,
-                                        content_id=existing_id,
-                                        content_type=content_type_value,
-                                    ):
-                                        inbox_created = True
-                        if inbox_created:
-                            db.commit()
-                            enqueue_visible_long_form_image_if_needed(db, existing)
-                        logger.debug(f"URL already exists: {item['url']}")
-                        duplicate_count += 1
-                        _record_processed_config_item(processed_by_config_id, item)
-                        continue
-
-                    # Create new content
+            content_keys = {(entry[3], entry[1]) for entry in content_entries}
+            existing_by_key = {
+                (content.url, content.content_type): content
+                for content in (
+                    db.query(Content)
+                    .filter(tuple_(Content.url, Content.content_type).in_(content_keys))
+                    .all()
+                    if content_keys
+                    else []
+                )
+            }
+            resolved_content: list[tuple[dict[str, Any], str, Content, bool]] = []
+            has_new_content = False
+            for item, content_type_value, raw_url, canonical_url, metadata in content_entries:
+                key = (canonical_url, content_type_value)
+                content = existing_by_key.get(key)
+                was_created = content is None
+                if content is None:
                     content = Content(
                         content_type=content_type_value,
                         url=canonical_url,
                         source_url=raw_url,
                         title=item.get("title"),
-                        source=metadata.get("source"),  # Extract source from metadata
-                        platform=metadata.get("platform"),  # Extract platform from metadata
+                        source=metadata.get("source"),
+                        platform=metadata.get("platform"),
                         is_aggregate=bool(item.get("is_aggregate", False)),
                         status=ContentStatus.NEW.value,
                         content_metadata=metadata,
                         created_at=datetime.now(UTC),
                     )
-
                     db.add(content)
-                    db.flush()
-                    content_id = content.id
+                    has_new_content = True
+                    existing_by_key[key] = content
+                resolved_content.append((item, content_type_value, content, was_created))
 
-                    if should_add_to_inbox(content_type_value) and content_id is not None:
-                        if user_id is not None:
-                            ensure_inbox_status(
-                                db,
-                                user_id=user_id,
-                                content_id=content_id,
-                                content_type=content_type_value,
-                            )
-                        elif content_type_value == ContentType.NEWS.value:
-                            if active_user_ids is None:
-                                active_user_ids = list_active_user_ids(db)
-                            for active_user_id in active_user_ids:
-                                ensure_inbox_status(
-                                    db,
-                                    user_id=active_user_id,
-                                    content_id=content_id,
-                                    content_type=content_type_value,
-                                )
+            if has_new_content:
+                db.flush()
+            status_entries: list[tuple[int | None, int, str | None]] = []
+            for item, content_type_value, content, _ in resolved_content:
+                if content.id is None:
+                    raise ValueError("Content insert did not produce an id")
+                status_entries.append((item.get("user_id"), int(content.id), content_type_value))
+            created_statuses = ensure_inbox_statuses(db, status_entries)
+            if created_statuses:
+                db.flush()
 
-                    db.commit()
-                    db.refresh(content)
+            for item, _content_type_value, content, was_created in resolved_content:
+                if content.id is None:
+                    raise ValueError("Content insert did not produce an id")
+                content_id = int(content.id)
+                if was_created:
+                    queue_requests.append(
+                        TaskEnqueueRequest(TaskType.PROCESS_CONTENT, content_id=content_id)
+                    )
+                    stats.saved += 1
+                else:
+                    status_key = (item.get("user_id"), content_id)
+                    if status_key in created_statuses and self._needs_visible_image(db, content):
+                        queue_requests.append(
+                            TaskEnqueueRequest(TaskType.GENERATE_IMAGE, content_id=content_id)
+                        )
+                    logger.debug("URL already exists: %s", item["url"])
+                    stats.duplicates += 1
+                _record_processed_config_item(stats.processed_by_config_id, item)
 
-                    # Queue for processing
-                    self.queue_service.enqueue(TaskType.PROCESS_CONTENT, content_id=content.id)
-                    if content_type_value == ContentType.NEWS.value:
-                        self.queue_service.enqueue(TaskType.FETCH_DISCUSSION, content_id=content.id)
+            if queue_requests:
+                self.queue_service.enqueue_many_in_session(db, queue_requests)
 
-                    saved_count += 1
-                    _record_processed_config_item(processed_by_config_id, item)
+        return stats
 
-                except Exception as e:
-                    db.rollback()
-                    if "UNIQUE constraint failed" in str(e) or "duplicate key value" in str(e):
-                        logger.debug(f"URL already exists (race condition): {item['url']}")
-                        duplicate_count += 1
-                        _record_processed_config_item(processed_by_config_id, item)
-                    else:
-                        logger.error(f"Error saving item {item['url']}: {e}")
-                        error_count += 1
-                        error_details.append(f"Error saving {item.get('url', 'unknown')}: {str(e)}")
-                    continue
-
-        return {
-            "saved": saved_count,
-            "duplicates": duplicate_count,
-            "errors": error_count,
-            "error_details": error_details,
-            "processed_by_config_id": processed_by_config_id,
-        }
+    def _needs_visible_image(self, db: Session, content: Content) -> bool:
+        content_id = content.id
+        return bool(
+            content_id is not None
+            and is_visible_long_form_image_candidate(db, content)
+            and not has_generated_long_form_image(content)
+            and not has_active_generate_image_task(db, int(content_id))
+        )
 
     def _normalize_url(self, url: str) -> str:
         """Normalize URL for consistency."""

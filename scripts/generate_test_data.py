@@ -60,18 +60,17 @@ from sqlalchemy.orm import Session
 
 from app.constants import (
     CONTENT_STATUS_INBOX,
-    SUMMARY_KIND_LONG_BULLETS,
-    SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE,
-    SUMMARY_KIND_LONG_INTERLEAVED,
-    SUMMARY_KIND_LONG_STRUCTURED,
-    SUMMARY_KIND_LONGFORM_ARTIFACT,
-    SUMMARY_KIND_SHORT_NEWS,
-    SUMMARY_VERSION_V1,
-    SUMMARY_VERSION_V2,
 )
 from app.core.db import get_db, init_db
 from app.core.settings import get_settings
-from app.models.contracts import ContentStatus, ContentType, NewsItemStatus, NewsItemVisibilityScope
+from app.models.contracts import (
+    ContentStatus,
+    ContentType,
+    NewsItemStatus,
+    NewsItemVisibilityScope,
+    SummaryKind,
+    SummaryVersion,
+)
 from app.models.db import (
     Content,
     ContentDiscussion,
@@ -931,8 +930,8 @@ class ArticleGenerator:
 
         selected_format = resolve_summary_format(summary_format)
         summary: SummaryPayload
-        summary_kind = SUMMARY_KIND_LONG_BULLETS
-        summary_version = SUMMARY_VERSION_V1
+        summary_kind = SummaryKind.LONG_BULLETS.value
+        summary_version = SummaryVersion.V1.value
 
         if selected_format == "longform_artifact":
             summary = generate_longform_artifact(
@@ -942,12 +941,12 @@ class ArticleGenerator:
                 source=source,
                 platform="web",
             )
-            summary_kind = SUMMARY_KIND_LONGFORM_ARTIFACT
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONGFORM_ARTIFACT.value
+            summary_version = SummaryVersion.V1.value
         elif selected_format == "editorial_narrative":
             summary = generate_editorial_narrative(title=title, topic=topics[0])
-            summary_kind = SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONG_EDITORIAL_NARRATIVE.value
+            summary_version = SummaryVersion.V1.value
         elif selected_format == "interleaved_v1":
             summary = InterleavedSummary(
                 summary_type="interleaved",
@@ -966,8 +965,8 @@ class ArticleGenerator:
                 classification="to_read" if random.random() > 0.2 else "skip",
                 summarization_date=random_datetime(7),
             )
-            summary_kind = SUMMARY_KIND_LONG_INTERLEAVED
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONG_INTERLEAVED.value
+            summary_version = SummaryVersion.V1.value
         elif selected_format == "interleaved_v2":
             summary = InterleavedSummaryV2(
                 title=title,
@@ -987,8 +986,8 @@ class ArticleGenerator:
                 classification="to_read" if random.random() > 0.2 else "skip",
                 summarization_date=random_datetime(7),
             )
-            summary_kind = SUMMARY_KIND_LONG_INTERLEAVED
-            summary_version = SUMMARY_VERSION_V2
+            summary_kind = SummaryKind.LONG_INTERLEAVED.value
+            summary_version = SummaryVersion.V2.value
         elif selected_format == "structured":
             summary = StructuredSummary(
                 title=title,
@@ -1004,8 +1003,8 @@ class ArticleGenerator:
                 summarization_date=random_datetime(7),
                 classification="to_read" if random.random() > 0.2 else "skip",
             )
-            summary_kind = SUMMARY_KIND_LONG_STRUCTURED
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONG_STRUCTURED.value
+            summary_version = SummaryVersion.V1.value
         else:
             summary = BulletedSummary(
                 title=title,
@@ -1013,8 +1012,8 @@ class ArticleGenerator:
                 classification="to_read" if random.random() > 0.2 else "skip",
                 summarization_date=random_datetime(7),
             )
-            summary_kind = SUMMARY_KIND_LONG_BULLETS
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONG_BULLETS.value
+            summary_version = SummaryVersion.V1.value
 
         # Generate article metadata
         article_body = generate_article_markdown_body(title=title, source=source, topics=topics)
@@ -1064,8 +1063,8 @@ class PodcastGenerator:
 
         selected_format = resolve_summary_format(summary_format)
         summary: SummaryPayload
-        summary_kind = SUMMARY_KIND_LONG_BULLETS
-        summary_version = SUMMARY_VERSION_V1
+        summary_kind = SummaryKind.LONG_BULLETS.value
+        summary_version = SummaryVersion.V1.value
 
         if selected_format == "longform_artifact":
             summary = generate_longform_artifact(
@@ -1075,12 +1074,12 @@ class PodcastGenerator:
                 source=source,
                 platform="podcast",
             )
-            summary_kind = SUMMARY_KIND_LONGFORM_ARTIFACT
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONGFORM_ARTIFACT.value
+            summary_version = SummaryVersion.V1.value
         elif selected_format == "editorial_narrative":
             summary = generate_editorial_narrative(title=title, topic=topics[0])
-            summary_kind = SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONG_EDITORIAL_NARRATIVE.value
+            summary_version = SummaryVersion.V1.value
         elif selected_format == "interleaved_v1":
             summary = InterleavedSummary(
                 summary_type="interleaved",
@@ -1100,8 +1099,8 @@ class PodcastGenerator:
                 classification="to_read" if random.random() > 0.15 else "skip",
                 summarization_date=random_datetime(7),
             )
-            summary_kind = SUMMARY_KIND_LONG_INTERLEAVED
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONG_INTERLEAVED.value
+            summary_version = SummaryVersion.V1.value
         elif selected_format == "interleaved_v2":
             summary = InterleavedSummaryV2(
                 title=title,
@@ -1122,8 +1121,8 @@ class PodcastGenerator:
                 classification="to_read" if random.random() > 0.15 else "skip",
                 summarization_date=random_datetime(7),
             )
-            summary_kind = SUMMARY_KIND_LONG_INTERLEAVED
-            summary_version = SUMMARY_VERSION_V2
+            summary_kind = SummaryKind.LONG_INTERLEAVED.value
+            summary_version = SummaryVersion.V2.value
         elif selected_format == "structured":
             summary = StructuredSummary(
                 title=title,
@@ -1139,8 +1138,8 @@ class PodcastGenerator:
                 summarization_date=random_datetime(7),
                 classification="to_read" if random.random() > 0.15 else "skip",
             )
-            summary_kind = SUMMARY_KIND_LONG_STRUCTURED
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONG_STRUCTURED.value
+            summary_version = SummaryVersion.V1.value
         else:
             summary = BulletedSummary(
                 title=title,
@@ -1148,8 +1147,8 @@ class PodcastGenerator:
                 classification="to_read" if random.random() > 0.15 else "skip",
                 summarization_date=random_datetime(7),
             )
-            summary_kind = SUMMARY_KIND_LONG_BULLETS
-            summary_version = SUMMARY_VERSION_V1
+            summary_kind = SummaryKind.LONG_BULLETS.value
+            summary_version = SummaryVersion.V1.value
 
         # Generate podcast metadata
         metadata = PodcastMetadata(
@@ -1237,8 +1236,8 @@ class NewsGenerator:
         metadata: dict[str, Any] = {
             "source": source_domain,
             "platform": platform,
-            "summary_kind": SUMMARY_KIND_SHORT_NEWS,
-            "summary_version": SUMMARY_VERSION_V1,
+            "summary_kind": SummaryKind.SHORT_NEWS.value,
+            "summary_version": SummaryVersion.V1.value,
             "article": {
                 "url": article_url,
                 "title": headline,

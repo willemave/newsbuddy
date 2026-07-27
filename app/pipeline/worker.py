@@ -910,11 +910,6 @@ class ContentWorker:
             )
             return False
 
-    def _process_podcast_sync(self, content: ContentData) -> bool:
-        """Compatibility shim used by legacy tests."""
-
-        return self._process_podcast(content)
-
     def _resolve_youtube_podcast_strategy(
         self,
         content: ContentData,

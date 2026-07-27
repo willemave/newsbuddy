@@ -259,6 +259,49 @@ def test_create_learning_deck_enforces_one_active_run_per_user(
         )
 
 
+def test_historical_active_run_does_not_block_current_llm_task_generation(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    """Drained legacy run rows are read-only history, not scheduling locks."""
+    legacy_deck = LearningDeck(
+        user_id=test_user.id,
+        source_kind="content",
+        source_identity="content:legacy-active-run",
+        source_url="https://example.com/legacy-active-run",
+        source_title="Legacy active run",
+        source_metadata={},
+        title="Legacy active run",
+        artifact_object_keys=[],
+        share_enabled=False,
+    )
+    db_session.add(legacy_deck)
+    db_session.flush()
+    db_session.add(
+        LearningDeckRun(
+            deck_id=legacy_deck.id,
+            user_id=test_user.id,
+            status="generating",
+            source_snapshot={},
+            timeline=[],
+            artifact_object_keys=[],
+        )
+    )
+    db_session.commit()
+
+    content = _create_visible_article(db_session, test_user, content_factory)
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=content.id,
+    )
+
+    assert deck.id != legacy_deck.id
+    task = db_session.query(LlmTask).filter_by(subject_id=deck.id).one()
+    assert task.status == LlmTaskStatus.QUEUED.value
+
+
 def test_share_tokens_enable_disable_and_private_tokens(
     db_session,
     test_user,

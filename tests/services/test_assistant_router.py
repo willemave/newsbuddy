@@ -1,17 +1,31 @@
 """Tests for contextual assistant routing heuristics."""
 
+import asyncio
+import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.test import TestModel
 
 from app.core.settings import get_settings
-from app.models.db import Content, ContentStatusEntry, NewsItemReadStatus, UserScraperConfig
+from app.models.contracts import LlmTaskStatus, MessageProcessingStatus
+from app.models.db import (
+    ChatMessage,
+    ChatSession,
+    Content,
+    ContentStatusEntry,
+    LlmTask,
+    NewsItemReadStatus,
+    UserScraperConfig,
+)
 from app.models.internal.assistant import AssistantScreenContext
 from app.repositories.search_repository import (
     search_news,
     search_subscription_feeds,
 )
 from app.services import assistant_router, chat_turn_runtime
+from app.services.chat_agent import create_processing_message
 
 
 def test_build_turn_instructions_prefers_knowledge_for_saved_content_prompts() -> None:
@@ -453,3 +467,88 @@ def test_build_assistant_personal_library_runtime_skips_sync_when_sandbox_disabl
     assert sandbox_session is None
     assert personal_library_error is None
     assert sync_calls == []
+
+
+def test_process_assistant_turn_persists_completion_usage_and_ledger(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Detached assistant chat",
+        session_type="knowledge_chat",
+        context_snapshot="Knowledge snapshot",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.5",
+    )
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+    assert session.id is not None
+    session_id = int(session.id)
+    message = create_processing_message(db_session, session_id, "Find my saved article")
+    assert message.id is not None
+    message_id = int(message.id)
+    usage_calls: list[tuple[int, int | None, str]] = []
+
+    monkeypatch.setattr(assistant_router, "load_message_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        assistant_router,
+        "_build_assistant_personal_library_runtime",
+        lambda **_kwargs: (None, None),
+    )
+    monkeypatch.setattr(assistant_router, "resolve_effective_api_key", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        assistant_router,
+        "_log_chat_usage",
+        lambda _result, _snapshot, sid, mid, context: usage_calls.append((sid, mid, context)),
+    )
+
+    async def _fake_run_in_threadpool(_func, _model, prompt, deps, history, **_kwargs):
+        assert prompt == "Find my saved article"
+        assert deps.session_id == session_id
+        assert deps.user_id == test_user.id
+        assert deps.context_snapshot == "Knowledge snapshot"
+        assert history == []
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="model-facing assistant prompt")]),
+            ModelResponse(parts=[TextPart(content="Here is the saved article")]),
+        ]
+        return SimpleNamespace(
+            output="Here is the saved article",
+            tool_calls=[],
+            new_messages=lambda: messages,
+        )
+
+    monkeypatch.setattr(assistant_router, "run_in_threadpool", _fake_run_in_threadpool)
+
+    asyncio.run(
+        assistant_router.process_assistant_turn_async(
+            session_id,
+            message_id,
+            "Find my saved article",
+            screen_context=AssistantScreenContext(
+                screen_type="knowledge_hub",
+                screen_title="Knowledge",
+            ),
+        )
+    )
+
+    db_session.expire_all()
+    persisted_message = db_session.query(ChatMessage).filter_by(id=message_id).one()
+    ledger = (
+        db_session.query(LlmTask)
+        .filter(LlmTask.workflow_key == "chat.contextual_assistant.v1")
+        .order_by(LlmTask.id.desc())
+        .first()
+    )
+    assert persisted_message.status == MessageProcessingStatus.COMPLETED.value
+    assert json.loads(persisted_message.message_list)[0]["parts"][0]["content"] == (
+        "Find my saved article"
+    )
+    assert usage_calls == [(session_id, message_id, "assistant")]
+    assert ledger is not None
+    assert ledger.status == LlmTaskStatus.COMPLETED.value
+    assert ledger.input_json["screen_type"] == "knowledge_hub"
+    assert ledger.output_json["message_id"] == message_id

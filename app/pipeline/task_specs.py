@@ -55,10 +55,6 @@ class AudioEpisodePayload(TaskPayload):
     audio_episode_id: int
 
 
-class LearningDeckRunPayload(RequiredUserPayload):
-    learning_deck_run_id: int
-
-
 class LlmTaskRunPayload(RequiredUserPayload):
     llm_task_id: int
 
@@ -77,7 +73,10 @@ class TaskSpec:
     task_type: TaskType
     queue: TaskQueue
     payload_model: type[BaseModel]
+    handler_module: str
+    handler_class: str
     dedupe_by_content: bool = False
+    requires_context_llm_service: bool = False
 
     def normalize_payload(self, payload: dict[str, Any] | None) -> dict[str, Any]:
         try:
@@ -89,97 +88,167 @@ class TaskSpec:
             raise ValueError(f"Invalid payload for {self.task_type.value}: {exc}") from exc
 
 
-TASK_SPECS: dict[TaskType, TaskSpec] = {
-    TaskType.SCRAPE: TaskSpec(TaskType.SCRAPE, TaskQueue.CONTENT, ScrapePayload),
-    TaskType.BACKFILL_FEEDS: TaskSpec(
+_TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
+    TaskSpec(
+        TaskType.SCRAPE,
+        TaskQueue.CONTENT,
+        ScrapePayload,
+        "app.pipeline.handlers.scrape",
+        "ScrapeHandler",
+    ),
+    TaskSpec(
         TaskType.BACKFILL_FEEDS,
         TaskQueue.BACKFILL,
         FeedBatchBackfillRequest,
+        "app.pipeline.handlers.backfill_feeds",
+        "BackfillFeedsHandler",
     ),
-    TaskType.ANALYZE_URL: TaskSpec(TaskType.ANALYZE_URL, TaskQueue.CONTENT, AnalyzeUrlPayload),
-    TaskType.PROCESS_CONTENT: TaskSpec(
-        TaskType.PROCESS_CONTENT, TaskQueue.CONTENT, ContentIdPayload, True
+    TaskSpec(
+        TaskType.ANALYZE_URL,
+        TaskQueue.CONTENT,
+        AnalyzeUrlPayload,
+        "app.pipeline.handlers.analyze_url",
+        "AnalyzeUrlHandler",
     ),
-    TaskType.ENRICH_NEWS_ITEM_ARTICLE: TaskSpec(
+    TaskSpec(
+        TaskType.PROCESS_CONTENT,
+        TaskQueue.CONTENT,
+        ContentIdPayload,
+        "app.pipeline.handlers.process_content",
+        "ProcessContentHandler",
+        dedupe_by_content=True,
+    ),
+    TaskSpec(
         TaskType.ENRICH_NEWS_ITEM_ARTICLE,
         TaskQueue.CONTENT,
         TaskPayload,
+        "app.pipeline.handlers.enrich_news_item_article",
+        "EnrichNewsItemArticleHandler",
     ),
-    TaskType.PROCESS_NEWS_ITEM: TaskSpec(
+    TaskSpec(
         TaskType.PROCESS_NEWS_ITEM,
         TaskQueue.CONTENT,
         NewsItemIdPayload,
-        True,
+        "app.pipeline.handlers.process_news_item",
+        "ProcessNewsItemHandler",
+        dedupe_by_content=True,
+        requires_context_llm_service=True,
     ),
-    TaskType.PROCESS_PODCAST_MEDIA: TaskSpec(
+    TaskSpec(
         TaskType.PROCESS_PODCAST_MEDIA,
         TaskQueue.MEDIA,
         ProcessPodcastMediaPayload,
-        True,
+        "app.pipeline.handlers.process_podcast_media",
+        "ProcessPodcastMediaHandler",
+        dedupe_by_content=True,
     ),
-    TaskType.DOWNLOAD_AUDIO: TaskSpec(TaskType.DOWNLOAD_AUDIO, TaskQueue.MEDIA, ContentIdPayload),
-    TaskType.TRANSCRIBE: TaskSpec(TaskType.TRANSCRIBE, TaskQueue.MEDIA, ContentIdPayload),
-    TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO: TaskSpec(
+    TaskSpec(
         TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO,
         TaskQueue.MEDIA,
         ContentIdPayload,
-        True,
+        "app.pipeline.handlers.download_tweet_video",
+        "DownloadTweetVideoAudioHandler",
+        dedupe_by_content=True,
     ),
-    TaskType.TRANSCRIBE_TWEET_VIDEO: TaskSpec(
+    TaskSpec(
         TaskType.TRANSCRIBE_TWEET_VIDEO,
         TaskQueue.MEDIA,
         ContentIdPayload,
-        True,
+        "app.pipeline.handlers.transcribe_tweet_video",
+        "TranscribeTweetVideoHandler",
+        dedupe_by_content=True,
     ),
-    TaskType.SUMMARIZE: TaskSpec(TaskType.SUMMARIZE, TaskQueue.CONTENT, ContentIdPayload, True),
-    TaskType.FETCH_DISCUSSION: TaskSpec(
-        TaskType.FETCH_DISCUSSION, TaskQueue.DISCUSSION, ContentIdPayload, True
+    TaskSpec(
+        TaskType.SUMMARIZE,
+        TaskQueue.CONTENT,
+        ContentIdPayload,
+        "app.pipeline.handlers.summarize",
+        "SummarizeHandler",
+        dedupe_by_content=True,
+        requires_context_llm_service=True,
     ),
-    TaskType.FETCH_NEWS_ITEM_DISCUSSION: TaskSpec(
+    TaskSpec(
+        TaskType.FETCH_DISCUSSION,
+        TaskQueue.DISCUSSION,
+        ContentIdPayload,
+        "app.pipeline.handlers.fetch_discussion",
+        "FetchDiscussionHandler",
+        dedupe_by_content=True,
+    ),
+    TaskSpec(
         TaskType.FETCH_NEWS_ITEM_DISCUSSION,
         TaskQueue.DISCUSSION,
         NewsItemIdPayload,
-        True,
+        "app.pipeline.handlers.fetch_news_item_discussion",
+        "FetchNewsItemDiscussionHandler",
+        dedupe_by_content=True,
+        requires_context_llm_service=True,
     ),
-    TaskType.GENERATE_IMAGE: TaskSpec(
-        TaskType.GENERATE_IMAGE, TaskQueue.IMAGE, GenerateImagePayload, True
+    TaskSpec(
+        TaskType.GENERATE_IMAGE,
+        TaskQueue.IMAGE,
+        GenerateImagePayload,
+        "app.pipeline.handlers.generate_image",
+        "GenerateImageHandler",
+        dedupe_by_content=True,
     ),
-    TaskType.DISCOVER_FEEDS: TaskSpec(TaskType.DISCOVER_FEEDS, TaskQueue.CONTENT, TaskPayload),
-    TaskType.ONBOARDING_DISCOVER: TaskSpec(
+    TaskSpec(
+        TaskType.DISCOVER_FEEDS,
+        TaskQueue.CONTENT,
+        TaskPayload,
+        "app.pipeline.handlers.discover_feeds",
+        "DiscoverFeedsHandler",
+    ),
+    TaskSpec(
         TaskType.ONBOARDING_DISCOVER,
         TaskQueue.ONBOARDING,
         RequiredUserPayload,
-        True,
+        "app.pipeline.handlers.onboarding_discover",
+        "OnboardingDiscoverHandler",
+        dedupe_by_content=True,
     ),
-    TaskType.DIG_DEEPER: TaskSpec(TaskType.DIG_DEEPER, TaskQueue.CHAT, DigDeeperPayload),
-    TaskType.SYNC_INTEGRATION: TaskSpec(
+    TaskSpec(
+        TaskType.DIG_DEEPER,
+        TaskQueue.CHAT,
+        DigDeeperPayload,
+        "app.pipeline.handlers.dig_deeper",
+        "DigDeeperHandler",
+    ),
+    TaskSpec(
         TaskType.SYNC_INTEGRATION,
         TaskQueue.TWITTER,
         SyncIntegrationPayload,
-        True,
+        "app.pipeline.handlers.sync_integration",
+        "SyncIntegrationHandler",
+        dedupe_by_content=True,
     ),
-    TaskType.GENERATE_AUDIO_EPISODE: TaskSpec(
+    TaskSpec(
         TaskType.GENERATE_AUDIO_EPISODE,
         TaskQueue.AUDIO_EPISODE,
         AudioEpisodePayload,
-        True,
+        "app.pipeline.handlers.generate_audio_episode",
+        "GenerateAudioEpisodeHandler",
+        dedupe_by_content=True,
     ),
-    TaskType.GENERATE_LEARNING_DECK: TaskSpec(
-        TaskType.GENERATE_LEARNING_DECK,
-        TaskQueue.LEARNING,
-        LearningDeckRunPayload,
-    ),
-    TaskType.RUN_LLM_TASK: TaskSpec(
+    TaskSpec(
         TaskType.RUN_LLM_TASK,
         TaskQueue.LLM,
         LlmTaskRunPayload,
+        "app.pipeline.handlers.run_llm_task",
+        "RunLlmTaskHandler",
     ),
-    TaskType.BRIEFING_REFRESH: TaskSpec(
+    TaskSpec(
         TaskType.BRIEFING_REFRESH,
         TaskQueue.LLM,
         BriefingRefreshPayload,
+        "app.pipeline.handlers.briefing_refresh",
+        "BriefingRefreshHandler",
     ),
-}
+)
+
+TASK_SPECS: dict[TaskType, TaskSpec] = {spec.task_type: spec for spec in _TASK_SPEC_SEQUENCE}
+if len(TASK_SPECS) != len(_TASK_SPEC_SEQUENCE):
+    raise ValueError("Duplicate task specifications")
 
 
 def get_task_spec(task_type: TaskType) -> TaskSpec:

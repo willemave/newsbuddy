@@ -40,7 +40,7 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
             return 42
 
     monkeypatch.setattr(
-        "app.services.onboarding.get_task_queue_gateway",
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
         lambda: FakeQueueGateway(),
     )
 
@@ -131,7 +131,7 @@ def test_onboarding_complete_persists_selected_feed_reddit_and_aggregator(
             return 45
 
     monkeypatch.setattr(
-        "app.services.onboarding.get_task_queue_gateway",
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
         lambda: FakeQueueGateway(),
     )
 
@@ -207,7 +207,7 @@ def test_onboarding_complete_queues_selected_aggregator_scrapes(
             return 43
 
     monkeypatch.setattr(
-        "app.services.onboarding.get_task_queue_gateway",
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
         lambda: FakeQueueGateway(),
     )
 
@@ -254,7 +254,7 @@ def test_onboarding_complete_ignores_reddit_aggregator(
             return 44
 
     monkeypatch.setattr(
-        "app.services.onboarding.get_task_queue_gateway",
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
         lambda: FakeQueueGateway(),
     )
 
@@ -314,7 +314,7 @@ def test_onboarding_tutorial_complete(client, db_session, test_user):
 
 def test_onboarding_fast_discover_returns_empty_without_search_results(client, monkeypatch):
     monkeypatch.setattr(
-        "app.services.onboarding._run_discovery_exa_queries",
+        "app.services.onboarding.discovery_run._run_discovery_exa_queries",
         lambda *_args, **_kwargs: [],
     )
     response = client.post(
@@ -333,7 +333,7 @@ def test_onboarding_fast_discover_returns_empty_without_search_results(client, m
 
 def test_onboarding_fast_discover_does_not_use_static_defaults(client, monkeypatch):
     monkeypatch.setattr(
-        "app.services.onboarding._run_discovery_exa_queries",
+        "app.services.onboarding.discovery_run._run_discovery_exa_queries",
         lambda *_args, **_kwargs: [],
     )
 
@@ -380,7 +380,7 @@ def test_onboarding_parse_voice(client, monkeypatch):
 
         return FakeAgent()
 
-    monkeypatch.setattr("app.services.onboarding.get_basic_agent", fake_get_basic_agent)
+    monkeypatch.setattr("app.services.onboarding.llm_plans.get_basic_agent", fake_get_basic_agent)
 
     response = client.post(
         "/api/onboarding/parse-voice",
@@ -434,9 +434,9 @@ def test_onboarding_audio_discover_creates_run(client, db_session, monkeypatch, 
             calls.append(payload or {})
             return 99
 
-    monkeypatch.setattr("app.services.onboarding.get_basic_agent", fake_get_basic_agent)
+    monkeypatch.setattr("app.services.onboarding.llm_plans.get_basic_agent", fake_get_basic_agent)
     monkeypatch.setattr(
-        "app.services.onboarding.get_task_queue_gateway",
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
         lambda: FakeQueueGateway(),
     )
 

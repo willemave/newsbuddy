@@ -1,4 +1,5 @@
-from app.services.onboarding import _AudioLane, _AudioPlanOutput, _normalize_audio_lane_plan
+from app.services.onboarding.internal_models import _AudioLane, _AudioPlanOutput
+from app.services.onboarding.llm_plans import _normalize_audio_lane_plan
 
 
 def test_audio_lane_plan_preserves_reddit_lane_when_full() -> None:

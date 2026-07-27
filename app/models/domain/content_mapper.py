@@ -12,7 +12,7 @@ from app.models.db import Content as DBContent
 from app.models.domain.content import ContentData
 from app.models.metadata.access import metadata_view
 from app.models.metadata.state import merge_runtime_metadata, normalize_metadata_shape
-from app.utils.summary_metadata import infer_summary_kind_version
+from app.models.metadata.summary_contracts import infer_summary_kind_version
 from app.utils.url_utils import is_http_url
 
 logger = get_logger(__name__)
@@ -166,9 +166,9 @@ def _normalize_summary_metadata(metadata: dict[str, Any], content_type: str) -> 
         return
     inferred_kind, inferred_version = inferred
     if not summary_kind:
-        metadata["summary_kind"] = inferred_kind
+        metadata["summary_kind"] = inferred_kind.value
     if not summary_version:
-        metadata["summary_version"] = inferred_version
+        metadata["summary_version"] = inferred_version.value
 
 
 def domain_to_content(content_data: ContentData, existing: DBContent | None = None) -> DBContent:

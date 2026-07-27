@@ -6,6 +6,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+DEFAULT_MAX_LINES = 1_000
+SOURCE_GLOBS = ("app/**/*.py", "client/newsly/newsly/**/*.swift")
+IGNORED_PREFIXES = ("client/newsly/newsly/Models/Generated/",)
+
 
 def load_guardrails(config_path: Path) -> dict[str, int]:
     """Load guardrail line limits from JSON config."""
@@ -28,11 +32,27 @@ def count_lines(path: Path) -> int:
     return sum(1 for _ in path.open("r", encoding="utf-8"))
 
 
+def discover_guardrails(
+    repo_root: Path,
+    explicit_guardrails: dict[str, int],
+) -> dict[str, int]:
+    """Apply a default ceiling to every non-generated Python and Swift module."""
+    guardrails = dict(explicit_guardrails)
+    for source_glob in SOURCE_GLOBS:
+        for file_path in repo_root.glob(source_glob):
+            rel_path = file_path.relative_to(repo_root).as_posix()
+            if rel_path.startswith(IGNORED_PREFIXES):
+                continue
+            guardrails.setdefault(rel_path, DEFAULT_MAX_LINES)
+    return guardrails
+
+
 def main() -> int:
     """Run the guardrail check."""
     repo_root = Path(__file__).resolve().parent.parent
     config_path = repo_root / "config/module_size_guardrails.json"
-    guardrails = load_guardrails(config_path)
+    explicit_guardrails = load_guardrails(config_path)
+    guardrails = discover_guardrails(repo_root, explicit_guardrails)
 
     violations: list[tuple[str, int, int]] = []
     missing: list[str] = []
@@ -50,15 +70,19 @@ def main() -> int:
         print("Missing guardrail targets:")
         for rel_path in missing:
             print(f"- {rel_path}")
-        return 1
 
     if violations:
         print("Module size guardrail violations:")
         for rel_path, line_count, limit in violations:
             print(f"- {rel_path}: {line_count} lines (limit {limit})")
+
+    if missing or violations:
         return 1
 
-    print(f"Module size guardrails OK ({len(guardrails)} files checked).")
+    print(
+        "Module size guardrails OK "
+        f"({len(guardrails)} files checked, {len(explicit_guardrails)} ratcheted)."
+    )
     return 0
 
 

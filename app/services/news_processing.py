@@ -9,9 +9,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.constants import SUMMARY_KIND_SHORT_NEWS, SUMMARY_VERSION_V1
 from app.core.logging import get_logger
-from app.models.contracts import NewsItemStatus
+from app.models.contracts import NewsItemStatus, SummaryKind, SummaryVersion
 from app.models.db import NewsItem
 from app.models.metadata.summaries import NewsSummary
 from app.services.briefing.events import enqueue_news_item_for_briefing_if_ready
@@ -84,12 +83,12 @@ def _has_materialized_summary(
 
 def _extract_existing_summary(item: NewsItem) -> NewsSummary | None:
     raw_metadata = dict(item.raw_metadata or {})
-    if raw_metadata.get("summary_kind") == SUMMARY_KIND_SHORT_NEWS:
-        has_generated_summary = raw_metadata.get("summary_version") == SUMMARY_VERSION_V1
+    if raw_metadata.get("summary_kind") == SummaryKind.SHORT_NEWS.value:
+        has_generated_summary = raw_metadata.get("summary_version") == SummaryVersion.V1.value
     else:
         has_generated_summary = raw_metadata.get(
             "summary_version"
-        ) == SUMMARY_VERSION_V1 and isinstance(raw_metadata.get("summary"), dict)
+        ) == SummaryVersion.V1.value and isinstance(raw_metadata.get("summary"), dict)
     if not has_generated_summary:
         return None
 
@@ -252,8 +251,8 @@ def _persist_summary(item: NewsItem, summary: NewsSummary, raw_metadata: dict[st
     if resolved_summary_text:
         raw_summary["summary"] = resolved_summary_text
     raw_metadata["summary"] = raw_summary
-    raw_metadata["summary_kind"] = SUMMARY_KIND_SHORT_NEWS
-    raw_metadata["summary_version"] = SUMMARY_VERSION_V1
+    raw_metadata["summary_kind"] = SummaryKind.SHORT_NEWS.value
+    raw_metadata["summary_version"] = SummaryVersion.V1.value
     item.raw_metadata = raw_metadata
     item.status = NewsItemStatus.READY.value
     item.processed_at = _utcnow_naive()

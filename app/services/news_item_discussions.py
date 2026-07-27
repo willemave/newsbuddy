@@ -8,9 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
 
-import httpx
 from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import JSONB
@@ -22,19 +20,17 @@ from app.core.settings import get_settings
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
 from app.models.db import NewsItem, NewsItemDiscussion, User, UserScraperConfig
 from app.services.briefing.read_marks import bump_briefing_version_for_news_item
-from app.services.discussion_fetcher import (
+from app.services.discussion_comments import (
     DiscussionFetchError,
-    _clean_html_text,
-    _compact_text,
-    _extract_anchor_titles_from_html,
-    _extract_hn_item_id,
-    _extract_links_from_comments,
-    _extract_reddit_submission_id,
-    _get_reddit_client,
-    _is_reddit_more_comments,
-    _is_retryable_reddit_error,
-    _normalize_reddit_discussion_url,
-    _unix_to_iso,
+    NormalizedDiscussion,
+    TerminalDiscussionUnavailable,
+    extract_hackernews_item_id,
+    extract_reddit_submission_id,
+    fetch_hackernews_comments,
+    fetch_reddit_comments,
+    is_hackernews_discussion,
+    is_reddit_discussion,
+    normalize_reddit_discussion_url,
 )
 from app.services.gateways.object_storage_gateway import (
     ObjectStorageGateway,
@@ -66,8 +62,6 @@ NEWS_DISCUSSION_SUMMARY_VERSION = 1
 DEFAULT_DISCUSSION_REFRESH_ENQUEUE_LIMIT = 100
 MAX_STORED_COMMENTS = 1_000
 
-HN_ALGOLIA_ITEM_URL = "https://hn.algolia.com/api/v1/items/{item_id}"
-HN_FIREBASE_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{item_id}.json"
 SUPPORTED_DISCUSSION_PLATFORMS = frozenset({"hackernews", "reddit"})
 
 
@@ -83,12 +77,7 @@ class NewsItemDiscussionRefreshResult:
     retryable: bool = True
 
 
-class TerminalNewsItemDiscussionUnavailable(DiscussionFetchError):
-    """Non-retryable discussion state that should be removed from refresh rotation."""
-
-    def __init__(self, message: str, *, status: str = REFRESH_STATUS_GONE) -> None:
-        super().__init__(message, retryable=False)
-        self.status = status
+TerminalNewsItemDiscussionUnavailable = TerminalDiscussionUnavailable
 
 
 def _utcnow_naive() -> datetime:
@@ -128,18 +117,11 @@ def _normalize_platform(value: Any) -> str:
 
 
 def _is_hackernews_url(url: str | None) -> bool:
-    if not url:
-        return False
-    parsed = urlparse(url)
-    return "ycombinator.com" in parsed.netloc.lower() and "item" in url
+    return is_hackernews_discussion("", url)
 
 
 def _is_reddit_url(url: str | None) -> bool:
-    if not url:
-        return False
-    parsed = urlparse(url)
-    host = parsed.netloc.lower()
-    return "reddit.com" in host or host.endswith("redd.it")
+    return is_reddit_discussion("", url)
 
 
 def _is_supported_platform(platform: str, discussion_url: str | None) -> bool:
@@ -221,9 +203,9 @@ def _resolve_external_id(
     if external_id:
         return external_id
     if platform == "hackernews" and discussion_url:
-        return _extract_hn_item_id(discussion_url)
+        return extract_hackernews_item_id(discussion_url)
     if platform == "reddit" and discussion_url:
-        return _extract_reddit_submission_id(discussion_url)
+        return extract_reddit_submission_id(discussion_url)
     return None
 
 
@@ -232,7 +214,7 @@ def _resolve_discussion_url(platform: str, item: NewsItem) -> str | None:
         normalized = normalize_http_url(candidate)
         if normalized:
             if platform == "reddit":
-                return _normalize_reddit_discussion_url(normalized) or normalized
+                return normalize_reddit_discussion_url(normalized) or normalized
             return normalized
     return None
 
@@ -257,6 +239,50 @@ def sync_news_item_discussion_from_news_item(
     This is intentionally count-only. Full comments and summaries are fetched by
     queued refresh tasks, explicit refreshes, or the catch-up scraper when the TTL allows it.
     """
+    row = (
+        db.query(NewsItemDiscussion).filter(NewsItemDiscussion.news_item_id == news_item.id).first()
+    )
+    return _sync_news_item_discussion(db, news_item=news_item, row=row)
+
+
+def sync_news_item_discussions_from_news_items(
+    db: Session,
+    news_items: list[NewsItem],
+) -> list[NewsItemDiscussion | None]:
+    """Synchronize a batch after preloading existing discussion rows once."""
+    if not news_items:
+        return []
+    news_item_ids = [int(item.id) for item in news_items if item.id is not None]
+    existing_by_news_item_id = {
+        int(row.news_item_id): row
+        for row in db.query(NewsItemDiscussion)
+        .filter(NewsItemDiscussion.news_item_id.in_(news_item_ids))
+        .all()
+        if row.news_item_id is not None
+    }
+    results: list[NewsItemDiscussion | None] = []
+    for news_item in news_items:
+        row = _sync_news_item_discussion(
+            db,
+            news_item=news_item,
+            row=(
+                existing_by_news_item_id.get(int(news_item.id))
+                if news_item.id is not None
+                else None
+            ),
+        )
+        results.append(row)
+        if row is not None and news_item.id is not None:
+            existing_by_news_item_id[int(news_item.id)] = row
+    return results
+
+
+def _sync_news_item_discussion(
+    db: Session,
+    *,
+    news_item: NewsItem,
+    row: NewsItemDiscussion | None,
+) -> NewsItemDiscussion | None:
     raw_metadata = dict(news_item.raw_metadata or {})
     platform = _normalize_platform(news_item.platform or raw_metadata.get("platform"))
     discussion_url = _resolve_discussion_url(platform, news_item)
@@ -275,9 +301,6 @@ def sync_news_item_discussion_from_news_item(
     if external_id is None and discussion_url is None:
         return None
 
-    row = (
-        db.query(NewsItemDiscussion).filter(NewsItemDiscussion.news_item_id == news_item.id).first()
-    )
     if row is None:
         row = NewsItemDiscussion(
             news_item_id=news_item.id,
@@ -432,6 +455,38 @@ def should_enqueue_news_item_discussion_refresh(
     )
 
 
+def news_item_discussion_refresh_ids(
+    db: Session,
+    *,
+    rows: Iterable[NewsItemDiscussion | None],
+    now: datetime | None = None,
+) -> set[int]:
+    """Return refresh-eligible ids using one visibility query for a batch."""
+    current_time = now or _utcnow_naive()
+    candidate_ids = {
+        int(row.news_item_id)
+        for row in rows
+        if row is not None
+        and row.news_item_id is not None
+        and row.platform in SUPPORTED_DISCUSSION_PLATFORMS
+        and bool(row.external_id)
+        and bool(row.discussion_url)
+        and not (row.next_refresh_after is not None and row.next_refresh_after > current_time)
+        and row.last_refresh_status not in TERMINAL_REFRESH_STATUSES
+    }
+    if not candidate_ids:
+        return set()
+    return {
+        int(news_item_id)
+        for (news_item_id,) in db.query(NewsItem.id)
+        .filter(NewsItem.id.in_(candidate_ids))
+        .filter(_ready_representative_news_item_clause())
+        .filter(_visible_to_active_user_clause())
+        .filter(_supported_discussion_news_item_clause())
+        .all()
+    }
+
+
 def sync_missing_visible_news_item_discussions(db: Session, *, limit: int = 500) -> int:
     """Backfill discussion rows only for supported items visible to active users."""
     existing_ids = db.query(NewsItemDiscussion.news_item_id)
@@ -520,143 +575,17 @@ def list_due_news_item_discussion_refresh_candidates(
     return [int(news_item_id) for (news_item_id,) in rows if news_item_id is not None]
 
 
-def _fetch_json(client: httpx.Client, url: str, *, retryable_404: bool = False) -> dict[str, Any]:
-    response = client.get(url)
-    try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        status_code = exc.response.status_code
-        raise DiscussionFetchError(
-            f"HTTP {status_code} while fetching discussion",
-            retryable=(
-                status_code >= 500 or status_code == 429 or (status_code == 404 and retryable_404)
-            ),
-        ) from exc
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise DiscussionFetchError("Discussion endpoint returned a non-object payload")
-    return payload
-
-
-def _build_comment_source_url(platform: str, discussion_url: str, comment_id: str) -> str:
-    if platform == "hackernews":
-        return f"https://news.ycombinator.com/item?id={comment_id}"
-    return discussion_url
-
-
-def _normalize_hn_comment(
-    node: dict[str, Any],
-    *,
-    depth: int,
-    parent_id: str | None,
-    discussion_url: str,
-) -> dict[str, Any] | None:
-    comment_id = _clean_string(str(node.get("id"))) if node.get("id") is not None else None
-    raw_html = str(node.get("text") or "")
-    text = _clean_html_text(raw_html)
-    if not comment_id or not text:
-        return None
-    return {
-        "comment_id": comment_id,
-        "parent_id": parent_id,
-        "author": _clean_string(node.get("author")) or "unknown",
-        "text": text,
-        "compact_text": _compact_text(text),
-        "depth": depth,
-        "created_at": node.get("created_at") or _unix_to_iso(node.get("created_at_i")),
-        "source_url": _build_comment_source_url("hackernews", discussion_url, comment_id),
-    }
-
-
 def _fetch_hackernews_comments(
     *,
     external_id: str,
     discussion_url: str,
 ) -> dict[str, Any]:
-    timeout = httpx.Timeout(timeout=get_settings().http_timeout_seconds, connect=10.0)
-    with httpx.Client(timeout=timeout) as client:
-        firebase_item = _fetch_json(
-            client,
-            HN_FIREBASE_ITEM_URL.format(item_id=external_id),
-            retryable_404=False,
-        )
-        if firebase_item.get("dead") is True or firebase_item.get("deleted") is True:
-            raise TerminalNewsItemDiscussionUnavailable(
-                "Hacker News discussion is gone",
-                status=REFRESH_STATUS_GONE,
-            )
-        algolia_item = _fetch_json(
-            client,
-            HN_ALGOLIA_ITEM_URL.format(item_id=external_id),
-            retryable_404=False,
-        )
-
-    comments: list[dict[str, Any]] = []
-    url_titles: dict[str, str] = {}
-    total_seen = 0
-    cap_reached = False
-
-    def walk(nodes: Iterable[Any], depth: int, parent_id: str | None) -> None:
-        nonlocal total_seen, cap_reached
-        for node in nodes:
-            if not isinstance(node, dict):
-                continue
-            if len(comments) >= MAX_STORED_COMMENTS:
-                cap_reached = True
-                return
-
-            total_seen += 1
-            raw_html = str(node.get("text") or "")
-            if raw_html:
-                url_titles.update(_extract_anchor_titles_from_html(raw_html))
-
-            comment = _normalize_hn_comment(
-                node,
-                depth=depth,
-                parent_id=parent_id,
-                discussion_url=discussion_url,
-            )
-            next_parent_id = parent_id
-            if comment is not None:
-                comments.append(comment)
-                next_parent_id = comment["comment_id"]
-
-            children = node.get("children")
-            if isinstance(children, list):
-                walk(children, depth + 1, next_parent_id)
-                if cap_reached:
-                    return
-
-    children = algolia_item.get("children")
-    if isinstance(children, list):
-        walk(children, depth=0, parent_id=None)
-
-    links = _extract_links_from_comments(comments, url_titles=url_titles)
-    return {
-        "platform": "hackernews",
-        "external_id": external_id,
-        "discussion_url": discussion_url,
-        "thread": {
-            "title": _clean_string(firebase_item.get("title"))
-            or _clean_string(algolia_item.get("title")),
-            "author": _clean_string(firebase_item.get("by"))
-            or _clean_string(algolia_item.get("author")),
-            "score": _coerce_non_negative_int(firebase_item.get("score"))
-            or _coerce_non_negative_int(algolia_item.get("points")),
-            "comment_count": _coerce_non_negative_int(firebase_item.get("descendants")),
-            "created_at": _unix_to_iso(firebase_item.get("time")) or algolia_item.get("created_at"),
-        },
-        "comments": comments,
-        "links": links,
-        "stats": {
-            "provider": "algolia",
-            "declared_comment_count": _coerce_non_negative_int(firebase_item.get("descendants")),
-            "fetched_count": len(comments),
-            "total_seen": total_seen,
-            "stored_comment_cap": MAX_STORED_COMMENTS,
-            "cap_reached": cap_reached,
-        },
-    }
+    discussion = fetch_hackernews_comments(
+        external_id=external_id,
+        discussion_url=discussion_url,
+        comment_cap=MAX_STORED_COMMENTS,
+    )
+    return _news_item_provider_payload(discussion)
 
 
 def _fetch_reddit_comments(
@@ -664,96 +593,39 @@ def _fetch_reddit_comments(
     external_id: str,
     discussion_url: str,
 ) -> dict[str, Any]:
-    canonical_url = _normalize_reddit_discussion_url(discussion_url) or discussion_url
-    client = _get_reddit_client()
-    if client is None:
-        raise DiscussionFetchError(
-            "Reddit API credentials not configured",
-            retryable=False,
-        )
+    discussion = fetch_reddit_comments(
+        external_id=external_id,
+        discussion_url=discussion_url,
+        comment_cap=MAX_STORED_COMMENTS,
+    )
+    return _news_item_provider_payload(discussion)
 
-    try:
-        submission = client.submission(id=external_id)
-        submission.comment_sort = "top"
-        _ = submission.title
-        submission.comments.replace_more(limit=0)
-    except Exception as exc:  # noqa: BLE001
-        raise DiscussionFetchError(
-            f"Reddit API request failed: {exc}",
-            retryable=_is_retryable_reddit_error(exc),
-        ) from exc
 
-    comments: list[dict[str, Any]] = []
-    url_titles: dict[str, str] = {}
-    cap_reached = False
-    total_seen = 0
+def _news_item_provider_payload(discussion: NormalizedDiscussion) -> dict[str, Any]:
+    thread: dict[str, Any] = {
+        "title": discussion.thread.title,
+        "author": discussion.thread.author,
+        "score": discussion.thread.score,
+        "comment_count": discussion.thread.comment_count,
+        "created_at": discussion.thread.created_at,
+    }
+    if discussion.platform == "reddit":
+        thread["subreddit"] = discussion.thread.subreddit
 
-    def walk(nodes: Iterable[Any], depth: int, parent_id: str | None) -> None:
-        nonlocal cap_reached, total_seen
-        for node in nodes:
-            if len(comments) >= MAX_STORED_COMMENTS:
-                cap_reached = True
-                return
-            if _is_reddit_more_comments(node):
-                continue
-
-            total_seen += 1
-            body_html = getattr(node, "body_html", None) or ""
-            if body_html:
-                url_titles.update(_extract_anchor_titles_from_html(str(body_html)))
-            body = getattr(node, "body", None) or body_html or ""
-            text = _clean_html_text(str(body))
-            comment_id = str(getattr(node, "id", "") or "").strip()
-
-            if text and comment_id:
-                author_obj = getattr(node, "author", None)
-                author = getattr(author_obj, "name", None) or "unknown"
-                comments.append(
-                    {
-                        "comment_id": comment_id,
-                        "parent_id": parent_id,
-                        "author": author,
-                        "text": text,
-                        "compact_text": _compact_text(text),
-                        "depth": depth,
-                        "created_at": _unix_to_iso(getattr(node, "created_utc", None)),
-                        "source_url": canonical_url,
-                    }
-                )
-
-            replies = getattr(node, "replies", None)
-            if replies:
-                walk(replies, depth + 1, comment_id or parent_id)
-                if cap_reached:
-                    return
-
-    walk(submission.comments, depth=0, parent_id=None)
-    links = _extract_links_from_comments(comments, url_titles=url_titles)
     return {
-        "platform": "reddit",
-        "external_id": external_id,
-        "discussion_url": canonical_url,
-        "thread": {
-            "title": _clean_string(getattr(submission, "title", None)),
-            "author": _clean_string(getattr(getattr(submission, "author", None), "name", None)),
-            "score": _coerce_non_negative_int(getattr(submission, "score", None)),
-            "comment_count": _coerce_non_negative_int(getattr(submission, "num_comments", None)),
-            "created_at": _unix_to_iso(getattr(submission, "created_utc", None)),
-            "subreddit": _clean_string(
-                getattr(getattr(submission, "subreddit", None), "display_name", None)
-            ),
-        },
-        "comments": comments,
-        "links": links,
+        "platform": discussion.platform,
+        "external_id": discussion.external_id,
+        "discussion_url": discussion.discussion_url,
+        "thread": thread,
+        "comments": [comment.as_payload() for comment in discussion.comments],
+        "links": [link.as_payload() for link in discussion.links],
         "stats": {
-            "provider": "reddit",
-            "declared_comment_count": _coerce_non_negative_int(
-                getattr(submission, "num_comments", None)
-            ),
-            "fetched_count": len(comments),
-            "total_seen": total_seen,
-            "stored_comment_cap": MAX_STORED_COMMENTS,
-            "cap_reached": cap_reached,
+            "provider": discussion.provider,
+            "declared_comment_count": discussion.thread.comment_count,
+            "fetched_count": discussion.fetched_count,
+            "total_seen": discussion.total_seen,
+            "stored_comment_cap": discussion.comment_cap,
+            "cap_reached": discussion.cap_reached,
         },
     }
 

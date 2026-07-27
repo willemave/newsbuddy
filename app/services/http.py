@@ -1,9 +1,12 @@
+import atexit
 import logging
+import threading
+from contextlib import nullcontext
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
@@ -59,8 +62,11 @@ class NonRetryableError(Exception):
 def should_bypass_ssl(url: str) -> bool:
     """Check if URL domain should bypass SSL verification."""
     try:
-        domain = urlparse(url).netloc.lower()
-        return any(domain.endswith(bypass_domain) for bypass_domain in SSL_BYPASS_DOMAINS)
+        domain = (urlparse(url).hostname or "").lower()
+        return any(
+            domain == bypass_domain or domain.endswith(f".{bypass_domain}")
+            for bypass_domain in SSL_BYPASS_DOMAINS
+        )
     except Exception:
         return False
 
@@ -103,6 +109,15 @@ def categorize_http_error(error: httpx.HTTPStatusError) -> Exception:
 
     # Default to non-retryable for unknown status codes
     return NonRetryableError(f"Unknown status code {status_code}: {error}")
+
+
+def _is_retryable_http_error(error: BaseException) -> bool:
+    """Return whether a failed request is safe to retry."""
+    if isinstance(error, NonRetryableError):
+        return False
+    if isinstance(error, httpx.HTTPStatusError):
+        return 500 <= error.response.status_code < 600
+    return isinstance(error, httpx.TransportError)
 
 
 def fetch_quiet_compat(
@@ -170,23 +185,41 @@ class HttpService:
             "DNT": "1",
             "Connection": "keep-alive",
         }
+        self._clients: dict[bool, httpx.Client] = {}
+        self._clients_lock = threading.Lock()
 
     def get_client(self, url: str | None = None) -> httpx.Client:
-        """Get an HTTP client with appropriate SSL settings."""
-        # Determine SSL verification settings
-        verify_ssl = True
-        if url and should_bypass_ssl(url):
-            verify_ssl = False
-            logger.warning(f"Bypassing SSL verification for {urlparse(url).netloc}")
+        """Return a reusable client with the URL's required SSL policy."""
+        verify_ssl = not (url and should_bypass_ssl(url))
+        if not verify_ssl:
+            logger.warning("Bypassing SSL verification for %s", urlparse(url).netloc)
 
-        return httpx.Client(
-            timeout=self.timeout, follow_redirects=True, headers=self.headers, verify=verify_ssl
-        )
+        with self._clients_lock:
+            client = self._clients.get(verify_ssl)
+            if client is None or client.is_closed:
+                client = httpx.Client(
+                    timeout=self.timeout,
+                    follow_redirects=True,
+                    headers=self.headers,
+                    verify=verify_ssl,
+                )
+                self._clients[verify_ssl] = client
+            return client
+
+    def close(self) -> None:
+        """Close every pooled client owned by this service."""
+        with self._clients_lock:
+            clients = list(self._clients.values())
+            self._clients.clear()
+        for client in clients:
+            if not client.is_closed:
+                client.close()
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=8),
-        retry=retry_if_not_exception_type((NonRetryableError, httpx.HTTPStatusError)),
+        retry=retry_if_exception(_is_retryable_http_error),
+        reraise=True,
     )
     def fetch(
         self,
@@ -208,7 +241,7 @@ class HttpService:
         Returns:
             httpx.Response object
         """
-        with self.get_client(url) as client:
+        with nullcontext(self.get_client(url)) as client:
             logger.debug(f"Fetching URL: {url}")
 
             request_headers = self.headers.copy()
@@ -325,7 +358,8 @@ class HttpService:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=8),
-        retry=retry_if_not_exception_type((NonRetryableError, httpx.HTTPStatusError)),
+        retry=retry_if_exception(_is_retryable_http_error),
+        reraise=True,
     )
     def head(
         self,
@@ -349,7 +383,7 @@ class HttpService:
         Returns:
             httpx.Response object
         """
-        with self.get_client(url) as client:
+        with nullcontext(self.get_client(url)) as client:
             logger.debug(f"Fetching HEAD: {url}")
 
             request_headers = self.headers.copy()
@@ -463,6 +497,12 @@ class HttpService:
                     )
                 raise
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=8),
+        retry=retry_if_exception(_is_retryable_http_error),
+        reraise=True,
+    )
     def fetch_content(
         self, url: str, headers: dict[str, str] | None = None
     ) -> tuple[str | bytes, dict[str, str]]:
@@ -472,15 +512,7 @@ class HttpService:
         Returns:
             Tuple of (content, response_headers)
         """
-        # Determine SSL verification settings
-        verify_ssl = True
-        if url and should_bypass_ssl(url):
-            verify_ssl = False
-            logger.warning(f"Bypassing SSL verification for {urlparse(url).netloc}")
-
-        with httpx.Client(
-            timeout=self.timeout, follow_redirects=True, headers=self.headers, verify=verify_ssl
-        ) as client:
+        with nullcontext(self.get_client(url)) as client:
             logger.debug(f"Fetching URL (sync): {url}")
 
             request_headers = self.headers.copy()
@@ -577,12 +609,33 @@ class HttpService:
 
 
 # Global instance
-_http_service = None
+_http_service: HttpService | None = None
+_http_service_lock = threading.Lock()
 
 
 def get_http_service() -> HttpService:
     """Get the global HTTP service instance."""
     global _http_service
     if _http_service is None:
-        _http_service = HttpService()
+        with _http_service_lock:
+            if _http_service is None:
+                _http_service = HttpService()
     return _http_service
+
+
+def close_http_service() -> None:
+    """Close and reset the process-wide HTTP service."""
+    global _http_service
+    with _http_service_lock:
+        service = _http_service
+        _http_service = None
+    if service is not None:
+        service.close()
+
+
+def reset_http_service_for_testing() -> None:
+    """Reset process-wide HTTP state between tests."""
+    close_http_service()
+
+
+atexit.register(close_http_service)

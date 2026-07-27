@@ -3,7 +3,37 @@
 import pytest
 
 from app.models.contracts import TaskQueue, TaskType
-from app.pipeline.task_specs import get_task_spec
+from app.pipeline.task_specs import TASK_SPECS, get_task_spec
+
+
+@pytest.mark.parametrize(
+    "retired_task_type",
+    ["download_audio", "transcribe", "generate_learning_deck"],
+)
+def test_retired_compatibility_task_types_are_not_public_contracts(
+    retired_task_type: str,
+) -> None:
+    with pytest.raises(ValueError):
+        TaskType(retired_task_type)
+
+
+def test_every_task_type_has_one_spec_and_no_empty_learning_queue() -> None:
+    assert set(TASK_SPECS) == set(TaskType)
+    assert all(spec.handler_module and spec.handler_class for spec in TASK_SPECS.values())
+    with pytest.raises(ValueError):
+        TaskQueue("learning")
+
+
+def test_task_specs_are_the_single_source_for_context_llm_dependencies() -> None:
+    context_llm_task_types = {
+        task_type for task_type, spec in TASK_SPECS.items() if spec.requires_context_llm_service
+    }
+
+    assert context_llm_task_types == {
+        TaskType.PROCESS_NEWS_ITEM,
+        TaskType.SUMMARIZE,
+        TaskType.FETCH_NEWS_ITEM_DISCUSSION,
+    }
 
 
 def test_task_spec_defines_queue_payload_and_dedupe_for_core_tasks() -> None:

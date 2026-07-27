@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from importlib.util import find_spec
 from pathlib import Path
@@ -18,9 +18,7 @@ from app.services.vendor_costs import record_vendor_usage_out_of_band
 try:  # pragma: no cover - import availability covered by readiness checks
     from elevenlabs import VoiceSettings
     from elevenlabs.client import ElevenLabs
-    from elevenlabs.types.dialogue_input import DialogueInput
 except Exception:  # pragma: no cover - gracefully handled at runtime
-    DialogueInput = None  # type: ignore[misc,assignment]
     VoiceSettings = None  # type: ignore[misc,assignment]
     ElevenLabs = None  # type: ignore[misc,assignment]
 
@@ -429,191 +427,6 @@ class ContentNarrationTtsService:
             },
         )
         return audio_bytes, duration_ms
-
-    def stream_dialogue_mp3(
-        self,
-        *,
-        turns: Iterable[Mapping[str, str]],
-        item_id: int | None = None,
-        user_id: int | None = None,
-    ) -> Iterator[bytes]:
-        """Stream MP3 audio chunks for a multi-speaker podcast script."""
-
-        normalized_turns = _normalize_dialogue_turns(turns)
-        if not normalized_turns:
-            raise NarrationTtsInputError("Dialogue turns are empty")
-        self._require_elevenlabs_config()
-
-        host_voice_id = (
-            self._settings.elevenlabs_podcast_host_voice_id
-            or self._settings.elevenlabs_tts_voice_id
-        )
-        guest_voice_id = (
-            self._settings.elevenlabs_podcast_guest_voice_id
-            or self._settings.elevenlabs_tts_voice_id
-        )
-        if not host_voice_id or not guest_voice_id:
-            raise NarrationTtsConfigurationError("ElevenLabs podcast voice ids are not configured")
-        if DialogueInput is None:
-            raise NarrationTtsConfigurationError("ElevenLabs dialogue SDK is not installed")
-
-        model_id = self._settings.elevenlabs_dialogue_tts_model
-        output_format = self._settings.elevenlabs_narration_tts_output_format
-        started_at = time.perf_counter()
-        text_chars = sum(len(turn["text"]) for turn in normalized_turns)
-        logger.info(
-            "Audio episode dialogue stream setup started",
-            extra={
-                "component": "audio_episode_tts",
-                "operation": "stream_dialogue_mp3",
-                "status": "setup_started",
-                "item_id": item_id,
-                "user_id": user_id,
-                "context_data": {
-                    "model_id": model_id,
-                    "output_format": output_format,
-                    "turn_count": len(normalized_turns),
-                    "text_chars": text_chars,
-                },
-            },
-        )
-        try:
-            client = ElevenLabs(api_key=self._settings.elevenlabs_api_key)
-            dialogue_inputs = [
-                DialogueInput(
-                    text=turn["text"],
-                    voice_id=host_voice_id if turn["speaker"] == "host" else guest_voice_id,
-                )
-                for turn in normalized_turns
-            ]
-            audio_iterator = client.text_to_dialogue.stream(
-                inputs=dialogue_inputs,
-                model_id=model_id,
-                output_format=output_format,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Audio episode dialogue stream failed to start",
-                extra={
-                    "component": "audio_episode_tts",
-                    "operation": "stream_dialogue_mp3",
-                    "duration_ms": _duration_ms(started_at),
-                    "item_id": item_id,
-                    "user_id": user_id,
-                    "context_data": {
-                        "model_id": model_id,
-                        "output_format": output_format,
-                        "turn_count": len(normalized_turns),
-                    },
-                },
-            )
-            raise RuntimeError("Failed to stream audio episode dialogue") from exc
-
-        audio_bytes = 0
-        first_chunk_ms: float | None = None
-        logger.info(
-            "Audio episode dialogue stream iterator ready",
-            extra={
-                "component": "audio_episode_tts",
-                "operation": "stream_dialogue_mp3",
-                "status": "iterator_ready",
-                "duration_ms": _duration_ms(started_at),
-                "item_id": item_id,
-                "user_id": user_id,
-                "context_data": {
-                    "model_id": model_id,
-                    "output_format": output_format,
-                    "turn_count": len(normalized_turns),
-                },
-            },
-        )
-        try:
-            for chunk in audio_iterator:
-                if not chunk:
-                    continue
-                if first_chunk_ms is None:
-                    first_chunk_ms = _duration_ms(started_at)
-                    logger.info(
-                        "Audio episode dialogue stream first chunk",
-                        extra={
-                            "component": "audio_episode_tts",
-                            "operation": "stream_dialogue_mp3",
-                            "status": "first_chunk",
-                            "duration_ms": first_chunk_ms,
-                            "item_id": item_id,
-                            "user_id": user_id,
-                            "context_data": {
-                                "model_id": model_id,
-                                "output_format": output_format,
-                                "turn_count": len(normalized_turns),
-                            },
-                        },
-                    )
-                audio_bytes += len(chunk)
-                yield bytes(chunk)
-        except GeneratorExit:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Audio episode dialogue stream failed",
-                extra={
-                    "component": "audio_episode_tts",
-                    "operation": "stream_dialogue_mp3",
-                    "duration_ms": _duration_ms(started_at),
-                    "item_id": item_id,
-                    "user_id": user_id,
-                    "context_data": {
-                        "model_id": model_id,
-                        "output_format": output_format,
-                        "turn_count": len(normalized_turns),
-                        "audio_bytes": audio_bytes,
-                        "time_to_first_chunk_ms": first_chunk_ms or 0,
-                    },
-                },
-            )
-            raise RuntimeError("Failed to stream audio episode dialogue") from exc
-
-        if audio_bytes <= 0:
-            raise RuntimeError("Audio episode dialogue stream was empty")
-
-        logger.info(
-            "Audio episode dialogue stream completed",
-            extra={
-                "component": "audio_episode_tts",
-                "operation": "stream_dialogue_mp3",
-                "status": "completed",
-                "duration_ms": _duration_ms(started_at),
-                "item_id": item_id,
-                "user_id": user_id,
-                "context_data": {
-                    "model_id": model_id,
-                    "output_format": output_format,
-                    "turn_count": len(normalized_turns),
-                    "text_chars": text_chars,
-                    "audio_bytes": audio_bytes,
-                    "time_to_first_chunk_ms": first_chunk_ms or 0,
-                },
-            },
-        )
-
-        record_vendor_usage_out_of_band(
-            provider="elevenlabs",
-            model=model_id,
-            feature="audio_episode_tts",
-            operation="audio_episode_tts.stream_dialogue_mp3",
-            source="api",
-            usage={"request_count": 1},
-            user_id=user_id,
-            metadata={
-                "target_id": item_id,
-                "host_voice_id": host_voice_id,
-                "guest_voice_id": guest_voice_id,
-                "output_format": output_format,
-                "turn_count": len(normalized_turns),
-                "text_chars": text_chars,
-                "audio_bytes": audio_bytes,
-            },
-        )
 
     def _require_elevenlabs_config(self) -> None:
         """Raise a user-facing config error if ElevenLabs cannot be used."""

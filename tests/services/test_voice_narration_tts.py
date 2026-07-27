@@ -158,7 +158,6 @@ def test_dialogue_tts_parallelizes_turn_synthesis(monkeypatch) -> None:
             elevenlabs_podcast_host_voice_id="host-voice",
             elevenlabs_podcast_guest_voice_id="guest-voice",
             elevenlabs_narration_tts_model="eleven_turbo_v2_5",
-            elevenlabs_dialogue_tts_model="eleven_v3",
             elevenlabs_narration_tts_output_format="mp3_44100_128",
             elevenlabs_narration_tts_speed=1.0,
             elevenlabs_audio_episode_tts_max_workers=2,

@@ -35,7 +35,9 @@ def test_mediagazer_uses_its_own_cluster_domain() -> None:
         include_related=True,
         max_related=2,
     )
-    with patch("app.scraping.aggregators._rss_cluster.feedparser.parse", return_value=mock_feed):
+    with patch(
+        "app.scraping.aggregators._rss_cluster.fetch_and_parse_feed", return_value=mock_feed
+    ):
         items = MediagazerAggregatorScraper(settings).scrape()
 
     assert len(items) == 1

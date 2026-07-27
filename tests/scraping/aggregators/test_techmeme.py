@@ -42,7 +42,9 @@ def test_techmeme_scrape_returns_primary_and_related() -> None:
     mock_feed.feed = {"title": "Techmeme"}
     mock_feed.bozo = 0
 
-    with patch("app.scraping.aggregators._rss_cluster.feedparser.parse", return_value=mock_feed):
+    with patch(
+        "app.scraping.aggregators._rss_cluster.fetch_and_parse_feed", return_value=mock_feed
+    ):
         items = TechmemeAggregatorScraper(_settings()).scrape()
 
     assert len(items) == 1
@@ -72,7 +74,9 @@ def test_techmeme_scrape_skips_clusters_without_external_link() -> None:
     mock_feed.feed = {"title": "Techmeme"}
     mock_feed.bozo = 0
 
-    with patch("app.scraping.aggregators._rss_cluster.feedparser.parse", return_value=mock_feed):
+    with patch(
+        "app.scraping.aggregators._rss_cluster.fetch_and_parse_feed", return_value=mock_feed
+    ):
         items = TechmemeAggregatorScraper(_settings()).scrape()
 
     assert items == []

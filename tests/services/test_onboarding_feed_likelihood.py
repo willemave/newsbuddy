@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from app.services.onboarding import _DiscoverSuggestion, _normalize_suggestions
+from app.services.onboarding.internal_models import _DiscoverSuggestion
+from app.services.onboarding.suggestion_projection import _normalize_suggestions
 
 
 def test_normalize_suggestions_uses_candidate_feed_url_when_feed_url_missing(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.services.onboarding.resolve_feed_candidate",
+        "app.services.onboarding.suggestion_projection.resolve_feed_candidate",
         lambda **kwargs: {
             "feed_url": kwargs["candidate_feed_urls"][0],
             "feed_format": "rss",
@@ -31,7 +32,7 @@ def test_normalize_suggestions_uses_candidate_feed_url_when_feed_url_missing(mon
 
 def test_normalize_suggestions_uses_likely_feed_site_when_feed_like(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.services.onboarding.resolve_feed_candidate",
+        "app.services.onboarding.suggestion_projection.resolve_feed_candidate",
         lambda **kwargs: {
             "feed_url": kwargs["candidate_feed_urls"][0],
             "feed_format": "rss",
@@ -66,7 +67,7 @@ def test_normalize_suggestions_prefers_site_discovery_for_podcasts(monkeypatch) 
         }
 
     monkeypatch.setattr(
-        "app.services.onboarding.resolve_feed_candidate",
+        "app.services.onboarding.suggestion_projection.resolve_feed_candidate",
         fake_resolve_feed_candidate,
     )
 

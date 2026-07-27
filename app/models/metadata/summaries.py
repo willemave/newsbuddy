@@ -13,16 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.constants import (
-    SUMMARY_KIND_LONG_BULLETS,
-    SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE,
-    SUMMARY_KIND_LONG_INTERLEAVED,
-    SUMMARY_KIND_LONG_STRUCTURED,
-    SUMMARY_KIND_LONGFORM_ARTIFACT,
-    SUMMARY_KIND_SHORT_NEWS,
-    SUMMARY_VERSION_V1,
-    SUMMARY_VERSION_V2,
-)
+from app.models.contracts import SummaryKind, SummaryVersion
 from app.models.metadata.longform_artifacts import LongformArtifactEnvelope
 
 
@@ -790,29 +781,29 @@ def _parse_summary_payload(
     summary_version: int | None,
     value: dict[str, Any],
 ) -> SummaryPayload:
-    if summary_kind == SUMMARY_KIND_LONG_INTERLEAVED:
-        if summary_version == SUMMARY_VERSION_V1:
+    if summary_kind == SummaryKind.LONG_INTERLEAVED.value:
+        if summary_version == SummaryVersion.V1.value:
             return InterleavedSummary.model_validate(value)
-        if summary_version == SUMMARY_VERSION_V2:
+        if summary_version == SummaryVersion.V2.value:
             return InterleavedSummaryV2.model_validate(value)
         raise ValueError(f"Unsupported summary version: {summary_version}")
-    if summary_kind == SUMMARY_KIND_LONG_BULLETS:
-        if summary_version == SUMMARY_VERSION_V1:
+    if summary_kind == SummaryKind.LONG_BULLETS.value:
+        if summary_version == SummaryVersion.V1.value:
             return BulletedSummary.model_validate(value)
         raise ValueError(f"Unsupported summary version: {summary_version}")
-    if summary_kind == SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE:
-        if summary_version in {SUMMARY_VERSION_V1, SUMMARY_VERSION_V2}:
+    if summary_kind == SummaryKind.LONG_EDITORIAL_NARRATIVE.value:
+        if summary_version in {SummaryVersion.V1.value, SummaryVersion.V2.value}:
             return EditorialNarrativeSummary.model_validate(value)
         raise ValueError(f"Unsupported summary version: {summary_version}")
-    if summary_kind == SUMMARY_KIND_LONG_STRUCTURED:
+    if summary_kind == SummaryKind.LONG_STRUCTURED.value:
         return StructuredSummary.model_validate(value)
-    if summary_kind == SUMMARY_KIND_LONGFORM_ARTIFACT:
-        if summary_version == SUMMARY_VERSION_V1:
+    if summary_kind == SummaryKind.LONGFORM_ARTIFACT.value:
+        if summary_version == SummaryVersion.V1.value:
             return LongformArtifactEnvelope.model_validate(value)
         raise ValueError(f"Unsupported summary version: {summary_version}")
-    if summary_kind == SUMMARY_KIND_SHORT_NEWS:
+    if summary_kind == SummaryKind.SHORT_NEWS.value:
         return NewsSummary.model_validate(value)
-    if summary_version == SUMMARY_VERSION_V1 and "summary" in value and "key_points" in value:
+    if summary_version == SummaryVersion.V1.value and "summary" in value and "key_points" in value:
         return NewsSummary.model_validate(value)
     raise ValueError(f"Unsupported summary kind: {summary_kind}")
 

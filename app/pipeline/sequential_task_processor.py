@@ -4,9 +4,12 @@ Process-wide concerns - signal handling, the LISTEN connection, model warmups -
 belong to whoever runs these loops (see `threaded_task_processor.py`).
 """
 
+from __future__ import annotations
+
 import threading
 import time
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 from sqlalchemy.exc import OperationalError
@@ -16,38 +19,18 @@ from app.core.logging import get_logger, setup_logging
 from app.core.observability import bound_log_context, build_log_extra, get_task_event_name
 from app.core.settings import get_settings
 from app.pipeline.dispatcher import TaskDispatcher
-from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
-from app.pipeline.handlers.backfill_feeds import BackfillFeedsHandler
-from app.pipeline.handlers.briefing_refresh import BriefingRefreshHandler
-from app.pipeline.handlers.dig_deeper import DigDeeperHandler
-from app.pipeline.handlers.discover_feeds import DiscoverFeedsHandler
-from app.pipeline.handlers.download_audio import DownloadAudioHandler
-from app.pipeline.handlers.download_tweet_video import DownloadTweetVideoAudioHandler
-from app.pipeline.handlers.enrich_news_item_article import EnrichNewsItemArticleHandler
-from app.pipeline.handlers.fetch_discussion import FetchDiscussionHandler
-from app.pipeline.handlers.fetch_news_item_discussion import FetchNewsItemDiscussionHandler
-from app.pipeline.handlers.generate_audio_episode import GenerateAudioEpisodeHandler
-from app.pipeline.handlers.generate_image import GenerateImageHandler
-from app.pipeline.handlers.generate_learning_deck import GenerateLearningDeckHandler
-from app.pipeline.handlers.onboarding_discover import OnboardingDiscoverHandler
-from app.pipeline.handlers.process_content import ProcessContentHandler
-from app.pipeline.handlers.process_news_item import ProcessNewsItemHandler
-from app.pipeline.handlers.process_podcast_media import ProcessPodcastMediaHandler
-from app.pipeline.handlers.run_llm_task import RunLlmTaskHandler
-from app.pipeline.handlers.scrape import ScrapeHandler
-from app.pipeline.handlers.summarize import SummarizeHandler
-from app.pipeline.handlers.sync_integration import SyncIntegrationHandler
-from app.pipeline.handlers.transcribe import TranscribeHandler
-from app.pipeline.handlers.transcribe_tweet_video import TranscribeTweetVideoHandler
+from app.pipeline.handler_registry import build_handlers_for_queue
 from app.pipeline.queue_notifications import QueueNotificationListener
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_handler import TaskHandler
 from app.pipeline.task_models import TaskEnvelope, TaskResult, task_will_retry
-from app.pipeline.task_specs import get_task_spec
-from app.pipeline.worker import get_llm_service
+from app.pipeline.task_specs import TASK_SPECS, get_task_spec
 from app.services.gateways.task_queue_gateway import TaskQueueGateway
 from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.queue import QueueService, TaskQueue, TaskType
+
+if TYPE_CHECKING:
+    from app.services.llm_summarization import ContentSummarizer
 
 logger = get_logger(__name__)
 
@@ -58,10 +41,24 @@ _TRANSIENT_DATABASE_ERROR_SNIPPETS = (
 )
 
 
+def get_llm_service() -> ContentSummarizer:
+    """Load the content summarizer only in queues whose handlers consume it."""
+    from app.pipeline.worker import get_llm_service as build_llm_service
+
+    return build_llm_service()
+
+
+def _queue_uses_context_llm_service(queue_name: str) -> bool:
+    return any(
+        task_spec.queue.value == queue_name and task_spec.requires_context_llm_service
+        for task_spec in TASK_SPECS.values()
+    )
+
+
 def _task_extra(
     task: TaskEnvelope | None,
     *,
-    processor: "SequentialTaskProcessor",
+    processor: SequentialTaskProcessor,
     operation: str,
     event_name: str | None = None,
     status: str | None = None,
@@ -111,11 +108,14 @@ class SequentialTaskProcessor:
         self.queue_service = QueueService()
         self.queue_gateway = TaskQueueGateway(queue_service=self.queue_service)
         logger.debug("QueueService initialized")
-        self.llm_service = get_llm_service()
-        logger.debug("Shared summarization service initialized")
         self.settings = get_settings()
         logger.debug("Settings loaded")
         self.queue_name = QueueService._normalize_queue_name(queue_name) or TaskQueue.CONTENT.value
+        self.llm_service = (
+            get_llm_service() if _queue_uses_context_llm_service(self.queue_name) else None
+        )
+        if self.llm_service is not None:
+            logger.debug("Shared summarization service initialized")
         self.running = True
         self.worker_slot = worker_slot
         # Threads within a process must claim under distinct worker ids so that
@@ -144,32 +144,8 @@ class SequentialTaskProcessor:
         self.dispatcher = TaskDispatcher(self._build_handlers())
 
     def _build_handlers(self) -> list[TaskHandler]:
-        """Build task handlers for dispatching."""
-        return [
-            ScrapeHandler(),
-            BackfillFeedsHandler(),
-            AnalyzeUrlHandler(),
-            ProcessContentHandler(),
-            EnrichNewsItemArticleHandler(),
-            ProcessNewsItemHandler(),
-            ProcessPodcastMediaHandler(),
-            DownloadAudioHandler(),
-            TranscribeHandler(),
-            DownloadTweetVideoAudioHandler(),
-            TranscribeTweetVideoHandler(),
-            SummarizeHandler(),
-            FetchDiscussionHandler(),
-            FetchNewsItemDiscussionHandler(),
-            GenerateImageHandler(),
-            DiscoverFeedsHandler(),
-            OnboardingDiscoverHandler(),
-            DigDeeperHandler(),
-            SyncIntegrationHandler(),
-            GenerateAudioEpisodeHandler(),
-            GenerateLearningDeckHandler(),
-            RunLlmTaskHandler(),
-            BriefingRefreshHandler(),
-        ]
+        """Build only the task handlers assigned to this processor's queue."""
+        return build_handlers_for_queue(self.queue_name)
 
     def _idle_wait(self, timeout_seconds: float) -> None:
         """Sleep until the next poll interval or an incoming queue notification."""

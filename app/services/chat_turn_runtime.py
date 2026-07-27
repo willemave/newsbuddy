@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from threading import Lock
 from typing import cast
+
+from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.models.db import ChatSession
 from app.services.llm_models import DEFAULT_MODEL, resolve_model_provider
+from app.services.llm_task_turn_tracker import LlmTaskTurnSpec, LlmTaskTurnTracker
 from app.services.sandbox_runtime import PersonalLibrarySandboxSession
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 
@@ -37,6 +41,154 @@ class ChatUsageSnapshot:
             model=resolve_session_model(session),
             content_id=session.content_id,
             session_type=session.session_type,
+        )
+
+
+@dataclass(frozen=True)
+class DetachedChatTurnLifecycle:
+    """Static ledger and usage settings for one background chat-turn family."""
+
+    task_spec: LlmTaskTurnSpec
+    running_note: str
+    completed_note: str
+    failed_note: str
+    usage_context: str
+
+
+@dataclass(frozen=True)
+class DetachedChatTurn:
+    """Immutable fields safe to use after the preparation DB session closes."""
+
+    session_id: int
+    message_id: int | None
+    user_id: int
+    model: str
+    provider: str
+    content_id: int | None
+    news_item_id: int | None
+    session_type: str | None
+    source: str
+    task_id: int | None
+    llm_task_id: int | None = None
+
+    @property
+    def usage_snapshot(self) -> ChatUsageSnapshot:
+        return ChatUsageSnapshot(
+            user_id=self.user_id,
+            model=self.model,
+            content_id=self.content_id,
+            session_type=self.session_type,
+        )
+
+
+def snapshot_detached_chat_turn(
+    session: ChatSession,
+    *,
+    message_id: int | None,
+    source: str,
+    task_id: int | None,
+) -> DetachedChatTurn:
+    """Snapshot session fields that remain safe after its DB session closes."""
+    usage_snapshot = ChatUsageSnapshot.from_session(session)
+    return DetachedChatTurn(
+        session_id=require_session_id(session),
+        message_id=message_id,
+        user_id=usage_snapshot.user_id,
+        model=usage_snapshot.model,
+        provider=resolve_model_provider(usage_snapshot.model),
+        content_id=usage_snapshot.content_id,
+        news_item_id=session.news_item_id,
+        session_type=usage_snapshot.session_type,
+        source=source,
+        task_id=task_id,
+    )
+
+
+def start_detached_chat_turn(
+    db: Session,
+    *,
+    turn: DetachedChatTurn,
+    lifecycle: DetachedChatTurnLifecycle,
+    input_json: dict[str, object],
+) -> tuple[DetachedChatTurn, LlmTaskTurnTracker]:
+    """Create the durable ledger row before provider work begins."""
+    tracker = LlmTaskTurnTracker.create(
+        db,
+        user_id=turn.user_id,
+        spec=lifecycle.task_spec,
+        input_json=input_json,
+    )
+    if tracker.task_id is None:
+        raise RuntimeError("Chat turn ledger row was not initialized")
+    return replace(turn, llm_task_id=tracker.task_id), tracker
+
+
+def mark_detached_chat_turn_running(
+    db: Session,
+    *,
+    turn: DetachedChatTurn,
+    tracker: LlmTaskTurnTracker,
+    lifecycle: DetachedChatTurnLifecycle,
+) -> None:
+    """Record that preparation finished and external work is starting."""
+    tracker.running(
+        db,
+        note=lifecycle.running_note,
+        model_provider=turn.provider,
+        model_name=turn.model,
+    )
+
+
+def complete_detached_chat_turn(
+    db: Session,
+    *,
+    session: ChatSession,
+    turn: DetachedChatTurn,
+    tracker: LlmTaskTurnTracker,
+    lifecycle: DetachedChatTurnLifecycle,
+    output_json: dict[str, object],
+) -> None:
+    """Atomically persist session activity and the completed ledger state."""
+    now = datetime.now(UTC)
+    session.last_message_at = now
+    session.updated_at = now
+    tracker.completed(
+        db,
+        note=lifecycle.completed_note,
+        output_json=output_json,
+        model_provider=turn.provider,
+        model_name=turn.model,
+    )
+
+
+def persist_detached_turn_failure(
+    *,
+    session_factory: Callable[[], Session],
+    tracker: LlmTaskTurnTracker,
+    lifecycle: DetachedChatTurnLifecycle,
+    message_id: int | None,
+    error: Exception,
+    mark_message_failed: Callable[[Session, int, str], object] | None,
+) -> None:
+    """Best-effort persistence for an optional message and durable ledger row."""
+
+    try:
+        with session_factory() as fail_db:
+            if message_id is not None and mark_message_failed is not None:
+                mark_message_failed(fail_db, message_id, str(error))
+            if tracker.task_id is None:
+                fail_db.commit()
+            else:
+                tracker.failed(
+                    fail_db,
+                    note=lifecycle.failed_note,
+                    error_type=type(error).__name__,
+                    error_message=str(error),
+                )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to persist detached chat turn failure",
+            extra={"message_id": message_id, "llm_task_id": tracker.task_id},
         )
 
 
@@ -69,6 +221,20 @@ def personal_library_unavailable_message(error: str | None) -> str:
     if error:
         return f"Personal markdown library is unavailable: {error}"
     return "Personal markdown library is unavailable for this chat."
+
+
+def extract_tool_names(result: object) -> list[str]:
+    """Return the non-empty tool names reported by an agent result."""
+    tool_calls = getattr(result, "tool_calls", []) or []
+    return [
+        cast(str, name)
+        for tool_call in tool_calls
+        if (
+            name := getattr(tool_call, "name", None)
+            or getattr(tool_call, "function_name", None)
+            or getattr(tool_call, "tool_name", None)
+        )
+    ]
 
 
 def build_agent_cache_key(model_spec: str, api_key_override: str | None) -> tuple[str, str]:

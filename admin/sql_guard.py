@@ -5,6 +5,10 @@ from __future__ import annotations
 import re
 
 _ALLOWED_PREFIXES = ("select", "with", "pragma", "explain")
+_READONLY_EXPLAIN = re.compile(
+    r"^explain(?:\s+query\s+plan|\s+analyze|\s*\([^)]*\))?\s+(?:select|with)\b",
+    re.IGNORECASE,
+)
 _FORBIDDEN_KEYWORDS = {
     "insert",
     "update",
@@ -46,8 +50,8 @@ def validate_readonly_sql(sql: str) -> str:
     if not lowered.startswith(_ALLOWED_PREFIXES):
         raise ValueError("Only read-only SELECT/WITH/PRAGMA/EXPLAIN statements are allowed")
 
-    if lowered.startswith("explain") and "query plan" not in lowered:
-        raise ValueError("Only EXPLAIN QUERY PLAN is allowed")
+    if lowered.startswith("explain") and _READONLY_EXPLAIN.match(normalized) is None:
+        raise ValueError("EXPLAIN must target one read-only SELECT/WITH statement")
 
     keyword_hits = {
         keyword

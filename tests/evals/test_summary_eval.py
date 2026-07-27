@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from app.services import summary_eval
+from app.services.eval_common import extract_result_payload
 
 
 def test_load_summary_eval_suite_parses_yaml(tmp_path: Path) -> None:
@@ -42,6 +45,14 @@ def test_load_summary_eval_suite_parses_yaml(tmp_path: Path) -> None:
     assert suite.defaults.judge_model_spec == "anthropic:claude-opus-4-6"
     assert suite.cases[0].id == "case-1"
     assert suite.cases[0].bad_titles == ["wow"]
+
+
+def test_extract_result_payload_rejects_legacy_data_fallback() -> None:
+    class FakeLegacyResult:
+        data = {"title": "legacy"}
+
+    with pytest.raises(ValueError, match="output payload"):
+        extract_result_payload(FakeLegacyResult())
 
 
 def test_run_summary_eval_case_fails_when_generated_title_matches_bad_title(

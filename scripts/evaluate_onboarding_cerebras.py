@@ -19,12 +19,12 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.services.llm_agents import get_basic_agent
-from app.services.onboarding import (
-    AUDIO_PLAN_SYSTEM_PROMPT,
-    _AudioPlanOutput,
-    _format_audio_plan_prompt,
+from app.services.onboarding import AUDIO_PLAN_SYSTEM_PROMPT
+from app.services.onboarding.audio_plan_heuristics import (
     _normalize_audio_lane_plan_with_metadata,
 )
+from app.services.onboarding.internal_models import _AudioPlanOutput
+from app.services.onboarding.llm_plans import _format_audio_plan_prompt
 
 DEFAULT_CEREBRAS_MODEL = "cerebras:zai-glm-4.7"
 DEFAULT_BASELINE_MODEL = "anthropic:claude-haiku-4-5-20251001"

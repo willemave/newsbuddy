@@ -10,14 +10,18 @@ from app.services.onboarding import (
     AUDIO_PLAN_MODEL,
     DISCOVERY_FALLBACK_MODELS,
     FAST_DISCOVER_MODEL,
+    fast_discover,
+)
+from app.services.onboarding.internal_models import (
     _AudioLane,
     _AudioPlanOutput,
-    _build_audio_lane_plan_with_metadata,
     _DiscoverOutput,
     _DiscoverSuggestion,
+)
+from app.services.onboarding.llm_plans import (
+    _build_audio_lane_plan_with_metadata,
     _run_audio_plan_with_fallback,
     _run_discover_output_with_fallback,
-    fast_discover,
 )
 
 
@@ -53,10 +57,10 @@ def test_discover_generation_does_not_use_secondary_model(monkeypatch) -> None:
         return SuccessAgent()
 
     monkeypatch.setattr(
-        "app.services.onboarding.DISCOVERY_FALLBACK_MODELS",
+        "app.services.onboarding.llm_plans.DISCOVERY_FALLBACK_MODELS",
         ("openai:gpt-5.4-mini",),
     )
-    monkeypatch.setattr("app.services.onboarding.get_basic_agent", fake_get_basic_agent)
+    monkeypatch.setattr("app.services.onboarding.llm_plans.get_basic_agent", fake_get_basic_agent)
 
     with pytest.raises(TimeoutError, match="primary timeout"):
         _run_discover_output_with_fallback(
@@ -70,19 +74,19 @@ def test_discover_generation_does_not_use_secondary_model(monkeypatch) -> None:
 
 def test_fast_discover_returns_empty_when_generation_fails(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.services.onboarding._run_discovery_exa_queries",
+        "app.services.onboarding.discovery_run._run_discovery_exa_queries",
         lambda *_args, **_kwargs: ["result"],
     )
     monkeypatch.setattr(
-        "app.services.onboarding._select_prompt_results",
+        "app.services.onboarding.discovery_run._select_prompt_results",
         lambda results, lane_balanced=False: results,
     )
     monkeypatch.setattr(
-        "app.services.onboarding._format_discovery_prompt",
+        "app.services.onboarding.discovery_run._format_discovery_prompt",
         lambda *_args, **_kwargs: "prompt",
     )
     monkeypatch.setattr(
-        "app.services.onboarding._run_discover_output_with_fallback",
+        "app.services.onboarding.discovery_run._run_discover_output_with_fallback",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("primary timeout")),
     )
     response = fast_discover(
@@ -127,10 +131,10 @@ async def test_audio_plan_generation_does_not_use_secondary_model(monkeypatch) -
         return SuccessAgent()
 
     monkeypatch.setattr(
-        "app.services.onboarding.AUDIO_PLAN_FALLBACK_MODELS",
+        "app.services.onboarding.llm_plans.AUDIO_PLAN_FALLBACK_MODELS",
         ("openai:gpt-5.4-mini",),
     )
-    monkeypatch.setattr("app.services.onboarding.get_basic_agent", fake_get_basic_agent)
+    monkeypatch.setattr("app.services.onboarding.llm_plans.get_basic_agent", fake_get_basic_agent)
 
     with pytest.raises(TimeoutError, match="primary timeout"):
         await _run_audio_plan_with_fallback(
@@ -147,7 +151,7 @@ async def test_audio_plan_build_returns_fallback_on_generation_error(monkeypatch
         raise TimeoutError("primary timeout")
 
     monkeypatch.setattr(
-        "app.services.onboarding._run_audio_plan_with_fallback",
+        "app.services.onboarding.llm_plans._run_audio_plan_with_fallback",
         fail_generation,
     )
 

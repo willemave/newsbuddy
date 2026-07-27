@@ -18,12 +18,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.core.settings import get_settings  # noqa: E402
 from app.models.db import Content, ProcessingTask  # noqa: E402
 from app.services.queue import (  # noqa: E402
+    DEFAULT_TASK_CLEANUP_BATCH_SIZE,
+    DEFAULT_TASK_CLEANUP_MAX_DELETE,
+    DEFAULT_TASK_RETENTION_DAYS,
     TASK_QUEUE_BY_TYPE,
     TASK_QUEUE_VALUE_BY_TYPE,
     TaskQueue,
     TaskStatus,
     TaskType,
     build_task_queue_mismatch_filter,
+    build_terminal_task_retention_filter,
+    cleanup_terminal_tasks_in_session,
 )
 
 PROCESSING_TIMESTAMP_EXPR = func.coalesce(
@@ -55,6 +60,17 @@ def _create_session_factory(database_url: str | None = None) -> tuple[Any, sessi
 def _print_header(title: str) -> None:
     """Print a lightweight section header."""
     print(f"\n== {title} ==")
+
+
+def _positive_int(value: str) -> int:
+    """Parse a strictly positive CLI integer."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be at least 1")
+    return parsed
 
 
 def show_status(session: Session, stale_hours: float, sample_limit: int) -> None:
@@ -301,6 +317,55 @@ def requeue_stale_processing(
     print(f"Requeued tasks: {len(rows)}")
 
 
+def cleanup_terminal_tasks(
+    session: Session,
+    *,
+    retention_days: int,
+    batch_size: int = DEFAULT_TASK_CLEANUP_BATCH_SIZE,
+    max_delete: int = DEFAULT_TASK_CLEANUP_MAX_DELETE,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    """Delete expired terminal tasks with preview and bounded-run safeguards."""
+    effective_retention_days = max(int(retention_days), 1)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    cutoff = now - timedelta(days=effective_retention_days)
+    if dry_run or not force:
+        matched_count = int(
+            session.query(func.count(ProcessingTask.id))
+            .filter(build_terminal_task_retention_filter(cutoff))
+            .scalar()
+            or 0
+        )
+        print(
+            f"Matched terminal tasks: {matched_count} (older than {effective_retention_days} days)"
+        )
+        if dry_run:
+            print(
+                "Maximum deletions this run: "
+                f"{min(matched_count, max_delete)} (batch size: {batch_size})."
+            )
+            print("Dry run only; no changes applied.")
+            return
+
+    if not force:
+        raise SystemExit("Refusing to delete terminal tasks without --yes")
+
+    print(f"Applying terminal-task cleanup: batch_size={batch_size}, max_delete={max_delete}")
+    result = cleanup_terminal_tasks_in_session(
+        session,
+        retention_days=effective_retention_days,
+        batch_size=batch_size,
+        max_delete=max_delete,
+        now=now,
+    )
+    print(
+        f"Deleted terminal tasks: {result['deleted_count']} across {result['batch_count']} batches"
+    )
+    if result["has_more"]:
+        print("Run cap reached; more expired terminal tasks remain for the next run.")
+
+
 def move_media_tasks(
     session: Session,
     *,
@@ -527,6 +592,37 @@ def build_parser() -> argparse.ArgumentParser:
     stale_parser.add_argument("--dry-run", action="store_true", help="Preview only")
     stale_parser.add_argument("--yes", action="store_true", help="Apply changes")
 
+    cleanup_parser = subparsers.add_parser(
+        "cleanup-terminal",
+        help="Delete completed/failed tasks outside the retention window",
+    )
+    cleanup_parser.add_argument(
+        "--retention-days",
+        type=int,
+        default=DEFAULT_TASK_RETENTION_DAYS,
+        help=f"Keep terminal task rows for this many days (default: {DEFAULT_TASK_RETENTION_DAYS})",
+    )
+    cleanup_parser.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=DEFAULT_TASK_CLEANUP_BATCH_SIZE,
+        help=(
+            "Commit at most this many deletes per transaction "
+            f"(default: {DEFAULT_TASK_CLEANUP_BATCH_SIZE})"
+        ),
+    )
+    cleanup_parser.add_argument(
+        "--max-delete",
+        type=_positive_int,
+        default=DEFAULT_TASK_CLEANUP_MAX_DELETE,
+        help=(
+            "Delete at most this many rows per command run "
+            f"(default: {DEFAULT_TASK_CLEANUP_MAX_DELETE})"
+        ),
+    )
+    cleanup_parser.add_argument("--dry-run", action="store_true", help="Preview only")
+    cleanup_parser.add_argument("--yes", action="store_true", help="Apply changes")
+
     move_parser = subparsers.add_parser(
         "move-media",
         aliases=["move-transcribe"],
@@ -642,6 +738,17 @@ def main(argv: list[str] | None = None) -> int:
                     hours=float(args.hours),
                     queue_name=args.queue,
                     task_type=args.task_type,
+                    dry_run=bool(args.dry_run),
+                    force=bool(args.yes),
+                )
+                return 0
+
+            if args.command == "cleanup-terminal":
+                cleanup_terminal_tasks(
+                    session,
+                    retention_days=int(args.retention_days),
+                    batch_size=int(args.batch_size),
+                    max_delete=int(args.max_delete),
                     dry_run=bool(args.dry_run),
                     force=bool(args.yes),
                 )

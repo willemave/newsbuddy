@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.models.contracts import FeedFormat, FeedType
 from app.models.domain.chat_render import AssistantFeedOption, AssistantFeedOptionsResult
 
 
@@ -167,8 +168,8 @@ class TestSearchAPI:
                         title="AI Weekly",
                         site_url="https://ai.example.com",
                         feed_url="https://ai.example.com/feed.xml",
-                        feed_type="atom",
-                        feed_format="rss",
+                        feed_type=FeedType.ATOM,
+                        feed_format=FeedFormat.RSS,
                         description="AI coverage",
                         rationale="Validated feed",
                         evidence_url="https://ai.example.com",

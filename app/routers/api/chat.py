@@ -1,6 +1,5 @@
 """Chat session endpoints for deep-dive conversations."""
 
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import (
@@ -15,9 +14,12 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from app.commands import create_assistant_turn as create_assistant_turn_command
 from app.commands import create_chat_session as create_chat_session_command
+from app.commands import delete_chat_session as delete_chat_session_command
 from app.commands import send_chat_message as send_chat_message_command
-from app.core.db import get_db_session, get_readonly_db_session
+from app.commands import update_chat_session as update_chat_session_command
+from app.core.db import get_db_session, get_readonly_db_session, get_session_factory
 from app.core.deps import get_current_user, require_user_id
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
@@ -38,57 +40,15 @@ from app.models.api.chat import (
     SendMessageResponse,
     UpdateChatSessionRequest,
 )
-from app.models.api.chat import (
-    MessageProcessingStatus as MessageProcessingStatusDto,
-)
 from app.models.contracts import ChatMessageRole
-from app.models.db import (
-    ChatSession,
-    Content,
-)
+from app.models.db import ChatSession
 from app.models.db.users import User
-from app.models.internal.assistant import AssistantScreenContext
-from app.queries import chat_read_models as _chat_read_models
 from app.queries import get_chat_message_status as get_chat_message_status_query
 from app.queries import get_chat_session as get_chat_session_query
 from app.queries import list_chat_sessions as list_chat_sessions_query
-from app.queries.chat_read_models import (
-    build_processing_user_message as _build_processing_user_message,
-)
-from app.queries.chat_read_models import (
-    build_session_summaries as _build_session_summaries,
-)
-from app.queries.chat_read_models import (
-    extract_messages_for_display as _extract_messages_for_display,
-)
-from app.queries.chat_read_models import (
-    require_message_id as _require_message_id,
-)
-from app.queries.chat_read_models import (
-    require_session_id as _require_session_id,
-)
-from app.queries.chat_read_models import (
-    require_timestamp as _require_timestamp,
-)
-from app.queries.chat_read_models import (
-    resolve_article_title as _resolve_article_title,
-)
-from app.queries.chat_read_models import (
-    resolve_news_item_title as _resolve_news_item_title,
-)
-from app.queries.chat_read_models import (
-    resolve_session_article_presentation as _resolve_session_article_presentation,
-)
-from app.queries.chat_read_models import (
-    session_to_summary as _session_to_summary,
-)
-from app.services.assistant_router import (
-    build_screen_context_snapshot,
-    create_assistant_session,
-    process_assistant_turn_async,
-)
+from app.queries.chat_read_models import extract_messages_for_display
+from app.services.assistant_router import process_assistant_turn_async
 from app.services.chat_agent import (
-    create_processing_message,
     generate_initial_suggestions,
     process_message_async,
 )
@@ -97,57 +57,10 @@ from app.services.council_chat import (
     select_council_branch,
     start_council_chat,
 )
-from app.services.llm_models import (
-    is_deep_research_provider,
-    resolve_model,
-)
-from app.services.news_feed import get_visible_news_item
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
-
-_extract_last_message_preview = _chat_read_models.extract_last_message_preview
-_format_process_summary_label = _chat_read_models.format_process_summary_label
-
-
-def _refresh_assistant_session_context(
-    *,
-    db: Session,
-    session: ChatSession,
-    user_id: int,
-    screen_context: AssistantScreenContext,
-) -> None:
-    """Refresh persisted assistant session context for the current screen."""
-
-    session.context_snapshot = build_screen_context_snapshot(
-        db,
-        user_id=user_id,
-        screen_context=screen_context,
-    )
-    session.content_id = screen_context.content_id
-    session.news_item_id = screen_context.news_item_id
-    session.topic = screen_context.selected_topic
-
-    title = screen_context.screen_title or session.title or "Knowledge Chat"
-    if screen_context.content_id is not None:
-        content = db.query(Content).filter(Content.id == screen_context.content_id).first()
-        if content is not None:
-            resolved_title = _resolve_article_title(content)
-            if resolved_title:
-                title = resolved_title
-    elif screen_context.news_item_id is not None:
-        item = get_visible_news_item(
-            db,
-            user_id=user_id,
-            news_item_id=screen_context.news_item_id,
-        )
-        if item is not None:
-            title = _resolve_news_item_title(item)
-    session.title = title[:500]
-    session.updated_at = datetime.now(UTC)
-    db.commit()
-    db.refresh(session)
 
 
 @router.get(
@@ -244,48 +157,11 @@ def update_session(
 
     Allows switching LLM provider mid-conversation while preserving chat history.
     """
-    user_id = require_user_id(current_user)
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if session.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this session")
-
-    # Update provider if specified
-    if request.llm_provider is not None:
-        if is_deep_research_provider(request.llm_provider):
-            raise HTTPException(
-                status_code=400,
-                detail="Deep research must be started as a dedicated deep research session",
-            )
-        provider, model_spec = resolve_model(request.llm_provider, request.llm_model_hint)
-        session.llm_provider = provider
-        session.llm_model = model_spec
-        session.updated_at = datetime.now(UTC)
-
-        logger.info(
-            "Chat session provider changed",
-            extra=build_log_extra(
-                component="chat",
-                operation="update_session",
-                event_name="chat.session_provider_changed",
-                status="completed",
-                user_id=user_id,
-                session_id=_require_session_id(session),
-                context_data={"model": model_spec},
-            ),
-        )
-
-    db.commit()
-    db.refresh(session)
-
-    article_presentation = _resolve_session_article_presentation(db, session)
-
-    return _session_to_summary(
-        session,
-        article_presentation,
+    return update_chat_session_command.execute(
+        db,
+        user_id=require_user_id(current_user),
+        session_id=session_id,
+        request=request,
     )
 
 
@@ -317,44 +193,11 @@ def delete_session(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> Response:
     """Archive a chat session for the current user."""
-    user_id = require_user_id(current_user)
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
-
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if session.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this session")
-
-    if not session.is_archived:
-        session.is_archived = True
-        session.updated_at = datetime.now(UTC)
-        if session.council_mode:
-            (
-                db.query(ChatSession)
-                .filter(ChatSession.parent_session_id == session.id)
-                .update(
-                    {
-                        ChatSession.is_archived: True,
-                        ChatSession.updated_at: datetime.now(UTC),
-                    },
-                    synchronize_session=False,
-                )
-            )
-        db.commit()
-
-    logger.info(
-        "Chat session archived",
-        extra=build_log_extra(
-            component="chat",
-            operation="delete_session",
-            event_name="chat.session_deleted",
-            status="completed",
-            user_id=user_id,
-            session_id=_require_session_id(session),
-        ),
+    delete_chat_session_command.execute(
+        db,
+        user_id=require_user_id(current_user),
+        session_id=session_id,
     )
-
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -403,91 +246,12 @@ def create_assistant_turn(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AssistantTurnResponse:
     """Create or continue an assistant-driven chat turn with screen context."""
-    user_id = require_user_id(current_user)
-    screen_context: AssistantScreenContext = request.screen_context
-    session: ChatSession
-    if screen_context.news_item_id is not None and not get_visible_news_item(
+    return create_assistant_turn_command.execute(
         db,
-        user_id=user_id,
-        news_item_id=screen_context.news_item_id,
-    ):
-        raise HTTPException(status_code=404, detail="News item not found")
-
-    if request.session_id is not None:
-        existing_session = (
-            db.query(ChatSession).filter(ChatSession.id == request.session_id).first()
-        )
-        if existing_session is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-        if existing_session.user_id != user_id:
-            raise HTTPException(status_code=403, detail="Not authorized to access this session")
-        session = existing_session
-        _refresh_assistant_session_context(
-            db=db,
-            session=session,
-            user_id=user_id,
-            screen_context=screen_context,
-        )
-    else:
-        context_snapshot = build_screen_context_snapshot(
-            db,
-            user_id=user_id,
-            screen_context=screen_context,
-        )
-        session = create_assistant_session(
-            db,
-            user_id=user_id,
-            context_snapshot=context_snapshot,
-            screen_context=screen_context,
-            initial_message=request.message,
-        )
-    session_row_id = _require_session_id(session)
-
-    logger.info(
-        "Assistant turn accepted",
-        extra=build_log_extra(
-            component="assistant_turn",
-            operation="create_turn",
-            event_name="assistant.turn",
-            status="started",
-            user_id=user_id,
-            session_id=session_row_id,
-            content_id=screen_context.content_id,
-            context_data={
-                "model": session.llm_model,
-                "screen_type": screen_context.screen_type,
-            },
-        ),
-    )
-
-    db_message = create_processing_message(db, session_row_id, request.message)
-    message_id = _require_message_id(db_message)
-    message_created_at = _require_timestamp(
-        db_message.created_at,
-        detail="Chat message missing created_at",
-    )
-    session.last_message_at = message_created_at
-    session.updated_at = message_created_at
-    db.commit()
-    db.refresh(session)
-
-    background_tasks.add_task(
-        process_assistant_turn_async,
-        session_row_id,
-        message_id,
-        request.message,
-        screen_context=screen_context,
-    )
-
-    return AssistantTurnResponse(
-        session=_build_session_summaries(db, user_id=user_id, sessions=[session])[0],
-        user_message=_build_processing_user_message(
-            db_message=db_message,
-            session_id=session_row_id,
-            content=request.message,
-        ),
-        message_id=message_id,
-        status=MessageProcessingStatusDto.PROCESSING,
+        user_id=require_user_id(current_user),
+        request=request,
+        background_tasks=background_tasks,
+        process_assistant_turn=process_assistant_turn_async,
     )
 
 
@@ -643,6 +407,7 @@ async def get_initial_suggestions(
             status_code=400,
             detail="Initial suggestions only available for contextual sessions",
         )
+    model_spec = session.llm_model
 
     logger.info(
         "Initial suggestions requested",
@@ -653,15 +418,18 @@ async def get_initial_suggestions(
             status="started",
             user_id=user_id,
             session_id=session_id,
-            context_data={"model": session.llm_model},
+            context_data={"model": model_spec},
         ),
     )
 
-    result = await generate_initial_suggestions(db, session)
+    db.close()
+    result = await generate_initial_suggestions(session_id)
     if result is None:
         raise HTTPException(status_code=500, detail="Unable to generate suggestions")
 
-    messages = _extract_messages_for_display(db, session_id)
+    session_factory = get_session_factory()
+    with session_factory() as response_db:
+        messages = extract_messages_for_display(response_db, session_id)
     assistant_message = next(
         (msg for msg in reversed(messages) if msg.role == ChatMessageRole.ASSISTANT),
         None,
@@ -678,7 +446,7 @@ async def get_initial_suggestions(
             status="completed",
             user_id=user_id,
             session_id=session_id,
-            context_data={"model": session.llm_model},
+            context_data={"model": model_spec},
         ),
     )
 

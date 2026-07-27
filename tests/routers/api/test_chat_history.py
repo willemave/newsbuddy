@@ -1,9 +1,9 @@
 import json
 
 from app.models.db import ChatMessage, ChatSession
-from app.routers.api.chat import (
-    _extract_last_message_preview,
-    _extract_messages_for_display,
+from app.queries.chat_read_models import (
+    extract_last_message_preview,
+    extract_messages_for_display,
 )
 
 
@@ -146,7 +146,7 @@ def test_extract_messages_for_display_hides_intermediate_agent_scaffolding(db_se
     db_session.commit()
     assert session.id is not None
 
-    display_messages = _extract_messages_for_display(db_session, session.id)
+    display_messages = extract_messages_for_display(db_session, session.id)
 
     assert [message.role.value for message in display_messages] == ["user", "tool", "assistant"]
     assert display_messages[0].content == "Dig deeper into these news bullets."
@@ -218,7 +218,7 @@ def test_extract_messages_for_display_omits_process_summary_for_simple_turn(db_s
     db_session.commit()
     assert session.id is not None
 
-    display_messages = _extract_messages_for_display(db_session, session.id)
+    display_messages = extract_messages_for_display(db_session, session.id)
 
     assert [message.role.value for message in display_messages] == ["user", "assistant"]
     assert all(message.display_type.value == "message" for message in display_messages)
@@ -285,7 +285,7 @@ def test_extract_messages_for_display_sanitizes_legacy_model_facing_user_prompt(
     db_session.commit()
     assert session.id is not None
 
-    display_messages = _extract_messages_for_display(db_session, session.id)
+    display_messages = extract_messages_for_display(db_session, session.id)
 
     assert [message.role.value for message in display_messages] == ["user", "assistant"]
     assert display_messages[0].content == "Find my saved notes about AI chips."
@@ -316,7 +316,7 @@ def test_extract_last_message_preview_prefers_final_assistant_text(db_session) -
     db_session.commit()
     db_session.refresh(db_message)
 
-    preview, role = _extract_last_message_preview(db_message)
+    preview, role = extract_last_message_preview(db_message)
 
     assert preview == "Final deep-dive answer."
     assert role == "assistant"

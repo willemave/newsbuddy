@@ -437,15 +437,12 @@ class TestModelIntegration:
             content_metadata={"audio_url": "https://example.com/audio.mp3", "episode_number": 1},
         )
 
-        # 2. Create download task
-        download_task = ProcessingTask(
-            task_type="download_audio", content_id=456, status="completed"
+        # 2. Create the unified podcast-media task
+        media_task = ProcessingTask(
+            task_type="process_podcast_media", content_id=456, status="completed"
         )
 
-        # 3. Create transcription task
-        transcribe_task = ProcessingTask(task_type="transcribe", content_id=456, status="completed")
-
-        # 4. Update content with transcript
+        # 3. Update content with transcript
         content.content_metadata.update(
             {"transcript": "This is the podcast transcript...", "duration_seconds": 3600}
         )
@@ -455,5 +452,4 @@ class TestModelIntegration:
         assert content.content_type == ContentType.PODCAST.value
         assert "transcript" in content.content_metadata
         assert content.content_metadata["duration_seconds"] == 3600
-        assert download_task.task_type == "download_audio"
-        assert transcribe_task.task_type == "transcribe"
+        assert media_task.task_type == "process_podcast_media"

@@ -742,6 +742,7 @@ def test_convert_news_item_to_article_queues_processing(
     assert response.status_code == 200
 
     payload = response.json()
+    assert payload["status"] == "success"
     assert payload["already_exists"] is False
     assert payload["news_item_id"] == news_item.id
     assert fake_queue.calls == [("process_content", payload["new_content_id"])]
@@ -756,6 +757,66 @@ def test_convert_news_item_to_article_queues_processing(
 
     article = db_session.query(Content).filter(Content.id == payload["new_content_id"]).one()
     assert article.url == "https://example.com/convert-1"
+
+
+def test_convert_news_item_to_article_preserves_canonical_title_resolution(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    _subscribe_to_hackernews(db_session, user_id=test_user.id)
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="convert-title",
+        summary_title="Generated summary title",
+        article_title="Fallback article title",
+        raw_metadata={"article": {"title": "Canonical source title"}},
+    )
+    db_session.commit()
+
+    fake_queue = _FakeQueueService()
+    monkeypatch.setattr(
+        "app.commands.convert_news_to_article.get_queue_service",
+        lambda: fake_queue,
+    )
+
+    response = client.post(f"/api/news/items/{news_item.id}/convert-to-article")
+
+    assert response.status_code == 200
+    article = (
+        db_session.query(Content).filter(Content.id == response.json()["new_content_id"]).one()
+    )
+    assert article.title == "Canonical source title"
+
+
+def test_convert_news_item_to_article_rejects_item_outside_user_visibility(
+    client,
+    db_session,
+    user_factory,
+    monkeypatch,
+) -> None:
+    other_user = user_factory()
+    news_item = _create_news_item(
+        db_session,
+        ingest_key="convert-private",
+        summary_title="Another user's private item",
+        visibility_scope="user",
+        owner_user_id=other_user.id,
+    )
+    db_session.commit()
+
+    fake_queue = _FakeQueueService()
+    monkeypatch.setattr(
+        "app.commands.convert_news_to_article.get_queue_service",
+        lambda: fake_queue,
+    )
+
+    response = client.post(f"/api/news/items/{news_item.id}/convert-to-article")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "News item not found"
+    assert fake_queue.calls == []
 
 
 def test_convert_news_item_to_article_reuses_stored_body_and_queues_summary(

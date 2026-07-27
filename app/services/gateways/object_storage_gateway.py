@@ -169,7 +169,7 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
         key: str,
         size_bytes: int | None = None,
     ) -> None:
-        """Persist one S3-compatible storage API call."""
+        """Persist one S3-compatible storage mutation."""
         record_vendor_usage_out_of_band(
             provider="s3_compatible",
             model=model,
@@ -201,10 +201,11 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
             key=key,
             size_bytes=len(data),
         )
-        return self._head(key=key, record_usage=False) or StoredObjectMetadata(
+        return StoredObjectMetadata(
             provider=self.provider,
             bucket=self._bucket,
             key=key,
+            size_bytes=len(data),
         )
 
     def get_text(self, *, key: str) -> str:
@@ -212,26 +213,19 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
 
     def get_bytes(self, *, key: str) -> bytes:
         response = self._client.get_object(Bucket=self._bucket, Key=key)
-        body = response["Body"].read()
-        self._record_usage(
-            model="get_object",
-            operation="object_storage.get",
-            key=key,
-            size_bytes=len(body),
-        )
-        return body
+        return response["Body"].read()
 
     def exists(self, *, key: str) -> bool:
-        return self.head(key=key) is not None
+        return self._head(key=key) is not None
 
     def delete(self, *, key: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=key)
         self._record_usage(model="delete_object", operation="object_storage.delete", key=key)
 
     def head(self, *, key: str) -> StoredObjectMetadata | None:
-        return self._head(key=key, record_usage=True)
+        return self._head(key=key)
 
-    def _head(self, *, key: str, record_usage: bool) -> StoredObjectMetadata | None:
+    def _head(self, *, key: str) -> StoredObjectMetadata | None:
         try:
             response = self._client.head_object(Bucket=self._bucket, Key=key)
         except ClientError as exc:
@@ -239,13 +233,6 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
             if error_code in {"404", "NoSuchKey", "NotFound"}:
                 return None
             raise
-        if record_usage:
-            self._record_usage(
-                model="head_object",
-                operation="object_storage.head",
-                key=key,
-                size_bytes=response.get("ContentLength"),
-            )
         return StoredObjectMetadata(
             provider=self.provider,
             bucket=self._bucket,
@@ -264,7 +251,7 @@ class S3CompatibleObjectStorageGateway(ObjectStorageGateway):
             operation="object_storage.copy",
             key=destination_key,
         )
-        return self._head(key=destination_key, record_usage=False) or StoredObjectMetadata(
+        return self._head(key=destination_key) or StoredObjectMetadata(
             provider=self.provider,
             bucket=self._bucket,
             key=destination_key,

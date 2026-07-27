@@ -4,12 +4,12 @@ from typing import Any, cast
 
 from app.models.api.onboarding import OnboardingFastDiscoverRequest
 from app.services.exa_client import ExaSearchResult
-from app.services.onboarding import (
-    _build_discovery_response,
+from app.services.onboarding.internal_models import (
     _DiscoverOutput,
     _DiscoverSuggestion,
-    _format_discovery_prompt,
 )
+from app.services.onboarding.llm_plans import _format_discovery_prompt
+from app.services.onboarding.suggestion_projection import _build_discovery_response
 
 
 def test_format_discovery_prompt_uses_only_web_results() -> None:
@@ -37,7 +37,7 @@ def test_format_discovery_prompt_uses_only_web_results() -> None:
 
 def test_build_discovery_response_preserves_generated_rationale(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.services.onboarding.resolve_feed_candidate",
+        "app.services.onboarding.suggestion_projection.resolve_feed_candidate",
         lambda **kwargs: {"feed_url": kwargs["candidate_feed_urls"][0]},
     )
     output = _DiscoverOutput(

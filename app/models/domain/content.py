@@ -5,20 +5,36 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
-from app.constants import (
-    SUMMARY_KIND_LONG_BULLETS,
-    SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE,
-    SUMMARY_KIND_LONG_INTERLEAVED,
-    SUMMARY_KIND_LONG_STRUCTURED,
-    SUMMARY_KIND_LONGFORM_ARTIFACT,
-    SUMMARY_VERSION_V2,
-)
 from app.models.contracts import ContentStatus, ContentType
+from app.models.domain import summary_projection
 from app.models.metadata.articles import ArticleMetadata
 from app.models.metadata.news import NewsMetadata
 from app.models.metadata.podcasts import PodcastMetadata
 from app.utils.summary_utils import extract_short_summary, extract_summary_text
 from app.utils.title_utils import resolve_content_display_title
+
+
+def _clean_metadata_values(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {key: None if value == "" else value for key, value in metadata.items()}
+
+
+def _validate_metadata_model(
+    model_type: type[BaseModel],
+    value: dict[str, Any],
+    *,
+    label: str,
+    exclude_unset: bool = True,
+    exclude_none: bool = False,
+) -> dict[str, Any]:
+    """Validate metadata once and keep the normalized JSON-compatible result."""
+    try:
+        return model_type.model_validate(value).model_dump(
+            mode="json",
+            exclude_none=exclude_none,
+            exclude_unset=exclude_unset,
+        )
+    except Exception as exc:
+        raise ValueError(f"Invalid {label} metadata: {exc}") from exc
 
 
 class ContentData(BaseModel):
@@ -57,31 +73,20 @@ class ContentData(BaseModel):
 
             # Clean up empty strings in metadata
             if isinstance(v, dict):
-                cleaned_v = {}
-                for key, value in v.items():
-                    if value == "":
-                        cleaned_v[key] = None
-                    else:
-                        cleaned_v[key] = value
-                v = cleaned_v
+                v = _clean_metadata_values(v)
 
             if content_type == ContentType.ARTICLE:
-                # Validate article metadata
-                try:
-                    ArticleMetadata(**v)
-                except Exception as e:
-                    raise ValueError(f"Invalid article metadata: {e}") from e
+                return _validate_metadata_model(ArticleMetadata, v, label="article")
             elif content_type == ContentType.PODCAST:
-                # Validate podcast metadata
-                try:
-                    PodcastMetadata(**v)
-                except Exception as e:
-                    raise ValueError(f"Invalid podcast metadata: {e}") from e
+                return _validate_metadata_model(PodcastMetadata, v, label="podcast")
             elif content_type == ContentType.NEWS:
-                try:
-                    return NewsMetadata(**v).model_dump(mode="json", exclude_none=True)
-                except Exception as e:
-                    raise ValueError(f"Invalid news metadata: {e}") from e
+                return _validate_metadata_model(
+                    NewsMetadata,
+                    v,
+                    label="news",
+                    exclude_unset=False,
+                    exclude_none=True,
+                )
         return v
 
     @property
@@ -112,25 +117,7 @@ class ContentData(BaseModel):
     @property
     def structured_summary(self) -> dict[str, Any] | None:
         """Get structured or interleaved summary if available."""
-        summary_data = self.metadata.get("summary")
-        summary_kind = self.metadata.get("summary_kind")
-        if isinstance(summary_data, dict) and summary_kind in {
-            SUMMARY_KIND_LONG_STRUCTURED,
-            SUMMARY_KIND_LONG_INTERLEAVED,
-            SUMMARY_KIND_LONG_BULLETS,
-            SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE,
-            SUMMARY_KIND_LONGFORM_ARTIFACT,
-        }:
-            return summary_data
-        # Legacy fallback: infer by payload shape
-        if isinstance(summary_data, dict) and (
-            "bullet_points" in summary_data
-            or "insights" in summary_data
-            or "editorial_narrative" in summary_data
-            or ("artifact" in summary_data and "selection_trace" in summary_data)
-        ):
-            return summary_data
-        return None
+        return summary_projection.structured_summary(self.metadata)
 
     @property
     def bullet_points(self) -> list[dict[str, str]]:
@@ -138,66 +125,7 @@ class ContentData(BaseModel):
 
         For interleaved summaries, converts insights to bullet point format.
         """
-        if not self.structured_summary:
-            return []
-
-        summary_kind = self.metadata.get("summary_kind")
-        summary_version = self.metadata.get("summary_version")
-
-        # Standard structured summary with bullet_points
-        if summary_kind == SUMMARY_KIND_LONG_STRUCTURED:
-            return self.structured_summary.get("bullet_points", [])
-
-        if summary_kind == SUMMARY_KIND_LONG_INTERLEAVED:
-            if summary_version == SUMMARY_VERSION_V2:
-                return self.structured_summary.get("key_points", [])
-            # Interleaved v1 - convert insights to bullet point format
-            insights = self.structured_summary.get("insights", [])
-            if insights:
-                return [
-                    {"text": ins.get("insight", ""), "category": ins.get("topic", "")}
-                    for ins in insights
-                    if ins.get("insight")
-                ]
-        if summary_kind == SUMMARY_KIND_LONG_BULLETS:
-            points = self.structured_summary.get("points", [])
-            if isinstance(points, list):
-                return [
-                    {"text": point.get("text", ""), "category": "key_point"}
-                    for point in points
-                    if isinstance(point, dict) and point.get("text")
-                ]
-        if summary_kind == SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE:
-            key_points = self.structured_summary.get("key_points", [])
-            if isinstance(key_points, list):
-                return [
-                    {"text": point.get("point", ""), "category": "key_point"}
-                    for point in key_points
-                    if isinstance(point, dict) and point.get("point")
-                ]
-        if summary_kind == SUMMARY_KIND_LONGFORM_ARTIFACT:
-            artifact = self.structured_summary.get("artifact")
-            payload = artifact.get("payload") if isinstance(artifact, dict) else None
-            raw_points = payload.get("key_points", []) if isinstance(payload, dict) else []
-            artifact_type = artifact.get("type") if isinstance(artifact, dict) else None
-            if isinstance(raw_points, list):
-                return [
-                    {
-                        "text": " — ".join(
-                            part
-                            for part in (
-                                str(point.get("heading") or "").strip(),
-                                str(point.get("content") or "").strip(),
-                            )
-                            if part
-                        ),
-                        "category": str(artifact_type or "key_point"),
-                    }
-                    for point in raw_points
-                    if isinstance(point, dict) and (point.get("heading") or point.get("content"))
-                ]
-
-        return []
+        return summary_projection.bullet_points(self.metadata)
 
     @property
     def quotes(self) -> list[dict[str, str]]:
@@ -205,77 +133,7 @@ class ContentData(BaseModel):
 
         For interleaved summaries, extracts supporting quotes from insights.
         """
-        if not self.structured_summary:
-            return []
-
-        summary_kind = self.metadata.get("summary_kind")
-        summary_version = self.metadata.get("summary_version")
-
-        # Standard structured summary with quotes
-        if summary_kind == SUMMARY_KIND_LONG_STRUCTURED:
-            return self.structured_summary.get("quotes", [])
-
-        if summary_kind == SUMMARY_KIND_LONG_INTERLEAVED:
-            if summary_version == SUMMARY_VERSION_V2:
-                return self.structured_summary.get("quotes", [])
-            # Interleaved v1 - extract supporting quotes from insights
-            insights = self.structured_summary.get("insights", [])
-            quotes = []
-            for ins in insights:
-                quote_text = ins.get("supporting_quote")
-                if quote_text:
-                    quotes.append(
-                        {
-                            "text": quote_text,
-                            "context": ins.get("quote_attribution", ins.get("topic", "")),
-                        }
-                    )
-            return quotes
-        if summary_kind == SUMMARY_KIND_LONG_BULLETS:
-            points = self.structured_summary.get("points", [])
-            if isinstance(points, list):
-                flattened: list[dict[str, str]] = []
-                for point in points:
-                    if not isinstance(point, dict):
-                        continue
-                    for quote in point.get("quotes", []) or []:
-                        if not isinstance(quote, dict):
-                            continue
-                        text = quote.get("text")
-                        if text:
-                            flattened.append(
-                                {
-                                    "text": text,
-                                    "context": quote.get("context") or quote.get("attribution", ""),
-                                }
-                            )
-                return flattened
-        if summary_kind == SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE:
-            raw_quotes = self.structured_summary.get("quotes", [])
-            if isinstance(raw_quotes, list):
-                return [
-                    {
-                        "text": quote.get("text", ""),
-                        "context": quote.get("attribution", ""),
-                    }
-                    for quote in raw_quotes
-                    if isinstance(quote, dict) and quote.get("text")
-                ]
-        if summary_kind == SUMMARY_KIND_LONGFORM_ARTIFACT:
-            artifact = self.structured_summary.get("artifact")
-            payload = artifact.get("payload") if isinstance(artifact, dict) else None
-            raw_quotes = payload.get("quotes", []) if isinstance(payload, dict) else []
-            if isinstance(raw_quotes, list):
-                return [
-                    {
-                        "text": quote.get("text", ""),
-                        "context": quote.get("attribution", ""),
-                    }
-                    for quote in raw_quotes
-                    if isinstance(quote, dict) and quote.get("text")
-                ]
-
-        return []
+        return summary_projection.quotes(self.metadata)
 
     @property
     def topics(self) -> list[str]:
@@ -283,49 +141,9 @@ class ContentData(BaseModel):
 
         For interleaved summaries, extracts unique topic names from insights.
         """
-        if self.structured_summary:
-            summary_kind = self.metadata.get("summary_kind")
-            summary_version = self.metadata.get("summary_version")
-
-            # Standard topics array
-            if summary_kind == SUMMARY_KIND_LONG_STRUCTURED:
-                raw_topics = self.structured_summary.get("topics", [])
-                if isinstance(raw_topics, list):
-                    return [topic for topic in raw_topics if isinstance(topic, str)]
-                return []
-
-            if summary_kind == SUMMARY_KIND_LONG_INTERLEAVED:
-                if summary_version == SUMMARY_VERSION_V2:
-                    topics = self.structured_summary.get("topics", [])
-                    if isinstance(topics, list):
-                        extracted_topics: list[str] = []
-                        for topic in topics:
-                            if not isinstance(topic, dict):
-                                continue
-                            topic_name = topic.get("topic")
-                            if isinstance(topic_name, str) and topic_name:
-                                extracted_topics.append(topic_name)
-                        return extracted_topics
-                # Interleaved v1 - extract unique topics from insights
-                insights = self.structured_summary.get("insights", [])
-                if insights:
-                    seen = set()
-                    topics = []
-                    for ins in insights:
-                        topic = ins.get("topic")
-                        if topic and topic not in seen:
-                            seen.add(topic)
-                            topics.append(topic)
-                    return topics
-            if summary_kind == SUMMARY_KIND_LONG_BULLETS:
-                return []
-            if summary_kind == SUMMARY_KIND_LONG_EDITORIAL_NARRATIVE:
-                return []
-            if summary_kind == SUMMARY_KIND_LONGFORM_ARTIFACT:
-                artifact = self.structured_summary.get("artifact")
-                if isinstance(artifact, dict) and isinstance(artifact.get("type"), str):
-                    return [artifact["type"]]
-                return []
+        projected_topics = summary_projection.topics(self.metadata)
+        if projected_topics is not None:
+            return projected_topics
 
         return self.metadata.get("topics", [])
 

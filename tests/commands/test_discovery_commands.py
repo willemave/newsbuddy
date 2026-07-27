@@ -3,8 +3,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from app.commands import add_discovery_items, subscribe_discovery_suggestions
-from app.models.api.discovery import DiscoveryAddItemRequest, DiscoverySubscribeRequest
+from app.commands import (
+    add_discovery_items,
+    dismiss_discovery_suggestions,
+    subscribe_discovery_suggestions,
+)
+from app.models.api.discovery import (
+    DiscoveryAddItemRequest,
+    DiscoveryDismissRequest,
+    DiscoverySubscribeRequest,
+)
 from app.models.api.submissions import ContentSubmissionResponse
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import FeedDiscoveryRun, FeedDiscoverySuggestion, UserScraperConfig
@@ -107,3 +115,115 @@ def test_add_discovery_items_uses_ingest_content_command(
     assert response.errors == []
     assert calls[0]["current_user"] == test_user
     assert str(calls[0]["payload"].url) == "https://example.com/episode-1"
+
+
+def test_dismiss_discovery_suggestions_only_updates_owned_rows(
+    db_session,
+    test_user,
+    user_factory,
+) -> None:
+    other_user = user_factory()
+    owned_run = _create_run(db_session, test_user.id)
+    other_run = _create_run(db_session, other_user.id)
+    owned_run_id = owned_run.id
+    other_run_id = other_run.id
+    assert owned_run_id is not None
+    assert other_run_id is not None
+    owned = FeedDiscoverySuggestion(
+        run_id=owned_run_id,
+        user_id=test_user.id,
+        suggestion_type="atom",
+        site_url="https://example.com",
+        feed_url="https://example.com/feed.xml",
+        title="Example Feed",
+        status="new",
+        config={"feed_url": "https://example.com/feed.xml"},
+    )
+    foreign = FeedDiscoverySuggestion(
+        run_id=other_run_id,
+        user_id=other_user.id,
+        suggestion_type="atom",
+        site_url="https://other.example.com",
+        feed_url="https://other.example.com/feed.xml",
+        title="Other Feed",
+        status="new",
+        config={"feed_url": "https://other.example.com/feed.xml"},
+    )
+    db_session.add_all([owned, foreign])
+    db_session.commit()
+    db_session.refresh(owned)
+    db_session.refresh(foreign)
+    assert owned.id is not None
+    assert foreign.id is not None
+
+    response = dismiss_discovery_suggestions.execute(
+        db_session,
+        user_id=test_user.id,
+        payload=DiscoveryDismissRequest(suggestion_ids=[owned.id, foreign.id]),
+    )
+
+    assert response.dismissed == [owned.id]
+    db_session.refresh(owned)
+    db_session.refresh(foreign)
+    assert owned.status == "dismissed"
+    assert foreign.status == "new"
+
+
+def test_clear_discovery_suggestions_updates_only_non_dismissed_owned_rows(
+    db_session,
+    test_user,
+    user_factory,
+) -> None:
+    other_user = user_factory()
+    owned_run = _create_run(db_session, test_user.id)
+    other_run = _create_run(db_session, other_user.id)
+    owned_run_id = owned_run.id
+    other_run_id = other_run.id
+    assert owned_run_id is not None
+    assert other_run_id is not None
+
+    def suggestion(
+        *, run_id: int, user_id: int, suffix: str, status: str
+    ) -> FeedDiscoverySuggestion:
+        return FeedDiscoverySuggestion(
+            run_id=run_id,
+            user_id=user_id,
+            suggestion_type="atom",
+            site_url=f"https://{suffix}.example.com",
+            feed_url=f"https://{suffix}.example.com/feed.xml",
+            title=f"{suffix.title()} Feed",
+            status=status,
+            config={"feed_url": f"https://{suffix}.example.com/feed.xml"},
+        )
+
+    active = suggestion(
+        run_id=owned_run_id,
+        user_id=test_user.id,
+        suffix="active",
+        status="new",
+    )
+    already_dismissed = suggestion(
+        run_id=owned_run_id,
+        user_id=test_user.id,
+        suffix="dismissed",
+        status="dismissed",
+    )
+    foreign = suggestion(
+        run_id=other_run_id,
+        user_id=other_user.id,
+        suffix="foreign",
+        status="new",
+    )
+    db_session.add_all([active, already_dismissed, foreign])
+    db_session.commit()
+    for row in (active, already_dismissed, foreign):
+        db_session.refresh(row)
+
+    response = dismiss_discovery_suggestions.clear_all(db_session, user_id=test_user.id)
+
+    assert response.dismissed == [active.id]
+    for row in (active, already_dismissed):
+        db_session.refresh(row)
+        assert row.status == "dismissed"
+    db_session.refresh(foreign)
+    assert foreign.status == "new"

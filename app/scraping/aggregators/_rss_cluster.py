@@ -20,6 +20,7 @@ from app.core.logging import get_logger
 from app.models.contracts import ContentType
 from app.scraping.aggregators.base import AggregatorScraper
 from app.scraping.aggregators.config import RssClusterAggregator
+from app.scraping.feed_fetch import fetch_and_parse_feed
 
 logger = get_logger(__name__)
 
@@ -49,7 +50,7 @@ class RssClusterAggregatorScraper(AggregatorScraper):
         feed_url = str(self.settings.url)
 
         try:
-            parsed_feed = feedparser.parse(feed_url)
+            parsed_feed = fetch_and_parse_feed(feed_url)
         except Exception as exc:  # pragma: no cover - network guard
             logger.exception("Failed to fetch %s feed: %s", self.DISPLAY_NAME, exc)
             return items

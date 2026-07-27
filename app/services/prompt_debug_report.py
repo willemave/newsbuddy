@@ -18,6 +18,7 @@ from app.core.settings import get_settings
 from app.models.db import Content
 from app.services.content_analyzer import CONTENT_ANALYSIS_MODEL, CONTENT_ANALYZER_SYSTEM_PROMPT
 from app.services.content_bodies import get_content_body_resolver
+from app.services.eval_common import build_news_context
 from app.services.llm_prompts import generate_summary_prompt
 from app.services.llm_summarization import DEFAULT_SUMMARIZATION_MODELS
 from app.services.prompt_library import render_prompt
@@ -717,7 +718,7 @@ def _extract_summarize_context(
             or _extract_str(metadata.get("content"))
             or _extract_str(metadata.get("content_to_summarize"))
         )
-        context = _build_news_context(metadata)
+        context = build_news_context(metadata)
         if context and raw_content:
             text_payload = f"Context:\n{context}\n\nArticle Content:\n{raw_content}"
             notes.append("aggregator_context=present")
@@ -745,64 +746,6 @@ def _default_model_for_summarize(content_type: str | None, prompt_type: str) -> 
     if prompt_type in DEFAULT_SUMMARIZATION_MODELS:
         return DEFAULT_SUMMARIZATION_MODELS[prompt_type]
     return DEFAULT_SUMMARIZATION_MODELS["article"]
-
-
-def _build_news_context(metadata: dict[str, Any]) -> str:
-    """Build news context string used by summarize handler for news items."""
-    article = metadata.get("article", {})
-    aggregator = metadata.get("aggregator", {})
-    lines: list[str] = []
-
-    article_title = _extract_str(article.get("title"))
-    article_url = _extract_str(article.get("url"))
-    if article_title:
-        lines.append(f"Article Title: {article_title}")
-    if article_url:
-        lines.append(f"Article URL: {article_url}")
-
-    if isinstance(aggregator, dict) and aggregator:
-        name = _extract_str(aggregator.get("name")) or _extract_str(metadata.get("platform"))
-        agg_title = _extract_str(aggregator.get("title"))
-        agg_url = _extract_str(metadata.get("discussion_url")) or _extract_str(
-            aggregator.get("url")
-        )
-        author = _extract_str(aggregator.get("author"))
-
-        context_bits: list[str] = []
-        if name:
-            context_bits.append(name)
-        if author:
-            context_bits.append(f"by {author}")
-        if agg_title and agg_title != article_title:
-            lines.append(f"Aggregator Headline: {agg_title}")
-        if context_bits:
-            lines.append("Aggregator Context: " + ", ".join(context_bits))
-        if agg_url:
-            lines.append(f"Discussion URL: {agg_url}")
-
-        extra = aggregator.get("metadata")
-        if isinstance(extra, dict):
-            highlights: list[str] = []
-            for field in ("score", "comments_count", "likes", "retweets", "replies"):
-                value = extra.get(field)
-                if value is not None:
-                    highlights.append(f"{field}={value}")
-            if highlights:
-                lines.append("Signals: " + ", ".join(highlights))
-
-    summary_payload = metadata.get("summary")
-    excerpt = _extract_str(metadata.get("excerpt"))
-    if not excerpt and isinstance(summary_payload, dict):
-        excerpt = (
-            _extract_str(summary_payload.get("overview"))
-            or _extract_str(summary_payload.get("summary"))
-            or _extract_str(summary_payload.get("hook"))
-            or _extract_str(summary_payload.get("takeaway"))
-        )
-    if excerpt:
-        lines.append(f"Aggregator Summary: {excerpt}")
-
-    return "\n".join(lines)
 
 
 def _parse_iso_timestamp(value: Any) -> datetime | None:

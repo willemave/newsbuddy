@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.logging import get_logger
 from app.models.contracts import ContentType, NewsItemStatus, NewsItemVisibilityScope
@@ -358,6 +359,93 @@ def _find_existing_news_item(db: Session, payload: NewsItemUpsertInput) -> NewsI
     return db.query(NewsItem).filter(NewsItem.ingest_key == ingest_key).first()
 
 
+def _matches_owner(candidate: NewsItem, payload: NewsItemUpsertInput) -> bool:
+    return (
+        candidate.visibility_scope == payload.visibility_scope.value
+        and candidate.owner_user_id == payload.owner_user_id
+    )
+
+
+def _find_existing_news_item_in_candidates(
+    candidates: list[NewsItem],
+    payload: NewsItemUpsertInput,
+) -> NewsItem | None:
+    """Resolve one payload against a preloaded batch using scalar lookup precedence."""
+    if payload.legacy_content_id is not None:
+        for candidate in candidates:
+            if candidate.legacy_content_id == payload.legacy_content_id:
+                return candidate
+
+    if payload.platform and payload.source_external_id:
+        for candidate in candidates:
+            if (
+                _matches_owner(candidate, payload)
+                and candidate.platform == payload.platform
+                and candidate.source_external_id == payload.source_external_id
+            ):
+                return candidate
+
+    for attribute, value in (
+        ("canonical_item_url", payload.canonical_item_url),
+        ("discussion_url", payload.discussion_url),
+        ("canonical_story_url", payload.canonical_story_url),
+    ):
+        if value is None:
+            continue
+        for candidate in candidates:
+            if _matches_owner(candidate, payload) and getattr(candidate, attribute) == value:
+                return candidate
+
+    ingest_key = _build_ingest_key(payload)
+    return next((candidate for candidate in candidates if candidate.ingest_key == ingest_key), None)
+
+
+def _load_news_item_candidates(
+    db: Session,
+    payloads: list[NewsItemUpsertInput],
+) -> list[NewsItem]:
+    conditions: list[ColumnElement[bool]] = []
+    legacy_ids = {payload.legacy_content_id for payload in payloads if payload.legacy_content_id}
+    if legacy_ids:
+        conditions.append(NewsItem.legacy_content_id.in_(legacy_ids))
+
+    platforms = {payload.platform for payload in payloads if payload.platform}
+    external_ids = {
+        payload.source_external_id for payload in payloads if payload.source_external_id
+    }
+    if platforms and external_ids:
+        conditions.append(
+            and_(
+                NewsItem.platform.in_(platforms),
+                NewsItem.source_external_id.in_(external_ids),
+            )
+        )
+
+    for column, values in (
+        (
+            NewsItem.canonical_item_url,
+            {payload.canonical_item_url for payload in payloads if payload.canonical_item_url},
+        ),
+        (
+            NewsItem.discussion_url,
+            {payload.discussion_url for payload in payloads if payload.discussion_url},
+        ),
+        (
+            NewsItem.canonical_story_url,
+            {payload.canonical_story_url for payload in payloads if payload.canonical_story_url},
+        ),
+    ):
+        if values:
+            conditions.append(column.in_(values))
+
+    ingest_keys = {_build_ingest_key(payload) for payload in payloads}
+    if ingest_keys:
+        conditions.append(NewsItem.ingest_key.in_(ingest_keys))
+    if not conditions:
+        return []
+    return db.query(NewsItem).filter(or_(*conditions)).order_by(NewsItem.id.asc()).all()
+
+
 def build_news_item_upsert_input_from_scraped_item(item: dict[str, Any]) -> NewsItemUpsertInput:
     """Normalize one scraper/X payload into a news item upsert input.
 
@@ -568,8 +656,39 @@ def upsert_news_item(db: Session, payload: NewsItemUpsertInput) -> tuple[NewsIte
     Returns:
         Tuple of ``(news_item, created)``.
     """
-    ingest_key = _build_ingest_key(payload)
     existing = _find_existing_news_item(db, payload)
+    result = _apply_news_item_upsert(db, payload, existing=existing)
+    db.flush()
+    return result
+
+
+def upsert_news_items(
+    db: Session,
+    payloads: list[NewsItemUpsertInput],
+) -> list[tuple[NewsItem, bool]]:
+    """Create or update a batch after resolving all persisted identities once."""
+    if not payloads:
+        return []
+
+    candidates = _load_news_item_candidates(db, payloads)
+    results: list[tuple[NewsItem, bool]] = []
+    for payload in payloads:
+        existing = _find_existing_news_item_in_candidates(candidates, payload)
+        result = _apply_news_item_upsert(db, payload, existing=existing)
+        results.append(result)
+        if result[1]:
+            candidates.append(result[0])
+    db.flush()
+    return results
+
+
+def _apply_news_item_upsert(
+    db: Session,
+    payload: NewsItemUpsertInput,
+    *,
+    existing: NewsItem | None,
+) -> tuple[NewsItem, bool]:
+    ingest_key = _build_ingest_key(payload)
 
     if existing is not None:
         merged_raw_metadata = merge_news_metadata(existing.raw_metadata, payload.raw_metadata)
@@ -625,7 +744,6 @@ def upsert_news_item(db: Session, payload: NewsItemUpsertInput) -> tuple[NewsIte
         existing.ingested_at = payload.ingested_at or existing.ingested_at or _utcnow_naive()
         existing.legacy_content_id = payload.legacy_content_id or existing.legacy_content_id
         existing.updated_at = _utcnow_naive()
-        db.flush()
         return existing, False
 
     record_raw_metadata = normalize_news_metadata_titles(
@@ -657,7 +775,6 @@ def upsert_news_item(db: Session, payload: NewsItemUpsertInput) -> tuple[NewsIte
         created_at=_utcnow_naive(),
     )
     db.add(record)
-    db.flush()
     return record, True
 
 

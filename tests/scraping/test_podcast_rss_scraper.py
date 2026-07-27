@@ -34,9 +34,11 @@ def test_existing_podcast_entries_are_skipped(status):
     existing = Mock()
     existing.id = 123
     existing.status = status
+    existing.url = "https://example.com/ep1"
+    existing.content_type = ContentType.PODCAST.value
 
     mock_db = Mock()
-    mock_db.query.return_value.filter.return_value.first.return_value = existing
+    mock_db.query.return_value.filter.return_value.all.return_value = [existing]
 
     @contextmanager
     def _db_context():
@@ -45,7 +47,6 @@ def test_existing_podcast_entries_are_skipped(status):
     with (
         patch("app.scraping.base.get_db", lambda: _db_context()),
         patch("app.scraping.base.get_queue_service", return_value=Mock()),
-        patch("app.scraping.base.ensure_inbox_status", return_value=False),
     ):
         scraper = PodcastUnifiedScraper()
         stats = scraper._save_items_with_stats([_build_item("https://example.com/ep1")])
@@ -74,8 +75,6 @@ def test_existing_news_entries_are_not_reenqueued():
     )
 
     mock_db = Mock()
-    query = mock_db.query.return_value
-    query.filter.return_value.order_by.return_value.first.return_value = existing
     queue_service = Mock()
 
     @contextmanager
@@ -107,14 +106,15 @@ def test_existing_news_entries_are_not_reenqueued():
     with (
         patch("app.scraping.base.get_db", lambda: _db_context()),
         patch("app.scraping.base.get_queue_service", return_value=queue_service),
-        patch("app.scraping.base.ensure_inbox_status", return_value=False),
-        patch("app.scraping.base.sync_news_item_discussion_from_news_item", return_value=None),
+        patch("app.scraping.base.upsert_news_items", return_value=[(existing, False)]),
+        patch("app.scraping.base.sync_news_item_discussions_from_news_items", return_value=[None]),
+        patch("app.scraping.base.news_item_discussion_refresh_ids", return_value=set()),
     ):
         scraper = PodcastUnifiedScraper()
         stats = scraper._save_items_with_stats([news_item])
 
     assert stats["duplicates"] == 1
-    queue_service.enqueue.assert_not_called()
+    queue_service.enqueue_many_in_session.assert_not_called()
 
 
 def test_existing_visible_due_news_enqueues_discussion_refresh(
@@ -207,16 +207,16 @@ def test_existing_visible_due_news_enqueues_discussion_refresh(
     with (
         patch("app.scraping.base.get_db", lambda: _db_context()),
         patch("app.scraping.base.get_queue_service", return_value=queue_service),
-        patch("app.scraping.base.ensure_inbox_status", return_value=False),
     ):
         scraper = PodcastUnifiedScraper()
         stats = scraper._save_items_with_stats([news_item])
 
     assert stats["duplicates"] == 1
-    queue_service.enqueue.assert_called_once_with(
-        TaskType.FETCH_NEWS_ITEM_DISCUSSION,
-        payload={"news_item_id": existing.id},
-    )
+    queue_service.enqueue_many_in_session.assert_called_once()
+    queued_requests = queue_service.enqueue_many_in_session.call_args.args[1]
+    assert len(queued_requests) == 1
+    assert queued_requests[0].task_type == TaskType.FETCH_NEWS_ITEM_DISCUSSION
+    assert queued_requests[0].payload == {"news_item_id": existing.id}
 
 
 def test_new_visible_supported_news_item_enqueues_discussion_refresh(db_session, user_factory):
@@ -273,14 +273,14 @@ def test_new_visible_supported_news_item_enqueues_discussion_refresh(db_session,
     with (
         patch("app.scraping.base.get_db", lambda: _db_context()),
         patch("app.scraping.base.get_queue_service", return_value=queue_service),
-        patch("app.scraping.base.ensure_inbox_status", return_value=False),
     ):
         scraper = PodcastUnifiedScraper()
         stats = scraper._save_items_with_stats([news_item])
 
     assert stats["saved"] == 1
     saved_item = db_session.query(NewsItem).filter(NewsItem.source_external_id == "abc123").one()
-    queue_service.enqueue.assert_called_once_with(
-        TaskType.FETCH_NEWS_ITEM_DISCUSSION,
-        payload={"news_item_id": saved_item.id},
-    )
+    queue_service.enqueue_many_in_session.assert_called_once()
+    queued_requests = queue_service.enqueue_many_in_session.call_args.args[1]
+    assert len(queued_requests) == 1
+    assert queued_requests[0].task_type == TaskType.FETCH_NEWS_ITEM_DISCUSSION
+    assert queued_requests[0].payload == {"news_item_id": saved_item.id}

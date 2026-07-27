@@ -1,58 +1,10 @@
 """Tests for Atom feed scraper."""
 
-import logging
-from pathlib import Path
+from unittest.mock import MagicMock, call
 
-from app.scraping.atom_unified import AtomScraper, load_atom_feeds
+import httpx
 
-
-def test_load_atom_feeds_missing_file(tmp_path: Path):
-    """Test loading from non-existent config file."""
-    config_path = tmp_path / "nonexistent.yml"
-    feeds = load_atom_feeds(config_path)
-    assert feeds == []
-
-
-def test_load_atom_feeds_valid_config(tmp_path: Path):
-    """Test loading valid Atom feed configuration."""
-    config_path = tmp_path / "atom.yml"
-    config_content = """
-feeds:
-  - url: "https://example.com/feed.atom"
-    name: "Example Feed"
-    limit: 5
-  - url: "https://test.com/atom.xml"
-    name: "Test Feed"
-    limit: 10
-"""
-    config_path.write_text(config_content)
-
-    feeds = load_atom_feeds(config_path)
-
-    assert len(feeds) == 2
-    assert feeds[0]["url"] == "https://example.com/feed.atom"
-    assert feeds[0]["name"] == "Example Feed"
-    assert feeds[0]["limit"] == 5
-    assert feeds[1]["url"] == "https://test.com/atom.xml"
-    assert feeds[1]["name"] == "Test Feed"
-    assert feeds[1]["limit"] == 10
-
-
-def test_load_atom_feeds_string_format(tmp_path: Path):
-    """Test loading with simple string URL format."""
-    config_path = tmp_path / "atom.yml"
-    config_content = """
-feeds:
-  - "https://example.com/feed.atom"
-"""
-    config_path.write_text(config_content)
-
-    feeds = load_atom_feeds(config_path)
-
-    assert len(feeds) == 1
-    assert feeds[0]["url"] == "https://example.com/feed.atom"
-    assert feeds[0]["name"] == "Unknown Atom"
-    assert feeds[0]["limit"] == 10
+from app.scraping.atom_unified import AtomScraper
 
 
 def test_atom_scraper_in_runner(monkeypatch):
@@ -78,21 +30,56 @@ def test_atom_scraper_in_runner(monkeypatch):
 
 def test_atom_scraper_no_feeds_logs_info(
     monkeypatch,
-    caplog,
 ):
     """Expected empty Atom config should not warn."""
     scraper = AtomScraper()
     monkeypatch.setattr(scraper, "_load_feeds", lambda: [])
+    info = MagicMock()
+    warning = MagicMock()
+    monkeypatch.setattr("app.scraping.atom_unified.logger.info", info)
+    monkeypatch.setattr("app.scraping.atom_unified.logger.warning", warning)
 
-    caplog.set_level(logging.INFO)
     items = scraper.scrape()
 
     assert items == []
-    assert any(
-        record.levelno == logging.INFO and "No Atom feeds configured" in record.message
-        for record in caplog.records
+    info.assert_called_once_with("No Atom feeds configured. Skipping scrape.")
+    warning.assert_not_called()
+
+
+def test_atom_scraper_continues_after_feed_timeout(monkeypatch) -> None:
+    scraper = AtomScraper()
+    first_url = "https://slow.example/feed.atom"
+    second_url = "https://working.example/feed.atom"
+    monkeypatch.setattr(
+        scraper,
+        "_load_feeds",
+        lambda: [
+            {"url": first_url, "name": "Slow", "limit": 10},
+            {"url": second_url, "name": "Working", "limit": 10},
+        ],
     )
-    assert not any(
-        "No Atom feeds configured" in record.message and record.levelno >= logging.WARNING
-        for record in caplog.records
-    )
+
+    parsed_feed = MagicMock()
+    parsed_feed.bozo = False
+    parsed_feed.feed = {"title": "Working", "subtitle": ""}
+    parsed_feed.entries = [
+        {
+            "title": "Recovered item",
+            "link": "https://working.example/item",
+            "summary": "Summary",
+        }
+    ]
+
+    def fetch_by_url(url: str):
+        if url == first_url:
+            raise httpx.ReadTimeout("feed timed out", request=httpx.Request("GET", first_url))
+        assert url == second_url
+        return parsed_feed
+
+    fetch = MagicMock(side_effect=fetch_by_url)
+    monkeypatch.setattr("app.scraping.atom_unified.fetch_and_parse_feed", fetch)
+
+    items = scraper.scrape()
+
+    assert [item["title"] for item in items] == ["Recovered item"]
+    fetch.assert_has_calls([call(first_url), call(second_url)], any_order=True)

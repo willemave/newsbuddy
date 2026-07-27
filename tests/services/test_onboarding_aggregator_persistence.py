@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.constants import AGGREGATOR_FEED_URL_PREFIX, AGGREGATOR_SCRAPER_TYPE
 from app.models.api.onboarding import OnboardingSelectedAggregator
 from app.models.db import UserScraperConfig
-from app.services.onboarding import _create_aggregator_configs
+from app.services.onboarding.persistence import _create_aggregator_configs
 
 
 def test_create_aggregator_configs_persists_per_user_subscription(db_session, test_user) -> None:

@@ -8,14 +8,14 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.settings import Settings
 from app.models.db import BriefingLens, BriefingSegment, BriefingState
-from app.services.briefing.composer import LayoutGenerator, plan_windows
+from app.services.briefing.composer import plan_windows
 from app.services.briefing.segments import build_briefing_segment
 from app.services.briefing.sources import (
     BriefingSource,
     read_source_keys,
     sources_for_keys,
 )
-from app.services.briefing.window_composition import ComposedWindow, compose_windows
+from app.services.briefing.window_composition import ComposedWindow
 
 logger = get_logger(__name__)
 
@@ -76,30 +76,6 @@ def briefing_fragmentation_metrics(
         window_source_limit=window_source_limit,
         minimum_required_segment_count=minimum_required,
         excess_fragmentation=max(len(source_key_groups) - minimum_required, 0),
-    )
-
-
-def compact_fragmented_lenses(
-    db: Session,
-    *,
-    user_id: int,
-    task_id: int | None,
-    use_llm: bool,
-    settings: Settings,
-) -> int:
-    plans = prepare_compactions(db, user_id=user_id, settings=settings)
-    composed = compose_compactions(
-        plans,
-        user_id=user_id,
-        task_id=task_id,
-        use_llm=use_llm,
-        settings=settings,
-    )
-    return persist_compactions(
-        db,
-        user_id=user_id,
-        plans=plans,
-        composed_windows=composed,
     )
 
 
@@ -235,26 +211,6 @@ def prepare_compactions(
             )
         )
     return plans
-
-
-def compose_compactions(
-    plans: list[CompactionPlan],
-    *,
-    user_id: int,
-    task_id: int | None,
-    use_llm: bool,
-    settings: Settings,
-    layout_generator: LayoutGenerator | None = None,
-) -> list[ComposedWindow[CompactionWindow]]:
-    windows = [window for plan in plans for window in plan.windows]
-    return compose_windows(
-        windows,
-        user_id=user_id,
-        task_id=task_id,
-        use_llm=use_llm,
-        settings=settings,
-        layout_generator=layout_generator,
-    )
 
 
 def persist_compactions(

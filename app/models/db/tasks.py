@@ -39,20 +39,28 @@ class ProcessingTask(Base):
     lease_expires_at = Column(DateTime, nullable=True, index=True)
 
     error_message = Column(Text, nullable=True)
-    retry_count = Column(Integer, default=0)
+    retry_count = Column(Integer, default=0, nullable=False, server_default="0")
     dedupe_key = Column(String(512), nullable=True, index=True)
 
     __table_args__ = (
         Index("idx_task_status_created", "status", "created_at"),
         Index("idx_task_queue_status_created", "queue_name", "status", "created_at"),
-        Index("idx_task_status_available", "status", "available_at", "retry_count", "id"),
+        Index(
+            "idx_task_status_available",
+            "status",
+            "retry_count",
+            "available_at",
+            "created_at",
+            "id",
+        ),
         Index(
             "idx_task_queue_status_available",
             "queue_name",
             "status",
-            "available_at",
             "retry_count",
+            "available_at",
             "created_at",
+            "id",
         ),
         Index(
             "uq_processing_tasks_dedupe_key_active",

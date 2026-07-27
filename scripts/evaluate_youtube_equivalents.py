@@ -67,8 +67,8 @@ def _normalize_youtube_watch_url(url: str) -> str:
     if "youtube.com" not in host:
         return url
     if parsed.path == "/watch":
-        video_id = parse_qs(parsed.query).get("v", [None])[0]
-        return f"https://www.youtube.com/watch?v={video_id}" if video_id else url
+        watch_video_id = parse_qs(parsed.query).get("v", [None])[0]
+        return f"https://www.youtube.com/watch?v={watch_video_id}" if watch_video_id else url
     return url
 
 
@@ -110,7 +110,8 @@ def _probe_current_youtube_path(url: str) -> dict[str, Any]:
             "title": result.get("title"),
         }
 
-    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    raw_metadata = result.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
     return {
         "success": True,
         "title": result.get("title"),

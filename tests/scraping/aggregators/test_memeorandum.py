@@ -39,7 +39,9 @@ def test_memeorandum_treats_memeorandum_links_as_cluster() -> None:
         include_related=True,
         max_related=5,
     )
-    with patch("app.scraping.aggregators._rss_cluster.feedparser.parse", return_value=mock_feed):
+    with patch(
+        "app.scraping.aggregators._rss_cluster.fetch_and_parse_feed", return_value=mock_feed
+    ):
         items = MemeorandumAggregatorScraper(settings).scrape()
 
     assert len(items) == 1

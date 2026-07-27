@@ -567,7 +567,7 @@ class TestContentWorker:
         # Commit is called to persist the failed status
         mock_db.commit.assert_called()
 
-    def test_process_podcast_sync_success(self, mock_dependencies):
+    def test_process_podcast_queues_media_task(self, mock_dependencies):
         """Test successful podcast processing."""
         worker = ContentWorker()
 
@@ -601,7 +601,7 @@ class TestContentWorker:
         with patch("app.pipeline.worker.content_to_domain") as mock_converter:
             mock_converter.return_value = content_data
 
-            result = worker._process_podcast_sync(content_data)
+            result = worker._process_podcast(content_data)
 
         assert result is True
         # Should have created a unified media task

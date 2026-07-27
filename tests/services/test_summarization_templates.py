@@ -1,6 +1,6 @@
 """Tests for source-aware summarization template routing."""
 
-from app.constants import SUMMARY_VERSION_V1, SUMMARY_VERSION_V2
+from app.models.contracts import SummaryVersion
 from app.services.summarization_templates import (
     resolve_editorial_summary_version,
     resolve_summarization_prompt_route,
@@ -52,5 +52,5 @@ def test_resolve_summarization_prompt_route_uses_twitter_template_for_x_links() 
 
 
 def test_resolve_editorial_summary_version_marks_specialized_templates_v2() -> None:
-    assert resolve_editorial_summary_version("editorial_narrative") == SUMMARY_VERSION_V1
-    assert resolve_editorial_summary_version("editorial_research") == SUMMARY_VERSION_V2
+    assert resolve_editorial_summary_version("editorial_narrative") == SummaryVersion.V1.value
+    assert resolve_editorial_summary_version("editorial_research") == SummaryVersion.V2.value

@@ -148,9 +148,6 @@ thesis  # unused variable (app/models/metadata/longform_artifacts.py:63)
 time_or_cost  # unused variable (app/models/metadata/longform_artifacts.py:101)
 timeline  # unused variable (app/models/metadata/longform_artifacts.py:93)
 total_requested  # unused variable (app/models/api/content_actions.py:78)
-twitter_auth_token_configured  # unused variable (app/core/settings.py:182)
-twitter_ct0_configured  # unused variable (app/core/settings.py:183)
-twitter_user_agent_configured  # unused variable (app/core/settings.py:184)
 unread_count  # unused variable (app/models/api/content_actions.py:99)
 user_status  # unused variable (app/models/api/content.py:69)
 video_audio_path  # unused variable (app/models/metadata/news.py:53)
@@ -172,7 +169,6 @@ _.side_effect  # unused attribute (tests/pipeline/test_content_worker.py:357)
 pytestmark  # unused variable (tests/routers/api/test_content_detail_subscribe.py:9)
 
 # Runtime framework attributes
-load_atom_feeds  # unused function (app/scraping/atom_unified.py:62)
 _.namer  # unused attribute (app/core/logging.py:420)
 _.row_factory  # unused attribute (scripts/export_title_clustering_dataset.py:67)
 
@@ -199,6 +195,3 @@ storage_provider  # unused variable (app/models/db/content.py:109)
 prompt_version  # unused variable (app/models/db/audio_episode.py:26)
 summary_model  # unused variable (app/models/db/news.py:139)
 usage_json  # unused variable (app/models/db/llm_tasks.py:54)
-
-# Host workflow extension points
-propose_llm_task_action  # unused function (app/services/llm_tasks.py:298)

@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 from app.models.api.onboarding import OnboardingFastDiscoverResponse, OnboardingSuggestion
+from app.models.contracts import OnboardingSuggestionType
 from app.models.db import FeedDiscoveryRun, FeedDiscoverySuggestion
-from app.services.onboarding import _persist_discovery_run
+from app.services.onboarding.persistence import _persist_discovery_run
 
 
 def test_persist_discovery_run_deduplicates_within_response(db_session, test_user) -> None:
     suggestions = OnboardingFastDiscoverResponse(
         recommended_substacks=[
             OnboardingSuggestion(
-                suggestion_type="substack",
+                suggestion_type=OnboardingSuggestionType.SUBSTACK,
                 title="Conservation Realist",
                 feed_url="https://conservationrealist.substack.com/feed",
             )
         ],
         recommended_pods=[
             OnboardingSuggestion(
-                suggestion_type="podcast_rss",
+                suggestion_type=OnboardingSuggestionType.PODCAST_RSS,
                 title="Conservation Realist Podcast",
                 feed_url="https://conservationrealist.substack.com/feed",
             )
@@ -63,7 +64,7 @@ def test_persist_discovery_run_returns_none_when_all_feeds_already_exist(
     suggestions = OnboardingFastDiscoverResponse(
         recommended_substacks=[
             OnboardingSuggestion(
-                suggestion_type="substack",
+                suggestion_type=OnboardingSuggestionType.SUBSTACK,
                 title="Conservation Realist",
                 feed_url="https://conservationrealist.substack.com/feed",
             )
