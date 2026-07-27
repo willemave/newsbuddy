@@ -6,6 +6,7 @@ struct BriefingTierStrip: View {
     let viewModel: BriefingViewModel
     let onSelectNews: () -> Void
     let onSelectLens: (String) -> Void
+    let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -25,7 +26,10 @@ struct BriefingTierStrip: View {
                         title: lens.title,
                         unreadCount: lens.unreadSourceCount,
                         isSelected: lens.key == viewModel.selectedLensKey,
-                        accessibilityId: "briefing.lens.\(lens.key)"
+                        accessibilityId: "briefing.lens.\(lens.key)",
+                        longPressAction: lens.unreadSourceCount > 0
+                            ? { onRequestMarkAllRead(lens) }
+                            : nil
                     ) {
                         onSelectLens(lens.key)
                     }

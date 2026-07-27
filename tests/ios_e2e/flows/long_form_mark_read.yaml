@@ -16,10 +16,14 @@ appId: "${APP_ID}"
     visible:
       id: briefing.screen
     timeout: 15000
+- tapOn:
+    id: briefing.lens.articles
 - extendedWaitUntil:
     visible:
       id: briefing.segment.${SEGMENT_ID}
     timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 5000
 - longPressOn:
     id: briefing.lens.articles
 - extendedWaitUntil:

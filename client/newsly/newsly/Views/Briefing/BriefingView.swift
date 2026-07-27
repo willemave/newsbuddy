@@ -307,7 +307,8 @@ struct BriefingView: View {
                     BriefingTierStrip(
                         viewModel: viewModel,
                         onSelectNews: { viewModel.selectNewsTier() },
-                        onSelectLens: { key in viewModel.selectLens(key: key) }
+                        onSelectLens: { key in viewModel.selectLens(key: key) },
+                        onRequestMarkAllRead: presentMarkAllReadPrompt
                     )
                 }
             }
