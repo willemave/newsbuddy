@@ -119,7 +119,10 @@ Keep `ProcessingTask.payload` as JSON. Only validate/normalize at enqueue and di
 
 ## 3. Consolidate processing status transitions behind one lifecycle module
 
-**Problem.** Status rules are split across `ContentProcessingWorkflow`, `ContentStatusStateMachine`, `ContentWorker`, summarization handlers, image handlers, and media handlers. The code already has good pieces: workflow transition recording, summarization input fingerprints, `awaiting_image`, image eligibility. The transition authority is not singular.
+**Original problem.** Status rules were split across several workflow, worker, and handler
+implementations. The current implementation consolidates the canonical transition rules in
+`app/services/content_lifecycle.py`; the obsolete `ContentProcessingWorkflow` forwarding wrapper
+has been removed.
 
 **Why it matters.** The hardest production bugs in this app will be content stuck in `processing`, duplicate summarize/image tasks, completed items missing generated assets, or failed content still rendering like success.
 

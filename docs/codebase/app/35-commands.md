@@ -10,13 +10,15 @@ Router-facing write/use-case entrypoints. Commands validate use-case intent, coo
 - Read state and Knowledge actions mutate per-user state through services/repositories.
 - Agent onboarding commands start and complete simplified onboarding flows.
 - API-key and LLM-integration commands create, revoke, upsert, or delete user-managed credentials.
-- Content actions cover news-to-article conversion, download-more-from-series, discussion refresh, tweet suggestions, and feedback submission.
+- Content and discovery actions cover news-to-article conversion, suggestion dismissal,
+  download-more-from-series, discussion refresh, tweet suggestions, and feedback submission.
 
 ## Important files
 | File | Purpose |
 |---|---|
 | `submit_content.py`, `ingest_content.py` | User URL/instruction submission and queue handoff. |
 | `convert_news_to_article.py` | Converts a short-form news item into long-form content and enqueues processing. |
+| `dismiss_discovery_suggestions.py` | Dismisses selected or all active suggestions for one user. |
 | `mark_read.py` | Per-user read/unread actions. |
 | `save_to_knowledge.py`, `remove_from_knowledge.py` | Knowledge save/remove use cases. |
 | `start_agent_onboarding.py`, `complete_agent_onboarding.py` | Machine-oriented onboarding commands. |

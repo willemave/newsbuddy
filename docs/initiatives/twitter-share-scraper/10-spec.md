@@ -1,5 +1,11 @@
 # Twitter Share Scraper (Tweet-Only)
 
+> **Status (2026-07-25): superseded.** The cookie-authenticated GraphQL client described below
+> has been retired. Tweet ingestion now uses the official X API implementation in
+> `app/services/x_api.py`; `app/services/twitter_share.py` retains only shared URL helpers. New
+> deployments should configure `X_APP_BEARER_TOKEN` (`TWITTER_AUTH_TOKEN` remains an accepted
+> compatibility alias).
+
 ## Summary
 Implement a tweet-only ingestion path for share-sheet submissions. When a user shares a tweet URL, fetch tweet details via X/Twitter GraphQL (cookie-auth), extract external URLs, and process as **articles**. If the tweet has external URLs, use them as the scraping targets while keeping the tweet as the discussion/source link. If no URLs exist, summarize the tweet text directly as article content. No list/search/timeline scraping.
 
@@ -22,7 +28,7 @@ Implement a tweet-only ingestion path for share-sheet submissions. When a user s
 - `twitter_unified` exists for list scraping but is not wired for share-sheet tweet ingestion.
 - No tweet-specific URL handling in `url_detection`.
 
-## Proposed Design
+## Historical Proposed Design
 
 ### 1) Tweet URL Detection + Canonicalization
 - Add a tweet URL detector in `app/services/url_detection.py`:

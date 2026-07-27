@@ -738,8 +738,6 @@ Defined in `app/models/contracts.py`:
 - `enrich_news_item_article`
 - `process_news_item`
 - `process_podcast_media`
-- `download_audio`
-- `transcribe`
 - `download_tweet_video_audio`
 - `transcribe_tweet_video`
 - `summarize`
@@ -751,8 +749,8 @@ Defined in `app/models/contracts.py`:
 - `dig_deeper`
 - `sync_integration`
 - `generate_audio_episode`
-- `generate_learning_deck`
 - `run_llm_task`
+- `briefing_refresh`
 
 ### 9.2 Queue partitions
 
@@ -767,7 +765,6 @@ Defined in `TaskQueue`:
 - `discussion`
 - `twitter`
 - `chat`
-- `learning`
 - `llm`
 
 Current task-to-queue mapping is declared in `app/pipeline/task_specs.py` and
@@ -782,8 +779,6 @@ used by `app/services/queue.py`:
 | `enrich_news_item_article` | `content` |
 | `process_news_item` | `content` |
 | `process_podcast_media` | `media` |
-| `download_audio` | `media` |
-| `transcribe` | `media` |
 | `download_tweet_video_audio` | `media` |
 | `transcribe_tweet_video` | `media` |
 | `summarize` | `content` |
@@ -795,7 +790,6 @@ used by `app/services/queue.py`:
 | `dig_deeper` | `chat` |
 | `sync_integration` | `twitter` |
 | `generate_audio_episode` | `audio_episode` |
-| `generate_learning_deck` | `learning` |
 | `run_llm_task` | `llm` |
 | `briefing_refresh` | `llm` |
 
@@ -810,6 +804,8 @@ used by `app/services/queue.py`:
 - retry bucket rotation to reduce starvation
 - retry scheduling through delayed `available_at`
 - completion and retry state transitions
+- daily terminal-row retention after 14 days, committed in 5,000-row batches with a
+  50,000-row cap per run so initial cleanup drains gradually
 
 This design assumes PostgreSQL row-locking and notification features, including
 `FOR UPDATE SKIP LOCKED` and `LISTEN`/`NOTIFY`.
@@ -838,8 +834,6 @@ Registered handlers:
 - enrich news-item article
 - process short-form news items
 - process podcast media
-- download audio
-- transcribe
 - download tweet video audio
 - transcribe tweet video
 - summarize
@@ -851,8 +845,8 @@ Registered handlers:
 - dig deeper
 - sync integration
 - generate audio episode
-- generate learning deck
 - run LLM task
+- refresh briefing
 
 ### 9.5 LLM task workflows
 
@@ -863,8 +857,9 @@ retry state.
 
 Learning Decks use `learning_decks` as the stable product record and point to their latest and
 latest-successful `llm_tasks` attempts. New attempts do not create `learning_deck_runs`; API fields
-named `latest_run` remain a compatibility projection from the LLM task. Legacy run rows and the
-`generate_learning_deck` handler remain readable/executable only while the pre-cutover queue drains.
+named `latest_run` remain a compatibility projection from the LLM task. Historical
+`learning_deck_runs` rows remain readable through those projections, while the drained legacy task
+handler and its dedicated worker partition have been retired.
 The worker handler owns terminal failure recording. Successful publication locks the stable deck row,
 commits its new artifact bundle and attempt pointers together through
 `app/services/learning_deck_publication.py`, then retires the superseded object-store bundle. Request
@@ -882,7 +877,7 @@ failure.
 
 ### 9.6 Worker launch and drift guards
 
-Workers are launched per queue partition. `scripts/dev.sh` and `scripts/start_services.sh` start `content`, `media`, `audio_episode`, `image`, `onboarding`, `backfill`, `discussion`, `twitter`, `chat`, `learning`, and `llm` workers. The `content` queue runs with higher parallelism by default because it carries the widest set of user-visible work.
+Workers are launched per queue partition. `scripts/dev.sh` and `scripts/start_services.sh` start `content`, `media`, `audio_episode`, `image`, `onboarding`, `backfill`, `discussion`, `twitter`, `chat`, and `llm` workers. The `content` queue runs with higher parallelism by default because it carries the widest set of user-visible work.
 
 `supervisor.conf` and `docker/supervisord.worker-programs.conf` mirror the same queue partitions. Both the all-in-one `docker/supervisord.conf` and split `docker/supervisord.workers.conf` include that canonical worker graph; `docker/supervisord.server.conf` intentionally starts only server/bootstrap processes. `tests/scripts/test_supervisor_queue_config.py` derives expected worker coverage from `TaskQueue` and guards host/Docker config drift.
 
@@ -979,8 +974,6 @@ Normal podcast processing is:
   - download, normalize, transcribe when needed, persist transcript/body state, then enqueue `SUMMARIZE`
 - `SUMMARIZE`
   - summarize transcript once text is available
-
-`DOWNLOAD_AUDIO` and `TRANSCRIBE` handlers still exist as compatibility paths for older queued work and tests.
 
 Tweet video processing reuses the same audio primitives:
 

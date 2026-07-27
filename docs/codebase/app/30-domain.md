@@ -13,9 +13,10 @@ Internal domain transfer objects and helpers that sit between ORM rows, metadata
 ## Important files
 | File | Purpose |
 |---|---|
-| `content.py` | Canonical content-form and type helpers. |
+| `content.py` | Canonical content data model and common content-field accessors. |
 | `content_mapper.py` | Converts between ORM `Content` rows and canonical `ContentData`. |
 | `content_display.py` | Resolves image URLs, long-form summary readiness, and feed-subscribe affordances. |
+| `summary_projection.py` | Adapts each persisted summary kind onto common bullet, quote, and topic fields. |
 | `chat_render.py` | Chat render metadata domain helpers. |
 | `discovery.py` | Discovery result/domain shapes. |
 | `scraper_runs.py` | Scraper stats used by runner and logging. |

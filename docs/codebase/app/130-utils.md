@@ -3,7 +3,7 @@
 Source folder: `app/utils`
 
 ## Purpose
-Small cross-cutting helpers for URLs, paths, dates, pagination, title normalization, summary metadata, image paths/URLs, JSON repair, error logging, and summarization inputs.
+Small cross-cutting helpers for URLs, paths, dates, pagination, title normalization, summary text, image paths/URLs, JSON repair, error logging, and summarization inputs.
 
 ## Runtime behavior
 - Utilities stay stateless and dependency-light so they can be reused by routers, services, scrapers, scripts, and tests.
@@ -14,14 +14,13 @@ Small cross-cutting helpers for URLs, paths, dates, pagination, title normalizat
 | File | Purpose |
 |---|---|
 | `dates.py` | Date/time normalization helpers. |
-| `error_logger.py` | Error log helpers. |
 | `image_paths.py`, `image_urls.py` | Local image path and URL resolution. |
 | `json_repair.py` | Tolerant JSON cleanup. |
 | `news_titles.py`, `title_utils.py` | News/content title cleanup. |
 | `pagination.py` | Cursor/pagination helpers. |
 | `paths.py` | Repo/config path resolution with env overrides. |
 | `summarization_inputs.py` | News/aggregator context strings for summarization. |
-| `summary_metadata.py`, `summary_utils.py` | Summary metadata and text helpers. |
+| `summary_utils.py` | Summary text extraction helpers. Summary kind/version ownership lives in `app/models/metadata/summary_contracts.py`. |
 | `url_utils.py` | URL parsing/normalization helpers. |
 | `__init__.py` | Package marker. |
 

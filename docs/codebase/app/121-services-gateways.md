@@ -7,7 +7,10 @@ Small dependency gateways that keep workflows and services from binding directly
 
 ## Runtime behavior
 - Gateway interfaces are used where orchestration needs a patchable boundary for tests or a provider-agnostic API.
-- Object storage supports local filesystem and S3-compatible providers and records storage API usage out of band.
+- Object storage supports local filesystem and S3-compatible providers. S3-compatible mutations
+  record usage synchronously through a dedicated short-lived database session; latency-sensitive
+  reads and existence probes intentionally do not open database sessions, so the vendor ledger is
+  not a complete storage request meter.
 - Queue gateway wraps `QueueService` for handlers/workflows that need to enqueue or inspect tasks.
 
 ## Important files

@@ -2,6 +2,17 @@
 
 A fresh structural read of the iOS client, focused on simplification, runtime performance, and navigation/motion usability. Written after verifying the current tree rather than trusting the July modernization plan, most of which has already landed.
 
+## Implementation update
+
+The review below is the pre-change evidence snapshot. The cross-stack implementation on the same
+date has since retired Classic, migrated its E2E routes, moved Briefing and Dig to Observation,
+made Briefing-to-detail navigation a real push, and adopted the `Tab(…)` builder while retaining
+the custom bar. The custom-bar replacement and lens-pager replacement remain measurement gates,
+not automatic migrations: neither should ship without a physical-device comparison showing that
+the native alternative improves the current interaction. See
+[`2026-07-25-cross-stack-architecture-implementation-plan.md`](2026-07-25-cross-stack-architecture-implementation-plan.md)
+for the execution record and validation evidence.
+
 ## Where things stand
 
 `docs/initiatives/ios-modernization-2026-07/plan.md` is largely **executed**. Re-verified today:
@@ -206,9 +217,9 @@ Ordered by value per unit of risk.
 | # | Change | Size | Why here |
 |---|---|---|---|
 | ~~1~~ | ~~Briefing → detail becomes a real `navigationDestination`~~ — **done 2026-07-25** (zoom transition deliberately excluded; see Finding 2) | M | Biggest felt improvement; infrastructure already existed and was tested on the chat path |
-| 2 | Migrate `BriefingViewModel` + `BriefingDigViewModel` to `@Observable` (Finding 4) | M | Biggest perf win; retires the `BriefingChromeCollapseModel` workaround pattern |
-| 3 | Delete the classic shell (Finding 1, decided) | M | ~2,700 lines and 24 dual-mode branches; real work is migrating E2E flows |
-| 4 | Native tab bar prototype; `.tabItem` → `Tab(…)` (Finding 3) | S–M | Prototype first — may retire 4 pieces of custom chrome plumbing |
+| ~~2~~ | ~~Migrate `BriefingViewModel` + `BriefingDigViewModel` to `@Observable` (Finding 4)~~ — **done 2026-07-25** | M | Observation now limits invalidation to properties each view reads; per-frame geometry stays view-owned |
+| ~~3~~ | ~~Delete the classic shell (Finding 1, decided)~~ — **done 2026-07-25** | M | Briefing is the sole composition root; affected E2E routes were migrated |
+| 4 | Native tab bar prototype; `.tabItem` → `Tab(…)` (Finding 3) — **builder migration done; bar replacement evidence-gated** | S–M | The current API is in use without forcing a visual/interaction regression |
 | 5 | Profile the lens pager; migrate to paging `ScrollView` only if it measures (Finding 5) | S | Evidence-gated |
 | 6 | Opportunistic iOS 26 adoption (Finding 6) | S | Fold into whatever screen is already being touched |
 

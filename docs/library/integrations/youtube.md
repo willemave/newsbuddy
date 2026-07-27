@@ -23,8 +23,7 @@ YouTube video processing treats individual YouTube URLs as podcast-like content.
 - Falls back to video description if no transcript available
 
 ### 3. Pipeline Integration
-- **PodcastDownloadWorker**: Detects YouTube URLs and skips download, passing directly to transcription
-- **PodcastTranscribeWorker**: Uses existing YouTube transcripts instead of OpenAI transcription
+- **PodcastMediaWorker**: Detects YouTube URLs, reuses existing transcript metadata when present, and otherwise downloads/transcribes through the unified podcast media path
 - **Summarization**: Works normally with transcript/description content
 
 ## Configuration

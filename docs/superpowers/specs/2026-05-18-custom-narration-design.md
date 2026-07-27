@@ -71,8 +71,9 @@ Script generation:
 
 Audio generation:
 
-- Reuse ElevenLabs dialogue TTS via `stream_dialogue_mp3(...)` for streaming playback.
-- It is acceptable to stream/chunk audio output.
+- Reuse ElevenLabs dialogue TTS via `synthesize_dialogue_mp3(...)`.
+- Generate and cache the final MP3 before playback; provider-sized synthesis chunks are stitched
+  internally.
 - Do not chunk script-generation text input by source.
 - Continue caching the final MP3 on the episode row.
 
