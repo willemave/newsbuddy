@@ -363,7 +363,7 @@ def test_badge_stats_store_owns_counts_and_scene_phase_gated_refresh() -> None:
     assert "func setRefreshSuspended(_ isSuspended: Bool)" in badge_store_source
     assert "guard !isRefreshSuspended else { return }" in badge_store_source
     assert "guard hasActiveProcessing, !isRefreshSuspended" in badge_store_source
-    assert "func resetCounts()" in badge_store_source
+    assert "private func stopAndReset()" in badge_store_source
     assert "UIApplication.didBecomeActiveNotification" in badge_store_source
     assert "UIApplication.didEnterBackgroundNotification" in badge_store_source
     assert not (SERVICES_ROOT / "BadgeStatsRefreshCoordinator.swift").exists()
@@ -377,7 +377,7 @@ def test_badge_stats_store_owns_counts_and_scene_phase_gated_refresh() -> None:
     assert "testAuthenticationResetClearsCountsAndScheduledRefresh" in badge_store_tests
 
     assert "badge stats retries" in root_docs
-    assert "`BadgeStatsStore` owns unread and processing counts" in services_docs
+    assert "`BadgeStatsStore` owns rendered long-form unread and processing counts" in services_docs
 
 
 def test_e2e_route_injection_is_consolidated_at_root() -> None:
