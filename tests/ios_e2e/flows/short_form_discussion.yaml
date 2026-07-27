@@ -12,16 +12,12 @@ appId: "${APP_ID}"
       newslyE2EUserId: "${USER_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
-- tapOn:
-    id: tab.fast_news
-- assertVisible:
-    id: short.screen
-- assertVisible:
-    id: short.row.${CONTENT_ID}
-- tapOn:
-    id: short.row.${CONTENT_ID}
-- assertVisible:
-    id: content.detail.screen
+      newslyE2EOpenContentType: news
+      newslyE2EOpenContentId: "${CONTENT_ID}"
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 15000
 - scrollUntilVisible:
     element:
       id: content.discussion.open

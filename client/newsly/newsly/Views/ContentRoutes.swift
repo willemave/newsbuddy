@@ -7,13 +7,13 @@ import SwiftUI
 
 extension View {
     func withContentRoutes(
-        tab: RootTab,
         path: Binding<NavigationPath>,
         readingStateStore: ReadingStateStore,
         readStateCache: ReadStateCache,
         contentTextSize: DynamicTypeSize,
         contentTransitionNamespace: Namespace.ID? = nil,
-        chatTransitionNamespace: Namespace.ID? = nil
+        chatTransitionNamespace: Namespace.ID? = nil,
+        allowsChatHistory: Bool = false
     ) -> some View {
         navigationDestination(for: ContentDetailRoute.self) { route in
             ContentDetailView(
@@ -32,7 +32,7 @@ extension View {
         .navigationDestination(for: ChatSessionRoute.self) { route in
             ChatSessionView(
                 route: route,
-                onShowHistory: tab == .learning
+                onShowHistory: allowsChatHistory
                     ? {
                         path.wrappedValue = NavigationPath()
                         path.wrappedValue.append(SessionHistoryRoute())

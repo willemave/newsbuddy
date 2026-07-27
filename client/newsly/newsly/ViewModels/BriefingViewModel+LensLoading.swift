@@ -30,6 +30,16 @@ extension BriefingViewModel {
         lensStates[lensKey]?.renderModel
     }
 
+    func materializeRenderModelIfNeeded(for lensKey: String) {
+        guard var state = lensStates[lensKey],
+              state.renderModel == nil,
+              let lens = state.document else {
+            return
+        }
+        state.renderModel = makeRenderModel(lens, for: lensKey)
+        lensStates[lensKey] = state
+    }
+
     func loadLensIfNeeded(key: String) {
         let currentState = lensStates[key] ?? BriefingLensState()
         guard key == selectedLensKey || !lensRetention.isExpired(key) else {
@@ -275,21 +285,40 @@ extension BriefingViewModel {
             state.documentGeneration += 1
         }
         reindexSources(for: key, replacing: previousLens, with: lens)
-        let renderStartedAt = Date()
-        let signpostState = BriefingPerformance.signposter.beginInterval("render-model")
         state.document = lens
-        state.renderModel = BriefingLensRenderModel(
-            lens: lens,
-            reusing: reusingUnchangedPrefix ? previousRenderModel : nil,
-            affectedSourceKeys: reusingUnchangedPrefix ? Set<String>() : nil
-        )
+        if key == selectedLensKey {
+            state.renderModel = makeRenderModel(
+                lens,
+                for: key,
+                reusing: reusingUnchangedPrefix ? previousRenderModel : nil,
+                affectedSourceKeys: reusingUnchangedPrefix ? Set<String>() : nil
+            )
+        } else {
+            state.renderModel = nil
+        }
         stateUpdate(&state)
         lensStates[key] = state
-        BriefingPerformance.signposter.endInterval("render-model", signpostState)
         BriefingPerformance.signposter.emitEvent("lens-published")
+    }
+
+    func makeRenderModel(
+        _ lens: APIBriefingLensResponse,
+        for key: String,
+        reusing previousRenderModel: BriefingLensRenderModel? = nil,
+        affectedSourceKeys: Set<String>? = nil
+    ) -> BriefingLensRenderModel {
+        let renderStartedAt = Date()
+        let signpostState = BriefingPerformance.signposter.beginInterval("render-model")
+        let renderModel = BriefingLensRenderModel(
+            lens: lens,
+            reusing: previousRenderModel,
+            affectedSourceKeys: affectedSourceKeys
+        )
+        BriefingPerformance.signposter.endInterval("render-model", signpostState)
         BriefingPerformance.logger.info(
             "Lens render model built | key=\(key, privacy: .public) version=\(lens.version, privacy: .public) segments=\(lens.segments.count, privacy: .public) sources=\(lens.sources.count, privacy: .public) duration_ms=\(Int(Date().timeIntervalSince(renderStartedAt) * 1_000), privacy: .public)"
         )
+        return renderModel
     }
 
     func applyingOptimisticReadOverlay(

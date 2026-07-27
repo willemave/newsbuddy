@@ -74,78 +74,6 @@ struct SkeletonRow: View {
     }
 }
 
-struct SkeletonCard: View {
-    let showsImage: Bool
-
-    init(showsImage: Bool = true) {
-        self.showsImage = showsImage
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if showsImage {
-                RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
-                    .fill(Color.onSurface.opacity(0.08))
-                    .frame(height: 180)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                skeletonLine(width: nil, height: 16)
-                skeletonLine(width: nil, height: 16)
-                skeletonLine(width: 180, height: 16)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                skeletonLine(width: nil, height: 10)
-                skeletonLine(width: 220, height: 10)
-                skeletonLine(width: 150, height: 10)
-            }
-        }
-        .padding(16)
-        .background(Color.surfaceSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.card, style: .continuous))
-        .appShadow(.editorialCard)
-        .skeletonPulse()
-        .accessibilityHidden(true)
-    }
-
-    private func skeletonLine(width: CGFloat?, height: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
-            .fill(Color.onSurface.opacity(0.10))
-            .frame(width: width, height: height)
-    }
-}
-
-struct SkeletonFeedList: View {
-    let kind: Kind
-    var count = 4
-
-    enum Kind {
-        case shortForm
-        case longForm
-    }
-
-    var body: some View {
-        LazyVStack(spacing: kind == .longForm ? CardMetrics.cardSpacing : 0) {
-            EditorialMastheadHeader(title: kind == .longForm ? "Long Read" : "Fast Read")
-
-            ForEach(0..<count, id: \.self) { _ in
-                switch kind {
-                case .shortForm:
-                    SkeletonRow(style: .regular)
-                case .longForm:
-                    SkeletonCard()
-                        .padding(.horizontal, Spacing.appHorizontalMargin)
-                }
-            }
-        }
-        .padding(.bottom, 96)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .screenContainer()
-        .topScreenEdgeFade()
-    }
-}
-
 struct ContentDetailSkeletonView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -208,10 +136,7 @@ private extension View {
 }
 
 #Preview {
-    VStack(spacing: 24) {
-        SkeletonCard()
-        SkeletonRow()
-    }
+    SkeletonRow()
     .padding()
     .screenContainer()
 }

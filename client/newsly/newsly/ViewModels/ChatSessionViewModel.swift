@@ -13,10 +13,6 @@ import os
 private let logger = Logger(subsystem: "com.newsly", category: "ChatSessionViewModel")
 private let chatPerfSignposter = OSSignposter(subsystem: "com.newsly.chat", category: "perf")
 
-private enum ChatForegroundPollingSuspended: Error {
-    case inactive
-}
-
 private enum ChatSessionTaskKey: Hashable {
     case send
     case startCouncil
@@ -53,6 +49,7 @@ final class ChatSessionViewModel {
     var isVoiceActionInFlight: Bool { voiceInput.isActionInFlight }
 
     private let chatService: any ChatSessionServicing
+    private let messageCompletionRegistry: ChatMessageCompletionRegistry
     private let voiceInput: ChatVoiceInputController
     private let activeSessionManager: ActiveChatSessionManager
     private let timelineReconciler = ChatTimelineReconciler()
@@ -85,6 +82,7 @@ final class ChatSessionViewModel {
         let initialPendingUserMessage = Self.initialPendingUserMessage(from: route)
         let initialPendingLocalId = initialPendingUserMessage.map { _ in UUID() }
         self.chatService = dependencies.chatService
+        self.messageCompletionRegistry = dependencies.messageCompletionRegistry
         self.voiceInput = ChatVoiceInputController(
             transcriptionService: dependencies.transcriptionService,
             authService: dependencies.authService,
@@ -245,11 +243,8 @@ final class ChatSessionViewModel {
         startThinkingTimer()
 
         do {
-            // Use the polling sendMessage which handles the polling loop
-            _ = try await pollUntilComplete(messageId: messageId)
+            _ = try await waitForMessageCompletion(messageId: messageId)
             try await refreshTranscriptAfterPolling()
-        } catch is ChatForegroundPollingSuspended {
-            logger.debug("[ViewModel] pollForMessageCompletion suspended while inactive | sessionId=\(self.sessionId)")
         } catch where isCancelledOperation(error) {
             logger.debug("[ViewModel] pollForMessageCompletion cancelled | sessionId=\(self.sessionId)")
         } catch {
@@ -261,43 +256,25 @@ final class ChatSessionViewModel {
         stopThinkingTimer()
     }
 
-    /// Poll until message is complete
-    private func pollUntilComplete(messageId: Int) async throws -> ChatMessage {
+    private func waitForMessageCompletion(messageId: Int) async throws -> ChatMessage {
         let signpostState = chatPerfSignposter.beginInterval("poll-cycle")
         defer { chatPerfSignposter.endInterval("poll-cycle", signpostState) }
 
-        let maxAttempts = 120 // 60 seconds at 500ms intervals
-        var attempts = 0
-
-        while attempts < maxAttempts {
-            try Task.checkCancellation()
-            if suspendForegroundPollingIfInactive(messageId: messageId) {
-                throw ChatForegroundPollingSuspended.inactive
-            }
-
-            let status = try await chatService.getMessageStatus(messageId: messageId)
-
-            switch status.status {
-            case .completed:
-                guard let assistantMessage = status.assistantMessage else {
-                    throw ChatServiceError.missingAssistantMessage
+        let assistantMessage = try await messageCompletionRegistry.waitForCompletion(
+            messageId: messageId,
+            onProcessing: { [weak self] attempt in
+                guard
+                    let self,
+                    self.isViewActive,
+                    attempt == 1 || attempt.isMultiple(of: 6)
+                else {
+                    return
                 }
-                upsertServerMessage(assistantMessage)
-                return assistantMessage
-
-            case .failed:
-                throw ChatServiceError.processingFailed(status.error ?? "Unknown error")
-
-            case .processing, .unknown(_):
-                attempts += 1
-                if attempts == 1 || attempts.isMultiple(of: 6) {
-                    await refreshTranscriptSnapshot()
-                }
-                try await Task.sleep(nanoseconds: 500_000_000) // 500ms
+                await self.refreshTranscriptSnapshot()
             }
-        }
-
-        throw ChatServiceError.timeout
+        )
+        upsertServerMessage(assistantMessage)
+        return assistantMessage
     }
 
     func sendMessage(text overrideText: String? = nil) async {
@@ -383,13 +360,9 @@ final class ChatSessionViewModel {
             if suspendAcceptedSendIfInactive(localId: localId, messageId: response.messageId) {
                 return
             }
-            _ = try await pollUntilComplete(messageId: response.messageId)
+            _ = try await waitForMessageCompletion(messageId: response.messageId)
             try await refreshTranscriptAfterPolling()
             pendingSends.removeValue(forKey: localId)
-        } catch is ChatForegroundPollingSuspended {
-            pendingSends.removeValue(forKey: localId)
-            needsForegroundTranscriptRefresh = true
-            logger.debug("[ViewModel] sendMessage polling suspended while inactive | sessionId=\(self.sessionId)")
         } catch where isCancelledOperation(error) {
             if pendingSends[localId]?.messageId != nil {
                 pendingSends.removeValue(forKey: localId)

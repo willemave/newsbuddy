@@ -113,10 +113,8 @@ struct RecentlyReadView: View {
                 FilterSheet(
                     selectedContentType: $viewModel.selectedContentType,
                     selectedDate: $viewModel.selectedDate,
-                    selectedReadFilter: $viewModel.selectedReadFilter,
                     contentTypes: viewModel.contentTypes,
-                    availableDates: viewModel.availableDates,
-                    showsReadStatus: false
+                    availableDates: viewModel.availableDates
                 )
             }
         }

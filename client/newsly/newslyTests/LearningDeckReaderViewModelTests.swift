@@ -27,6 +27,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
         let viewModel = LearningDeckReaderViewModel(
             deck: Self.deck(),
             chatService: chatService,
+            messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
             deckService: LearningDeckService.shared
         )
 
@@ -75,6 +76,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
         let viewModel = LearningDeckReaderViewModel(
             deck: Self.deck(),
             chatService: chatService,
+            messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
             deckService: LearningDeckService.shared
         )
 
@@ -132,6 +134,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
         let viewModel = LearningDeckReaderViewModel(
             deck: Self.deck(),
             chatService: chatService,
+            messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
             deckService: LearningDeckService.shared
         )
 

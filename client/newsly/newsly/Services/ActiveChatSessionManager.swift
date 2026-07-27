@@ -41,7 +41,12 @@ struct ActiveChatSession: Identifiable, Equatable {
 @MainActor
 @Observable
 final class ActiveChatSessionManager {
-    static let shared = ActiveChatSessionManager()
+    private static let sharedMessageCompletionRegistry = ChatMessageCompletionRegistry(
+        statusService: ChatService.shared
+    )
+    static let shared = ActiveChatSessionManager(
+        messageCompletionRegistry: sharedMessageCompletionRegistry
+    )
 
     /// Active sessions being polled, keyed by session ID
     private(set) var activeSessions: [Int: ActiveChatSession] = [:]  // sessionId -> session
@@ -50,19 +55,13 @@ final class ActiveChatSessionManager {
     private(set) var completedSessions: [Int: ActiveChatSession] = [:]  // sessionId -> session
 
     @ObservationIgnored
-    private let chatService: any ChatSessionServicing
+    let messageCompletionRegistry: ChatMessageCompletionRegistry
 
     @ObservationIgnored
     private let notificationService = LocalNotificationService.shared
 
     @ObservationIgnored
     private let startsPolling: Bool
-
-    @ObservationIgnored
-    private let pollingInterval: UInt64
-
-    @ObservationIgnored
-    private let maxPollingAttempts: Int
 
     @ObservationIgnored
     private var pollingTasks: [Int: Task<Void, Never>] = [:]  // sessionId -> task
@@ -77,15 +76,12 @@ final class ActiveChatSessionManager {
     private var authDidLogOutObserver: NSObjectProtocol?
 
     init(
-        chatService: any ChatSessionServicing = ChatService.shared,
-        startsPolling: Bool = true,
-        pollingInterval: UInt64 = 500_000_000,
-        maxPollingAttempts: Int = 120
+        messageCompletionRegistry: ChatMessageCompletionRegistry? = nil,
+        startsPolling: Bool = true
     ) {
-        self.chatService = chatService
+        self.messageCompletionRegistry = messageCompletionRegistry
+            ?? Self.sharedMessageCompletionRegistry
         self.startsPolling = startsPolling
-        self.pollingInterval = pollingInterval
-        self.maxPollingAttempts = maxPollingAttempts
         authDidLogOutObserver = NotificationCenter.default.addObserver(
             forName: .authDidLogOut,
             object: nil,
@@ -237,40 +233,19 @@ final class ActiveChatSessionManager {
 
     /// Poll for message completion
     private func pollForCompletion(sessionId: Int, messageId: Int) async {
-        var attempts = 0
-
-        while attempts < maxPollingAttempts {
-            do {
-                try Task.checkCancellation()
-
-                let status = try await chatService.getMessageStatus(messageId: messageId)
-
-                switch status.status {
-                case .completed:
-                    await handleCompletion(sessionId: sessionId)
-                    return
-
-                case .failed:
-                    let errorMsg = status.error ?? "Unknown error"
-                    await handleFailure(sessionId: sessionId, error: errorMsg)
-                    return
-
-                case .processing, .unknown(_):
-                    attempts += 1
-                    try await Task.sleep(nanoseconds: pollingInterval)
-                }
-            } catch is CancellationError {
-                logger.info("Polling cancelled for session \(sessionId)")
-                return
-            } catch {
-                logger.error("Polling error for session \(sessionId): \(error.localizedDescription)")
-                await handleFailure(sessionId: sessionId, error: error.localizedDescription)
-                return
-            }
+        do {
+            _ = try await messageCompletionRegistry.waitForCompletion(messageId: messageId)
+            await handleCompletion(sessionId: sessionId)
+        } catch is CancellationError {
+            logger.info("Polling cancelled for session \(sessionId)")
+        } catch ChatServiceError.processingFailed(let message) {
+            await handleFailure(sessionId: sessionId, error: message)
+        } catch ChatServiceError.timeout {
+            await handleFailure(sessionId: sessionId, error: "Request timed out")
+        } catch {
+            logger.error("Polling error for session \(sessionId): \(error.localizedDescription)")
+            await handleFailure(sessionId: sessionId, error: error.localizedDescription)
         }
-
-        // Timeout
-        await handleFailure(sessionId: sessionId, error: "Request timed out")
     }
 
     private func handleCompletion(sessionId: Int) async {

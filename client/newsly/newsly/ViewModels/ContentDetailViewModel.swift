@@ -35,6 +35,13 @@ extension ScraperConfigService: DetectedFeedSubscribing {}
 @MainActor
 @Observable
 final class ContentDetailViewModel {
+    private enum TaskKey: Hashable {
+        case sourceBody(Int)
+        case readerBody(Int)
+        case markRead(Int)
+        case trackOpened(Int)
+    }
+
     var content: ContentDetail?
     var contentBody: ContentBody?
     var readerBody: ContentBody?
@@ -61,6 +68,8 @@ final class ContentDetailViewModel {
     private let toastPresenter: any ToastPresenting
     @ObservationIgnored
     private let linkSubmissionCoordinator: LinkSubmissionCoordinator
+    @ObservationIgnored
+    private let tasks = TaskBag<TaskKey>()
     @ObservationIgnored
     private var contentId: Int = 0
     @ObservationIgnored
@@ -100,6 +109,10 @@ final class ContentDetailViewModel {
     }
     
     func updateContentId(_ newId: Int, contentType newContentType: APIContentType? = nil) {
+        let previousContentId = contentId
+        tasks.cancel(.sourceBody(previousContentId))
+        tasks.cancel(.readerBody(previousContentId))
+        tasks.cancel(.markRead(previousContentId))
         self.contentId = newId
         if let newContentType {
             self.contentType = newContentType
@@ -150,17 +163,20 @@ final class ContentDetailViewModel {
             // Render immediately once the main detail payload arrives.
             isLoading = false
 
-            Task {
+            tasks.runReplacing(.trackOpened(fetched.id)) { [weak self] in
+                guard let self else { return }
                 await self.trackOpenedInteraction(for: fetched)
             }
 
             if fetched.bodyAvailable && fetched.contentType != .news {
-                Task {
+                tasks.runReplacing(.sourceBody(fetched.id)) { [weak self] in
+                    guard let self else { return }
                     await self.loadContentBody(for: fetched)
                 }
             }
 
-            Task {
+            tasks.runReplacing(.markRead(fetched.id)) { [weak self] in
+                guard let self else { return }
                 await self.markFetchedContentAsReadIfNeeded(fetched)
             }
         } catch where isNetworkCancellation(error) {
@@ -185,12 +201,28 @@ final class ContentDetailViewModel {
     func loadReaderBody(for content: ContentDetail, force: Bool = false) async {
         guard canShowReader(for: content) else { return }
         guard force || readerBody == nil else { return }
-        guard !isLoadingReaderBody else { return }
+        let taskKey = TaskKey.readerBody(content.id)
+        if !force, let existingTask = tasks.task(for: taskKey) {
+            await existingTask.value
+            return
+        }
 
-        isLoadingReaderBody = true
-        readerErrorMessage = nil
-        defer { isLoadingReaderBody = false }
+        let task = tasks.runReplacing(taskKey) { [weak self] token in
+            guard let self else { return }
+            self.isLoadingReaderBody = true
+            self.readerErrorMessage = nil
+            defer {
+                if self.tasks.isCurrent(token) {
+                    self.isLoadingReaderBody = false
+                }
+            }
 
+            await self.performReaderBodyLoad(for: content)
+        }
+        await task.value
+    }
+
+    private func performReaderBodyLoad(for content: ContentDetail) async {
         do {
             let body = try await fetchReaderBody(for: content)
             guard self.contentId == content.id,
@@ -216,7 +248,8 @@ final class ContentDetailViewModel {
                 variant: "source",
                 contentType: fetched.contentType
             )
-            guard self.contentId == fetched.id else {
+            guard self.contentId == fetched.id,
+                  self.contentType == fetched.contentType else {
                 logger.debug("[ContentDetail] Ignoring stale content body | requestedId=\(fetched.id) currentId=\(self.contentId)")
                 return
             }
@@ -242,6 +275,19 @@ final class ContentDetailViewModel {
             throw error
         } catch {
             logger.debug("[ContentDetail] Rendered reader body unavailable, falling back to source | contentId=\(content.id) error=\(error.localizedDescription)")
+        }
+
+        if let sourceBody = contentBody,
+           sourceBody.contentId == content.id {
+            return sourceBody
+        }
+
+        if let sourceTask = tasks.task(for: .sourceBody(content.id)) {
+            await sourceTask.value
+            if let sourceBody = contentBody,
+               sourceBody.contentId == content.id {
+                return sourceBody
+            }
         }
 
         return try await contentService.fetchContentBody(
@@ -319,12 +365,6 @@ final class ContentDetailViewModel {
         ActivityViewPresenter.presentWhenReady(activityVC)
     }
 
-    func markdownForShare(option: ShareContentOption) -> String? {
-        guard let content else { return nil }
-        return ShareMarkdownBuilder(content: content, contentBody: contentBody)
-            .markdown(for: option)
-    }
-    
     func toggleKnowledgeSave() async {
         guard let currentContent = content else { return }
 
@@ -458,25 +498,4 @@ final class ContentDetailViewModel {
         }
     }
 
-    func openInChatGPT() async {
-        // Strategy:
-        // 1) Build full markdown and offer it via the share sheet so ChatGPT's share extension can receive the text.
-        // 2) As a convenience, also put the text on the clipboard (user can paste if needed in the app).
-        // 3) Use custom item provider to preserve line breaks in Mail by converting to HTML.
-
-        guard let content = content else { return }
-        let fullText = ShareMarkdownBuilder(content: content, contentBody: contentBody)
-            .markdown(for: .full) ?? content.displayTitle
-
-        // Put on clipboard (helps in case target app reads clipboard or the user wants to paste manually)
-        UIPasteboard.general.string = fullText
-
-        // Create custom item provider that converts markdown to HTML for Mail
-        let itemProvider = MarkdownItemProvider(markdown: fullText, subject: content.displayTitle)
-
-        // Prepare share sheet with custom provider
-        let activityVC = UIActivityViewController(activityItems: [itemProvider], applicationActivities: nil)
-        activityVC.excludedActivityTypes = [.assignToContact, .saveToCameraRoll, .addToReadingList, .postToFacebook, .postToTwitter]
-        ActivityViewPresenter.presentWhenReady(activityVC)
-    }
 }

@@ -3,7 +3,7 @@ import SwiftUI
 /// Top-level pills: one aggregate "News" pill plus every fixed (podcasts /
 /// articles) lens. Lives above the pager so it stays put while pages swipe.
 struct BriefingTierStrip: View {
-    @ObservedObject var viewModel: BriefingViewModel
+    let viewModel: BriefingViewModel
     let onSelectNews: () -> Void
     let onSelectLens: (String) -> Void
 
@@ -42,7 +42,7 @@ struct BriefingTierStrip: View {
 /// During first-run onboarding, assigned categories append beside Welcome.
 /// They become interactive as soon as their first segment is readable.
 struct BriefingFirstRunStrip: View {
-    @ObservedObject var viewModel: BriefingViewModel
+    let viewModel: BriefingViewModel
     let onSelectStartHere: () -> Void
     let onSelectLens: (String) -> Void
 
@@ -92,7 +92,7 @@ struct BriefingFirstRunStrip: View {
 /// first sentence of news. One row costs a little more horizontal scrolling and
 /// buys back most of that height.
 struct BriefingCategoryStrip: View {
-    @ObservedObject var viewModel: BriefingViewModel
+    let viewModel: BriefingViewModel
     let onSelectLens: (String) -> Void
     let onRequestMarkAllRead: (APIBriefingLensSummary) -> Void
 

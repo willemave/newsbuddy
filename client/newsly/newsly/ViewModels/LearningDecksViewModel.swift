@@ -24,18 +24,26 @@ final class LearningDecksViewModel {
     @ObservationIgnored
     private let tasks = TaskBag<LearningDecksTaskKey>()
     @ObservationIgnored
-    private let pollingIntervalNanoseconds: UInt64
-    @ObservationIgnored
-    private let pollingAttemptLimit: Int
+    private let statusRegistry: LearningDeckStatusRegistry
 
     init(
         service: any LearningDeckServicing,
+        statusRegistry: LearningDeckStatusRegistry? = nil,
         pollingIntervalNanoseconds: UInt64 = 3_000_000_000,
         pollingAttemptLimit: Int = 120
     ) {
         self.service = service
-        self.pollingIntervalNanoseconds = pollingIntervalNanoseconds
-        self.pollingAttemptLimit = pollingAttemptLimit
+        self.statusRegistry = statusRegistry ?? LearningDeckStatusRegistry(
+            statusService: service,
+            policy: .fixed(
+                intervalNanoseconds: pollingIntervalNanoseconds,
+                attemptLimit: pollingAttemptLimit
+            )
+        )
+    }
+
+    deinit {
+        tasks.cancelAll()
     }
 
     func load() async {
@@ -168,6 +176,7 @@ final class LearningDecksViewModel {
                     errorMessage = "This deck can't be regenerated."
                     return nil
                 }
+                await statusRegistry.invalidate(deckId: deck.id)
                 tasks.cancel(.deckPolling(deck.id))
                 upsert(replacement)
                 errorMessage = nil
@@ -185,6 +194,7 @@ final class LearningDecksViewModel {
         await withDeckBusy(deck.id) {
             do {
                 try await service.deleteDeck(deckId: deck.id)
+                await statusRegistry.invalidate(deckId: deck.id)
                 tasks.cancel(.deckPolling(deck.id))
                 decks.removeAll { $0.id == deck.id }
                 errorMessage = nil
@@ -196,13 +206,15 @@ final class LearningDecksViewModel {
         }
     }
 
-    private func upsert(_ deck: LearningDeck) {
+    private func upsert(_ deck: LearningDeck, startsPolling: Bool = true) {
         if let index = decks.firstIndex(where: { $0.id == deck.id }) {
             decks[index] = deck
         } else {
             decks.insert(deck, at: 0)
         }
-        startPollingIfNeeded(deck)
+        if startsPolling {
+            startPollingIfNeeded(deck)
+        }
     }
 
     private func withDeckBusy<T>(
@@ -222,32 +234,27 @@ final class LearningDecksViewModel {
         }
 
         tasks.runIfIdle(taskKey) { [weak self] in
-            await self?.pollUntilLatestRunFinishes(deckId: deck.id)
+            await self?.observeUntilLatestRunFinishes(deckId: deck.id)
         }
     }
 
-    private func pollUntilLatestRunFinishes(deckId: Int) async {
-        for _ in 0..<pollingAttemptLimit {
-            do {
-                try await Task.sleep(nanoseconds: pollingIntervalNanoseconds)
-            } catch {
-                return
-            }
-
-            guard !Task.isCancelled else { return }
-
-            do {
-                let latest = try await service.fetchDeck(id: deckId)
-                upsert(latest)
-                errorMessage = nil
-                if !latest.hasActiveLatestRun {
-                    return
+    private func observeUntilLatestRunFinishes(deckId: Int) async {
+        do {
+            let latest = try await statusRegistry.waitUntilTerminal(
+                deckId: deckId,
+                onUpdate: { [weak self] deck in
+                    self?.upsert(deck, startsPolling: false)
+                    self?.errorMessage = nil
                 }
-            } catch where isNetworkCancellation(error) {
-                return
-            } catch {
-                continue
-            }
+            )
+            upsert(latest, startsPolling: false)
+            errorMessage = nil
+        } catch where isNetworkCancellation(error) {
+            return
+        } catch LearningDeckStatusRegistryError.timeout {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }

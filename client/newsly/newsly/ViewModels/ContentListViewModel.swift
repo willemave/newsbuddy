@@ -10,22 +10,6 @@ import Observation
 import SwiftUI
 
 protocol ContentSummaryListServicing: AnyObject {
-    func fetchContentList(
-        contentTypes: [String]?,
-        date: String?,
-        readFilter: String,
-        cursor: String?,
-        limit: Int
-    ) async throws -> ContentListResponse
-
-    func fetchContentList(
-        contentType: String?,
-        date: String?,
-        readFilter: String,
-        cursor: String?,
-        limit: Int
-    ) async throws -> ContentListResponse
-
     func fetchKnowledgeLibrary(
         query: String?,
         cursor: String?,
@@ -49,7 +33,6 @@ extension ContentService: ContentSummaryListServicing {}
 @Observable
 final class ContentListViewModel {
     private enum Mode {
-        case content
         case knowledgeLibrary
         case recentlyRead
     }
@@ -58,7 +41,7 @@ final class ContentListViewModel {
         get {
             readStateCache.applying(
                 to: feed.items,
-                removeReadItems: mode == .content && selectedReadFilter == "unread"
+                removeReadItems: false
             )
         }
         set { feed.replaceItems(newValue) }
@@ -83,37 +66,19 @@ final class ContentListViewModel {
         return message
     }
 
-    var nextCursor: String? {
-        feed.nextCursor
-    }
-
-    var hasMore: Bool {
-        feed.hasMore
-    }
-
     var selectedContentType: String = "all" {
         didSet {
             Task { await reloadForCurrentFilters() }
         }
     }
 
-    var selectedContentTypes: [String] = [] {
-        didSet {
-            Task { await reloadForCurrentFilters() }
-        }
-    }
     var selectedDate: String = "" {
         didSet {
             Task { await reloadForCurrentFilters() }
         }
     }
-    var selectedReadFilter: String = "unread" {
-        didSet {
-            Task { await reloadForCurrentFilters() }
-        }
-    }
 
-    private var mode: Mode = .content
+    private var mode: Mode = .knowledgeLibrary
     private var knowledgeQuery: String?
 
     @ObservationIgnored
@@ -123,22 +88,15 @@ final class ContentListViewModel {
     private let contentService: any ContentSummaryListServicing
 
     @ObservationIgnored
-    private let unreadCountService: UnreadCountService
-
-    @ObservationIgnored
     private let readStateCache: ReadStateCache
 
     private var actionErrorMessage: String?
 
     init(
-        defaultReadFilter: String = "unread",
         contentService: any ContentSummaryListServicing,
-        unreadCountService: UnreadCountService,
         readStateCache: ReadStateCache? = nil
     ) {
-        selectedReadFilter = defaultReadFilter
         self.contentService = contentService
-        self.unreadCountService = unreadCountService
         self.readStateCache = readStateCache ?? ReadStateCache()
         feed = PaginatedFeed { [weak self] cursor, generation in
             guard let self else {
@@ -157,44 +115,11 @@ final class ContentListViewModel {
             await loadRecentlyRead()
         case .knowledgeLibrary:
             await loadKnowledgeLibrary(query: knowledgeQuery)
-        case .content:
-            await loadContent()
         }
-    }
-
-    func loadContent() async {
-        actionErrorMessage = nil
-        mode = .content
-        await feed.loadInitial()
     }
 
     func loadMoreContent() async {
         await feed.loadNextPage()
-    }
-    
-    func markAsRead(_ contentId: Int) async {
-        do {
-            guard let initialIndex = contents.firstIndex(where: { $0.id == contentId }) else { return }
-            let initialContentType = contents[initialIndex].contentType
-            try await readStateCache.markReadAndSync([
-                ReadStateKey(id: contentId, contentType: initialContentType)
-            ])
-
-            // Re-resolve the index by id: `contents` may have been reordered or
-            // shrunk by a concurrent load during the await, so the pre-await
-            // index could now point at a different item (or be out of bounds).
-            guard let index = contents.firstIndex(where: { $0.id == contentId }) else { return }
-            let current = contents[index]
-            contents[index] = current.updating(isRead: true)
-
-            if selectedReadFilter == "unread" {
-                _ = withAnimation(AppMotion.panel) {
-                    contents.remove(at: index)
-                }
-            }
-        } catch {
-            actionErrorMessage = "Failed to mark as read: \(error.localizedDescription)"
-        }
     }
     
     func toggleKnowledgeSave(_ contentId: Int) async {
@@ -245,53 +170,10 @@ final class ContentListViewModel {
         feed.reset()
     }
 
-    func refreshKnowledgeLibraryInBackground() async {
-        guard mode == .knowledgeLibrary else { return }
-        await feed.refreshInBackground()
-    }
-
     func loadRecentlyRead() async {
         actionErrorMessage = nil
         mode = .recentlyRead
         await feed.loadInitial()
-    }
-
-    func refresh() async {
-        await loadContent()
-    }
-
-    func markAllAsRead() async {
-        let unreadItems = contents.filter { !$0.isRead }
-        let unreadIds = unreadItems.map { $0.id }
-        if unreadIds.isEmpty {
-            return
-        }
-
-        do {
-            let markedKeys = try await readStateCache.markReadAndSync(
-                Set(unreadItems.map(ReadStateKey.init))
-            )
-            let markedSet = Set(unreadIds)
-
-            contents = contents.map { item in
-                if markedSet.contains(item.id) {
-                    return item.updating(isRead: true)
-                }
-                return item
-            }
-
-            if selectedReadFilter == "unread" {
-                withAnimation(AppMotion.panel) {
-                    contents.removeAll { markedSet.contains($0.id) }
-                }
-            }
-
-            if !markedKeys.isEmpty {
-                await unreadCountService.refreshCounts()
-            }
-        } catch {
-            actionErrorMessage = "Failed to mark all as read: \(error.localizedDescription)"
-        }
     }
 
     func markAsUnreadAndRemove(_ contentId: Int) async {
@@ -308,8 +190,6 @@ final class ContentListViewModel {
     private func loadPage(cursor: String?, generation: Int) async throws -> Page<ContentSummary> {
         let response: ContentListResponse
         switch mode {
-        case .content:
-            response = try await loadDefaultContentPage(cursor: cursor)
         case .knowledgeLibrary:
             response = try await contentService.fetchKnowledgeLibrary(
                 query: knowledgeQuery,
@@ -334,26 +214,6 @@ final class ContentListViewModel {
             items: response.contents,
             nextCursor: response.nextCursor,
             hasMore: response.hasMore
-        )
-    }
-
-    private func loadDefaultContentPage(cursor: String?) async throws -> ContentListResponse {
-        if !selectedContentTypes.isEmpty {
-            return try await contentService.fetchContentList(
-                contentTypes: selectedContentTypes,
-                date: selectedDate.isEmpty ? nil : selectedDate,
-                readFilter: selectedReadFilter,
-                cursor: cursor,
-                limit: 25
-            )
-        }
-
-        return try await contentService.fetchContentList(
-            contentType: selectedContentType,
-            date: selectedDate.isEmpty ? nil : selectedDate,
-            readFilter: selectedReadFilter,
-            cursor: cursor,
-            limit: 25
         )
     }
 }

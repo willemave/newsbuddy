@@ -8,111 +8,21 @@ import SwiftUI
 
 private let rootTabLogger = Logger(subsystem: "com.newsly", category: "ContentView")
 
-private func pushRootContentDetail(
+private func pushBriefingContentDetail(
     _ route: ContentDetailRoute,
-    tab: String,
     path: Binding<NavigationPath>
 ) {
     guard path.wrappedValue.isEmpty else {
         rootTabLogger.info(
-            "[Navigation] ignoredDuplicatePush tab=\(tab, privacy: .public) contentId=\(route.contentId, privacy: .public) activePathCount=\(path.wrappedValue.count, privacy: .public)"
+            "[Navigation] ignoredDuplicatePush tab=briefing contentId=\(route.contentId, privacy: .public) activePathCount=\(path.wrappedValue.count, privacy: .public)"
         )
         return
     }
 
     rootTabLogger.info(
-        "[Navigation] pushDetail tab=\(tab, privacy: .public) contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(path.wrappedValue.count, privacy: .public)"
+        "[Navigation] pushDetail tab=briefing contentId=\(route.contentId, privacy: .public) type=\(route.contentType.rawValue, privacy: .public) idsCount=\(route.allContentIds.count, privacy: .public) pathCountBefore=\(path.wrappedValue.count, privacy: .public)"
     )
     path.wrappedValue.append(route)
-}
-
-struct LongFormTab: View {
-    @Binding var path: NavigationPath
-    @Namespace private var contentTransitionNamespace
-    let viewModel: LongContentListViewModel
-    let isActive: Bool
-    let badge: Int
-    let readingStateStore: ReadingStateStore
-    let readStateCache: ReadStateCache
-    let contentTextSize: DynamicTypeSize
-    let scrollToTopRequest: Int
-    let onShowNarrations: () -> Void
-    let currentFastReadItems: () -> [ContentSummary]
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            LongFormView(
-                viewModel: viewModel,
-                isActive: isActive,
-                onSelect: pushDetail,
-                scrollToTopRequest: scrollToTopRequest,
-                contentTransitionNamespace: contentTransitionNamespace,
-                onShowNarrations: onShowNarrations,
-                currentFastReadItems: currentFastReadItems
-            )
-            .dynamicTypeSize(contentTextSize)
-            .withContentRoutes(
-                tab: .longContent,
-                path: $path,
-                readingStateStore: readingStateStore,
-                readStateCache: readStateCache,
-                contentTextSize: contentTextSize,
-                contentTransitionNamespace: contentTransitionNamespace
-            )
-        }
-        .toolbar(path.isEmpty ? .visible : .hidden, for: .tabBar)
-        .tag(RootTab.longContent)
-        .tabItem {
-            Label("Long", systemImage: "doc.richtext")
-                .accessibilityIdentifier("tab.long_form")
-        }
-        .badge(badge)
-    }
-
-    private func pushDetail(_ route: ContentDetailRoute) {
-        pushRootContentDetail(route, tab: "long_form", path: $path)
-    }
-}
-
-struct ShortFormTab: View {
-    @Binding var path: NavigationPath
-    let viewModel: ShortNewsListViewModel
-    let isActive: Bool
-    let badge: Int
-    let readingStateStore: ReadingStateStore
-    let readStateCache: ReadStateCache
-    let contentTextSize: DynamicTypeSize
-    let scrollToTopRequest: Int
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            ShortFormView(
-                viewModel: viewModel,
-                isActive: isActive,
-                onSelect: pushDetail,
-                scrollToTopRequest: scrollToTopRequest
-            )
-            .dynamicTypeSize(contentTextSize)
-            .withContentRoutes(
-                tab: .shortNews,
-                path: $path,
-                readingStateStore: readingStateStore,
-                readStateCache: readStateCache,
-                contentTextSize: contentTextSize
-            )
-        }
-        .toolbar(path.isEmpty ? .visible : .hidden, for: .tabBar)
-        .tag(RootTab.shortNews)
-        .tabItem {
-            Label("Fast", systemImage: "bolt.fill")
-                .accessibilityIdentifier("tab.fast_news")
-        }
-        .badge(badge)
-    }
-
-    private func pushDetail(_ route: ContentDetailRoute) {
-        pushRootContentDetail(route, tab: "fast_news", path: $path)
-    }
 }
 
 struct BriefingTab: View {
@@ -128,7 +38,6 @@ struct BriefingTab: View {
             BriefingView(viewModel: viewModel, onOpenContent: pushDetail)
                 .dynamicTypeSize(contentTextSize)
                 .withContentRoutes(
-                    tab: .briefing,
                     path: $path,
                     readingStateStore: readingStateStore,
                     readStateCache: readStateCache,
@@ -137,21 +46,15 @@ struct BriefingTab: View {
                 )
         }
         .toolbar(.hidden, for: .tabBar)
-        .tag(RootTab.briefing)
-        .tabItem {
-            Label("Briefing", systemImage: "newspaper")
-                .accessibilityIdentifier("tab.briefing")
-        }
     }
 
     private func pushDetail(_ route: ContentDetailRoute) {
-        pushRootContentDetail(route, tab: "briefing", path: $path)
+        pushBriefingContentDetail(route, path: $path)
     }
 }
 
 struct KnowledgeTab: View {
     @Binding var path: NavigationPath
-    let isBriefingExperience: Bool
     let readStateCache: ReadStateCache
     let readingStateStore: ReadingStateStore
     let contentTextSize: DynamicTypeSize
@@ -162,7 +65,7 @@ struct KnowledgeTab: View {
             KnowledgeView(
                 onSelectContent: pushContent,
                 onSearch: { path.append(KnowledgeSearchRoute()) },
-                onOpenMore: isBriefingExperience ? onOpenMore : nil,
+                onOpenMore: onOpenMore,
                 readStateCache: readStateCache
             )
             .navigationDestination(for: KnowledgeSearchRoute.self) { _ in
@@ -172,19 +75,13 @@ struct KnowledgeTab: View {
                 )
             }
             .withContentRoutes(
-                tab: .knowledge,
                 path: $path,
                 readingStateStore: readingStateStore,
                 readStateCache: readStateCache,
                 contentTextSize: contentTextSize
             )
         }
-        .toolbar(isBriefingExperience ? .hidden : .visible, for: .tabBar)
-        .tag(RootTab.knowledge)
-        .tabItem {
-            Label("Knowledge", systemImage: "books.vertical.fill")
-                .accessibilityIdentifier("tab.knowledge")
-        }
+        .toolbar(.hidden, for: .tabBar)
     }
 
     private func pushContent(_ route: ContentDetailRoute) {
@@ -194,9 +91,7 @@ struct KnowledgeTab: View {
 
 struct LearningTab: View {
     @Binding var path: NavigationPath
-    @Binding var focusRequest: LearningFocusRequest?
     @Namespace private var chatTransitionNamespace
-    let isBriefingExperience: Bool
     let viewModel: LearningHubViewModel
     let readStateCache: ReadStateCache
     let readingStateStore: ReadingStateStore
@@ -206,70 +101,28 @@ struct LearningTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             LearningView(
-                focusRequest: focusRequest,
-                onFocusHandled: clearFocusRequest,
                 onSelectSession: pushSession,
-                onOpenMore: isBriefingExperience ? onOpenMore : nil,
+                onOpenMore: onOpenMore,
                 viewModel: viewModel,
                 readStateCache: readStateCache,
                 contentTextSize: contentTextSize,
                 chatTransitionNamespace: chatTransitionNamespace
             )
             .withContentRoutes(
-                tab: .learning,
                 path: $path,
                 readingStateStore: readingStateStore,
                 readStateCache: readStateCache,
                 contentTextSize: contentTextSize,
-                chatTransitionNamespace: chatTransitionNamespace
+                chatTransitionNamespace: chatTransitionNamespace,
+                allowsChatHistory: true
             )
         }
-        .toolbar(isBriefingExperience ? .hidden : .visible, for: .tabBar)
-        .tag(RootTab.learning)
-        .tabItem {
-            Label("Learning", systemImage: "sparkles")
-                .accessibilityIdentifier("tab.learning")
-        }
-    }
-
-    private func clearFocusRequest(_ request: LearningFocusRequest) {
-        if focusRequest == request { focusRequest = nil }
+        .toolbar(.hidden, for: .tabBar)
     }
 
     private func pushSession(_ route: ChatSessionRoute) {
         path = NavigationPath()
         path.append(route)
-    }
-}
-
-struct MoreTab: View {
-    @Binding var path: NavigationPath
-    let submissionsViewModel: SubmissionStatusViewModel
-    let readStateCache: ReadStateCache
-    let readingStateStore: ReadingStateStore
-    let contentTextSize: DynamicTypeSize
-    let badge: Int
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            MoreView(
-                submissionsViewModel: submissionsViewModel,
-                readStateCache: readStateCache
-            )
-            .withContentRoutes(
-                tab: .more,
-                path: $path,
-                readingStateStore: readingStateStore,
-                readStateCache: readStateCache,
-                contentTextSize: contentTextSize
-            )
-        }
-        .tag(RootTab.more)
-        .tabItem {
-            Label("More", systemImage: "ellipsis.circle.fill")
-                .accessibilityIdentifier("tab.more")
-        }
-        .badge(badge)
     }
 }
 

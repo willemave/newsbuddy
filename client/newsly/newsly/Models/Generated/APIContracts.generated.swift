@@ -122,8 +122,6 @@ enum APITaskType: Codable, Equatable, Hashable {
     case enrich_news_item_article
     case process_news_item
     case process_podcast_media
-    case download_audio
-    case transcribe
     case download_tweet_video_audio
     case transcribe_tweet_video
     case summarize
@@ -135,7 +133,6 @@ enum APITaskType: Codable, Equatable, Hashable {
     case dig_deeper
     case sync_integration
     case generate_audio_episode
-    case generate_learning_deck
     case run_llm_task
     case briefing_refresh
     case unknown(String)
@@ -148,8 +145,6 @@ enum APITaskType: Codable, Equatable, Hashable {
         .enrich_news_item_article,
         .process_news_item,
         .process_podcast_media,
-        .download_audio,
-        .transcribe,
         .download_tweet_video_audio,
         .transcribe_tweet_video,
         .summarize,
@@ -161,7 +156,6 @@ enum APITaskType: Codable, Equatable, Hashable {
         .dig_deeper,
         .sync_integration,
         .generate_audio_episode,
-        .generate_learning_deck,
         .run_llm_task,
         .briefing_refresh,
     ]
@@ -175,8 +169,6 @@ enum APITaskType: Codable, Equatable, Hashable {
         case .enrich_news_item_article: "enrich_news_item_article"
         case .process_news_item: "process_news_item"
         case .process_podcast_media: "process_podcast_media"
-        case .download_audio: "download_audio"
-        case .transcribe: "transcribe"
         case .download_tweet_video_audio: "download_tweet_video_audio"
         case .transcribe_tweet_video: "transcribe_tweet_video"
         case .summarize: "summarize"
@@ -188,7 +180,6 @@ enum APITaskType: Codable, Equatable, Hashable {
         case .dig_deeper: "dig_deeper"
         case .sync_integration: "sync_integration"
         case .generate_audio_episode: "generate_audio_episode"
-        case .generate_learning_deck: "generate_learning_deck"
         case .run_llm_task: "run_llm_task"
         case .briefing_refresh: "briefing_refresh"
         case .unknown(let rawValue): rawValue
@@ -204,8 +195,6 @@ enum APITaskType: Codable, Equatable, Hashable {
         case "enrich_news_item_article": self = .enrich_news_item_article
         case "process_news_item": self = .process_news_item
         case "process_podcast_media": self = .process_podcast_media
-        case "download_audio": self = .download_audio
-        case "transcribe": self = .transcribe
         case "download_tweet_video_audio": self = .download_tweet_video_audio
         case "transcribe_tweet_video": self = .transcribe_tweet_video
         case "summarize": self = .summarize
@@ -217,7 +206,6 @@ enum APITaskType: Codable, Equatable, Hashable {
         case "dig_deeper": self = .dig_deeper
         case "sync_integration": self = .sync_integration
         case "generate_audio_episode": self = .generate_audio_episode
-        case "generate_learning_deck": self = .generate_learning_deck
         case "run_llm_task": self = .run_llm_task
         case "briefing_refresh": self = .briefing_refresh
         default: self = .unknown(rawValue)

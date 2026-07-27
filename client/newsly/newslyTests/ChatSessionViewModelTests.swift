@@ -740,12 +740,20 @@ private extension ChatDependencies {
     static func test(
         transcriptionService: any SpeechTranscribing,
         chatService: any ChatSessionServicing = MockChatSessionService(),
-        activeSessionManager: ActiveChatSessionManager? = nil
+        activeSessionManager: ActiveChatSessionManager? = nil,
+        messageCompletionRegistry: ChatMessageCompletionRegistry? = nil
     ) -> ChatDependencies {
-        ChatDependencies(
+        let registry = messageCompletionRegistry
+            ?? ChatMessageCompletionRegistry(statusService: chatService)
+        return ChatDependencies(
             chatService: chatService,
+            messageCompletionRegistry: registry,
             transcriptionService: transcriptionService,
-            activeSessionManager: activeSessionManager ?? .shared,
+            activeSessionManager: activeSessionManager
+                ?? ActiveChatSessionManager(
+                    messageCompletionRegistry: registry,
+                    startsPolling: false
+                ),
             authService: AuthenticationService.shared,
             tokenStore: KeychainManager.shared,
             refreshTranscriptionAvailability: {

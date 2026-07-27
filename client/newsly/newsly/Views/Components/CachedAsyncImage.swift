@@ -7,6 +7,19 @@
 
 import SwiftUI
 
+enum ImageRequestSizing {
+    private static let pixelBucket = 128
+
+    static func targetPixelSize(for targetSize: CGSize?, scale: CGFloat) -> Int? {
+        guard let targetSize else { return nil }
+        let maxPointDimension = max(targetSize.width, targetSize.height)
+        guard maxPointDimension.isFinite, maxPointDimension > 0 else { return nil }
+
+        let requestedPixels = max(1, Int((maxPointDimension * scale).rounded(.up)))
+        return ((requestedPixels + pixelBucket - 1) / pixelBucket) * pixelBucket
+    }
+}
+
 /// A cached version of AsyncImage that uses ImageCacheService for memory and disk caching.
 /// Supports progressive loading from thumbnail to full image.
 struct CachedAsyncImage<Content: View, Placeholder: View>: View {
@@ -21,7 +34,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     
     @State private var loadedImage: UIImage?
     @State private var thumbnailImage: UIImage?
-    @State private var isLoading = false
     @State private var activeURLKey: String?
     
     init(
@@ -63,10 +75,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     }
 
     private var targetPixelSize: Int? {
-        guard let targetSize else { return nil }
-        let maxPointDimension = max(targetSize.width, targetSize.height)
-        guard maxPointDimension.isFinite, maxPointDimension > 0 else { return nil }
-        return max(1, Int((maxPointDimension * scale).rounded(.up)))
+        ImageRequestSizing.targetPixelSize(for: targetSize, scale: scale)
     }
 
     private func loadImage() async {
@@ -77,15 +86,9 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
                 thumbnailImage = nil
                 activeURLKey = newKey
             }
-            isLoading = true
         }
 
-        guard let url = url else {
-            await MainActor.run {
-                isLoading = false
-            }
-            return
-        }
+        guard let url = url else { return }
 
         let targetPixelSize = targetPixelSize
 
@@ -94,7 +97,6 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             await MainActor.run {
                 withAnimation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)) {
                     loadedImage = cached
-                    isLoading = false
                 }
             }
             return
@@ -124,12 +126,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             await MainActor.run {
                 withAnimation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)) {
                     loadedImage = image
-                    isLoading = false
                 }
-            }
-        } else {
-            await MainActor.run {
-                isLoading = false
             }
         }
     }

@@ -22,6 +22,32 @@ def test_network_services_use_timeout_session_and_single_auth_decoder_setup() ->
     assert "single ISO-8601 auth response decoder factory" in services_docs
 
 
+def test_share_extension_compiles_only_its_minimal_transport_boundary() -> None:
+    project_source = (REPO_ROOT / "client/newsly/newsly.xcodeproj/project.pbxproj").read_text()
+    extension_membership = project_source.split(
+        'E637D39E2EF99E2B004CD1F1 /* Exceptions for "newsly" folder in "ShareExtension" target */',
+        maxsplit=1,
+    )[1].split("};", maxsplit=1)[0]
+    share_controller_source = (
+        REPO_ROOT / "client/newsly/ShareExtension/ShareViewController.swift"
+    ).read_text()
+
+    assert "Shared/ShareExtensionTransport.swift" in extension_membership
+    assert "Shared/ServerConfigurationDefaults.swift" in extension_membership
+    assert "Services/KeychainManager.swift" in extension_membership
+    for main_app_dependency in [
+        "Services/APIClient.swift",
+        "Services/AppSettings.swift",
+        "Services/TokenRefreshService.swift",
+        "Models/Generated/APIContracts.generated.swift",
+        "Models/Generated/APIModels.generated.swift",
+    ]:
+        assert main_app_dependency not in extension_membership
+
+    assert "ShareExtensionTransport.shared.requestVoid(" in share_controller_source
+    assert "APIClient.shared" not in share_controller_source
+
+
 def test_auth_refresh_is_split_from_keychain_storage() -> None:
     keychain_source = (SERVICES_ROOT / "KeychainManager.swift").read_text()
     auth_error_source = (SERVICES_ROOT / "AuthError.swift").read_text()
@@ -40,17 +66,8 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     content_detail_view_model_source = (
         REPO_ROOT / "client/newsly/newsly/ViewModels/ContentDetailViewModel.swift"
     ).read_text()
-    long_content_list_view_model_source = (
-        REPO_ROOT / "client/newsly/newsly/ViewModels/LongContentListViewModel.swift"
-    ).read_text()
-    news_group_view_model_source = (
-        REPO_ROOT / "client/newsly/newsly/ViewModels/NewsGroupViewModel.swift"
-    ).read_text()
     submission_status_view_model_source = (
         REPO_ROOT / "client/newsly/newsly/ViewModels/SubmissionStatusViewModel.swift"
-    ).read_text()
-    custom_narration_creation_view_model_source = (
-        REPO_ROOT / "client/newsly/newsly/ViewModels/CustomNarrationCreationViewModel.swift"
     ).read_text()
     custom_narration_library_view_model_source = (
         REPO_ROOT / "client/newsly/newsly/ViewModels/CustomNarrationLibraryViewModel.swift"
@@ -101,7 +118,7 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
         REPO_ROOT / "client/newsly/newsly/Views/RecentlyReadView.swift"
     ).read_text()
     app_chrome_source = (REPO_ROOT / "client/newsly/newsly/Shared/AppChrome.swift").read_text()
-    badge_stats_source = (SERVICES_ROOT / "BadgeStatsRefreshCoordinator.swift").read_text()
+    badge_stats_source = (SERVICES_ROOT / "BadgeStatsStore.swift").read_text()
     services_docs = (REPO_ROOT / "docs/codebase/client/50-services.md").read_text()
     view_model_docs = (REPO_ROOT / "docs/codebase/client/70-view-models.md").read_text()
 
@@ -160,29 +177,15 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
         "private let contentService: any ContentSummaryListServicing"
         in content_list_view_model_source
     )
-    assert "private let unreadCountService: UnreadCountService" in content_list_view_model_source
     assert "ContentService.shared" not in content_list_view_model_source
-    assert "UnreadCountService.shared" not in content_list_view_model_source
+    assert "BadgeStatsStore.shared" not in content_list_view_model_source
     assert "func markAsUnreadAndRemove(_ contentId: Int) async" in content_list_view_model_source
     assert "ContentService.shared" not in recently_read_view_source
     assert "viewModel.markAsUnreadAndRemove(content.id)" in recently_read_view_source
-    assert (
-        "private let contentService: any ContentSummaryListServicing"
-        in long_content_list_view_model_source
-    )
-    assert "private let toastPresenter: any ToastPresenting" in long_content_list_view_model_source
-    assert "ContentService.shared" not in long_content_list_view_model_source
-    assert "ToastService.shared" not in long_content_list_view_model_source
-    assert "private let toastPresenter: any ToastPresenting" in news_group_view_model_source
-    assert "UnreadCountService.shared" not in news_group_view_model_source
-    assert "ToastService.shared" not in news_group_view_model_source
     assert "ContentService.shared" not in submission_status_view_model_source
-    assert "protocol CustomNarrationAudioServicing" in custom_narration_creation_view_model_source
-    assert "AudioEpisodeService.shared" not in custom_narration_creation_view_model_source
-    assert "ToastService.shared" not in custom_narration_creation_view_model_source
     assert "AudioEpisodeService.shared" not in custom_narration_library_view_model_source
     assert "NarrationPlaybackService.shared" not in custom_narration_library_view_model_source
-    assert "UnreadCountService.shared" not in custom_narration_library_view_model_source
+    assert "BadgeStatsStore.shared" not in custom_narration_library_view_model_source
     assert "ToastService.shared" not in custom_narration_library_view_model_source
     assert "OnboardingService.shared" not in onboarding_view_model_source
     assert "OnboardingStateStore.shared" not in onboarding_view_model_source
@@ -244,7 +247,6 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "service: ScraperConfigService.shared" in app_chrome_source
     assert "contentService: ContentService.shared" in app_chrome_source
     assert "static func makeContentListViewModel(" in app_chrome_source
-    assert "static func makeCustomNarrationCreationViewModel()" in app_chrome_source
     assert "static func makeCustomNarrationLibraryViewModel(" in app_chrome_source
     assert "static func makeSubmissionStatusViewModel(" in app_chrome_source
     assert "static func makeOnboardingViewModel(user: User)" in app_chrome_source
@@ -260,10 +262,7 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "locked token access-group storage" in services_docs
     assert "AuthenticationViewModel` is its direct observer" in services_docs
     assert "AuthenticationViewModel` takes auth and token-store dependencies" in view_model_docs
-    assert (
-        "ContentListViewModel` and `LongContentListViewModel` take their content-list service"
-        in view_model_docs
-    )
+    assert "ContentListViewModel` takes its content-list service" in view_model_docs
     assert (
         "ContentDetailViewModel` takes content, detected-feed, and toast dependencies"
         in view_model_docs
@@ -272,7 +271,9 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
         "detail-local coordinators take chat, discussion, audio, navigation, and toast dependencies"
         in view_model_docs
     )
-    assert "custom narration and submission-status view models are factory-wired" in view_model_docs
+    assert (
+        "Narration-library and submission-status view models are factory-wired" in view_model_docs
+    )
     assert (
         "onboarding, discovery personalization, and Learning Deck view models are factory-wired"
         in view_model_docs
@@ -323,7 +324,8 @@ def test_image_cache_has_periodic_cleanup_and_error_logging() -> None:
     assert "Failed to enumerate image cache during clear" in image_cache_source
     assert "Failed to write image cache data" in image_cache_source
     assert "Failed to download image" in image_cache_source
-    assert "Failed to prefetch image" in image_cache_source
+    assert "inFlightDataDownloads" in image_cache_source
+    assert "maximumConcurrentDownloads: Int = 4" in image_cache_source
     assert "throttled disk cleanup" in services_docs
 
 
@@ -347,45 +349,35 @@ def test_active_chat_polling_is_lifecycle_gated() -> None:
     assert "lifecycle-gated active-session polling" in services_docs
 
 
-def test_badge_stats_refresh_is_scene_phase_gated() -> None:
-    coordinator_source = (SERVICES_ROOT / "BadgeStatsRefreshCoordinator.swift").read_text()
-    unread_source = (SERVICES_ROOT / "UnreadCountService.swift").read_text()
-    processing_source = (SERVICES_ROOT / "ProcessingCountService.swift").read_text()
+def test_badge_stats_store_owns_counts_and_scene_phase_gated_refresh() -> None:
+    badge_store_source = (SERVICES_ROOT / "BadgeStatsStore.swift").read_text()
     content_view_source = (REPO_ROOT / "client/newsly/newsly/ContentView.swift").read_text()
+    badge_store_tests = (
+        REPO_ROOT / "client/newsly/newslyTests/BadgeStatsStoreTests.swift"
+    ).read_text()
     root_docs = (REPO_ROOT / "docs/codebase/client/20-app-target-root.md").read_text()
     services_docs = (REPO_ROOT / "docs/codebase/client/50-services.md").read_text()
 
-    assert "private var isRefreshSuspended = false" in coordinator_source
-    assert "func setRefreshSuspended(_ isSuspended: Bool)" in coordinator_source
-    assert "guard !isRefreshSuspended else { return }" in coordinator_source
-    assert "guard hasActiveProcessing, !isRefreshSuspended" in coordinator_source
+    assert "@Observable\nfinal class BadgeStatsStore" in badge_store_source
+    assert "private var refreshTask: Task<Void, Never>?" in badge_store_source
+    assert "func setRefreshSuspended(_ isSuspended: Bool)" in badge_store_source
+    assert "guard !isRefreshSuspended else { return }" in badge_store_source
+    assert "guard hasActiveProcessing, !isRefreshSuspended" in badge_store_source
+    assert "func resetCounts()" in badge_store_source
+    assert "UIApplication.didBecomeActiveNotification" in badge_store_source
+    assert "UIApplication.didEnterBackgroundNotification" in badge_store_source
+    assert not (SERVICES_ROOT / "BadgeStatsRefreshCoordinator.swift").exists()
+    assert not (SERVICES_ROOT / "UnreadCountService.swift").exists()
+    assert not (SERVICES_ROOT / "ProcessingCountService.swift").exists()
 
-    assert "func setPeriodicRefreshSuspended(_ isSuspended: Bool)" in unread_source
-    assert "func setPeriodicRefreshSuspended(_ isSuspended: Bool)" in processing_source
-    assert (
-        "@State private var processingCountService = ProcessingCountService.shared"
-        in content_view_source
-    )
-    assert (
-        "unreadCountService.setPeriodicRefreshSuspended(scenePhase != .active)"
-        in content_view_source
-    )
-    assert (
-        "processingCountService.setPeriodicRefreshSuspended(scenePhase != .active)"
-        in content_view_source
-    )
-    assert (
-        "unreadCountService.setPeriodicRefreshSuspended(newPhase != .active)" in content_view_source
-    )
-    assert (
-        "processingCountService.setPeriodicRefreshSuspended(newPhase != .active)"
-        in content_view_source
-    )
+    assert "await BadgeStatsStore.shared.refreshStats()" in content_view_source
+    assert "badgeStatsStore.setRefreshSuspended" not in content_view_source
+    assert "testSimultaneousRefreshesShareOneRequest" in badge_store_tests
+    assert "testBackgroundSuspendsAndForegroundRefreshes" in badge_store_tests
+    assert "testAuthenticationResetClearsCountsAndScheduledRefresh" in badge_store_tests
 
     assert "badge stats retries" in root_docs
-    assert (
-        "`BadgeStatsRefreshCoordinator` retries active processing badge refreshes" in services_docs
-    )
+    assert "`BadgeStatsStore` owns unread and processing counts" in services_docs
 
 
 def test_e2e_route_injection_is_consolidated_at_root() -> None:

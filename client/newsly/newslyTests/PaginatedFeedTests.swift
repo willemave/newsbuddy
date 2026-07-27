@@ -130,6 +130,34 @@ final class PaginatedFeedTests: XCTestCase {
         XCTAssertTrue(feed.hasMore)
         XCTAssertEqual(feed.phase, .idle)
     }
+
+    func testResetCancelsUnderlyingPageRequest() async {
+        let loader = CancellablePageLoader()
+        let feed = PaginatedFeed<TestFeedItem>(loadPage: loader.loadPage)
+        let load = Task { await feed.loadInitial() }
+        await loader.waitUntilStarted()
+
+        feed.reset()
+        await load.value
+
+        XCTAssertTrue(loader.wasCancelled)
+        XCTAssertEqual(feed.items, [])
+        XCTAssertEqual(feed.phase, .idle)
+    }
+
+    func testCallerCancellationCancelsUnderlyingPageRequest() async {
+        let loader = CancellablePageLoader(sleepDuration: .milliseconds(200))
+        let feed = PaginatedFeed<TestFeedItem>(loadPage: loader.loadPage)
+        let load = Task { await feed.loadInitial() }
+        await loader.waitUntilStarted()
+
+        load.cancel()
+        await load.value
+
+        XCTAssertTrue(loader.wasCancelled)
+        XCTAssertEqual(feed.items, [])
+        XCTAssertEqual(feed.phase, .idle)
+    }
 }
 
 private struct TestFeedItem: Identifiable, Equatable, Sendable {
@@ -192,5 +220,41 @@ private final class ControlledPageLoader {
         }
 
         XCTAssertEqual(pendingRequests.count, expectedCount, file: file, line: line)
+    }
+}
+
+@MainActor
+private final class CancellablePageLoader {
+    private let sleepDuration: Duration
+    private(set) var didStart = false
+    private(set) var wasCancelled = false
+
+    init(sleepDuration: Duration = .seconds(30)) {
+        self.sleepDuration = sleepDuration
+    }
+
+    func loadPage(cursor: String?) async throws -> Page<TestFeedItem> {
+        XCTAssertNil(cursor)
+        didStart = true
+        do {
+            try await Task.sleep(for: sleepDuration)
+        } catch is CancellationError {
+            wasCancelled = true
+            throw CancellationError()
+        }
+        return Page(items: [], nextCursor: nil, hasMore: false)
+    }
+
+    func waitUntilStarted(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<50 {
+            if didStart {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(didStart, file: file, line: line)
     }
 }

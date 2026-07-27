@@ -1,7 +1,9 @@
 import Foundation
+import Observation
 
 @MainActor
-final class BriefingDigViewModel: ObservableObject {
+@Observable
+final class BriefingDigViewModel {
     private enum TaskKey: Hashable {
         case dig
     }
@@ -28,8 +30,8 @@ final class BriefingDigViewModel: ObservableObject {
         case error(String)
     }
 
-    @Published private(set) var fragment: String?
-    @Published private(set) var state: State = .idle
+    private(set) var fragment: String?
+    private(set) var state: State = .idle
 
     var isIdle: Bool {
         if case .idle = state { return true }

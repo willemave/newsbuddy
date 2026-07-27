@@ -23,14 +23,14 @@ private enum BriefingViewAlert: Identifiable {
 }
 
 struct BriefingView: View {
-    @ObservedObject var viewModel: BriefingViewModel
+    let viewModel: BriefingViewModel
     private let narrationController: BriefingNarrationController
     /// Sources push onto the tab's navigation stack rather than opening a sheet,
     /// so the reader gets the standard back stack and edge-swipe.
     private let onOpenContent: (ContentDetailRoute) -> Void
 
     @Environment(\.dynamicTypeSize) private var contentTextSize
-    @StateObject private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
+    @State private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
     @State private var playbackService = NarrationPlaybackService.shared
     @State private var activeNarrationChapters: BriefingNarrationChapterSheetItem?
     @State private var chromeCollapse = BriefingChromeCollapseModel()

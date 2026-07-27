@@ -9,7 +9,6 @@ def test_phase5_zoom_transitions_pair_matched_sources_with_destinations() -> Non
     helper_source = (VIEWS_ROOT / "ContentZoomTransition.swift").read_text()
     root_tabs_source = (VIEWS_ROOT / "RootTabs.swift").read_text()
     routes_source = (VIEWS_ROOT / "ContentRoutes.swift").read_text()
-    long_form_source = (VIEWS_ROOT / "LongFormView.swift").read_text()
     learning_source = (VIEWS_ROOT / "LearningView.swift").read_text()
     chat_history_source = (VIEWS_ROOT / "ChatSessionHistoryView.swift").read_text()
     detail_source = (VIEWS_ROOT / "ContentDetailView.swift").read_text()
@@ -26,10 +25,6 @@ def test_phase5_zoom_transitions_pair_matched_sources_with_destinations() -> Non
     assert "contentTransitionNamespace: contentTransitionNamespace" in root_tabs_source
     assert "chatTransitionNamespace: chatTransitionNamespace" in root_tabs_source
 
-    assert (
-        ".matchedContentZoomSource(id: content.id, namespace: contentTransitionNamespace)"
-        in long_form_source
-    )
     content_destination_transition = (
         ".contentZoomNavigationTransition("
         "id: route.contentId, namespace: contentTransitionNamespace)"
@@ -61,4 +56,4 @@ def test_phase5_zoom_transitions_pair_matched_sources_with_destinations() -> Non
         in detail_source
     )
 
-    assert "Long-form cards, Learning chat rows, and article-reader entrypoints" in views_docs
+    assert "Learning chat rows and article-reader entrypoints" in views_docs

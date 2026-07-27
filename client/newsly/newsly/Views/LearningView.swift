@@ -5,24 +5,7 @@
 
 import SwiftUI
 
-enum LearningFocusTarget: Hashable {
-    case narrations
-}
-
-struct LearningFocusRequest: Equatable {
-    let id = UUID()
-    let target: LearningFocusTarget
-}
-
-private enum LearningSheetDestination: String, Identifiable {
-    case narrationList
-
-    var id: String { rawValue }
-}
-
 struct LearningView: View {
-    let focusRequest: LearningFocusRequest?
-    let onFocusHandled: (LearningFocusRequest) -> Void
     let onSelectSession: (ChatSessionRoute) -> Void
     let chatTransitionNamespace: Namespace.ID?
     let contentTextSize: DynamicTypeSize
@@ -33,12 +16,9 @@ struct LearningView: View {
     @State private var decks = RootDependencyFactory.makeLearningDecksViewModel()
     @State private var settings = AppSettings.shared
     @State private var composerText = ""
-    @State private var activeSheet: LearningSheetDestination?
     @State private var deckReaderDestination: LearningDeckReaderDestination?
     @FocusState private var isComposerFocused: Bool
     init(
-        focusRequest: LearningFocusRequest? = nil,
-        onFocusHandled: @escaping (LearningFocusRequest) -> Void = { _ in },
         onSelectSession: @escaping (ChatSessionRoute) -> Void,
         onOpenMore: (() -> Void)? = nil,
         viewModel: LearningHubViewModel,
@@ -46,8 +26,6 @@ struct LearningView: View {
         contentTextSize: DynamicTypeSize,
         chatTransitionNamespace: Namespace.ID? = nil
     ) {
-        self.focusRequest = focusRequest
-        self.onFocusHandled = onFocusHandled
         self.onSelectSession = onSelectSession
         self.onOpenMore = onOpenMore
         self.viewModel = viewModel
@@ -103,15 +81,6 @@ struct LearningView: View {
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $activeSheet) { destination in
-            switch destination {
-            case .narrationList:
-                CustomNarrationListSheet(
-                    viewModel: narrations,
-                    playbackService: narrations.playbackService
-                )
-            }
-        }
         .fullScreenCover(item: $deckReaderDestination) { destination in
             LearningDeckReaderView(
                 deck: destination.deck,
@@ -124,12 +93,10 @@ struct LearningView: View {
         .task {
             await loadLearningScreen()
             await viewModel.checkAndRefreshVoiceDictation()
-            handleFocusRequest(focusRequest)
         }
         .task(id: viewModel.hasActiveChatWork) {
             await viewModel.pollActiveChatWork()
         }
-        .onChange(of: focusRequest) { _, request in handleFocusRequest(request) }
         .onChange(of: viewModel.completedVoiceRoute) { _, route in
             guard let route else { return }
             viewModel.clearCompletedVoiceRoute()
@@ -333,12 +300,6 @@ struct LearningView: View {
     private func regenerateDeck(_ deck: LearningDeck) async {
         guard await decks.regenerate(deck) != nil else { return }
         ToastService.shared.show("Regenerating your deck", type: .info)
-    }
-
-    private func handleFocusRequest(_ request: LearningFocusRequest?) {
-        guard let request else { return }
-        if request.target == .narrations { activeSheet = .narrationList }
-        onFocusHandled(request)
     }
 
     @MainActor

@@ -249,13 +249,10 @@ enum RootDependencyFactory {
     }
 
     static func makeContentListViewModel(
-        defaultReadFilter: String = "unread",
         readStateCache: ReadStateCache? = nil
     ) -> ContentListViewModel {
         ContentListViewModel(
-            defaultReadFilter: defaultReadFilter,
             contentService: ContentService.shared,
-            unreadCountService: UnreadCountService.shared,
             readStateCache: readStateCache
         )
     }
@@ -295,20 +292,13 @@ enum RootDependencyFactory {
         )
     }
 
-    static func makeCustomNarrationCreationViewModel() -> CustomNarrationCreationViewModel {
-        CustomNarrationCreationViewModel(
-            audioService: AudioEpisodeService.shared,
-            toastPresenter: ToastService.shared
-        )
-    }
-
     static func makeCustomNarrationLibraryViewModel(
         readStateCache: ReadStateCache? = nil
     ) -> CustomNarrationLibraryViewModel {
         CustomNarrationLibraryViewModel(
             playbackService: NarrationPlaybackService.shared,
             audioService: AudioEpisodeService.shared,
-            unreadCountService: UnreadCountService.shared,
+            badgeStatsStore: BadgeStatsStore.shared,
             toastPresenter: ToastService.shared,
             readStateCache: readStateCache
         )
@@ -341,17 +331,26 @@ enum RootDependencyFactory {
     }
 
     static func makeLearningDecksViewModel() -> LearningDecksViewModel {
-        LearningDecksViewModel(service: LearningDeckService.shared)
+        LearningDecksViewModel(
+            service: LearningDeckService.shared,
+            statusRegistry: LearningDeckStatusRegistry.shared
+        )
     }
 
     static func makeLearningDeckReaderViewModel(
         deck: LearningDeck,
         chatService: (any LearningDeckReaderChatServicing)? = nil
     ) -> LearningDeckReaderViewModel {
-        LearningDeckReaderViewModel(
+        let resolvedChatService = chatService ?? ChatService.shared
+        let messageCompletionRegistry = chatService.map {
+            ChatMessageCompletionRegistry(statusService: $0)
+        } ?? ActiveChatSessionManager.shared.messageCompletionRegistry
+        return LearningDeckReaderViewModel(
             deck: deck,
-            chatService: chatService ?? ChatService.shared,
-            deckService: LearningDeckService.shared
+            chatService: resolvedChatService,
+            messageCompletionRegistry: messageCompletionRegistry,
+            deckService: LearningDeckService.shared,
+            deckStatusRegistry: LearningDeckStatusRegistry.shared
         )
     }
 
@@ -405,30 +404,8 @@ enum RootDependencyFactory {
     }
 
     static func makeTabCoordinator(
-        userID: Int? = nil,
-        readStateCache: ReadStateCache? = nil
+        userID: Int? = nil
     ) -> TabCoordinatorViewModel {
-        let readStateCache = readStateCache ?? ReadStateCache()
-        let shortFeedRepository = ContentRepository(includeAvailableDates: false)
-        let longFeedRepository = ContentRepository(includeAvailableDates: false)
-        let readRepository = ReadStatusRepository()
-        let newsReadRepository = ReadStatusRepository(endpoint: .newsItems)
-        let unreadService = UnreadCountService.shared
-
-        let shortNewsViewModel = ShortNewsListViewModel(
-            repository: shortFeedRepository,
-            readRepository: newsReadRepository,
-            unreadCountService: unreadService,
-            readStateCache: readStateCache
-        )
-        let longContentViewModel = LongContentListViewModel(
-            repository: longFeedRepository,
-            readRepository: readRepository,
-            unreadCountService: unreadService,
-            contentService: ContentService.shared,
-            toastPresenter: ToastService.shared,
-            readStateCache: readStateCache
-        )
         let briefingViewModel = BriefingViewModel(
             service: LiveBriefingService(),
             audioEpisodeService: AudioEpisodeService.shared,
@@ -437,8 +414,6 @@ enum RootDependencyFactory {
         )
 
         return TabCoordinatorViewModel(
-            shortNewsVM: shortNewsViewModel,
-            longContentVM: longContentViewModel,
             briefingVM: briefingViewModel
         )
     }

@@ -12,16 +12,12 @@ appId: "${APP_ID}"
       newslyE2EUserId: "${USER_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
-- tapOn:
-    id: tab.long_form
-- assertVisible:
-    id: long.screen
-- assertVisible:
-    id: long.row.${CONTENT_ID}
-- tapOn:
-    id: long.row.${CONTENT_ID}
-- assertVisible:
-    id: content.detail.screen
+      newslyE2EOpenContentType: article
+      newslyE2EOpenContentId: "${CONTENT_ID}"
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 15000
 # Stale-label fix: the deep-dive options sheet header changed from "AI Chat" to
 # the option labels "Start chat" / "Council Chat" (see ContentDetailView chat sheet).
 # Wait for the summary to render so the action toolbar is interactive before tapping.

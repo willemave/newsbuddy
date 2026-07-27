@@ -11,8 +11,7 @@ struct ProcessingStatsView: View {
     @State private var sourcesViewModel = RootDependencyFactory.makeScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
     )
-    @State private var processingCountService = ProcessingCountService.shared
-    @State private var unreadCountService = UnreadCountService.shared
+    @State private var badgeStatsStore = BadgeStatsStore.shared
 
     var body: some View {
         List {
@@ -20,14 +19,14 @@ struct ProcessingStatsView: View {
                 statRow(
                     title: "Processing",
                     subtitle: "Pending or running",
-                    count: processingCountService.longFormProcessingCount,
+                    count: badgeStatsStore.longFormProcessingCount,
                     icon: "clock.arrow.circlepath",
                     color: .brandPrimary
                 )
                 statRow(
                     title: "Unread",
                     subtitle: "Ready to read",
-                    count: unreadCountService.longFormCount,
+                    count: badgeStatsStore.longFormCount,
                     icon: "tray",
                     color: .onSurfaceSecondary
                 )
@@ -74,10 +73,9 @@ struct ProcessingStatsView: View {
         .navigationTitle("Processing Stats")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            async let unreadRefresh: Void = unreadCountService.refreshCounts()
-            async let processingRefresh: Void = processingCountService.refreshCount()
             async let sourcesRefresh: Void = sourcesViewModel.loadConfigs()
-            _ = await (unreadRefresh, processingRefresh, sourcesRefresh)
+            async let badgeStatsRefresh: Void = badgeStatsStore.refreshStats()
+            _ = await (sourcesRefresh, badgeStatsRefresh)
         }
     }
 

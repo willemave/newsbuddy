@@ -33,6 +33,7 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
                 let stretch = (isOverscroll && !reduceMotion) ? minY : 0
                 let extraHeight = geo.size.height * rate
                 let imageHeight = geo.size.height + geo.safeAreaInsets.top + stretch + extraHeight
+                let imageRequestHeight = geo.size.height + geo.safeAreaInsets.top + extraHeight
 
                 Button {
                     selectedImageAsset = DetailHeroImageAsset(
@@ -43,7 +44,7 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
                     CachedAsyncImage(
                         url: imageURL,
                         thumbnailUrl: thumbnailURL,
-                        targetSize: CGSize(width: geo.size.width, height: imageHeight)
+                        targetSize: CGSize(width: geo.size.width, height: imageRequestHeight)
                     ) { image in
                         image
                             .resizable()

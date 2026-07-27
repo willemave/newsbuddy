@@ -67,18 +67,12 @@
 		E637D39E2EF99E2B004CD1F1 /* Exceptions for "newsly" folder in "ShareExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Models/AnyCodable.swift,
-				Models/Generated/APIContracts.generated.swift,
-				Models/Generated/APIModels.generated.swift,
-				Models/ServerDate.swift,
-				Services/APIClient.swift,
-				Services/AppSettings.swift,
-				Services/AuthError.swift,
 				Services/KeychainManager.swift,
-				Services/TokenRefreshService.swift,
 				Shared/ReaderPalette.swift,
+				Shared/ServerConfigurationDefaults.swift,
 				Shared/SharedContainer.swift,
 				Shared/ShareExtensionStyle.swift,
+				Shared/ShareExtensionTransport.swift,
 			);
 			target = E61B938D2EF910AC0006676A /* ShareExtension */;
 		};

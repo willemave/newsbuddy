@@ -10,17 +10,10 @@ import SwiftUI
 struct FilterSheet: View {
     @Binding var selectedContentType: String
     @Binding var selectedDate: String
-    @Binding var selectedReadFilter: String
     @Environment(\.dismiss) private var dismiss
     
     let contentTypes: [String]
     let availableDates: [String]
-    var showsReadStatus: Bool = true
-    private let readStatusOptions = [
-        FormChoiceOption(title: "Unread", value: "unread"),
-        FormChoiceOption(title: "All", value: "all"),
-        FormChoiceOption(title: "Read", value: "read"),
-    ]
     
     var body: some View {
         NavigationStack {
@@ -64,17 +57,6 @@ struct FilterSheet: View {
                         }
                         .accessibilityLabel("Date")
                         .accessibilityValue(selectedDateTitle)
-                    }
-                    
-                    if showsReadStatus {
-                        Section(header: Text("Read Status")) {
-                            FormChoicePillGroup(
-                                options: readStatusOptions,
-                                selection: $selectedReadFilter,
-                                unselectedBackground: .surfaceContainer
-                            )
-                            .padding(.vertical, 4)
-                        }
                     }
                     
                     // Settings Section

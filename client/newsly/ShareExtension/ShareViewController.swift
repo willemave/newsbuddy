@@ -405,27 +405,25 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         let requestBody = try JSONEncoder().encode(payload)
 
         do {
-            try await APIClient.shared.requestVoid(
+            try await ShareExtensionTransport.shared.requestVoid(
                 "/api/share-actions",
                 method: "POST",
                 body: requestBody
             )
-        } catch let error as APIError {
+        } catch let error as ShareExtensionTransportError {
             switch error {
-            case .unauthorized:
+            case .notAuthenticated:
                 throw ShareError.notAuthenticated
             case .invalidURL:
                 throw ShareError.invalidURL
-            case .networkError(let underlying):
+            case .network(let underlying):
                 throw ShareError.networkError(underlying.localizedDescription)
-            case .httpError(let statusCode, let detail):
+            case .server(let statusCode, let detail):
                 if let message = detail?.trimmingCharacters(in: .whitespacesAndNewlines), !message.isEmpty {
                     throw ShareError.serverError(message)
                 }
                 throw ShareError.serverError("Request failed with status \(statusCode)")
-            case .decodingError(let underlying):
-                throw ShareError.serverError(underlying.localizedDescription)
-            case .noData, .unknown:
+            case .invalidResponse:
                 throw ShareError.invalidResponse
             }
         } catch {

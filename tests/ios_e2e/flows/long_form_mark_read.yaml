@@ -12,13 +12,23 @@ appId: "${APP_ID}"
       newslyE2EUserId: "${USER_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
-- tapOn:
-    id: tab.long_form
+- extendedWaitUntil:
+    visible:
+      id: briefing.screen
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: briefing.segment.${SEGMENT_ID}
+    timeout: 10000
+- longPressOn:
+    id: briefing.lens.articles
+- extendedWaitUntil:
+    visible: Mark All as Read
+    timeout: 5000
+- tapOn: Mark All as Read
+- extendedWaitUntil:
+    notVisible:
+      id: briefing.category.mark_all.progress
+    timeout: 10000
 - assertVisible:
-    id: long.screen
-- assertVisible:
-    id: long.row.${CONTENT_ID}
-- tapOn:
-    text: Mark as read
-- assertVisible:
-    id: long.screen
+    id: briefing.screen

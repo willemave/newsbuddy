@@ -73,8 +73,6 @@ const (
 	TaskTypeEnrichNewsItemArticle TaskType = "enrich_news_item_article"
 	TaskTypeProcessNewsItem TaskType = "process_news_item"
 	TaskTypeProcessPodcastMedia TaskType = "process_podcast_media"
-	TaskTypeDownloadAudio TaskType = "download_audio"
-	TaskTypeTranscribe TaskType = "transcribe"
 	TaskTypeDownloadTweetVideoAudio TaskType = "download_tweet_video_audio"
 	TaskTypeTranscribeTweetVideo TaskType = "transcribe_tweet_video"
 	TaskTypeSummarize TaskType = "summarize"
@@ -86,14 +84,13 @@ const (
 	TaskTypeDigDeeper TaskType = "dig_deeper"
 	TaskTypeSyncIntegration TaskType = "sync_integration"
 	TaskTypeGenerateAudioEpisode TaskType = "generate_audio_episode"
-	TaskTypeGenerateLearningDeck TaskType = "generate_learning_deck"
 	TaskTypeRunLLMTask TaskType = "run_llm_task"
 	TaskTypeBriefingRefresh TaskType = "briefing_refresh"
 )
 
 func (v TaskType) Known() bool {
 	switch v {
-	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadAudio, TaskTypeTranscribe, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateAudioEpisode, TaskTypeGenerateLearningDeck, TaskTypeRunLLMTask, TaskTypeBriefingRefresh:
+	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateAudioEpisode, TaskTypeRunLLMTask, TaskTypeBriefingRefresh:
 		return true
 	default:
 		return false

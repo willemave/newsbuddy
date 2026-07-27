@@ -765,6 +765,12 @@ final class BriefingViewModelTests: XCTestCase {
 
         XCTAssertEqual(service.indexEtags, ["etag-4"])
         XCTAssertEqual(service.fetchLensKeys, ["alpha"])
+        XCTAssertNotNil(viewModel.renderModel(for: "alpha"))
+        XCTAssertNil(viewModel.renderModel(for: "zeta"))
+
+        viewModel.selectLens(key: "zeta")
+
+        XCTAssertNotNil(viewModel.renderModel(for: "zeta"))
     }
 
     func testRestoredPartialSnapshotResumesCursorOnlyAfterNotModified() async {

@@ -62,11 +62,16 @@ final class ActiveChatSessionManagerTests: XCTestCase {
 
     func testLifecycleSuspensionPausesAndResumesPollingWithoutDroppingTrackedSession() async {
         let service = PollingChatSessionService()
+        let registry = ChatMessageCompletionRegistry(
+            statusService: service,
+            policy: ChatMessageCompletionPollingPolicy(
+                delaysNanoseconds: Array(repeating: 20_000_000, count: 99)
+            ),
+            orphanGraceNanoseconds: 0
+        )
         let manager = ActiveChatSessionManager(
-            chatService: service,
-            startsPolling: true,
-            pollingInterval: 20_000_000,
-            maxPollingAttempts: 100
+            messageCompletionRegistry: registry,
+            startsPolling: true
         )
 
         manager.startTracking(

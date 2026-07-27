@@ -6,23 +6,17 @@
 import Foundation
 import Observation
 
-private enum LearningDeckForegroundPollingSuspended: Error {
-    case inactive
-}
-
 private enum LearningDeckReaderTaskKey: Hashable {
     case send
     case viewer
 }
 
-protocol LearningDeckReaderChatServicing: AnyObject {
+protocol LearningDeckReaderChatServicing: MessageStatusFetching {
     func createAssistantTurn(
         message: String,
         sessionId: Int?,
         screenContext: AssistantScreenContext
     ) async throws -> AssistantTurnResponse
-
-    func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse
 }
 
 extension ChatService: LearningDeckReaderChatServicing {}
@@ -96,11 +90,9 @@ final class LearningDeckReaderViewModel {
 
     private let deck: LearningDeck
     private let chatService: LearningDeckReaderChatServicing
+    private let messageCompletionRegistry: ChatMessageCompletionRegistry
     private let deckService: any LearningDeckServicing
-    private let maxPollingAttempts = 120
-    private let pollingIntervalNanoseconds: UInt64 = 500_000_000
-    private let viewerPollIntervalNanoseconds: UInt64
-    private let viewerPollAttemptLimit: Int
+    private let deckStatusRegistry: LearningDeckStatusRegistry
 
     @ObservationIgnored
     private let tasks = TaskBag<LearningDeckReaderTaskKey>()
@@ -112,15 +104,23 @@ final class LearningDeckReaderViewModel {
     init(
         deck: LearningDeck,
         chatService: any LearningDeckReaderChatServicing,
+        messageCompletionRegistry: ChatMessageCompletionRegistry,
         deckService: any LearningDeckServicing,
+        deckStatusRegistry: LearningDeckStatusRegistry? = nil,
         viewerPollIntervalNanoseconds: UInt64 = 3_000_000_000,
         viewerPollAttemptLimit: Int = 120
     ) {
         self.deck = deck
         self.chatService = chatService
+        self.messageCompletionRegistry = messageCompletionRegistry
         self.deckService = deckService
-        self.viewerPollIntervalNanoseconds = viewerPollIntervalNanoseconds
-        self.viewerPollAttemptLimit = viewerPollAttemptLimit
+        self.deckStatusRegistry = deckStatusRegistry ?? LearningDeckStatusRegistry(
+            statusService: deckService,
+            policy: .fixed(
+                intervalNanoseconds: viewerPollIntervalNanoseconds,
+                attemptLimit: viewerPollAttemptLimit
+            )
+        )
     }
 
     deinit {
@@ -163,74 +163,43 @@ final class LearningDeckReaderViewModel {
     }
 
     private func resolveViewerLoop() async {
-        var attempts = 0
-        while attempts < viewerPollAttemptLimit {
-            do {
-                try Task.checkCancellation()
-                let latest = try await deckService.fetchDeck(id: deck.id)
-                generationStatusLabel = latest.statusLabel
-                if let note = nonEmptyTrimmed(latest.latestNote) {
-                    generationNote = note
+        do {
+            let latest = try await deckStatusRegistry.waitUntilTerminal(
+                deckId: deck.id,
+                onUpdate: { [weak self] latest in
+                    self?.applyGenerationStatus(latest)
+                },
+                onRetry: { [weak self] _ in
+                    self?.generationNote = "Connection interrupted. Still trying…"
                 }
-
-                if latest.hasActiveLatestRun {
-                    attempts += 1
-                    try await Task.sleep(nanoseconds: viewerPollIntervalNanoseconds)
-                    continue
-                }
-
-                if latest.viewerAvailable {
-                    let url = try await deckService.viewerURL(deckId: latest.id)
-                    resolvedViewerURL = url
-                    isResolvingViewer = false
-                    viewerResolutionFailed = false
-                    return
-                }
-
+            )
+            applyGenerationStatus(latest)
+            if latest.viewerAvailable {
+                resolvedViewerURL = try await deckService.viewerURL(deckId: latest.id)
+                isResolvingViewer = false
+                viewerResolutionFailed = false
+            } else {
                 isResolvingViewer = false
                 viewerResolutionFailed = true
-                return
-            } catch where isNetworkCancellation(error) {
-                isResolvingViewer = false
-                return
-            } catch where !shouldRetryViewerResolution(after: error) {
-                isResolvingViewer = false
-                viewerResolutionFailed = true
-                generationNote = error.localizedDescription
-                return
-            } catch {
-                attempts += 1
-                generationNote = "Connection interrupted. Still trying…"
-                if attempts < viewerPollAttemptLimit {
-                    try? await Task.sleep(nanoseconds: viewerPollIntervalNanoseconds)
-                }
             }
+        } catch where isNetworkCancellation(error) {
+            isResolvingViewer = false
+        } catch LearningDeckStatusRegistryError.timeout {
+            isResolvingViewer = false
+            viewerResolutionFailed = false
+            generationStatusLabel = "Taking longer than expected"
+            generationNote = "Your deck is still being prepared."
+        } catch {
+            isResolvingViewer = false
+            viewerResolutionFailed = true
+            generationNote = error.localizedDescription
         }
-        isResolvingViewer = false
-        viewerResolutionFailed = false
-        generationStatusLabel = "Taking longer than expected"
-        generationNote = "Your deck is still being prepared."
     }
 
-    private func shouldRetryViewerResolution(after error: Error) -> Bool {
-        if error is LearningDeckURLValidationError {
-            return false
-        }
-
-        guard let apiError = error as? APIError else {
-            return true
-        }
-        switch apiError {
-        case .invalidURL, .decodingError, .unauthorized:
-            return false
-        case .httpError(let statusCode, _):
-            return statusCode == 408
-                || statusCode == 409
-                || statusCode == 425
-                || statusCode == 429
-                || statusCode >= 500
-        case .noData, .networkError, .unknown:
-            return true
+    private func applyGenerationStatus(_ latest: LearningDeck) {
+        generationStatusLabel = latest.statusLabel
+        if let note = nonEmptyTrimmed(latest.latestNote) {
+            generationNote = note
         }
     }
 
@@ -351,7 +320,9 @@ final class LearningDeckReaderViewModel {
             if !isViewActive {
                 return
             }
-            let assistantMessage = try await pollUntilComplete(messageId: response.messageId)
+            let assistantMessage = try await messageCompletionRegistry.waitForCompletion(
+                messageId: response.messageId
+            )
             upsertTimelineItem(
                 ChatTimelineItem(
                     id: ChatTimelineID.server(for: assistantMessage),
@@ -361,9 +332,6 @@ final class LearningDeckReaderViewModel {
                 )
             )
             clearPendingMessageId(for: .local(localId))
-        } catch is LearningDeckForegroundPollingSuspended {
-            // The backend has accepted the turn. Leave the pending user row in
-            // place so foregrounding can resume status polling.
         } catch where isNetworkCancellation(error) {
             if pendingMessageId(for: .local(localId)) == nil {
                 removeTimelineItem(id: .local(localId))
@@ -388,30 +356,6 @@ final class LearningDeckReaderViewModel {
         }
     }
 
-    private func pollUntilComplete(messageId: Int) async throws -> ChatMessage {
-        var attempts = 0
-        while attempts < maxPollingAttempts {
-            try Task.checkCancellation()
-            if !isViewActive {
-                throw LearningDeckForegroundPollingSuspended.inactive
-            }
-            let status = try await chatService.getMessageStatus(messageId: messageId)
-            switch status.status {
-            case .completed:
-                guard let assistantMessage = status.assistantMessage else {
-                    throw ChatServiceError.missingAssistantMessage
-                }
-                return assistantMessage
-            case .failed:
-                throw ChatServiceError.processingFailed(status.error ?? "Unknown error")
-            case .processing, .unknown(_):
-                attempts += 1
-                try await Task.sleep(nanoseconds: pollingIntervalNanoseconds)
-            }
-        }
-        throw ChatServiceError.timeout
-    }
-
     private func resumeAcceptedSendIfNeeded() {
         guard !tasks.isRunning(.send), let messageId = pendingForegroundMessageId else { return }
 
@@ -431,7 +375,9 @@ final class LearningDeckReaderViewModel {
         }
 
         do {
-            let assistantMessage = try await pollUntilComplete(messageId: messageId)
+            let assistantMessage = try await messageCompletionRegistry.waitForCompletion(
+                messageId: messageId
+            )
             upsertTimelineItem(
                 ChatTimelineItem(
                     id: ChatTimelineID.server(for: assistantMessage),
@@ -441,8 +387,6 @@ final class LearningDeckReaderViewModel {
                 )
             )
             clearPendingMessageId(forPendingMessageId: messageId)
-        } catch is LearningDeckForegroundPollingSuspended {
-            return
         } catch where isNetworkCancellation(error) {
             return
         } catch {

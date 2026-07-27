@@ -14,80 +14,7 @@ private let appSettingsLogger = Logger(
     category: "AppSettings"
 )
 
-enum ServerConfigurationDefaults {
-    static let hostKey = "serverHost"
-    static let portKey = "serverPort"
-    static let useHTTPSKey = "useHTTPS"
-    static let defaultHost = "localhost"
-    static let defaultPort = "8000"
-
-    static func applyDebugDefaultsIfNeeded(to userDefaults: UserDefaults) {
-#if DEBUG
-        let persistedHost = persistedString(forKey: hostKey, in: userDefaults)
-        let persistedPort = persistedString(forKey: portKey, in: userDefaults)
-
-        guard persistedHost == nil || persistedPort == nil else {
-            return
-        }
-
-        if persistedHost == nil {
-            userDefaults.set(defaultHost, forKey: hostKey)
-        }
-
-        if persistedPort == nil {
-            userDefaults.set(defaultPort, forKey: portKey)
-        }
-
-        if userDefaults.object(forKey: useHTTPSKey) == nil {
-            userDefaults.set(false, forKey: useHTTPSKey)
-        }
-
-        appSettingsLogger.notice(
-            "Seeded debug server configuration host=\(persistedHost ?? defaultHost, privacy: .public) port=\(persistedPort ?? defaultPort, privacy: .public)"
-        )
-#endif
-    }
-
-    static func hasPersistedServerConfiguration(in userDefaults: UserDefaults) -> Bool {
-        persistedString(forKey: hostKey, in: userDefaults) != nil
-            && persistedString(forKey: portKey, in: userDefaults) != nil
-    }
-
-    static func resolvedConfiguration(
-        in userDefaults: UserDefaults,
-        launchHost: String? = nil,
-        launchPort: String? = nil,
-        launchUseHTTPS: Bool? = nil
-    ) -> (host: String, port: String, useHTTPS: Bool) {
-        (
-            host: launchHost ?? persistedString(forKey: hostKey, in: userDefaults) ?? defaultHost,
-            port: launchPort ?? persistedString(forKey: portKey, in: userDefaults) ?? defaultPort,
-            useHTTPS: launchUseHTTPS
-                ?? (userDefaults.object(forKey: useHTTPSKey) as? Bool)
-                ?? false
-        )
-    }
-
-    private static func persistedString(forKey key: String, in userDefaults: UserDefaults) -> String? {
-        guard let value = userDefaults.string(forKey: key)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty else {
-            return nil
-        }
-        return value
-    }
-}
-
 typealias ReadingExperience = APIReadingExperience
-
-enum ReadingExperiencePolicy {
-    static func presentationExperience(
-        serverExperience: ReadingExperience,
-        allowsClassicFallback: Bool
-    ) -> ReadingExperience {
-        allowsClassicFallback ? serverExperience : .briefing
-    }
-}
 
 @Observable
 final class AppSettings {
@@ -110,9 +37,6 @@ final class AppSettings {
     }
     var backendTranscriptionAvailable: Bool {
         didSet { userDefaults.set(backendTranscriptionAvailable, forKey: "backendTranscriptionAvailable") }
-    }
-    var readingExperienceRaw: String {
-        didSet { userDefaults.set(readingExperienceRaw, forKey: "readingExperience") }
     }
 
     @ObservationIgnored
@@ -141,10 +65,6 @@ final class AppSettings {
         return "\(scheme)://\(normalizedHost):\(serverPort)"
     }
 
-    var readingExperience: ReadingExperience {
-        ReadingExperience(rawValue: readingExperienceRaw) ?? .briefing
-    }
-
     func setAppTextSize(_ index: Int) {
         guard appTextSizeIndex != index else { return }
         appTextSizeIndex = index
@@ -158,11 +78,6 @@ final class AppSettings {
     func setBackendTranscriptionAvailable(_ isAvailable: Bool) {
         guard backendTranscriptionAvailable != isAvailable else { return }
         backendTranscriptionAvailable = isAvailable
-    }
-
-    func setReadingExperience(_ experience: ReadingExperience) {
-        guard readingExperience != experience else { return }
-        readingExperienceRaw = experience.rawValue
     }
 
     private init(userDefaults: UserDefaults = SharedContainer.userDefaults) {
@@ -180,10 +95,6 @@ final class AppSettings {
         appTextSizeIndex = userDefaults.object(forKey: "appTextSizeIndex") as? Int ?? 1
         contentTextSizeIndex = userDefaults.object(forKey: "contentTextSizeIndex") as? Int ?? 2
         backendTranscriptionAvailable = userDefaults.object(forKey: "backendTranscriptionAvailable") as? Bool ?? false
-        readingExperienceRaw = E2ETestLaunch.readingExperience
-            ?? userDefaults.string(forKey: "readingExperience")
-            ?? ReadingExperience.briefing.rawValue
-
         if E2ETestLaunch.isEnabled {
             appSettingsLogger.notice(
                 "Applied ephemeral E2E server configuration host=\(self.serverHost, privacy: .public) port=\(self.serverPort, privacy: .public)"

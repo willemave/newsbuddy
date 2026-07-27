@@ -3,9 +3,9 @@ import SwiftUI
 
 /// Per-lens chrome collapse driven directly by scroll position, so the
 /// masthead and category strip track the finger 1:1 instead of snapping at a
-/// threshold. Kept separate from `BriefingViewModel` (and `@Observable` rather
-/// than the legacy observation path) so per-frame writes during the collapse window
-/// only invalidate the small chrome views that read it — never the pager.
+/// threshold. This remains view-owned interaction state rather than feature
+/// state, so per-frame geometry writes only invalidate the small chrome views
+/// that read it — never the pager.
 @MainActor
 @Observable
 final class BriefingChromeCollapseModel {

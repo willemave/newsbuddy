@@ -132,25 +132,15 @@ def test_swiftui_views_use_sensory_feedback_for_haptics() -> None:
     assert offenders == []
 
 
-def test_primary_ios_loading_states_use_shared_skeletons() -> None:
+def test_detail_loading_state_uses_shared_skeleton_rows() -> None:
     skeleton_source = VIEWS_ROOT / "Shared/SkeletonViews.swift"
     source = skeleton_source.read_text()
 
     assert "struct SkeletonRow" in source
-    assert "struct SkeletonCard" in source
-
-    expected_usages = {
-        VIEWS_ROOT / "ShortFormView.swift": "SkeletonFeedList(kind: .shortForm)",
-        VIEWS_ROOT / "LongFormView.swift": "SkeletonFeedList(kind: .longForm)",
-        VIEWS_ROOT / "ContentDetailView.swift": "ContentDetailSkeletonView()",
-    }
-    offenders: list[str] = []
-
-    for path, usage in expected_usages.items():
-        if usage not in path.read_text():
-            offenders.append(f"{path.relative_to(REPO_ROOT)} missing {usage}")
-
-    assert offenders == []
+    assert "struct ContentDetailSkeletonView" in source
+    assert "SkeletonCard" not in source
+    assert "SkeletonFeedList" not in source
+    assert "ContentDetailSkeletonView()" in (VIEWS_ROOT / "ContentDetailView.swift").read_text()
 
 
 def test_cached_async_image_call_sites_pass_target_size() -> None:
@@ -184,51 +174,37 @@ def test_empty_and_error_states_share_state_view() -> None:
     assert "role: .error" in error_source
 
 
-def test_content_text_size_reaches_feeds_detail_and_chat() -> None:
+def test_content_text_size_reaches_briefing_detail_and_chat() -> None:
     root_tabs = (VIEWS_ROOT / "RootTabs.swift").read_text()
     content_routes = (VIEWS_ROOT / "ContentRoutes.swift").read_text()
     history_view = (VIEWS_ROOT / "ChatSessionHistoryView.swift").read_text()
 
     required_snippets = [
-        "LongFormView(\n                viewModel: viewModel",
-        "ShortFormView(\n                viewModel: viewModel",
         "ContentDetailView(",
         "ChatSessionView(",
         "ChatSessionHistoryView(",
     ]
 
     for snippet in required_snippets:
-        source = root_tabs if "FormView" in snippet else content_routes
-        assert snippet in source
+        assert snippet in content_routes
 
-    assert root_tabs.count(".dynamicTypeSize(contentTextSize)") >= 2
+    assert "BriefingView(viewModel: viewModel" in root_tabs
+    assert ".dynamicTypeSize(contentTextSize)" in root_tabs
     assert content_routes.count(".dynamicTypeSize(contentTextSize)") >= 3
     assert "AppTextSize(index: settings.appTextSizeIndex)" not in history_view
 
 
-def test_learning_sheets_use_model_destinations() -> None:
+def test_learning_view_uses_model_destinations() -> None:
     learning_source = (VIEWS_ROOT / "LearningView.swift").read_text()
-    learning_deck_sheet_source = (VIEWS_ROOT / "Components/LearningDeckListSheet.swift").read_text()
 
-    assert "private enum LearningSheetDestination" in learning_source
-    assert "@State private var activeSheet: LearningSheetDestination?" in learning_source
-    assert ".sheet(item: $activeSheet)" in learning_source
     assert (
         "@State private var deckReaderDestination: LearningDeckReaderDestination?"
         in learning_source
     )
     assert ".fullScreenCover(item: $deckReaderDestination)" in learning_source
+    assert "LearningFocusRequest" not in learning_source
+    assert "CustomNarrationListSheet" not in learning_source
     assert "DispatchQueue.main.async" not in learning_source
-    assert "@Environment(\\.dismiss) private var dismiss" in learning_deck_sheet_source
-    assert "private enum LearningDeckListSheetDestination" in learning_deck_sheet_source
-    assert (
-        "@State private var activeSheet: LearningDeckListSheetDestination?"
-        in learning_deck_sheet_source
-    )
-    assert ".sheet(item: $activeSheet)" in learning_deck_sheet_source
-    assert "@Binding var isPresented" not in learning_deck_sheet_source
-    assert "showCreateSheet" not in learning_deck_sheet_source
-    assert "shareContent" not in learning_deck_sheet_source
 
 
 def test_settings_sheets_use_single_model_destination() -> None:
@@ -296,9 +272,8 @@ def test_chat_session_sheets_use_single_model_destination() -> None:
 
 def test_primary_scroll_surfaces_use_top_edge_fade() -> None:
     expected_usages = {
-        VIEWS_ROOT / "ShortFormView.swift": ".topScreenEdgeFade()",
-        VIEWS_ROOT / "LongFormView.swift": ".topScreenEdgeFade()",
         VIEWS_ROOT / "KnowledgeView.swift": ".topScreenEdgeFade()",
+        VIEWS_ROOT / "LearningView.swift": ".topScreenEdgeFade()",
         VIEWS_ROOT / "ChatSessionHistoryView.swift": ".topScreenEdgeFade()",
     }
     offenders: list[str] = []
@@ -306,24 +281,6 @@ def test_primary_scroll_surfaces_use_top_edge_fade() -> None:
     for path, usage in expected_usages.items():
         if usage not in path.read_text():
             offenders.append(f"{path.relative_to(REPO_ROOT)} missing {usage}")
-
-    assert offenders == []
-
-
-def test_feed_items_use_shared_removal_transition() -> None:
-    transition = ".transition(.opacity.combined(with: .move(edge: .top)))"
-    expected_paths = [
-        VIEWS_ROOT / "ShortFormView.swift",
-        VIEWS_ROOT / "LongFormView.swift",
-    ]
-    offenders: list[str] = []
-
-    for path in expected_paths:
-        source = path.read_text()
-        if transition not in source:
-            offenders.append(f"{path.relative_to(REPO_ROOT)} missing feed removal transition")
-        if ".animation(AppMotion.subtle, value: itemIds)" not in source:
-            offenders.append(f"{path.relative_to(REPO_ROOT)} missing item id animation")
 
     assert offenders == []
 
@@ -340,6 +297,15 @@ def test_cached_async_image_fades_use_motion_tokens() -> None:
     assert "image fades use `AppMotion.subtle`" in components_docs
 
 
+def test_knowledge_ready_content_projection_is_computed_once_per_render() -> None:
+    source = (VIEWS_ROOT / "KnowledgeView.swift").read_text()
+
+    projection = "let readyContentIDs = viewModel.contents.compactMap"
+    assert source.count(projection) == 2
+    assert source.index(projection) < source.index("ForEach(viewModel.contents)")
+    assert "private var readyContentIDs" not in source
+
+
 def test_chat_messages_use_single_parameterized_bubble_surface() -> None:
     chat_root = VIEWS_ROOT / "Chat"
     message_bubble = (chat_root / "MessageBubble.swift").read_text()
@@ -354,7 +320,8 @@ def test_chat_messages_use_single_parameterized_bubble_surface() -> None:
     assert "AssistantMessageBubble" not in message_bubble
     assert ".transition(messageInsertionTransition)" in message_list
     assert "AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)" in message_list
-    assert ".animation(messageAnimation, value: timeline.map(\\.id))" in message_list
+    assert ".animation(messageAnimation, value: timeline.last?.id)" in message_list
+    assert ".animation(messageAnimation, value: timeline.map(\\.id))" not in message_list
     assert ".animation(messageAnimation, value: isSending)" in message_list
     assert ".defaultScrollAnchor(.bottom)" in message_list
     assert ".topScreenEdgeFade()" not in message_list
@@ -370,18 +337,13 @@ def test_ios_timing_hacks_use_completion_or_task_boundaries() -> None:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}: {line.strip()}")
 
     presenter_source = (APP_ROOT / "ViewModels/ActivityViewPresenter.swift").read_text()
-    long_form_source = (VIEWS_ROOT / "LongFormView.swift").read_text()
     root_tabs_source = (VIEWS_ROOT / "RootTabs.swift").read_text()
 
     assert offenders == []
     assert "transitionCoordinator.animate(alongsideTransition: nil)" in presenter_source
     assert "await Task.yield()" in presenter_source
-    assert "pendingOpenContentId" not in long_form_source
-    assert "Task.sleep(nanoseconds: 300_000_000)" not in long_form_source
     assert root_tabs_source.count("guard path.wrappedValue.isEmpty else") == 1
-    assert 'pushRootContentDetail(route, tab: "long_form"' in root_tabs_source
-    assert 'pushRootContentDetail(route, tab: "fast_news"' in root_tabs_source
-    assert 'pushRootContentDetail(route, tab: "briefing"' in root_tabs_source
+    assert "pushBriefingContentDetail(route, path: $path)" in root_tabs_source
 
 
 def test_swipe_snapback_uses_motion_tokens() -> None:
@@ -419,22 +381,18 @@ def test_shared_controls_use_motion_tokens_for_common_state_animation() -> None:
     checked_paths = [
         VIEWS_ROOT / "Components/TapToTalkMicButton.swift",
         VIEWS_ROOT / "Chat/ChatComposerDock.swift",
-        VIEWS_ROOT / "Components/FeedActionChip.swift",
         VIEWS_ROOT / "Components/LearningDeckChatComposer.swift",
         VIEWS_ROOT / "Components/LearningDeckChatPanel.swift",
         VIEWS_ROOT / "Components/ToastView.swift",
         VIEWS_ROOT / "Components/DetailChatSheet.swift",
         VIEWS_ROOT / "Components/MiniSheetComponents.swift",
         VIEWS_ROOT / "Chat/MessageBubble.swift",
-        VIEWS_ROOT / "Components/LongFormCard.swift",
         VIEWS_ROOT / "ChatSessionView.swift",
-        VIEWS_ROOT / "ShortFormRows.swift",
         VIEWS_ROOT / "Chat/AssistantFeedOptionsSection.swift",
         VIEWS_ROOT / "Settings/SettingsView.swift",
         VIEWS_ROOT / "Components/StructuredSummaryView.swift",
         VIEWS_ROOT / "Components/ExpandableSection.swift",
         VIEWS_ROOT / "Components/LearningDeckReaderView.swift",
-        VIEWS_ROOT / "Components/LearningDeckRow.swift",
         VIEWS_ROOT / "Components/DiscussionSheet.swift",
         VIEWS_ROOT / "KnowledgeView.swift",
         VIEWS_ROOT / "RecentlyReadView.swift",

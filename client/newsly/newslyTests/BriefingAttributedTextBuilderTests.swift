@@ -36,6 +36,31 @@ final class BriefingPassageCoordinatorTests: XCTestCase {
 }
 
 final class BriefingPassageTypographyTests: XCTestCase {
+    func testCoordinatorScalesOncePerContentAndTraitRevision() throws {
+        let coordinator = BriefingPassageView.Coordinator(
+            onOpenSource: { _ in },
+            onOpenDiscussion: { _ in }
+        )
+        let attributedText = NSAttributedString(
+            string: "Briefing body",
+            attributes: [.font: UIFont.appSans(size: 16)]
+        )
+        let largeTraits = UITraitCollection(preferredContentSizeCategory: .large)
+        let accessibilityTraits = UITraitCollection(
+            preferredContentSizeCategory: .accessibilityLarge
+        )
+
+        XCTAssertNotNil(
+            coordinator.scaledTextIfNeeded(attributedText, compatibleWith: largeTraits)
+        )
+        XCTAssertNil(
+            coordinator.scaledTextIfNeeded(attributedText, compatibleWith: largeTraits)
+        )
+        XCTAssertNotNil(
+            coordinator.scaledTextIfNeeded(attributedText, compatibleWith: accessibilityTraits)
+        )
+    }
+
     func testPassageTypographyScalesWithContentTextSize() throws {
         let baseFont = UIFont.appSans(size: 16)
         let attributedText = NSAttributedString(
@@ -62,6 +87,23 @@ final class BriefingPassageTypographyTests: XCTestCase {
 }
 
 final class TypographyScalingTests: XCTestCase {
+    func testSelectableMarkdownRenderCacheReusesRenderedText() {
+        let cache = SelectableMarkdownRenderCache()
+        let key = SelectableMarkdownView.RenderKey(
+            markdown: "**Cached** markdown",
+            baseFontName: "Lato-Regular",
+            baseFontSize: 16,
+            textColorSignature: "text",
+            linkColorSignature: "link",
+            colorSchemeSignature: "light"
+        )
+        let rendered = NSAttributedString(string: "Cached markdown")
+
+        cache.insert(rendered, for: key)
+
+        XCTAssertTrue(cache.value(for: key) === rendered)
+    }
+
     func testSelectableMarkdownUsesItsSemanticTextStyleWhenScaling() {
         let baseFont = UIFont.appSans(size: 16)
         let traitCollection = UITraitCollection(preferredContentSizeCategory: .extraLarge)

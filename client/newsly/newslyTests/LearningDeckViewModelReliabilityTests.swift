@@ -238,6 +238,9 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
         let viewModel = LearningDeckReaderViewModel(
             deck: active,
             chatService: NoopLearningDeckReaderChatService(),
+            messageCompletionRegistry: ChatMessageCompletionRegistry(
+                statusService: NoopLearningDeckReaderChatService()
+            ),
             deckService: service,
             viewerPollIntervalNanoseconds: 1_000_000,
             viewerPollAttemptLimit: 1
@@ -288,6 +291,9 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
         LearningDeckReaderViewModel(
             deck: deck,
             chatService: NoopLearningDeckReaderChatService(),
+            messageCompletionRegistry: ChatMessageCompletionRegistry(
+                statusService: NoopLearningDeckReaderChatService()
+            ),
             deckService: service,
             viewerPollIntervalNanoseconds: 1_000_000,
             viewerPollAttemptLimit: 5

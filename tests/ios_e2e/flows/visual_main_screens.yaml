@@ -13,7 +13,6 @@ appId: "${APP_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
       newslyE2EVisualNow: "${VISUAL_NOW}"
-      newslyE2EReadingExperience: briefing
 - extendedWaitUntil:
     visible:
       id: briefing.screen

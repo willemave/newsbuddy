@@ -41,11 +41,10 @@ struct BriefingPassageView: UIViewRepresentable {
         context.coordinator.onOpenSource = onOpenSource
         context.coordinator.onOpenDiscussion = onOpenDiscussion
         uiView.floatingExclusionSize = floatingExclusionSize
-        let scaledText = Self.scaledAttributedText(
+        if let scaledText = context.coordinator.scaledTextIfNeeded(
             content.attributedText,
             compatibleWith: uiView.traitCollection
-        )
-        if !uiView.attributedText.isEqual(to: scaledText) {
+        ) {
             uiView.attributedText = scaledText
             context.coordinator.measurement = nil
             context.coordinator.contentRevision += 1
@@ -107,6 +106,11 @@ struct BriefingPassageView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
+        private struct RenderFingerprint: Equatable {
+            let contentIdentity: ObjectIdentifier
+            let contentSizeCategory: UIContentSizeCategory
+        }
+
         struct MeasurementFingerprint: Equatable {
             let contentRevision: Int
             let width: CGFloat
@@ -120,6 +124,7 @@ struct BriefingPassageView: UIViewRepresentable {
         var onOpenDiscussion: (String) -> Void
         var contentRevision = 0
         var measurement: (fingerprint: MeasurementFingerprint, size: CGSize)?
+        private var renderFingerprint: RenderFingerprint?
 
         init(
             onOpenSource: @escaping (String) -> Void,
@@ -127,6 +132,26 @@ struct BriefingPassageView: UIViewRepresentable {
         ) {
             self.onOpenSource = onOpenSource
             self.onOpenDiscussion = onOpenDiscussion
+        }
+
+        func scaledTextIfNeeded(
+            _ attributedText: NSAttributedString,
+            compatibleWith traitCollection: UITraitCollection
+        ) -> NSAttributedString? {
+            let fingerprint = RenderFingerprint(
+                contentIdentity: ObjectIdentifier(attributedText),
+                contentSizeCategory: traitCollection.preferredContentSizeCategory
+            )
+            guard renderFingerprint != fingerprint else { return nil }
+
+            let signpostState = BriefingPerformance.signposter.beginInterval("passage-scaling")
+            let scaledText = BriefingPassageView.scaledAttributedText(
+                attributedText,
+                compatibleWith: traitCollection
+            )
+            BriefingPerformance.signposter.endInterval("passage-scaling", signpostState)
+            renderFingerprint = fingerprint
+            return scaledText
         }
 
         func textView(

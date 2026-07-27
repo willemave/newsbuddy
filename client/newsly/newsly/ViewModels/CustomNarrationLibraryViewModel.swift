@@ -6,6 +6,15 @@
 import Foundation
 import Observation
 
+protocol CustomNarrationLibraryServicing: AnyObject {
+    func fetchEpisode(id: Int) async throws -> AudioEpisode
+    func fetchCustomNarrationEpisodes(limit: Int) async throws -> [AudioEpisode]
+    func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource
+    func enableEpisodeShare(id: Int) async throws -> AudioEpisodeShareResponse
+}
+
+extension AudioEpisodeService: CustomNarrationLibraryServicing {}
+
 @MainActor
 @Observable
 final class CustomNarrationLibraryViewModel {
@@ -17,9 +26,9 @@ final class CustomNarrationLibraryViewModel {
     @ObservationIgnored
     let playbackService: NarrationPlaybackService
     @ObservationIgnored
-    private let audioService: any CustomNarrationAudioServicing
+    private let audioService: any CustomNarrationLibraryServicing
     @ObservationIgnored
-    private let unreadCountService: UnreadCountService
+    private let badgeStatsStore: BadgeStatsStore
     @ObservationIgnored
     private let toastPresenter: any ToastPresenting
     @ObservationIgnored
@@ -29,14 +38,14 @@ final class CustomNarrationLibraryViewModel {
 
     init(
         playbackService: NarrationPlaybackService,
-        audioService: any CustomNarrationAudioServicing,
-        unreadCountService: UnreadCountService,
+        audioService: any CustomNarrationLibraryServicing,
+        badgeStatsStore: BadgeStatsStore,
         toastPresenter: any ToastPresenting,
         readStateCache: ReadStateCache? = nil
     ) {
         self.playbackService = playbackService
         self.audioService = audioService
-        self.unreadCountService = unreadCountService
+        self.badgeStatsStore = badgeStatsStore
         self.toastPresenter = toastPresenter
         self.readStateCache = readStateCache ?? ReadStateCache()
     }
@@ -155,7 +164,7 @@ final class CustomNarrationLibraryViewModel {
                 + newsItemIds.map { ReadStateKey(id: $0, contentType: .news) }
         )
         readStateCache.markReadLocally(readKeys, adjustUnreadCounts: false)
-        await unreadCountService.refreshCounts()
+        await badgeStatsStore.refreshStats()
     }
 
     private func formattedNarrationDuration(_ seconds: Int) -> String {

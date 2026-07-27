@@ -2,7 +2,7 @@ import MarkdownUI
 import SwiftUI
 
 struct BriefingDigSheet: View {
-    @ObservedObject var viewModel: BriefingDigViewModel
+    let viewModel: BriefingDigViewModel
 
     @State private var safariItem: BriefingSafariItem?
 

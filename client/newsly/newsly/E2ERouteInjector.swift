@@ -28,18 +28,29 @@ final class E2ERouteInjector {
         guard let contentId = E2ETestLaunch.openContentId else { return }
 
         hasAppliedOpenContentRoute = true
-        let rawType = E2ETestLaunch.openContentType ?? APIContentType.news.rawValue
-        let contentType = APIContentType(rawValue: rawType)
-        let route = ContentDetailRoute(
+        let route = Self.contentRoute(
             contentId: contentId,
-            contentType: contentType,
-            allContentIds: [contentId],
-            navigationSurface: contentType == .news ? .fastNews : .longForm
+            rawContentType: E2ETestLaunch.openContentType
         )
 
         Task { @MainActor in
             await Task.yield()
             openContentRoute(route)
         }
+    }
+
+    static func contentRoute(
+        contentId: Int,
+        rawContentType: String?
+    ) -> ContentDetailRoute {
+        let contentType = APIContentType(
+            rawValue: rawContentType ?? APIContentType.news.rawValue
+        )
+        return ContentDetailRoute(
+            contentId: contentId,
+            contentType: contentType,
+            allContentIds: [contentId],
+            navigationSurface: .briefing
+        )
     }
 }

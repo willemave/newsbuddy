@@ -11,7 +11,7 @@ struct MoreView: View {
     let submissionsViewModel: SubmissionStatusViewModel
     let readStateCache: ReadStateCache
     let showsDismissButton: Bool
-    @State private var processingCountService = ProcessingCountService.shared
+    @State private var badgeStatsStore = BadgeStatsStore.shared
 
     init(
         submissionsViewModel: SubmissionStatusViewModel,
@@ -74,8 +74,8 @@ struct MoreView: View {
                             Text("Processing")
                                 .foregroundStyle(Color.onSurface)
                             Spacer()
-                            if processingCountService.processingCount > 0 {
-                                CountBadge(count: processingCountService.processingCount, color: .brandPrimary)
+                            if badgeStatsStore.processingCount > 0 {
+                                CountBadge(count: badgeStatsStore.processingCount, color: .brandPrimary)
                             }
                         }
                         .frame(minHeight: RowMetrics.compactHeight)
@@ -104,7 +104,7 @@ struct MoreView: View {
         .accessibilityIdentifier("more.screen")
         .task {
             await submissionsViewModel.load()
-            await processingCountService.refreshCount()
+            await badgeStatsStore.refreshStats()
         }
     }
 

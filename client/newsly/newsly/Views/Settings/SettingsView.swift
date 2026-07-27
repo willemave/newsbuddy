@@ -231,7 +231,7 @@ struct SettingsView: View {
         do {
             if let response = try await ContentService.shared.markAllAsRead(contentType: target.rawValue) {
                 if response.markedCount > 0 {
-                    await UnreadCountService.shared.refreshCounts()
+                    await BadgeStatsStore.shared.refreshStats()
                     alertMessage = "Marked \(response.markedCount) \(target.description(for: response.markedCount)) as read."
                 } else {
                     alertMessage = "No unread \(target.description(for: 0)) found."

@@ -44,7 +44,7 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
     private var requestGeneration = 0
 
     @ObservationIgnored
-    private var isLoading = false
+    private var requestTask: Task<Page<Item>, Error>?
 
     convenience init(
         items: [Item] = [],
@@ -97,7 +97,7 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
     }
 
     func refreshInBackground() async {
-        guard !isLoading else { return }
+        guard requestTask == nil else { return }
         await requestPage(
             cursor: nil,
             loadingPhase: phase,
@@ -106,7 +106,7 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
     }
 
     func loadNextPage() async {
-        guard !isLoading, hasMore, let nextCursor else { return }
+        guard requestTask == nil, hasMore, let nextCursor else { return }
         await requestPage(
             cursor: nextCursor,
             loadingPhase: .loadingMore,
@@ -120,7 +120,8 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
 
     func reset() {
         requestGeneration += 1
-        isLoading = false
+        requestTask?.cancel()
+        requestTask = nil
         items.removeAll()
         phase = .idle
         nextCursor = nil
@@ -143,7 +144,7 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
     ) async {
         requestGeneration += 1
         let generation = requestGeneration
-        isLoading = true
+        requestTask?.cancel()
         let previousPhase = phase
         phase = loadingPhase
 
@@ -153,21 +154,31 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
             hasMore = true
         }
 
+        let loader = loadPage
+        let task = Task {
+            try await loader(cursor, generation)
+        }
+        requestTask = task
+
         do {
-            let page = try await loadPage(cursor, generation)
+            let page = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
             guard generation == requestGeneration else { return }
 
             apply(page: page, mode: mode)
             phase = .loaded
-            isLoading = false
+            requestTask = nil
         } catch is CancellationError {
             guard generation == requestGeneration else { return }
             phase = previousPhase
-            isLoading = false
+            requestTask = nil
         } catch {
             guard generation == requestGeneration else { return }
             phase = .error(error.localizedDescription)
-            isLoading = false
+            requestTask = nil
         }
     }
 

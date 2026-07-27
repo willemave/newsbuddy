@@ -1,5 +1,5 @@
 import Foundation
-import SwiftUI
+import Observation
 
 private let briefingReadFlushDebounceNanoseconds: UInt64 = 300_000_000
 private let briefingReadFlushRetryNanoseconds: UInt64 = 2_000_000_000
@@ -12,7 +12,8 @@ private enum BriefingDestination: Equatable {
 }
 
 @MainActor
-final class BriefingViewModel: ObservableObject {
+@Observable
+final class BriefingViewModel {
     enum TaskKey: Hashable {
         case lens(String)
         case readFlush
@@ -42,20 +43,20 @@ final class BriefingViewModel: ObservableObject {
 
     typealias RefreshPhase = BriefingIndexSynchronizer.RefreshPhase
 
-    @Published private(set) var index: APIBriefingIndexResponse?
-    @Published private(set) var orderedLenses: [APIBriefingLensSummary] = []
-    @Published var lensStates: [String: BriefingLensState] = [:]
-    @Published private(set) var state: LoadState = .idle
-    @Published private(set) var refreshPhase: RefreshPhase = .idle
-    @Published private var destination: BriefingDestination?
-    @Published private(set) var isActive = false
+    private(set) var index: APIBriefingIndexResponse?
+    private(set) var orderedLenses: [APIBriefingLensSummary] = []
+    var lensStates: [String: BriefingLensState] = [:]
+    private(set) var state: LoadState = .idle
+    private(set) var refreshPhase: RefreshPhase = .idle
+    private var destination: BriefingDestination?
+    private(set) var isActive = false
     /// True while the selected lens is scrolled into reading — the masthead
     /// above the pager collapses to hand the space to the content.
-    @Published private(set) var isMastheadCompact = false
+    private(set) var isMastheadCompact = false
     /// True while the news category strip is showing beneath the tier strip.
     /// Expanded at the top of a news page (or after tapping News while
     /// reading); collapses as soon as the reader scrolls down.
-    @Published private(set) var isCategoryStripExpanded = false
+    private(set) var isCategoryStripExpanded = false
 
     let service: BriefingServicing
     let narrationController: BriefingNarrationController
@@ -278,6 +279,9 @@ final class BriefingViewModel: ObservableObject {
     }
 
     private func noteSelectionChanged() {
+        if let selectedLensKey {
+            materializeRenderModelIfNeeded(for: selectedLensKey)
+        }
         if selectedLensSummary?.tier == .news {
             lastNewsLensKey = selectedLensKey
         } else {
@@ -489,12 +493,7 @@ final class BriefingViewModel: ObservableObject {
         orderedLenses = firstRun == nil
             ? Self.sortedLenses(snapshot.index.lenses)
             : snapshot.index.lenses
-        lensStates = snapshot.lenses.mapValues { lens in
-            BriefingLensState(
-                document: lens,
-                renderModel: BriefingLensRenderModel(lens: lens)
-            )
-        }
+        lensStates = snapshot.lenses.mapValues { BriefingLensState(document: $0) }
         rebuildSourceIndex()
         indexSynchronizer.restore(etag: snapshot.etag)
         state = .loaded
@@ -735,11 +734,16 @@ final class BriefingViewModel: ObservableObject {
                 hasMore: lens.hasMore
             )
             state.document = updatedLens
-            state.renderModel = BriefingLensRenderModel(
-                lens: updatedLens,
-                reusing: state.renderModel,
-                affectedSourceKeys: keySet
-            )
+            if lensKey == selectedLensKey {
+                state.renderModel = makeRenderModel(
+                    updatedLens,
+                    for: lensKey,
+                    reusing: state.renderModel,
+                    affectedSourceKeys: keySet
+                )
+            } else {
+                state.renderModel = nil
+            }
             lensStates[lensKey] = state
             updatedSummaries[lensKey] = updatedSummary
         }

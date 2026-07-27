@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 import pytest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
+from app.core.settings import get_settings
 from app.models.contracts import (
     LlmTaskKind,
     LlmTaskMode,
     LlmTaskStatus,
     LlmWorkflowState,
-    TaskStatus,
     TaskType,
 )
 from app.models.db import (
@@ -30,15 +30,17 @@ from app.models.db import (
     ProcessingTask,
     UserScraperConfig,
 )
+from app.services.briefing.presentation import get_briefing_lens
+from app.services.briefing.refresh import run_briefing_refresh
 from app.services.chat_agent import ChatRunResult, save_messages
 from app.services.llm_tasks import create_llm_task
-from app.services.onboarding import (
+from app.services.onboarding import run_audio_discovery
+from app.services.onboarding.internal_models import (
     _AudioLane,
     _AudioPlanOutput,
     _DiscoverOutput,
     _DiscoverSuggestion,
     _DiscoveryWebResult,
-    run_audio_discovery,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.ios_e2e]
@@ -214,18 +216,6 @@ def test_long_form_detail_learning_deck_create_ignores_failed_legacy_attempt(
     db_session.flush()
     stale_deck.latest_task_id = stale_task.id
     stale_deck.latest_run_id = stale_run.id
-    db_session.add(
-        ProcessingTask(
-            task_type=TaskType.GENERATE_LEARNING_DECK.value,
-            status=TaskStatus.FAILED.value,
-            queue_name="learning",
-            payload={
-                "user_id": test_user.id,
-                "learning_deck_run_id": stale_run.id,
-            },
-            error_message="Source content is still processing",
-        )
-    )
     db_session.commit()
 
     content = create_sample_content(sample_article_long)
@@ -309,12 +299,33 @@ def test_long_form_list_mark_read_action_updates_backend_state(
     test_user,
     db_session,
 ) -> None:
-    """Mark-as-read from the long-form list should persist to the shared backend DB."""
+    """Mark-all-read from Briefing should persist the source read state."""
     content = create_sample_content(sample_article_long)
+    test_user.reading_experience = "briefing"
+    settings = get_settings().model_copy(
+        update={
+            "briefing_enabled_user_ids": [test_user.id],
+            "briefing_window_min": 1,
+            "briefing_debounce_seconds": 0,
+            "briefing_pending_max_age_seconds": 60,
+        }
+    )
+    refresh = run_briefing_refresh(
+        db_session,
+        user_id=test_user.id,
+        mode="full",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+    lens = get_briefing_lens(db_session, user_id=test_user.id, lens_key="articles")
+    assert refresh.appended_segments == 1
+    assert lens is not None
+    assert len(lens.segments) == 1
 
     run_ios_flow(
         "long_form_mark_read.yaml",
-        extra_env={"CONTENT_ID": str(content.id)},
+        extra_env={"SEGMENT_ID": str(lens.segments[0].id)},
     )
 
     read_status = (
@@ -796,19 +807,19 @@ def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(
         lambda url: {"feed_url": url},
     )
     monkeypatch.setattr(
-        "app.services.onboarding._build_audio_lane_plan",
+        "app.services.onboarding.entrypoints._build_audio_lane_plan",
         _fake_build_audio_lane_plan,
     )
     monkeypatch.setattr(
-        "app.services.onboarding._run_discovery_exa_queries",
+        "app.services.onboarding.discovery_run._run_discovery_exa_queries",
         _fake_run_discovery_exa_queries,
     )
     monkeypatch.setattr(
-        "app.services.onboarding._run_discover_output_with_fallback",
+        "app.services.onboarding.discovery_run._run_discover_output_with_fallback",
         _fake_run_discover_output_with_fallback,
     )
     monkeypatch.setattr(
-        "app.services.onboarding.get_task_queue_gateway",
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
         lambda: queue_gateway,
     )
 

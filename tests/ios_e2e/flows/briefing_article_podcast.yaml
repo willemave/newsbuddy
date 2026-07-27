@@ -12,7 +12,6 @@ appId: "${APP_ID}"
       newslyE2EUserId: "${USER_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
-      newslyE2EReadingExperience: briefing
 - extendedWaitUntil:
     visible:
       id: briefing.screen

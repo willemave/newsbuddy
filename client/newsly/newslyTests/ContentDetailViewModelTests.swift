@@ -3,6 +3,48 @@ import XCTest
 
 @MainActor
 final class ContentDetailViewModelTests: XCTestCase {
+    func testReaderFallbackReusesLoadedSourceBody() async throws {
+        let detail = try Self.articleDetail(id: 42)
+        let service = BodyRecordingContentDetailService(detail: detail)
+        let viewModel = makeViewModel(contentService: service)
+        let sourceBody = ContentBody(
+            contentId: detail.id,
+            variant: "source",
+            kind: "article",
+            format: "markdown",
+            text: "Already loaded source body.",
+            updatedAt: nil
+        )
+        viewModel.updateContentId(detail.id, contentType: detail.contentType)
+        viewModel.content = detail
+        viewModel.contentBody = sourceBody
+
+        await viewModel.loadReaderBody(for: detail)
+
+        XCTAssertEqual(service.requestedBodyVariants, ["rendered"])
+        XCTAssertEqual(viewModel.readerBody?.text, sourceBody.text)
+    }
+
+    func testChangingContentCancelsInFlightSourceBody() async throws {
+        let detail = try Self.articleDetail(id: 42)
+        let service = BodyRecordingContentDetailService(
+            detail: detail,
+            blockSourceBody: true
+        )
+        let viewModel = makeViewModel(contentService: service)
+        viewModel.updateContentId(detail.id, contentType: detail.contentType)
+
+        await viewModel.loadContent()
+        await waitUntil { service.sourceRequestCount == 1 }
+
+        viewModel.updateContentId(99, contentType: .article)
+        await waitUntil { service.sourceCancellationCount == 1 }
+
+        XCTAssertEqual(service.sourceRequestCount, 1)
+        XCTAssertEqual(service.sourceCancellationCount, 1)
+        XCTAssertNil(viewModel.contentBody)
+    }
+
     func testAddRelevantLinkToReadLaterMarksLinkAsAddedOnSuccess() async {
         var receivedURL: URL?
         var receivedTitle: String?
@@ -291,6 +333,29 @@ final class ContentDetailViewModelTests: XCTestCase {
         )
     }
 
+    private func makeViewModel(
+        contentService: any ContentDetailServicing
+    ) -> ContentDetailViewModel {
+        ContentDetailViewModel(
+            contentService: contentService,
+            feedSubscriptionService: StubDetectedFeedSubscriber(),
+            toastPresenter: StubToastPresenter()
+        )
+    }
+
+    private func waitUntil(
+        _ predicate: @escaping () -> Bool,
+        attempts: Int = 100
+    ) async {
+        for _ in 0..<attempts {
+            if predicate() {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail("Condition was not satisfied before timeout")
+    }
+
     nonisolated private static func submitResponse(
         alreadyExists: Bool = false,
         taskId: Int? = 99
@@ -321,13 +386,65 @@ final class ContentDetailViewModelTests: XCTestCase {
         let data = Data(json.utf8)
         return try JSONDecoder().decode(ContentDetail.self, from: data)
     }
+
+    private static func articleDetail(id: Int) throws -> ContentDetail {
+        try decodeDetail(
+            from: """
+            {
+              "id": \(id),
+              "content_type": "article",
+              "url": "https://example.com/article-\(id)",
+              "title": "Article \(id)",
+              "display_title": "Article \(id)",
+              "source": "Example",
+              "status": "completed",
+              "error_message": null,
+              "retry_count": 0,
+              "metadata": {},
+              "created_at": "2026-07-25T10:00:00Z",
+              "updated_at": null,
+              "processed_at": "2026-07-25T10:01:00Z",
+              "checked_out_by": null,
+              "checked_out_at": null,
+              "publication_date": null,
+              "is_read": true,
+              "is_saved_to_knowledge": false,
+              "summary": null,
+              "short_summary": null,
+              "summary_kind": null,
+              "summary_version": null,
+              "structured_summary": null,
+              "longform_artifact": null,
+              "feed_preview": null,
+              "artifact_type": null,
+              "preview_bullets": null,
+              "reason_to_read": null,
+              "bullet_points": [],
+              "quotes": [],
+              "topics": [],
+              "full_markdown": null,
+              "body_available": true,
+              "body_kind": "article",
+              "body_format": "markdown",
+              "news_article_url": null,
+              "news_discussion_url": null,
+              "news_key_points": [],
+              "news_summary": null,
+              "image_url": null,
+              "thumbnail_url": null,
+              "detected_feed": null,
+              "can_subscribe": false
+            }
+            """
+        )
+    }
 }
 
 private enum StubDetailServiceError: Error {
     case unexpectedCall
 }
 
-private final class StubContentDetailService: ContentDetailServicing {
+private class StubContentDetailService: ContentDetailServicing {
     func submitContent(
         url: URL,
         contentType: String?,
@@ -379,6 +496,78 @@ private final class StubContentDetailService: ContentDetailServicing {
 
     func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse {
         throw StubDetailServiceError.unexpectedCall
+    }
+}
+
+private final class BodyRecordingContentDetailService: StubContentDetailService {
+    private let detail: ContentDetail
+    private let blockSourceBody: Bool
+    private let stateLock = NSLock()
+    private var bodyVariants: [String] = []
+    private var sourceCancellations = 0
+
+    init(detail: ContentDetail, blockSourceBody: Bool = false) {
+        self.detail = detail
+        self.blockSourceBody = blockSourceBody
+    }
+
+    var requestedBodyVariants: [String] {
+        stateLock.withLock { bodyVariants }
+    }
+
+    var sourceRequestCount: Int {
+        stateLock.withLock { bodyVariants.count { $0 == "source" } }
+    }
+
+    var sourceCancellationCount: Int {
+        stateLock.withLock { sourceCancellations }
+    }
+
+    override func fetchContentDetail(id: Int) async throws -> ContentDetail {
+        detail
+    }
+
+    override func fetchContentBody(
+        id: Int,
+        variant: String,
+        contentType: APIContentType?
+    ) async throws -> ContentBody {
+        stateLock.withLock {
+            bodyVariants.append(variant)
+        }
+
+        if variant == "source", blockSourceBody {
+            do {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                stateLock.withLock {
+                    sourceCancellations += 1
+                }
+                throw error
+            }
+        }
+
+        return ContentBody(
+            contentId: id,
+            variant: variant,
+            kind: "article",
+            format: "markdown",
+            text: variant == "rendered" ? "" : "Source body",
+            updatedAt: nil
+        )
+    }
+
+    override func trackContentOpened(
+        contentId: Int,
+        surface: String,
+        contextData: [String: Any]
+    ) async throws -> TrackContentInteractionResponse {
+        TrackContentInteractionResponse(
+            status: "ok",
+            recorded: true,
+            interactionId: "interaction-\(contentId)",
+            analyticsInteractionId: nil
+        )
     }
 }
 

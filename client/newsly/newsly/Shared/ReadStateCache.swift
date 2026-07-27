@@ -40,16 +40,16 @@ final class ReadStateCache {
     private let newsReadRepository: ReadStatusRepositoryType
 
     @ObservationIgnored
-    private let unreadCountService: UnreadCountService
+    private let badgeStatsStore: BadgeStatsStore
 
     init(
         contentReadRepository: ReadStatusRepositoryType = ReadStatusRepository(),
         newsReadRepository: ReadStatusRepositoryType = ReadStatusRepository(endpoint: .newsItems),
-        unreadCountService: UnreadCountService? = nil
+        badgeStatsStore: BadgeStatsStore? = nil
     ) {
         self.contentReadRepository = contentReadRepository
         self.newsReadRepository = newsReadRepository
-        self.unreadCountService = unreadCountService ?? .shared
+        self.badgeStatsStore = badgeStatsStore ?? .shared
     }
 
     func isRead(id: Int, contentType: APIContentType) -> Bool {
@@ -135,39 +135,23 @@ final class ReadStateCache {
 
     private func decrementUnreadCounts(for keys: Set<ReadStateKey>) {
         let counts = countsByType(for: keys)
-        if counts.articles > 0 {
-            unreadCountService.decrementArticleCount(by: counts.articles)
-        }
-        if counts.podcasts > 0 {
-            unreadCountService.decrementPodcastCount(by: counts.podcasts)
-        }
-        if counts.news > 0 {
-            unreadCountService.decrementNewsCount(by: counts.news)
-        }
+        badgeStatsStore.decrementArticleCount(by: counts.articles)
+        badgeStatsStore.decrementPodcastCount(by: counts.podcasts)
     }
 
     private func incrementUnreadCounts(for keys: Set<ReadStateKey>) {
         let counts = countsByType(for: keys)
-        if counts.articles > 0 {
-            unreadCountService.incrementArticleCount(by: counts.articles)
-        }
-        if counts.podcasts > 0 {
-            unreadCountService.incrementPodcastCount(by: counts.podcasts)
-        }
-        if counts.news > 0 {
-            unreadCountService.incrementNewsCount(by: counts.news)
-        }
+        badgeStatsStore.incrementArticleCount(by: counts.articles)
+        badgeStatsStore.incrementPodcastCount(by: counts.podcasts)
     }
 
-    private func countsByType(for keys: Set<ReadStateKey>) -> (articles: Int, podcasts: Int, news: Int) {
-        keys.reduce(into: (articles: 0, podcasts: 0, news: 0)) { partial, key in
+    private func countsByType(for keys: Set<ReadStateKey>) -> (articles: Int, podcasts: Int) {
+        keys.reduce(into: (articles: 0, podcasts: 0)) { partial, key in
             switch key.contentType {
             case .article:
                 partial.articles += 1
             case .podcast:
                 partial.podcasts += 1
-            case .news:
-                partial.news += 1
             default:
                 break
             }

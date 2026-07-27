@@ -3,11 +3,10 @@ import XCTest
 
 @MainActor
 final class ContentListViewModelTests: XCTestCase {
-    func testRecentlyReadKeepsReadItemsWhenDefaultFeedFilterIsUnread() async {
+    func testRecentlyReadKeepsReadItems() async {
         let service = RecentlyReadContentService(contents: [makeReadSummary(id: 42)])
         let viewModel = ContentListViewModel(
             contentService: service,
-            unreadCountService: .shared,
             readStateCache: ReadStateCache()
         )
 
@@ -71,26 +70,6 @@ private final class RecentlyReadContentService: ContentSummaryListServicing {
                 total: contents.count
             )
         )
-    }
-
-    func fetchContentList(
-        contentTypes: [String]?,
-        date: String?,
-        readFilter: String,
-        cursor: String?,
-        limit: Int
-    ) async throws -> ContentListResponse {
-        throw RecentlyReadContentServiceError.unexpectedCall
-    }
-
-    func fetchContentList(
-        contentType: String?,
-        date: String?,
-        readFilter: String,
-        cursor: String?,
-        limit: Int
-    ) async throws -> ContentListResponse {
-        throw RecentlyReadContentServiceError.unexpectedCall
     }
 
     func fetchKnowledgeLibrary(

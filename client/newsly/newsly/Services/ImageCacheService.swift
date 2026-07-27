@@ -27,33 +27,43 @@ actor ImageCacheService {
     
     private let memoryCache: NSCache<NSString, UIImage>
     private let fileManager = FileManager.default
+    private let session: URLSession
     private let cacheDirectory: URL
-    private var inFlightDownloads: [String: Task<UIImage?, Never>] = [:]
+    private var inFlightImagePreparations: [String: Task<UIImage?, Never>] = [:]
+    private var inFlightDataDownloads: [String: Task<Data?, Never>] = [:]
     private var diskCleanupTask: Task<Void, Never>?
     private var lastDiskCleanupDate: Date?
     // MARK: - Initialization
     
-    private init() {
+    init(
+        session: URLSession = .newslyDefault,
+        cacheDirectory: URL? = nil,
+        schedulesInitialCleanup: Bool = true
+    ) {
         let memoryCache = NSCache<NSString, UIImage>()
         memoryCache.countLimit = 100 // Max 100 images in memory
         memoryCache.totalCostLimit = 50 * 1024 * 1024 // 50MB memory limit
         self.memoryCache = memoryCache
+        self.session = session
 
         // Set up cache directory
         let cachesDirectory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        cacheDirectory = cachesDirectory.appendingPathComponent("ImageCache", isDirectory: true)
+        self.cacheDirectory = cacheDirectory
+            ?? cachesDirectory.appendingPathComponent("ImageCache", isDirectory: true)
         
         // Create cache directory if needed
         do {
-            try fileManager.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: self.cacheDirectory, withIntermediateDirectories: true)
         } catch {
             imageCacheLogger.error(
                 "Failed to create image cache directory | path=\(self.cacheDirectory.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
         }
         
-        Task {
-            await scheduleDiskCleanupIfNeeded(reason: "init", force: true)
+        if schedulesInitialCleanup {
+            Task {
+                await scheduleDiskCleanupIfNeeded(reason: "init", force: true)
+            }
         }
     }
     
@@ -89,14 +99,14 @@ actor ImageCacheService {
         }
 
         let key = cacheKey(for: url, targetPixelSize: targetPixelSize)
-        if let task = inFlightDownloads[key] {
+        if let task = inFlightImagePreparations[key] {
             return await task.value
         }
 
         let task = Task { await self.downloadAndCache(url: url, targetPixelSize: targetPixelSize) }
-        inFlightDownloads[key] = task
+        inFlightImagePreparations[key] = task
         let image = await task.value
-        inFlightDownloads[key] = nil
+        inFlightImagePreparations[key] = nil
         return image
     }
     
@@ -119,13 +129,27 @@ actor ImageCacheService {
         return image
     }
     
-    /// Prefetch multiple images in the background.
-    func prefetch(urls: [URL]) async {
-        let urls = Array(Set(urls))
+    /// Prefetch multiple images while bounding network and disk pressure.
+    func prefetch(urls: [URL], maximumConcurrentDownloads: Int = 4) async {
+        var seenURLs: Set<URL> = []
+        let urls = urls.filter { seenURLs.insert($0).inserted }
+        guard !urls.isEmpty else { return }
+
+        let concurrency = min(max(maximumConcurrentDownloads, 1), urls.count)
         await withTaskGroup(of: Void.self) { group in
-            for url in urls {
+            var iterator = urls.makeIterator()
+
+            for _ in 0..<concurrency {
+                guard let url = iterator.next() else { break }
                 group.addTask {
-                    await self.downloadToDiskIfMissing(url: url)
+                    _ = await self.cachedOrDownloadedData(for: url)
+                }
+            }
+
+            while await group.next() != nil {
+                guard let url = iterator.next() else { continue }
+                group.addTask {
+                    _ = await self.cachedOrDownloadedData(for: url)
                 }
             }
         }
@@ -133,6 +157,11 @@ actor ImageCacheService {
     
     /// Clear all cached images.
     func clearCache() async {
+        inFlightImagePreparations.values.forEach { $0.cancel() }
+        inFlightImagePreparations.removeAll()
+        inFlightDataDownloads.values.forEach { $0.cancel() }
+        inFlightDataDownloads.removeAll()
+
         // Clear memory cache
         memoryCache.removeAllObjects()
 
@@ -244,30 +273,58 @@ actor ImageCacheService {
     }
     
     private func downloadAndCache(url: URL, targetPixelSize: Int?) async -> UIImage? {
+        guard let data = await cachedOrDownloadedData(for: url), !Task.isCancelled else {
+            return nil
+        }
+
+        guard let image = await preparedImage(from: data, targetPixelSize: targetPixelSize) else {
+            return nil
+        }
+
+        storeInMemory(image, forKey: cacheKey(for: url, targetPixelSize: targetPixelSize))
+        return image
+    }
+
+    /// Coalesce the raw transfer by URL so thumbnail/full-size decode variants share one request.
+    private func cachedOrDownloadedData(for url: URL) async -> Data? {
+        let diskKey = diskCacheKey(for: url)
+        if let cached = await loadDataFromDisk(key: diskKey) {
+            return cached
+        }
+
+        let downloadKey = url.absoluteString
+        if let task = inFlightDataDownloads[downloadKey] {
+            return await task.value
+        }
+
+        let task = Task { await self.downloadData(for: url) }
+        inFlightDataDownloads[downloadKey] = task
+        let data = await task.value
+        inFlightDataDownloads[downloadKey] = nil
+
+        if let data, !Task.isCancelled {
+            await saveDataToDisk(data, key: diskKey)
+        }
+        return data
+    }
+
+    private func downloadData(for url: URL) async -> Data? {
         do {
-            let (data, _) = try await URLSession.newslyDefault.data(from: url)
-            return await cacheImageData(data, for: url, targetPixelSize: targetPixelSize)
+            let (data, response) = try await session.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                imageCacheLogger.error(
+                    "Image request failed | url=\(url.absoluteString, privacy: .public) status=\(statusCode)"
+                )
+                return nil
+            }
+            return data
         } catch {
             imageCacheLogger.error(
                 "Failed to download image | url=\(url.absoluteString, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
             return nil
-        }
-    }
-
-    private func downloadToDiskIfMissing(url: URL) async {
-        let key = diskCacheKey(for: url)
-        if await loadDataFromDisk(key: key) != nil {
-            return
-        }
-
-        do {
-            let (data, _) = try await URLSession.newslyDefault.data(from: url)
-            await saveDataToDisk(data, key: key)
-        } catch {
-            imageCacheLogger.error(
-                "Failed to prefetch image | url=\(url.absoluteString, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
-            )
         }
     }
 

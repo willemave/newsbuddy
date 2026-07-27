@@ -39,10 +39,9 @@ struct UpdateChatSessionRequest: Codable {
     }
 }
 
-protocol ChatSessionServicing: AnyObject {
+protocol ChatSessionServicing: MessageStatusFetching {
     func getSession(id: Int) async throws -> ChatSessionDetail
     func sendMessageAsync(sessionId: Int, message: String) async throws -> SendChatMessageResponse
-    func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse
     func getInitialSuggestions(sessionId: Int) async throws -> ChatMessage
     func startCouncil(sessionId: Int, message: String) async throws -> ChatSessionDetail
     func selectCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail
@@ -55,12 +54,6 @@ extension ChatService: ChatSessionServicing {}
 class ChatService {
     static let shared = ChatService()
     private let client = APIClient.shared
-
-    /// Polling interval for checking message status (500ms)
-    private let pollingInterval: UInt64 = 500_000_000 // nanoseconds
-
-    /// Maximum polling attempts before timeout (60 seconds at 500ms intervals = 120 attempts)
-    private let maxPollingAttempts = 120
 
     private init() {}
 
@@ -248,49 +241,6 @@ class ChatService {
         return try await client.request(
             APIEndpoints.chatMessageStatus(messageId: messageId)
         )
-    }
-
-    /// Poll until a pending assistant message completes.
-    func waitForMessageCompletion(messageId: Int) async throws -> ChatMessage {
-        var attempts = 0
-        while attempts < maxPollingAttempts {
-            try Task.checkCancellation()
-
-            let status = try await getMessageStatus(messageId: messageId)
-            switch status.status {
-            case .completed:
-                guard let assistantMessage = status.assistantMessage else {
-                    throw ChatServiceError.missingAssistantMessage
-                }
-                return assistantMessage
-            case .failed:
-                throw ChatServiceError.processingFailed(status.error ?? "Unknown error")
-            case .processing, .unknown(_):
-                attempts += 1
-                try await Task.sleep(nanoseconds: pollingInterval)
-            }
-        }
-
-        throw ChatServiceError.timeout
-    }
-
-    /// Send a message and wait for the assistant response (polls for completion)
-    /// This is the main method for sending messages - it handles the async pattern internally
-    func sendMessage(
-        sessionId: Int,
-        message: String,
-        onProcessingStarted: ((ChatMessage) -> Void)? = nil
-    ) async throws -> ChatMessage {
-        // Send the message - returns immediately
-        let response = try await sendMessageAsync(sessionId: sessionId, message: message)
-
-        // Notify caller that processing has started (for immediate UI update)
-        if let callback = onProcessingStarted {
-            callback(response.userMessage)
-        }
-
-        // Poll for completion
-        return try await waitForMessageCompletion(messageId: response.messageId)
     }
 
     /// Get initial follow-up question suggestions for an article-based session (non-streaming)

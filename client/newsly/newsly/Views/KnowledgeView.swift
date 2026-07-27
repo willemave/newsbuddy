@@ -27,7 +27,6 @@ struct KnowledgeView: View {
         self.onOpenMore = onOpenMore
         self._viewModel = State(
             initialValue: viewModel ?? RootDependencyFactory.makeContentListViewModel(
-                defaultReadFilter: "all",
                 readStateCache: readStateCache ?? ReadStateCache()
             )
         )
@@ -125,6 +124,10 @@ struct KnowledgeView: View {
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 28)
         } else {
+            let readyContentIDs = viewModel.contents.compactMap { content in
+                content.savedLibraryItemState == .ready ? content.id : nil
+            }
+
             ForEach(viewModel.contents) { content in
                 KnowledgeSavedContentButton(
                     content: content,
@@ -148,12 +151,6 @@ struct KnowledgeView: View {
             }
         }
     }
-
-    private var readyContentIDs: [Int] {
-        viewModel.contents.compactMap { content in
-            content.savedLibraryItemState == .ready ? content.id : nil
-        }
-    }
 }
 
 struct KnowledgeSearchView: View {
@@ -170,7 +167,6 @@ struct KnowledgeSearchView: View {
         self.onSelectContent = onSelectContent
         self._viewModel = State(
             initialValue: RootDependencyFactory.makeContentListViewModel(
-                defaultReadFilter: "all",
                 readStateCache: readStateCache
             )
         )
@@ -212,6 +208,10 @@ struct KnowledgeSearchView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 } else {
+                    let readyContentIDs = viewModel.contents.compactMap { content in
+                        content.savedLibraryItemState == .ready ? content.id : nil
+                    }
+
                     ForEach(viewModel.contents) { content in
                         KnowledgeSavedContentButton(
                             content: content,
@@ -290,11 +290,6 @@ struct KnowledgeSearchView: View {
         }
     }
 
-    private var readyContentIDs: [Int] {
-        viewModel.contents.compactMap { content in
-            content.savedLibraryItemState == .ready ? content.id : nil
-        }
-    }
 }
 
 private struct KnowledgeSavedContentButton: View {

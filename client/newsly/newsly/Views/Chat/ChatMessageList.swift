@@ -85,22 +85,24 @@ struct ChatMessageList: View {
                             .id(item.id)
                             .transition(messageInsertionTransition)
                         }
+                        .animation(messageAnimation, value: timeline.last?.id)
 
-                        if isSending {
-                            ThinkingBubbleView(
-                                startDate: thinkingStartedAt,
-                                statusText: latestProcessSummary
-                            )
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .transition(messageInsertionTransition)
-                            .id(Self.thinkingBubbleID)
+                        Group {
+                            if isSending {
+                                ThinkingBubbleView(
+                                    startDate: thinkingStartedAt,
+                                    statusText: latestProcessSummary
+                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .transition(messageInsertionTransition)
+                                .id(Self.thinkingBubbleID)
+                            }
                         }
+                        .animation(messageAnimation, value: isSending)
                     }
                 }
                 .padding(.horizontal, Spacing.appHorizontalMargin)
                 .padding(.vertical, 10)
-                .animation(messageAnimation, value: timeline.map(\.id))
-                .animation(messageAnimation, value: isSending)
             }
             .defaultScrollAnchor(.bottom)
             .contentMargins(.bottom, 12, for: .scrollContent)

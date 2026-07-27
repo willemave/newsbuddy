@@ -7,6 +7,7 @@ import Foundation
 
 struct ChatDependencies {
     var chatService: any ChatSessionServicing
+    var messageCompletionRegistry: ChatMessageCompletionRegistry
     var transcriptionService: any SpeechTranscribing
     var activeSessionManager: ActiveChatSessionManager
     var authService: any AuthenticationServicing
@@ -16,10 +17,12 @@ struct ChatDependencies {
 
     @MainActor
     static var live: ChatDependencies {
-        ChatDependencies(
+        let activeSessionManager = ActiveChatSessionManager.shared
+        return ChatDependencies(
             chatService: ChatService.shared,
+            messageCompletionRegistry: activeSessionManager.messageCompletionRegistry,
             transcriptionService: SpeechTranscriberFactory.makeVoiceDictationTranscriber(),
-            activeSessionManager: ActiveChatSessionManager.shared,
+            activeSessionManager: activeSessionManager,
             authService: AuthenticationService.shared,
             tokenStore: KeychainManager.shared,
             refreshTranscriptionAvailability: {

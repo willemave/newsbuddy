@@ -22,49 +22,6 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
-    @MainActor
-    func testReadingExperienceFallsBackToBriefingForUnknownRawValue() {
-        let settings = AppSettings.shared
-        let original = settings.readingExperienceRaw
-        defer { settings.readingExperienceRaw = original }
-
-        settings.readingExperienceRaw = "future"
-
-        XCTAssertEqual(settings.readingExperience, .briefing)
-    }
-
-    func testProductionPresentationAlwaysUsesBriefing() {
-        XCTAssertEqual(
-            ReadingExperiencePolicy.presentationExperience(
-                serverExperience: .classic,
-                allowsClassicFallback: false
-            ),
-            .briefing
-        )
-    }
-
-    func testClassicPresentationRemainsAvailableAsFallback() {
-        XCTAssertEqual(
-            ReadingExperiencePolicy.presentationExperience(
-                serverExperience: .classic,
-                allowsClassicFallback: true
-            ),
-            .classic
-        )
-    }
-
-    @MainActor
-    func testSetReadingExperiencePersistsRawValue() {
-        let settings = AppSettings.shared
-        let original = settings.readingExperienceRaw
-        defer { settings.readingExperienceRaw = original }
-
-        settings.setReadingExperience(.briefing)
-
-        XCTAssertEqual(settings.readingExperienceRaw, "briefing")
-        XCTAssertEqual(settings.readingExperience, .briefing)
-    }
-
     func testApplyDebugDefaultsIfNeededSeedsMissingServerConfiguration() {
         let isolated = makeIsolatedDefaults()
         let defaults = isolated.defaults

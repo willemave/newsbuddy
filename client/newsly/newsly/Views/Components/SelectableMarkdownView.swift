@@ -93,6 +93,15 @@ struct SelectableMarkdownView: UIViewRepresentable {
             textColor: resolvedTextColor,
             traitCollection: uiView.traitCollection
         )
+        if let cached = SelectableMarkdownRenderCache.shared.value(for: renderKey) {
+            context.coordinator.apply(
+                cached,
+                key: renderKey,
+                to: uiView
+            )
+            return
+        }
+
         if uiView.attributedText.length == 0 || context.coordinator.lastRenderKey?.markdown != markdown {
             uiView.attributedText = NSAttributedString(
                 string: "\u{00a0}",
@@ -155,7 +164,7 @@ struct SelectableMarkdownView: UIViewRepresentable {
         )
     }
 
-    struct RenderKey: Equatable {
+    struct RenderKey: Hashable {
         let markdown: String
         let baseFontName: String
         let baseFontSize: CGFloat
@@ -171,10 +180,26 @@ struct SelectableMarkdownView: UIViewRepresentable {
     }
 
     class Coordinator {
+        private final class RenderCancellation {
+            private let lock = NSLock()
+            private var cancelled = false
+
+            var isCancelled: Bool {
+                lock.withLock { cancelled }
+            }
+
+            func cancel() {
+                lock.withLock {
+                    cancelled = true
+                }
+            }
+        }
+
         var lastRenderKey: RenderKey?
         var pendingRenderKey: RenderKey?
         var lastLinkAppearanceSignature: String?
         var cachedSize: SizeCacheEntry?
+        private var renderCancellation: RenderCancellation?
 
         func render(
             _ markdown: String,
@@ -182,20 +207,39 @@ struct SelectableMarkdownView: UIViewRepresentable {
             renderer: MarkdownNSRenderer,
             into textView: DigDeeperTextView
         ) {
+            renderCancellation?.cancel()
+            let cancellation = RenderCancellation()
+            renderCancellation = cancellation
             pendingRenderKey = renderKey
             DispatchQueue.global(qos: .userInitiated).async { [weak self, weak textView] in
-                let rendered = renderer.render(markdown)
+                guard let self, !cancellation.isCancelled else { return }
+                let rendered = SelectableMarkdownRenderCache.shared.value(for: renderKey)
+                    ?? renderer.render(markdown)
+                guard !cancellation.isCancelled else { return }
+                SelectableMarkdownRenderCache.shared.insert(rendered, for: renderKey)
                 DispatchQueue.main.async {
-                    guard let self,
+                    guard !cancellation.isCancelled,
                           self.pendingRenderKey == renderKey,
                           let textView else { return }
-                    textView.attributedText = rendered
-                    self.lastRenderKey = renderKey
-                    self.pendingRenderKey = nil
-                    self.cachedSize = nil
-                    textView.invalidateIntrinsicContentSize()
+                    self.apply(rendered, key: renderKey, to: textView)
                 }
             }
+        }
+
+        func apply(
+            _ rendered: NSAttributedString,
+            key renderKey: RenderKey,
+            to textView: DigDeeperTextView
+        ) {
+            guard lastRenderKey != renderKey else { return }
+            if pendingRenderKey != nil, pendingRenderKey != renderKey {
+                renderCancellation?.cancel()
+            }
+            textView.attributedText = rendered
+            lastRenderKey = renderKey
+            pendingRenderKey = nil
+            cachedSize = nil
+            textView.invalidateIntrinsicContentSize()
         }
 
         func colorSignature(for color: UIColor) -> String {
@@ -214,6 +258,48 @@ struct SelectableMarkdownView: UIViewRepresentable {
             }
             return color.description
         }
+
+    }
+}
+
+final class SelectableMarkdownRenderCache {
+    static let shared = SelectableMarkdownRenderCache()
+
+    private final class CacheKey: NSObject {
+        let renderKey: SelectableMarkdownView.RenderKey
+
+        init(_ renderKey: SelectableMarkdownView.RenderKey) {
+            self.renderKey = renderKey
+        }
+
+        override var hash: Int { renderKey.hashValue }
+
+        override func isEqual(_ object: Any?) -> Bool {
+            guard let other = object as? CacheKey else { return false }
+            return renderKey == other.renderKey
+        }
+    }
+
+    private let cache = NSCache<CacheKey, NSAttributedString>()
+
+    init() {
+        cache.countLimit = 128
+        cache.totalCostLimit = 24 * 1_024 * 1_024
+    }
+
+    func value(for key: SelectableMarkdownView.RenderKey) -> NSAttributedString? {
+        cache.object(forKey: CacheKey(key))
+    }
+
+    func insert(
+        _ value: NSAttributedString,
+        for key: SelectableMarkdownView.RenderKey
+    ) {
+        cache.setObject(value, forKey: CacheKey(key), cost: max(value.length * 64, 1))
+    }
+
+    func removeAll() {
+        cache.removeAllObjects()
     }
 }
 
