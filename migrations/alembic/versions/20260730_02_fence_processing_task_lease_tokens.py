@@ -20,7 +20,7 @@ CONSTRAINT_NAME = "ck_processing_tasks_lease_token_has_owner"
 
 
 def upgrade() -> None:
-    """Reject tokenized rows that no longer represent an owned claim."""
+    """Repair malformed tokenized rows, then reject future invalid tokenized states."""
     op.execute(
         """
         UPDATE processing_tasks

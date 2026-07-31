@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from enum import StrEnum
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.engine import Engine
@@ -160,10 +160,8 @@ class ProcessingTaskQueueRepository:
 
     def renew_lease(
         self,
+        claim: ClaimedTask,
         *,
-        task_id: int,
-        worker_id: str,
-        lease_token: UUID,
         lease_seconds: int,
     ) -> bool:
         """Extend an unexpired lease only for its exact claim owner."""
@@ -171,11 +169,12 @@ class ProcessingTaskQueueRepository:
         statement = (
             update(_TASKS)
             .where(
-                _TASKS.c.id == task_id,
+                _TASKS.c.id == claim.id,
                 _TASKS.c.status == TaskStatus.PROCESSING.value,
-                _TASKS.c.locked_by == worker_id,
-                _TASKS.c.lease_token == lease_token,
+                _TASKS.c.locked_by == claim.locked_by,
+                _TASKS.c.lease_token == claim.lease_token,
                 _TASKS.c.lease_expires_at > now,
+                _TASKS.c.retry_count == claim.retry_count,
             )
             .values(
                 locked_at=now,
@@ -258,12 +257,13 @@ class ProcessingTaskQueueRepository:
                 "error_message": error_message,
             }
 
-        delay = max(int(retry_delay_seconds or 0), 0)
+        if retry_delay_seconds is None:
+            raise ValueError(f"{outcome.value} finalization requires a resolved retry delay")
         values.update(
             status=TaskStatus.PENDING.value,
             started_at=None,
             completed_at=None,
-            available_at=now + timedelta(seconds=delay),
+            available_at=now + timedelta(seconds=retry_delay_seconds),
             error_message=(None if outcome is FinalizationOutcome.DEFERRED else error_message),
         )
         if outcome is FinalizationOutcome.RETRY:

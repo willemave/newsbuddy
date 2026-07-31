@@ -101,12 +101,12 @@ def _is_transient_database_operational_error(exc: OperationalError) -> bool:
 
 def _lease_heartbeat_interval_seconds(lease_seconds: int) -> float:
     """Choose a bounded cadence that renews well before lease expiry."""
-    return max(min(lease_seconds / 3, 30.0), 5.0)
+    return min(lease_seconds / 3, 30.0)
 
 
 def _lease_heartbeat_retry_seconds(remaining_seconds: float) -> float:
     """Retry a failed renewal promptly while staying within the lease window."""
-    return min(5.0, max(remaining_seconds, 0.1))
+    return min(5.0, max(remaining_seconds, 0.0))
 
 
 class SequentialTaskProcessor:
@@ -163,6 +163,10 @@ class SequentialTaskProcessor:
         """Build only the task handlers assigned to this processor's queue."""
         return build_handlers_for_queue(self.queue_name)
 
+    def _lease_seconds(self) -> int:
+        """Return the configured lease duration normalized for queue operations."""
+        return max(self.settings.queue.worker_timeout_seconds, 1)
+
     def _idle_wait(self, timeout_seconds: float) -> None:
         """Sleep until the next poll interval or an incoming queue notification."""
         if timeout_seconds <= 0:
@@ -201,11 +205,7 @@ class SequentialTaskProcessor:
     @contextmanager
     def _lease_heartbeat(self, claim: ClaimedTask) -> Iterator[threading.Event]:
         """Renew the lease for the current task while it is being processed."""
-        raw_lease_seconds = self.settings.queue.worker_timeout_seconds
-        try:
-            lease_seconds = max(int(raw_lease_seconds), 1)
-        except (TypeError, ValueError):
-            lease_seconds = 300
+        lease_seconds = self._lease_seconds()
         interval_seconds = _lease_heartbeat_interval_seconds(lease_seconds)
         stop_event = threading.Event()
         ownership_lost = threading.Event()
@@ -216,9 +216,7 @@ class SequentialTaskProcessor:
             while not stop_event.wait(wait_seconds):
                 try:
                     renewed = self.queue_service.renew_lease(
-                        claim.id,
-                        worker_id=claim.locked_by,
-                        lease_token=claim.lease_token,
+                        claim,
                         lease_seconds=lease_seconds,
                     )
                 except SQLAlchemyError as exc:
@@ -296,13 +294,12 @@ class SequentialTaskProcessor:
         ownership_lost: threading.Event,
     ) -> TaskContext:
         """Bind exact lease renewal to the handler context for this claim."""
+        lease_seconds = self._lease_seconds()
 
         def renew_claim() -> bool:
             renewed = self.queue_service.renew_lease(
-                claim.id,
-                worker_id=claim.locked_by,
-                lease_token=claim.lease_token,
-                lease_seconds=self.settings.queue.worker_timeout_seconds,
+                claim,
+                lease_seconds=lease_seconds,
             )
             if not renewed:
                 ownership_lost.set()

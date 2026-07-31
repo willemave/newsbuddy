@@ -815,9 +815,10 @@ short engine-owned transactions, validated internal result models, and the Postg
 transaction clock. They do not use ORM session synchronization or ORM `UPDATE ... RETURNING`
 adaptation. Renewal and finalization match task id, status, worker name, exact lease token,
 unexpired lease, and retry count so a stale attempt cannot overwrite a newer claim.
-`QueueService` resolves success, failure, retry, deferral, and backoff once before passing the typed
-transition request to the repository. Every finalization and administrative recovery path clears
-all four lease fields through the same helper.
+`QueueService` resolves success, failure, retry, deferral, and backoff once before passing the claim,
+resolved outcome, error, and delay to the repository. The repository returns the typed
+`TaskTransition`. Every finalization and administrative recovery path clears all four lease fields
+through the same helper.
 
 This design assumes PostgreSQL row-locking and notification features, including `FOR UPDATE SKIP
 LOCKED` and `LISTEN`/`NOTIFY`.

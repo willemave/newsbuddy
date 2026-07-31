@@ -7,8 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.db import ProcessingTask
-from app.models.internal.queue import ClaimedTask
-from app.pipeline.task_models import TaskResult
+from app.models.internal.queue import ClaimedTask, TaskResult
 from app.services.queue import (
     QueueService,
     TaskEnqueueRequest,
@@ -623,9 +622,7 @@ def test_renew_lease_extends_processing_task(db_session, monkeypatch):
     claimed = _claim_task(queue, task, worker_id="worker-lease")
     original_expiry = claimed.lease_expires_at
     renewed = queue.renew_lease(
-        task.id,
-        worker_id="worker-lease",
-        lease_token=claimed.lease_token,
+        claimed,
         lease_seconds=600,
     )
 
@@ -655,9 +652,7 @@ def test_expired_lease_cannot_be_renewed_or_finalized(db_session, monkeypatch):
 
     assert (
         queue.renew_lease(
-            task.id,
-            worker_id=claimed.locked_by,
-            lease_token=claimed.lease_token,
+            claimed,
             lease_seconds=120,
         )
         is False

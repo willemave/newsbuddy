@@ -95,5 +95,5 @@ def processing_task_lease_clear_values() -> dict[str, object]:
 
 def clear_processing_task_lease(task: ProcessingTask) -> None:
     """Clear every ownership field on an ORM processing-task row."""
-    for field, value in processing_task_lease_clear_values().items():
-        setattr(task, field, value)
+    for field in PROCESSING_TASK_LEASE_FIELDS:
+        setattr(task, field, None)

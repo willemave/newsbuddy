@@ -14,7 +14,11 @@ from sqlalchemy.exc import OperationalError
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
 from app.models.internal.queue import ClaimedTask, TaskTransition
 from app.pipeline.queue_notifications import psycopg_conninfo
-from app.pipeline.sequential_task_processor import SequentialTaskProcessor
+from app.pipeline.sequential_task_processor import (
+    SequentialTaskProcessor,
+    _lease_heartbeat_interval_seconds,
+    _lease_heartbeat_retry_seconds,
+)
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.task_specs import TASK_SPECS
 
@@ -49,30 +53,22 @@ def _transition_for(
     *,
     max_retries: int,
 ) -> TaskTransition:
-    will_retry = (
-        not result.success
-        and not result.deferred
-        and result.retryable
-        and claim.retry_count < max_retries
-    )
+    """Return a minimal persisted outcome without duplicating QueueService policy."""
     status = (
         TaskStatus.COMPLETED
         if result.success
         else TaskStatus.PENDING
-        if result.deferred or will_retry
+        if result.deferred
         else TaskStatus.FAILED
     )
-    retry_delay_seconds = result.retry_delay_seconds if status is TaskStatus.PENDING else None
-    if will_retry and retry_delay_seconds is None:
-        retry_delay_seconds = min(60 * (2**claim.retry_count), 3600)
     return TaskTransition(
         task_type=claim.task_type,
         queue_name=claim.queue_name,
         content_id=claim.content_id,
         error_message=None if result.success or result.deferred else result.error_message,
         status=status,
-        retry_count=claim.retry_count + int(will_retry),
-        retry_delay_seconds=retry_delay_seconds,
+        retry_count=claim.retry_count,
+        retry_delay_seconds=result.retry_delay_seconds if result.deferred else None,
         deferred=result.deferred,
         available_at=claim.available_at,
     )
@@ -247,6 +243,13 @@ class TestSequentialTaskProcessor:
         with pytest.raises(ValidationError, match="payload must be a JSON object"):
             _owned_claim(payload=["not", "an", "object"])
 
+    def test_lease_heartbeat_timing_stays_inside_short_lease_window(self):
+        interval_seconds = _lease_heartbeat_interval_seconds(1)
+        retry_seconds = _lease_heartbeat_retry_seconds(0.05)
+
+        assert 0 < interval_seconds < 1
+        assert 0 < retry_seconds <= 0.05
+
     def test_lease_heartbeat_retries_transient_database_error(self, processor):
         claim = _owned_claim()
         renewed = threading.Event()
@@ -339,8 +342,7 @@ class TestSequentialTaskProcessor:
             max_retries=processor.settings.queue.max_retries,
         )
 
-    def test_run_retry_logic(self, processor):
-        """Test retry logic for failed tasks."""
+    def test_run_forwards_failure_to_queue_service(self, processor):
         task_data = _owned_claim(
             id=1,
             task_type=TaskType.PROCESS_PODCAST_MEDIA.value,
@@ -398,7 +400,7 @@ class TestSequentialTaskProcessor:
 
         assert processed_count == 0
 
-    def test_run_deferral_preserves_retry_budget(self, processor):
+    def test_run_single_task_forwards_deferral(self, processor):
         task_data = _owned_claim(
             id=1,
             task_type=TaskType.RUN_LLM_TASK.value,
@@ -415,38 +417,6 @@ class TestSequentialTaskProcessor:
             task_data,
             TaskResult.defer(retry_delay_seconds=90),
             max_retries=processor.settings.queue.max_retries,
-        )
-
-    def test_run_max_retries_exceeded(self, processor):
-        """Test behavior when max retries exceeded."""
-        task_data = _owned_claim(
-            id=1,
-            task_type=TaskType.PROCESS_PODCAST_MEDIA.value,
-            retry_count=3,
-            content_id=999,
-        )
-
-        call_count = 0
-
-        def mock_dequeue(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return task_data
-            processor.running = False
-            return None
-
-        processor.queue_service.dequeue.side_effect = mock_dequeue
-        processor.process_task = Mock(return_value=TaskResult.fail("boom"))
-        processor.settings.queue.max_retries = 3
-
-        with patch("app.pipeline.sequential_task_processor.setup_logging"):
-            processor.run()
-
-        processor.queue_service.finalize_task.assert_called_once_with(
-            task_data,
-            TaskResult.fail("boom"),
-            max_retries=3,
         )
 
     def test_run_empty_queue_backoff(self, processor):
@@ -493,8 +463,7 @@ class TestSequentialTaskProcessor:
             max_retries=processor.settings.queue.max_retries,
         )
 
-    def test_run_single_task_with_retry(self, processor):
-        """Test run_single_task with failed task that should retry."""
+    def test_run_single_task_forwards_failure_result(self, processor):
         task_data = _owned_claim(
             id=1,
             task_type=TaskType.PROCESS_PODCAST_MEDIA.value,

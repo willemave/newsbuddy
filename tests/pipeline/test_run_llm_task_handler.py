@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -228,9 +227,6 @@ class _SessionContext:
 class SimpleContext:
     def __init__(self, db_session) -> None:
         self.db_session = db_session
-        self.queue_service = SimpleNamespace(renew_lease=lambda *_args, **_kwargs: True)
-        self.settings = SimpleNamespace(queue=SimpleNamespace(worker_timeout_seconds=300))
-        self.worker_id = "test-worker"
 
     def db_factory(self):
         return _SessionContext(self.db_session)

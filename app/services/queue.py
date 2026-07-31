@@ -1,7 +1,6 @@
 import time
 from datetime import datetime
 from typing import Any
-from uuid import UUID
 
 from sqlalchemy import and_, or_
 
@@ -64,7 +63,7 @@ RETRY_BUCKET_CACHE_SECONDS = 5.0
 def _task_lease_seconds() -> int:
     """Return the default worker lease duration in seconds."""
     settings = get_settings()
-    return max(int(settings.queue.worker_timeout_seconds), 1)
+    return settings.queue.worker_timeout_seconds
 
 
 def build_task_queue_mismatch_filter(task_type: TaskType | str | None = None):
@@ -226,20 +225,14 @@ class QueueService(QueueEnqueueMixin):
 
     def renew_lease(
         self,
-        task_id: int,
+        claim: ClaimedTask,
         *,
-        worker_id: str,
-        lease_token: UUID | None,
         lease_seconds: int | None = None,
     ) -> bool:
         """Extend an unexpired lease for the exact worker claim that owns it."""
-        if lease_token is None:
-            return False
-        effective_lease_seconds = max(int(lease_seconds or _task_lease_seconds()), 1)
+        effective_lease_seconds = _task_lease_seconds() if lease_seconds is None else lease_seconds
         return self._repository.renew_lease(
-            task_id=task_id,
-            worker_id=worker_id,
-            lease_token=lease_token,
+            claim,
             lease_seconds=effective_lease_seconds,
         )
 
@@ -262,15 +255,12 @@ class QueueService(QueueEnqueueMixin):
         )
         resolved_delay_seconds = None
         if result.deferred:
-            resolved_delay_seconds = max(int(result.retry_delay_seconds or 0), 0)
+            resolved_delay_seconds = max(result.retry_delay_seconds or 0, 0)
         elif should_retry:
-            requested_delay = result.retry_delay_seconds
             resolved_delay_seconds = max(
-                int(
-                    requested_delay
-                    if requested_delay is not None
-                    else min(60 * (2**claim.retry_count), 3600)
-                ),
+                result.retry_delay_seconds
+                if result.retry_delay_seconds is not None
+                else min(60 * (2**claim.retry_count), 3600),
                 0,
             )
         resolved_error = None

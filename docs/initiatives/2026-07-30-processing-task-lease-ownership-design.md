@@ -53,8 +53,9 @@ the processor does not overwrite the current row.
 
 `QueueService.finalize_task(claim, result, max_retries=...)` is the single policy boundary. It
 decides the outcome, default backoff, retry count behavior, and fallback error exactly once, then
-passes the typed claim and resolved transition to the repository. The typed `TaskTransition` is
-preserved through processor logging and return handling.
+passes the typed claim plus the resolved outcome, error, and delay to the repository. The typed
+`TaskTransition` returned by the repository is preserved through processor logging and return
+handling.
 
 The heartbeat retries SQLAlchemy database failures while the lease can still be renewed. A false
 renewal, exhausted lease window, or unexpected heartbeat failure marks ownership lost; the

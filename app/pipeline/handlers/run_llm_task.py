@@ -5,13 +5,12 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.contracts import LlmTaskKind, LlmTaskStatus, LlmWorkflowState
+from app.models.contracts import LlmTaskKind, LlmTaskStatus, LlmWorkflowState, TaskType
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.learning_deck_generation import LearningDeckGenerationWaiting
 from app.services.learning_deck_task_generation import run_learning_deck_task
 from app.services.llm_tasks import LlmTaskError, set_llm_task_status
-from app.services.queue import TaskType
 from app.services.share_actions import run_share_action_task
 
 logger = get_logger(__name__)
@@ -29,8 +28,7 @@ class RunLlmTaskHandler:
     task_type = TaskType.RUN_LLM_TASK
 
     def handle(self, task: TaskEnvelope, context: TaskContext) -> TaskResult:
-        payload = task.payload if isinstance(task.payload, dict) else {}
-        llm_task_id = payload.get("llm_task_id")
+        llm_task_id = task.payload.get("llm_task_id")
         if not llm_task_id:
             return TaskResult.fail("Missing llm_task_id", retryable=False)
         try:
