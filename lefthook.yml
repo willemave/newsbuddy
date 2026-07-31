@@ -5,6 +5,9 @@ glob_matcher: doublestar
 
 pre-commit:
   jobs:
+    - name: module size guardrails
+      run: python3 scripts/check_module_size_guardrails.py
+
     - name: ruff check
       glob: "**/*.py"
       run: uv run ruff check --fix {staged_files}
