@@ -40,7 +40,7 @@ from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
 
-PROMPT_VERSION = "briefing-v3"
+PROMPT_VERSION = "briefing-v4"
 MAX_COMPOSE_ATTEMPTS = 4
 LAYOUT_PROMPTS_BY_TIER = {
     "audio": "briefing/layout_audio",
@@ -420,15 +420,13 @@ def deterministic_layout(
     tier: str,
 ) -> ComposerLayout:
     sentences = [_source_sentence(source) for source in sources]
-    source_label = "source" if len(sources) == 1 else "sources"
-    intro = f"**{lens_title}** opens with {len(sources)} unread {source_label}."
     if tier == "news":
         clauses = [_news_clause(sentence) for sentence in sentences]
-        markdown = f"{intro.rstrip('.')}: " + "; ".join(clauses) + "."
+        markdown = "; ".join(clauses) + "."
         return ComposerLayout(
             blocks=[PassageBlock(type="passage", markdown=markdown, weight="feature")]
         )
-    markdown = intro + " " + " ".join(sentences)
+    markdown = " ".join(sentences)
     blocks: list[ComposerBlock] = [
         PassageBlock(type="passage", markdown=markdown, weight="feature")
     ]

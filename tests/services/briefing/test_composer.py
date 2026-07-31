@@ -386,6 +386,23 @@ def test_deterministic_news_layout_remains_one_paragraph_at_max_batch() -> None:
     assert linked_keys == [f"news:{index}" for index in range(1, 5)]
     assert segment.narration_text.count(";") == 3
     assert "News summary 1; News item 2" in segment.narration_text
+    assert "opens with" not in segment.narration_text
+    assert "unread sources" not in segment.narration_text
+
+
+def test_deterministic_deep_layout_starts_with_source_content() -> None:
+    segment = compose_window(
+        [_source()],
+        lens_key="articles",
+        lens_title="Engineering & Infrastructure",
+        tier="longform",
+        window_index=1,
+        use_llm=False,
+    )
+
+    assert segment.narration_text.startswith("A useful article")
+    assert "opens with" not in segment.narration_text
+    assert "unread source" not in segment.narration_text
 
 
 @pytest.mark.parametrize(

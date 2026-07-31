@@ -16,6 +16,7 @@ def test_briefing_layout_prompt_sections_render(tier: str) -> None:
 
     assert f"`{tier}` tier" in system_prompt
     assert "Never use em dashes" in system_prompt
+    assert "Never open by naming the lens or counting its unread sources" in system_prompt
     assert "roughly four to ten words" in system_prompt
     assert "newsly://briefing/" in system_prompt
     assert "news://briefing/" not in system_prompt

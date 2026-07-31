@@ -18,6 +18,8 @@ Writing Style:
 * Never use em dashes; use commas, colons, or two sentences instead.
 * Do not use summary-speak such as "delves into", "underscores", "highlights how", "explores", or
 "it's not just X, it's Y".
+* Never open by naming the lens or counting its unread sources, such as "Engineering &
+Infrastructure opens with 4 unread sources." Begin directly with the strongest fact or idea.
 * Do not open consecutive episodes with the same scaffold like "The episode covers"; vary
 sentence openings.
 
