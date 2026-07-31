@@ -11,6 +11,7 @@ from app.models.db import (
     BriefingSegment,
     BriefingState,
     Content,
+    NewsItemReadStatus,
     ProcessingTask,
 )
 from app.models.db.users import User
@@ -502,6 +503,51 @@ def test_old_unread_news_segment_stays_active(
 
     assert retired == 0
     assert segment.status == "active"
+
+
+def test_refresh_retires_duplicate_segment_when_representative_is_read(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+) -> None:
+    assert test_user.id is not None
+    user_id = test_user.id
+    representative = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=user_id,
+    )
+    duplicate = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=user_id,
+        representative_news_item_id=representative.id,
+    )
+    lens = _create_lens(db_session, user_id=user_id, key="news-clustered")
+    segment = BriefingSegment(
+        lens_id=lens.id,
+        user_id=user_id,
+        blocks=[],
+        source_keys=[f"news:{duplicate.id}"],
+        status="active",
+        model="test",
+        prompt_version="test",
+    )
+    db_session.add_all(
+        [
+            segment,
+            NewsItemReadStatus(
+                user_id=user_id,
+                news_item_id=representative.id,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    retired = _retire_finished_segments(db_session, user_id=user_id, settings=get_settings())
+    db_session.commit()
+    db_session.refresh(segment)
+
+    assert retired == 1
+    assert segment.status == "retired"
 
 
 def test_bump_briefing_version_for_news_item_only_updates_matching_enabled_active_segments(

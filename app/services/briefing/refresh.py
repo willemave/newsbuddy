@@ -592,6 +592,7 @@ def _plan_ready_windows(
         db,
         user_id=user_id,
         source_keys=list(dict.fromkeys(source_keys)),
+        require_current_news_representative=True,
     )
     for lens, pending_rows, lens_source_keys in ready_lenses:
         assert lens.id is not None

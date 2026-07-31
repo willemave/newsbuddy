@@ -2,11 +2,12 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.models.contracts import ContentClassification, ContentType
-from app.models.db import NewsItemDiscussion
+from app.models.db import NewsItemDiscussion, NewsItemReadStatus
 from app.services.briefing.sources import (
     BRIEFING_CONTEXT_MAX_CHARS,
     _truncate_discussion_overview,
     list_unread_longform_sources,
+    read_source_keys,
     read_source_keys_for,
     sources_for_keys,
 )
@@ -83,6 +84,75 @@ def test_read_source_keys_for_returns_only_requested_read_keys(
     )
 
     assert keys == {f"content:{read_article.id}"}
+
+
+def test_read_source_keys_for_treats_representative_read_as_duplicate_read(
+    db_session: Session,
+    test_user,
+    news_item_factory,
+) -> None:
+    assert test_user.id is not None
+    representative = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+    )
+    duplicate = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        representative_news_item_id=representative.id,
+    )
+    db_session.add(
+        NewsItemReadStatus(
+            user_id=test_user.id,
+            news_item_id=representative.id,
+        )
+    )
+    db_session.commit()
+
+    keys = read_source_keys_for(
+        db_session,
+        user_id=test_user.id,
+        source_keys=[f"news:{duplicate.id}"],
+    )
+
+    assert keys == {f"news:{duplicate.id}"}
+    assert {
+        f"news:{representative.id}",
+        f"news:{duplicate.id}",
+    }.issubset(read_source_keys(db_session, user_id=test_user.id))
+
+
+def test_sources_for_keys_can_reject_news_that_became_duplicates(
+    db_session: Session,
+    test_user,
+    news_item_factory,
+) -> None:
+    assert test_user.id is not None
+    representative = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+    )
+    duplicate = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+        representative_news_item_id=representative.id,
+    )
+    source_key = f"news:{duplicate.id}"
+
+    historical_sources = sources_for_keys(
+        db_session,
+        user_id=test_user.id,
+        source_keys=[source_key],
+    )
+    current_sources = sources_for_keys(
+        db_session,
+        user_id=test_user.id,
+        source_keys=[source_key],
+        require_current_news_representative=True,
+    )
+
+    assert source_key in historical_sources
+    assert source_key not in current_sources
 
 
 def test_list_unread_longform_sources_builds_rich_briefing_context(

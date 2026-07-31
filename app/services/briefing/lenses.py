@@ -121,11 +121,11 @@ def assign_pending_lenses(
     )
     if not pending:
         return 0
-
     source_map = sources_for_keys(
         db,
         user_id=user_id,
         source_keys=[f"{row.source_kind}:{row.source_id}" for row in pending],
+        require_current_news_representative=True,
     )
     changed = 0
     unassigned_news: list[tuple[BriefingPendingSource, BriefingSource]] = []

@@ -751,6 +751,100 @@ def test_briefing_lens_read_marks_every_source_in_the_category(
     assert other_segment.status == "active"
 
 
+def test_briefing_lens_read_marks_duplicate_and_its_representative(
+    client: TestClient,
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+) -> None:
+    assert test_user.id is not None
+    user_id = test_user.id
+    representative = news_item_factory(
+        article_title="Canonical story",
+        visibility_scope="user",
+        owner_user_id=user_id,
+    )
+    duplicate = news_item_factory(
+        article_title="Duplicate story",
+        visibility_scope="user",
+        owner_user_id=user_id,
+        representative_news_item_id=representative.id,
+    )
+    category = BriefingLens(
+        user_id=user_id,
+        key="technology",
+        tier="news",
+        title="Technology",
+        deck="Technology updates",
+        position=0,
+        status="active",
+    )
+    db_session.add(category)
+    db_session.flush()
+    category_segment = BriefingSegment(
+        lens_id=category.id,
+        user_id=user_id,
+        blocks=[],
+        source_keys=[f"news:{duplicate.id}"],
+        status="active",
+        model="test",
+        prompt_version="test",
+    )
+    db_session.add_all(
+        [
+            category_segment,
+            BriefingState(
+                user_id=user_id,
+                version=4,
+                masthead_title="The Unread Times",
+                masthead_deck="Existing edition",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.post("/api/briefing/lenses/technology/read-marks")
+    db_session.refresh(category_segment)
+    read_news_item_ids = set(
+        db_session.execute(
+            select(NewsItemReadStatus.news_item_id).where(NewsItemReadStatus.user_id == user_id)
+        ).scalars()
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"marked": 1, "retired": 1, "version": 5}
+    assert read_news_item_ids == {representative.id, duplicate.id}
+    assert category_segment.status == "retired"
+
+
+def test_briefing_read_marks_reject_news_outside_the_users_segments(
+    client: TestClient,
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+) -> None:
+    assert test_user.id is not None
+    item = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=test_user.id,
+    )
+
+    response = client.post(
+        "/api/briefing/read-marks",
+        json={"source_keys": [f"news:{item.id}"]},
+    )
+    read_status = db_session.execute(
+        select(NewsItemReadStatus.id).where(
+            NewsItemReadStatus.user_id == test_user.id,
+            NewsItemReadStatus.news_item_id == item.id,
+        )
+    ).scalar_one_or_none()
+
+    assert response.status_code == 200
+    assert response.json() == {"marked": 0, "retired": 0, "version": 0}
+    assert read_status is None
+
+
 def test_briefing_lens_read_returns_not_found_for_an_unknown_category(
     client: TestClient,
 ) -> None:

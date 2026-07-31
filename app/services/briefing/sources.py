@@ -5,11 +5,16 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, load_only
 
 from app.core.settings import get_settings
-from app.models.contracts import ContentClassification, ContentStatus, ContentType
+from app.models.contracts import (
+    ContentClassification,
+    ContentStatus,
+    ContentType,
+    NewsItemStatus,
+)
 from app.models.db import (
     Content,
     ContentReadStatus,
@@ -214,7 +219,14 @@ def sources_for_keys(
     user_id: int,
     source_keys: list[str],
     include_briefing_context: bool = True,
+    require_current_news_representative: bool = False,
 ) -> dict[str, BriefingSource]:
+    """Resolve source keys, optionally enforcing current feed eligibility for news.
+
+    Historical Briefing segments keep immutable source keys, so presentation must
+    still resolve a row that later became a duplicate. Pending composition opts
+    into the stricter representative-only behavior instead.
+    """
     parsed = [parse_source_key(key) for key in source_keys]
     content_ids = [key.source_id for key in parsed if key and key.kind == "content"]
     news_ids = [key.source_id for key in parsed if key and key.kind == "news"]
@@ -249,7 +261,7 @@ def sources_for_keys(
 
     if news_ids:
         visible = build_visible_news_item_filter(db, user_id=user_id)
-        news_rows = (
+        news_query = (
             db.query(NewsItem)
             .options(
                 load_only(
@@ -268,8 +280,13 @@ def sources_for_keys(
             )
             .filter(NewsItem.id.in_(news_ids))
             .filter(visible)
-            .all()
         )
+        if require_current_news_representative:
+            news_query = news_query.filter(
+                NewsItem.status == NewsItemStatus.READY.value,
+                NewsItem.representative_news_item_id.is_(None),
+            )
+        news_rows = news_query.all()
         discussions_by_news_id = _briefing_discussions_for_news_ids(db, news_ids=news_ids)
         for news_row in news_rows:
             source = _source_from_news_item(news_row)
@@ -388,17 +405,23 @@ def read_source_keys(db: Session, *, user_id: int) -> set[str]:
     content_ids = db.execute(
         select(ContentReadStatus.content_id).where(ContentReadStatus.user_id == user_id)
     ).scalars()
-    news_ids = db.execute(
-        select(NewsItemReadStatus.news_item_id).where(NewsItemReadStatus.user_id == user_id)
-    ).scalars()
+    exact_read_news_ids = {
+        int(news_id)
+        for news_id in db.execute(
+            select(NewsItemReadStatus.news_item_id).where(NewsItemReadStatus.user_id == user_id)
+        ).scalars()
+        if news_id is not None
+    }
     keys = {
         build_source_key("content", int(content_id))
         for content_id in content_ids
         if content_id is not None
     }
-    keys.update(
-        build_source_key("news", int(news_id)) for news_id in news_ids if news_id is not None
+    read_news_ids = exact_read_news_ids | _news_cluster_member_ids(
+        db,
+        news_item_ids=exact_read_news_ids,
     )
+    keys.update(build_source_key("news", news_id) for news_id in read_news_ids)
     return keys
 
 
@@ -408,6 +431,7 @@ def read_source_keys_for(
     user_id: int,
     source_keys: list[str],
 ) -> set[str]:
+    """Return requested keys whose underlying content or news cluster is read."""
     parsed = [parse_source_key(key) for key in source_keys]
     content_ids = sorted({key.source_id for key in parsed if key and key.kind == "content"})
     news_ids = sorted({key.source_id for key in parsed if key and key.kind == "news"})
@@ -426,18 +450,89 @@ def read_source_keys_for(
             if content_id is not None
         )
     if news_ids:
-        read_news_ids = db.execute(
-            select(NewsItemReadStatus.news_item_id).where(
-                NewsItemReadStatus.user_id == user_id,
-                NewsItemReadStatus.news_item_id.in_(news_ids),
+        exact_read_news_ids = {
+            int(news_id)
+            for news_id in db.execute(
+                select(NewsItemReadStatus.news_item_id).where(
+                    NewsItemReadStatus.user_id == user_id,
+                    NewsItemReadStatus.news_item_id.in_(news_ids),
+                )
+            ).scalars()
+            if news_id is not None
+        }
+        canonical_by_news_id = _canonical_news_ids(db, news_item_ids=set(news_ids))
+        canonical_ids = set(canonical_by_news_id.values())
+        read_canonical_ids = {
+            int(canonical_id)
+            for canonical_id in db.execute(
+                select(
+                    func.coalesce(
+                        NewsItem.representative_news_item_id,
+                        NewsItem.id,
+                    )
+                )
+                .join(
+                    NewsItemReadStatus,
+                    NewsItemReadStatus.news_item_id == NewsItem.id,
+                )
+                .where(
+                    NewsItemReadStatus.user_id == user_id,
+                    func.coalesce(
+                        NewsItem.representative_news_item_id,
+                        NewsItem.id,
+                    ).in_(canonical_ids),
+                )
+                .distinct()
+            ).scalars()
+            if canonical_id is not None
+        }
+        read_news_ids = exact_read_news_ids | {
+            news_id
+            for news_id, canonical_id in canonical_by_news_id.items()
+            if canonical_id in read_canonical_ids
+        }
+        keys.update(build_source_key("news", news_id) for news_id in read_news_ids)
+    return keys
+
+
+def _canonical_news_ids(
+    db: Session,
+    *,
+    news_item_ids: set[int],
+) -> dict[int, int]:
+    if not news_item_ids:
+        return {}
+    rows = db.execute(
+        select(NewsItem.id, NewsItem.representative_news_item_id).where(
+            NewsItem.id.in_(news_item_ids)
+        )
+    ).all()
+    return {
+        int(news_item_id): int(representative_id or news_item_id)
+        for news_item_id, representative_id in rows
+    }
+
+
+def _news_cluster_member_ids(
+    db: Session,
+    *,
+    news_item_ids: set[int],
+) -> set[int]:
+    canonical_ids = set(_canonical_news_ids(db, news_item_ids=news_item_ids).values())
+    if not canonical_ids:
+        return set()
+    return {
+        int(news_item_id)
+        for news_item_id in db.execute(
+            select(NewsItem.id).where(
+                or_(
+                    NewsItem.id.in_(canonical_ids),
+                    NewsItem.representative_news_item_id.in_(canonical_ids),
+                )
             )
         ).scalars()
-        keys.update(
-            build_source_key("news", int(news_id))
-            for news_id in read_news_ids
-            if news_id is not None
-        )
-    return keys
+        if news_item_id is not None
+    }
 
 
 def _source_from_content(

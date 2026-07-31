@@ -10,6 +10,37 @@ from app.models.db.users import User
 from app.services.briefing.lenses import LensName, assign_pending_lenses
 
 
+def test_pending_news_that_became_a_duplicate_is_discarded(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+) -> None:
+    assert test_user.id is not None
+    user_id = test_user.id
+    representative = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=user_id,
+    )
+    duplicate = news_item_factory(
+        visibility_scope="user",
+        owner_user_id=user_id,
+        representative_news_item_id=representative.id,
+    )
+    pending = BriefingPendingSource(
+        user_id=user_id,
+        source_kind="news",
+        source_id=duplicate.id,
+    )
+    db_session.add(pending)
+    db_session.flush()
+
+    changed = assign_pending_lenses(db_session, user_id=user_id)
+    db_session.flush()
+
+    assert changed == 1
+    assert db_session.get(BriefingPendingSource, pending.id) is None
+
+
 def test_stale_low_volume_news_uses_misc_lens_without_embedding(
     db_session: Session,
     test_user: User,
