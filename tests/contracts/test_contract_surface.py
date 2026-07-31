@@ -13,16 +13,7 @@ from app.main import app
 from app.models.api.base import UTCDateTime
 from app.models.contracts_registry import CONTRACT_UNTYPED_FIELD_ALLOWLIST
 
-NO_BODY_OR_STREAMING_ROUTE_EXCEPTIONS = {
-    ("GET", "/api/content/audio-episodes/{audio_episode_id}/audio"): "FileResponse audio bytes",
-    ("GET", "/api/content/audio-episodes/{audio_episode_id}/stream"): (
-        "StreamingResponse audio bytes"
-    ),
-    ("DELETE", "/api/content/chat/sessions/{session_id}"): "204 no-body delete",
-    ("DELETE", "/api/content/scrapers/{config_id}"): "204 no-body delete",
-    ("DELETE", "/api/learning/decks/{deck_id}"): "204 no-body delete",
-    ("DELETE", "/api/scrapers/{config_id}"): "204 no-body delete",
-}
+NO_BODY_OR_STREAMING_ROUTE_EXCEPTIONS: dict[tuple[str, str], str] = {}
 
 IGNORED_OPENAPI_SCHEMAS = {"HTTPValidationError", "ValidationError"}
 
