@@ -38,10 +38,6 @@ class TaskQueueGateway:
             enqueue_kwargs["dedupe_key"] = dedupe_key
         return self._queue_service.enqueue(**enqueue_kwargs)
 
-    def get_queue_stats(self) -> dict[str, Any]:
-        """Return queue stats."""
-        return self._queue_service.get_queue_stats()
-
 
 _task_queue_gateway: TaskQueueGateway | None = None
 

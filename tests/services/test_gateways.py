@@ -198,18 +198,6 @@ def test_task_queue_gateway_enqueue_builds_kwargs():
     )
 
 
-def test_task_queue_gateway_forwards_queue_stats():
-    """Queue stats should pass through transparently."""
-    queue_service = Mock()
-    queue_service.get_queue_stats.return_value = {"pending": 1}
-
-    gateway = TaskQueueGateway(queue_service=queue_service)
-    stats = gateway.get_queue_stats()
-
-    queue_service.get_queue_stats.assert_called_once_with()
-    assert stats == {"pending": 1}
-
-
 def test_get_task_queue_gateway_returns_cached_instance(monkeypatch):
     """Global queue gateway accessor should lazily build once and then reuse."""
     from app.services.gateways import task_queue_gateway as module
