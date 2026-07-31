@@ -10,17 +10,17 @@ struct SettingsTwitterSection: View {
     let xConnection: XConnectionResponse?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "X / Twitter")
+        if case .authenticated = authState {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeader(title: "Connections")
 
-            if case .authenticated = authState {
                 NavigationLink {
                     TwitterSettingsView()
                 } label: {
                     SettingsRow(
                         icon: "at",
                         title: "X / Twitter",
-                        subtitle: xConnection?.settingsSubtitle
+                        subtitle: xConnection?.settingsSubtitle ?? "Not connected"
                     )
                 }
                 .buttonStyle(.plain)
