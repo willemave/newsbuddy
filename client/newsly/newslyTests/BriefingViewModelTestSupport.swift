@@ -12,6 +12,7 @@ final class MockBriefingService: BriefingServicing {
 
     var indexResults: [BriefingIndexFetchResult] = []
     var indexError: Error?
+    var indexErrors: [Error?] = []
     var indexEtags: [String?] = []
     var fetchIndexDelayNanoseconds: UInt64?
     var lensResponses: [String: APIBriefingLensResponse] = [:]
@@ -58,6 +59,10 @@ final class MockBriefingService: BriefingServicing {
         events.append("fetchIndex:\(etag ?? "nil")")
         if let fetchIndexDelayNanoseconds {
             try? await Task.sleep(nanoseconds: fetchIndexDelayNanoseconds)
+        }
+        let queuedError = indexErrors.isEmpty ? nil : indexErrors.removeFirst()
+        if let queuedError {
+            throw queuedError
         }
         if let indexError {
             throw indexError
@@ -301,7 +306,10 @@ extension BriefingViewModel {
         snapshotStore: BriefingSnapshotStoring? = nil,
         refreshPollDelays: [UInt64] = [1_000_000, 2_000_000, 5_000_000],
         firstRunCompletionRetryDelay: UInt64 = 1_000_000,
-        lensRetentionScheduler: (any BriefingLensRetentionScheduling)? = nil
+        lensRetentionScheduler: (any BriefingLensRetentionScheduling)? = nil,
+        indexFreshnessInterval: TimeInterval = 15 * 60,
+        initialIndexRetryDelays: [UInt64] = [],
+        now: @escaping () -> Date = { AppClock.now }
     ) {
         self.init(
             service: service,
@@ -310,7 +318,10 @@ extension BriefingViewModel {
             snapshotStore: snapshotStore,
             refreshPollDelays: refreshPollDelays,
             firstRunCompletionRetryDelay: firstRunCompletionRetryDelay,
-            lensRetentionScheduler: lensRetentionScheduler
+            lensRetentionScheduler: lensRetentionScheduler,
+            indexFreshnessInterval: indexFreshnessInterval,
+            initialIndexRetryDelays: initialIndexRetryDelays,
+            now: now
         )
     }
 }

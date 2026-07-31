@@ -46,6 +46,7 @@ struct BriefingSnapshot: Codable {
     let etag: String?
     let selectedLensKey: String?
     let lenses: [String: APIBriefingLensResponse]
+    let lastValidatedAt: Date?
     let savedAt: Date
 
     init(
@@ -54,6 +55,7 @@ struct BriefingSnapshot: Codable {
         etag: String?,
         selectedLensKey: String?,
         lenses: [String: APIBriefingLensResponse],
+        lastValidatedAt: Date? = nil,
         savedAt: Date
     ) {
         self.schemaVersion = Self.currentSchemaVersion
@@ -62,6 +64,7 @@ struct BriefingSnapshot: Codable {
         self.etag = etag
         self.selectedLensKey = selectedLensKey
         self.lenses = lenses
+        self.lastValidatedAt = lastValidatedAt
         self.savedAt = savedAt
     }
 }
@@ -75,9 +78,10 @@ protocol BriefingSnapshotStoring: AnyObject {
 }
 
 actor BriefingSnapshotStore: BriefingSnapshotStoring {
-    /// Briefings regenerate daily; older snapshots are not useful enough to
-    /// flash before the fresh index replaces them.
-    private static let maxSnapshotAge: TimeInterval = 60 * 60 * 48
+    /// Displaying an older briefing is preferable to replacing the whole screen
+    /// with a transport failure. Freshness is tracked separately by the view
+    /// model, and successful revalidation replaces this stale fallback.
+    private static let maxDisplayAge: TimeInterval = 60 * 60 * 24 * 7
 
     private nonisolated static let storageLock = BriefingSnapshotStorageLock()
 
@@ -119,18 +123,43 @@ actor BriefingSnapshotStore: BriefingSnapshotStoring {
             try? Data(contentsOf: self.fileURL)
         }
         let readFinishedAt = Date()
-        guard let data,
-              let decoded = try? JSONDecoder().decode(BriefingSnapshot.self, from: data),
-              decoded.schemaVersion == BriefingSnapshot.currentSchemaVersion,
-              decoded.userID == self.userID,
-              AppClock.now.timeIntervalSince(decoded.savedAt) < Self.maxSnapshotAge,
-              let snapshot = Self.storageLock.accessIfCurrent(
-                  storageGeneration,
-                  operation: { decoded }
-              )
-        else {
+        guard let data else {
             briefingSnapshotLogger.info(
-                "Snapshot cache miss | user_id=\(self.userID, privacy: .private) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
+                "Snapshot cache miss | reason=file_unavailable user_id=\(self.userID, privacy: .private) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
+            )
+            return nil
+        }
+        guard let decoded = try? JSONDecoder().decode(BriefingSnapshot.self, from: data) else {
+            briefingSnapshotLogger.info(
+                "Snapshot cache miss | reason=decode_failed user_id=\(self.userID, privacy: .private) duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public)"
+            )
+            return nil
+        }
+        guard decoded.schemaVersion == BriefingSnapshot.currentSchemaVersion else {
+            briefingSnapshotLogger.info(
+                "Snapshot cache miss | reason=schema_mismatch user_id=\(self.userID, privacy: .private) schema=\(decoded.schemaVersion, privacy: .public)"
+            )
+            return nil
+        }
+        guard decoded.userID == userID else {
+            briefingSnapshotLogger.info(
+                "Snapshot cache miss | reason=user_mismatch user_id=\(self.userID, privacy: .private)"
+            )
+            return nil
+        }
+        let age = AppClock.now.timeIntervalSince(decoded.savedAt)
+        guard age < Self.maxDisplayAge else {
+            briefingSnapshotLogger.info(
+                "Snapshot cache miss | reason=display_expired user_id=\(self.userID, privacy: .private) age_seconds=\(Int(age), privacy: .public)"
+            )
+            return nil
+        }
+        guard let snapshot = Self.storageLock.accessIfCurrent(
+            storageGeneration,
+            operation: { decoded }
+        ) else {
+            briefingSnapshotLogger.info(
+                "Snapshot cache miss | reason=invalidated user_id=\(self.userID, privacy: .private)"
             )
             return nil
         }

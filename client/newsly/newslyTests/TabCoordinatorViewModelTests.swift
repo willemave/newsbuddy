@@ -13,6 +13,52 @@ final class TabCoordinatorViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectedTabRestoresPerUser() {
+        let suiteName = "TabCoordinatorViewModelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = TabCoordinatorViewModel(
+            briefingVM: BriefingViewModel(service: MockBriefingService()),
+            userID: 7,
+            defaults: defaults
+        )
+        first.selectedTab = .knowledge
+
+        let restored = TabCoordinatorViewModel(
+            briefingVM: BriefingViewModel(service: MockBriefingService()),
+            userID: 7,
+            defaults: defaults
+        )
+        let otherUser = TabCoordinatorViewModel(
+            briefingVM: BriefingViewModel(service: MockBriefingService()),
+            userID: 8,
+            defaults: defaults
+        )
+
+        XCTAssertEqual(restored.selectedTab, .knowledge)
+        XCTAssertEqual(otherUser.selectedTab, .briefing)
+    }
+
+    @MainActor
+    func testExplicitInitialTabOverridesRestoredTab() {
+        let suiteName = "TabCoordinatorViewModelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set(RootTab.knowledge.rawValue, forKey: "root.selectedTab.user.7")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let coordinator = TabCoordinatorViewModel(
+            briefingVM: BriefingViewModel(service: MockBriefingService()),
+            userID: 7,
+            defaults: defaults,
+            initialTab: .learning
+        )
+
+        XCTAssertEqual(coordinator.selectedTab, .learning)
+    }
+
+    @MainActor
     func testInjectedContentRoutesUseBriefingNavigationForEveryContentType() {
         for contentType in APIContentType.knownCases {
             let route = E2ERouteInjector.contentRoute(

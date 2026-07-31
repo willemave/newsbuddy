@@ -2,7 +2,7 @@ import XCTest
 @testable import newsly
 
 final class BriefingSnapshotStoreTests: XCTestCase {
-    func testSnapshotStoreIsPerUserAndRejectsExpiredData() async throws {
+    func testSnapshotStoreIsPerUserKeepsStaleFallbackAndRejectsTooOldData() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -23,7 +23,7 @@ final class BriefingSnapshotStoreTests: XCTestCase {
         XCTAssertNotNil(userOneSnapshot)
         XCTAssertNil(userTwoSnapshot)
 
-        let expired = BriefingSnapshot(
+        let staleFallback = BriefingSnapshot(
             userID: 1,
             index: fresh.index,
             etag: fresh.etag,
@@ -31,10 +31,23 @@ final class BriefingSnapshotStoreTests: XCTestCase {
             lenses: fresh.lenses,
             savedAt: Date(timeIntervalSinceNow: -(60 * 60 * 49))
         )
-        await userOneStore.save(expired)
+        await userOneStore.save(staleFallback)
 
-        let expiredSnapshot = await userOneStore.load()
-        XCTAssertNil(expiredSnapshot)
+        let staleSnapshot = await userOneStore.load()
+        XCTAssertNotNil(staleSnapshot)
+
+        let tooOld = BriefingSnapshot(
+            userID: 1,
+            index: fresh.index,
+            etag: fresh.etag,
+            selectedLensKey: fresh.selectedLensKey,
+            lenses: fresh.lenses,
+            savedAt: Date(timeIntervalSinceNow: -(60 * 60 * 24 * 8))
+        )
+        await userOneStore.save(tooOld)
+
+        let tooOldSnapshot = await userOneStore.load()
+        XCTAssertNil(tooOldSnapshot)
     }
 
     func testLogoutInvalidationDeletesSnapshotsAndRejectsWritesFromOldStores() async throws {

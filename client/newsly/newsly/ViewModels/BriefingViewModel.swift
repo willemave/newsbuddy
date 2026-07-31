@@ -4,6 +4,11 @@ import Observation
 private let briefingReadFlushDebounceNanoseconds: UInt64 = 300_000_000
 private let briefingReadFlushRetryNanoseconds: UInt64 = 2_000_000_000
 private let briefingFirstRunCompletionRetryNanoseconds: UInt64 = 2_000_000_000
+private let briefingIndexFreshnessInterval: TimeInterval = 15 * 60
+private let briefingInitialIndexRetryDelaysNanoseconds: [UInt64] = [
+    250_000_000,
+    750_000_000,
+]
 private let briefingRefreshLogger = BriefingPerformance.logger
 
 private enum BriefingDestination: Equatable {
@@ -63,6 +68,9 @@ final class BriefingViewModel {
     private let snapshotStore: BriefingSnapshotStoring?
     private let indexSynchronizer: BriefingIndexSynchronizer
     private let firstRunCoordinator: BriefingFirstRunCoordinator
+    private let indexFreshnessInterval: TimeInterval
+    private let initialIndexRetryDelays: [UInt64]
+    private let now: () -> Date
     let lensRetention: BriefingLensRetentionPolicy
     let tasks = TaskBag<TaskKey>()
     private var pendingReadKeys: Set<String> = []
@@ -77,6 +85,7 @@ final class BriefingViewModel {
     /// masthead is compact; cleared on the next scroll-down.
     private var categoryStripPinnedOpen = false
     private var dismissedFirstRunID: Int?
+    private var lastValidatedAt: Date?
 
     init(
         service: BriefingServicing,
@@ -85,10 +94,16 @@ final class BriefingViewModel {
         snapshotStore: BriefingSnapshotStoring? = nil,
         refreshPollDelays: [UInt64] = briefingRefreshPollDelaysNanoseconds,
         firstRunCompletionRetryDelay: UInt64 = briefingFirstRunCompletionRetryNanoseconds,
-        lensRetentionScheduler: (any BriefingLensRetentionScheduling)? = nil
+        lensRetentionScheduler: (any BriefingLensRetentionScheduling)? = nil,
+        indexFreshnessInterval: TimeInterval = briefingIndexFreshnessInterval,
+        initialIndexRetryDelays: [UInt64] = briefingInitialIndexRetryDelaysNanoseconds,
+        now: @escaping () -> Date = { AppClock.now }
     ) {
         self.service = service
         self.snapshotStore = snapshotStore
+        self.indexFreshnessInterval = indexFreshnessInterval
+        self.initialIndexRetryDelays = initialIndexRetryDelays
+        self.now = now
         self.narrationController = BriefingNarrationController(
             briefingService: service,
             audioEpisodeService: audioEpisodeService,
@@ -194,20 +209,34 @@ final class BriefingViewModel {
 
     func loadIndexIfNeeded() async {
         guard index == nil else {
-            await refreshIndex()
+            await refreshIndexIfStale()
             return
         }
         // Cold start: paint the last briefing immediately, then revalidate
         // against the server via ETag; a version bump refetches the lenses.
         if await restoreFromSnapshot() {
-            await refreshIndex()
+            await refreshIndexIfStale()
             return
         }
-        await loadIndex(force: true)
+        await loadIndex(force: true, retryTransientFailures: true)
     }
 
     func refreshIndex() async {
         await loadIndex(force: false)
+    }
+
+    private func refreshIndexIfStale() async {
+        if let lastValidatedAt {
+            let age = now().timeIntervalSince(lastValidatedAt)
+            if age >= 0, age < indexFreshnessInterval {
+                briefingRefreshLogger.info(
+                    "Index refresh skipped | reason=fresh age_seconds=\(Int(age), privacy: .public) freshness_seconds=\(Int(self.indexFreshnessInterval), privacy: .public)"
+                )
+                loadWorkingSet()
+                return
+            }
+        }
+        await refreshIndex()
     }
 
     func pullToRefresh() async {
@@ -218,7 +247,7 @@ final class BriefingViewModel {
                 await self?.flushPendingReadMarks()
             },
             onIndexResult: { [weak self] result in
-                self?.applyIndexResult(result)
+                self?.applyValidatedIndexResult(result)
             }
         )
     }
@@ -346,7 +375,7 @@ final class BriefingViewModel {
         indexSynchronizer.cancelIndexLoad()
         do {
             if let result = try await indexSynchronizer.load(force: true) {
-                applyIndexResult(result)
+                applyValidatedIndexResult(result)
             }
         } catch {
             briefingRefreshLogger.error(
@@ -359,19 +388,59 @@ final class BriefingViewModel {
         sourceByKey[sourceKey]
     }
 
-    private func loadIndex(force: Bool) async {
+    private func loadIndex(
+        force: Bool,
+        retryTransientFailures: Bool = false
+    ) async {
         if index == nil {
             state = .loading
         }
-        do {
-            if let result = try await indexSynchronizer.load(force: force) {
-                applyIndexResult(result)
-            }
-        } catch {
-            if !isNetworkCancellation(error), orderedLenses.isEmpty {
-                state = .error(error.localizedDescription)
+        var retryIndex = 0
+        while true {
+            do {
+                if let result = try await indexSynchronizer.load(force: force) {
+                    applyValidatedIndexResult(result)
+                }
+                return
+            } catch where isNetworkCancellation(error) {
+                return
+            } catch {
+                let transportCode = briefingTransientTransportCode(error)
+                if retryTransientFailures,
+                   let transportCode,
+                   retryIndex < initialIndexRetryDelays.count {
+                    let baseDelay = initialIndexRetryDelays[retryIndex]
+                    let jitter = UInt64.random(
+                        in: 0...min(baseDelay / 5, 100_000_000)
+                    )
+                    let delay = baseDelay + jitter
+                    retryIndex += 1
+                    briefingRefreshLogger.info(
+                        "Initial index load retry scheduled | attempt=\(retryIndex, privacy: .public) transport_code=\(transportCode.rawValue, privacy: .public) delay_ms=\(delay / 1_000_000, privacy: .public)"
+                    )
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch {
+                        return
+                    }
+                    continue
+                }
+                if orderedLenses.isEmpty {
+                    let code = transportCode.map { String($0.rawValue) } ?? "none"
+                    briefingRefreshLogger.error(
+                        "Initial index load failed | transport_code=\(code, privacy: .public) error=\(error.localizedDescription, privacy: .private)"
+                    )
+                    state = .error(error.localizedDescription)
+                }
+                return
             }
         }
+    }
+
+    private func applyValidatedIndexResult(_ result: BriefingIndexFetchResult) {
+        lastValidatedAt = now()
+        applyIndexResult(result)
+        scheduleSnapshotSave()
     }
 
     private func applyIndexResult(_ result: BriefingIndexFetchResult) {
@@ -496,6 +565,7 @@ final class BriefingViewModel {
         lensStates = snapshot.lenses.mapValues { BriefingLensState(document: $0) }
         rebuildSourceIndex()
         indexSynchronizer.restore(etag: snapshot.etag)
+        lastValidatedAt = snapshot.lastValidatedAt
         state = .loaded
         if firstRun != nil {
             destination = .startHere
@@ -536,6 +606,7 @@ final class BriefingViewModel {
                     etag: self.indexSynchronizer.etag,
                     selectedLensKey: self.selectedLensKey,
                     lenses: snapshotLenses,
+                    lastValidatedAt: self.lastValidatedAt,
                     savedAt: AppClock.now
                 )
             )
@@ -857,3 +928,26 @@ final class BriefingViewModel {
         firstRunCoordinator.complete()
     }
 }
+
+private func briefingTransientTransportCode(_ error: Error) -> URLError.Code? {
+    if let urlError = error as? URLError {
+        return briefingRetryableTransportCodes.contains(urlError.code) ? urlError.code : nil
+    }
+    if case APIError.networkError(let underlyingError) = error {
+        return briefingTransientTransportCode(underlyingError)
+    }
+    let nsError = error as NSError
+    guard nsError.domain == NSURLErrorDomain else { return nil }
+    let code = URLError.Code(rawValue: nsError.code)
+    return briefingRetryableTransportCodes.contains(code) ? code : nil
+}
+
+private let briefingRetryableTransportCodes: Set<URLError.Code> = [
+    .timedOut,
+    .cannotFindHost,
+    .cannotConnectToHost,
+    .networkConnectionLost,
+    .dnsLookupFailed,
+    .notConnectedToInternet,
+    .resourceUnavailable,
+]

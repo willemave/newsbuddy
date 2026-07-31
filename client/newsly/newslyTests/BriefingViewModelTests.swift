@@ -405,13 +405,111 @@ final class BriefingViewModelTests: XCTestCase {
     func testInitialIndexFailureIsFatalWithoutSnapshot() async {
         let service = MockBriefingService()
         service.indexError = URLError(.notConnectedToInternet)
-        let viewModel = BriefingViewModel(service: service)
+        let viewModel = BriefingViewModel(
+            service: service,
+            initialIndexRetryDelays: [0, 0]
+        )
 
         await viewModel.loadIndexIfNeeded()
 
+        XCTAssertEqual(service.indexEtags.count, 3)
         guard case .error = viewModel.state else {
             return XCTFail("Expected initial index failure to be fatal")
         }
+    }
+
+    func testInitialIndexDoesNotRetryDefinitiveFailure() async {
+        let service = MockBriefingService()
+        service.indexError = APIError.decodingError(
+            DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "Invalid fixture")
+            )
+        )
+        let viewModel = BriefingViewModel(
+            service: service,
+            initialIndexRetryDelays: [0, 0]
+        )
+
+        await viewModel.loadIndexIfNeeded()
+
+        XCTAssertEqual(service.indexEtags.count, 1)
+        guard case .error = viewModel.state else {
+            return XCTFail("Expected definitive initial failure to be fatal")
+        }
+    }
+
+    func testInitialIndexRetriesTransientTransportFailure() async {
+        let service = MockBriefingService()
+        service.indexErrors = [URLError(.networkConnectionLost), nil]
+        service.indexResults = [
+            .value(makeIndex(lenses: [makeLensSummary(key: "today")]), etag: "briefing-v1")
+        ]
+        service.lensResponses["today"] = makeLens(key: "today")
+        let viewModel = BriefingViewModel(
+            service: service,
+            initialIndexRetryDelays: [0]
+        )
+
+        await viewModel.loadIndexIfNeeded()
+
+        XCTAssertEqual(service.indexEtags.count, 2)
+        XCTAssertEqual(viewModel.state, .loaded)
+    }
+
+    func testFreshIndexSkipsLifecycleRevalidationUntilIntervalExpires() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(lenses: [makeLensSummary(key: "today")]), etag: "briefing-v1"),
+            .notModified
+        ]
+        service.lensResponses["today"] = makeLens(key: "today")
+        var now = Date(timeIntervalSince1970: 1_800_000_000)
+        let viewModel = BriefingViewModel(
+            service: service,
+            indexFreshnessInterval: 15 * 60,
+            now: { now }
+        )
+
+        await viewModel.loadIndexIfNeeded()
+        now.addTimeInterval(14 * 60)
+        await viewModel.loadIndexIfNeeded()
+
+        XCTAssertEqual(service.indexEtags.count, 1)
+
+        now.addTimeInterval(61)
+        await viewModel.loadIndexIfNeeded()
+
+        XCTAssertEqual(service.indexEtags, [nil, "briefing-v1"])
+    }
+
+    func testFreshRestoredSnapshotSkipsImmediateRevalidationAndLoadsWorkingSet() async {
+        let service = MockBriefingService()
+        let snapshotStore = MockBriefingSnapshotStore(userID: 1)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        service.lensResponses["today"] = makeLens(key: "today")
+        snapshotStore.snapshotToLoad = BriefingSnapshot(
+            userID: 1,
+            index: makeIndex(lenses: [makeLensSummary(key: "today")]),
+            etag: "etag-1",
+            selectedLensKey: "today",
+            lenses: [:],
+            lastValidatedAt: now.addingTimeInterval(-60),
+            savedAt: now.addingTimeInterval(-60)
+        )
+        let viewModel = BriefingViewModel(
+            service: service,
+            snapshotStore: snapshotStore,
+            indexFreshnessInterval: 15 * 60,
+            now: { now }
+        )
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+
+        XCTAssertTrue(service.indexEtags.isEmpty)
+        XCTAssertEqual(service.fetchLensKeys, ["today"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedLensKey, "today")
     }
 
     func testRefreshUsesETagAndKeepsExistingIndexOnNotModified() async {

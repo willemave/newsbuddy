@@ -414,7 +414,8 @@ enum RootDependencyFactory {
         )
 
         return TabCoordinatorViewModel(
-            briefingVM: briefingViewModel
+            briefingVM: briefingViewModel,
+            userID: userID
         )
     }
 }
