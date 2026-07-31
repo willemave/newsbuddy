@@ -393,7 +393,7 @@ def test_shared_controls_use_motion_tokens_for_common_state_animation() -> None:
         VIEWS_ROOT / "Components/StructuredSummaryView.swift",
         VIEWS_ROOT / "Components/ExpandableSection.swift",
         VIEWS_ROOT / "Components/LearningDeckReaderView.swift",
-        VIEWS_ROOT / "Components/DiscussionSheet.swift",
+        VIEWS_ROOT / "Components/CommunityDiscussionSummarySection.swift",
         VIEWS_ROOT / "KnowledgeView.swift",
         VIEWS_ROOT / "RecentlyReadView.swift",
         VIEWS_ROOT / "Onboarding/OnboardingFlowView.swift",

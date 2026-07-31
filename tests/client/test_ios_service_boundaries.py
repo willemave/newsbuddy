@@ -102,8 +102,8 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     detail_chat_coordinator_source = (
         REPO_ROOT / "client/newsly/newsly/ViewModels/DetailChatCoordinator.swift"
     ).read_text()
-    discussion_sheet_coordinator_source = (
-        REPO_ROOT / "client/newsly/newsly/ViewModels/DiscussionSheetCoordinator.swift"
+    discussion_summary_coordinator_source = (
+        REPO_ROOT / "client/newsly/newsly/ViewModels/DiscussionSummaryCoordinator.swift"
     ).read_text()
     podcast_audio_controller_source = (
         REPO_ROOT / "client/newsly/newsly/ViewModels/PodcastAudioController.swift"
@@ -225,20 +225,20 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "ChatService.shared" not in detail_chat_coordinator_source
     assert "ChatNavigationCoordinator.shared" not in detail_chat_coordinator_source
     assert "ToastService.shared" not in detail_chat_coordinator_source
-    assert "ContentService.shared" not in discussion_sheet_coordinator_source
+    assert "ContentService.shared" not in discussion_summary_coordinator_source
     assert "AudioEpisodeService.shared" not in podcast_audio_controller_source
     assert "NarrationPlaybackService.shared" not in podcast_audio_controller_source
     assert "ChatService.shared" not in content_detail_view_source
     assert "protocol DetailChatServicing" in detail_chat_coordinator_source
-    assert "protocol ContentDiscussionServicing" in discussion_sheet_coordinator_source
+    assert "protocol ContentDiscussionServicing" in discussion_summary_coordinator_source
     assert "protocol PodcastAudioEpisodeServicing" in podcast_audio_controller_source
     assert "static func makeContentDetailViewModel(" in app_chrome_source
     assert "static func makeDetailChatCoordinator()" in app_chrome_source
-    assert "static func makeDiscussionSheetCoordinator()" in app_chrome_source
+    assert "static func makeDiscussionSummaryCoordinator()" in app_chrome_source
     assert "static func makePodcastAudioController()" in app_chrome_source
     assert "RootDependencyFactory.makeContentDetailViewModel(" in content_detail_view_source
     assert "RootDependencyFactory.makeDetailChatCoordinator()" in content_detail_view_source
-    assert "RootDependencyFactory.makeDiscussionSheetCoordinator()" in content_detail_view_source
+    assert "RootDependencyFactory.makeDiscussionSummaryCoordinator()" in content_detail_view_source
     assert "RootDependencyFactory.makePodcastAudioController()" in content_detail_view_source
     assert "protocol ScraperSettingsServicing" in scraper_settings_view_model_source
     assert "private let service: any ScraperSettingsServicing" in scraper_settings_view_model_source
