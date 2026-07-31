@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -61,7 +61,9 @@ def test_admin_dashboard_shows_operational_readouts(client, db_session, test_use
                     task_type="summarize",
                     queue_name="content",
                     status="failed",
-                    created_at=now,
+                    created_at=now - timedelta(seconds=10),
+                    available_at=now - timedelta(seconds=8),
+                    started_at=now - timedelta(seconds=3),
                     completed_at=now,
                     error_message="Timeout while calling model",
                 ),
@@ -96,6 +98,11 @@ def test_admin_dashboard_shows_operational_readouts(client, db_session, test_use
         body = response.text
 
         assert "Queue Status" in body
+        assert "Task Latency" in body
+        assert "Ready Wait" in body
+        assert "Total Wait" in body
+        assert "Run Time" in body
+        assert "Run time measures the final attempt" in body
         assert "Task Phases" in body
         assert "Recent Failures (24h)" in body
         assert "User Lifecycle" in body

@@ -264,6 +264,20 @@ def _build_queue_health_dashboard(db: Session) -> dict[str, Any]:
             }
             for row in snapshot.activity[:10]
         ],
+        "latency": [
+            {
+                "queue_name": row.queue_name,
+                "task_type": row.task_type,
+                "sample_count": row.sample_count,
+                "ready_wait_p50": _format_duration_seconds(row.ready_wait_p50_seconds),
+                "ready_wait_p95": _format_duration_seconds(row.ready_wait_p95_seconds),
+                "total_wait_p50": _format_duration_seconds(row.total_wait_p50_seconds),
+                "total_wait_p95": _format_duration_seconds(row.total_wait_p95_seconds),
+                "run_time_p50": _format_duration_seconds(row.run_time_p50_seconds),
+                "run_time_p95": _format_duration_seconds(row.run_time_p95_seconds),
+            }
+            for row in snapshot.latency
+        ],
         "retry_buckets": snapshot.retry_buckets,
         "top_failures": snapshot.top_failures,
     }

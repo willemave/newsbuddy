@@ -39,6 +39,18 @@ class QueueTaskActivity(BaseModel):
     failed_count: int
 
 
+class QueueTaskLatency(BaseModel):
+    queue_name: str
+    task_type: str
+    sample_count: int
+    ready_wait_p50_seconds: float
+    ready_wait_p95_seconds: float
+    total_wait_p50_seconds: float
+    total_wait_p95_seconds: float
+    run_time_p50_seconds: float
+    run_time_p95_seconds: float
+
+
 class QueueFailureSummary(BaseModel):
     task_type: str
     error_message: str
@@ -51,6 +63,7 @@ class QueueHealthSnapshot(BaseModel):
     pending: list[QueueTaskBacklog]
     processing: list[QueueProcessingBacklog]
     activity: list[QueueTaskActivity]
+    latency: list[QueueTaskLatency]
     processing_count: int
     expired_lease_count: int
     retry_buckets: list[QueueRetryBucket]
@@ -86,6 +99,7 @@ def get_queue_health_snapshot(
     )
     retry_buckets = _retry_buckets(db)
     activity = _task_activity(db, cutoff=cutoff)
+    latency = _task_latency(db, cutoff=cutoff)
     recent_failed_count = int(
         db.query(func.count(ProcessingTask.id))
         .filter(ProcessingTask.status == TaskStatus.FAILED.value)
@@ -101,6 +115,7 @@ def get_queue_health_snapshot(
         pending=pending,
         processing=processing,
         activity=activity,
+        latency=latency,
         processing_count=processing_count,
         expired_lease_count=expired_lease_count,
         retry_buckets=retry_buckets,
@@ -233,6 +248,71 @@ def _task_activity(db: Session, *, cutoff: datetime) -> list[QueueTaskActivity]:
             failed_count=int(failed or 0),
         )
         for queue_name, task_type, enqueued, completed, failed in rows
+    ]
+
+
+def _task_latency(db: Session, *, cutoff: datetime) -> list[QueueTaskLatency]:
+    ready_wait_seconds = func.greatest(
+        func.extract("epoch", ProcessingTask.started_at - ProcessingTask.available_at),
+        0.0,
+    )
+    total_wait_seconds = func.greatest(
+        func.extract("epoch", ProcessingTask.started_at - ProcessingTask.created_at),
+        0.0,
+    )
+    run_time_seconds = func.greatest(
+        func.extract("epoch", ProcessingTask.completed_at - ProcessingTask.started_at),
+        0.0,
+    )
+    sample_count = func.count(ProcessingTask.id)
+    rows = (
+        db.query(
+            ProcessingTask.queue_name,
+            ProcessingTask.task_type,
+            sample_count,
+            func.percentile_cont(0.5).within_group(ready_wait_seconds),
+            func.percentile_cont(0.95).within_group(ready_wait_seconds),
+            func.percentile_cont(0.5).within_group(total_wait_seconds),
+            func.percentile_cont(0.95).within_group(total_wait_seconds),
+            func.percentile_cont(0.5).within_group(run_time_seconds),
+            func.percentile_cont(0.95).within_group(run_time_seconds),
+        )
+        .filter(ProcessingTask.status.in_((TaskStatus.COMPLETED.value, TaskStatus.FAILED.value)))
+        .filter(ProcessingTask.completed_at >= cutoff)
+        .filter(ProcessingTask.created_at.is_not(None))
+        .filter(ProcessingTask.available_at.is_not(None))
+        .filter(ProcessingTask.started_at.is_not(None))
+        .group_by(ProcessingTask.queue_name, ProcessingTask.task_type)
+        .order_by(
+            sample_count.desc(),
+            ProcessingTask.queue_name.asc(),
+            ProcessingTask.task_type.asc(),
+        )
+        .all()
+    )
+    return [
+        QueueTaskLatency(
+            queue_name=str(queue_name or "unknown"),
+            task_type=str(task_type or "unknown"),
+            sample_count=int(count or 0),
+            ready_wait_p50_seconds=float(ready_wait_p50 or 0.0),
+            ready_wait_p95_seconds=float(ready_wait_p95 or 0.0),
+            total_wait_p50_seconds=float(total_wait_p50 or 0.0),
+            total_wait_p95_seconds=float(total_wait_p95 or 0.0),
+            run_time_p50_seconds=float(run_time_p50 or 0.0),
+            run_time_p95_seconds=float(run_time_p95 or 0.0),
+        )
+        for (
+            queue_name,
+            task_type,
+            count,
+            ready_wait_p50,
+            ready_wait_p95,
+            total_wait_p50,
+            total_wait_p95,
+            run_time_p50,
+            run_time_p95,
+        ) in rows
     ]
 
 
