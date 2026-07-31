@@ -18,11 +18,17 @@ struct SettingsCouncilSection: View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(title: "Council")
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
                 sectionTitle
+                    .frame(minHeight: RowMetrics.compactHeight)
+
                 expertList
-                addExpertRow
-                footerRow
+
+                VStack(alignment: .leading, spacing: 12) {
+                    addExpertRow
+                    footerRow
+                }
+                .padding(.top, 12)
             }
             .padding(.horizontal, Spacing.rowHorizontal)
             .padding(.vertical, Spacing.rowVertical)
@@ -35,50 +41,60 @@ struct SettingsCouncilSection: View {
     private var sectionTitle: some View {
         HStack(spacing: 12) {
             SettingsIcon(systemName: "person.3.sequence.fill")
-                .frame(width: 36, height: 36, alignment: .leading)
 
             Text("Your Experts")
                 .font(.listTitle)
                 .foregroundStyle(Color.onSurface)
 
             Spacer(minLength: 8)
+
+            Text("\(personas.count)/\(CouncilPersona.maxExperts)")
+                .font(.listCaption)
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .monospacedDigit()
+                .accessibilityHidden(true)
         }
     }
 
+    /// Plain rows on hairlines rather than nested pills: the old pill was
+    /// `surfaceSecondary` on a `surfaceSecondary` card, so it never read as a
+    /// container — it just pushed the names out of line with everything else.
     private var expertList: some View {
         ForEach(Array(personas.enumerated()), id: \.element.id) { index, persona in
-            HStack(alignment: .top, spacing: 12) {
-                Circle()
-                    .fill(expertColor.opacity(0.15))
-                    .frame(width: 36, height: 36)
-                    .overlay(
-                        Text(persona.displayName.prefix(1).uppercased())
-                            .font(.appSans(size: 15, weight: .semibold))
-                            .foregroundStyle(expertColor)
-                    )
-                    .accessibilityHidden(true)
+            VStack(spacing: 0) {
+                Divider()
 
-                Text(persona.displayName)
-                    .font(.appBody)
-                    .foregroundStyle(Color.onSurface)
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(expertColor.opacity(0.12))
+                        .frame(width: Spacing.iconSize, height: Spacing.iconSize)
+                        .overlay(
+                            Text(persona.displayName.prefix(1).uppercased())
+                                .font(.appSans(size: 13, weight: .semibold))
+                                .foregroundStyle(expertColor)
+                        )
+                        .accessibilityHidden(true)
 
-                Spacer()
+                    Text(persona.displayName)
+                        .font(.listTitle)
+                        .foregroundStyle(Color.onSurface)
 
-                Button {
-                    onRemoveExpert(index)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.appSymbol(size: 20))
-                        .foregroundStyle(Color.onSurfaceSecondary.opacity(0.5))
-                        .frame(width: 44, height: 44)
+                    Spacer(minLength: 8)
+
+                    Button {
+                        onRemoveExpert(index)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.appSymbol(size: 18))
+                            .foregroundStyle(Color.onSurfaceSecondary.opacity(0.5))
+                            .frame(width: 44, height: 44, alignment: .trailing)
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("Remove \(persona.displayName)")
                 }
-                .buttonStyle(.plain)
-                .contentShape(Circle())
-                .accessibilityLabel("Remove \(persona.displayName)")
+                .frame(minHeight: RowMetrics.compactHeight)
             }
-            .padding(.vertical, 8)
-            .background(Color.surfaceSecondary.opacity(0.55))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 

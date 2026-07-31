@@ -26,7 +26,9 @@ struct SettingsSectionStack: View {
     let onOpenDebugMenu: () -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
+        // Section headers own the vertical rhythm (`Spacing.sectionTop`/`sectionBottom`),
+        // so the stack adds none of its own — otherwise every gap was doubled.
+        VStack(spacing: 0) {
             SettingsBrandHeader()
             SettingsAccountSection(
                 authState: authState,

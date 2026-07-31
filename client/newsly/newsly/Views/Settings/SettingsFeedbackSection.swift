@@ -21,6 +21,8 @@ struct SettingsFeedbackSection: View {
             }
             .buttonStyle(.plain)
             .settingsCard()
+            // Headerless card: match the leading gap a SectionHeader would provide.
+            .padding(.top, Spacing.sectionTop)
         }
     }
 }

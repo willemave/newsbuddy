@@ -12,10 +12,12 @@ struct SettingsAccountSection: View {
     let onSignOut: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: "Account")
+        // Signed out there is nothing to show, so the header goes with it rather
+        // than leaving a label hanging over empty space.
+        if case .authenticated(let user) = authState {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeader(title: "Account")
 
-            if case .authenticated(let user) = authState {
                 VStack(spacing: 0) {
                     AccountCard(user: user)
 
