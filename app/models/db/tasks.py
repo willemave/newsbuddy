@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Uuid,
     text,
 )
 
@@ -36,6 +37,7 @@ class ProcessingTask(Base):
     completed_at = Column(DateTime, nullable=True)
     locked_at = Column(DateTime, nullable=True)
     locked_by = Column(String(100), nullable=True, index=True)
+    lease_token = Column(Uuid(as_uuid=True), nullable=True)
     lease_expires_at = Column(DateTime, nullable=True, index=True)
 
     error_message = Column(Text, nullable=True)

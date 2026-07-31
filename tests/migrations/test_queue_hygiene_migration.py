@@ -23,6 +23,7 @@ def test_queue_hygiene_upgrade_and_downgrade(monkeypatch) -> None:
     )
     try:
         with harness.engine.begin() as connection:
+            connection.execute(text("ALTER TABLE processing_tasks DROP COLUMN lease_token"))
             connection.execute(text("DROP INDEX idx_task_status_available"))
             connection.execute(text("DROP INDEX idx_task_queue_status_available"))
             connection.execute(

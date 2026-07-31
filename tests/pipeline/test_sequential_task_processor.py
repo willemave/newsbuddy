@@ -3,6 +3,7 @@
 import subprocess
 import sys
 from unittest.mock import Mock, patch
+from uuid import UUID
 
 import pytest
 from sqlalchemy.exc import OperationalError
@@ -12,6 +13,17 @@ from app.pipeline.sequential_task_processor import SequentialTaskProcessor
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.task_specs import TASK_SPECS
 from app.services.queue import TaskQueue, TaskType
+
+CLAIM_TOKEN = UUID("00000000-0000-0000-0000-000000000001")
+
+
+def _owned_task_data(**overrides: object) -> dict[str, object]:
+    task_data: dict[str, object] = {
+        "locked_by": "content-processor-1",
+        "lease_token": CLAIM_TOKEN,
+    }
+    task_data.update(overrides)
+    return task_data
 
 
 @pytest.fixture
@@ -24,6 +36,7 @@ def processor():
         mock_queue_service_cls._normalize_queue_name.return_value = "content"
         instance = SequentialTaskProcessor()
         instance.queue_service = Mock()
+        instance.queue_service.finalize_task.return_value = {"status": "completed"}
         instance.llm_service = Mock()
         instance.dispatcher = Mock()
         return instance
@@ -179,13 +192,18 @@ class TestSequentialTaskProcessor:
 
     def test_run_processes_tasks_sequentially(self, processor):
         """Test that run method processes tasks sequentially."""
-        task1 = {"id": 1, "task_type": TaskType.SCRAPE.value, "retry_count": 0, "payload": {}}
-        task2 = {
-            "id": 2,
-            "task_type": TaskType.PROCESS_CONTENT.value,
-            "retry_count": 0,
-            "content_id": 123,
-        }
+        task1 = _owned_task_data(
+            id=1,
+            task_type=TaskType.SCRAPE.value,
+            retry_count=0,
+            payload={},
+        )
+        task2 = _owned_task_data(
+            id=2,
+            task_type=TaskType.PROCESS_CONTENT.value,
+            retry_count=0,
+            content_id=123,
+        )
 
         processor.queue_service.dequeue.side_effect = [task1, task2, None]
         processor.process_task = Mock(return_value=TaskResult.ok())
@@ -196,31 +214,37 @@ class TestSequentialTaskProcessor:
         assert processor.process_task.call_count == 2
         processor.queue_service.finalize_task.assert_any_call(
             1,
+            worker_id="content-processor-1",
+            lease_token=CLAIM_TOKEN,
             success=True,
             error_message=None,
             retryable=True,
             current_retry_count=0,
             max_retries=processor.settings.max_retries,
             retry_delay_seconds=None,
+            deferred=False,
         )
         processor.queue_service.finalize_task.assert_any_call(
             2,
+            worker_id="content-processor-1",
+            lease_token=CLAIM_TOKEN,
             success=True,
             error_message=None,
             retryable=True,
             current_retry_count=0,
             max_retries=processor.settings.max_retries,
             retry_delay_seconds=None,
+            deferred=False,
         )
 
     def test_run_retry_logic(self, processor):
         """Test retry logic for failed tasks."""
-        task_data = {
-            "id": 1,
-            "task_type": TaskType.PROCESS_PODCAST_MEDIA.value,
-            "retry_count": 1,
-            "content_id": 789,
-        }
+        task_data = _owned_task_data(
+            id=1,
+            task_type=TaskType.PROCESS_PODCAST_MEDIA.value,
+            retry_count=1,
+            content_id=789,
+        )
 
         call_count = 0
 
@@ -241,21 +265,50 @@ class TestSequentialTaskProcessor:
 
         processor.queue_service.finalize_task.assert_called_once_with(
             1,
+            worker_id="content-processor-1",
+            lease_token=CLAIM_TOKEN,
             success=False,
             error_message="boom",
             retryable=True,
             current_retry_count=1,
             max_retries=3,
             retry_delay_seconds=120,
+            deferred=False,
         )
 
+    def test_run_does_not_count_success_when_finalization_is_rejected(self, processor):
+        task_data = _owned_task_data(
+            id=1,
+            task_type=TaskType.SCRAPE.value,
+            retry_count=0,
+            payload={},
+        )
+        call_count = 0
+
+        def mock_dequeue(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return task_data
+            processor.running = False
+            return None
+
+        processor.queue_service.dequeue.side_effect = mock_dequeue
+        processor.queue_service.finalize_task.return_value = None
+        processor.process_task = Mock(return_value=TaskResult.ok())
+
+        with patch("app.pipeline.sequential_task_processor.setup_logging"):
+            processed_count = processor.run()
+
+        assert processed_count == 0
+
     def test_run_deferral_preserves_retry_budget(self, processor):
-        task_data = {
-            "id": 1,
-            "task_type": TaskType.RUN_LLM_TASK.value,
-            "retry_count": 3,
-            "payload": {"llm_task_id": 7},
-        }
+        task_data = _owned_task_data(
+            id=1,
+            task_type=TaskType.RUN_LLM_TASK.value,
+            retry_count=3,
+            payload={"llm_task_id": 7},
+        )
         processor.process_task = Mock(return_value=TaskResult.defer(retry_delay_seconds=90))
 
         with patch("app.pipeline.sequential_task_processor.setup_logging"):
@@ -264,6 +317,8 @@ class TestSequentialTaskProcessor:
         assert success is False
         processor.queue_service.finalize_task.assert_called_once_with(
             1,
+            worker_id="content-processor-1",
+            lease_token=CLAIM_TOKEN,
             success=False,
             error_message=None,
             retryable=False,
@@ -275,12 +330,12 @@ class TestSequentialTaskProcessor:
 
     def test_run_max_retries_exceeded(self, processor):
         """Test behavior when max retries exceeded."""
-        task_data = {
-            "id": 1,
-            "task_type": TaskType.PROCESS_PODCAST_MEDIA.value,
-            "retry_count": 3,
-            "content_id": 999,
-        }
+        task_data = _owned_task_data(
+            id=1,
+            task_type=TaskType.PROCESS_PODCAST_MEDIA.value,
+            retry_count=3,
+            content_id=999,
+        )
 
         call_count = 0
 
@@ -301,12 +356,15 @@ class TestSequentialTaskProcessor:
 
         processor.queue_service.finalize_task.assert_called_once_with(
             1,
+            worker_id="content-processor-1",
+            lease_token=CLAIM_TOKEN,
             success=False,
             error_message="boom",
             retryable=True,
             current_retry_count=3,
             max_retries=3,
             retry_delay_seconds=None,
+            deferred=False,
         )
 
     def test_run_empty_queue_backoff(self, processor):
@@ -333,12 +391,12 @@ class TestSequentialTaskProcessor:
 
     def test_run_single_task(self, processor):
         """Test run_single_task method."""
-        task_data = {
-            "id": 1,
-            "task_type": TaskType.PROCESS_CONTENT.value,
-            "retry_count": 0,
-            "content_id": 123,
-        }
+        task_data = _owned_task_data(
+            id=1,
+            task_type=TaskType.PROCESS_CONTENT.value,
+            retry_count=0,
+            content_id=123,
+        )
 
         processor.process_task = Mock(return_value=TaskResult.ok())
 
@@ -349,22 +407,25 @@ class TestSequentialTaskProcessor:
         processor.process_task.assert_called_once()
         processor.queue_service.finalize_task.assert_called_once_with(
             1,
+            worker_id="content-processor-1",
+            lease_token=CLAIM_TOKEN,
             success=True,
             error_message=None,
             retryable=True,
             current_retry_count=0,
             max_retries=processor.settings.max_retries,
             retry_delay_seconds=None,
+            deferred=False,
         )
 
     def test_run_single_task_with_retry(self, processor):
         """Test run_single_task with failed task that should retry."""
-        task_data = {
-            "id": 1,
-            "task_type": TaskType.PROCESS_PODCAST_MEDIA.value,
-            "retry_count": 0,
-            "content_id": 456,
-        }
+        task_data = _owned_task_data(
+            id=1,
+            task_type=TaskType.PROCESS_PODCAST_MEDIA.value,
+            retry_count=0,
+            content_id=456,
+        )
 
         processor.process_task = Mock(return_value=TaskResult.fail("boom"))
         processor.settings.max_retries = 3
@@ -375,21 +436,20 @@ class TestSequentialTaskProcessor:
         assert result is False
         processor.queue_service.finalize_task.assert_called_once_with(
             1,
+            worker_id="content-processor-1",
+            lease_token=CLAIM_TOKEN,
             success=False,
             error_message="boom",
             retryable=True,
             current_retry_count=0,
             max_retries=3,
             retry_delay_seconds=60,
+            deferred=False,
         )
 
     def test_run_single_task_with_invalid_payload(self, processor):
         """Test run_single_task handles invalid payloads gracefully."""
-        task_data = {
-            "id": 1,
-            "task_type": "INVALID_TYPE",
-            "retry_count": 0,
-        }
+        task_data = _owned_task_data(id=1, task_type="INVALID_TYPE", retry_count=0)
 
         with patch("app.pipeline.sequential_task_processor.setup_logging"):
             result = processor.run_single_task(task_data)
@@ -397,12 +457,15 @@ class TestSequentialTaskProcessor:
         assert result is False
         processor.queue_service.finalize_task.assert_called_once_with(
             1,
+            worker_id="content-processor-1",
+            lease_token=CLAIM_TOKEN,
             success=False,
             error_message="Invalid task payload",
             retryable=False,
             current_retry_count=0,
             max_retries=processor.settings.max_retries,
             retry_delay_seconds=None,
+            deferred=False,
         )
 
     def test_process_task_exception_handling(self, processor):
@@ -441,7 +504,12 @@ class TestSequentialTaskProcessor:
 
     def test_run_ignores_task_finalization_lock_error(self, processor):
         """A finalization lock error should not crash the worker loop."""
-        task_data = {"id": 1, "task_type": TaskType.SCRAPE.value, "retry_count": 0, "payload": {}}
+        task_data = _owned_task_data(
+            id=1,
+            task_type=TaskType.SCRAPE.value,
+            retry_count=0,
+            payload={},
+        )
         call_count = 0
 
         def mock_dequeue(*args, **kwargs):

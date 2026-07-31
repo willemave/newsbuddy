@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.models.contracts import TaskType
+from app.models.internal.queue import ClaimedTask
 from app.pipeline.retry_policy import retry_will_be_scheduled
-from app.services.queue import TaskType
 
 
 class TaskEnvelope(BaseModel):
     """Normalized task payload from the queue."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", from_attributes=True)
 
     id: int
     task_type: TaskType
@@ -25,6 +28,9 @@ class TaskEnvelope(BaseModel):
     queue_name: str | None = None
     created_at: datetime | None = None
     started_at: datetime | None = None
+    locked_by: str | None = None
+    lease_token: UUID | None = None
+    lease_expires_at: datetime | None = None
 
     @field_validator("payload", mode="before")
     @classmethod
@@ -37,8 +43,11 @@ class TaskEnvelope(BaseModel):
         return {}
 
     @classmethod
-    def from_queue_data(cls, task_data: dict[str, Any]) -> TaskEnvelope:
-        """Build a TaskEnvelope from raw queue data."""
+    def from_queue_data(
+        cls,
+        task_data: ClaimedTask | Mapping[str, Any],
+    ) -> TaskEnvelope:
+        """Build an execution envelope from a claimed task or test mapping."""
         return cls.model_validate(task_data)
 
 

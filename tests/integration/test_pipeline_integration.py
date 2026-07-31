@@ -130,10 +130,14 @@ class TestPipelineIntegration:
             task = queue_service.dequeue(worker_id="test-worker")
             if task:
                 result = processor.process_task(TaskEnvelope.from_queue_data(task))
-                queue_service.complete_task(
-                    task["id"],
+                queue_service.finalize_task(
+                    task.id,
+                    worker_id=task.locked_by,
+                    lease_token=task.lease_token,
                     success=result.success,
                     error_message=result.error_message,
+                    retryable=result.retryable,
+                    current_retry_count=task.retry_count,
                 )
 
             summarize_task = queue_service.dequeue(
@@ -141,10 +145,14 @@ class TestPipelineIntegration:
             )
             if summarize_task:
                 result = processor.process_task(TaskEnvelope.from_queue_data(summarize_task))
-                queue_service.complete_task(
-                    summarize_task["id"],
+                queue_service.finalize_task(
+                    summarize_task.id,
+                    worker_id=summarize_task.locked_by,
+                    lease_token=summarize_task.lease_token,
                     success=result.success,
                     error_message=result.error_message,
+                    retryable=result.retryable,
+                    current_retry_count=summarize_task.retry_count,
                 )
 
             # Verify content was processed
@@ -203,17 +211,23 @@ class TestPipelineIntegration:
             result = processor.process_task(TaskEnvelope.from_queue_data(task))
             assert result.success is False
 
-            # Check task was marked for retry
-            queue_service.complete_task(task["id"], success=False)
-
-            # Should be able to retry
-            queue_service.retry_task(task["id"], delay_seconds=0)
+            # Check task was atomically scheduled for retry.
+            transition = queue_service.finalize_task(
+                task.id,
+                worker_id=task.locked_by,
+                lease_token=task.lease_token,
+                success=False,
+                error_message=result.error_message,
+                retryable=True,
+                current_retry_count=task.retry_count,
+                max_retries=3,
+                retry_delay_seconds=0,
+            )
+            assert transition is not None
 
             # Check retry count increased
             with get_db() as db:
-                updated_task = (
-                    db.query(ProcessingTask).filter(ProcessingTask.id == task["id"]).first()
-                )
+                updated_task = db.query(ProcessingTask).filter(ProcessingTask.id == task.id).first()
                 assert updated_task.retry_count == 1
                 assert updated_task.status == "pending"
 
@@ -274,18 +288,26 @@ class TestPipelineIntegration:
 
             if worker1_task:
                 result = processor.process_task(TaskEnvelope.from_queue_data(worker1_task))
-                queue_service.complete_task(
-                    worker1_task["id"],
+                queue_service.finalize_task(
+                    worker1_task.id,
+                    worker_id=worker1_task.locked_by,
+                    lease_token=worker1_task.lease_token,
                     success=result.success,
                     error_message=result.error_message,
+                    retryable=result.retryable,
+                    current_retry_count=worker1_task.retry_count,
                 )
 
             if worker2_task:
                 result = processor.process_task(TaskEnvelope.from_queue_data(worker2_task))
-                queue_service.complete_task(
-                    worker2_task["id"],
+                queue_service.finalize_task(
+                    worker2_task.id,
+                    worker_id=worker2_task.locked_by,
+                    lease_token=worker2_task.lease_token,
                     success=result.success,
                     error_message=result.error_message,
+                    retryable=result.retryable,
+                    current_retry_count=worker2_task.retry_count,
                 )
 
             # Verify both tasks were processed

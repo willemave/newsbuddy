@@ -173,13 +173,19 @@ class TestPipelineWithRealData:
         # Dequeue the task
         task = queue_service.dequeue(worker_id="test-worker")
         assert task is not None
-        assert task["content_id"] == content.id
+        assert task.content_id == content.id
 
         # Mark task complete
-        queue_service.complete_task(task["id"], success=True)
+        queue_service.finalize_task(
+            task.id,
+            worker_id=task.locked_by,
+            lease_token=task.lease_token,
+            success=True,
+            current_retry_count=task.retry_count,
+        )
 
         # Verify task is completed
-        completed_task = db_session.query(ProcessingTask).filter_by(id=task["id"]).first()
+        completed_task = db_session.query(ProcessingTask).filter_by(id=task.id).first()
         assert completed_task.status == "completed"
 
     @pytest.mark.integration

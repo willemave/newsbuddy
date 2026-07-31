@@ -50,7 +50,7 @@ def _process_analyze_tasks(queue: QueueService) -> list[int]:
         if not task:
             break
         processor.run_single_task(task)
-        processed.append(task["id"])
+        processed.append(task.id)
 
     return processed
 

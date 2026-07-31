@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.db import ProcessingTask
+from app.models.internal.queue import ClaimedTask
 from app.services.queue import (
     QueueService,
     TaskEnqueueRequest,
@@ -30,8 +31,20 @@ def _patch_db(monkeypatch, db_session) -> QueueService:
     return QueueService()
 
 
-def test_complete_task_sets_default_error_message(db_session, monkeypatch):
-    """QueueService fills a default error message when missing."""
+def _claim_task(
+    queue: QueueService,
+    task: ProcessingTask,
+    *,
+    worker_id: str,
+) -> ClaimedTask:
+    claimed = queue.dequeue(worker_id=worker_id, queue_name=task.queue_name)
+    assert claimed is not None
+    assert claimed.id == task.id
+    return claimed
+
+
+def test_finalize_task_sets_default_error_message(db_session, monkeypatch):
+    """QueueService fills a default error message for a terminal failure."""
     queue = _patch_db(monkeypatch, db_session)
 
     task = ProcessingTask(
@@ -45,9 +58,21 @@ def test_complete_task_sets_default_error_message(db_session, monkeypatch):
     db_session.commit()
     db_session.refresh(task)
 
-    queue.complete_task(task.id, success=False, error_message=None)
+    claimed = _claim_task(queue, task, worker_id="worker-failure")
+    transition = queue.finalize_task(
+        claimed.id,
+        worker_id=claimed.locked_by,
+        lease_token=claimed.lease_token,
+        success=False,
+        error_message=None,
+        retryable=False,
+        current_retry_count=claimed.retry_count,
+    )
 
-    refreshed = db_session.query(ProcessingTask).filter(ProcessingTask.id == task.id).first()
+    db_session.refresh(task)
+    refreshed = task
+    assert transition is not None
+    assert transition.status is TaskStatus.FAILED
     assert refreshed is not None
     assert refreshed.status == TaskStatus.FAILED.value
     assert refreshed.error_message == "Task failed without error details"
@@ -60,22 +85,24 @@ def test_finalize_task_retryable_failure_requeues_in_one_step(db_session, monkey
     task = ProcessingTask(
         task_type=TaskType.PROCESS_CONTENT.value,
         payload={"user_id": 1},
-        status=TaskStatus.PROCESSING.value,
+        status=TaskStatus.PENDING.value,
         queue_name=TaskQueue.CONTENT.value,
         retry_count=0,
-        started_at=datetime.now(UTC) - timedelta(minutes=5),
     )
     db_session.add(task)
     db_session.commit()
     db_session.refresh(task)
     original_created_at = task.created_at
 
+    claimed = _claim_task(queue, task, worker_id="worker-retry")
     transition = queue.finalize_task(
-        task.id,
+        claimed.id,
+        worker_id=claimed.locked_by,
+        lease_token=claimed.lease_token,
         success=False,
         error_message="database is locked",
         retryable=True,
-        current_retry_count=task.retry_count,
+        current_retry_count=claimed.retry_count,
         max_retries=3,
         retry_delay_seconds=120,
     )
@@ -89,6 +116,7 @@ def test_finalize_task_retryable_failure_requeues_in_one_step(db_session, monkey
     assert task.error_message == "database is locked"
     assert task.locked_at is None
     assert task.locked_by is None
+    assert task.lease_token is None
     assert task.lease_expires_at is None
     assert task.created_at == original_created_at
     assert task.available_at >= datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=110)
@@ -102,17 +130,19 @@ def test_finalize_task_deferral_preserves_retry_budget_and_clears_error(
     task = ProcessingTask(
         task_type=TaskType.RUN_LLM_TASK.value,
         payload={"llm_task_id": 7},
-        status=TaskStatus.PROCESSING.value,
+        status=TaskStatus.PENDING.value,
         queue_name=TaskQueue.CONTENT.value,
         retry_count=3,
         error_message="stale error",
-        started_at=datetime.now(UTC) - timedelta(minutes=5),
     )
     db_session.add(task)
     db_session.commit()
 
+    claimed = _claim_task(queue, task, worker_id="worker-defer")
     transition = queue.finalize_task(
-        task.id,
+        claimed.id,
+        worker_id=claimed.locked_by,
+        lease_token=claimed.lease_token,
         success=False,
         retryable=False,
         current_retry_count=3,
@@ -122,7 +152,7 @@ def test_finalize_task_deferral_preserves_retry_budget_and_clears_error(
 
     db_session.refresh(task)
     assert transition is not None
-    assert transition["deferred"] is True
+    assert transition.deferred is True
     assert task.status == TaskStatus.PENDING.value
     assert task.retry_count == 3
     assert task.error_message is None
@@ -130,6 +160,7 @@ def test_finalize_task_deferral_preserves_retry_budget_and_clears_error(
     assert task.completed_at is None
     assert task.locked_at is None
     assert task.locked_by is None
+    assert task.lease_token is None
     assert task.lease_expires_at is None
     assert task.available_at >= datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=110)
 
@@ -398,8 +429,8 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
         queue_name=TaskQueue.ONBOARDING,
     )
     assert onboarding_task is not None
-    assert onboarding_task["task_type"] == TaskType.ONBOARDING_DISCOVER.value
-    assert onboarding_task["queue_name"] == TaskQueue.ONBOARDING.value
+    assert onboarding_task.task_type == TaskType.ONBOARDING_DISCOVER.value
+    assert onboarding_task.queue_name == TaskQueue.ONBOARDING.value
 
     second_onboarding_task = queue.dequeue(
         worker_id="onboarding-test",
@@ -409,44 +440,44 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
 
     content_task = queue.dequeue(worker_id="content-test", queue_name=TaskQueue.CONTENT)
     assert content_task is not None
-    assert content_task["task_type"] == TaskType.SUMMARIZE.value
-    assert content_task["queue_name"] == TaskQueue.CONTENT.value
+    assert content_task.task_type == TaskType.SUMMARIZE.value
+    assert content_task.queue_name == TaskQueue.CONTENT.value
 
     podcast_media_task = queue.dequeue(worker_id="media-test", queue_name=TaskQueue.MEDIA)
     assert podcast_media_task is not None
-    assert podcast_media_task["task_type"] == TaskType.PROCESS_PODCAST_MEDIA.value
-    assert podcast_media_task["queue_name"] == TaskQueue.MEDIA.value
+    assert podcast_media_task.task_type == TaskType.PROCESS_PODCAST_MEDIA.value
+    assert podcast_media_task.queue_name == TaskQueue.MEDIA.value
 
     audio_episode_task = queue.dequeue(
         worker_id="audio-episode-test",
         queue_name=TaskQueue.AUDIO_EPISODE,
     )
     assert audio_episode_task is not None
-    assert audio_episode_task["task_type"] == TaskType.GENERATE_AUDIO_EPISODE.value
-    assert audio_episode_task["queue_name"] == TaskQueue.AUDIO_EPISODE.value
+    assert audio_episode_task.task_type == TaskType.GENERATE_AUDIO_EPISODE.value
+    assert audio_episode_task.queue_name == TaskQueue.AUDIO_EPISODE.value
 
     backfill_task = queue.dequeue(worker_id="backfill-test", queue_name=TaskQueue.BACKFILL)
     assert backfill_task is not None
-    assert backfill_task["task_type"] == TaskType.BACKFILL_FEEDS.value
-    assert backfill_task["queue_name"] == TaskQueue.BACKFILL.value
+    assert backfill_task.task_type == TaskType.BACKFILL_FEEDS.value
+    assert backfill_task.queue_name == TaskQueue.BACKFILL.value
 
     discussion_task = queue.dequeue(
         worker_id="discussion-test",
         queue_name=TaskQueue.DISCUSSION,
     )
     assert discussion_task is not None
-    assert discussion_task["task_type"] == TaskType.FETCH_DISCUSSION.value
-    assert discussion_task["queue_name"] == TaskQueue.DISCUSSION.value
+    assert discussion_task.task_type == TaskType.FETCH_DISCUSSION.value
+    assert discussion_task.queue_name == TaskQueue.DISCUSSION.value
 
     chat_task = queue.dequeue(worker_id="chat-test", queue_name=TaskQueue.CHAT)
     assert chat_task is not None
-    assert chat_task["task_type"] == TaskType.DIG_DEEPER.value
-    assert chat_task["queue_name"] == TaskQueue.CHAT.value
+    assert chat_task.task_type == TaskType.DIG_DEEPER.value
+    assert chat_task.queue_name == TaskQueue.CHAT.value
 
     twitter_task = queue.dequeue(worker_id="twitter-test", queue_name=TaskQueue.TWITTER)
     assert twitter_task is not None
-    assert twitter_task["task_type"] == TaskType.SYNC_INTEGRATION.value
-    assert twitter_task["queue_name"] == TaskQueue.TWITTER.value
+    assert twitter_task.task_type == TaskType.SYNC_INTEGRATION.value
+    assert twitter_task.queue_name == TaskQueue.TWITTER.value
 
 
 def test_dequeue_claims_task_with_lease_metadata(db_session, monkeypatch):
@@ -468,18 +499,21 @@ def test_dequeue_claims_task_with_lease_metadata(db_session, monkeypatch):
     dequeued = queue.dequeue(worker_id="worker-lease", queue_name=TaskQueue.CONTENT)
 
     assert dequeued is not None
-    assert dequeued["id"] == task.id
-    assert dequeued["status"] == TaskStatus.PROCESSING.value
-    assert dequeued["locked_by"] == "worker-lease"
-    assert dequeued["locked_at"] is not None
-    assert dequeued["lease_expires_at"] is not None
-    assert dequeued["available_at"] == task.available_at
+    assert dequeued.id == task.id
+    assert dequeued.status == TaskStatus.PROCESSING.value
+    assert dequeued.locked_by == "worker-lease"
+    assert dequeued.locked_at is not None
+    assert dequeued.lease_token is not None
+    assert dequeued.lease_expires_at is not None
+    assert dequeued.available_at == task.available_at
 
-    refreshed = db_session.query(ProcessingTask).filter(ProcessingTask.id == task.id).first()
+    db_session.refresh(task)
+    refreshed = task
     assert refreshed is not None
     assert refreshed.status == TaskStatus.PROCESSING.value
     assert refreshed.locked_by == "worker-lease"
     assert refreshed.locked_at is not None
+    assert refreshed.lease_token == dequeued.lease_token
     assert refreshed.lease_expires_at is not None
 
 
@@ -506,11 +540,13 @@ def test_dequeue_reclaims_expired_processing_task(db_session, monkeypatch):
     dequeued = queue.dequeue(worker_id="worker-reclaim", queue_name=TaskQueue.CONTENT)
 
     assert dequeued is not None
-    assert dequeued["id"] == task.id
-    assert dequeued["locked_by"] == "worker-reclaim"
-    assert dequeued["lease_expires_at"] is not None
+    assert dequeued.id == task.id
+    assert dequeued.locked_by == "worker-reclaim"
+    assert dequeued.lease_token is not None
+    assert dequeued.lease_expires_at is not None
 
-    refreshed = db_session.query(ProcessingTask).filter(ProcessingTask.id == task.id).first()
+    db_session.refresh(task)
+    refreshed = task
     assert refreshed is not None
     assert refreshed.status == TaskStatus.PROCESSING.value
     assert refreshed.locked_by == "worker-reclaim"
@@ -525,21 +561,23 @@ def test_renew_lease_extends_processing_task(db_session, monkeypatch):
 
     task = ProcessingTask(
         task_type=TaskType.SUMMARIZE.value,
-        status=TaskStatus.PROCESSING.value,
+        status=TaskStatus.PENDING.value,
         payload={},
         queue_name=TaskQueue.CONTENT.value,
         available_at=now - timedelta(minutes=1),
-        started_at=now - timedelta(minutes=1),
-        locked_at=now - timedelta(seconds=30),
-        locked_by="worker-lease",
-        lease_expires_at=now + timedelta(seconds=10),
     )
     db_session.add(task)
     db_session.commit()
     db_session.refresh(task)
 
-    original_expiry = task.lease_expires_at
-    renewed = queue.renew_lease(task.id, worker_id="worker-lease", lease_seconds=120)
+    claimed = _claim_task(queue, task, worker_id="worker-lease")
+    original_expiry = claimed.lease_expires_at
+    renewed = queue.renew_lease(
+        task.id,
+        worker_id="worker-lease",
+        lease_token=claimed.lease_token,
+        lease_seconds=600,
+    )
 
     assert renewed is True
     db_session.refresh(task)
@@ -547,6 +585,95 @@ def test_renew_lease_extends_processing_task(db_session, monkeypatch):
     assert task.lease_expires_at is not None
     assert original_expiry is not None
     assert task.lease_expires_at > original_expiry
+
+
+def test_expired_lease_cannot_be_renewed_or_finalized(db_session, monkeypatch):
+    """Once a claim expires, its owner cannot revive or complete it."""
+    queue = _patch_db(monkeypatch, db_session)
+    task = ProcessingTask(
+        task_type=TaskType.SUMMARIZE.value,
+        status=TaskStatus.PENDING.value,
+        payload={},
+        queue_name=TaskQueue.CONTENT.value,
+    )
+    db_session.add(task)
+    db_session.commit()
+    claimed = _claim_task(queue, task, worker_id="expired-worker")
+
+    task.lease_expires_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
+    db_session.commit()
+
+    assert (
+        queue.renew_lease(
+            task.id,
+            worker_id=claimed.locked_by,
+            lease_token=claimed.lease_token,
+            lease_seconds=120,
+        )
+        is False
+    )
+    assert (
+        queue.finalize_task(
+            task.id,
+            worker_id=claimed.locked_by,
+            lease_token=claimed.lease_token,
+            success=True,
+            current_retry_count=claimed.retry_count,
+        )
+        is None
+    )
+
+    db_session.refresh(task)
+    assert task.status == TaskStatus.PROCESSING.value
+    assert task.lease_token == claimed.lease_token
+
+
+def test_reclaim_token_blocks_stale_same_named_worker(db_session, monkeypatch):
+    """A stable worker name cannot finalize an older claim after reclaim."""
+    queue = _patch_db(monkeypatch, db_session)
+    task = ProcessingTask(
+        task_type=TaskType.SUMMARIZE.value,
+        status=TaskStatus.PENDING.value,
+        payload={},
+        queue_name=TaskQueue.CONTENT.value,
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    first_claim = _claim_task(queue, task, worker_id="content-processor-1-t1")
+    task.lease_expires_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
+    db_session.commit()
+    second_claim = _claim_task(queue, task, worker_id="content-processor-1-t1")
+
+    assert second_claim.lease_token != first_claim.lease_token
+    assert (
+        queue.finalize_task(
+            task.id,
+            worker_id=first_claim.locked_by,
+            lease_token=first_claim.lease_token,
+            success=True,
+            current_retry_count=first_claim.retry_count,
+        )
+        is None
+    )
+
+    db_session.refresh(task)
+    assert task.status == TaskStatus.PROCESSING.value
+    assert task.lease_token == second_claim.lease_token
+
+    transition = queue.finalize_task(
+        task.id,
+        worker_id=second_claim.locked_by,
+        lease_token=second_claim.lease_token,
+        success=True,
+        current_retry_count=second_claim.retry_count,
+    )
+    assert transition is not None
+    assert transition.status is TaskStatus.COMPLETED
+    db_session.refresh(task)
+    assert task.status == TaskStatus.COMPLETED.value
+    assert task.locked_by is None
+    assert task.lease_token is None
 
 
 def test_get_queue_stats_reports_pending_by_queue(db_session, monkeypatch):
@@ -661,7 +788,7 @@ def test_dequeue_respects_retry_delay_schedule(db_session, monkeypatch):
     second = queue.dequeue(worker_id="worker-b", queue_name=TaskQueue.CONTENT)
 
     assert first is not None
-    assert first["id"] == ready_task.id
+    assert first.id == ready_task.id
     assert second is None
 
 
@@ -705,5 +832,5 @@ def test_dequeue_rotates_retry_buckets(db_session, monkeypatch):
 
     assert first is not None
     assert second is not None
-    assert first["id"] == retry_zero_oldest.id
-    assert second["id"] == retry_one_task.id
+    assert first.id == retry_zero_oldest.id
+    assert second.id == retry_one_task.id

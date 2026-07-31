@@ -1,8 +1,9 @@
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, or_
 
 from app.core.db import get_db
 from app.core.logging import get_logger
@@ -10,8 +11,14 @@ from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
 from app.models.db import ProcessingTask
+from app.models.internal.queue import ClaimedTask, TaskTransition
 from app.pipeline.retry_policy import retry_will_be_scheduled
 from app.pipeline.task_specs import TASK_SPECS
+from app.repositories.processing_task_queue_repository import (
+    FinalizationOutcome,
+    FinalizeTaskRequest,
+    ProcessingTaskQueueRepository,
+)
 from app.services.queue_enqueue import (
     QueueEnqueueMixin,
     TaskEnqueueRequest,
@@ -55,11 +62,6 @@ TASK_QUEUE_VALUE_BY_TYPE: dict[str, str] = {
 RETRY_BUCKET_CACHE_SECONDS = 5.0
 
 
-def _utc_now() -> datetime:
-    """Return the repo's normalized naive-UTC timestamp shape."""
-    return datetime.now(UTC).replace(tzinfo=None)
-
-
 def _task_lease_seconds() -> int:
     """Return the default worker lease duration in seconds."""
     settings = get_settings()
@@ -90,7 +92,7 @@ def build_task_queue_mismatch_filter(task_type: TaskType | str | None = None):
     )
 
 
-def _log_dequeued_task(task_data: dict[str, Any], *, worker_id: str) -> None:
+def _log_dequeued_task(task: ClaimedTask, *, worker_id: str) -> None:
     """Emit the standard log for a claimed task."""
     logger.debug(
         "Task dequeued",
@@ -99,39 +101,16 @@ def _log_dequeued_task(task_data: dict[str, Any], *, worker_id: str) -> None:
             operation="dequeue",
             event_name="task.dequeued",
             status="started",
-            task_id=task_data["id"],
-            task_type=task_data["task_type"],
-            queue_name=task_data["queue_name"],
+            task_id=task.id,
+            task_type=task.task_type,
+            queue_name=task.queue_name,
             worker_id=worker_id,
-            content_id=task_data["content_id"],
+            content_id=task.content_id,
             context_data={
-                "retry_count": task_data["retry_count"],
-                "lease_expires_at": task_data["lease_expires_at"].isoformat()
-                if task_data["lease_expires_at"] is not None
-                else None,
+                "retry_count": task.retry_count,
+                "lease_token": str(task.lease_token),
+                "lease_expires_at": task.lease_expires_at.isoformat(),
             },
-        ),
-    )
-
-
-def _clear_task_lease(task: ProcessingTask) -> None:
-    """Clear lease ownership fields on a task row."""
-    task.locked_at = None
-    task.locked_by = None
-    task.lease_expires_at = None
-
-
-def _claimable_task_filters(now: datetime):
-    """Return the predicate for tasks that are ready to be claimed."""
-    return or_(
-        and_(
-            ProcessingTask.status == TaskStatus.PENDING.value,
-            ProcessingTask.available_at <= now,
-        ),
-        and_(
-            ProcessingTask.status == TaskStatus.PROCESSING.value,
-            ProcessingTask.lease_expires_at.is_not(None),
-            ProcessingTask.lease_expires_at <= now,
         ),
     )
 
@@ -139,7 +118,8 @@ def _claimable_task_filters(now: datetime):
 class QueueService(QueueEnqueueMixin):
     """Simple database-backed task queue."""
 
-    def __init__(self) -> None:
+    def __init__(self, repository: ProcessingTaskQueueRepository | None = None) -> None:
+        self._repository = repository or ProcessingTaskQueueRepository()
         # Cursor used for best-effort rotation across retry buckets.
         # Keyed by (queue_name, task_type) so busy queues do not starve retries.
         self._retry_bucket_cursor: dict[tuple[str | None, str | None], int] = {}
@@ -167,9 +147,9 @@ class QueueService(QueueEnqueueMixin):
 
     def _available_retry_counts(
         self,
-        db,
         *,
-        base_filters: list[Any],
+        task_type: str | None,
+        queue_name: str | None,
         cursor_key: tuple[str | None, str | None],
         use_cache: bool,
     ) -> list[int]:
@@ -182,14 +162,10 @@ class QueueService(QueueEnqueueMixin):
                 if expires_at > now_monotonic:
                     return retry_counts
 
-        retry_rows = (
-            db.query(ProcessingTask.retry_count.label("retry_count"))
-            .filter(*base_filters)
-            .distinct()
-            .order_by("retry_count")
-            .all()
+        retry_counts = self._repository.list_claimable_retry_counts(
+            task_type=task_type,
+            queue_name=queue_name,
         )
-        retry_counts = [int(row.retry_count) for row in retry_rows]
         if retry_counts:
             self._retry_bucket_cache[cursor_key] = (
                 now_monotonic + RETRY_BUCKET_CACHE_SECONDS,
@@ -204,7 +180,7 @@ class QueueService(QueueEnqueueMixin):
         task_type: TaskType | None = None,
         worker_id: str = "worker",
         queue_name: TaskQueue | str | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> ClaimedTask | None:
         """
         Get the next available task from the queue.
 
@@ -214,187 +190,66 @@ class QueueService(QueueEnqueueMixin):
             queue_name: Filter by queue partition (optional)
 
         Returns:
-            Task data as dictionary or None if queue is empty
+            A validated owned task or None if the queue is empty
         """
-        with get_db() as db:
-            now = _utc_now()
-            normalized_queue = self._normalize_queue_name(queue_name)
-            task_order = ProcessingTask.available_at
-            base_filters = [_claimable_task_filters(now)]
-            if task_type:
-                base_filters.append(ProcessingTask.task_type == task_type.value)
-            if normalized_queue:
-                base_filters.append(ProcessingTask.queue_name == normalized_queue)
-
-            cursor_key = (
-                normalized_queue,
-                task_type.value if task_type is not None else None,
+        normalized_queue = self._normalize_queue_name(queue_name)
+        normalized_task_type = task_type.value if task_type is not None else None
+        cursor_key = (normalized_queue, normalized_task_type)
+        for use_cache in (True, False):
+            available_retry_counts = self._available_retry_counts(
+                task_type=normalized_task_type,
+                queue_name=normalized_queue,
+                cursor_key=cursor_key,
+                use_cache=use_cache,
             )
-            for use_cache in (True, False):
-                available_retry_counts = self._available_retry_counts(
-                    db,
-                    base_filters=base_filters,
-                    cursor_key=cursor_key,
-                    use_cache=use_cache,
+            if not available_retry_counts:
+                return None
+
+            for selected_retry in self._ordered_retry_counts(
+                available_retry_counts,
+                cursor_key,
+            ):
+                task = self._repository.claim_task(
+                    lease_seconds=_task_lease_seconds(),
+                    worker_id=worker_id,
+                    retry_count=selected_retry,
+                    task_type=normalized_task_type,
+                    queue_name=normalized_queue,
                 )
-                if not available_retry_counts:
-                    return None
+                if task is None:
+                    continue
+                _log_dequeued_task(task, worker_id=worker_id)
+                return task
 
-                for selected_retry in self._ordered_retry_counts(
-                    available_retry_counts,
-                    cursor_key,
-                ):
-                    candidate_id_subquery = (
-                        select(ProcessingTask.id)
-                        .where(
-                            *base_filters,
-                            ProcessingTask.retry_count == selected_retry,
-                        )
-                        .order_by(
-                            task_order.asc(),
-                            ProcessingTask.created_at.asc(),
-                            ProcessingTask.id.asc(),
-                        )
-                        .with_for_update(skip_locked=True)
-                        .limit(1)
-                    )
-                    claim_stmt = (
-                        update(ProcessingTask)
-                        .where(ProcessingTask.id == candidate_id_subquery.scalar_subquery())
-                        .values(
-                            status=TaskStatus.PROCESSING.value,
-                            started_at=now,
-                            locked_at=now,
-                            locked_by=worker_id,
-                            lease_expires_at=now + timedelta(seconds=_task_lease_seconds()),
-                        )
-                        .returning(
-                            ProcessingTask.id,
-                            ProcessingTask.task_type,
-                            ProcessingTask.content_id,
-                            ProcessingTask.payload,
-                            ProcessingTask.retry_count,
-                            ProcessingTask.status,
-                            ProcessingTask.queue_name,
-                            ProcessingTask.created_at,
-                            ProcessingTask.available_at,
-                            ProcessingTask.started_at,
-                            ProcessingTask.completed_at,
-                            ProcessingTask.locked_at,
-                            ProcessingTask.locked_by,
-                            ProcessingTask.lease_expires_at,
-                        )
-                    )
-                    task_row = db.execute(claim_stmt).mappings().first()
-                    if task_row is None:
-                        continue
-                    task_data = dict(task_row)
-                    task_data["retry_count"] = int(task_data["retry_count"])
-                    _log_dequeued_task(task_data, worker_id=worker_id)
-                    return task_data
+            self._retry_bucket_cache.pop(cursor_key, None)
 
-                self._retry_bucket_cache.pop(cursor_key, None)
-
-            return None
+        return None
 
     def renew_lease(
         self,
         task_id: int,
         *,
         worker_id: str,
+        lease_token: UUID | None,
         lease_seconds: int | None = None,
     ) -> bool:
-        """Extend the lease for a task currently owned by the worker."""
+        """Extend an unexpired lease for the exact worker claim that owns it."""
+        if lease_token is None:
+            return False
         effective_lease_seconds = max(int(lease_seconds or _task_lease_seconds()), 1)
-        with get_db() as db:
-            now = _utc_now()
-            renewed = (
-                db.query(ProcessingTask)
-                .filter(ProcessingTask.id == task_id)
-                .filter(ProcessingTask.status == TaskStatus.PROCESSING.value)
-                .filter(ProcessingTask.locked_by == worker_id)
-                .update(
-                    {
-                        ProcessingTask.locked_at: now,
-                        ProcessingTask.lease_expires_at: now
-                        + timedelta(seconds=effective_lease_seconds),
-                    },
-                    synchronize_session=False,
-                )
-            )
-            return bool(renewed)
-
-    def complete_task(self, task_id: int, success: bool = True, error_message: str | None = None):
-        """Mark a task as completed."""
-        with get_db() as db:
-            task = db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()
-            if not task:
-                completion = None
-            else:
-                task.completed_at = _utc_now()
-                _clear_task_lease(task)
-                if success:
-                    task.status = TaskStatus.COMPLETED.value
-                    task.error_message = None
-                else:
-                    task.status = TaskStatus.FAILED.value
-                    task.error_message = error_message or "Task failed without error details"
-                completion = {
-                    "task_type": task.task_type,
-                    "queue_name": task.queue_name,
-                    "content_id": task.content_id,
-                    "error_message": task.error_message,
-                }
-
-            if completion is None:
-                logger.error(
-                    "Task not found",
-                    extra=build_log_extra(
-                        component="queue",
-                        operation="complete_task",
-                        event_name="task.failed",
-                        status="failed",
-                        task_id=task_id,
-                        context_data={"failure_class": "TaskNotFound"},
-                    ),
-                )
-                return
-
-            if success:
-                logger.info(
-                    "Task completed",
-                    extra=build_log_extra(
-                        component="queue",
-                        operation="complete_task",
-                        event_name="task.completed",
-                        status="completed",
-                        task_id=task_id,
-                        task_type=completion["task_type"],
-                        queue_name=completion["queue_name"],
-                        content_id=completion["content_id"],
-                    ),
-                )
-            else:
-                logger.error(
-                    "Task failed",
-                    extra=build_log_extra(
-                        component="queue",
-                        operation="complete_task",
-                        event_name="task.failed",
-                        status="failed",
-                        item_id=task_id,
-                        task_id=task_id,
-                        task_type=completion["task_type"],
-                        queue_name=completion["queue_name"],
-                        content_id=completion["content_id"],
-                        context_data={"error_message": completion["error_message"]},
-                    ),
-                )
+        return self._repository.renew_lease(
+            task_id=task_id,
+            worker_id=worker_id,
+            lease_token=lease_token,
+            lease_seconds=effective_lease_seconds,
+        )
 
     def finalize_task(
         self,
         task_id: int,
         *,
+        worker_id: str,
+        lease_token: UUID,
         success: bool,
         error_message: str | None = None,
         retryable: bool = True,
@@ -402,180 +257,116 @@ class QueueService(QueueEnqueueMixin):
         max_retries: int = 3,
         retry_delay_seconds: int | None = None,
         deferred: bool = False,
-    ) -> dict[str, Any] | None:
-        """Persist one terminal or retry transition for a processed task."""
-        with get_db() as db:
-            should_retry = not deferred and retry_will_be_scheduled(
-                success=success,
-                retryable=retryable,
-                retry_count=current_retry_count,
-                max_retries=max_retries,
+    ) -> TaskTransition | None:
+        """Persist one ownership-checked terminal, retry, or deferral transition."""
+        if deferred and success:
+            raise ValueError("A successful task cannot also be deferred")
+
+        should_retry = not deferred and retry_will_be_scheduled(
+            success=success,
+            retryable=retryable,
+            retry_count=current_retry_count,
+            max_retries=max_retries,
+        )
+        resolved_delay_seconds = (
+            max(int(retry_delay_seconds or 0), 0) if should_retry or deferred else None
+        )
+        resolved_error = None
+        if not success and not deferred:
+            resolved_error = error_message or "Task failed without error details"
+
+        if success:
+            outcome = FinalizationOutcome.SUCCEEDED
+        elif deferred:
+            outcome = FinalizationOutcome.DEFERRED
+        elif should_retry:
+            outcome = FinalizationOutcome.RETRY
+        else:
+            outcome = FinalizationOutcome.FAILED
+
+        transition = self._repository.finalize_task(
+            FinalizeTaskRequest(
+                task_id=task_id,
+                worker_id=worker_id,
+                lease_token=lease_token,
+                expected_retry_count=current_retry_count,
+                outcome=outcome,
+                error_message=resolved_error,
+                retry_delay_seconds=resolved_delay_seconds,
             )
-            resolved_delay_seconds = retry_delay_seconds if should_retry or deferred else None
-            task = db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()
-            if not task:
-                transition = None
-            else:
-                now = _utc_now()
-                persisted_retry_count = int(task.retry_count or 0)
-                base_retry_count = max(persisted_retry_count, int(current_retry_count or 0))
-
-                if success:
-                    task.status = TaskStatus.COMPLETED.value
-                    task.completed_at = now
-                    task.error_message = None
-                elif deferred:
-                    task.status = TaskStatus.PENDING.value
-                    task.retry_count = base_retry_count
-                    task.started_at = None
-                    task.completed_at = None
-                    task.available_at = now + timedelta(seconds=resolved_delay_seconds or 0)
-                    task.error_message = None
-                elif should_retry:
-                    task.status = TaskStatus.PENDING.value
-                    task.retry_count = base_retry_count + 1
-                    task.started_at = None
-                    task.completed_at = None
-                    task.available_at = now + timedelta(seconds=resolved_delay_seconds or 0)
-                    task.error_message = error_message or "Task failed without error details"
-                else:
-                    task.status = TaskStatus.FAILED.value
-                    task.completed_at = now
-                    task.error_message = error_message or "Task failed without error details"
-
-                _clear_task_lease(task)
-                transition = {
-                    "task_type": task.task_type,
-                    "queue_name": task.queue_name,
-                    "content_id": task.content_id,
-                    "error_message": task.error_message,
-                    "status": task.status,
-                    "retry_count": int(task.retry_count or 0),
-                    "retry_delay_seconds": resolved_delay_seconds,
-                    "deferred": deferred,
-                    "available_at": task.available_at,
-                }
-
-            if transition is None:
-                logger.error(
-                    "Task not found",
-                    extra=build_log_extra(
-                        component="queue",
-                        operation="finalize_task",
-                        event_name="task.failed",
-                        status="failed",
-                        task_id=task_id,
-                        context_data={"failure_class": "TaskNotFound"},
-                    ),
-                )
-                return None
-
-            if transition["status"] == TaskStatus.COMPLETED.value:
-                logger.info(
-                    "Task completed",
-                    extra=build_log_extra(
-                        component="queue",
-                        operation="finalize_task",
-                        event_name="task.completed",
-                        status="completed",
-                        task_id=task_id,
-                        task_type=transition["task_type"],
-                        queue_name=transition["queue_name"],
-                        content_id=transition["content_id"],
-                    ),
-                )
-            elif transition["status"] == TaskStatus.PENDING.value:
-                logger.info(
-                    "Task deferred" if transition["deferred"] else "Task retry scheduled",
-                    extra=build_log_extra(
-                        component="queue",
-                        operation="finalize_task",
-                        event_name=(
-                            "task.deferred" if transition["deferred"] else "task.retry_scheduled"
-                        ),
-                        status="deferred" if transition["deferred"] else "retry_scheduled",
-                        task_id=task_id,
-                        task_type=transition["task_type"],
-                        queue_name=transition["queue_name"],
-                        content_id=transition["content_id"],
-                        context_data={
-                            "retry_count": transition["retry_count"],
-                            "delay_seconds": transition["retry_delay_seconds"],
-                            "error_message": transition["error_message"],
-                        },
-                    ),
-                )
-            else:
-                logger.error(
-                    "Task failed",
-                    extra=build_log_extra(
-                        component="queue",
-                        operation="finalize_task",
-                        event_name="task.failed",
-                        status="failed",
-                        item_id=task_id,
-                        task_id=task_id,
-                        task_type=transition["task_type"],
-                        queue_name=transition["queue_name"],
-                        content_id=transition["content_id"],
-                        context_data={"error_message": transition["error_message"]},
-                    ),
-                )
-
-            return transition
-
-    def retry_task(self, task_id: int, delay_seconds: int = 60):
-        """Retry a failed task after a delay."""
-        with get_db() as db:
-            task = db.query(ProcessingTask).filter(ProcessingTask.id == task_id).first()
-            if not task:
-                retry_result = None
-            else:
-                task.status = TaskStatus.PENDING.value
-                task.retry_count = int(task.retry_count or 0) + 1
-                task.started_at = None
-                task.completed_at = None
-                task.available_at = _utc_now() + timedelta(seconds=delay_seconds)
-                _clear_task_lease(task)
-                retry_result = {
-                    "task_type": task.task_type,
-                    "queue_name": task.queue_name,
-                    "content_id": task.content_id,
-                    "retry_count": task.retry_count,
-                    "available_at": task.available_at,
-                }
-
-            if retry_result is None:
-                logger.error(
-                    "Task not found",
-                    extra=build_log_extra(
-                        component="queue",
-                        operation="retry_task",
-                        event_name="task.retry_scheduled",
-                        status="failed",
-                        task_id=task_id,
-                        context_data={"failure_class": "TaskNotFound"},
-                    ),
-                )
-                return
-
-            logger.info(
-                "Task retry scheduled",
+        )
+        if transition is None:
+            logger.warning(
+                "Task finalization rejected because lease ownership was lost",
                 extra=build_log_extra(
                     component="queue",
-                    operation="retry_task",
-                    event_name="task.retry_scheduled",
-                    status="retry_scheduled",
+                    operation="finalize_task",
+                    event_name="task.finalization_rejected",
+                    status="degraded",
                     task_id=task_id,
-                    task_type=retry_result["task_type"],
-                    queue_name=retry_result["queue_name"],
-                    content_id=retry_result["content_id"],
+                    worker_id=worker_id,
                     context_data={
-                        "retry_count": retry_result["retry_count"],
-                        "delay_seconds": delay_seconds,
+                        "failure_class": "LeaseOwnershipLost",
+                        "lease_token": str(lease_token),
                     },
                 ),
             )
+            return None
+
+        if transition.status is TaskStatus.COMPLETED:
+            logger.info(
+                "Task completed",
+                extra=build_log_extra(
+                    component="queue",
+                    operation="finalize_task",
+                    event_name="task.completed",
+                    status="completed",
+                    task_id=task_id,
+                    task_type=transition.task_type,
+                    queue_name=transition.queue_name,
+                    worker_id=worker_id,
+                    content_id=transition.content_id,
+                ),
+            )
+        elif transition.status is TaskStatus.PENDING:
+            logger.info(
+                "Task deferred" if transition.deferred else "Task retry scheduled",
+                extra=build_log_extra(
+                    component="queue",
+                    operation="finalize_task",
+                    event_name="task.deferred" if transition.deferred else "task.retry_scheduled",
+                    status="deferred" if transition.deferred else "retry_scheduled",
+                    task_id=task_id,
+                    task_type=transition.task_type,
+                    queue_name=transition.queue_name,
+                    worker_id=worker_id,
+                    content_id=transition.content_id,
+                    context_data={
+                        "retry_count": transition.retry_count,
+                        "delay_seconds": transition.retry_delay_seconds,
+                        "error_message": transition.error_message,
+                    },
+                ),
+            )
+        else:
+            logger.error(
+                "Task failed",
+                extra=build_log_extra(
+                    component="queue",
+                    operation="finalize_task",
+                    event_name="task.failed",
+                    status="failed",
+                    item_id=task_id,
+                    task_id=task_id,
+                    task_type=transition.task_type,
+                    queue_name=transition.queue_name,
+                    worker_id=worker_id,
+                    content_id=transition.content_id,
+                    context_data={"error_message": transition.error_message},
+                ),
+            )
+
+        return transition
 
     def cleanup_terminal_tasks(
         self,

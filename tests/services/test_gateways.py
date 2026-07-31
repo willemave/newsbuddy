@@ -130,7 +130,7 @@ def test_llm_gateway_proxies_analyze_and_summarize(monkeypatch):
         max_quotes=2,
         content_id=5,
         provider_override="openai",
-        model_hint="gpt-5.4-mini",
+        model_hint="gpt-5.6-luna",
     )
 
     assert analysis == {"content_type": "article"}
@@ -144,7 +144,7 @@ def test_llm_gateway_proxies_analyze_and_summarize(monkeypatch):
         max_quotes=2,
         content_id=5,
         provider_override="openai",
-        model_hint="gpt-5.4-mini",
+        model_hint="gpt-5.6-luna",
     )
 
 
@@ -198,30 +198,15 @@ def test_task_queue_gateway_enqueue_builds_kwargs():
     )
 
 
-def test_task_queue_gateway_forwards_remaining_operations():
-    """Other queue operations should pass through transparently."""
+def test_task_queue_gateway_forwards_queue_stats():
+    """Queue stats should pass through transparently."""
     queue_service = Mock()
-    queue_service.dequeue.return_value = {"task_id": 9}
     queue_service.get_queue_stats.return_value = {"pending": 1}
 
     gateway = TaskQueueGateway(queue_service=queue_service)
-    gateway.complete_task(7, success=False, error_message="boom")
-    gateway.retry_task(7, delay_seconds=30)
-    dequeued = gateway.dequeue(
-        task_type=TaskType.SCRAPE,
-        worker_id="w1",
-        queue_name=TaskQueue.CONTENT,
-    )
     stats = gateway.get_queue_stats()
 
-    queue_service.complete_task.assert_called_once_with(7, success=False, error_message="boom")
-    queue_service.retry_task.assert_called_once_with(7, delay_seconds=30)
-    queue_service.dequeue.assert_called_once_with(
-        task_type=TaskType.SCRAPE,
-        worker_id="w1",
-        queue_name=TaskQueue.CONTENT,
-    )
-    assert dequeued == {"task_id": 9}
+    queue_service.get_queue_stats.assert_called_once_with()
     assert stats == {"pending": 1}
 
 

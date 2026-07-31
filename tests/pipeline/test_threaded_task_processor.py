@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from app.models.db import ProcessingTask
+from app.models.internal.queue import ClaimedTask
 from app.pipeline.threaded_task_processor import ThreadedTaskProcessor, warm_queue_models
 from app.services.queue import QueueService, TaskQueue, TaskStatus, TaskType
 
@@ -241,17 +242,20 @@ def test_queue_service_concurrent_claims_never_hand_out_a_task_twice(
         session.add_all(
             ProcessingTask(
                 task_type=TaskType.SUMMARIZE.value,
+                content_id=index,
                 status=TaskStatus.PENDING.value,
-                payload={},
+                payload={"marker": index},
                 queue_name=TaskQueue.CONTENT.value,
             )
-            for _ in range(task_count)
+            for index in range(task_count)
         )
         session.commit()
     finally:
         session.close()
 
-    claimed_ids: list[int] = []
+    postgres_harness.engine.clear_compiled_cache()
+    claimed_tasks = []
+    claim_errors: list[Exception] = []
     claims_lock = threading.Lock()
     start = threading.Barrier(thread_count)
 
@@ -259,16 +263,20 @@ def test_queue_service_concurrent_claims_never_hand_out_a_task_twice(
         # One QueueService per thread: its retry-bucket cursor and cache are
         # plain dicts that must not be shared across claim loops.
         queue_service = QueueService()
-        start.wait(timeout=10)
-        while True:
-            task_data = queue_service.dequeue(
-                worker_id=f"content-processor-1-t{thread_index}",
-                queue_name=TaskQueue.CONTENT.value,
-            )
-            if not task_data:
-                return
+        try:
+            start.wait(timeout=10)
+            while True:
+                task_data = queue_service.dequeue(
+                    worker_id=f"content-processor-1-t{thread_index}",
+                    queue_name=TaskQueue.CONTENT.value,
+                )
+                if not task_data:
+                    return
+                with claims_lock:
+                    claimed_tasks.append(task_data)
+        except Exception as exc:  # noqa: BLE001
             with claims_lock:
-                claimed_ids.append(int(task_data["id"]))
+                claim_errors.append(exc)
 
     threads = [
         threading.Thread(target=drain, args=(index,)) for index in range(1, thread_count + 1)
@@ -278,5 +286,88 @@ def test_queue_service_concurrent_claims_never_hand_out_a_task_twice(
     for thread in threads:
         thread.join(timeout=60)
 
-    assert len(claimed_ids) == task_count
-    assert len(set(claimed_ids)) == task_count
+    assert not any(thread.is_alive() for thread in threads)
+    assert claim_errors == []
+    assert len(claimed_tasks) == task_count
+    assert len({task.id for task in claimed_tasks}) == task_count
+    assert {task.content_id for task in claimed_tasks} == set(range(task_count))
+    assert {task.payload["marker"] for task in claimed_tasks} == set(range(task_count))
+    assert all(type(task.retry_count) is int for task in claimed_tasks)
+    assert all(task.status == TaskStatus.PROCESSING.value for task in claimed_tasks)
+    assert all(task.queue_name == TaskQueue.CONTENT.value for task in claimed_tasks)
+    assert all(task.lease_token is not None for task in claimed_tasks)
+
+
+def test_queue_service_cold_compiled_cache_claim_shape_is_stable(
+    postgres_harness,
+    db_session_factory: sessionmaker,
+) -> None:
+    """Concurrent first claims must never shift UPDATE RETURNING fields."""
+    thread_count = 6
+    trial_count = 12
+
+    for trial in range(trial_count):
+        marker_base = trial * thread_count
+        session = db_session_factory()
+        try:
+            session.add_all(
+                ProcessingTask(
+                    task_type=TaskType.SUMMARIZE.value,
+                    content_id=marker_base + index,
+                    status=TaskStatus.PENDING.value,
+                    payload={"marker": marker_base + index},
+                    queue_name=TaskQueue.CONTENT.value,
+                )
+                for index in range(thread_count)
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        postgres_harness.engine.clear_compiled_cache()
+        start = threading.Barrier(thread_count)
+        claims: list[ClaimedTask] = []
+        errors: list[Exception] = []
+        results_lock = threading.Lock()
+
+        def claim_one(
+            thread_index: int,
+            *,
+            barrier=start,
+            trial_index=trial,
+            claims_for_trial=claims,
+            errors_for_trial=errors,
+            lock=results_lock,
+        ) -> None:
+            try:
+                queue_service = QueueService()
+                barrier.wait(timeout=10)
+                claimed = queue_service.dequeue(
+                    worker_id=f"cold-cache-{trial_index}-t{thread_index}",
+                    queue_name=TaskQueue.CONTENT,
+                )
+                if claimed is None:
+                    raise AssertionError("Expected one task per claim thread")
+                with lock:
+                    claims_for_trial.append(claimed)
+            except Exception as exc:  # noqa: BLE001
+                with lock:
+                    errors_for_trial.append(exc)
+
+        threads = [
+            threading.Thread(target=claim_one, args=(index,)) for index in range(thread_count)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert not any(thread.is_alive() for thread in threads)
+        assert errors == []
+        assert len(claims) == thread_count
+        expected_markers = set(range(marker_base, marker_base + thread_count))
+        assert {task.content_id for task in claims} == expected_markers
+        assert {task.payload["marker"] for task in claims} == expected_markers
+        assert all(type(task.retry_count) is int for task in claims)
+        assert all(task.status == TaskStatus.PROCESSING.value for task in claims)
+        assert all(task.queue_name == TaskQueue.CONTENT.value for task in claims)
