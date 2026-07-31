@@ -8,6 +8,7 @@ import pytest
 
 from app.models.db import ProcessingTask
 from app.models.internal.queue import ClaimedTask
+from app.pipeline.task_models import TaskResult
 from app.services.queue import (
     QueueService,
     TaskEnqueueRequest,
@@ -60,13 +61,8 @@ def test_finalize_task_sets_default_error_message(db_session, monkeypatch):
 
     claimed = _claim_task(queue, task, worker_id="worker-failure")
     transition = queue.finalize_task(
-        claimed.id,
-        worker_id=claimed.locked_by,
-        lease_token=claimed.lease_token,
-        success=False,
-        error_message=None,
-        retryable=False,
-        current_retry_count=claimed.retry_count,
+        claimed,
+        TaskResult.fail(retryable=False),
     )
 
     db_session.refresh(task)
@@ -96,15 +92,9 @@ def test_finalize_task_retryable_failure_requeues_in_one_step(db_session, monkey
 
     claimed = _claim_task(queue, task, worker_id="worker-retry")
     transition = queue.finalize_task(
-        claimed.id,
-        worker_id=claimed.locked_by,
-        lease_token=claimed.lease_token,
-        success=False,
-        error_message="database is locked",
-        retryable=True,
-        current_retry_count=claimed.retry_count,
+        claimed,
+        TaskResult.fail("database is locked", retry_delay_seconds=120),
         max_retries=3,
-        retry_delay_seconds=120,
     )
 
     db_session.refresh(task)
@@ -120,6 +110,72 @@ def test_finalize_task_retryable_failure_requeues_in_one_step(db_session, monkey
     assert task.lease_expires_at is None
     assert task.created_at == original_created_at
     assert task.available_at >= datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=110)
+
+
+@pytest.mark.parametrize(
+    ("retry_count", "requested_delay", "expected_delay"),
+    [
+        (0, None, 60),
+        (1, 0, 0),
+    ],
+)
+def test_finalize_task_resolves_retry_delay_once(
+    db_session,
+    monkeypatch,
+    retry_count,
+    requested_delay,
+    expected_delay,
+):
+    queue = _patch_db(monkeypatch, db_session)
+    task = ProcessingTask(
+        task_type=TaskType.SUMMARIZE.value,
+        payload={},
+        status=TaskStatus.PENDING.value,
+        queue_name=TaskQueue.CONTENT.value,
+        retry_count=retry_count,
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    claimed = _claim_task(queue, task, worker_id=f"worker-delay-{retry_count}")
+    transition = queue.finalize_task(
+        claimed,
+        TaskResult.fail("temporary failure", retry_delay_seconds=requested_delay),
+        max_retries=3,
+    )
+
+    assert transition is not None
+    assert transition.status is TaskStatus.PENDING
+    assert transition.retry_delay_seconds == expected_delay
+    assert transition.retry_count == retry_count + 1
+
+
+def test_finalize_task_terminalizes_after_retry_budget(db_session, monkeypatch):
+    queue = _patch_db(monkeypatch, db_session)
+    task = ProcessingTask(
+        task_type=TaskType.SUMMARIZE.value,
+        payload={},
+        status=TaskStatus.PENDING.value,
+        queue_name=TaskQueue.CONTENT.value,
+        retry_count=3,
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    claimed = _claim_task(queue, task, worker_id="worker-terminal")
+    transition = queue.finalize_task(
+        claimed,
+        TaskResult.fail("still failing"),
+        max_retries=3,
+    )
+
+    db_session.refresh(task)
+    assert transition is not None
+    assert transition.status is TaskStatus.FAILED
+    assert transition.retry_count == 3
+    assert transition.retry_delay_seconds is None
+    assert task.status == TaskStatus.FAILED.value
+    assert task.lease_token is None
 
 
 def test_finalize_task_deferral_preserves_retry_budget_and_clears_error(
@@ -140,14 +196,8 @@ def test_finalize_task_deferral_preserves_retry_budget_and_clears_error(
 
     claimed = _claim_task(queue, task, worker_id="worker-defer")
     transition = queue.finalize_task(
-        claimed.id,
-        worker_id=claimed.locked_by,
-        lease_token=claimed.lease_token,
-        success=False,
-        retryable=False,
-        current_retry_count=3,
-        retry_delay_seconds=120,
-        deferred=True,
+        claimed,
+        TaskResult.defer(retry_delay_seconds=120),
     )
 
     db_session.refresh(task)
@@ -614,11 +664,8 @@ def test_expired_lease_cannot_be_renewed_or_finalized(db_session, monkeypatch):
     )
     assert (
         queue.finalize_task(
-            task.id,
-            worker_id=claimed.locked_by,
-            lease_token=claimed.lease_token,
-            success=True,
-            current_retry_count=claimed.retry_count,
+            claimed,
+            TaskResult.ok(),
         )
         is None
     )
@@ -648,11 +695,8 @@ def test_reclaim_token_blocks_stale_same_named_worker(db_session, monkeypatch):
     assert second_claim.lease_token != first_claim.lease_token
     assert (
         queue.finalize_task(
-            task.id,
-            worker_id=first_claim.locked_by,
-            lease_token=first_claim.lease_token,
-            success=True,
-            current_retry_count=first_claim.retry_count,
+            first_claim,
+            TaskResult.ok(),
         )
         is None
     )
@@ -662,11 +706,8 @@ def test_reclaim_token_blocks_stale_same_named_worker(db_session, monkeypatch):
     assert task.lease_token == second_claim.lease_token
 
     transition = queue.finalize_task(
-        task.id,
-        worker_id=second_claim.locked_by,
-        lease_token=second_claim.lease_token,
-        success=True,
-        current_retry_count=second_claim.retry_count,
+        second_claim,
+        TaskResult.ok(),
     )
     assert transition is not None
     assert transition.status is TaskStatus.COMPLETED

@@ -1,8 +1,46 @@
 """Tests for queue_control maintenance commands."""
 
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
 from app.models.db import ProcessingTask
 from scripts import queue_control
+
+
+def test_requeue_stale_processing_clears_exact_claim(db_session) -> None:
+    locked_at = datetime.now(UTC) - timedelta(hours=3)
+    task = ProcessingTask(
+        task_type=TaskType.SYNC_INTEGRATION.value,
+        payload={"provider": "x"},
+        status=TaskStatus.PROCESSING.value,
+        queue_name=TaskQueue.TWITTER.value,
+        retry_count=0,
+        started_at=locked_at,
+        locked_at=locked_at,
+        locked_by="stale-worker",
+        lease_token=uuid4(),  # type: ignore[arg-type]  # SQLAlchemy's Column constructor loses the UUID type here.
+        lease_expires_at=locked_at + timedelta(minutes=5),
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    queue_control.requeue_stale_processing(
+        db_session,
+        hours=2,
+        queue_name=TaskQueue.TWITTER.value,
+        task_type=TaskType.SYNC_INTEGRATION.value,
+        dry_run=False,
+        force=True,
+    )
+
+    db_session.refresh(task)
+    assert task.status == TaskStatus.PENDING.value
+    assert task.retry_count == 1
+    assert task.locked_at is None
+    assert task.locked_by is None
+    assert task.lease_token is None
+    assert task.lease_expires_at is None
 
 
 def test_move_tasks_between_queues_moves_only_matching_rows(db_session) -> None:

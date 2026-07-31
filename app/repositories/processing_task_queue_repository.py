@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
 from uuid import UUID, uuid4
@@ -13,6 +12,7 @@ from sqlalchemy.engine import Engine
 from app.core.db import get_engine
 from app.models.contracts import TaskStatus
 from app.models.db import ProcessingTask
+from app.models.db.tasks import processing_task_lease_clear_values
 from app.models.internal.queue import ClaimedTask, TaskTransition
 
 _TASKS = ProcessingTask.__table__
@@ -52,19 +52,6 @@ class FinalizationOutcome(StrEnum):
     FAILED = "failed"
     RETRY = "retry"
     DEFERRED = "deferred"
-
-
-@dataclass(frozen=True, slots=True)
-class FinalizeTaskRequest:
-    """Ownership proof and desired state transition for one claimed task."""
-
-    task_id: int
-    worker_id: str
-    lease_token: UUID
-    expected_retry_count: int
-    outcome: FinalizationOutcome
-    error_message: str | None = None
-    retry_delay_seconds: int | None = None
 
 
 def _database_now():
@@ -199,20 +186,31 @@ class ProcessingTaskQueueRepository:
         with self._engine.begin() as connection:
             return connection.execute(statement).scalar_one_or_none() is not None
 
-    def finalize_task(self, request: FinalizeTaskRequest) -> TaskTransition | None:
+    def finalize_task(
+        self,
+        claim: ClaimedTask,
+        *,
+        outcome: FinalizationOutcome,
+        error_message: str | None = None,
+        retry_delay_seconds: int | None = None,
+    ) -> TaskTransition | None:
         """Apply one terminal, retry, or deferral transition if ownership is current."""
-        values = self._finalization_values(request)
+        values = self._finalization_values(
+            outcome=outcome,
+            error_message=error_message,
+            retry_delay_seconds=retry_delay_seconds,
+        )
         statement = (
             # PostgreSQL evaluates this once per transaction, including after
             # connection-pool waits, so an already-expired claim cannot pass.
             update(_TASKS)
             .where(
-                _TASKS.c.id == request.task_id,
+                _TASKS.c.id == claim.id,
                 _TASKS.c.status == TaskStatus.PROCESSING.value,
-                _TASKS.c.locked_by == request.worker_id,
-                _TASKS.c.lease_token == request.lease_token,
+                _TASKS.c.locked_by == claim.locked_by,
+                _TASKS.c.lease_token == claim.lease_token,
                 _TASKS.c.lease_expires_at > _database_now(),
-                _TASKS.c.retry_count == request.expected_retry_count,
+                _TASKS.c.retry_count == claim.retry_count,
             )
             .values(**values)
             .returning(*_TRANSITION_COLUMNS)
@@ -224,52 +222,50 @@ class ProcessingTaskQueueRepository:
             return TaskTransition.model_validate(
                 {
                     **dict(row),
-                    "retry_delay_seconds": request.retry_delay_seconds
-                    if request.outcome
+                    "retry_delay_seconds": retry_delay_seconds
+                    if outcome
                     in {
                         FinalizationOutcome.RETRY,
                         FinalizationOutcome.DEFERRED,
                     }
                     else None,
-                    "deferred": request.outcome is FinalizationOutcome.DEFERRED,
+                    "deferred": outcome is FinalizationOutcome.DEFERRED,
                 }
             )
 
     @staticmethod
-    def _finalization_values(request: FinalizeTaskRequest) -> dict[str, object]:
+    def _finalization_values(
+        *,
+        outcome: FinalizationOutcome,
+        error_message: str | None,
+        retry_delay_seconds: int | None,
+    ) -> dict[str, object]:
         """Build the single update payload for a finalization outcome."""
         now = _database_now()
-        values: dict[str, object] = {
-            "locked_at": None,
-            "locked_by": None,
-            "lease_token": None,
-            "lease_expires_at": None,
-        }
-        if request.outcome is FinalizationOutcome.SUCCEEDED:
+        values: dict[str, object] = processing_task_lease_clear_values()
+        if outcome is FinalizationOutcome.SUCCEEDED:
             return {
                 **values,
                 "status": TaskStatus.COMPLETED.value,
                 "completed_at": now,
                 "error_message": None,
             }
-        if request.outcome is FinalizationOutcome.FAILED:
+        if outcome is FinalizationOutcome.FAILED:
             return {
                 **values,
                 "status": TaskStatus.FAILED.value,
                 "completed_at": now,
-                "error_message": request.error_message,
+                "error_message": error_message,
             }
 
-        delay = max(int(request.retry_delay_seconds or 0), 0)
+        delay = max(int(retry_delay_seconds or 0), 0)
         values.update(
             status=TaskStatus.PENDING.value,
             started_at=None,
             completed_at=None,
             available_at=now + timedelta(seconds=delay),
-            error_message=(
-                None if request.outcome is FinalizationOutcome.DEFERRED else request.error_message
-            ),
+            error_message=(None if outcome is FinalizationOutcome.DEFERRED else error_message),
         )
-        if request.outcome is FinalizationOutcome.RETRY:
+        if outcome is FinalizationOutcome.RETRY:
             values["retry_count"] = _TASKS.c.retry_count + 1
         return values

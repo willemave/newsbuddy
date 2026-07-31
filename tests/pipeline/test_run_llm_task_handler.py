@@ -234,3 +234,6 @@ class SimpleContext:
 
     def db_factory(self):
         return _SessionContext(self.db_session)
+
+    def renew_current_lease(self) -> bool:
+        return True

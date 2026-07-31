@@ -134,30 +134,20 @@ def test_scrape_to_completion_smoke(
 
         task = queue_service.dequeue(worker_id="test-worker")
         assert task is not None
-        result = processor.process_task(TaskEnvelope.from_queue_data(task))
+        result = processor.process_task(TaskEnvelope.from_claim(task))
         queue_service.finalize_task(
-            task.id,
-            worker_id=task.locked_by,
-            lease_token=task.lease_token,
-            success=result.success,
-            error_message=result.error_message,
-            retryable=result.retryable,
-            current_retry_count=task.retry_count,
+            task,
+            result,
         )
 
         summarize_task = queue_service.dequeue(
             task_type=TaskType.SUMMARIZE, worker_id="test-worker"
         )
         assert summarize_task is not None
-        result = processor.process_task(TaskEnvelope.from_queue_data(summarize_task))
+        result = processor.process_task(TaskEnvelope.from_claim(summarize_task))
         queue_service.finalize_task(
-            summarize_task.id,
-            worker_id=summarize_task.locked_by,
-            lease_token=summarize_task.lease_token,
-            success=result.success,
-            error_message=result.error_message,
-            retryable=result.retryable,
-            current_retry_count=summarize_task.retry_count,
+            summarize_task,
+            result,
         )
 
     content = db_session.query(Content).filter(Content.url == "https://example.com/smoke").first()

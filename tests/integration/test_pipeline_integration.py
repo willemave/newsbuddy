@@ -10,7 +10,7 @@ from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, ContentBody, ProcessingTask
 from app.models.domain.scraper_runs import ScraperStats
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
-from app.pipeline.task_models import TaskEnvelope
+from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.queue import QueueService, TaskType
 
 
@@ -129,30 +129,20 @@ class TestPipelineIntegration:
             # Process single task
             task = queue_service.dequeue(worker_id="test-worker")
             if task:
-                result = processor.process_task(TaskEnvelope.from_queue_data(task))
+                result = processor.process_task(TaskEnvelope.from_claim(task))
                 queue_service.finalize_task(
-                    task.id,
-                    worker_id=task.locked_by,
-                    lease_token=task.lease_token,
-                    success=result.success,
-                    error_message=result.error_message,
-                    retryable=result.retryable,
-                    current_retry_count=task.retry_count,
+                    task,
+                    result,
                 )
 
             summarize_task = queue_service.dequeue(
                 task_type=TaskType.SUMMARIZE, worker_id="test-worker"
             )
             if summarize_task:
-                result = processor.process_task(TaskEnvelope.from_queue_data(summarize_task))
+                result = processor.process_task(TaskEnvelope.from_claim(summarize_task))
                 queue_service.finalize_task(
-                    summarize_task.id,
-                    worker_id=summarize_task.locked_by,
-                    lease_token=summarize_task.lease_token,
-                    success=result.success,
-                    error_message=result.error_message,
-                    retryable=result.retryable,
-                    current_retry_count=summarize_task.retry_count,
+                    summarize_task,
+                    result,
                 )
 
             # Verify content was processed
@@ -208,20 +198,14 @@ class TestPipelineIntegration:
             task = queue_service.dequeue(worker_id="test-worker")
             assert task is not None
 
-            result = processor.process_task(TaskEnvelope.from_queue_data(task))
+            result = processor.process_task(TaskEnvelope.from_claim(task))
             assert result.success is False
 
             # Check task was atomically scheduled for retry.
             transition = queue_service.finalize_task(
-                task.id,
-                worker_id=task.locked_by,
-                lease_token=task.lease_token,
-                success=False,
-                error_message=result.error_message,
-                retryable=True,
-                current_retry_count=task.retry_count,
+                task,
+                TaskResult.fail(result.error_message, retry_delay_seconds=0),
                 max_retries=3,
-                retry_delay_seconds=0,
             )
             assert transition is not None
 
@@ -287,27 +271,17 @@ class TestPipelineIntegration:
             worker2_task = queue_service.dequeue(worker_id="worker-2")
 
             if worker1_task:
-                result = processor.process_task(TaskEnvelope.from_queue_data(worker1_task))
+                result = processor.process_task(TaskEnvelope.from_claim(worker1_task))
                 queue_service.finalize_task(
-                    worker1_task.id,
-                    worker_id=worker1_task.locked_by,
-                    lease_token=worker1_task.lease_token,
-                    success=result.success,
-                    error_message=result.error_message,
-                    retryable=result.retryable,
-                    current_retry_count=worker1_task.retry_count,
+                    worker1_task,
+                    result,
                 )
 
             if worker2_task:
-                result = processor.process_task(TaskEnvelope.from_queue_data(worker2_task))
+                result = processor.process_task(TaskEnvelope.from_claim(worker2_task))
                 queue_service.finalize_task(
-                    worker2_task.id,
-                    worker_id=worker2_task.locked_by,
-                    lease_token=worker2_task.lease_token,
-                    success=result.success,
-                    error_message=result.error_message,
-                    retryable=result.retryable,
-                    current_retry_count=worker2_task.retry_count,
+                    worker2_task,
+                    result,
                 )
 
             # Verify both tasks were processed
@@ -332,7 +306,8 @@ class TestPipelineIntegration:
         processor = SequentialTaskProcessor()
         task = queue_service.dequeue(worker_id="test-worker")
 
-        result = processor.process_task(TaskEnvelope.from_queue_data(task))
+        assert task is not None
+        result = processor.process_task(TaskEnvelope.from_claim(task))
         assert result.success is False
 
         # Test handling of invalid task type
@@ -357,7 +332,7 @@ class TestPipelineIntegration:
             from pydantic import ValidationError
 
             with pytest.raises(ValidationError):
-                TaskEnvelope.from_queue_data(task_data)
+                TaskEnvelope.model_validate(task_data)
 
     @pytest.mark.integration
     def test_end_to_end_scraping_and_processing(self, setup_test_db):
@@ -397,7 +372,8 @@ class TestPipelineIntegration:
 
             # Process scrape task
             scrape_task = queue_service.dequeue(worker_id="scraper")
-            result = processor.process_task(TaskEnvelope.from_queue_data(scrape_task))
+            assert scrape_task is not None
+            result = processor.process_task(TaskEnvelope.from_claim(scrape_task))
             assert result.success is True
 
             # Verify new content was created and task queued

@@ -8,28 +8,30 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from app.core.db import dispose_db_engine
 from app.core.logging import get_logger, setup_logging
 from app.core.observability import bound_log_context, build_log_extra, get_task_event_name
 from app.core.settings import get_settings
+from app.models.contracts import TaskQueue, TaskStatus, TaskType
 from app.models.internal.queue import ClaimedTask, TaskTransition
 from app.pipeline.dispatcher import TaskDispatcher
 from app.pipeline.handler_registry import build_handlers_for_queue
 from app.pipeline.queue_notifications import QueueNotificationListener
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_handler import TaskHandler
-from app.pipeline.task_models import TaskEnvelope, TaskResult, task_will_retry
+from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.task_specs import TASK_SPECS, get_task_spec
 from app.services.gateways.task_queue_gateway import TaskQueueGateway
 from app.services.langfuse_tracing import langfuse_trace_context
-from app.services.queue import QueueService, TaskQueue, TaskType
+from app.services.queue import QueueService
 
 if TYPE_CHECKING:
     from app.services.llm_summarization import ContentSummarizer
@@ -58,7 +60,7 @@ def _queue_uses_context_llm_service(queue_name: str) -> bool:
 
 
 def _task_extra(
-    task: TaskEnvelope | None,
+    task: TaskEnvelope | ClaimedTask | None,
     *,
     processor: SequentialTaskProcessor,
     operation: str,
@@ -68,7 +70,9 @@ def _task_extra(
     context_data: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build structured logger metadata for a queue task."""
-    task_type = task.task_type.value if task else None
+    task_type = None
+    if task is not None:
+        task_type = task.task_type.value if isinstance(task.task_type, TaskType) else task.task_type
     return build_log_extra(
         component="task_processor",
         operation=operation,
@@ -95,38 +99,14 @@ def _is_transient_database_operational_error(exc: OperationalError) -> bool:
     return any(snippet in combined for snippet in _TRANSIENT_DATABASE_ERROR_SNIPPETS)
 
 
-def _task_data_value(
-    task_data: ClaimedTask | Mapping[str, Any],
-    key: str,
-) -> Any:
-    """Read one claim field from the typed runtime shape or a test mapping."""
-    if isinstance(task_data, ClaimedTask):
-        return getattr(task_data, key, None)
-    return task_data.get(key)
+def _lease_heartbeat_interval_seconds(lease_seconds: int) -> float:
+    """Choose a bounded cadence that renews well before lease expiry."""
+    return max(min(lease_seconds / 3, 30.0), 5.0)
 
 
-def _task_data_for_log(task_data: ClaimedTask | Mapping[str, Any]) -> dict[str, Any]:
-    """Return a JSON-compatible task summary for validation failure logs."""
-    if isinstance(task_data, ClaimedTask):
-        return task_data.model_dump(mode="json")
-    return dict(task_data)
-
-
-def _invalid_task_envelope(
-    task_data: ClaimedTask | Mapping[str, Any],
-    *,
-    task_id: int,
-) -> TaskEnvelope:
-    """Preserve claim ownership while terminally failing an invalid task type."""
-    return TaskEnvelope(
-        id=task_id,
-        task_type=TaskType.SCRAPE,
-        retry_count=int(_task_data_value(task_data, "retry_count") or 0),
-        payload={},
-        locked_by=_task_data_value(task_data, "locked_by"),
-        lease_token=_task_data_value(task_data, "lease_token"),
-        lease_expires_at=_task_data_value(task_data, "lease_expires_at"),
-    )
+def _lease_heartbeat_retry_seconds(remaining_seconds: float) -> float:
+    """Retry a failed renewal promptly while staying within the lease window."""
+    return min(5.0, max(remaining_seconds, 0.1))
 
 
 class SequentialTaskProcessor:
@@ -219,45 +199,85 @@ class SequentialTaskProcessor:
         return 10.0 if transient else 5.0
 
     @contextmanager
-    def _lease_heartbeat(self, task: TaskEnvelope):
+    def _lease_heartbeat(self, claim: ClaimedTask) -> Iterator[threading.Event]:
         """Renew the lease for the current task while it is being processed."""
-        if (
-            not isinstance(self.queue_service, QueueService)
-            or task.lease_token is None
-            or task.locked_by is None
-        ):
-            yield
-            return
-        claim_worker_id = task.locked_by
-        lease_token = task.lease_token
-
         raw_lease_seconds = self.settings.queue.worker_timeout_seconds
         try:
             lease_seconds = max(int(raw_lease_seconds), 1)
         except (TypeError, ValueError):
             lease_seconds = 300
-        interval_seconds = max(min(lease_seconds / 3, 30.0), 5.0)
+        interval_seconds = _lease_heartbeat_interval_seconds(lease_seconds)
         stop_event = threading.Event()
+        ownership_lost = threading.Event()
 
         def _run() -> None:
-            while not stop_event.wait(interval_seconds):
-                renewed = self.queue_service.renew_lease(
-                    task.id,
-                    worker_id=claim_worker_id,
-                    lease_token=lease_token,
-                    lease_seconds=lease_seconds,
-                )
-                if renewed:
+            last_renewed_at = time.monotonic()
+            wait_seconds = interval_seconds
+            while not stop_event.wait(wait_seconds):
+                try:
+                    renewed = self.queue_service.renew_lease(
+                        claim.id,
+                        worker_id=claim.locked_by,
+                        lease_token=claim.lease_token,
+                        lease_seconds=lease_seconds,
+                    )
+                except SQLAlchemyError as exc:
+                    elapsed = time.monotonic() - last_renewed_at
+                    if elapsed >= lease_seconds:
+                        ownership_lost.set()
+                        logger.exception(
+                            "Task lease heartbeat exhausted its renewal window",
+                            extra=_task_extra(
+                                claim,
+                                processor=self,
+                                operation="renew_lease",
+                                event_name="task.lease_heartbeat_stopped",
+                                status="failed",
+                                context_data={"failure_class": type(exc).__name__},
+                            ),
+                        )
+                        return
+                    logger.warning(
+                        "Task lease heartbeat renewal hit a transient database error",
+                        exc_info=True,
+                        extra=_task_extra(
+                            claim,
+                            processor=self,
+                            operation="renew_lease",
+                            event_name="task.lease_heartbeat_retrying",
+                            status="degraded",
+                            context_data={"failure_class": type(exc).__name__},
+                        ),
+                    )
+                    wait_seconds = _lease_heartbeat_retry_seconds(lease_seconds - elapsed)
                     continue
+                except Exception as exc:  # noqa: BLE001
+                    ownership_lost.set()
+                    logger.exception(
+                        "Task lease heartbeat stopped after an unexpected error",
+                        extra=_task_extra(
+                            claim,
+                            processor=self,
+                            operation="renew_lease",
+                            event_name="task.lease_heartbeat_stopped",
+                            status="failed",
+                            context_data={"failure_class": type(exc).__name__},
+                        ),
+                    )
+                    return
+                if renewed:
+                    last_renewed_at = time.monotonic()
+                    wait_seconds = interval_seconds
+                    continue
+                ownership_lost.set()
                 logger.warning(
                     "Task lease heartbeat stopped after renewal failure",
-                    extra=build_log_extra(
-                        component="task_processor",
+                    extra=_task_extra(
+                        claim,
+                        processor=self,
                         operation="renew_lease",
                         event_name="task.lease_heartbeat_stopped",
                         status="degraded",
-                        task_id=task.id,
-                        worker_id=self.worker_id,
                     ),
                 )
                 return
@@ -265,22 +285,66 @@ class SequentialTaskProcessor:
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
         try:
-            yield
+            yield ownership_lost
         finally:
             stop_event.set()
             thread.join(timeout=1.0)
 
+    def _context_for_claim(
+        self,
+        claim: ClaimedTask,
+        ownership_lost: threading.Event,
+    ) -> TaskContext:
+        """Bind exact lease renewal to the handler context for this claim."""
+
+        def renew_claim() -> bool:
+            renewed = self.queue_service.renew_lease(
+                claim.id,
+                worker_id=claim.locked_by,
+                lease_token=claim.lease_token,
+                lease_seconds=self.settings.queue.worker_timeout_seconds,
+            )
+            if not renewed:
+                ownership_lost.set()
+            return renewed
+
+        return replace(
+            self.context,
+            lease_renewer=renew_claim,
+        )
+
     def _process_and_finalize_task(
         self,
+        claim: ClaimedTask,
         task: TaskEnvelope,
-    ) -> tuple[TaskResult, dict[str, object] | None]:
+    ) -> tuple[TaskResult, TaskTransition | None]:
         """Run one task under a lease heartbeat and persist the outcome."""
-        with self._lease_heartbeat(task):
-            result = self.process_task(task)
-            finalization = self._finalize_processed_task(task=task, result=result)
+        with self._lease_heartbeat(claim) as ownership_lost:
+            result = self.process_task(
+                task,
+                context=self._context_for_claim(claim, ownership_lost),
+            )
+            if ownership_lost.is_set():
+                logger.warning(
+                    "Task result not finalized because lease ownership was lost",
+                    extra=_task_extra(
+                        task,
+                        processor=self,
+                        operation="finalize_task",
+                        status="degraded",
+                        context_data={"failure_class": "LeaseOwnershipLost"},
+                    ),
+                )
+                return result, None
+            finalization = self._finalize_processed_task(claim=claim, result=result)
         return result, finalization
 
-    def process_task(self, task: TaskEnvelope) -> TaskResult:
+    def process_task(
+        self,
+        task: TaskEnvelope,
+        *,
+        context: TaskContext | None = None,
+    ) -> TaskResult:
         """Process a single task."""
         start_time = time.perf_counter()
         try:
@@ -354,7 +418,7 @@ class SequentialTaskProcessor:
                         context_data={"payload_keys": sorted(task.payload.keys())},
                     ),
                 )
-                result = self.dispatcher.dispatch(task, self.context)
+                result = self.dispatcher.dispatch(task, context or self.context)
                 if not result.success and not result.error_message and not result.deferred:
                     result = TaskResult(
                         success=False,
@@ -399,60 +463,21 @@ class SequentialTaskProcessor:
     def _finalize_processed_task(
         self,
         *,
-        task: TaskEnvelope,
+        claim: ClaimedTask,
         result: TaskResult,
-    ) -> dict[str, object] | None:
+    ) -> TaskTransition | None:
         """Persist task completion/retry state without crashing the worker loop."""
-        retry_count = task.retry_count
-        max_retries = self.settings.queue.max_retries
-        should_retry = task_will_retry(
-            result,
-            retry_count=retry_count,
-            max_retries=max_retries,
-        )
-        retry_delay_seconds = None
-        if should_retry:
-            retry_delay_seconds = result.retry_delay_seconds or min(60 * (2**retry_count), 3600)
-
-        if task.lease_token is None or task.locked_by is None:
-            logger.error(
-                "Task finalization refused because claim ownership is missing",
-                extra=_task_extra(
-                    task,
-                    processor=self,
-                    operation="finalize_task",
-                    status="failed",
-                    context_data={"failure_class": "MissingLeaseOwnership"},
-                ),
-            )
-            return None
-
         try:
-            finalization = self.queue_service.finalize_task(
-                task.id,
-                worker_id=task.locked_by,
-                lease_token=task.lease_token,
-                success=False if result.deferred else result.success,
-                error_message=None if result.deferred else result.error_message,
-                retryable=False if result.deferred else result.retryable,
-                current_retry_count=retry_count,
-                max_retries=max_retries,
-                retry_delay_seconds=(
-                    result.retry_delay_seconds if result.deferred else retry_delay_seconds
-                ),
-                deferred=result.deferred,
+            return self.queue_service.finalize_task(
+                claim,
+                result,
+                max_retries=self.settings.queue.max_retries,
             )
-
-            if isinstance(finalization, TaskTransition):
-                return finalization.model_dump(mode="python")
-            if isinstance(finalization, dict) or finalization is None:
-                return finalization
-            raise TypeError("Queue finalization returned an unsupported result")
-        except OperationalError as exc:
+        except SQLAlchemyError as exc:
             logger.exception(
                 "Task finalization hit a database write error",
                 extra=_task_extra(
-                    task,
+                    claim,
                     processor=self,
                     operation="finalize_task",
                     status="failed",
@@ -530,9 +555,8 @@ class SequentialTaskProcessor:
                     logger.info("Exiting startup phase - found first task")
 
                 try:
-                    task = TaskEnvelope.from_queue_data(task_data)
+                    task = TaskEnvelope.from_claim(task_data)
                 except ValidationError as exc:
-                    task_id = _task_data_value(task_data, "id")
                     logger.error(
                         "Invalid task payload",
                         extra=build_log_extra(
@@ -540,28 +564,23 @@ class SequentialTaskProcessor:
                             operation="task_parse",
                             event_name="task.invalid_payload",
                             status="failed",
-                            item_id=task_id,
-                            task_id=task_id,
+                            item_id=task_data.id,
+                            task_id=task_data.id,
                             queue_name=self.queue_name,
                             worker_id=self.worker_id,
                             source="queue",
                             context_data={
                                 "failure_class": type(exc).__name__,
-                                "task_data": _task_data_for_log(task_data),
+                                "task_data": task_data.model_dump(mode="json"),
                             },
                         ),
                     )
-                    if task_id is not None:
-                        invalid_task = _invalid_task_envelope(
-                            task_data,
-                            task_id=int(task_id),
-                        )
-                        self._finalize_processed_task(
-                            task=invalid_task,
-                            result=TaskResult.fail("Invalid task payload", retryable=False),
-                        )
+                    self._finalize_processed_task(
+                        claim=task_data,
+                        result=TaskResult.fail("Invalid task payload", retryable=False),
+                    )
                     continue
-                result, finalization = self._process_and_finalize_task(task)
+                result, finalization = self._process_and_finalize_task(task_data, task)
 
                 if finalization is None:
                     logger.warning(
@@ -588,7 +607,7 @@ class SequentialTaskProcessor:
                     )
                 else:
                     max_retries = self.settings.queue.max_retries
-                    if finalization and finalization.get("status") == "pending":
+                    if finalization.status is TaskStatus.PENDING:
                         logger.info(
                             (
                                 "Task deferred by processor"
@@ -604,9 +623,9 @@ class SequentialTaskProcessor:
                                 ),
                                 status="deferred" if result.deferred else "retry_scheduled",
                                 context_data={
-                                    "retry_count": finalization.get("retry_count"),
+                                    "retry_count": finalization.retry_count,
                                     "max_retries": max_retries,
-                                    "delay_seconds": finalization.get("retry_delay_seconds"),
+                                    "delay_seconds": finalization.retry_delay_seconds,
                                 },
                             ),
                         )
@@ -655,20 +674,18 @@ class SequentialTaskProcessor:
 
     def run_single_task(
         self,
-        task_data: ClaimedTask | Mapping[str, Any],
+        claim: ClaimedTask,
     ) -> bool:
         """
         Process a single task without the main loop.
         Useful for testing or one-off processing.
         """
         setup_logging()
-        logger.info("Processing single task: %s", _task_data_value(task_data, "id") or "unknown")
+        logger.info("Processing single task: %s", claim.id)
 
         try:
-            task = TaskEnvelope.from_queue_data(task_data)
+            task = TaskEnvelope.from_claim(claim)
         except ValidationError as exc:
-            task_id = _task_data_value(task_data, "id")
-            log_task_id = task_id if isinstance(task_id, (str, int)) else None
             logger.error(
                 "Invalid task payload",
                 extra=build_log_extra(
@@ -676,31 +693,26 @@ class SequentialTaskProcessor:
                     operation="task_parse",
                     event_name="task.invalid_payload",
                     status="failed",
-                    item_id=log_task_id,
-                    task_id=log_task_id,
+                    item_id=claim.id,
+                    task_id=claim.id,
                     queue_name=self.queue_name,
                     worker_id=self.worker_id,
                     source="queue",
                     context_data={
                         "failure_class": type(exc).__name__,
-                        "task_data": _task_data_for_log(task_data),
+                        "task_data": claim.model_dump(mode="json"),
                     },
                 ),
             )
-            if log_task_id is not None:
-                invalid_task = _invalid_task_envelope(
-                    task_data,
-                    task_id=int(log_task_id),
-                )
-                self._finalize_processed_task(
-                    task=invalid_task,
-                    result=TaskResult.fail("Invalid task payload", retryable=False),
-                )
+            self._finalize_processed_task(
+                claim=claim,
+                result=TaskResult.fail("Invalid task payload", retryable=False),
+            )
             return False
 
-        result, finalization = self._process_and_finalize_task(task)
+        result, finalization = self._process_and_finalize_task(claim, task)
 
-        if finalization and finalization.get("status") == "pending":
+        if finalization is not None and finalization.status is TaskStatus.PENDING:
             logger.info(
                 "Task %s %s",
                 task.id,
@@ -710,5 +722,5 @@ class SequentialTaskProcessor:
         return bool(
             result.success
             and finalization is not None
-            and finalization.get("status") == "completed"
+            and finalization.status is TaskStatus.COMPLETED
         )

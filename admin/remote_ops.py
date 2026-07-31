@@ -33,6 +33,7 @@ from app.models.db import (
     ProcessingTask,
     VendorUsageRecord,
 )
+from app.models.db.tasks import clear_processing_task_lease
 from app.models.db.users import User
 from app.models.domain.content_mapper import content_to_domain
 from app.queries.queue_health import get_queue_health_snapshot
@@ -1088,9 +1089,7 @@ def _regenerate_one_content_image(
             task.status = "failed"
             task.completed_at = datetime.now(UTC).replace(tzinfo=None)
             task.error_message = result.error_message
-            task.locked_at = None
-            task.locked_by = None
-            task.lease_expires_at = None
+            clear_processing_task_lease(task)
             session.flush()
             return {
                 "content_id": content_id,
@@ -1115,9 +1114,7 @@ def _regenerate_one_content_image(
         task.status = "completed"
         task.completed_at = datetime.now(UTC).replace(tzinfo=None)
         task.error_message = None
-        task.locked_at = None
-        task.locked_by = None
-        task.lease_expires_at = None
+        clear_processing_task_lease(task)
         session.flush()
         return {
             "content_id": content_id,
@@ -1130,9 +1127,7 @@ def _regenerate_one_content_image(
         task.status = "failed"
         task.completed_at = datetime.now(UTC).replace(tzinfo=None)
         task.error_message = str(exc)
-        task.locked_at = None
-        task.locked_by = None
-        task.lease_expires_at = None
+        clear_processing_task_lease(task)
         session.flush()
         return {
             "content_id": content_id,

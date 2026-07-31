@@ -10,6 +10,7 @@ import pytest
 
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import ProcessingTask
+from app.pipeline.task_models import TaskResult
 from app.pipeline.worker import ContentWorker
 from app.services.queue import QueueService, TaskType
 
@@ -177,11 +178,8 @@ class TestPipelineWithRealData:
 
         # Mark task complete
         queue_service.finalize_task(
-            task.id,
-            worker_id=task.locked_by,
-            lease_token=task.lease_token,
-            success=True,
-            current_retry_count=task.retry_count,
+            task,
+            TaskResult.ok(),
         )
 
         # Verify task is completed

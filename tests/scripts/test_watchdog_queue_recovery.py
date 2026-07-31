@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 from sqlalchemy.exc import OperationalError
 
@@ -18,13 +19,18 @@ from scripts.watchdog_queue_recovery import (
 
 def test_run_watchdog_once_requeues_stale_process_news_item(db_session) -> None:
     """Watchdog should requeue stale process_news_item tasks."""
+    locked_at = datetime.now(UTC) - timedelta(hours=3)
     stale_task = ProcessingTask(
         task_type=TaskType.PROCESS_NEWS_ITEM.value,
         status=TaskStatus.PROCESSING.value,
         payload={"news_item_id": 123},
         queue_name=TaskQueue.CONTENT.value,
         retry_count=0,
-        started_at=datetime.now(UTC) - timedelta(hours=3),
+        started_at=locked_at,
+        locked_at=locked_at,
+        locked_by="stale-worker",
+        lease_token=uuid4(),  # type: ignore[arg-type]  # SQLAlchemy's Column constructor loses the UUID type here.
+        lease_expires_at=locked_at + timedelta(minutes=5),
     )
     db_session.add(stale_task)
     db_session.commit()
@@ -47,6 +53,10 @@ def test_run_watchdog_once_requeues_stale_process_news_item(db_session) -> None:
     assert stale_task.started_at is None
     assert stale_task.completed_at is None
     assert stale_task.retry_count == 1
+    assert stale_task.locked_at is None
+    assert stale_task.locked_by is None
+    assert stale_task.lease_token is None
+    assert stale_task.lease_expires_at is None
 
 
 def test_run_watchdog_once_requeues_stale_sync_integration(db_session) -> None:

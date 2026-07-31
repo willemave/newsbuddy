@@ -55,12 +55,7 @@ class RunLlmTaskHandler:
                     LlmTaskKind.LEARNING_DECK.value: lambda: run_learning_deck_task(
                         db,
                         llm_task_id=llm_task_id_int,
-                        ensure_lease=lambda: context.queue_service.renew_lease(
-                            task.id,
-                            worker_id=task.locked_by or context.worker_id,
-                            lease_token=task.lease_token,
-                            lease_seconds=context.settings.queue.worker_timeout_seconds,
-                        ),
+                        ensure_lease=context.renew_current_lease,
                     ),
                 }
                 executor = executors.get(str(llm_task.task_kind or ""))

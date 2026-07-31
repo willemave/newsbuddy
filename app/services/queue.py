@@ -11,12 +11,11 @@ from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.contracts import TaskQueue, TaskStatus, TaskType
 from app.models.db import ProcessingTask
-from app.models.internal.queue import ClaimedTask, TaskTransition
+from app.models.internal.queue import ClaimedTask, TaskResult, TaskTransition
 from app.pipeline.retry_policy import retry_will_be_scheduled
 from app.pipeline.task_specs import TASK_SPECS
 from app.repositories.processing_task_queue_repository import (
     FinalizationOutcome,
-    FinalizeTaskRequest,
     ProcessingTaskQueueRepository,
 )
 from app.services.queue_enqueue import (
@@ -246,38 +245,41 @@ class QueueService(QueueEnqueueMixin):
 
     def finalize_task(
         self,
-        task_id: int,
+        claim: ClaimedTask,
+        result: TaskResult,
         *,
-        worker_id: str,
-        lease_token: UUID,
-        success: bool,
-        error_message: str | None = None,
-        retryable: bool = True,
-        current_retry_count: int = 0,
         max_retries: int = 3,
-        retry_delay_seconds: int | None = None,
-        deferred: bool = False,
     ) -> TaskTransition | None:
         """Persist one ownership-checked terminal, retry, or deferral transition."""
-        if deferred and success:
+        if result.deferred and result.success:
             raise ValueError("A successful task cannot also be deferred")
 
-        should_retry = not deferred and retry_will_be_scheduled(
-            success=success,
-            retryable=retryable,
-            retry_count=current_retry_count,
+        should_retry = not result.deferred and retry_will_be_scheduled(
+            success=result.success,
+            retryable=result.retryable,
+            retry_count=claim.retry_count,
             max_retries=max_retries,
         )
-        resolved_delay_seconds = (
-            max(int(retry_delay_seconds or 0), 0) if should_retry or deferred else None
-        )
+        resolved_delay_seconds = None
+        if result.deferred:
+            resolved_delay_seconds = max(int(result.retry_delay_seconds or 0), 0)
+        elif should_retry:
+            requested_delay = result.retry_delay_seconds
+            resolved_delay_seconds = max(
+                int(
+                    requested_delay
+                    if requested_delay is not None
+                    else min(60 * (2**claim.retry_count), 3600)
+                ),
+                0,
+            )
         resolved_error = None
-        if not success and not deferred:
-            resolved_error = error_message or "Task failed without error details"
+        if not result.success and not result.deferred:
+            resolved_error = result.error_message or "Task failed without error details"
 
-        if success:
+        if result.success:
             outcome = FinalizationOutcome.SUCCEEDED
-        elif deferred:
+        elif result.deferred:
             outcome = FinalizationOutcome.DEFERRED
         elif should_retry:
             outcome = FinalizationOutcome.RETRY
@@ -285,15 +287,10 @@ class QueueService(QueueEnqueueMixin):
             outcome = FinalizationOutcome.FAILED
 
         transition = self._repository.finalize_task(
-            FinalizeTaskRequest(
-                task_id=task_id,
-                worker_id=worker_id,
-                lease_token=lease_token,
-                expected_retry_count=current_retry_count,
-                outcome=outcome,
-                error_message=resolved_error,
-                retry_delay_seconds=resolved_delay_seconds,
-            )
+            claim,
+            outcome=outcome,
+            error_message=resolved_error,
+            retry_delay_seconds=resolved_delay_seconds,
         )
         if transition is None:
             logger.warning(
@@ -303,11 +300,11 @@ class QueueService(QueueEnqueueMixin):
                     operation="finalize_task",
                     event_name="task.finalization_rejected",
                     status="degraded",
-                    task_id=task_id,
-                    worker_id=worker_id,
+                    task_id=claim.id,
+                    worker_id=claim.locked_by,
                     context_data={
                         "failure_class": "LeaseOwnershipLost",
-                        "lease_token": str(lease_token),
+                        "lease_token": str(claim.lease_token),
                     },
                 ),
             )
@@ -321,10 +318,10 @@ class QueueService(QueueEnqueueMixin):
                     operation="finalize_task",
                     event_name="task.completed",
                     status="completed",
-                    task_id=task_id,
+                    task_id=claim.id,
                     task_type=transition.task_type,
                     queue_name=transition.queue_name,
-                    worker_id=worker_id,
+                    worker_id=claim.locked_by,
                     content_id=transition.content_id,
                 ),
             )
@@ -336,10 +333,10 @@ class QueueService(QueueEnqueueMixin):
                     operation="finalize_task",
                     event_name="task.deferred" if transition.deferred else "task.retry_scheduled",
                     status="deferred" if transition.deferred else "retry_scheduled",
-                    task_id=task_id,
+                    task_id=claim.id,
                     task_type=transition.task_type,
                     queue_name=transition.queue_name,
-                    worker_id=worker_id,
+                    worker_id=claim.locked_by,
                     content_id=transition.content_id,
                     context_data={
                         "retry_count": transition.retry_count,
@@ -356,11 +353,11 @@ class QueueService(QueueEnqueueMixin):
                     operation="finalize_task",
                     event_name="task.failed",
                     status="failed",
-                    item_id=task_id,
-                    task_id=task_id,
+                    item_id=claim.id,
+                    task_id=claim.id,
                     task_type=transition.task_type,
                     queue_name=transition.queue_name,
-                    worker_id=worker_id,
+                    worker_id=claim.locked_by,
                     content_id=transition.content_id,
                     context_data={"error_message": transition.error_message},
                 ),

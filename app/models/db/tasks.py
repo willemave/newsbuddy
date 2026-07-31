@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     Column,
     DateTime,
     Index,
@@ -17,6 +18,13 @@ from app.core.logging import get_logger
 from app.models.db.common import _utcnow
 
 logger = get_logger(__name__)
+
+PROCESSING_TASK_LEASE_FIELDS = (
+    "locked_at",
+    "locked_by",
+    "lease_token",
+    "lease_expires_at",
+)
 
 
 class ProcessingTask(Base):
@@ -45,6 +53,13 @@ class ProcessingTask(Base):
     dedupe_key = Column(String(512), nullable=True, index=True)
 
     __table_args__ = (
+        CheckConstraint(
+            "lease_token IS NULL OR "
+            "(status IS NOT NULL AND status = 'processing' "
+            "AND locked_at IS NOT NULL AND locked_by IS NOT NULL "
+            "AND lease_expires_at IS NOT NULL)",
+            name="ck_processing_tasks_lease_token_has_owner",
+        ),
         Index("idx_task_status_created", "status", "created_at"),
         Index("idx_task_queue_status_created", "queue_name", "status", "created_at"),
         Index(
@@ -71,3 +86,14 @@ class ProcessingTask(Base):
             postgresql_where=text("dedupe_key IS NOT NULL AND status IN ('pending', 'processing')"),
         ),
     )
+
+
+def processing_task_lease_clear_values() -> dict[str, object]:
+    """Return the canonical values for releasing processing-task ownership."""
+    return {field: None for field in PROCESSING_TASK_LEASE_FIELDS}
+
+
+def clear_processing_task_lease(task: ProcessingTask) -> None:
+    """Clear every ownership field on an ORM processing-task row."""
+    for field, value in processing_task_lease_clear_values().items():
+        setattr(task, field, value)

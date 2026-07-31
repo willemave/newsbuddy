@@ -28,6 +28,7 @@ class TaskContext:
     worker_id: str
     queue_gateway: TaskQueueGateway | None = None
     db_factory: Callable[[], AbstractContextManager[Session]] = get_db
+    lease_renewer: Callable[[], bool] | None = None
 
     @property
     def queue(self) -> TaskQueueGateway:
@@ -42,3 +43,9 @@ class TaskContext:
         if self.llm_service is None:
             raise RuntimeError("This task handler requires a content summarizer")
         return self.llm_service
+
+    def renew_current_lease(self) -> bool:
+        """Renew the active claim without exposing ownership fields to handlers."""
+        if self.lease_renewer is None:
+            return False
+        return self.lease_renewer()

@@ -802,6 +802,8 @@ used by `app/services/queue.py`:
 - dequeue with SQLAlchemy Core compare-and-set claiming via `FOR UPDATE SKIP LOCKED`
 - a unique `lease_token` for each claim attempt in addition to the diagnostic `locked_by` worker name
 - ownership-checked lease renewal and finalization, with expired `processing` rows eligible for reclaim
+- a database check constraint that permits tokenless rolling-deploy claims but requires every
+  tokenized row to remain `processing` with a lock timestamp, owner, and lease expiry
 - retry bucket rotation to reduce starvation
 - retry scheduling through delayed `available_at`
 - one atomic completion, failure, retry, or deferral transition
@@ -813,6 +815,9 @@ short engine-owned transactions, validated internal result models, and the Postg
 transaction clock. They do not use ORM session synchronization or ORM `UPDATE ... RETURNING`
 adaptation. Renewal and finalization match task id, status, worker name, exact lease token,
 unexpired lease, and retry count so a stale attempt cannot overwrite a newer claim.
+`QueueService` resolves success, failure, retry, deferral, and backoff once before passing the typed
+transition request to the repository. Every finalization and administrative recovery path clears
+all four lease fields through the same helper.
 
 This design assumes PostgreSQL row-locking and notification features, including `FOR UPDATE SKIP
 LOCKED` and `LISTEN`/`NOTIFY`.
@@ -821,7 +826,10 @@ LOCKED` and `LISTEN`/`NOTIFY`.
 
 `app/pipeline/threaded_task_processor.py` owns one queue process and runs multiple
 `SequentialTaskProcessor` claim loops. Each loop has its own worker name and carries the exact
-claim token through heartbeat and finalization.
+`ClaimedTask` through heartbeat and finalization. Handlers receive a smaller `TaskEnvelope`; lease
+identity stays in the processor and can only be renewed through the bound `TaskContext` callback.
+Heartbeat database failures are retried within the current lease window, and ownership loss blocks
+finalization of that attempt.
 
 Responsibilities:
 
@@ -831,7 +839,7 @@ Responsibilities:
 - dispatch to a typed handler
 - wrap execution in Langfuse tracing
 - renew task leases while long tasks execute
-- apply retry/backoff policy
+- send the typed handler result to `QueueService` for one retry/backoff decision
 - gracefully handle shutdown signals
 
 Registered handlers:

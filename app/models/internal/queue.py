@@ -35,7 +35,58 @@ class ClaimedTask(BaseModel):
     @classmethod
     def normalize_payload(cls, value: Any) -> dict[str, Any]:
         """Preserve the historical empty-payload behavior for nullable JSON rows."""
-        return value if isinstance(value, dict) else {}
+        if isinstance(value, dict):
+            return value
+        if value is None:
+            return {}
+        raise ValueError("Claimed task payload must be a JSON object")
+
+
+class TaskResult(BaseModel):
+    """Typed outcome returned by a processing-task handler."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    success: bool
+    error_message: str | None = None
+    retry_delay_seconds: int | None = None
+    retryable: bool = True
+    deferred: bool = False
+
+    @classmethod
+    def ok(cls) -> TaskResult:
+        """Return a successful task result."""
+        return cls(success=True)
+
+    @classmethod
+    def fail(
+        cls,
+        error_message: str | None = None,
+        *,
+        retryable: bool = True,
+        retry_delay_seconds: int | None = None,
+    ) -> TaskResult:
+        """Return a failed task result."""
+        return cls(
+            success=False,
+            error_message=error_message,
+            retryable=retryable,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+
+    @classmethod
+    def defer(
+        cls,
+        *,
+        retry_delay_seconds: int,
+    ) -> TaskResult:
+        """Return a pending outcome that does not consume the retry budget."""
+        return cls(
+            success=False,
+            retryable=False,
+            deferred=True,
+            retry_delay_seconds=retry_delay_seconds,
+        )
 
 
 class TaskTransition(BaseModel):

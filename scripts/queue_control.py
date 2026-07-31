@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.settings import get_settings  # noqa: E402
 from app.models.db import Content, ProcessingTask  # noqa: E402
+from app.models.db.tasks import clear_processing_task_lease  # noqa: E402
 from app.services.queue import (  # noqa: E402
     DEFAULT_TASK_CLEANUP_BATCH_SIZE,
     DEFAULT_TASK_CLEANUP_MAX_DELETE,
@@ -308,9 +309,7 @@ def requeue_stale_processing(
         row.started_at = None
         row.completed_at = None
         row.available_at = now
-        row.locked_at = None
-        row.locked_by = None
-        row.lease_expires_at = None
+        clear_processing_task_lease(row)
         row.error_message = None
         row.retry_count = int(row.retry_count or 0) + 1
     session.commit()

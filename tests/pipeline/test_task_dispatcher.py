@@ -8,7 +8,7 @@ from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.queue import TaskType
 
 
-def test_task_envelope_parses_queue_data() -> None:
+def test_task_envelope_parses_handler_data() -> None:
     task_data = {
         "id": 10,
         "task_type": "scrape",
@@ -16,7 +16,7 @@ def test_task_envelope_parses_queue_data() -> None:
         "payload": {"sources": ["all"]},
     }
 
-    envelope = TaskEnvelope.from_queue_data(task_data)
+    envelope = TaskEnvelope.model_validate(task_data)
 
     assert envelope.id == 10
     assert envelope.task_type == TaskType.SCRAPE
@@ -31,7 +31,7 @@ def test_task_envelope_normalizes_payload_none() -> None:
         "payload": None,
     }
 
-    envelope = TaskEnvelope.from_queue_data(task_data)
+    envelope = TaskEnvelope.model_validate(task_data)
 
     assert envelope.payload == {}
 

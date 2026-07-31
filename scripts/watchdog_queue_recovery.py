@@ -32,6 +32,7 @@ from app.core.logging import get_logger, setup_logging  # noqa: E402
 from app.core.observability import bound_log_context, build_log_extra  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
 from app.models.db import ProcessingTask  # noqa: E402
+from app.models.db.tasks import clear_processing_task_lease  # noqa: E402
 from app.services.queue import (  # noqa: E402
     TASK_QUEUE_BY_TYPE,
     TASK_QUEUE_VALUE_BY_TYPE,
@@ -206,9 +207,7 @@ def _requeue_stale_tasks(
             row.started_at = None
             row.completed_at = None
             row.available_at = now
-            row.locked_at = None
-            row.locked_by = None
-            row.lease_expires_at = None
+            clear_processing_task_lease(row)
             row.error_message = None
             row.retry_count = int(row.retry_count or 0) + 1
 
