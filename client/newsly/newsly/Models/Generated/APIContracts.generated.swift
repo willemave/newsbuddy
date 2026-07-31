@@ -782,7 +782,6 @@ enum APIDeleteStatus: String, Codable, CaseIterable {
 enum APIUserLlmProvider: String, Codable, CaseIterable {
     case anthropic = "anthropic"
     case openai = "openai"
-    case google = "google"
 }
 
 enum APINewsItemVisibilityScope: Codable, Equatable, Hashable {
@@ -1118,7 +1117,6 @@ enum APIChatMessageDisplayType: Codable, Equatable, Hashable {
 enum APILLMProvider: String, Codable, CaseIterable {
     case openai = "openai"
     case anthropic = "anthropic"
-    case google = "google"
     case cerebras = "cerebras"
     case openrouter = "openrouter"
     case deep_research = "deep_research"

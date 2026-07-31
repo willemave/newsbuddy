@@ -2,7 +2,6 @@
 
 from app.core.model_defaults import (
     CHEAP_MODEL_SPEC,
-    GOOGLE_FLASH_LITE_PREVIEW_MODEL_SPEC,
     SMART_ANTHROPIC_MODEL_SPEC,
     SMART_MODEL_SPEC,
 )
@@ -12,7 +11,6 @@ TWEET_SUGGESTION_MODEL = CHEAP_MODEL_SPEC
 
 # LLM provider models for tweet suggestions
 TWEET_MODELS = {
-    "google": GOOGLE_FLASH_LITE_PREVIEW_MODEL_SPEC,
     "openai": SMART_MODEL_SPEC,
     "anthropic": SMART_ANTHROPIC_MODEL_SPEC,
 }

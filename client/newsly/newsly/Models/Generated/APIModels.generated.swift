@@ -925,13 +925,13 @@ struct APITweetSuggestionsRequest: Codable {
     let message: String?
     let creativity: Int
     let length: APITweetLength
-    let llmProvider: String?
+    let llmProvider: APIUserLlmProvider?
 
     init(
         message: String? = nil,
         creativity: Int = 5,
         length: APITweetLength = .medium,
-        llmProvider: String? = nil
+        llmProvider: APIUserLlmProvider? = nil
     ) {
         self.message = message
         self.creativity = creativity
@@ -951,7 +951,7 @@ struct APITweetSuggestionsRequest: Codable {
         message = try container.decodeIfPresent(String.self, forKey: .message)
         creativity = try container.decode(Int.self, forKey: .creativity)
         length = try container.decode(APITweetLength.self, forKey: .length)
-        llmProvider = try container.decodeIfPresent(String.self, forKey: .llmProvider)
+        llmProvider = try container.decodeIfPresent(APIUserLlmProvider.self, forKey: .llmProvider)
     }
 
     func encode(to encoder: Encoder) throws {

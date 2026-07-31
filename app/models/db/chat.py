@@ -43,7 +43,7 @@ class ChatSession(Base):
     branch_start_message_id = Column(Integer, nullable=True, index=True)
     council_message_id = Column(Integer, nullable=True, index=True)
     is_hidden_from_history = Column(Boolean, default=False, nullable=False)
-    llm_model = Column(String(100), nullable=False, default="openai:gpt-5.5")
+    llm_model = Column(String(100), nullable=False, default="openai:gpt-5.6-terra")
     llm_provider = Column(String(50), nullable=False, default="openai")
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)

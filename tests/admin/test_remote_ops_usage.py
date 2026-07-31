@@ -75,7 +75,7 @@ def remote_context(tmp_path) -> Iterator[RemoteContext]:
                 [
                     VendorUsageRecord(
                         provider="openai",
-                        model="gpt-5.4-mini",
+                        model="gpt-5.6-luna",
                         feature="summarization",
                         operation="summarize",
                         source="worker",

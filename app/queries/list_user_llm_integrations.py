@@ -6,7 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.models.api.integrations import UserLlmIntegrationResponse
 from app.models.contracts import UserLlmProvider
-from app.repositories.user_integration_repository import list_user_llm_integrations
+from app.repositories.user_integration_repository import (
+    SUPPORTED_LLM_PROVIDERS,
+    list_user_llm_integrations,
+)
 
 
 def execute(db: Session, *, user_id: int) -> list[UserLlmIntegrationResponse]:
@@ -14,7 +17,7 @@ def execute(db: Session, *, user_id: int) -> list[UserLlmIntegrationResponse]:
     responses: list[UserLlmIntegrationResponse] = []
     for record in list_user_llm_integrations(db, user_id=user_id):
         provider = record.provider
-        if provider not in {"anthropic", "openai", "google"}:
+        if provider not in SUPPORTED_LLM_PROVIDERS:
             continue
         responses.append(
             UserLlmIntegrationResponse(

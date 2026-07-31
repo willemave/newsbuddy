@@ -9,6 +9,13 @@ MAX_NARRATION_POINTS = 10
 MAX_NARRATION_CHARS = 8_000
 
 
+def _truncate_with_ellipsis(text: str, limit: int) -> str:
+    suffix = "..."
+    if limit <= len(suffix):
+        return suffix[:limit]
+    return f"{text[: limit - len(suffix)].rstrip()}{suffix}"
+
+
 def _truncate(text: str | None, limit: int) -> str | None:
     if text is None:
         return None
@@ -17,7 +24,7 @@ def _truncate(text: str | None, limit: int) -> str | None:
         return None
     if len(cleaned) <= limit:
         return cleaned
-    return f"{cleaned[:limit].rstrip()}..."
+    return _truncate_with_ellipsis(cleaned, limit)
 
 
 def _clean_spoken_text(value: object, limit: int = MAX_NARRATION_POINT_CHARS) -> str | None:
@@ -28,7 +35,7 @@ def _clean_spoken_text(value: object, limit: int = MAX_NARRATION_POINT_CHARS) ->
         return None
     if len(cleaned) <= limit:
         return cleaned
-    return f"{cleaned[:limit].rstrip()}..."
+    return _truncate_with_ellipsis(cleaned, limit)
 
 
 def _extract_artifact_payload(summary_payload: object) -> dict[str, object] | None:
@@ -169,4 +176,4 @@ def build_summary_narration(content: Content, *, title: str) -> str:
     spoken_text = " ".join(part.strip() for part in parts if part.strip()).strip()
     if len(spoken_text) <= MAX_NARRATION_CHARS:
         return spoken_text
-    return f"{spoken_text[:MAX_NARRATION_CHARS].rstrip()}..."
+    return _truncate_with_ellipsis(spoken_text, MAX_NARRATION_CHARS)

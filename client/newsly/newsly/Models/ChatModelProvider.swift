@@ -11,7 +11,6 @@ import Foundation
 enum ChatModelProvider: String, Codable, CaseIterable {
     case openai
     case anthropic
-    case google
     case deep_research
 
     var displayName: String {
@@ -20,8 +19,6 @@ enum ChatModelProvider: String, Codable, CaseIterable {
             return "GPT"
         case .anthropic:
             return "Claude"
-        case .google:
-            return "Gemini"
         case .deep_research:
             return "Deep Research"
         }
@@ -34,8 +31,6 @@ enum ChatModelProvider: String, Codable, CaseIterable {
             return "brain.head.profile"
         case .anthropic:
             return "sparkles"
-        case .google:
-            return "diamond"
         case .deep_research:
             return "magnifyingglass.circle.fill"
         }
@@ -48,8 +43,6 @@ enum ChatModelProvider: String, Codable, CaseIterable {
             return "openai-icon"
         case .anthropic:
             return "claude-icon"
-        case .google:
-            return "gemini-icon"
         case .deep_research:
             return "deep-research-icon"
         }
@@ -58,7 +51,7 @@ enum ChatModelProvider: String, Codable, CaseIterable {
     var chatDisplayName: String {
         switch self {
         case .openai:
-            return "GPT-5.5"
+            return "GPT-5.6 Terra"
         default:
             return displayName
         }
@@ -76,8 +69,6 @@ enum ChatModelProvider: String, Codable, CaseIterable {
             return "Fast, versatile reasoning"
         case .anthropic:
             return "Thoughtful, nuanced responses"
-        case .google:
-            return "Balanced performance"
         case .deep_research:
             return "Comprehensive analysis (2-5 min)"
         }
@@ -90,15 +81,12 @@ enum ChatModelProvider: String, Codable, CaseIterable {
             return "green"
         case .anthropic:
             return "orange"
-        case .google:
-            return "blue"
         case .deep_research:
             return "purple"
         }
     }
 
-    /// Providers offered for new conversations. Google remains decodable so
-    /// existing sessions keep their original provider label.
+    /// Providers offered for new conversations.
     static let selectableProviders: [ChatModelProvider] = [.openai, .anthropic]
 
     /// Providers available for tweet generation.

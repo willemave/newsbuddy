@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.db import UserIntegrationConnection
 from app.services.token_crypto import decrypt_token, encrypt_token
 
-SUPPORTED_LLM_PROVIDERS = ("anthropic", "openai", "google")
+SUPPORTED_LLM_PROVIDERS = ("anthropic", "openai")
 
 
 def list_user_llm_integrations(db: Session, *, user_id: int) -> list[UserIntegrationConnection]:

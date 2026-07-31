@@ -276,7 +276,7 @@ One PR, mechanical, each item is delete + prune references:
 - `app/models/metadata/discussion.py` (docstring-only module); stale archaeology comments
   (summaries.py:820, articles.py:68, news.py:115, db/users.py:30, http_client/__init__.py:1).
 - Dead settings: `max_content_length`, `http_max_retries`, `max_retry_attempts`,
-  `elevenlabs_agent_id`/`_text_only`/`_turn_timeout_seconds` + their `vulture_whitelist.py`
+  the retired conversational-agent settings plus their `vulture_whitelist.py`
   entries and `QueueSettingsView` echo.
 - Blanket `# ruff: noqa: F401` headers on 11 `app/models/api/` files → run
   `ruff --ignore-noqa --select F401`, delete the ~60 dead imports, keep noqa only in true
@@ -307,9 +307,8 @@ Independent of Phase 3 consolidations; land in any order.
 Hold two long-lived `httpx.Client`s (verify on / verify off for `SSL_BYPASS_DOMAINS`) on
 `HttpService` ([app/services/http.py:174](../../../app/services/http.py)); same one-client
 treatment for `x_api._request_json` (`:518`), `podcast_search` (3 sites),
-`narration_tts` ElevenLabs client per turn (`:309`), and `image_generation` bare `requests.*`
-(`:949` → module-level `Session`). Full three-layer consolidation is WP3.1; this package only
-stops the per-request TCP+TLS churn.
+and `image_generation` bare `requests.*` (`:949` → module-level `Session`). Full three-layer
+consolidation is WP3.1; this package only stops the per-request TCP+TLS churn.
 
 ### WP2.2 — Lazy heavyweight imports in workers
 Move `import torch/transformers` inside functions in

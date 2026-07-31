@@ -17,6 +17,7 @@ from app.models.contracts import (
     SummaryKind,
     SummaryVersion,
     TweetLength,
+    UserLlmProvider,
 )
 
 
@@ -208,9 +209,9 @@ class TweetSuggestionsRequest(BaseModel):
         TweetLength.MEDIUM,
         description="Tweet length preference (short=100-180, medium=180-280, long=280-400 chars)",
     )
-    llm_provider: str | None = Field(
+    llm_provider: UserLlmProvider | None = Field(
         None,
-        description="LLM provider to use (openai, anthropic, google). Defaults to google.",
+        description="LLM provider to use (openai or anthropic). Defaults to openai.",
     )
 
     model_config = ConfigDict(
@@ -219,7 +220,7 @@ class TweetSuggestionsRequest(BaseModel):
                 "message": "emphasize the startup angle",
                 "creativity": 7,
                 "length": "medium",
-                "llm_provider": "google",
+                "llm_provider": "openai",
             }
         }
     )

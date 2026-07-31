@@ -380,7 +380,6 @@ class UserLlmProvider(StrEnum):
 
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
-    GOOGLE = "google"
 
 
 class NewsItemVisibilityScope(StrEnum):
@@ -462,7 +461,6 @@ class LLMProvider(StrEnum):
 
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
-    GOOGLE = "google"
     CEREBRAS = "cerebras"
     OPENROUTER = "openrouter"
     DEEP_RESEARCH = "deep_research"

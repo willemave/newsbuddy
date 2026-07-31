@@ -151,7 +151,7 @@ def test_content_summarizer_resolves_default_models(monkeypatch: pytest.MonkeyPa
     assert captured_model_specs == ["openrouter:deepseek/deepseek-v4-flash"]
 
 
-def test_content_summarizer_uses_gpt_5_4_mini_for_articles(
+def test_content_summarizer_uses_luna_for_articles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_resolves: list[tuple[str | None, str | None]] = []
@@ -171,8 +171,8 @@ def test_content_summarizer_uses_gpt_5_4_mini_for_articles(
     summarizer = llm_summarization.ContentSummarizer(_model_resolver=fake_resolve)
     summarizer.summarize("body", content_type=ContentType.ARTICLE)
 
-    assert captured_resolves == [("openai", "gpt-5.4-mini")]
-    assert captured_model_specs == ["openai:gpt-5.4-mini"]
+    assert captured_resolves == [("openai", "gpt-5.6-luna")]
+    assert captured_model_specs == ["openai:gpt-5.6-luna"]
 
 
 def test_content_summarizer_uses_editorial_model_for_specialized_prompt_types(
@@ -195,8 +195,8 @@ def test_content_summarizer_uses_editorial_model_for_specialized_prompt_types(
     summarizer = llm_summarization.ContentSummarizer(_model_resolver=fake_resolve)
     summarizer.summarize("body", content_type="editorial_research")
 
-    assert captured_resolves == [("openai", "gpt-5.5")]
-    assert captured_model_specs == ["openai:gpt-5.5"]
+    assert captured_resolves == [("openai", "gpt-5.6-terra")]
+    assert captured_model_specs == ["openai:gpt-5.6-terra"]
 
 
 def test_content_summarizer_respects_overrides(monkeypatch: pytest.MonkeyPatch) -> None:

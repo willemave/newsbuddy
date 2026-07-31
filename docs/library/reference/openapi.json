@@ -5655,7 +5655,6 @@
         "enum": [
           "openai",
           "anthropic",
-          "google",
           "cerebras",
           "openrouter",
           "deep_research"
@@ -8769,7 +8768,7 @@
         "example": {
           "creativity": 7,
           "length": "medium",
-          "llm_provider": "google",
+          "llm_provider": "openai",
           "message": "emphasize the startup angle"
         },
         "properties": {
@@ -8789,14 +8788,13 @@
           "llm_provider": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/UserLlmProvider"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "LLM provider to use (openai, anthropic, google). Defaults to google.",
-            "title": "Llm Provider"
+            "description": "LLM provider to use (openai or anthropic). Defaults to openai."
           },
           "message": {
             "anyOf": [
@@ -9108,8 +9106,7 @@
         "description": "User-configurable LLM providers accepted by integration endpoints.",
         "enum": [
           "anthropic",
-          "openai",
-          "google"
+          "openai"
         ],
         "title": "UserLlmProvider",
         "type": "string"

@@ -8,7 +8,7 @@
 **Primary Runtime:** Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, pydantic-ai
 **Primary Clients:** SwiftUI iOS app, iOS Share Extension, Jinja admin UI, machine-facing agent/CLI APIs
 **Storage:** PostgreSQL for local/staging/production, plus local or S3-compatible content-body storage
-**Processing Model:** Task-spec-routed database queue with queue partitions and sequential workers
+**Processing Model:** Task-spec-routed database queue with partition-owned threaded workers
 
 ## 1. Documentation Map
 
@@ -58,7 +58,7 @@ flowchart LR
 
   Scrapers["Scrapers"] -->|create contents + enqueue| Queue
   Submit["User submission"] -->|ANALYZE_URL| Queue
-  Queue --> Workers["SequentialTaskProcessor workers"]
+  Queue --> Workers["ThreadedTaskProcessor queue workers"]
   Workers --> Analyzer["ContentAnalyzer"]
   Workers --> Strategies["Processing strategies"]
   Workers --> Summarizer["ContentSummarizer"]
@@ -302,7 +302,7 @@ X sync and YouTube configuration paths exist outside the default scheduled scrap
 - worker limits
   - max workers, timeouts, retry limits, checkout timeout
 - external providers
-  - OpenAI, Anthropic, Google, Cerebras, OpenRouter, Exa, ElevenLabs, Firecrawl, Runware
+  - OpenAI, Anthropic, Google, Cerebras, OpenRouter, Exa, Firecrawl, Runware
 - tracing
   - Langfuse host, keys, sample rate, instrumentation mode
 - discovery and onboarding
@@ -347,7 +347,7 @@ SQLAlchemy tables live under `app/models/db/`. API DTOs, domain objects, metadat
 | `users` | End users and admin users | Apple identity, profile, onboarding flags, X username, display preferences |
 | `contents` | Canonical long-form records and compatibility rows | Content type, URL, source/platform, lifecycle status, compact metadata, publication date |
 | `content_bodies` | Canonical body storage pointers | Source/rendered text stored outside `content_metadata` in local or S3-compatible storage |
-| `processing_tasks` | Async task queue | Task type, queue partition, normalized payload, active dedupe key, retries, lease timestamps |
+| `processing_tasks` | Async task queue | Task type, queue partition, normalized payload, active dedupe key, retries, lease owner/token/timestamps |
 | `content_status` | Per-user inbox/feed membership | Main long-form visibility overlay |
 | `content_read_status` | Per-user read marks for `contents` | One row per user/content |
 | `content_knowledge_saves` | Per-user Knowledge saves | Drives saved-content state and personal markdown sync |
@@ -799,20 +799,29 @@ used by `app/services/queue.py`:
 
 - enqueue with task-spec-normalized payloads and queue names from `TASK_SPECS`
 - dedupe controlled by `TaskSpec`, explicit `dedupe_key`, and a partial unique index over active `pending`/`processing` rows
-- dequeue with compare-and-set claiming via `FOR UPDATE SKIP LOCKED`
-- worker leases for active tasks, with expired `processing` rows eligible for reclaim
+- dequeue with SQLAlchemy Core compare-and-set claiming via `FOR UPDATE SKIP LOCKED`
+- a unique `lease_token` for each claim attempt in addition to the diagnostic `locked_by` worker name
+- ownership-checked lease renewal and finalization, with expired `processing` rows eligible for reclaim
 - retry bucket rotation to reduce starvation
 - retry scheduling through delayed `available_at`
-- completion and retry state transitions
+- one atomic completion, failure, retry, or deferral transition
 - daily terminal-row retention after 14 days, committed in 5,000-row batches with a
   50,000-row cap per run so initial cleanup drains gradually
 
-This design assumes PostgreSQL row-locking and notification features, including
-`FOR UPDATE SKIP LOCKED` and `LISTEN`/`NOTIFY`.
+Claim, renewal, and finalization live in `ProcessingTaskQueueRepository`. They use the Core table,
+short engine-owned transactions, validated internal result models, and the PostgreSQL UTC
+transaction clock. They do not use ORM session synchronization or ORM `UPDATE ... RETURNING`
+adaptation. Renewal and finalization match task id, status, worker name, exact lease token,
+unexpired lease, and retry count so a stale attempt cannot overwrite a newer claim.
 
-### 9.4 Sequential task processor
+This design assumes PostgreSQL row-locking and notification features, including `FOR UPDATE SKIP
+LOCKED` and `LISTEN`/`NOTIFY`.
 
-`app/pipeline/sequential_task_processor.py` is the runtime for workers.
+### 9.4 Threaded worker and sequential claim loop
+
+`app/pipeline/threaded_task_processor.py` owns one queue process and runs multiple
+`SequentialTaskProcessor` claim loops. Each loop has its own worker name and carries the exact
+claim token through heartbeat and finalization.
 
 Responsibilities:
 
@@ -877,7 +886,10 @@ failure.
 
 ### 9.6 Worker launch and drift guards
 
-Workers are launched per queue partition. `scripts/dev.sh` and `scripts/start_services.sh` start `content`, `media`, `audio_episode`, `image`, `onboarding`, `backfill`, `discussion`, `twitter`, `chat`, and `llm` workers. The `content` queue runs with higher parallelism by default because it carries the widest set of user-visible work.
+Workers are launched as one process per queue partition with configurable claim-loop threads.
+`scripts/dev.sh` and `scripts/start_services.sh` start `content`, `media`, `audio_episode`, `image`,
+`onboarding`, `backfill`, `discussion`, `twitter`, `chat`, and `llm` workers. The `content` queue
+runs with higher parallelism by default because it carries the widest set of user-visible work.
 
 `supervisor.conf` and `docker/supervisord.worker-programs.conf` mirror the same queue partitions. Both the all-in-one `docker/supervisord.conf` and split `docker/supervisord.workers.conf` include that canonical worker graph; `docker/supervisord.server.conf` intentionally starts only server/bootstrap processes. `tests/scripts/test_supervisor_queue_config.py` derives expected worker coverage from `TaskQueue` and guards host/Docker config drift.
 
@@ -993,11 +1005,11 @@ Current defaults:
 - discussion summaries
   - `openrouter:deepseek/deepseek-v4-flash`
 - articles
-  - `openai:gpt-5.4-mini`
+  - `openai:gpt-5.6-luna`
 - podcasts
-  - `openai:gpt-5.4-mini`
+  - `openai:gpt-5.6-luna`
 - editorial/interleaved/long-bullets/longform artifacts
-  - `openai:gpt-5.5`
+  - `openai:gpt-5.6-terra`
 
 Key behaviors:
 

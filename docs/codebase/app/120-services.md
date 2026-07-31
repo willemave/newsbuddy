@@ -35,7 +35,7 @@ Business-logic layer for content ingestion/lifecycle, LLM use, chat, discovery, 
 
 ## Runtime dependencies
 - `yt_dlp` and YouTube config support audio/video extraction.
-- ElevenLabs is used by backend narration TTS in `app/services/voice`.
+- ElevenLabs `eleven_flash_v2_5` is used by backend narration TTS in `app/services/voice`.
 - Learning Decks can use local or E2B-style sandbox execution and object storage.
 - News embeddings/reranking depend on optional local ML packages such as `sentence-transformers`, `torch`, and `transformers`.
 - Provider costs and usage flow through `vendor_usage.py` and `vendor_costs.py`.

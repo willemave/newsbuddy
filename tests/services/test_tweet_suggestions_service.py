@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from pydantic import HttpUrl, TypeAdapter
 from pydantic_ai import PromptedOutput
 
@@ -126,7 +127,7 @@ class TestTweetSuggestionService:
     def test_generate_suggestions_accepts_raw_json_text_output(
         self, mock_run_sync, monkeypatch
     ) -> None:
-        """Prompted non-Gemini output can be parsed from raw JSON text."""
+        """Prompted model output can be parsed from raw JSON text."""
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
         mock_result = MagicMock()
         mock_result.output = """
@@ -176,7 +177,7 @@ class TestTweetModelSelection:
         for provider, model_spec in TWEET_MODELS.items():
             assert service._get_model_for_provider(provider) == model_spec
 
-    def test_non_gemini_agents_use_prompted_json_output(self, monkeypatch) -> None:
+    def test_supported_agents_use_prompted_json_output(self, monkeypatch) -> None:
         """OpenAI, Anthropic, and OpenRouter avoid tool-output-only generation."""
         captured: dict[str, object] = {}
 
@@ -193,7 +194,7 @@ class TestTweetModelSelection:
 
         service = TweetSuggestionService()
         for model_spec in (
-            "openai:gpt-5.5",
+            "openai:gpt-5.6-terra",
             "anthropic:claude-opus-4-6",
             "openrouter:deepseek/deepseek-v4-flash",
         ):
@@ -202,20 +203,8 @@ class TestTweetModelSelection:
             assert isinstance(output_type, PromptedOutput)
             assert output_type.outputs is TweetSuggestionsPayload
 
-    def test_gemini_agent_keeps_native_payload_output(self, monkeypatch) -> None:
-        """Gemini stays on the existing structured payload path."""
-        captured: dict[str, object] = {}
-
-        def fake_get_basic_agent(model_spec, output_type, system_prompt):  # noqa: ANN001
-            captured["output_type"] = output_type
-            return MagicMock()
-
-        monkeypatch.setattr(
-            "app.services.tweet_suggestions.get_basic_agent",
-            fake_get_basic_agent,
-        )
-
+    def test_google_provider_is_rejected(self) -> None:
         service = TweetSuggestionService()
-        service._build_agent("system prompt", "google:gemini-3.1-flash-lite-preview")
 
-        assert captured["output_type"] is TweetSuggestionsPayload
+        with pytest.raises(ValueError, match="Unsupported tweet LLM provider: google"):
+            service._get_model_for_provider("google")

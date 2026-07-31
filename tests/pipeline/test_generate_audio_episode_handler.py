@@ -93,7 +93,7 @@ def test_generate_audio_episode_handler_keeps_episode_pending_for_retry(
         ("provider", 503, 0, True, "pending", "status_code: 503, raw provider diagnostics"),
         ("provider", 503, 3, True, "failed", "status_code: 503, raw provider diagnostics"),
         ("local_input", None, 0, False, "failed", "Preauthored audio episode narration is empty"),
-        ("local_tts", None, 0, False, "failed", "ElevenLabs SDK is not installed"),
+        ("local_tts", None, 0, False, "failed", "ElevenLabs API key is not configured"),
         (
             "wrapped_local_tts",
             None,
@@ -152,7 +152,7 @@ def test_generate_audio_episode_handler_classifies_generation_failures(
         if failure_kind == "local_input":
             raise AudioEpisodeInputError("Preauthored audio episode narration is empty")
         if failure_kind == "local_tts":
-            raise NarrationTtsConfigurationError("ElevenLabs SDK is not installed")
+            raise NarrationTtsConfigurationError("ElevenLabs API key is not configured")
         if failure_kind == "wrapped_local_tts":
             error = NarrationTtsConfigurationError("ffmpeg is not installed")
             raise RuntimeError("Failed to generate audio episode dialogue") from error

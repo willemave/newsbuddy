@@ -3,7 +3,7 @@
 Generate article infographics using ASCII art rendered as images.
 
 Approach:
-1. Use OpenAI gpt-5.4-mini to generate ASCII art representing the article
+1. Use OpenAI gpt-5.6-luna to generate ASCII art representing the article
 2. Render the ASCII art as a styled image using PIL
 
 This is dramatically cheaper than image generation models.
@@ -43,7 +43,7 @@ setup_logging()
 logger = get_logger(__name__)
 
 # Default model (can be overridden with --model flag)
-DEFAULT_MODEL = "openai:gpt-5.4-mini"
+DEFAULT_MODEL = "openai:gpt-5.6-luna"
 FALLBACK_MODEL = "google-gla:gemini-2.5-flash-preview-09-2025"
 
 # Output directory

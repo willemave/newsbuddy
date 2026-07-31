@@ -147,7 +147,7 @@ def test_admin_dashboard_shows_cost_analysis(client, db_session, test_user) -> N
                 ),
                 VendorUsageRecord(
                     provider="openai",
-                    model="gpt-5.4-mini",
+                    model="gpt-5.6-luna",
                     feature="summarization",
                     operation="summarization.llm_summarization",
                     user_id=test_user.id,

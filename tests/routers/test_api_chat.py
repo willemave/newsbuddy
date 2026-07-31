@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from sqlalchemy.orm import Session
@@ -133,7 +134,7 @@ def test_create_chat_session_with_content(
     session = data["session"]
     assert session["content_id"] == content.id
     assert session["llm_provider"] == "openai"
-    assert session["llm_model"] == "openai:gpt-5.5"
+    assert session["llm_model"] == "openai:gpt-5.6-terra"
     assert session["session_type"] == "knowledge_chat"
     assert session["article_title"] == "Test Article"
     assert session["article_summary"] is not None
@@ -317,7 +318,7 @@ def test_list_chat_sessions(client: TestClient, db_session: Session, test_user) 
             content_id=content.id if i == 0 else None,
             title=f"Session {i}",
             session_type="knowledge_chat",
-            llm_model="openai:gpt-5.5",
+            llm_model="openai:gpt-5.6-terra",
             llm_provider="openai",
         )
         db_session.add(session)
@@ -354,7 +355,7 @@ def test_list_chat_sessions_marks_share_chat_waiting_for_first_turn(
         content_id=content.id,
         title="Pending Share Chat",
         session_type="knowledge_chat",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -385,7 +386,7 @@ def test_list_chat_sessions_keeps_preparing_state_during_chat_queue_handoff(
         content_id=content.id,
         title="Queued Share Chat",
         session_type="knowledge_chat",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     task = ProcessingTask(
@@ -558,7 +559,7 @@ def test_start_council_chat_creates_hidden_child_sessions_and_hides_them_from_hi
         title="Council Parent",
         session_type="knowledge_chat",
         context_snapshot="Parent context",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(parent)
@@ -641,7 +642,7 @@ def test_start_council_chat_preserves_failed_branch_candidate(
         title="Partially Failed Council",
         session_type="knowledge_chat",
         context_snapshot="Parent context",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(parent)
@@ -711,7 +712,7 @@ def test_retry_council_branch_regenerates_failed_candidate(
         title="Retryable Council",
         session_type="knowledge_chat",
         context_snapshot="Parent context",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(parent)
@@ -803,7 +804,7 @@ def test_start_council_chat_builds_child_context_from_linked_content(
         content_id=content.id,
         title="Content-backed Council Parent",
         session_type="knowledge_chat",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(parent)
@@ -864,7 +865,7 @@ def test_council_branch_selection_switches_visible_transcript_and_send_targets_a
         title="Switchable Council",
         session_type="knowledge_chat",
         context_snapshot="Parent context",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(parent)
@@ -1001,7 +1002,7 @@ def test_start_council_chat_runs_branches_in_parallel(
         title="Parallel Council",
         session_type="knowledge_chat",
         context_snapshot="Parent context",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(parent)
@@ -1058,7 +1059,7 @@ def test_start_council_chat_after_parent_turn_begins_skips_processing_placeholde
         title="Council With Pending Parent Turn",
         session_type="knowledge_chat",
         context_snapshot="Parent context",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(parent)
@@ -1132,7 +1133,7 @@ def test_delete_chat_session_archives_council_children(
         title="Council Delete",
         session_type="knowledge_chat",
         context_snapshot="Parent context",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(parent)
@@ -1206,14 +1207,14 @@ def test_list_chat_sessions_filter_by_content(
         user_id=test_user.id,
         content_id=content1.id,
         title="Session for Article 1",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     session2 = ChatSession(
         user_id=test_user.id,
         content_id=content2.id,
         title="Session for Article 2",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add_all([session1, session2])
@@ -1233,7 +1234,7 @@ def test_get_chat_session_detail(client: TestClient, db_session: Session, test_u
     session = ChatSession(
         user_id=test_user.id,
         title="Test Session",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -1261,7 +1262,7 @@ def test_get_chat_session_detail_includes_assistant_feed_options(
         user_id=test_user.id,
         title="Quick Assistant",
         session_type="assistant_quick",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -1295,7 +1296,7 @@ def test_get_chat_session_detail_includes_assistant_feed_options(
                     }
                 ],
                 "usage": {},
-                "model_name": "gpt-5.5",
+                "model_name": "gpt-5.6-terra",
                 "timestamp": "2026-03-17T20:05:04.689805Z",
                 "kind": "response",
                 "provider_name": "openai",
@@ -1352,7 +1353,7 @@ def test_get_chat_session_detail_exposes_source_message_id_for_pending_rows(
         user_id=test_user.id,
         title="Pending Session",
         session_type="assistant_quick",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -1407,7 +1408,7 @@ def test_get_chat_session_wrong_user(client: TestClient, db_session: Session) ->
     session = ChatSession(
         user_id=99999,  # Different user
         title="Other User's Session",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -1425,7 +1426,7 @@ def test_delete_chat_session_archives_session(
     session = ChatSession(
         user_id=test_user.id,
         title="Session to delete",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -1454,7 +1455,7 @@ def test_delete_chat_session_wrong_user(client: TestClient, db_session: Session)
     session = ChatSession(
         user_id=99999,  # Different user
         title="Other User Session",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -1471,13 +1472,8 @@ def test_delete_chat_session_wrong_user(client: TestClient, db_session: Session)
 def test_different_llm_providers(client: TestClient, db_session: Session) -> None:
     """Test creating sessions with different LLM providers."""
     providers = [
-        ("openai", None, "openai:gpt-5.5"),
+        ("openai", None, "openai:gpt-5.6-terra"),
         ("anthropic", None, "anthropic:claude-opus-4-6"),
-        (
-            "google",
-            "gemini-3.1-flash-lite-preview",
-            "google:gemini-3.1-flash-lite-preview",
-        ),
     ]
 
     for provider, model_hint, expected_model in providers:
@@ -1491,6 +1487,43 @@ def test_different_llm_providers(client: TestClient, db_session: Session) -> Non
         session = data["session"]
         assert session["llm_provider"] == provider
         assert session["llm_model"] == expected_model
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        ({"llm_provider": "google"}, "Input should be"),
+        (
+            {"llm_provider": "openai", "llm_model_hint": "google:gemini-3.1-flash-lite-preview"},
+            "Google models are not available for chat sessions",
+        ),
+    ],
+)
+def test_google_chat_selection_is_rejected(
+    client: TestClient,
+    payload: dict[str, str],
+    expected_error: str,
+) -> None:
+    response = client.post("/api/content/chat/sessions", json=payload)
+
+    assert response.status_code == 422
+    assert expected_error in response.text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"llm_provider": "google"},
+        {"llm_provider": "openai", "llm_model_hint": "google:gemini-3.1-flash-lite-preview"},
+    ],
+)
+def test_google_chat_selection_is_rejected_when_updating(
+    client: TestClient,
+    payload: dict[str, str],
+) -> None:
+    response = client.patch("/api/content/chat/sessions/1", json=payload)
+
+    assert response.status_code == 422
 
 
 def test_create_assistant_turn_creates_session_with_screen_context(
@@ -1816,7 +1849,7 @@ def test_create_assistant_turn_refreshes_existing_session_context(
         title="Old Context",
         session_type="knowledge_chat",
         context_snapshot="Screen Type: content_detail\nVisible Content:\n- [1] Old Context",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -1883,7 +1916,7 @@ def test_send_message_routes_assistant_sessions_to_assistant_processor(
         user_id=test_user.id,
         title="Quick Assistant",
         session_type="assistant_quick",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -1941,7 +1974,7 @@ def test_message_status_returns_distinct_assistant_display_id(
         user_id=test_user.id,
         title="Quick Assistant",
         session_type="assistant_quick",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(session)
@@ -1978,7 +2011,7 @@ def test_message_status_returns_distinct_assistant_display_id(
                     }
                 ],
                 "usage": {},
-                "model_name": "gpt-5.5",
+                "model_name": "gpt-5.6-terra",
                 "timestamp": "2026-03-17T20:05:04.689805Z",
                 "kind": "response",
                 "provider_name": "openai",

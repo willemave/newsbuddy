@@ -291,7 +291,7 @@ def test_resolve_generation_model_spec_uses_real_app_defaults() -> None:
 
     assert (
         summary_eval._resolve_generation_model_spec(case=article_case, defaults=defaults)
-        == "openai:gpt-5.4-mini"
+        == "openai:gpt-5.6-luna"
     )
     assert (
         summary_eval._resolve_generation_model_spec(case=news_case, defaults=defaults)

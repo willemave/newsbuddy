@@ -43,13 +43,13 @@ class TestStructuredLogging:
             exc_info=None,
         )
         record.provider = "openai"
-        record.model = "gpt-5.4-mini"
+        record.model = "gpt-5.6-luna"
         record.context_data = {"feature": "summarization"}
 
         payload = _build_structured_json_payload(record)
 
         assert payload["provider"] == "openai"
-        assert payload["model"] == "gpt-5.4-mini"
+        assert payload["model"] == "gpt-5.6-luna"
         assert payload["context_data"] == {"feature": "summarization"}
 
     def test_structured_log_filter(self):

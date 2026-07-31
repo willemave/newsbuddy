@@ -143,11 +143,11 @@ def test_get_or_create_agent_uses_shared_model_builder(monkeypatch) -> None:
     monkeypatch.setattr(assistant_router, "build_pydantic_model", _fake_build)
 
     agent = assistant_router._get_or_create_agent(
-        "openai:gpt-5.5",
+        "openai:gpt-5.6-terra",
         api_key_override="user-key",
     )
 
-    assert calls == [("openai:gpt-5.5", "user-key", "low")]
+    assert calls == [("openai:gpt-5.6-terra", "user-key", "low")]
     assert agent.model is sentinel_model
 
     chat_turn_runtime.clear_agent_cache_for_tests()
@@ -480,7 +480,7 @@ def test_process_assistant_turn_persists_completion_usage_and_ledger(
         session_type="knowledge_chat",
         context_snapshot="Knowledge snapshot",
         llm_provider="openai",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.commit()

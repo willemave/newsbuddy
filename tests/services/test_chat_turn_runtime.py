@@ -39,13 +39,13 @@ def test_get_or_create_cached_agent_scopes_by_namespace_model_and_credential() -
 
     first = chat_turn_runtime.get_or_create_cached_agent(
         "article_chat",
-        "openai:gpt-5.5",
+        "openai:gpt-5.6-terra",
         "user-key",
         lambda: _factory("first"),
     )
     second = chat_turn_runtime.get_or_create_cached_agent(
         "article_chat",
-        "openai:gpt-5.5",
+        "openai:gpt-5.6-terra",
         "user-key",
         lambda: _factory("second"),
     )
@@ -57,7 +57,7 @@ def test_get_or_create_cached_agent_scopes_by_namespace_model_and_credential() -
     )
     other_namespace = chat_turn_runtime.get_or_create_cached_agent(
         "contextual_assistant",
-        "openai:gpt-5.5",
+        "openai:gpt-5.6-terra",
         "user-key",
         lambda: _factory("other_namespace"),
     )
@@ -94,7 +94,7 @@ def test_detached_turn_primitives_close_prepare_session_and_complete_ledger(
         user_id=test_user.id,
         title="Runtime success",
         session_type="knowledge_chat",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.flush()
@@ -179,7 +179,7 @@ def test_detached_turn_failure_marks_message_and_ledger_failed(
         user_id=test_user.id,
         title="Runtime failure",
         session_type="knowledge_chat",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.flush()
@@ -251,7 +251,7 @@ def test_detached_turn_failure_supports_message_less_turns(
         user_id=test_user.id,
         title="Message-less runtime failure",
         session_type="knowledge_chat",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.commit()

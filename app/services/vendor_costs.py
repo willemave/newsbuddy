@@ -18,7 +18,7 @@ from app.services.llm_models import resolve_model_provider
 
 logger = get_logger("vendor.cost")
 
-PRICING_VERSION = "2026-05-08"
+PRICING_VERSION = "2026-07-30"
 USD = "USD"
 
 
@@ -42,16 +42,26 @@ class UnitPricing:
 # official pricing for the same model family and keep the alias explicit below.
 MODEL_PRICING: dict[str, ModelPricing] = {
     # OpenAI
+    "gpt-5.6-terra": ModelPricing(
+        input_per_million_usd=2.00,
+        output_per_million_usd=12.00,
+        long_context_threshold_tokens=272_000,
+        long_context_input_per_million_usd=4.00,
+        long_context_output_per_million_usd=18.00,
+    ),
+    "gpt-5.6-luna": ModelPricing(
+        input_per_million_usd=0.20,
+        output_per_million_usd=1.20,
+        long_context_threshold_tokens=272_000,
+        long_context_input_per_million_usd=0.40,
+        long_context_output_per_million_usd=1.80,
+    ),
     "gpt-5.4": ModelPricing(
         input_per_million_usd=2.50,
         output_per_million_usd=15.00,
         long_context_threshold_tokens=272_000,
         long_context_input_per_million_usd=5.00,
         long_context_output_per_million_usd=22.50,
-    ),
-    "gpt-5.4-mini": ModelPricing(
-        input_per_million_usd=0.75,
-        output_per_million_usd=4.50,
     ),
     "gpt-4o": ModelPricing(
         input_per_million_usd=2.50,
@@ -530,6 +540,7 @@ def _resolve_unit_pricing(*, provider: str, model: str) -> UnitPricing | None:
         "x:users.read": UnitPricing(resource_usd=settings.x_users_read_cost_usd),
         "runware:runware:101@1": UnitPricing(request_usd=0.0038),
         "firecrawl:scrape-v2": UnitPricing(resource_usd=settings.firecrawl_credit_cost_usd),
+        "elevenlabs:eleven_flash_v2_5": UnitPricing(resource_usd=50.00 / 1_000_000),
     }
     for candidate in _pricing_candidates(provider=provider, model=model):
         if candidate in unit_pricing:

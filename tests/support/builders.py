@@ -196,7 +196,7 @@ def build_chat_session_row(
         content_id=_resolved_id(content, content_id),
         title=overrides.pop("title", f"Chat Session {index}"),
         session_type=overrides.pop("session_type", "knowledge_chat"),
-        llm_model=overrides.pop("llm_model", "openai:gpt-5.5"),
+        llm_model=overrides.pop("llm_model", "openai:gpt-5.6-terra"),
         llm_provider=overrides.pop("llm_provider", "openai"),
         topic=overrides.pop("topic", None),
         context_snapshot=overrides.pop("context_snapshot", None),

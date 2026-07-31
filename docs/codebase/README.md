@@ -16,7 +16,7 @@ Folder-by-folder reference for the main source-bearing areas of this repository.
 Runtime and generated folders such as `data/`, `db/`, `logs/`, `outputs/`, `.tmp/`, caches, and build products are intentionally excluded.
 
 ## Generation workflow
-Use `./docs/generate_codebase_docs.sh` from the repo root. It runs Codex with `gpt-5.4-mini` once per documented top-level folder and refreshes only the corresponding `00-overview.md` files.
+Use `./docs/generate_codebase_docs.sh` from the repo root. It runs Codex with `gpt-5.6-luna` once per documented top-level folder and refreshes only the corresponding `00-overview.md` files.
 
 ```bash
 ./docs/generate_codebase_docs.sh

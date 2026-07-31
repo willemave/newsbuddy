@@ -262,9 +262,8 @@ class Settings(BaseSettings):
     worker_threads_default: int = Field(default=4, ge=1, le=32)
     worker_threads_content: int = Field(default=6, ge=1, le=32)
     worker_threads_media: int = Field(default=3, ge=1, le=32)
-    # Audio episodes already fan their chunks across an in-task TTS pool
-    # (elevenlabs_audio_episode_tts_max_workers); stacking claim threads on top
-    # would just multiply concurrent ElevenLabs calls.
+    # Audio episodes already fan their chunks across an in-task TTS pool;
+    # stacking claim threads on top would multiply concurrent ElevenLabs calls.
     worker_threads_audio_episode: int = Field(default=1, ge=1, le=32)
     checkout_timeout_minutes: int = 30
     queue_backpressure_max_pending_content: int = Field(default=150, ge=1)
@@ -355,13 +354,10 @@ class Settings(BaseSettings):
     elevenlabs_tts_voice_id: str | None = "JBFqnCBsd6RMkjVDRZzb"
     elevenlabs_podcast_host_voice_id: str | None = None
     elevenlabs_podcast_guest_voice_id: str | None = None
-    elevenlabs_narration_tts_model: str = "eleven_turbo_v2_5"
+    elevenlabs_narration_tts_model: str = "eleven_flash_v2_5"
     elevenlabs_narration_tts_output_format: str = "mp3_44100_128"
     elevenlabs_narration_tts_speed: float = Field(default=1.0, ge=0.7, le=1.2)
     elevenlabs_audio_episode_tts_max_workers: int = Field(default=4, ge=1, le=8)
-    elevenlabs_agent_id: str = "agent_4701khf4v6jef3vskb8sd2a30m36"
-    elevenlabs_agent_text_only: bool = True
-    elevenlabs_agent_turn_timeout_seconds: int = 25
     exa_search_request_cost_usd: float | None = Field(default=0.007, ge=0.0)
     exa_content_result_cost_usd: float | None = Field(default=0.001, ge=0.0)
     exa_summary_result_cost_usd: float | None = Field(default=0.001, ge=0.0)

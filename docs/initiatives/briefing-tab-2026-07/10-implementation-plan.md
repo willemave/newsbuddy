@@ -37,7 +37,8 @@ Prototype scripts stay untouched as a lab; production code is a new vertical.
 
 1. **D1 — Model**: every briefing LLM call defaults to `OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC`
    ([app/core/model_defaults.py:4](../../../app/core/model_defaults.py)). Never
-   `openai:gpt-5.4-mini`. Model spec is a setting per call-site so it can be overridden.
+   `openai:gpt-5.6-luna`; briefing stays on the DeepSeek route. Model spec is a setting per
+   call-site so it can be overridden.
 2. **D2 — Native SwiftUI rendering, no WebView.** The client renders the typed block document
    natively. We already have the machinery: `SelectableMarkdownView` /
    `DigDeeperTextView` (UITextView + custom "Dig Deeper" edit-menu action,
@@ -64,7 +65,7 @@ Prototype scripts stay untouched as a lab; production code is a new vertical.
    The existing `DIG_DEEPER` task type ([app/services/dig_deeper.py](../../../app/services/dig_deeper.py))
    is an async chat bootstrapper — different feature, unchanged.
 8. **D8 — Narration rides the audio-episode pipeline.** New `AudioEpisodeKind.BRIEFING_NARRATION`
-   episodes are synthesized from segment `narration_text` via the existing ElevenLabs
+   episodes are synthesized from segment `narration_text` via the existing ElevenLabs speech
    `ContentNarrationTtsService` + `GENERATE_AUDIO_EPISODE` task, streamed with
    `follow_audio_episode_stream_chunks`, and mark sources read on play via the existing
    `mark_audio_episode_sources_read_on_play` hook (extended to mixed source kinds).
@@ -615,7 +616,7 @@ exist); everything else is sequential on its arrow.
 | Fragmented editions read choppy | Compaction thresholds + newest-first ordering; masthead deck stitches continuity. |
 | Read-state divergence between briefing and Classic tabs | Single source of truth (D5) + live read joins on GET + `.contentMarkedAsRead` client notification interop. |
 | Dig latency/failures feel broken | Two-staged response, inline sources within ~2s, cache, retry, honest error copy; rate-limited to protect spend. |
-| Narration cost (ElevenLabs) on long lenses | `input_hash` reuse; per-lens (not per-edition) episodes; duration cap `briefing_narration_max_chars` with "narrate newest first" truncation. |
+| Narration cost (ElevenLabs speech) on long lenses | `input_hash` reuse; per-lens (not per-edition) episodes; duration cap `briefing_narration_max_chars` with "narrate newest first" truncation. |
 | Payload bloat on big backlogs | Per-lens lazy endpoints, backlog caps, segment retirement/age-out, 300KB budget test. |
 | No cron infra | Self-rescheduling sweep + event debounce (D10) — both pure queue primitives with dedupe. |
 

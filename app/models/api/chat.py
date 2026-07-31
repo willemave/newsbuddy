@@ -18,6 +18,13 @@ from app.models.domain.chat_render import AssistantFeedOption, CouncilCandidate
 from app.models.internal.assistant import AssistantScreenContext
 
 
+def _is_google_model_hint(model_hint: str | None) -> bool:
+    if not model_hint:
+        return False
+    normalized = model_hint.strip().lower()
+    return normalized.startswith(("google:", "google-gla:", "gemini"))
+
+
 class CreateChatSessionRequest(BaseModel):
     """Request to create a new chat session."""
 
@@ -31,6 +38,12 @@ class CreateChatSessionRequest(BaseModel):
     initial_message: str | None = Field(
         None, max_length=2000, description="Optional initial user message"
     )
+
+    @model_validator(mode="after")
+    def reject_google_chat_models(self) -> Self:
+        if _is_google_model_hint(self.llm_model_hint):
+            raise ValueError("Google models are not available for chat sessions")
+        return self
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -55,6 +68,12 @@ class UpdateChatSessionRequest(BaseModel):
     llm_model_hint: str | None = Field(
         None, max_length=100, description="Optional specific model to use"
     )
+
+    @model_validator(mode="after")
+    def reject_google_chat_models(self) -> Self:
+        if _is_google_model_hint(self.llm_model_hint):
+            raise ValueError("Google models are not available for chat sessions")
+        return self
 
     model_config = ConfigDict(
         json_schema_extra={

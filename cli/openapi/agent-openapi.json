@@ -4425,7 +4425,6 @@
         "enum": [
           "openai",
           "anthropic",
-          "google",
           "cerebras",
           "openrouter",
           "deep_research"
@@ -6852,7 +6851,7 @@
         "example": {
           "creativity": 7,
           "length": "medium",
-          "llm_provider": "google",
+          "llm_provider": "openai",
           "message": "emphasize the startup angle"
         },
         "properties": {
@@ -6870,10 +6869,9 @@
             "description": "Tweet length preference (short=100-180, medium=180-280, long=280-400 chars)"
           },
           "llm_provider": {
-            "description": "LLM provider to use (openai, anthropic, google). Defaults to google.",
-            "nullable": true,
-            "title": "Llm Provider",
-            "type": "string"
+            "$ref": "#/components/schemas/UserLlmProvider",
+            "description": "LLM provider to use (openai or anthropic). Defaults to openai.",
+            "nullable": true
           },
           "message": {
             "description": "Optional user guidance for tweet generation",
@@ -7119,8 +7117,7 @@
         "description": "User-configurable LLM providers accepted by integration endpoints.",
         "enum": [
           "anthropic",
-          "openai",
-          "google"
+          "openai"
         ],
         "title": "UserLlmProvider",
         "type": "string"

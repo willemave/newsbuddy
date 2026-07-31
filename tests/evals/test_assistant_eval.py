@@ -20,8 +20,8 @@ def test_load_assistant_eval_suite_parses_yaml(tmp_path: Path) -> None:
             [
                 "suite: assistant_actions_v1",
                 "defaults:",
-                "  model_spec: openai:gpt-5.5",
-                "  judge_model_spec: openai:gpt-5.5",
+                "  model_spec: openai:gpt-5.6-terra",
+                "  judge_model_spec: openai:gpt-5.6-terra",
                 "cases:",
                 "  - id: case-1",
                 "    query: find Armin Ronacher's blog",
@@ -44,7 +44,7 @@ def test_load_assistant_eval_suite_parses_yaml(tmp_path: Path) -> None:
     suite = assistant_eval.load_assistant_eval_suite(dataset)
 
     assert suite.suite == "assistant_actions_v1"
-    assert suite.defaults.model_spec == "openai:gpt-5.5"
+    assert suite.defaults.model_spec == "openai:gpt-5.6-terra"
     assert suite.cases[0].id == "case-1"
     assert suite.cases[0].seed_data.news_items[0].title == "Policy and AI moved fast"
     assert suite.cases[0].seed_data.favorites[0].title == "AI policy landscape"
@@ -121,7 +121,7 @@ def test_build_assistant_trace_serializes_tool_flow() -> None:
 
     trace = assistant_eval.build_assistant_trace(
         query="please find a blog by Armin Ronacher and subscribe to it",
-        model_spec="openai:gpt-5.5",
+        model_spec="openai:gpt-5.6-terra",
         messages=messages,
     )
 
@@ -172,8 +172,8 @@ def test_run_assistant_eval_case_uses_generic_expected_outcome(monkeypatch) -> N
     result = assistant_eval.run_assistant_eval_case(
         suite_name="assistant_actions_v1",
         defaults=assistant_eval.AssistantEvalDefaults(
-            model_spec="openai:gpt-5.5",
-            judge_model_spec="openai:gpt-5.5",
+            model_spec="openai:gpt-5.6-terra",
+            judge_model_spec="openai:gpt-5.6-terra",
         ),
         case=assistant_eval.AssistantEvalCase(
             id="armin",
@@ -187,7 +187,7 @@ def test_run_assistant_eval_case_uses_generic_expected_outcome(monkeypatch) -> N
         "The assistant identifies the correct blog and subscribes to it."
     )
     assert captured["assistant_text"] == "Subscribed to lucumr."
-    assert captured["judge_model_spec"] == "openai:gpt-5.5"
+    assert captured["judge_model_spec"] == "openai:gpt-5.6-terra"
 
 
 def test_run_assistant_eval_case_requires_feed_options_when_expected(monkeypatch) -> None:
@@ -239,8 +239,8 @@ def test_run_assistant_eval_case_requires_feed_options_when_expected(monkeypatch
     result = assistant_eval.run_assistant_eval_case(
         suite_name="assistant_actions_v1",
         defaults=assistant_eval.AssistantEvalDefaults(
-            model_spec="openai:gpt-5.5",
-            judge_model_spec="openai:gpt-5.5",
+            model_spec="openai:gpt-5.6-terra",
+            judge_model_spec="openai:gpt-5.6-terra",
         ),
         case=assistant_eval.AssistantEvalCase(
             id="armin",

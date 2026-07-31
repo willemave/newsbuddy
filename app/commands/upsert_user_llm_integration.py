@@ -25,7 +25,7 @@ def execute(
         raise HTTPException(status_code=404, detail="Unsupported provider")
     record = upsert_user_llm_integration(db, user_id=user_id, provider=provider, api_key=api_key)
     stored_provider = record.provider
-    if stored_provider not in {"anthropic", "openai", "google"}:
+    if stored_provider not in SUPPORTED_LLM_PROVIDERS:
         raise HTTPException(status_code=500, detail="Stored integration has invalid provider")
     return UserLlmIntegrationResponse(
         provider=UserLlmProvider(stored_provider),

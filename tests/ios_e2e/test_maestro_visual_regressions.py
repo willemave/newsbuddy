@@ -149,7 +149,7 @@ def _seed_visual_knowledge_and_learning(db_session, *, user_id: int, content) ->
         content_id=content.id,
         title="How should small teams evaluate AI products?",
         session_type="knowledge_chat",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
         created_at=_utc_naive(VISUAL_NOW - timedelta(hours=2)),
         updated_at=_utc_naive(VISUAL_NOW - timedelta(minutes=12)),

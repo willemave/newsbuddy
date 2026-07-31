@@ -28,7 +28,7 @@ def _settings(**kwargs):
 def test_build_pydantic_model_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm_models, "get_settings", lambda: _settings(openai_api_key="test-key"))
 
-    model, model_settings = llm_models.build_pydantic_model("gpt-5.4-mini")
+    model, model_settings = llm_models.build_pydantic_model("gpt-5.6-luna")
 
     assert isinstance(model, OpenAIResponsesModel)
     assert model_settings == {
@@ -43,7 +43,7 @@ def test_build_pydantic_model_openai_accepts_user_override(
     monkeypatch.setattr(llm_models, "get_settings", lambda: _settings(openai_api_key=None))
 
     model, model_settings = llm_models.build_pydantic_model(
-        "gpt-5.4-mini",
+        "gpt-5.6-luna",
         api_key_override="user-openai-key",
     )
 
@@ -60,7 +60,7 @@ def test_build_pydantic_model_openai_accepts_reasoning_effort(
     monkeypatch.setattr(llm_models, "get_settings", lambda: _settings(openai_api_key="test-key"))
 
     model, model_settings = llm_models.build_pydantic_model(
-        "gpt-5.5",
+        "gpt-5.6-terra",
         openai_reasoning_effort="low",
     )
 
@@ -72,11 +72,11 @@ def test_build_pydantic_model_openai_accepts_reasoning_effort(
     }
 
 
-def test_resolve_model_uses_gpt_5_5_for_openai_default() -> None:
+def test_resolve_model_uses_terra_for_openai_default() -> None:
     provider, model_spec = llm_models.resolve_model(llm_models.LLMProvider.OPENAI, None)
 
     assert provider == llm_models.LLMProvider.OPENAI.value
-    assert model_spec == "openai:gpt-5.5"
+    assert model_spec == "openai:gpt-5.6-terra"
 
 
 def test_resolve_model_google_requires_explicit_model_hint() -> None:
@@ -260,7 +260,7 @@ def test_resolve_effective_api_key_prefers_user_key(monkeypatch: pytest.MonkeyPa
     resolved = llm_models.resolve_effective_api_key(
         db=cast(Session, object()),
         user_id=123,
-        model_spec="openai:gpt-5.4-mini",
+        model_spec="openai:gpt-5.6-luna",
     )
 
     assert resolved == "user-key"

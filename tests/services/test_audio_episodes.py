@@ -350,6 +350,7 @@ def test_custom_narration_prompt_uses_deepseek_flash_and_bounded_excerpts(
 
     assert generated.model == CUSTOM_NARRATION_MODEL
     assert captured["model"] == CUSTOM_NARRATION_MODEL
+    assert len(source_text) <= LONGFORM_BODY_MAX_CHARS + 120
     assert full_text not in captured["message"]
     assert "[Source opening excerpt]" in captured["message"]
     assert "CLOSING_MARKER" in captured["message"]
@@ -672,14 +673,16 @@ def test_persist_audio_episode_script_keeps_natural_long_dialogue(db_session) ->
     assert long_text.strip() in str(episode.script_text)
 
 
-@pytest.mark.parametrize("char_count", [24, 1_000, 18_000])
+@pytest.mark.parametrize("char_count", [24, 1_000, 18_000, 80_000])
 def test_background_briefing_narration_never_uses_llm_and_preserves_text(
     db_session,
     tmp_path,
     monkeypatch,
     char_count: int,
 ) -> None:
-    text = ("Briefing narration sentence with complete context. " * 500)[:char_count]
+    sentence = "Briefing narration sentence with complete context. "
+    text = (sentence * ((char_count // len(sentence)) + 1))[:char_count]
+    assert len(text) == char_count
     episode = AudioEpisode(
         user_id=123,
         kind=service.BRIEFING_NARRATION_KIND,

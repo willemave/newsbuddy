@@ -182,6 +182,16 @@ def test_estimate_vendor_cost_prices_openrouter_deepseek_flash() -> None:
     assert cost == 0.00028
 
 
+def test_estimate_vendor_cost_prices_elevenlabs_flash_characters() -> None:
+    cost = vendor_costs.estimate_vendor_cost_usd(
+        provider="elevenlabs",
+        model="eleven_flash_v2_5",
+        usage={"request_count": 1, "resource_count": 10_000},
+    )
+
+    assert cost == 0.5
+
+
 def test_estimate_vendor_cost_prices_explicit_gemini_flash_lite_preview() -> None:
     cost = vendor_costs.estimate_vendor_cost_usd(
         provider="google",

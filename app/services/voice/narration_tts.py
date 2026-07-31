@@ -11,9 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from importlib.util import find_spec
 from pathlib import Path
 
-from app.core.logging import get_logger
-from app.core.settings import get_settings
-from app.services.vendor_costs import record_vendor_usage_out_of_band
+import httpx
 
 try:  # pragma: no cover - import availability covered by readiness checks
     from elevenlabs import VoiceSettings
@@ -22,8 +20,15 @@ except Exception:  # pragma: no cover - gracefully handled at runtime
     VoiceSettings = None  # type: ignore[misc,assignment]
     ElevenLabs = None  # type: ignore[misc,assignment]
 
+from app.core.logging import get_logger
+from app.core.settings import get_settings
+from app.services.vendor_costs import record_vendor_usage_out_of_band
+
 logger = get_logger(__name__)
-DIALOGUE_TTS_CHUNK_TARGET_CHARS = 3_500
+ELEVENLABS_FLASH_MAX_INPUT_CHARS = 40_000
+TTS_CHUNK_TARGET_CHARS = 35_000
+FFMPEG_STITCH_SECONDS_PER_CHUNK = 15
+FFMPEG_STITCH_MAX_TIMEOUT_SECONDS = 300
 
 
 class PermanentNarrationTtsError(ValueError):
@@ -35,7 +40,11 @@ class NarrationTtsInputError(PermanentNarrationTtsError):
 
 
 class NarrationTtsConfigurationError(PermanentNarrationTtsError):
-    """Raised when the local ElevenLabs integration is not usable."""
+    """Raised when the configured narration TTS integration is not usable."""
+
+
+class EmptyNarrationAudioError(RuntimeError):
+    """Raised when the speech provider returns an empty audio payload."""
 
 
 def _duration_ms(started_at: float) -> float:
@@ -65,14 +74,19 @@ class ContentNarrationTtsService:
             MP3 bytes for playback.
 
         Raises:
-            ValueError: If ElevenLabs is unavailable or required config is missing.
+            ValueError: If required ElevenLabs configuration is missing.
             RuntimeError: If audio generation fails or returns empty audio.
         """
 
         normalized = text.strip()
         if not normalized:
             raise NarrationTtsInputError("Narration text is empty")
-        self._require_elevenlabs_config()
+        voice_id = self._settings.elevenlabs_tts_voice_id
+        self._require_elevenlabs_config(voice_id)
+        assert voice_id is not None
+        text_chunks = _chunk_tts_text(normalized)
+        model_id = self._settings.elevenlabs_narration_tts_model
+        output_format = self._settings.elevenlabs_narration_tts_output_format
 
         started_at = time.perf_counter()
         logger.info(
@@ -84,23 +98,65 @@ class ContentNarrationTtsService:
                 "item_id": item_id,
                 "user_id": user_id,
                 "context_data": {
-                    "model_id": self._settings.elevenlabs_narration_tts_model,
-                    "output_format": self._settings.elevenlabs_narration_tts_output_format,
+                    "model_id": model_id,
+                    "output_format": output_format,
                     "text_chars": len(normalized),
                 },
             },
         )
+        completed_chars = 0
+        audio_chunks: list[bytes] = []
         try:
-            client = ElevenLabs(api_key=self._settings.elevenlabs_api_key)
-            audio_iterator = client.text_to_speech.convert(
-                voice_id=self._settings.elevenlabs_tts_voice_id,
-                text=normalized,
-                model_id=self._settings.elevenlabs_narration_tts_model,
-                output_format=self._settings.elevenlabs_narration_tts_output_format,
-                voice_settings=VoiceSettings(speed=self._settings.elevenlabs_narration_tts_speed),
+            with httpx.Client(timeout=240) as http_client:
+                client = ElevenLabs(
+                    api_key=self._settings.elevenlabs_api_key,
+                    httpx_client=http_client,
+                )
+                for chunk in text_chunks:
+                    audio_chunk, _ = self._synthesize_text_mp3(
+                        client=client,
+                        text=chunk,
+                        voice_id=voice_id,
+                        model_id=model_id,
+                        output_format=output_format,
+                        empty_audio_message="Content narration audio was empty",
+                    )
+                    audio_chunks.append(audio_chunk)
+                    completed_chars += len(chunk)
+            self._record_tts_usage(
+                model_id=model_id,
+                feature="narration_tts",
+                operation="content_narration_tts.synthesize_mp3",
+                user_id=user_id,
+                request_count=len(audio_chunks),
+                text_chars=completed_chars,
+                metadata={
+                    "target_id": item_id,
+                    "voice_id": voice_id,
+                    "output_format": output_format,
+                },
             )
-            audio_bytes = self._collect_audio(audio_iterator)
+            audio_bytes, _ = self._stitch_mp3_chunks(
+                audio_chunks,
+                item_id=item_id,
+                user_id=user_id,
+            )
         except Exception as exc:  # noqa: BLE001
+            if completed_chars and completed_chars < len(normalized):
+                self._record_tts_usage(
+                    model_id=model_id,
+                    feature="narration_tts",
+                    operation="content_narration_tts.synthesize_mp3",
+                    user_id=user_id,
+                    request_count=len(audio_chunks),
+                    text_chars=completed_chars,
+                    metadata={
+                        "target_id": item_id,
+                        "voice_id": voice_id,
+                        "output_format": output_format,
+                        "synthesis_status": "partial",
+                    },
+                )
             logger.exception(
                 "Content narration generation failed",
                 extra={
@@ -110,12 +166,14 @@ class ContentNarrationTtsService:
                     "item_id": item_id,
                     "user_id": user_id,
                     "context_data": {
-                        "model_id": self._settings.elevenlabs_narration_tts_model,
-                        "output_format": self._settings.elevenlabs_narration_tts_output_format,
+                        "model_id": model_id,
+                        "output_format": output_format,
                         "speed": self._settings.elevenlabs_narration_tts_speed,
                     },
                 },
             )
+            if isinstance(exc, EmptyNarrationAudioError):
+                raise
             raise RuntimeError("Failed to generate content narration audio") from exc
 
         if not audio_bytes:
@@ -131,28 +189,11 @@ class ContentNarrationTtsService:
                 "item_id": item_id,
                 "user_id": user_id,
                 "context_data": {
-                    "model_id": self._settings.elevenlabs_narration_tts_model,
-                    "output_format": self._settings.elevenlabs_narration_tts_output_format,
+                    "model_id": model_id,
+                    "output_format": output_format,
                     "text_chars": len(normalized),
                     "audio_bytes": len(audio_bytes),
                 },
-            },
-        )
-
-        record_vendor_usage_out_of_band(
-            provider="elevenlabs",
-            model=self._settings.elevenlabs_narration_tts_model,
-            feature="narration_tts",
-            operation="content_narration_tts.synthesize_mp3",
-            source="api",
-            usage={"request_count": 1},
-            user_id=user_id,
-            metadata={
-                "target_id": item_id,
-                "voice_id": self._settings.elevenlabs_tts_voice_id,
-                "output_format": self._settings.elevenlabs_narration_tts_output_format,
-                "text_chars": len(normalized),
-                "audio_bytes": len(audio_bytes),
             },
         )
 
@@ -170,8 +211,6 @@ class ContentNarrationTtsService:
         normalized_turns = _normalize_dialogue_turns(turns)
         if not normalized_turns:
             raise NarrationTtsInputError("Dialogue turns are empty")
-        self._require_elevenlabs_config()
-
         host_voice_id = (
             self._settings.elevenlabs_podcast_host_voice_id
             or self._settings.elevenlabs_tts_voice_id
@@ -180,8 +219,9 @@ class ContentNarrationTtsService:
             self._settings.elevenlabs_podcast_guest_voice_id
             or self._settings.elevenlabs_tts_voice_id
         )
-        if not host_voice_id or not guest_voice_id:
-            raise NarrationTtsConfigurationError("ElevenLabs podcast voice ids are not configured")
+        self._require_elevenlabs_config(host_voice_id, guest_voice_id)
+        assert host_voice_id is not None
+        assert guest_voice_id is not None
         model_id = self._settings.elevenlabs_narration_tts_model
         output_format = self._settings.elevenlabs_narration_tts_output_format
         max_workers = min(
@@ -208,33 +248,91 @@ class ContentNarrationTtsService:
                 },
             },
         )
+        completed_chars = 0
+        completed_requests = 0
+        usage_recorded = False
         try:
             turn_results = [b""] * len(normalized_turns)
             turn_durations_ms: list[float] = []
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            first_error: Exception | None = None
+            with (
+                httpx.Client(timeout=240) as http_client,
+                ThreadPoolExecutor(max_workers=max_workers) as executor,
+            ):
+                client = ElevenLabs(
+                    api_key=self._settings.elevenlabs_api_key,
+                    httpx_client=http_client,
+                )
                 futures = {
                     executor.submit(
                         self._synthesize_dialogue_turn_mp3,
+                        client=client,
                         turn=turn,
                         host_voice_id=host_voice_id,
                         guest_voice_id=guest_voice_id,
                         model_id=model_id,
                         output_format=output_format,
-                    ): index
+                    ): (index, len(turn["text"]))
                     for index, turn in enumerate(normalized_turns)
                 }
                 for future in as_completed(futures):
-                    index = futures[future]
-                    audio_chunk, turn_duration_ms = future.result()
+                    index, turn_chars = futures[future]
+                    try:
+                        audio_chunk, turn_duration_ms = future.result()
+                    except Exception as exc:  # noqa: BLE001
+                        if first_error is None:
+                            first_error = exc
+                        continue
                     turn_results[index] = audio_chunk
                     turn_durations_ms.append(turn_duration_ms)
+                    completed_requests += 1
+                    completed_chars += turn_chars
 
-            audio_bytes, stitch_duration_ms = self._stitch_dialogue_turns_mp3(
+            if completed_requests:
+                self._record_tts_usage(
+                    model_id=model_id,
+                    feature="audio_episode_tts",
+                    operation="audio_episode_tts.synthesize_dialogue_mp3",
+                    user_id=user_id,
+                    request_count=completed_requests,
+                    text_chars=completed_chars,
+                    metadata={
+                        "target_id": item_id,
+                        "host_voice_id": host_voice_id,
+                        "guest_voice_id": guest_voice_id,
+                        "output_format": output_format,
+                        "mode": "parallel_turns",
+                        "max_workers": max_workers,
+                        "turn_count": len(normalized_turns),
+                        "synthesis_status": "partial" if first_error else "completed",
+                    },
+                )
+                usage_recorded = True
+            if first_error is not None:
+                raise first_error
+
+            audio_bytes, stitch_duration_ms = self._stitch_mp3_chunks(
                 turn_results,
                 item_id=item_id,
                 user_id=user_id,
             )
         except Exception as exc:  # noqa: BLE001
+            if completed_requests and not usage_recorded:
+                self._record_tts_usage(
+                    model_id=model_id,
+                    feature="audio_episode_tts",
+                    operation="audio_episode_tts.synthesize_dialogue_mp3",
+                    user_id=user_id,
+                    request_count=completed_requests,
+                    text_chars=completed_chars,
+                    metadata={
+                        "target_id": item_id,
+                        "host_voice_id": host_voice_id,
+                        "guest_voice_id": guest_voice_id,
+                        "output_format": output_format,
+                        "synthesis_status": "partial",
+                    },
+                )
             logger.exception(
                 "Audio episode dialogue generation failed",
                 extra={
@@ -282,62 +380,59 @@ class ContentNarrationTtsService:
             },
         )
 
-        record_vendor_usage_out_of_band(
-            provider="elevenlabs",
-            model=model_id,
-            feature="audio_episode_tts",
-            operation="audio_episode_tts.synthesize_dialogue_mp3",
-            source="api",
-            usage={"request_count": len(normalized_turns)},
-            user_id=user_id,
-            metadata={
-                "target_id": item_id,
-                "host_voice_id": host_voice_id,
-                "guest_voice_id": guest_voice_id,
-                "output_format": output_format,
-                "mode": "parallel_turns",
-                "max_workers": max_workers,
-                "turn_count": len(normalized_turns),
-                "text_chars": text_chars,
-                "stitch_duration_ms": stitch_duration_ms,
-                "audio_bytes": len(audio_bytes),
-            },
-        )
-
         return bytes(audio_bytes)
 
     def _synthesize_dialogue_turn_mp3(
         self,
         *,
+        client: ElevenLabs,
         turn: Mapping[str, str],
         host_voice_id: str,
         guest_voice_id: str,
         model_id: str,
         output_format: str,
     ) -> tuple[bytes, float]:
+        is_host = turn["speaker"] == "host"
+        return self._synthesize_text_mp3(
+            client=client,
+            text=turn["text"],
+            voice_id=host_voice_id if is_host else guest_voice_id,
+            model_id=model_id,
+            output_format=output_format,
+            empty_audio_message="Audio episode dialogue turn was empty",
+        )
+
+    def _synthesize_text_mp3(
+        self,
+        *,
+        client: ElevenLabs,
+        text: str,
+        voice_id: str,
+        model_id: str,
+        output_format: str,
+        empty_audio_message: str,
+    ) -> tuple[bytes, float]:
         started_at = time.perf_counter()
-        voice_id = host_voice_id if turn["speaker"] == "host" else guest_voice_id
-        client = ElevenLabs(api_key=self._settings.elevenlabs_api_key)
         audio_iterator = client.text_to_speech.convert(
             voice_id=voice_id,
-            text=turn["text"],
+            text=text,
             model_id=model_id,
             output_format=output_format,
             voice_settings=VoiceSettings(speed=self._settings.elevenlabs_narration_tts_speed),
         )
         audio_bytes = self._collect_audio(audio_iterator)
         if not audio_bytes:
-            raise RuntimeError("Audio episode dialogue turn was empty")
+            raise EmptyNarrationAudioError(empty_audio_message)
         return bytes(audio_bytes), _duration_ms(started_at)
 
-    def _stitch_dialogue_turns_mp3(
+    def _stitch_mp3_chunks(
         self,
         chunks: list[bytes],
         *,
         item_id: int | None = None,
         user_id: int | None = None,
     ) -> tuple[bytes, float]:
-        """Stitch independently generated MP3 turns into one valid MP3 asset."""
+        """Stitch independently generated MP3 chunks into one valid MP3 asset."""
 
         if len(chunks) == 1:
             return chunks[0], 0.0
@@ -345,7 +440,7 @@ class ContentNarrationTtsService:
         ffmpeg_binary = shutil.which("ffmpeg")
         if ffmpeg_binary is None:
             raise NarrationTtsConfigurationError(
-                "ffmpeg is required to stitch audio episode dialogue turns"
+                "ffmpeg is required to stitch narration audio chunks"
             )
 
         started_at = time.perf_counter()
@@ -386,7 +481,7 @@ class ContentNarrationTtsService:
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=30,
+                timeout=_stitch_timeout_seconds(len(chunks)),
             )
             if (
                 result.returncode != 0
@@ -394,57 +489,77 @@ class ContentNarrationTtsService:
                 or output_path.stat().st_size <= 0
             ):
                 logger.error(
-                    "Audio episode dialogue stitch failed",
+                    "Narration audio stitch failed",
                     extra={
-                        "component": "audio_episode_tts",
-                        "operation": "stitch_dialogue_turns_mp3",
+                        "component": "narration_tts",
+                        "operation": "stitch_mp3_chunks",
                         "duration_ms": _duration_ms(started_at),
                         "item_id": item_id,
                         "user_id": user_id,
                         "context_data": {
-                            "turn_count": len(chunks),
+                            "chunk_count": len(chunks),
                             "stderr": (result.stderr or "")[-500:],
                         },
                     },
                 )
-                raise RuntimeError("Failed to stitch audio episode dialogue")
+                raise RuntimeError("Failed to stitch narration audio")
             audio_bytes = output_path.read_bytes()
 
         duration_ms = _duration_ms(started_at)
         logger.info(
-            "Audio episode dialogue stitch completed",
+            "Narration audio stitch completed",
             extra={
-                "component": "audio_episode_tts",
-                "operation": "stitch_dialogue_turns_mp3",
+                "component": "narration_tts",
+                "operation": "stitch_mp3_chunks",
                 "status": "completed",
                 "duration_ms": duration_ms,
                 "item_id": item_id,
                 "user_id": user_id,
                 "context_data": {
-                    "turn_count": len(chunks),
+                    "chunk_count": len(chunks),
                     "audio_bytes": len(audio_bytes),
                 },
             },
         )
         return audio_bytes, duration_ms
 
-    def _require_elevenlabs_config(self) -> None:
-        """Raise a user-facing config error if ElevenLabs cannot be used."""
+    @staticmethod
+    def _record_tts_usage(
+        *,
+        model_id: str,
+        feature: str,
+        operation: str,
+        user_id: int | None,
+        request_count: int,
+        text_chars: int,
+        metadata: dict[str, object],
+    ) -> None:
+        record_vendor_usage_out_of_band(
+            provider="elevenlabs",
+            model=model_id,
+            feature=feature,
+            operation=operation,
+            source="api",
+            usage={"request_count": request_count, "resource_count": text_chars},
+            user_id=user_id,
+            metadata={**metadata, "text_chars": text_chars},
+        )
+
+    def _require_elevenlabs_config(self, *voices: str | None) -> None:
+        """Raise a user-facing config error if ElevenLabs speech cannot be used."""
 
         if not self._settings.elevenlabs_api_key:
             raise NarrationTtsConfigurationError("ElevenLabs API key is not configured")
-        if not self._settings.elevenlabs_tts_voice_id:
-            raise NarrationTtsConfigurationError("ElevenLabs TTS voice id is not configured")
+        if not self._settings.elevenlabs_narration_tts_model:
+            raise NarrationTtsConfigurationError("ElevenLabs narration model is not configured")
+        if any(not voice for voice in voices):
+            raise NarrationTtsConfigurationError("ElevenLabs narration voice is not configured")
         if find_spec("elevenlabs") is None or ElevenLabs is None or VoiceSettings is None:
             raise NarrationTtsConfigurationError("ElevenLabs SDK is not installed")
 
     @staticmethod
-    def _collect_audio(audio_iterator: Iterable[bytes]) -> bytearray:
-        audio_bytes = bytearray()
-        for chunk in audio_iterator:
-            if chunk:
-                audio_bytes.extend(chunk)
-        return audio_bytes
+    def _collect_audio(audio_iterator: Iterable[bytes]) -> bytes:
+        return b"".join(chunk for chunk in audio_iterator if chunk)
 
 
 def _normalize_dialogue_turns(turns: Iterable[Mapping[str, str]]) -> list[dict[str, str]]:
@@ -456,18 +571,18 @@ def _normalize_dialogue_turns(turns: Iterable[Mapping[str, str]]) -> list[dict[s
         speaker = str(turn.get("speaker") or "guest").strip().lower()
         normalized_speaker = "host" if speaker == "host" else "guest"
         normalized.extend(
-            {"speaker": normalized_speaker, "text": chunk} for chunk in _chunk_dialogue_text(text)
+            {"speaker": normalized_speaker, "text": chunk} for chunk in _chunk_tts_text(text)
         )
     return normalized
 
 
-def _chunk_dialogue_text(text: str) -> list[str]:
-    """Split provider-bound dialogue without changing its text or whitespace."""
+def _chunk_tts_text(text: str) -> list[str]:
+    """Split provider-bound speech input without changing its text or whitespace."""
 
     remaining = text
     chunks: list[str] = []
-    while len(remaining) > DIALOGUE_TTS_CHUNK_TARGET_CHARS:
-        window = remaining[: DIALOGUE_TTS_CHUNK_TARGET_CHARS + 1]
+    while len(remaining) > TTS_CHUNK_TARGET_CHARS:
+        window = remaining[: TTS_CHUNK_TARGET_CHARS + 1]
         sentence_cut = max(
             (
                 index
@@ -482,7 +597,7 @@ def _chunk_dialogue_text(text: str) -> list[str]:
         )
         cut = sentence_cut or word_cut
         if cut <= 0:
-            cut = DIALOGUE_TTS_CHUNK_TARGET_CHARS
+            cut = TTS_CHUNK_TARGET_CHARS
         chunks.append(remaining[:cut])
         remaining = remaining[cut:]
     if remaining:
@@ -493,6 +608,13 @@ def _chunk_dialogue_text(text: str) -> list[str]:
 def _ffmpeg_concat_line(path: Path) -> str:
     escaped = str(path).replace("'", "'\\''")
     return f"file '{escaped}'"
+
+
+def _stitch_timeout_seconds(chunk_count: int) -> int:
+    return min(
+        max(chunk_count, 2) * FFMPEG_STITCH_SECONDS_PER_CHUNK,
+        FFMPEG_STITCH_MAX_TIMEOUT_SECONDS,
+    )
 
 
 _content_narration_tts_service: ContentNarrationTtsService | None = None

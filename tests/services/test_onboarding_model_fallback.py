@@ -58,7 +58,7 @@ def test_discover_generation_does_not_use_secondary_model(monkeypatch) -> None:
 
     monkeypatch.setattr(
         "app.services.onboarding.llm_plans.DISCOVERY_FALLBACK_MODELS",
-        ("openai:gpt-5.4-mini",),
+        ("openai:gpt-5.6-luna",),
     )
     monkeypatch.setattr("app.services.onboarding.llm_plans.get_basic_agent", fake_get_basic_agent)
 
@@ -132,7 +132,7 @@ async def test_audio_plan_generation_does_not_use_secondary_model(monkeypatch) -
 
     monkeypatch.setattr(
         "app.services.onboarding.llm_plans.AUDIO_PLAN_FALLBACK_MODELS",
-        ("openai:gpt-5.4-mini",),
+        ("openai:gpt-5.6-luna",),
     )
     monkeypatch.setattr("app.services.onboarding.llm_plans.get_basic_agent", fake_get_basic_agent)
 

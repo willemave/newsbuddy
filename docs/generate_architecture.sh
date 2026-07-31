@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCHITECTURE_FILE="docs/architecture.md"
 CODEX_BIN="${CODEX_BIN:-codex}"
-MODEL="${MODEL:-gpt-5.4-mini}"
+MODEL="${MODEL:-gpt-5.6-luna}"
 
 run_codex_prompt() {
   local prompt="$1"

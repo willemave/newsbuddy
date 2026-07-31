@@ -57,7 +57,8 @@ class RunLlmTaskHandler:
                         llm_task_id=llm_task_id_int,
                         ensure_lease=lambda: context.queue_service.renew_lease(
                             task.id,
-                            worker_id=context.worker_id,
+                            worker_id=task.locked_by or context.worker_id,
+                            lease_token=task.lease_token,
                             lease_seconds=context.settings.queue.worker_timeout_seconds,
                         ),
                     ),

@@ -354,17 +354,8 @@ def _model_hint_from_spec(model_spec: str) -> tuple[str | None, str]:
     return None, model_spec
 
 
-def _is_google_model_spec(model_spec: str) -> bool:
-    """Return whether the model spec targets Gemini/Google."""
-    provider_prefix, model_hint = _model_hint_from_spec(model_spec)
-    return provider_prefix in {"google", "google-gla"} or model_hint.startswith("gemini")
-
-
 def _tweet_output_type_for_model(model_spec: str) -> Any:
-    """Choose the structured-output mode that works reliably for the provider."""
-    if _is_google_model_spec(model_spec):
-        return TweetSuggestionsPayload
-
+    """Return the canonical structured-output definition for tweet suggestions."""
     return PromptedOutput(
         TweetSuggestionsPayload,
         name="tweet_suggestions",
@@ -429,8 +420,13 @@ class TweetSuggestionService:
     def _get_model_for_provider(self, provider: str | None) -> str:
         """Get the model name for a given provider."""
         model_spec = self.default_model
-        if provider and provider in TWEET_MODELS:
-            model_spec = TWEET_MODELS[provider]
+        if provider:
+            provider_name = str(provider)
+            default_provider, _ = _model_hint_from_spec(self.default_model)
+            if provider_name in TWEET_MODELS:
+                model_spec = TWEET_MODELS[provider_name]
+            elif provider_name != default_provider:
+                raise ValueError(f"Unsupported tweet LLM provider: {provider_name}")
 
         default_provider_hint, model_hint = _model_hint_from_spec(model_spec)
         provider_hint = provider or default_provider_hint
@@ -468,7 +464,7 @@ class TweetSuggestionService:
             message: Optional user guidance/tweak message.
             creativity: Creativity level 1-10.
             length: Tweet length preference ("short", "medium", "long").
-            llm_provider: Optional LLM provider (openai, anthropic, google).
+            llm_provider: Optional LLM provider (openai or anthropic).
 
         Returns:
             TweetSuggestionsResult with 3 suggestions, or None on failure.
@@ -580,7 +576,7 @@ def generate_tweet_suggestions(
         message: Optional user guidance/tweak message
         creativity: Creativity level 1-10
         length: Tweet length preference ("short", "medium", "long")
-        llm_provider: Optional LLM provider (openai, anthropic, google)
+        llm_provider: Optional LLM provider (openai or anthropic)
 
     Returns:
         TweetSuggestionsResult with 3 suggestions, or None on failure

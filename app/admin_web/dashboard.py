@@ -86,7 +86,6 @@ EXTERNAL_PROVIDER_LABELS = {
     "x": "X API",
     "exa": "Exa",
     "openai": "OpenAI",
-    "elevenlabs": "ElevenLabs",
     "listen_notes": "Listen Notes",
     "spotify": "Spotify",
     "podcast_index": "Podcast Index",

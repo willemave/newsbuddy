@@ -182,3 +182,29 @@ def test_llm_integrations_reject_unsupported_provider(client):
         json={"api_key": "secret"},
     )
     assert response.status_code == 404
+
+
+def test_llm_integrations_reject_google_provider(client):
+    response = client.put(
+        "/api/integrations/llm/google",
+        json={"api_key": "secret"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_llm_integrations_hide_legacy_google_rows(client, db_session, test_user):
+    db_session.add(
+        UserIntegrationConnection(
+            user_id=test_user.id,
+            provider="google",
+            access_token_encrypted="legacy-encrypted-key",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/integrations/llm")
+
+    assert response.status_code == 200
+    assert response.json() == []

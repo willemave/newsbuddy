@@ -136,7 +136,7 @@ enum ChatPreviewFixtures {
         sessionType: "knowledge_chat",
         topic: "Market structure",
         llmProvider: "openai",
-        llmModel: "openai:gpt-5.5",
+        llmModel: "openai:gpt-5.6-terra",
         createdAt: timestamp,
         updatedAt: timestamp,
         lastMessageAt: timestamp,

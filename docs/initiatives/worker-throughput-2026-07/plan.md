@@ -186,9 +186,9 @@ that owns N inner claim-loops for ONE queue:
   - all other queues (`image`, `onboarding`, `backfill`, `discussion`, `twitter`,
     `chat`, `learning`, `llm`): 4
   - Why `audio_episode` is 1: an episode task already fans out its chunks across
-    `elevenlabs_audio_episode_tts_max_workers` (`app/core/settings.py:354`, default 4)
+    `elevenlabs_audio_episode_tts_max_workers` (`app/core/settings.py`, default 4)
     threads inside the task. Giving the queue 4 claim threads would stack a pool on a
-    pool — up to 16 concurrent ElevenLabs calls — for no real gain, since episodes are
+    pool — up to 16 concurrent ElevenLabs speech calls — for no real gain, since episodes are
     TTS-bound and the existing pool already saturates that. One claim thread keeps
     concurrent TTS calls at today's 4. If episode latency (not throughput) is the
     problem, tune `elevenlabs_audio_episode_tts_max_workers` rather than the queue
@@ -273,7 +273,7 @@ that owns N inner claim-loops for ONE queue:
   is then identical to today's sequential workers (topology change aside).
 - After deploy: `uv run -m admin logs exceptions --limit 20`, queue stats via the
   admin CLI, and container RSS (`docker stats`) before/after for the memory claim.
-- Watch for: Postgres connection exhaustion, ElevenLabs/LLM provider rate limits at
+- Watch for: Postgres connection exhaustion, ElevenLabs speech and LLM provider rate limits at
   higher concurrency, crawl4ai browser instability under serialized-but-busier use.
 
 ## Explicit non-goals

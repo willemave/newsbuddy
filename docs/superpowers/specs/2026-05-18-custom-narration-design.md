@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add a Long Read action that lets the user select multiple eligible articles and podcasts, then creates one combined podcast-style narration. The script must be generated from the full selected source text/transcripts as one cohesive prompt, then sent to ElevenLabs as dialogue turns. Generated narrations should be discoverable and replayable from the Knowledge tab.
+Add a Long Read action that lets the user select multiple eligible articles and podcasts, then creates one combined podcast-style narration. The script must be generated from the full selected source text/transcripts as one cohesive prompt, then sent to ElevenLabs speech synthesis as dialogue turns. Generated narrations should be discoverable and replayable from the Knowledge tab.
 
 ## Product Decisions
 

@@ -24,6 +24,7 @@ from app.models.api.integrations import (
 from app.models.contracts import UserLlmProvider
 from app.models.db.users import User
 from app.queries import list_user_llm_integrations
+from app.repositories.user_integration_repository import SUPPORTED_LLM_PROVIDERS
 from app.services.x_integration import (
     XConnectionView,
     disconnect_x_connection,
@@ -165,7 +166,7 @@ def test_llm_integration(
         integration.provider: integration
         for integration in list_user_llm_integrations.execute(db, user_id=user_id)
     }
-    if provider not in {"anthropic", "openai", "google"}:
+    if provider not in SUPPORTED_LLM_PROVIDERS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported provider")
     resolved_provider = UserLlmProvider(provider)
     return UserLlmIntegrationTestResponse(

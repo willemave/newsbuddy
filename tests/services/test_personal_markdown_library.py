@@ -166,7 +166,7 @@ def test_sync_personal_markdown_for_content_keeps_files_when_chat_session_exists
         content_id=content_id,
         title=content.title,
         session_type="knowledge_chat",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
         llm_provider="openai",
     )
     db_session.add(chat_session)
@@ -327,7 +327,7 @@ def test_collect_personal_markdown_documents_supports_mixed_types_and_reasons(
             content_id=podcast_id,
             title=podcast.title,
             session_type="knowledge_chat",
-            llm_model="openai:gpt-5.5",
+            llm_model="openai:gpt-5.6-terra",
             llm_provider="openai",
         )
     )

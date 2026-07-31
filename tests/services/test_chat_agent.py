@@ -185,7 +185,7 @@ def test_build_chat_deps_uses_processed_content_for_knowledge_chat(db_session) -
         session_type="knowledge_chat",
         context_snapshot="Compact pre-processing snapshot",
         llm_provider="openai",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.commit()
@@ -582,7 +582,7 @@ def test_build_chat_deps_prepares_personal_library_runtime(
         title="Library Chat",
         session_type="knowledge_chat",
         llm_provider="openai",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.commit()
@@ -612,7 +612,7 @@ def test_build_chat_deps_keeps_local_personal_library_read_only(
         title="Research chat",
         session_type="knowledge_chat",
         llm_provider="openai",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.commit()
@@ -648,7 +648,7 @@ def test_build_chat_deps_skips_personal_library_sync_when_sandbox_disabled(
         title="No Sandbox Chat",
         session_type="knowledge_chat",
         llm_provider="openai",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.commit()
@@ -671,7 +671,7 @@ def test_run_chat_turn_builds_deps_with_library_tools_enabled(
         title="Council-capable Chat",
         session_type="knowledge_chat",
         llm_provider="openai",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.commit()
@@ -728,7 +728,7 @@ def test_process_message_async_persists_completion_usage_and_ledger(
         session_type="knowledge_chat",
         context_snapshot="Saved context",
         llm_provider="openai",
-        llm_model="openai:gpt-5.5",
+        llm_model="openai:gpt-5.6-terra",
     )
     db_session.add(session)
     db_session.commit()
