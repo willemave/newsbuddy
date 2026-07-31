@@ -28,6 +28,7 @@ from app.services.content_bodies import get_content_body_resolver
 from app.services.eval_common import (
     build_news_context,
     extract_result_payload,
+    extract_result_usage,
     resolve_summary_prompt_settings,
 )
 from app.services.llm_agents import get_basic_agent
@@ -441,7 +442,7 @@ def _run_single_model_eval(
         payload = extract_result_payload(result)
         generated_title = payload.get("title") if isinstance(payload, dict) else None
         output_chars = len(json.dumps(payload, ensure_ascii=False))
-        usage = _extract_usage(result)
+        usage = extract_result_usage(result)
         request_tokens_actual = usage.get("input_tokens")
         pricing = request.pricing.get(model_alias)
         estimated_cost_usd, cost_reason = _estimate_cost(usage, pricing)
@@ -637,33 +638,6 @@ def _resolve_model_availability(
     return available, skipped
 
 
-def _extract_usage(result: Any) -> dict[str, int | None]:
-    try:
-        usage = result.usage()
-    except Exception:  # noqa: BLE001
-        usage = None
-
-    if not usage:
-        return {"input_tokens": None, "output_tokens": None, "total_tokens": None}
-
-    input_tokens = _coerce_int(
-        getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", None)
-    )
-    output_tokens = _coerce_int(
-        getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", None)
-    )
-    total_tokens = _coerce_int(getattr(usage, "total_tokens", None))
-
-    if total_tokens is None and input_tokens is not None and output_tokens is not None:
-        total_tokens = input_tokens + output_tokens
-
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }
-
-
 def _estimate_cost(
     usage: dict[str, int | None],
     pricing: ModelPricing | None,
@@ -683,17 +657,6 @@ def _estimate_cost(
         output_tokens / 1_000_000
     ) * pricing.output_per_million_usd
     return round(cost, 8), None
-
-
-def _coerce_int(value: object | None) -> int | None:
-    if value is None:
-        return None
-    if not isinstance(value, (int, float, str, bytes, bytearray)):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _estimate_tokens_from_chars(char_count: int) -> int:

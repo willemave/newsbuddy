@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field, replace
 from enum import Enum, StrEnum
 from typing import Any, cast
 
@@ -19,7 +18,8 @@ from pydantic_ai.models.openai import (
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.cerebras import CerebrasProvider
-from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.providers.google import BaseGoogleProvider, GoogleProvider
+from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.settings import ModelSettings
@@ -195,33 +195,14 @@ def _build_openai_responses_model_settings(
     return model_settings
 
 
-@dataclass(frozen=True)
-class GoogleProviderConfig:
-    """Owned transport decision passed to pydantic-ai's Google provider."""
-
-    vertexai: bool
-    api_key: str | None = field(default=None, repr=False)
-    project: str | None = None
-    location: str | None = None
-
-    def provider_kwargs(self) -> dict[str, Any]:
-        if self.vertexai:
-            return {
-                "project": self.project,
-                "location": self.location,
-                "vertexai": True,
-            }
-        return {"api_key": self.api_key, "vertexai": False}
-
-
-def resolve_google_provider_config(
+def resolve_google_provider(
     *,
     provider_prefix: str | None,
     api_key_override: str | None,
     platform_api_key: str | None,
     cloud_project: str | None,
     cloud_location: str,
-) -> GoogleProviderConfig:
+) -> BaseGoogleProvider:
     """Choose GLA for API keys and Vertex only for explicit cloud projects."""
     use_google_language_api = (
         provider_prefix == "google-gla" or api_key_override is not None or not cloud_project
@@ -230,13 +211,9 @@ def resolve_google_provider_config(
         api_key = api_key_override or platform_api_key
         if not api_key:
             raise ValueError("GOOGLE_API_KEY not configured in settings.")
-        return GoogleProviderConfig(vertexai=False, api_key=api_key)
+        return GoogleProvider(api_key=api_key)
 
-    return GoogleProviderConfig(
-        vertexai=True,
-        project=cloud_project,
-        location=cloud_location,
-    )
+    return GoogleCloudProvider(project=cloud_project, location=cloud_location)
 
 
 def build_pydantic_model(
@@ -271,14 +248,13 @@ def build_pydantic_model(
             if provider_prefix
             else (model_spec.split(":", 1)[1] if ":" in model_spec else model_spec)
         )
-        google_provider_config = resolve_google_provider_config(
+        provider = resolve_google_provider(
             provider_prefix=provider_prefix,
             api_key_override=api_key_override,
             platform_api_key=settings.google_api_key,
             cloud_project=settings.google_cloud_project,
             cloud_location=settings.google_cloud_location,
         )
-        provider = GoogleProvider(**google_provider_config.provider_kwargs())
 
         model = GoogleModel(model_to_use, provider=provider)
         # Configure thinking for Google models – suppress thought traces and
@@ -347,11 +323,11 @@ def build_pydantic_model(
             # DeepSeek V4 Flash, but pydantic-ai's default OpenRouter profile currently
             # leaves native JSON-schema output disabled. Enable it for OpenRouter models
             # we construct explicitly so Agent(..., NativeOutput(...)) uses response_format.
-            profile = replace(
-                profile,
-                supports_json_schema_output=True,
-                supports_json_object_output=True,
-            )
+            profile = {
+                **profile,
+                "supports_json_schema_output": True,
+                "supports_json_object_output": True,
+            }
         openrouter_model_settings = cast(
             ModelSettings,
             {

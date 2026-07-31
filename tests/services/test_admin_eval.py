@@ -23,6 +23,7 @@ class _FakeResult:
             total_tokens=input_tokens + output_tokens,
         )
 
+    @property
     def usage(self):
         return self._usage
 

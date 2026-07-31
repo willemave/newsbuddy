@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from e2b import CommandExitException, SandboxNotFoundException
+
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.services.agent_vm_runtime import (
@@ -210,7 +212,7 @@ class E2BAgentVmSession(AgentVmSession):
                 cwd=self._workdir.as_posix(),
                 timeout=timeout_seconds,
             )
-        except _e2b_command_exit_exception() as exc:
+        except CommandExitException as exc:
             return self._normalize_command_exit_exception(exc)
         except Exception as exc:
             self._evict_if_missing(exc)
@@ -515,10 +517,6 @@ def _probe_e2b_sandbox(sandbox: Any) -> dict[str, Any]:
 
 
 def _is_missing_e2b_sandbox_error(exc: Exception) -> bool:
-    try:
-        from e2b.exceptions import SandboxNotFoundException
-    except ImportError:  # pragma: no cover - E2B is optional in local development
-        SandboxNotFoundException = ()
     if isinstance(exc, SandboxNotFoundException):
         return True
     message = str(exc).lower()
@@ -531,14 +529,6 @@ def _sandbox_identifier(sandbox: object) -> str | None:
         if value:
             return str(value)
     return None
-
-
-def _e2b_command_exit_exception() -> type[Exception]:
-    try:
-        from e2b.sandbox.commands.command_handle import CommandExitException
-    except ImportError:  # pragma: no cover
-        return RuntimeError
-    return CommandExitException
 
 
 def _relative_to_workdir(path: str, workdir: PurePosixPath) -> str:

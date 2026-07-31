@@ -37,6 +37,7 @@ from app.services.admin_eval import (
     build_eval_source_payload,
     select_eval_samples,
 )
+from app.services.eval_common import extract_result_payload, extract_result_usage
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt
 from app.services.llm_summarization import resolve_summarization_output_type
@@ -548,80 +549,6 @@ def estimate_tokens_from_chars(char_count: int) -> int:
     if char_count <= 0:
         return 0
     return math.ceil(char_count / ESTIMATED_CHARS_PER_TOKEN)
-
-
-def coerce_int(value: object | None) -> int | None:
-    """Safely coerce values to integers.
-
-    Args:
-        value: Candidate value.
-
-    Returns:
-        Parsed integer or ``None``.
-    """
-    if value is None:
-        return None
-    if not isinstance(value, (int, float, str, bytes, bytearray)):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def extract_usage(result: Any) -> dict[str, int | None]:
-    """Extract token usage values from a pydantic-ai result.
-
-    Args:
-        result: Pydantic-ai run result.
-
-    Returns:
-        Token usage dictionary.
-    """
-    try:
-        usage = result.usage()
-    except Exception:  # noqa: BLE001
-        usage = None
-
-    if not usage:
-        return {"input_tokens": None, "output_tokens": None, "total_tokens": None}
-
-    input_tokens = coerce_int(
-        getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", None)
-    )
-    output_tokens = coerce_int(
-        getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", None)
-    )
-    total_tokens = coerce_int(getattr(usage, "total_tokens", None))
-    if total_tokens is None and input_tokens is not None and output_tokens is not None:
-        total_tokens = input_tokens + output_tokens
-
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }
-
-
-def extract_result_payload(result: Any) -> dict[str, Any]:
-    """Extract JSON-serializable output payload from pydantic-ai result.
-
-    Args:
-        result: Pydantic-ai run result.
-
-    Returns:
-        Dict payload for report rendering.
-    """
-    output = getattr(result, "output", None)
-    if output is None:
-        output = getattr(result, "data", None)
-    if output is None:
-        raise ValueError("Model result did not include output payload")
-    if hasattr(output, "model_dump"):
-        return output.model_dump(mode="json", exclude_none=True)
-    if isinstance(output, dict):
-        return output
-    raise ValueError("Model result payload is not JSON serializable")
 
 
 def resolve_builtin_prompt_settings(
@@ -1706,7 +1633,7 @@ def run_single_model_call(
                 model_settings=build_model_run_settings(model_alias, timeout_seconds),
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
-            usage = extract_usage(result)
+            usage = extract_result_usage(result)
             payload = extract_result_payload(result)
             output_chars = len(json.dumps(payload, ensure_ascii=False))
 

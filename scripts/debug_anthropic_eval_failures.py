@@ -22,6 +22,7 @@ from app.services.admin_eval import (
     build_eval_source_payload,
     select_eval_samples,
 )
+from app.services.eval_common import extract_result_payload, extract_result_usage
 from app.services.llm_agents import get_basic_agent
 from app.services.llm_prompts import generate_summary_prompt
 from app.services.llm_summarization import resolve_summarization_output_type
@@ -219,51 +220,6 @@ def estimate_tokens_from_chars(char_count: int) -> int:
     return math.ceil(char_count / ESTIMATED_CHARS_PER_TOKEN)
 
 
-def extract_usage(result: Any) -> dict[str, int | None]:
-    """Extract token usage from pydantic-ai result object.
-
-    Args:
-        result: Pydantic-ai result object.
-
-    Returns:
-        Usage dict with token counts.
-    """
-    try:
-        usage = result.usage()
-    except Exception:  # noqa: BLE001
-        usage = None
-
-    if not usage:
-        return {"input_tokens": None, "output_tokens": None, "total_tokens": None}
-
-    def _to_int(value: object | None) -> int | None:
-        if value is None:
-            return None
-        if not isinstance(value, (int, float, str, bytes, bytearray)):
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    input_tokens = _to_int(
-        getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", None)
-    )
-    output_tokens = _to_int(
-        getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", None)
-    )
-    total_tokens = _to_int(getattr(usage, "total_tokens", None))
-
-    if total_tokens is None and input_tokens is not None and output_tokens is not None:
-        total_tokens = input_tokens + output_tokens
-
-    return {
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }
-
-
 def classify_error(exc: Exception) -> str:
     """Classify an exception into coarse buckets.
 
@@ -399,8 +355,8 @@ def run_probe_for_source(
                 model_settings={"timeout": timeout_seconds},
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
-            usage = extract_usage(result)
-            payload = getattr(result, "output", None) or getattr(result, "data", None)
+            usage = extract_result_usage(result)
+            payload = extract_result_payload(result)
             output_chars = len(json.dumps(payload, ensure_ascii=False, default=str))
 
             logger.info(

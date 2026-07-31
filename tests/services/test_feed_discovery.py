@@ -29,6 +29,7 @@ class _FakeUsage:
 
 
 class _FakeResult:
+    @property
     def usage(self):
         return _FakeUsage()
 

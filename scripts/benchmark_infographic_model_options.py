@@ -302,7 +302,7 @@ def generate_fal_image(
     fal_key: str,
     payload_overrides: dict[str, Any] | None = None,
 ) -> tuple[bytes, str]:
-    payload = {
+    payload: dict[str, Any] = {
         "prompt": prompt,
         "image_size": "landscape_16_9",
         "num_images": 1,
@@ -501,7 +501,7 @@ def generate_runware_image(
     payload_overrides: dict[str, Any] | None = None,
     supports_negative_prompt: bool = True,
 ) -> tuple[bytes, str, float | None]:
-    payload = {
+    payload: dict[str, Any] = {
         "taskType": "imageInference",
         "taskUUID": str(uuid4()),
         "includeCost": True,

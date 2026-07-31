@@ -511,17 +511,16 @@ class TweetSuggestionService:
                 raise ValueError(f"Expected 3 suggestions after validation, got {len(suggestions)}")
 
             # Log usage metrics
-            usage = run_result.usage()
-            if usage:
-                logger.info(
-                    "Tweet generation - content_id: %d, creativity: %d, model: %s, "
-                    "input_tokens: %d, output_tokens: %d",
-                    content_id,
-                    creativity,
-                    model_name,
-                    usage.input_tokens,
-                    usage.output_tokens,
-                )
+            usage = run_result.usage
+            logger.info(
+                "Tweet generation - content_id: %d, creativity: %d, model: %s, "
+                "input_tokens: %d, output_tokens: %d",
+                content_id,
+                creativity,
+                model_name,
+                usage.input_tokens,
+                usage.output_tokens,
+            )
 
             return TweetSuggestionsResult(
                 content_id=content_id,

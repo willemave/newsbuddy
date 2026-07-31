@@ -13,6 +13,7 @@ from app.services.llm_tasks import create_llm_task
 class _FakeAgentResult:
     output = "done"
 
+    @property
     def usage(self) -> object:
         return SimpleNamespace(input_tokens=1, output_tokens=1, total_tokens=2)
 

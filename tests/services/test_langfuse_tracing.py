@@ -3,8 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import cast
-
-from pydantic_ai.models.instrumented import InstrumentationSettings
+from unittest.mock import Mock
 
 from app.services import langfuse_tracing
 
@@ -24,8 +23,7 @@ def _settings(**overrides: object) -> SimpleNamespace:
         "langfuse_sample_rate": None,
         "langfuse_include_content": True,
         "langfuse_include_binary_content": False,
-        "langfuse_instrumentation_version": 2,
-        "langfuse_event_mode": "attributes",
+        "langfuse_instrumentation_version": 5,
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -61,9 +59,23 @@ def test_initialize_langfuse_tracing_missing_keys(monkeypatch) -> None:
 
 def test_initialize_langfuse_tracing_success(monkeypatch) -> None:
     _reset_langfuse_state()
-    monkeypatch.setattr(langfuse_tracing, "get_settings", lambda: _settings())
+    monkeypatch.setattr(
+        langfuse_tracing,
+        "get_settings",
+        lambda: _settings(
+            langfuse_include_content=False,
+            langfuse_include_binary_content=True,
+        ),
+    )
 
     captured: dict[str, object] = {}
+    instrumentation = object()
+    instrumentation_factory = Mock(return_value=instrumentation)
+    monkeypatch.setattr(
+        langfuse_tracing,
+        "InstrumentationSettings",
+        instrumentation_factory,
+    )
 
     class FakeLangfuse:
         def __init__(self, **kwargs: object) -> None:
@@ -74,8 +86,8 @@ def test_initialize_langfuse_tracing_success(monkeypatch) -> None:
 
     monkeypatch.setattr(langfuse_tracing, "Langfuse", FakeLangfuse)
 
-    def _instrument_all(instrumentation: InstrumentationSettings) -> None:
-        captured["instrumentation"] = instrumentation
+    def _instrument_all(settings: object) -> None:
+        captured["instrumentation"] = settings
 
     monkeypatch.setattr(langfuse_tracing.Agent, "instrument_all", _instrument_all)
 
@@ -90,7 +102,12 @@ def test_initialize_langfuse_tracing_success(monkeypatch) -> None:
         "sample_rate": None,
         "tracing_enabled": True,
     }
-    assert isinstance(captured["instrumentation"], InstrumentationSettings)
+    assert captured["instrumentation"] is instrumentation
+    instrumentation_factory.assert_called_once_with(
+        include_content=False,
+        include_binary_content=True,
+        version=5,
+    )
 
 
 def test_langfuse_trace_context_propagates_attributes(monkeypatch) -> None:
@@ -190,7 +207,7 @@ def test_initialize_langfuse_tracing_does_not_retry_after_missing_keys(monkeypat
         def flush(self) -> None:
             return None
 
-    def _instrument_all(_: InstrumentationSettings) -> None:
+    def _instrument_all(_: object) -> None:
         captured["instrumentation_calls"] = cast(int, captured["instrumentation_calls"]) + 1
 
     monkeypatch.setattr(langfuse_tracing, "get_settings", _get_settings)

@@ -217,7 +217,6 @@ class ObservabilitySettingsView(BaseModel):
     langfuse_include_content: bool
     langfuse_include_binary_content: bool
     langfuse_instrumentation_version: int
-    langfuse_event_mode: str
 
 
 class Settings(BaseSettings):
@@ -371,8 +370,7 @@ class Settings(BaseSettings):
     langfuse_sample_rate: float | None = None
     langfuse_include_content: bool = True
     langfuse_include_binary_content: bool = False
-    langfuse_instrumentation_version: Literal[1, 2, 3] = 2
-    langfuse_event_mode: Literal["attributes", "logs"] = "attributes"
+    langfuse_instrumentation_version: Literal[2, 3, 4, 5] = 5
 
     # Feed discovery
     discovery_model: str = Field(
@@ -764,7 +762,6 @@ class Settings(BaseSettings):
             langfuse_include_content=self.langfuse_include_content,
             langfuse_include_binary_content=self.langfuse_include_binary_content,
             langfuse_instrumentation_version=self.langfuse_instrumentation_version,
-            langfuse_event_mode=self.langfuse_event_mode,
         )
 
     def redacted_diagnostics(self) -> dict[str, object]:

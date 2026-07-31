@@ -52,6 +52,7 @@ def test_record_vendor_usage_persists_row_and_cost(db_session, monkeypatch) -> N
 
 def test_extract_usage_from_result_reads_provider_cache_details() -> None:
     class Result:
+        @property
         def usage(self):
             return SimpleNamespace(
                 input_tokens=1000,

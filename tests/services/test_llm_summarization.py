@@ -22,6 +22,7 @@ class FakeResult:
         self.data = output
         self._usage = usage
 
+    @property
     def usage(self) -> object | None:
         return self._usage
 

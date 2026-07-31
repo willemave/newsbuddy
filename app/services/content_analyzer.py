@@ -14,7 +14,7 @@ import feedparser
 import httpx
 import trafilatura
 from pydantic_ai import Agent
-from pydantic_ai.builtin_tools import WebSearchTool
+from pydantic_ai.capabilities import WebSearch
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from sqlalchemy.orm import Session
 
@@ -245,7 +245,7 @@ class ContentAnalyzer:
                 output_type=ContentAnalysisOutput,
                 system_prompt=CONTENT_ANALYZER_SYSTEM_PROMPT,
                 model_settings=model_settings,
-                builtin_tools=[WebSearchTool()],
+                capabilities=[WebSearch()],
             )
         return self._agent
 

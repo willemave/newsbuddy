@@ -122,14 +122,7 @@ MODEL_ALIASES: dict[str, str] = {
 
 def extract_usage_from_result(result: object) -> dict[str, int | None] | None:
     """Extract token usage from a pydantic-ai style result object."""
-    usage_fn = getattr(result, "usage", None)
-    if not callable(usage_fn):
-        return None
-    try:
-        usage = usage_fn()
-    except Exception:  # noqa: BLE001
-        return None
-
+    usage = getattr(result, "usage", None)
     if not usage:
         return None
 

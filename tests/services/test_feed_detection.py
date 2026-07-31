@@ -285,7 +285,7 @@ def test_classify_feed_type_with_llm_persists_usage(
                     confidence=0.9,
                     reasoning="Looks like a standard blog feed.",
                 ),
-                usage=lambda: SimpleNamespace(
+                usage=SimpleNamespace(
                     input_tokens=40,
                     output_tokens=12,
                     total_tokens=52,

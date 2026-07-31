@@ -8,6 +8,7 @@ class FakeResult:
     def __init__(self, output: object) -> None:
         self.output = output
 
+    @property
     def usage(self) -> None:
         return None
 

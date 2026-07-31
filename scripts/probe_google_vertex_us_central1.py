@@ -5,7 +5,7 @@
 This script tests whether calls succeed via:
 1) Gemini Developer API (google-gla) using API key.
 2) Vertex AI in a pinned region (us-central1) using google-genai SDK.
-3) Vertex AI in a pinned region via pydantic-ai GoogleProvider.
+3) Vertex AI in a pinned region via pydantic-ai GoogleCloudProvider.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from google import genai
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -114,7 +115,7 @@ def _probe_pydantic_google_gla(api_key: str, model: str) -> str:
 
 
 def _probe_pydantic_vertex(project: str, location: str, model: str) -> str:
-    provider = GoogleProvider(project=project, location=location)
+    provider = GoogleCloudProvider(project=project, location=location)
     agent = Agent(
         GoogleModel(model, provider=provider),
         output_type=str,
@@ -150,7 +151,7 @@ def main() -> int:
 
     print("== Probe Context ==")
     print(f"python-genai={version('google-genai')}")
-    print(f"pydantic-ai={version('pydantic-ai')}")
+    print(f"pydantic-ai={version('pydantic-ai-slim')}")
     print(f"model={args.model}")
     print(f"GOOGLE_API_KEY={_mask_secret(api_key)}")
     print(f"project={project or '<unset>'}")

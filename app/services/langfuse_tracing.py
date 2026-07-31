@@ -147,7 +147,6 @@ def initialize_langfuse_tracing() -> bool:
                     include_content=settings.langfuse_include_content,
                     include_binary_content=settings.langfuse_include_binary_content,
                     version=settings.langfuse_instrumentation_version,
-                    event_mode=settings.langfuse_event_mode,
                 )
             )
             _LANGFUSE_INITIALIZED = True

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from app.services import summary_eval
-from app.services.eval_common import extract_result_payload
+from app.services.eval_common import extract_result_payload, extract_result_usage
 
 
 def test_load_summary_eval_suite_parses_yaml(tmp_path: Path) -> None:
@@ -53,6 +54,18 @@ def test_extract_result_payload_rejects_legacy_data_fallback() -> None:
 
     with pytest.raises(ValueError, match="output payload"):
         extract_result_payload(FakeLegacyResult())
+
+
+def test_extract_result_usage_normalizes_current_usage_property() -> None:
+    result = SimpleNamespace(
+        usage=SimpleNamespace(input_tokens="12", output_tokens=8, total_tokens=None)
+    )
+
+    assert extract_result_usage(result) == {
+        "input_tokens": 12,
+        "output_tokens": 8,
+        "total_tokens": 20,
+    }
 
 
 def test_run_summary_eval_case_fails_when_generated_title_matches_bad_title(

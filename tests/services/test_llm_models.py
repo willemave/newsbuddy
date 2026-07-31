@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import Mock
 
 import pytest
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -147,8 +148,14 @@ def test_build_pydantic_model_google_gla_prefix_uses_api_key_with_project(
     }
 
 
-def test_google_provider_config_uses_gla_for_api_key() -> None:
-    config = llm_models.resolve_google_provider_config(
+def test_resolve_google_provider_uses_gla_for_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_provider = object()
+    provider_factory = Mock(return_value=expected_provider)
+    monkeypatch.setattr(llm_models, "GoogleProvider", provider_factory)
+
+    provider = llm_models.resolve_google_provider(
         provider_prefix="google",
         api_key_override=None,
         platform_api_key="platform-key",
@@ -156,14 +163,18 @@ def test_google_provider_config_uses_gla_for_api_key() -> None:
         cloud_location="global",
     )
 
-    assert config.vertexai is False
-    assert config.api_key == "platform-key"
-    assert config.project is None
-    assert config.location is None
+    assert provider is expected_provider
+    provider_factory.assert_called_once_with(api_key="platform-key")
 
 
-def test_google_provider_config_uses_vertex_for_explicit_project() -> None:
-    config = llm_models.resolve_google_provider_config(
+def test_resolve_google_provider_uses_vertex_for_explicit_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_provider = object()
+    provider_factory = Mock(return_value=expected_provider)
+    monkeypatch.setattr(llm_models, "GoogleCloudProvider", provider_factory)
+
+    provider = llm_models.resolve_google_provider(
         provider_prefix="google",
         api_key_override=None,
         platform_api_key="platform-key",
@@ -171,15 +182,23 @@ def test_google_provider_config_uses_vertex_for_explicit_project() -> None:
         cloud_location="us-central1",
     )
 
-    assert config.vertexai is True
-    assert config.api_key is None
-    assert config.project == "news-app-prod"
-    assert config.location == "us-central1"
+    assert provider is expected_provider
+    provider_factory.assert_called_once_with(
+        project="news-app-prod",
+        location="us-central1",
+    )
 
 
 @pytest.mark.parametrize("provider_prefix", ["google", "google-gla"])
-def test_google_provider_config_uses_gla_for_api_key_override(provider_prefix: str) -> None:
-    config = llm_models.resolve_google_provider_config(
+def test_resolve_google_provider_uses_gla_for_api_key_override(
+    provider_prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_provider = object()
+    provider_factory = Mock(return_value=expected_provider)
+    monkeypatch.setattr(llm_models, "GoogleProvider", provider_factory)
+
+    provider = llm_models.resolve_google_provider(
         provider_prefix=provider_prefix,
         api_key_override="user-key",
         platform_api_key="platform-key",
@@ -187,10 +206,19 @@ def test_google_provider_config_uses_gla_for_api_key_override(provider_prefix: s
         cloud_location="us-central1",
     )
 
-    assert config.vertexai is False
-    assert config.api_key == "user-key"
-    assert config.project is None
-    assert config.location is None
+    assert provider is expected_provider
+    provider_factory.assert_called_once_with(api_key="user-key")
+
+
+def test_resolve_google_provider_requires_api_key_without_cloud_project() -> None:
+    with pytest.raises(ValueError, match="GOOGLE_API_KEY not configured"):
+        llm_models.resolve_google_provider(
+            provider_prefix="google",
+            api_key_override=None,
+            platform_api_key=None,
+            cloud_project=None,
+            cloud_location="global",
+        )
 
 
 def test_build_pydantic_model_openrouter_uses_native_json_schema_profile(
@@ -205,8 +233,8 @@ def test_build_pydantic_model_openrouter_uses_native_json_schema_profile(
     model, model_settings = llm_models.build_pydantic_model("openrouter:deepseek/deepseek-v4-flash")
 
     assert isinstance(model, OpenRouterModel)
-    assert model.profile.supports_json_schema_output is True
-    assert model.profile.supports_json_object_output is True
+    assert model.profile["supports_json_schema_output"] is True
+    assert model.profile["supports_json_object_output"] is True
     assert model_settings == {
         "openrouter_provider": {
             "require_parameters": True,

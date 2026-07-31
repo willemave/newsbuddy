@@ -15,6 +15,7 @@ from app.services.llm_tasks import create_llm_task
 class _FakeAgentResult:
     output = "Deck generated."
 
+    @property
     def usage(self) -> object:
         return SimpleNamespace(input_tokens=1000, output_tokens=500, total_tokens=1500)
 
