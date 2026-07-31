@@ -50,8 +50,8 @@ BASELINE_FILES = {
         "modal-chat.png",
         "modal-learning-deck.png",
     ],
-    "visual_discussion_modal": [
-        "modal-discussion.png",
+    "visual_comments_summary": [
+        "comments-summary.png",
     ],
 }
 
@@ -518,37 +518,22 @@ def test_content_detail_modals_match_visual_baselines(
     )
 
 
-def test_discussion_modal_matches_visual_baseline(
+def test_inline_comments_summary_matches_visual_baseline(
     run_ios_flow,
     db_session,
     test_user,
 ) -> None:
-    """Discussion sheets should render comments without oversized empty detents."""
-    _prepare_baselines("visual_discussion_modal")
-    comment_id = "visual-comment-1"
+    """Comment-derived key topics should remain visible without the Discussion sheet."""
+    _prepare_baselines("visual_comments_summary")
     news_item = _create_user_visible_news_item(
         db_session,
         user_id=test_user.id,
-        ingest_key="ios-visual-discussion-modal",
+        ingest_key="ios-visual-comments-summary",
         title="Mini NAS Boards Put NVMe Storage in Tiny Homelab Servers",
         discussion_payload={
             "mode": "comments",
             "source_url": "https://news.ycombinator.com/item?id=424242",
-            "comments": [
-                {
-                    "comment_id": comment_id,
-                    "author": "alice",
-                    "text": (
-                        "The compact sheet is easier to scan and should not leave a "
-                        "huge empty tail."
-                    ),
-                    "compact_text": (
-                        "The compact sheet is easier to scan and should not leave a "
-                        "huge empty tail."
-                    ),
-                    "depth": 0,
-                }
-            ],
+            "comments": [],
             "discussion_groups": [],
             "links": [],
             "summary": {
@@ -574,10 +559,9 @@ def test_discussion_modal_matches_visual_baseline(
     )
 
     run_ios_flow(
-        _flow_name("visual_discussion_modal"),
+        _flow_name("visual_comments_summary"),
         extra_env={
             **_baseline_env(),
             "NEWS_ITEM_ID": str(news_item.id),
-            "COMMENT_ID": comment_id,
         },
     )

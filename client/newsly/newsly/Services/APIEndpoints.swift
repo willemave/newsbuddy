@@ -56,9 +56,6 @@ enum APIEndpoints {
     static func newsItemAudioEpisode(id: Int) -> String {
         return "/api/news/items/\(id)/audio-episodes/discussion"
     }
-    static func newsItemDiscussionRefresh(id: Int) -> String {
-        return "/api/news/items/\(id)/discussion/refresh"
-    }
     static let analytics = "/api/analytics"
     static let bulkMarkRead = "/api/content/bulk-mark-read"
     static func saveToKnowledge(id: Int) -> String {
@@ -74,9 +71,6 @@ enum APIEndpoints {
     }
     static func contentDiscussion(id: Int) -> String {
         return "/api/content/\(id)/discussion"
-    }
-    static func contentDiscussionRefresh(id: Int) -> String {
-        return "/api/content/\(id)/discussion/refresh"
     }
     static let unreadCounts = "/api/content/stats/unread-counts"
     static let processingCount = "/api/content/stats/processing-count"

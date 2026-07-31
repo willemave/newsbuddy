@@ -20,7 +20,6 @@ struct DetailContentSections: View {
     let onOpenURL: (URL) -> Void
     let linkStateForLink: (String) -> LinkReadLaterState
     let onAddRelevantLink: (RelevantLink) -> Void
-    let onOpenFullDiscussion: (URL) -> Void
     let onDigDeeper: (String) -> Void
 
     var body: some View {
@@ -63,7 +62,6 @@ struct DetailContentSections: View {
         if let inlineDiscussion {
             CommunityDiscussionSummarySection(
                 discussion: inlineDiscussion,
-                onOpenComments: onOpenFullDiscussion,
                 onOpenURL: onOpenURL
             )
             .id(ContentDetailScrollTarget.comments)

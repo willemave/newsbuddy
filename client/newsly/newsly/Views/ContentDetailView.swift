@@ -38,7 +38,7 @@ struct ContentDetailView: View {
     @AppStorage("hasSeenLearningDeckHint") private var hasSeenLearningDeckHint = false
     @State private var showLearningDeckHint = false
     @State private var learningDeckHintBounce = false
-    @State private var discussionCoordinator: DiscussionSheetCoordinator
+    @State private var discussionCoordinator: DiscussionSummaryCoordinator
     @State private var pendingScrollTarget: ContentDetailScrollTarget?
     @State private var detailScrollOffsetY: CGFloat = 0
     // Transcript/Full Article collapsed state
@@ -71,7 +71,7 @@ struct ContentDetailView: View {
         )
         self._chatCoordinator = State(initialValue: RootDependencyFactory.makeDetailChatCoordinator())
         self._podcastAudioController = State(initialValue: RootDependencyFactory.makePodcastAudioController())
-        self._discussionCoordinator = State(initialValue: RootDependencyFactory.makeDiscussionSheetCoordinator())
+        self._discussionCoordinator = State(initialValue: RootDependencyFactory.makeDiscussionSummaryCoordinator())
         self._pendingScrollTarget = State(initialValue: context.initialScrollTarget)
     }
     
@@ -152,9 +152,6 @@ struct ContentDetailView: View {
                                     onAddRelevantLink: { link in
                                         Task { await viewModel.addRelevantLinkToReadLater(link) }
                                     },
-                                    onOpenFullDiscussion: { discussionURL in
-                                        presentDiscussionSheet(content: content, fallbackURL: discussionURL)
-                                    },
                                     onDigDeeper: { selectedText in
                                         startReaderDigDeeper(
                                             selectedText: selectedText,
@@ -186,10 +183,7 @@ struct ContentDetailView: View {
                 .accessibilityIdentifier("content.detail.screen")
                 .task(id: viewModel.content?.id) {
                     await Task.yield()
-                    await requestInitialCommentsScrollIfNeeded()
-                }
-                .onChange(of: discussionCoordinator.commentsNavigationState) { _, _ in
-                    resolvePendingCommentsNavigation(scrollProxy: scrollProxy)
+                    await requestInitialCommentsScrollIfNeeded(scrollProxy: scrollProxy)
                 }
                 .topScreenEdgeFade(opacity: topEdgeFadeOpacity)
                 .overlay(alignment: .topLeading) {
@@ -234,12 +228,12 @@ struct ContentDetailView: View {
                 discussionCoordinator.reset()
                 return
             }
-            discussionCoordinator.reset(fallbackURL: discussionCoordinator.discussionURL(for: content))
+            discussionCoordinator.reset()
             readingStateStore.setCurrent(contentId: id, type: content.contentType)
             logSummarySnapshot(content: content, context: "content_change")
             if pendingScrollTarget != .comments && content.contentType == .news {
                 Task {
-                    await discussionCoordinator.prefetchStoredDiscussion(
+                    await discussionCoordinator.loadStoredSummary(
                         for: content,
                         currentContentId: viewModel.content?.id
                     )
@@ -287,7 +281,6 @@ struct ContentDetailView: View {
         }
         .sheet(item: $activeSheet, onDismiss: {
             chatCoordinator.chatError = nil
-            discussionCoordinator.unavailableMessage = nil
             guard !presentPendingSheetIfNeeded() else { return }
             presentPendingShareIfNeeded()
         }) {
@@ -308,16 +301,6 @@ struct ContentDetailView: View {
                 if let content = viewModel.content {
                     TweetSuggestionsSheet(contentId: content.id)
                 }
-
-            case .discussion:
-                discussionSheet
-                    .presentationDetents(
-                        DiscussionSheet.presentationDetents(
-                            isLoading: discussionCoordinator.isLoading,
-                            discussion: discussionCoordinator.payload
-                        )
-                    )
-                    .presentationDragIndicator(.visible)
 
             case .chat:
                 if let content = viewModel.content {
@@ -713,59 +696,21 @@ struct ContentDetailView: View {
     }
 
     @MainActor
-    private func requestInitialCommentsScrollIfNeeded() async {
+    private func requestInitialCommentsScrollIfNeeded(scrollProxy: ScrollViewProxy) async {
         guard pendingScrollTarget == .comments,
               let content = viewModel.content else {
             return
         }
         pendingScrollTarget = nil
-        guard let fallbackURL = discussionCoordinator.discussionURL(for: content) else {
-            return
-        }
-        await requestCommentsScroll(content: content, fallbackURL: fallbackURL)
-    }
-
-    @MainActor
-    private func requestCommentsScroll(
-        content: ContentDetail,
-        fallbackURL: URL
-    ) async {
-        pendingScrollTarget = .comments
-        discussionCoordinator.requestCommentsNavigation(
-            content: content,
-            fallbackURL: fallbackURL
-        )
-        await discussionCoordinator.loadPendingCommentsNavigation(
-            content: content,
+        await discussionCoordinator.loadStoredSummary(
+            for: content,
             currentContentId: viewModel.content?.id
         )
-    }
-
-    @MainActor
-    private func resolvePendingCommentsNavigation(scrollProxy: ScrollViewProxy) {
-        switch discussionCoordinator.commentsNavigationAction(for: viewModel.content) {
-        case .none, .waitForPayload:
+        guard discussionCoordinator.inlineSummaryPayload(for: content) != nil else {
             return
-        case .scrollInlineSummary:
-            pendingScrollTarget = nil
-            withAnimation(AppMotion.subtle) {
-                scrollProxy.scrollTo(ContentDetailScrollTarget.comments, anchor: .top)
-            }
-        case .presentSheet:
-            pendingScrollTarget = nil
-            activeSheet = .discussion
         }
-    }
-
-    private func presentDiscussionSheet(content: ContentDetail, fallbackURL: URL) {
-        discussionCoordinator.prepareForPresentation(fallbackURL: fallbackURL)
-        activeSheet = .discussion
-        Task {
-            await discussionCoordinator.load(
-                content: content,
-                fallbackURL: fallbackURL,
-                currentContentId: viewModel.content?.id
-            )
+        withAnimation(AppMotion.subtle) {
+            scrollProxy.scrollTo(ContentDetailScrollTarget.comments, anchor: .top)
         }
     }
 
@@ -778,45 +723,6 @@ struct ContentDetailView: View {
             return
         }
         activeBrowserDestination = BrowserDestination(url: url)
-    }
-
-    @ViewBuilder
-    private var discussionSheet: some View {
-        DiscussionSheet(
-            isLoading: discussionCoordinator.isLoading,
-            discussion: discussionCoordinator.payload,
-            unavailableText: discussionCoordinator.unavailableText,
-            fallbackURL: discussionCoordinator.resolvedFallbackURL,
-            canRetry: viewModel.content != nil && discussionCoordinator.resolvedFallbackURL != nil,
-            selectedTab: Binding(
-                get: { discussionCoordinator.selectedTab },
-                set: { discussionCoordinator.selectedTab = $0 }
-            ),
-            collapsedCommentIDs: Binding(
-                get: { discussionCoordinator.collapsedCommentIDs },
-                set: { discussionCoordinator.collapsedCommentIDs = $0 }
-            ),
-            addStateForLink: { viewModel.discussionLinkAddState(for: $0) },
-            onClose: { activeSheet = nil },
-            onOpenURL: openInAppBrowser,
-            onRetry: {
-                guard let content = viewModel.content,
-                      let url = discussionCoordinator.resolvedFallbackURL else {
-                    return
-                }
-                Task {
-                    await discussionCoordinator.load(
-                        content: content,
-                        fallbackURL: url,
-                        refresh: true,
-                        currentContentId: viewModel.content?.id
-                    )
-                }
-            },
-            onAddLink: { link in
-                Task { await viewModel.addDiscussionLinkToLongForm(link) }
-            }
-        )
     }
 
     private func logSummarySnapshot(content: ContentDetail, context: String) {

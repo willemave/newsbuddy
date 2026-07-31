@@ -21,19 +21,12 @@ appId: "${APP_ID}"
     timeout: 15000
 - scrollUntilVisible:
     element:
-      id: content.discussion.open
+      id: content.comments.topic
     direction: DOWN
     centerElement: true
-- tapOn:
-    id: content.discussion.open
-- extendedWaitUntil:
-    visible:
-      id: content.discussion.sheet
-    timeout: 10000
 - assertVisible:
-    id: content.discussion.comment.${COMMENT_ID}
-- assertScreenshot:
-    path: "${BASELINE_DIR}/modal-discussion.png"
-    cropOn:
-      id: content.discussion.sheet
-    thresholdPercentage: 97
+    id: content.comments.topic
+- assertNotVisible:
+    id: content.discussion.sheet
+- takeScreenshot:
+    path: "${BASELINE_DIR}/comments-summary"

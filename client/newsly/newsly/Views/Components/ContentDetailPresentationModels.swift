@@ -9,7 +9,6 @@ enum DetailSheetDestination: String, Identifiable {
     case share
     case download
     case tweet
-    case discussion
     case chat
     case learningDeckCreate
 

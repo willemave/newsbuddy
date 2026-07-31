@@ -407,11 +407,6 @@ final class ContentDetailViewModel {
         }
     }
 
-    func discussionLinkAddState(for linkID: String) -> DiscussionLinkAddState {
-        _ = linkSubmissionRevision
-        return linkSubmissionCoordinator.state(for: linkID)
-    }
-
     func relevantLinkReadLaterState(for linkID: String) -> LinkReadLaterState {
         _ = linkSubmissionRevision
         return linkSubmissionCoordinator.state(for: linkID)
@@ -419,10 +414,6 @@ final class ContentDetailViewModel {
 
     func addRelevantLinkToReadLater(_ link: RelevantLink) async {
         await linkSubmissionCoordinator.addRelevantLinkToReadLater(link)
-    }
-
-    func addDiscussionLinkToLongForm(_ link: DiscussionLink) async {
-        await linkSubmissionCoordinator.addDiscussionLinkToLongForm(link)
     }
 
     /// Subscribe to the detected feed for this content.

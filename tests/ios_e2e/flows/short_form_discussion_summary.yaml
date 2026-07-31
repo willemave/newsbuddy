@@ -14,21 +14,17 @@ appId: "${APP_ID}"
       newslyE2ECompleteTutorial: true
       newslyE2EOpenContentType: news
       newslyE2EOpenContentId: "${CONTENT_ID}"
-- assertVisible:
-    id: content.detail.screen
 - scrollUntilVisible:
     element:
-      id: content.discussion.open
+      id: content.comments.topic
     direction: DOWN
     centerElement: true
-- tapOn:
-    id: content.discussion.open
 - extendedWaitUntil:
     visible:
-      id: content.discussion.sheet
+      id: content.comments.topic
     timeout: 10000
-- assertVisible: "Community Summary"
-- assertVisible: "${SUMMARY_OVERVIEW}"
-- assertVisible: "Key Topics"
-- assertVisible: "${TOPIC_TITLE}"
-- assertVisible: "Open original discussion"
+- assertVisible: "Comments"
+- assertVisible: "${TOPIC_STANCE}"
+- assertVisible: "${TOPIC_SUMMARY}"
+- assertVisible:
+    id: content.comments.open_original

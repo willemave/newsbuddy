@@ -218,19 +218,6 @@ class ContentService {
         return try await client.request(endpoint)
     }
 
-    func refreshContentDiscussion(id: Int, contentType: APIContentType? = nil) async throws -> ContentDiscussion {
-        let path = if contentType == .news {
-            APIEndpoints.newsItemDiscussionRefresh(id: id)
-        } else {
-            APIEndpoints.contentDiscussionRefresh(id: id)
-        }
-        let endpoint = APIRequestDescriptor<ContentDiscussion>(
-            path: path,
-            method: "POST"
-        )
-        return try await client.request(endpoint)
-    }
-
     func fetchContentDiscussion(id: Int, contentType: APIContentType? = nil) async throws -> ContentDiscussion {
         let path = if contentType == .news {
             APIEndpoints.newsItemDiscussion(id: id)

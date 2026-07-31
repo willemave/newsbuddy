@@ -12,8 +12,6 @@ enum LinkReadLaterState: Equatable {
     case failed
 }
 
-typealias DiscussionLinkAddState = LinkReadLaterState
-
 @MainActor
 protocol ToastPresenting: AnyObject {
     func show(_ message: String, type: ToastType, duration: TimeInterval)
@@ -64,22 +62,6 @@ final class LinkSubmissionCoordinator {
             alreadyExistsMessage: "Already in Read Later",
             successMessage: "Added to Read Later",
             errorPrefix: "Failed to add to Read Later"
-        )
-    }
-
-    func addDiscussionLinkToLongForm(_ link: DiscussionLink) async {
-        guard let url = URL(string: link.url) else {
-            toastPresenter.showError("Invalid link URL")
-            return
-        }
-
-        await addLinkToReadLater(
-            id: link.id,
-            url: url,
-            title: link.title,
-            alreadyExistsMessage: "Already in Long Form",
-            successMessage: "Added to Long Form",
-            errorPrefix: "Failed to add to Long Form"
         )
     }
 

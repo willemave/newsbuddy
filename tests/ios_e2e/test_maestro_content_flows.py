@@ -339,87 +339,18 @@ def test_long_form_list_mark_read_action_updates_backend_state(
     assert read_status is not None
 
 
-def test_short_form_detail_discussion_sheet_renders_embedded_comments(
+def test_short_form_detail_renders_comment_key_topics_inline(
     run_ios_flow,
     db_session,
     test_user,
 ) -> None:
-    """Comments button should open the in-app discussion sheet for news items."""
-    comment_id = "comment-1"
-    news_item = NewsItem(
-        ingest_key="ios-e2e-discussion",
-        visibility_scope="user",
-        owner_user_id=test_user.id,
-        platform="hackernews",
-        source_type="hackernews",
-        source_label="Hacker News",
-        source_external_id="ios-e2e-discussion",
-        canonical_item_url="https://news.ycombinator.com/item?id=424242",
-        canonical_story_url="https://example.com/herbie-floating-point",
-        article_url="https://example.com/herbie-floating-point",
-        article_title="Herbie Automatically Optimizes Code to Fix Floating-Point Precision Errors",
-        article_domain="example.com",
-        discussion_url="https://news.ycombinator.com/item?id=424242",
-        summary_title="Herbie Automatically Optimizes Code to Fix Floating-Point Precision Errors",
-        summary_key_points=[
-            "Herbie suggests numerically stable rewrites for floating-point expressions."
-        ],
-        summary_text="Herbie improves floating-point expressions by proposing stable alternatives.",
-        raw_metadata={
-            "discussion_url": "https://news.ycombinator.com/item?id=424242",
-            "summary": {
-                "article_url": "https://example.com/herbie-floating-point",
-                "summary": (
-                    "Herbie improves floating-point expressions by proposing stable alternatives."
-                ),
-                "key_points": [
-                    "Herbie suggests numerically stable rewrites for floating-point expressions."
-                ],
-            },
-            "discussion_payload": {
-                "mode": "comments",
-                "source_url": "https://news.ycombinator.com/item?id=424242",
-                "comments": [
-                    {
-                        "comment_id": comment_id,
-                        "author": "alice",
-                        "text": "This kind of numerical tooling saves real debugging time.",
-                        "compact_text": "This kind of numerical tooling saves real debugging time.",
-                        "depth": 0,
-                    }
-                ],
-                "discussion_groups": [],
-                "links": [],
-                "stats": {"fetched_count": 1},
-            },
-        },
-        status="ready",
-        published_at=datetime.now(UTC).replace(tzinfo=None),
-        ingested_at=datetime.now(UTC).replace(tzinfo=None),
-        processed_at=datetime.now(UTC).replace(tzinfo=None),
-    )
-    db_session.add(news_item)
-    db_session.commit()
-
-    run_ios_flow(
-        "short_form_discussion.yaml",
-        extra_env={
-            "CONTENT_ID": str(news_item.id),
-            "COMMENT_ID": comment_id,
-        },
-    )
-
-
-def test_short_form_detail_discussion_sheet_renders_discussion_summary(
-    run_ios_flow,
-    db_session,
-    test_user,
-) -> None:
-    """Comments button should render the new stored news-item discussion summary."""
+    """Stored discussion topics should render inline without a Discussion sheet."""
     summary_overview = (
         "Developers compare parser ergonomics, runtime tradeoffs, and deployment risks."
     )
     topic_title = "Parser ergonomics"
+    topic_summary = "Commenters focus on simpler grammar changes and clearer failures."
+    topic_stance = "Mostly supportive, with concerns about migration cost."
     news_item = NewsItem(
         ingest_key="ios-e2e-discussion-summary",
         visibility_scope="user",
@@ -473,10 +404,8 @@ def test_short_form_detail_discussion_sheet_renders_discussion_summary(
                 "topics": [
                     {
                         "title": topic_title,
-                        "summary": (
-                            "Commenters focus on simpler grammar changes and clearer failures."
-                        ),
-                        "stance": "Mostly supportive, with concerns about migration cost.",
+                        "summary": topic_summary,
+                        "stance": topic_stance,
                     }
                 ],
                 "notable_links": [
@@ -511,8 +440,8 @@ def test_short_form_detail_discussion_sheet_renders_discussion_summary(
         "short_form_discussion_summary.yaml",
         extra_env={
             "CONTENT_ID": str(news_item.id),
-            "SUMMARY_OVERVIEW": summary_overview,
-            "TOPIC_TITLE": topic_title,
+            "TOPIC_STANCE": topic_stance.upper(),
+            "TOPIC_SUMMARY": topic_summary,
         },
     )
 

@@ -12,13 +12,13 @@ final class LinkSubmissionCoordinatorTests: XCTestCase {
             },
             toastPresenter: StubLinkSubmissionToastPresenter()
         )
-        let link = Self.discussionLink(
+        let link = Self.relevantLink(
             url: "https://example.com/already-added",
             title: "Already added"
         )
 
-        await coordinator.addDiscussionLinkToLongForm(link)
-        await coordinator.addDiscussionLinkToLongForm(link)
+        await coordinator.addRelevantLinkToReadLater(link)
+        await coordinator.addRelevantLinkToReadLater(link)
 
         XCTAssertEqual(attempts, 1)
         XCTAssertEqual(coordinator.state(for: link.id), .added)
@@ -35,12 +35,12 @@ final class LinkSubmissionCoordinatorTests: XCTestCase {
         coordinator.onStateWillChange = {
             changeNotifications += 1
         }
-        let link = Self.discussionLink(
+        let link = Self.relevantLink(
             url: "https://example.com/reset-link",
             title: "Reset link"
         )
 
-        await coordinator.addDiscussionLinkToLongForm(link)
+        await coordinator.addRelevantLinkToReadLater(link)
         XCTAssertEqual(coordinator.state(for: link.id), .added)
 
         changeNotifications = 0
@@ -63,13 +63,12 @@ final class LinkSubmissionCoordinatorTests: XCTestCase {
         )
     }
 
-    nonisolated private static func discussionLink(url: String, title: String) -> DiscussionLink {
-        DiscussionLink(
+    nonisolated private static func relevantLink(url: String, title: String) -> RelevantLink {
+        RelevantLink(
             url: url,
-            source: "comment",
-            commentID: "c1",
-            groupLabel: nil,
-            title: title
+            title: title,
+            reason: "Supporting context.",
+            source: nil
         )
     }
 }

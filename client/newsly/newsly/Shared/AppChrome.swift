@@ -281,8 +281,8 @@ enum RootDependencyFactory {
         )
     }
 
-    static func makeDiscussionSheetCoordinator() -> DiscussionSheetCoordinator {
-        DiscussionSheetCoordinator(contentService: ContentService.shared)
+    static func makeDiscussionSummaryCoordinator() -> DiscussionSummaryCoordinator {
+        DiscussionSummaryCoordinator(contentService: ContentService.shared)
     }
 
     static func makePodcastAudioController() -> PodcastAudioController {

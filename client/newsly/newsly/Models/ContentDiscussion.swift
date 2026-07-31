@@ -7,15 +7,6 @@
 
 import Foundation
 
-private func normalizedDiscussionURLKey(_ value: String?) -> String? {
-    guard let value else { return nil }
-    var cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    while cleaned.hasSuffix("/") {
-        cleaned.removeLast()
-    }
-    return cleaned.isEmpty ? nil : cleaned
-}
-
 struct ContentDiscussion: Codable {
     let contentId: Int
     let status: String
@@ -120,67 +111,6 @@ struct ContentDiscussion: Codable {
         case summary
         case commentCount = "comment_count"
         case stats
-    }
-
-    var hasRenderableContent: Bool {
-        if mode == "comments" {
-            return summary != nil || !comments.isEmpty || !links.isEmpty
-        }
-        if mode == "discussion_list" {
-            return !discussionGroups.isEmpty || !links.isEmpty
-        }
-        return false
-    }
-
-    var linksOutsideSummary: [DiscussionLink] {
-        guard let summary else { return links }
-
-        let summaryLinkKeys = Set(
-            summary.notableLinks.compactMap { normalizedDiscussionURLKey($0.url) }
-        )
-        guard !summaryLinkKeys.isEmpty else { return links }
-
-        return links.filter { link in
-            guard let key = normalizedDiscussionURLKey(link.url) else { return true }
-            return !summaryLinkKeys.contains(key)
-        }
-    }
-
-    var shouldAutoRefresh: Bool {
-        if status == "not_ready" {
-            return true
-        }
-        if status == "failed" {
-            return false
-        }
-        if mode == "comments" {
-            return summary == nil && comments.isEmpty && links.isEmpty
-        }
-        return false
-    }
-
-    var unavailableMessage: String {
-        if let errorMessage = normalizedMessage(errorMessage) {
-            return errorMessage
-        }
-
-        switch status {
-        case "not_ready":
-            return "Comments are still being prepared for this story."
-        case "failed":
-            return "Comments could not be loaded in the app right now."
-        default:
-            if discussionURL != nil || sourceURL != nil {
-                return "This story has a discussion link, but there is no in-app discussion payload yet."
-            }
-            return "No discussion is available for this story."
-        }
-    }
-
-    private func normalizedMessage(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
