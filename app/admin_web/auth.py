@@ -16,7 +16,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.get("/admin/login", response_class=HTMLResponse)
 def admin_login_page(request: Request) -> HTMLResponse:
     """Render admin login page."""
-    return templates.TemplateResponse(request, "login.html", {"request": request})
+    response = templates.TemplateResponse(request, "login.html", {"request": request})
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
 
 
 @router.post("/admin/login", response_model=AdminLoginResponse)

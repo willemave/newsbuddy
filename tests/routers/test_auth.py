@@ -259,6 +259,17 @@ def test_admin_login_valid(
     assert "admin_session" in response.cookies
 
 
+def test_admin_login_page_is_private_and_clearly_branded(auth_client: TestClient) -> None:
+    response = auth_client.get("/auth/admin/login")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
+    assert "Newsly Operator Login" in response.text
+    assert "Authorized access only" in response.text
+    assert "Newsbuddy" not in response.text
+
+
 def test_admin_login_invalid(auth_client: TestClient) -> None:
     """Test admin login with wrong password."""
     response = auth_client.post("/auth/admin/login", json={"password": "wrong_password"})

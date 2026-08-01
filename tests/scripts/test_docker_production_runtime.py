@@ -95,6 +95,9 @@ def test_nginx_routes_through_atomic_active_upstream() -> None:
     assert "proxy_pass http://newsly_backend" in nginx_config
     assert "listen 443 ssl http2" in nginx_config
     assert "racknerd-3b1b61d.willemsavenue.com" in nginx_config
+    assert "location = /robots.txt" in nginx_config
+    assert 'X-Robots-Tag "noindex, nofollow, noarchive" always' in nginx_config
+    assert "A private news reading and learning service." in nginx_config
     assert switch_script.index('"http://127.0.0.1:${port}/health"') < (
         switch_script.index('install -m 644 "${candidate}" "${upstream_file}"')
     )

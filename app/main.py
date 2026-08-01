@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -58,6 +58,38 @@ MAX_LOGGABLE_REQUEST_BODY_BYTES = 64 * 1024
 _LOGGABLE_REQUEST_CONTENT_TYPES = {
     "application/json",
     "application/x-www-form-urlencoded",
+}
+
+PUBLIC_HOME_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <title>Newsly</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f7f5f1; color: #24221f; }
+    main { max-width: 38rem; margin: 18vh auto; padding: 2rem; }
+    h1 { margin: 0 0 0.75rem; font-size: 2.25rem; }
+    p { color: #5d5952; line-height: 1.6; }
+    a { color: #8a4b2b; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Newsly</h1>
+    <p>A private news reading and learning service.</p>
+    <p><a href="/health">Service status</a></p>
+  </main>
+</body>
+</html>
+"""
+PRIVATE_ORIGIN_HEADERS = {
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Robots-Tag": "noindex, nofollow, noarchive",
 }
 
 
@@ -440,10 +472,19 @@ app.include_router(agent.router, prefix="/api")
 app.include_router(openai.router, prefix="/api")
 
 
-@app.get("/", include_in_schema=False)
-async def root_redirect():
-    """Redirect root path to admin dashboard."""
-    return RedirectResponse(url="/admin", status_code=status.HTTP_303_SEE_OTHER)
+@app.get("/", include_in_schema=False, response_class=HTMLResponse)
+async def public_home() -> HTMLResponse:
+    """Describe the private service without exposing its admin sign-in flow."""
+    return HTMLResponse(PUBLIC_HOME_HTML, headers=PRIVATE_ORIGIN_HEADERS)
+
+
+@app.get("/robots.txt", include_in_schema=False, response_class=PlainTextResponse)
+async def robots_txt() -> PlainTextResponse:
+    """Keep private API, admin, and signed viewer routes out of search indexes."""
+    return PlainTextResponse(
+        "User-agent: *\nDisallow: /\n",
+        headers=PRIVATE_ORIGIN_HEADERS,
+    )
 
 
 def _check_database_health() -> None:

@@ -1,12 +1,24 @@
 """Tests for admin-only web interface routes."""
 
 
-def test_root_redirects_to_admin(client):
-    """Root should redirect to admin dashboard entry point."""
-    response = client.get("/", follow_redirects=False)
+def test_root_describes_private_service_without_exposing_admin(client):
+    """Root should identify the service without leading crawlers to a password form."""
+    response = client.get("/")
 
-    assert response.status_code == 303
-    assert response.headers["location"] == "/admin"
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
+    assert "Newsly" in response.text
+    assert "password" not in response.text.lower()
+    assert "/admin" not in response.text
+
+
+def test_robots_txt_disallows_crawling_private_origin(client):
+    response = client.get("/robots.txt")
+
+    assert response.status_code == 200
+    assert response.text == "User-agent: *\nDisallow: /\n"
+    assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
 
 
 def test_removed_web_content_routes_return_404(client):
