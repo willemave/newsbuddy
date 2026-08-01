@@ -1,5 +1,7 @@
 import subprocess
+from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -56,6 +58,13 @@ class TestOpenAITranscriptionService:
 
         prompt = service._get_transcription_prompt(Path("random-podcast.mp3"))
         assert "podcast episode" in prompt
+
+        assert service._get_transcription_keywords(Path("random-podcast.mp3")) == []
+        assert service._get_transcription_keywords(Path("bg2-episode-123.mp3")) == [
+            "BG2",
+            "Bill Gurley",
+            "Brad Gerstner",
+        ]
 
     @patch("app.services.openai_llm.os.path.getsize")
     @patch("app.services.openai_llm.OpenAI")
@@ -189,9 +198,10 @@ class TestOpenAITranscriptionService:
 
         # Mock OpenAI client
         mock_client = MagicMock()
-        mock_transcription = MagicMock()
-        mock_transcription.text = "This is the transcribed text"
-        mock_transcription.language = "en"
+        mock_transcription = SimpleNamespace(
+            text="This is the transcribed text",
+            languages=[SimpleNamespace(code="en")],
+        )
         mock_client.audio.transcriptions.create.return_value = mock_transcription
         mock_openai.return_value = mock_client
 
@@ -210,7 +220,82 @@ class TestOpenAITranscriptionService:
         # Assertions
         assert transcript == "This is the transcribed text"
         assert language == "en"
-        mock_client.audio.transcriptions.create.assert_called_once()
+        mock_client.audio.transcriptions.create.assert_called_once_with(
+            model="gpt-transcribe",
+            file=mock_file,
+            response_format="json",
+            prompt="This recording is a podcast episode that may mention speakers by name.",
+        )
+
+    @patch("app.services.openai_llm.OpenAI")
+    @patch("app.services.openai_llm.settings")
+    def test_transcribe_single_file_sends_known_keywords(
+        self,
+        mock_get_settings,
+        mock_openai,
+    ):
+        mock_get_settings.openai_api_key = "test-key"
+        mock_client = MagicMock()
+        mock_client.audio.transcriptions.create.return_value = SimpleNamespace(
+            text="Bill Gurley and Brad Gerstner",
+            languages=[],
+        )
+        mock_openai.return_value = mock_client
+        service = OpenAITranscriptionService()
+
+        with (
+            patch("builtins.open", create=True) as mock_open_file,
+            patch("app.services.openai_llm.os.path.getsize", return_value=1024),
+        ):
+            mock_file = MagicMock()
+            mock_open_file.return_value.__enter__.return_value = mock_file
+            transcript, language = service._transcribe_single_file(
+                Path("bg2.mp3"),
+                "A technology podcast.",
+                ["BG2", "Bill Gurley", "Brad Gerstner"],
+            )
+
+        assert transcript == "Bill Gurley and Brad Gerstner"
+        assert language is None
+        mock_client.audio.transcriptions.create.assert_called_once_with(
+            model="gpt-transcribe",
+            file=mock_file,
+            response_format="json",
+            prompt="A technology podcast.",
+            keywords=["BG2", "Bill Gurley", "Brad Gerstner"],
+        )
+
+    @patch("app.services.openai_llm.OpenAI")
+    @patch("app.services.openai_llm.settings")
+    def test_transcribe_buffer_uses_voice_dictation_context(
+        self,
+        mock_get_settings,
+        mock_openai,
+    ):
+        mock_get_settings.openai_api_key = "test-key"
+        service = OpenAITranscriptionService()
+
+        with patch.object(
+            service,
+            "transcribe_audio",
+            return_value=("Voice note", "en"),
+        ) as mock_transcribe:
+            result = service.transcribe_audio_from_buffer(
+                BytesIO(b"audio"),
+                "voice-note.m4a",
+                user_id=7,
+            )
+
+        assert result == ("Voice note", "en")
+        call = mock_transcribe.call_args
+        assert call.kwargs == {
+            "user_id": 7,
+            "context_prompt": (
+                "This recording is a short voice dictation that may contain names, numbers, "
+                "URLs, or specialized terms."
+            ),
+            "context_keywords": [],
+        }
 
     @patch("app.services.openai_llm.os.path.getsize")
     @patch("app.services.openai_llm.OpenAI")
@@ -228,9 +313,10 @@ class TestOpenAITranscriptionService:
         mock_get_settings.openai_api_key = "test-key"
 
         mock_client = MagicMock()
-        mock_transcription = MagicMock()
-        mock_transcription.text = "This is the transcribed text"
-        mock_transcription.language = "en"
+        mock_transcription = SimpleNamespace(
+            text="This is the transcribed text",
+            languages=[SimpleNamespace(code="en")],
+        )
         mock_client.audio.transcriptions.create.return_value = mock_transcription
         mock_openai.return_value = mock_client
 
@@ -246,7 +332,7 @@ class TestOpenAITranscriptionService:
         assert language == "en"
         row = db_session.query(VendorUsageRecord).one()
         assert row.provider == "openai"
-        assert row.model == "gpt-4o-transcribe"
+        assert row.model == "gpt-transcribe"
         assert row.feature == "transcription"
         assert row.user_id == 7
         assert row.request_count == 1

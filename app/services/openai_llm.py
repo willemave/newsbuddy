@@ -1,4 +1,4 @@
-"""OpenAI services (summarization via pydantic-ai, transcription via Whisper)."""
+"""OpenAI services (summarization via pydantic-ai and audio transcription)."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def _duration_ms(started_at: float) -> float:
 
 
 class OpenAITranscriptionService:
-    """OpenAI service for audio transcription using Whisper API."""
+    """OpenAI service for completed-file audio transcription."""
 
     def __init__(self):
         openai_api_key = getattr(settings, "openai_api_key", None)
@@ -45,7 +45,7 @@ class OpenAITranscriptionService:
             raise ValueError("OpenAI API key is required for transcription service")
 
         self.client = OpenAI(api_key=openai_api_key)
-        self.model_name = "gpt-4o-transcribe"
+        self.model_name = "gpt-transcribe"
         logger.info("Initialized OpenAI provider for transcription")
 
     def _get_audio_format(self, file_path: Path) -> str:
@@ -172,6 +172,23 @@ class OpenAITranscriptionService:
 
         return prompt
 
+    def _get_transcription_keywords(self, file_path: Path) -> list[str]:
+        """Return literal terms that are likely to be spoken in known recordings."""
+        file_name = file_path.stem.lower()
+        if any(term in file_name for term in ["bg2", "bill", "gurley", "gerstner"]):
+            return ["BG2", "Bill Gurley", "Brad Gerstner"]
+        return []
+
+    @staticmethod
+    def _get_detected_language(transcription: object) -> str | None:
+        """Return the first language detected by GPT-Transcribe, when available."""
+        languages = getattr(transcription, "languages", None) or []
+        if not languages:
+            return None
+
+        code = getattr(languages[0], "code", None)
+        return code if isinstance(code, str) and code else None
+
     def _record_transcription_usage(
         self,
         *,
@@ -201,7 +218,12 @@ class OpenAITranscriptionService:
         )
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def _transcribe_single_file(self, file_path: Path, prompt: str) -> tuple[str, str | None]:
+    def _transcribe_single_file(
+        self,
+        file_path: Path,
+        prompt: str,
+        keywords: list[str],
+    ) -> tuple[str, str | None]:
         """Transcribe a single audio file."""
         with open(file_path, "rb") as audio_file:
             started_at = time.perf_counter()
@@ -231,12 +253,24 @@ class OpenAITranscriptionService:
                 },
                 tags=["queue", "transcription"],
             ):
-                transcription = self.client.audio.transcriptions.create(
-                    model=self.model_name, file=audio_file, response_format="json", prompt=prompt
-                )
+                if keywords:
+                    transcription = self.client.audio.transcriptions.create(
+                        model=self.model_name,
+                        file=audio_file,
+                        response_format="json",
+                        prompt=prompt,
+                        keywords=keywords,
+                    )
+                else:
+                    transcription = self.client.audio.transcriptions.create(
+                        model=self.model_name,
+                        file=audio_file,
+                        response_format="json",
+                        prompt=prompt,
+                    )
 
             transcript = transcription.text
-            language = getattr(transcription, "language", None)
+            language = self._get_detected_language(transcription)
 
             logger.info(
                 "Successfully transcribed audio",
@@ -263,11 +297,18 @@ class OpenAITranscriptionService:
         audio_file_path: Path,
         *,
         user_id: int | None = None,
+        context_prompt: str | None = None,
+        context_keywords: list[str] | None = None,
     ) -> tuple[str, str | None]:
-        """Transcribe audio file using OpenAI Whisper API."""
+        """Transcribe a completed audio file with GPT-Transcribe."""
         started_at = time.perf_counter()
         try:
-            prompt = self._get_transcription_prompt(audio_file_path)
+            prompt = context_prompt or self._get_transcription_prompt(audio_file_path)
+            keywords = (
+                context_keywords
+                if context_keywords is not None
+                else self._get_transcription_keywords(audio_file_path)
+            )
             audio_size_bytes = os.path.getsize(audio_file_path)
             logger.info(
                 "OpenAI audio transcription started",
@@ -287,7 +328,11 @@ class OpenAITranscriptionService:
             )
 
             if self._check_file_size(audio_file_path):
-                transcript, language = self._transcribe_single_file(audio_file_path, prompt)
+                transcript, language = self._transcribe_single_file(
+                    audio_file_path,
+                    prompt,
+                    keywords,
+                )
                 self._record_transcription_usage(
                     file_path=audio_file_path,
                     language=language,
@@ -372,7 +417,9 @@ class OpenAITranscriptionService:
                         chunk_prompt += f" {load_prompt('audio/transcription#continuation_suffix')}"
 
                     chunk_transcript, chunk_language = self._transcribe_single_file(
-                        chunk_path, chunk_prompt
+                        chunk_path,
+                        chunk_prompt,
+                        keywords,
                     )
 
                     transcripts.append(chunk_transcript)
@@ -466,7 +513,7 @@ class OpenAITranscriptionService:
         *,
         user_id: int | None = None,
     ) -> tuple[str, str | None]:
-        """Transcribe audio from a file buffer using OpenAI Whisper API."""
+        """Persist and transcribe a completed audio upload with GPT-Transcribe."""
         started_at = time.perf_counter()
         tmp_path: Path | None = None
         try:
@@ -491,7 +538,12 @@ class OpenAITranscriptionService:
             )
 
             try:
-                transcript, language = self.transcribe_audio(tmp_path, user_id=user_id)
+                transcript, language = self.transcribe_audio(
+                    tmp_path,
+                    user_id=user_id,
+                    context_prompt=load_prompt("audio/transcription#voice_dictation"),
+                    context_keywords=[],
+                )
                 logger.info(
                     "Audio transcription buffer completed",
                     extra={
