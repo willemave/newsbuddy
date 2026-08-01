@@ -313,7 +313,6 @@ class Settings(BaseSettings):
     briefing_taxonomy_llm_timeout_seconds: int = Field(default=300, ge=30, le=600)
     briefing_lens_idle_days: int = Field(default=7, ge=1, le=90)
     briefing_window_min: int = Field(default=3, ge=1, le=12)
-    briefing_window_max: int = Field(default=6, ge=1, le=12)
     briefing_news_window_max: int = Field(default=4, ge=2, le=4)
     briefing_max_figures_deep: int = Field(default=12, ge=0, le=50)
     briefing_max_figures_news: int = Field(default=6, ge=0, le=50)

@@ -294,7 +294,7 @@ def test_append_updates_existing_news_category_one_window_at_a_time(
     ]
 
 
-def test_append_composes_one_longform_window_at_a_time(
+def test_append_composes_one_article_segment_at_a_time(
     db_session: Session,
     test_user: User,
     content_factory,
@@ -302,12 +302,7 @@ def test_append_composes_one_longform_window_at_a_time(
 ) -> None:
     assert test_user.id is not None
     user_id = test_user.id
-    settings = get_settings().model_copy(
-        update={
-            "briefing_enabled_user_ids": [user_id],
-            "briefing_window_max": 3,
-        }
-    )
+    settings = get_settings().model_copy(update={"briefing_enabled_user_ids": [user_id]})
     for index in range(8):
         _create_unread_article(
             content_factory,
@@ -330,7 +325,7 @@ def test_append_composes_one_longform_window_at_a_time(
         db_session.query(BriefingPendingSource)
         .filter_by(user_id=user_id, lens_key="articles")
         .count()
-        == 5
+        == 7
     )
 
     second = run_briefing_refresh(
@@ -347,7 +342,7 @@ def test_append_composes_one_longform_window_at_a_time(
         db_session.query(BriefingPendingSource)
         .filter_by(user_id=user_id, lens_key="articles")
         .count()
-        == 2
+        == 6
     )
 
 

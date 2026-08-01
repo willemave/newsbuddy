@@ -19,7 +19,6 @@ def test_briefing_status_surfaces_fragmentation_and_source_reference_health(
 ) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "briefing_news_window_max", 2)
-    monkeypatch.setattr(settings, "briefing_window_max", 2)
     harness = create_temporary_postgres_harness(
         schema_prefix="newsly_test",
         tables=[

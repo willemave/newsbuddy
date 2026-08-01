@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy.orm import Session
 
 import app.services.briefing.compaction as compaction_service
@@ -31,9 +32,8 @@ def test_fragmentation_metrics_report_achievable_floor_and_duplicates(monkeypatc
     assert metrics.excess_fragmentation == 1
 
 
-def test_fragmentation_metrics_handle_zero_sources(monkeypatch) -> None:
+def test_fragmentation_metrics_handle_zero_sources() -> None:
     settings = get_settings()
-    monkeypatch.setattr(settings, "briefing_window_max", 5)
 
     metrics = compaction_service.briefing_fragmentation_metrics(
         [[], []],
@@ -47,7 +47,7 @@ def test_fragmentation_metrics_handle_zero_sources(monkeypatch) -> None:
     assert metrics.excess_fragmentation == 2
 
 
-def test_release_path_compacts_every_unread_donor_source_without_loss(
+def test_release_path_splits_multi_source_article_segments_without_loss(
     db_session: Session,
     test_user: User,
     content_factory,
@@ -59,8 +59,6 @@ def test_release_path_compacts_every_unread_donor_source_without_loss(
     user_id = test_user.id
     monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
     monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
-    monkeypatch.setattr(settings, "briefing_window_min", 1)
-    monkeypatch.setattr(settings, "briefing_window_max", 4)
     before_keys = _seed_fragmented_article_lens(
         db_session,
         user=test_user,
@@ -80,10 +78,11 @@ def test_release_path_compacts_every_unread_donor_source_without_loss(
     active = _active_segments(db_session, user_id=user_id)
     after_keys = {str(key) for segment in active for key in (segment.source_keys or [])}
     assert result.compacted_segments == 5
-    assert len(active) == 3
+    assert len(active) == 10
     assert after_keys == before_keys
     compacted = [segment for segment in active if "compaction_segment" in (segment.warnings or [])]
-    assert len(compacted) == 3
+    assert len(compacted) == 10
+    assert all(len(segment.source_keys or []) == 1 for segment in compacted)
 
 
 def test_release_path_leaves_donors_active_when_compaction_coverage_is_incomplete(
@@ -98,8 +97,6 @@ def test_release_path_leaves_donors_active_when_compaction_coverage_is_incomplet
     user_id = test_user.id
     monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
     monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
-    monkeypatch.setattr(settings, "briefing_window_min", 1)
-    monkeypatch.setattr(settings, "briefing_window_max", 4)
     original_compose = window_composition_service.compose_window_groups
 
     def compose_without_compaction(first_windows, _second_windows, **kwargs):
@@ -146,8 +143,6 @@ def test_release_path_aborts_compaction_when_global_version_changes_during_compo
     user_id = test_user.id
     monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
     monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
-    monkeypatch.setattr(settings, "briefing_window_min", 1)
-    monkeypatch.setattr(settings, "briefing_window_max", 4)
     before_keys = _seed_fragmented_article_lens(
         db_session,
         user=test_user,
@@ -185,7 +180,7 @@ def test_release_path_aborts_compaction_when_global_version_changes_during_compo
     assert after_keys == before_keys
 
 
-def test_release_path_append_does_not_compact_without_fragmentation_threshold(
+def test_append_does_not_compact_singleton_article_segments(
     db_session: Session,
     test_user: User,
     content_factory,
@@ -197,8 +192,6 @@ def test_release_path_append_does_not_compact_without_fragmentation_threshold(
     user_id = test_user.id
     monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
     monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
-    monkeypatch.setattr(settings, "briefing_window_min", 1)
-    monkeypatch.setattr(settings, "briefing_window_max", 4)
 
     contents = []
     for index in range(7):
@@ -226,7 +219,7 @@ def test_release_path_append_does_not_compact_without_fragmentation_threshold(
     )
     db_session.add(lens)
     db_session.flush()
-    existing_source_groups = [contents[0:1], contents[1:2], contents[2:6]]
+    existing_source_groups = [[content] for content in contents[:6]]
     for group in existing_source_groups:
         db_session.add(
             BriefingSegment(
@@ -255,7 +248,7 @@ def test_release_path_append_does_not_compact_without_fragmentation_threshold(
     expected_source_keys = {f"content:{content.id}" for content in contents}
     assert result.appended_segments == 1
     assert result.compacted_segments == 0
-    assert len(active) == 4
+    assert len(active) == 7
     assert active_source_keys == expected_source_keys
 
 
@@ -267,7 +260,40 @@ def test_large_lens_does_not_compact_full_windows() -> None:
         for segment_index in range(63)
     ]
 
-    assert compaction_service._compaction_donors(segments, read_keys=set()) == []
+    assert (
+        compaction_service._compaction_donors(
+            segments,
+            read_keys=set(),
+            tier="news",
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("tier", ["longform", "audio"])
+def test_non_news_compaction_selects_only_multi_source_segments(tier: str) -> None:
+    singleton = BriefingSegment(source_keys=["content:1"])
+    combined = BriefingSegment(source_keys=["content:2", "content:3"])
+
+    assert compaction_service._compaction_donors(
+        [singleton, combined],
+        read_keys=set(),
+        tier=tier,
+    ) == [combined]
+
+
+def test_non_news_compaction_selects_partially_read_multi_source_segment() -> None:
+    combined = BriefingSegment(source_keys=["content:1", "content:2"])
+
+    assert compaction_service._compaction_donors(
+        [combined],
+        read_keys={"content:1"},
+        tier="longform",
+    ) == [combined]
+    assert compaction_service._ordered_unread_source_keys(
+        [combined],
+        read_keys={"content:1"},
+    ) == ["content:2"]
 
 
 def _seed_fragmented_article_lens(

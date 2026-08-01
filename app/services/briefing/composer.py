@@ -113,20 +113,22 @@ def plan_windows[WindowItem](
     tier: str,
     settings: Settings | None = None,
 ) -> list[list[WindowItem]]:
+    if tier != "news":
+        return [[source] for source in sources]
+
     settings = settings or get_settings()
-    max_size = settings.briefing_news_window_max if tier == "news" else settings.briefing_window_max
-    max_size = max(1, max_size)
-    if tier == "news" and sources:
-        window_count = (len(sources) + max_size - 1) // max_size
-        base_size, larger_windows = divmod(len(sources), window_count)
-        windows: list[list[WindowItem]] = []
-        start = 0
-        for window_index in range(window_count):
-            size = base_size + int(window_index < larger_windows)
-            windows.append(sources[start : start + size])
-            start += size
-        return windows
-    return [sources[index : index + max_size] for index in range(0, len(sources), max_size)]
+    max_size = max(1, settings.briefing_news_window_max)
+    if not sources:
+        return []
+    window_count = (len(sources) + max_size - 1) // max_size
+    base_size, larger_windows = divmod(len(sources), window_count)
+    windows: list[list[WindowItem]] = []
+    start = 0
+    for window_index in range(window_count):
+        size = base_size + int(window_index < larger_windows)
+        windows.append(sources[start : start + size])
+        start += size
+    return windows
 
 
 def compose_window(

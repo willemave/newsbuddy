@@ -57,14 +57,21 @@ def test_full_refresh_builds_segments_and_schedules_sweep(
     )
     db_session.commit()
 
-    assert result.appended_segments == 1
+    assert result.appended_segments == 3
     assert result.pending_added == 3
     assert result.sweep_enqueued is True
     lens = db_session.query(BriefingLens).filter(BriefingLens.key == "articles").one()
-    segment = db_session.query(BriefingSegment).filter(BriefingSegment.lens_id == lens.id).one()
-    assert segment.status == "active"
-    assert segment.source_keys == [f"content:{content.id}" for content in reversed(contents)]
-    assert segment.narration_text
+    segments = (
+        db_session.query(BriefingSegment)
+        .filter(BriefingSegment.lens_id == lens.id)
+        .order_by(BriefingSegment.id)
+        .all()
+    )
+    assert [segment.status for segment in segments] == ["active"] * 3
+    assert [segment.source_keys for segment in segments] == [
+        [f"content:{content.id}"] for content in reversed(contents)
+    ]
+    assert all(segment.narration_text for segment in segments)
     assert (
         db_session.query(ProcessingTask)
         .filter(ProcessingTask.task_type == TaskType.BRIEFING_REFRESH.value)
@@ -121,45 +128,6 @@ def test_refresh_owns_one_provider_client_lifecycle(
     assert clients[0].closed is True
 
 
-def test_release_path_full_refresh_builds_segments_and_schedules_sweep(
-    db_session: Session,
-    test_user: User,
-    content_factory,
-    status_entry_factory,
-    monkeypatch,
-) -> None:
-    settings = get_settings()
-    assert test_user.id is not None
-    user_id = test_user.id
-    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
-    contents = [
-        _create_unread_article(
-            content_factory,
-            status_entry_factory,
-            test_user,
-            index=index,
-        )
-        for index in range(3)
-    ]
-
-    result = run_briefing_refresh(
-        db_session,
-        user_id=user_id,
-        mode="full",
-        use_llm=False,
-        settings=settings,
-    )
-    db_session.commit()
-
-    assert result.appended_segments == 1
-    assert result.pending_added == 3
-    assert result.sweep_enqueued is True
-    lens = db_session.query(BriefingLens).filter(BriefingLens.key == "articles").one()
-    segment = db_session.query(BriefingSegment).filter(BriefingSegment.lens_id == lens.id).one()
-    assert segment.status == "active"
-    assert segment.source_keys == [f"content:{content.id}" for content in reversed(contents)]
-
-
 def test_release_path_full_refresh_preserves_current_segments_when_compose_fails(
     db_session: Session,
     test_user: User,
@@ -186,7 +154,7 @@ def test_release_path_full_refresh_preserves_current_segments_when_compose_fails
         settings=settings,
     )
     db_session.commit()
-    existing_segment = db_session.query(BriefingSegment).one()
+    existing_segments = db_session.query(BriefingSegment).order_by(BriefingSegment.id).all()
 
     def fail_compose(*_args, **_kwargs):  # noqa: ANN002, ANN003
         raise TimeoutError("compose timed out")
@@ -201,10 +169,11 @@ def test_release_path_full_refresh_preserves_current_segments_when_compose_fails
             settings=settings,
         )
     db_session.rollback()
-    db_session.refresh(existing_segment)
+    for segment in existing_segments:
+        db_session.refresh(segment)
 
-    assert existing_segment.status == "active"
-    assert db_session.query(BriefingSegment).count() == 1
+    assert [segment.status for segment in existing_segments] == ["active"] * 3
+    assert db_session.query(BriefingSegment).count() == 3
 
 
 def test_release_path_append_without_pending_skips_planning(
@@ -362,9 +331,13 @@ def test_append_backfills_uncovered_unclassified_podcasts_after_existing_segment
     podcast_segment = (
         db_session.query(BriefingSegment).filter(BriefingSegment.lens_id == podcast_lens.id).one()
     )
-    assert podcast_segment.source_keys == [
-        f"content:{podcast.id}" for podcast in reversed(podcasts)
-    ]
+    assert podcast_segment.source_keys == [f"content:{podcasts[-1].id}"]
+    assert (
+        db_session.query(BriefingPendingSource)
+        .filter_by(user_id=user_id, lens_key="podcasts")
+        .count()
+        == 2
+    )
 
 
 def test_append_seeds_uncovered_podcasts_beyond_existing_top_slice(
@@ -421,16 +394,21 @@ def test_append_seeds_uncovered_podcasts_beyond_existing_top_slice(
 
     assert result.pending_added == 3
     assert result.appended_segments == 1
-    source_key_sets = [
-        set(segment.source_keys or [])
+    assert result.compacted_segments == 1
+    source_key_groups = [
+        segment.source_keys
         for segment in db_session.query(BriefingSegment)
         .filter(BriefingSegment.lens_id == lens.id)
+        .filter(BriefingSegment.status.in_(("active", "degraded")))
         .order_by(BriefingSegment.id)
     ]
-    assert source_key_sets == [
-        {f"content:{podcast.id}" for podcast in podcasts[-2:]},
-        {f"content:{podcast.id}" for podcast in podcasts[:3]},
-    ]
+    assert source_key_groups == [[f"content:{podcast.id}"] for podcast in podcasts[2:]]
+    assert (
+        db_session.query(BriefingPendingSource)
+        .filter_by(user_id=user_id, lens_key="podcasts")
+        .count()
+        == 2
+    )
 
 
 def test_mark_read_retires_fully_read_segment_and_bumps_version(
@@ -455,7 +433,8 @@ def test_mark_read_retires_fully_read_segment_and_bumps_version(
         settings=settings,
     )
     db_session.commit()
-    segment = db_session.query(BriefingSegment).one()
+    segment = db_session.query(BriefingSegment).order_by(BriefingSegment.id).first()
+    assert segment is not None
     assert segment.source_keys is not None
 
     result = mark_briefing_sources_read(
@@ -466,7 +445,7 @@ def test_mark_read_retires_fully_read_segment_and_bumps_version(
     db_session.commit()
     db_session.refresh(segment)
 
-    assert result.marked == 3
+    assert result.marked == 1
     assert result.version == refresh.version + 1
     assert segment.status == "retired"
 

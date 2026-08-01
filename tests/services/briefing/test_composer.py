@@ -70,13 +70,11 @@ def test_plan_windows_balances_news_without_singleton_tails(
     assert [len(window) for window in windows] == expected_sizes
 
 
-def test_plan_windows_keeps_longform_chunking_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = composer.get_settings()
-    monkeypatch.setattr(settings, "briefing_window_max", 4)
+@pytest.mark.parametrize("tier", ["longform", "audio"])
+def test_plan_windows_keeps_non_news_sources_in_separate_segments(tier: str) -> None:
+    windows = plan_windows(list(range(5)), tier=tier)
 
-    windows = plan_windows(list(range(5)), tier="longform", settings=settings)
-
-    assert windows == [[0, 1, 2, 3], [4]]
+    assert windows == [[0], [1], [2], [3], [4]]
 
 
 def test_compose_window_falls_back_after_llm_unavailable() -> None:

@@ -66,10 +66,7 @@ def briefing_fragmentation_metrics(
         for source_key in source_keys
         if str(source_key) not in read_keys
     }
-    window_source_limit = max(
-        settings.briefing_news_window_max if tier == "news" else settings.briefing_window_max,
-        1,
-    )
+    window_source_limit = max(settings.briefing_news_window_max, 1) if tier == "news" else 1
     minimum_required = ceil(len(unique_unread_keys) / window_source_limit)
     return BriefingFragmentationMetrics(
         unique_unread_source_count=len(unique_unread_keys),
@@ -146,11 +143,12 @@ def prepare_compactions(
         donors = _compaction_donors(
             segments,
             read_keys=read_keys,
+            tier=str(lens.tier),
         )
         if not donors:
             continue
         source_keys = _ordered_unread_source_keys(donors, read_keys=read_keys)
-        if len(source_keys) < settings.briefing_window_min:
+        if str(lens.tier) == "news" and len(source_keys) < settings.briefing_window_min:
             continue
         prepared_donors.append((lens, donors, source_keys))
         for source_key in source_keys:
@@ -327,7 +325,16 @@ def _compaction_donors(
     segments: list[BriefingSegment],
     *,
     read_keys: set[str],
+    tier: str,
 ) -> list[BriefingSegment]:
+    if tier != "news":
+        donors: list[BriefingSegment] = []
+        for segment in segments:
+            source_keys = set(segment.source_keys or [])
+            if len(source_keys) > 1 and source_keys - read_keys:
+                donors.append(segment)
+        return donors
+
     small = [
         segment for segment in segments if 0 < len(set(segment.source_keys or []) - read_keys) <= 2
     ]

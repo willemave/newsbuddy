@@ -291,7 +291,7 @@ def test_briefing_lens_and_narration_endpoints_reuse_episode(
     assert lens_response.status_code == 200
     lens_payload = lens_response.json()
     assert lens_payload["lens"]["key"] == "articles"
-    assert len(lens_payload["segments"]) == 1
+    assert len(lens_payload["segments"]) == 3
     assert len(lens_payload["sources"]) == 3
     assert lens_payload["next_cursor"] is None
     assert lens_payload["has_more"] is False
@@ -488,7 +488,7 @@ def test_briefing_lens_pagination_handles_empty_and_single_segment_lenses(
         content_factory=content_factory,
         status_entry_factory=status_entry_factory,
         settings=settings,
-        count=3,
+        count=1,
     )
 
     empty = client.get("/api/briefing/lenses/podcasts", params={"limit": 12})
@@ -657,7 +657,7 @@ def test_briefing_read_mark_response_reports_retirement_count(
     )
 
     assert response.status_code == 200
-    assert response.json() == {"marked": 1, "retired": 0, "version": 2}
+    assert response.json() == {"marked": 1, "retired": 1, "version": 2}
 
 
 def test_briefing_lens_read_marks_every_source_in_the_category(
