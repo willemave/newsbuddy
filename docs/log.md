@@ -76,3 +76,13 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** Ruff and mypy passed for the crawler manager and HTML strategy; 37 focused HTML strategy tests; 139 processing-strategy tests; `git diff --check`.
 - **Remaining:** Monitor production deadline and crawler-reset logs; move browser work behind process isolation only if Chromium or Playwright proves non-cooperative after cancellation.
 - **Commits:** Included in this commit.
+
+### 2026-08-02 — `willem/learning-deck-source-dependency` — Make Learning Deck source waits dependency-aware
+
+- **Status:** Complete
+- **Scope:** Learning Deck generation, focused backend tests, and queue architecture notes.
+- **Decisions:** Replace the deck-age timeout with source-pipeline state: active ingestion remains resumable, while terminal or orphaned dependencies fail explicitly. Reuse the existing retry-preserving deferral loop rather than adding a parallel wakeup or delivery-deduplication path.
+- **Changes:** Added source task inspection at the existing source-not-ready boundary and covered long delays, terminal/missing dependencies, terminal redelivery, and retry-preserving deferral.
+- **Validation:** Ruff passed on the touched Python/test files; 51 focused Learning Deck, LLM handler, and queue-service tests passed; `git diff --check` passed.
+- **Remaining:** Production remains unchanged. After review and deployment, Deck 12 requires an explicit rerun because its prior LLM task is terminal.
+- **Commits:** Included in this commit.

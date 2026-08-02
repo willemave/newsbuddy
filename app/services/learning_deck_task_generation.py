@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import timedelta
 from typing import Any, NoReturn
 
 from sqlalchemy.orm import Session
@@ -14,8 +13,10 @@ from app.models.contracts import (
     LlmTaskKind,
     LlmTaskStatus,
     LlmWorkflowState,
+    TaskStatus,
+    TaskType,
 )
-from app.models.db import Content, LearningDeck, LlmTask
+from app.models.db import Content, LearningDeck, LlmTask, ProcessingTask
 from app.services.learning_deck_agent import (
     LearningDeckAgentExecutionError,
     LearningDeckAgentResult,
@@ -42,11 +43,17 @@ from app.services.llm_tasks import (
     utcnow,
 )
 
-SOURCE_WAIT_DEADLINE = timedelta(hours=2)
 TERMINAL_LLM_TASK_STATUSES = {
     LlmTaskStatus.COMPLETED.value,
     LlmTaskStatus.FAILED.value,
     LlmTaskStatus.CANCELLED.value,
+}
+SOURCE_PREPARATION_TASK_TYPES = {
+    TaskType.ANALYZE_URL.value,
+    TaskType.PROCESS_CONTENT.value,
+    TaskType.PROCESS_PODCAST_MEDIA.value,
+    TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO.value,
+    TaskType.TRANSCRIBE_TWEET_VIDEO.value,
 }
 
 
@@ -76,7 +83,7 @@ def run_learning_deck_task(
     try:
         source_snapshot = _build_source_snapshot(db, deck)
     except LearningDeckSourceNotReady as exc:
-        terminal_error = _source_terminal_error(db, task, deck)
+        terminal_error = _source_terminal_error(db, deck)
         if terminal_error is not None:
             error_type, message = terminal_error
             _fail_task(db, task, error_type, message)
@@ -293,19 +300,48 @@ def _build_source_snapshot(db: Session, deck: LearningDeck) -> dict[str, Any]:
 
 def _source_terminal_error(
     db: Session,
-    task: LlmTask,
     deck: LearningDeck,
 ) -> tuple[str, str] | None:
-    if deck.source_content_id:
-        content = db.query(Content).filter(Content.id == deck.source_content_id).first()
-        if content is not None and content.status in {
-            ContentStatus.FAILED.value,
-            ContentStatus.SKIPPED.value,
-        }:
-            return "source_processing_failed", "Source content processing failed"
-    if task.created_at is not None and utcnow() - task.created_at >= SOURCE_WAIT_DEADLINE:
-        return "source_wait_timeout", "Source content did not become ready within 2 hours"
-    return None
+    if not deck.source_content_id:
+        return None
+    content_id = int(deck.source_content_id)
+    content = db.query(Content).filter(Content.id == content_id).first()
+    if content is None:
+        return "source_not_found", "Source content no longer exists"
+    if content.status in {ContentStatus.FAILED.value, ContentStatus.SKIPPED.value}:
+        return "source_processing_failed", "Source content processing failed"
+
+    active_source_task_id = (
+        db.query(ProcessingTask.id)
+        .filter(ProcessingTask.content_id == content_id)
+        .filter(ProcessingTask.task_type.in_(SOURCE_PREPARATION_TASK_TYPES))
+        .filter(
+            ProcessingTask.status.in_([TaskStatus.PENDING.value, TaskStatus.PROCESSING.value])
+        )
+        .limit(1)
+        .scalar()
+    )
+    if active_source_task_id is not None:
+        return None
+
+    latest_source_task = (
+        db.query(ProcessingTask.status, ProcessingTask.error_message)
+        .filter(ProcessingTask.content_id == content_id)
+        .filter(ProcessingTask.task_type.in_(SOURCE_PREPARATION_TASK_TYPES))
+        .order_by(ProcessingTask.id.desc())
+        .first()
+    )
+    if latest_source_task is not None and latest_source_task.status == TaskStatus.FAILED.value:
+        return (
+            "source_processing_failed",
+            latest_source_task.error_message or "Source content processing failed",
+        )
+    if content.status in {ContentStatus.COMPLETED.value, ContentStatus.AWAITING_IMAGE.value}:
+        return "source_text_unavailable", "Source content completed without readable source text"
+    return (
+        "source_pipeline_stalled",
+        "Source content is not ready and has no active preparation task",
+    )
 
 
 def _source_wait_delay_seconds(task: LlmTask) -> int:

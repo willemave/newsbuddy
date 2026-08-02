@@ -884,9 +884,13 @@ commits its new artifact bundle and attempt pointers together through
 paths read the canonical ledger and do not reconcile queue failures as a side effect.
 
 Source preparation uses queue deferral rather than failure retry: a deferred task returns to
-`pending`, preserves its retry count, clears stale errors, and waits until `available_at`. Learning
-Deck source waits have a fixed two-hour deadline and fail immediately if source processing is
-terminal. Before publishing, the workflow renews and verifies queue ownership.
+`pending`, preserves its retry count, clears stale errors, and waits until `available_at`. Content-
+backed Learning Decks inspect the active source-preparation tasks instead of expiring against deck
+wall-clock age, so a queued or processing dependency remains resumable regardless of queue delay.
+The existing bounded deferral loop resumes generation when the source becomes readable without
+spending the task's retry budget. Terminal content/prerequisite failures and sources with no active
+preparation path fail explicitly. Before publishing, the workflow renews and verifies queue
+ownership.
 
 VM-backed agents share five direct host tools: `execute_bash`, `read_file`, `write_file`,
 `list_files`, and `web_search`. Tool results are structured. Learning Deck output is validated

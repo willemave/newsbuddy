@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
-from app.models.contracts import ContentStatus, ContentType, LlmTaskStatus, LlmWorkflowState
-from app.models.db import LlmTask
+from app.models.contracts import (
+    ContentStatus,
+    ContentType,
+    LlmTaskStatus,
+    LlmWorkflowState,
+    TaskStatus,
+    TaskType,
+)
+from app.models.db import LlmTask, ProcessingTask
 from app.services.learning_deck_agent import LearningDeckAgentResult
 from app.services.learning_deck_artifacts import StoredLearningDeckArtifact
 from app.services.learning_deck_generation import LearningDeckGenerationWaiting
@@ -13,6 +22,7 @@ from app.services.learning_decks import (
     delete_learning_deck,
     present_learning_deck,
 )
+from app.services.llm_tasks import LlmTaskError, utcnow
 from tests.support.builders import create_content_status_entry_row
 
 
@@ -41,6 +51,16 @@ def test_learning_deck_llm_task_defers_while_source_is_processing(
     content, deck, task = _create_task(db_session, test_user, content_factory)
     content.status = ContentStatus.PROCESSING.value
     content.content_metadata = {}
+    task.created_at = utcnow() - timedelta(hours=22)
+    db_session.add(
+        ProcessingTask(
+            task_type=TaskType.PROCESS_CONTENT.value,
+            content_id=content.id,
+            payload={"content_id": content.id},
+            status=TaskStatus.PENDING.value,
+            queue_name="content",
+        )
+    )
     db_session.commit()
 
     with pytest.raises(LearningDeckGenerationWaiting) as exc_info:
@@ -51,6 +71,42 @@ def test_learning_deck_llm_task_defers_while_source_is_processing(
     assert task.status == LlmTaskStatus.PREPARING.value
     assert deck.latest_task_id == task.id
     assert exc_info.value.retry_delay_seconds >= 30
+
+
+def test_learning_deck_llm_task_fails_when_source_pipeline_is_terminal(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content, _deck, task = _create_task(db_session, test_user, content_factory)
+    content.status = ContentStatus.FAILED.value
+    content.content_metadata = {}
+    db_session.commit()
+
+    with pytest.raises(LlmTaskError, match="Source content processing failed"):
+        run_learning_deck_task(db_session, llm_task_id=task.id)
+
+    db_session.refresh(task)
+    assert task.status == LlmTaskStatus.FAILED.value
+    assert task.error_type == "source_processing_failed"
+
+
+def test_learning_deck_llm_task_fails_when_source_pipeline_is_missing(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content, _deck, task = _create_task(db_session, test_user, content_factory)
+    content.status = ContentStatus.PROCESSING.value
+    content.content_metadata = {}
+    db_session.commit()
+
+    with pytest.raises(LlmTaskError, match="no active preparation task"):
+        run_learning_deck_task(db_session, llm_task_id=task.id)
+
+    db_session.refresh(task)
+    assert task.status == LlmTaskStatus.FAILED.value
+    assert task.error_type == "source_pipeline_stalled"
 
 
 def test_learning_deck_llm_task_uses_source_body_before_artwork_finishes(
