@@ -279,13 +279,17 @@ def _normalize_candidate_url(raw_url: str, source_url: str | None) -> str | None
     if not cleaned:
         return None
 
-    absolute = urljoin(source_url or "", cleaned)
-    parsed = urlparse(absolute)
+    try:
+        absolute = urljoin(source_url or "", cleaned)
+        parsed = urlparse(absolute)
+        source_host = _normalized_host(urlparse(source_url or "").netloc)
+    except ValueError:
+        return None
+
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
 
     host = _normalized_host(parsed.netloc)
-    source_host = _normalized_host(urlparse(source_url or "").netloc)
     if not host or (source_host and _same_site(host, source_host)):
         return None
 

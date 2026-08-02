@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-02 — `willem/fix-malformed-external-links-2026-08-02` — Ignore malformed extracted article links
+
+- **Status:** Complete
+- **Scope:** Interesting external-link URL normalization and focused service coverage for short-form news processing.
+- **Decisions:** Treat URL-parser `ValueError` as candidate-local invalid input so defanged or malformed bracket URLs are skipped without failing or retrying the owning news item.
+- **Changes:** Made candidate normalization fail closed on deterministic URL-validation errors and added a regression using the malformed Pipedream URL shape from news item 21750 alongside valid protocol-relative and absolute links.
+- **Validation:** Focused Ruff passed; all 4 interesting-external-link service tests passed; `git diff --check` passed.
+- **Remaining:** After deployment, safely enqueue news item 21750 once for reprocessing.
+- **Commits:** Included in this commit.
+
 ### 2026-08-01 — `main` — Add durable implementation guidance
 
 - **Status:** Complete

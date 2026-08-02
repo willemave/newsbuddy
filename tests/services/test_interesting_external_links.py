@@ -45,6 +45,25 @@ def test_extract_interesting_link_candidates_filters_same_site_share_and_trackin
     assert candidates[0].title == "the paper"
 
 
+def test_extract_interesting_link_candidates_skips_malformed_bracket_urls() -> None:
+    text = """
+    requests.post("https://enqqnvvtgrnyl.x.pipedream[.]net/", json=data)
+    Ignore [a malformed IPv6 URL](https://[2001:db8::1/path).
+    Keep [external docs](//docs.example.org/guide) and
+    https://papers.example.org/model.
+    """
+
+    candidates = links.extract_interesting_link_candidates(
+        text,
+        source_url="https://www.aikido.dev/blog/example",
+    )
+
+    assert [candidate.url for candidate in candidates] == [
+        "https://docs.example.org/guide",
+        "https://papers.example.org/model",
+    ]
+
+
 def test_select_interesting_external_links_rejects_non_candidate_model_urls(
     monkeypatch,
 ) -> None:
