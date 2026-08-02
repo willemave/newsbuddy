@@ -97,7 +97,13 @@ def test_exchange_x_oauth_returns_502_for_provider_runtime_error(client, monkeyp
     assert response.json()["detail"] == "provider failed"
 
 
-def test_disconnect_x_connection_clears_tokens(client, db_session, test_user):
+def test_disconnect_x_connection_clears_tokens(client, db_session, test_user, monkeypatch):
+    monkeypatch.setattr("app.services.x_integration.decrypt_token", lambda token: token)
+    revoked: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "app.services.x_integration.revoke_oauth_token",
+        lambda *, token, token_type_hint: revoked.append((token, token_type_hint)),
+    )
     connection = UserIntegrationConnection(
         user_id=test_user.id,
         provider="x",
@@ -119,6 +125,7 @@ def test_disconnect_x_connection_clears_tokens(client, db_session, test_user):
     assert connection.is_active is False
     assert connection.access_token_encrypted is None
     assert connection.refresh_token_encrypted is None
+    assert revoked == [("encrypted-refresh", "refresh_token")]
 
 
 def test_llm_integrations_crud(client, monkeypatch):

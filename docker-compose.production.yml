@@ -3,7 +3,7 @@ name: newsly-prod
 x-newsly-environment: &newsly-environment
   DATABASE_URL: ${NEWSLY_DATABASE_URL:?NEWSLY_DATABASE_URL is required}
   NEWSLY_WAIT_FOR_BOOTSTRAP: "false"
-  PUBLIC_BASE_URL: ${NEWSLY_PUBLIC_BASE_URL:-https://racknerd-3b1b61d.willemsavenue.com}
+  PUBLIC_BASE_URL: ${NEWSLY_PUBLIC_BASE_URL:-https://news.willemsavenue.com}
   PORT: "8000"
 
 x-newsly-app: &newsly-app

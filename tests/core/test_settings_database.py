@@ -127,8 +127,8 @@ def test_settings_grouped_views_do_not_expose_secrets() -> None:
         database_url="postgresql://postgres@localhost/test",
         JWT_SECRET_KEY="jwt-secret-value",
         ADMIN_PASSWORD="admin-secret-value",
+        APPLE_PRIVATE_KEY="apple-private-key-value",
         openai_api_key="openai-secret-value",
-        langfuse_secret_key="langfuse-secret-value",
         x_client_secret="x-secret-value",
     )
 
@@ -139,12 +139,11 @@ def test_settings_grouped_views_do_not_expose_secrets() -> None:
     assert diagnostics["groups"]["auth"]["jwt_secret_configured"] is True
     assert diagnostics["groups"]["auth"]["admin_password_configured"] is True
     assert diagnostics["groups"]["providers"]["openai_api_key_configured"] is True
-    assert diagnostics["groups"]["observability"]["langfuse_secret_key_configured"] is True
     assert diagnostics["groups"]["observability"]["public_base_url"] is None
     assert diagnostics["groups"]["integrations"]["x"]["x_client_secret_configured"] is True
     assert "twitter_ct0_configured" not in diagnostics["groups"]["integrations"]["x"]
     assert "jwt-secret-value" not in rendered
     assert "admin-secret-value" not in rendered
+    assert "apple-private-key-value" not in rendered
     assert "openai-secret-value" not in rendered
-    assert "langfuse-secret-value" not in rendered
     assert "x-secret-value" not in rendered

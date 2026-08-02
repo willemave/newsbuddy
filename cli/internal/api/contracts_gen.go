@@ -86,11 +86,12 @@ const (
 	TaskTypeGenerateAudioEpisode TaskType = "generate_audio_episode"
 	TaskTypeRunLLMTask TaskType = "run_llm_task"
 	TaskTypeBriefingRefresh TaskType = "briefing_refresh"
+	TaskTypeDeleteUserAccount TaskType = "delete_user_account"
 )
 
 func (v TaskType) Known() bool {
 	switch v {
-	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateAudioEpisode, TaskTypeRunLLMTask, TaskTypeBriefingRefresh:
+	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateAudioEpisode, TaskTypeRunLLMTask, TaskTypeBriefingRefresh, TaskTypeDeleteUserAccount:
 		return true
 	default:
 		return false

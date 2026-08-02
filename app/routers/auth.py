@@ -24,12 +24,17 @@ from app.models.api.auth import (
     AccessTokenResponse,
     AppleSignInRequest,
     DebugUserSessionRequest,
+    DeleteAccountRequest,
+    DeleteAccountResponse,
     RefreshTokenRequest,
     TokenResponse,
 )
 from app.models.api.users import UpdateUserProfileRequest, UserResponse
+from app.models.contracts import TaskType
 from app.models.db.users import User
 from app.models.domain.user_profile import CouncilPersonaConfig, resolve_user_council_personas
+from app.services.apple_account import exchange_and_revoke_apple_authorization
+from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.x_integration import has_active_x_connection, normalize_twitter_username
 
 logger = get_logger(__name__)
@@ -181,6 +186,51 @@ def apple_signin(
         user=_build_user_response(db, user),
         is_new_user=is_new_user,
     )
+
+
+@router.delete(
+    "/me",
+    response_model=DeleteAccountResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def delete_current_account(
+    request: DeleteAccountRequest,
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> DeleteAccountResponse:
+    """Verify fresh Apple credentials, revoke the grant, and schedule deletion."""
+    try:
+        claims = verify_apple_token(request.id_token)
+        if claims.get("sub") != current_user.apple_id:
+            raise ValueError("Apple account does not match the signed-in user")
+        exchange_and_revoke_apple_authorization(request.authorization_code)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    user_id = require_user_id(current_user)
+    try:
+        get_task_queue_gateway().enqueue(
+            TaskType.DELETE_USER_ACCOUNT,
+            payload={"user_id": user_id},
+            dedupe_key=f"delete-user-account:{user_id}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to enqueue account deletion",
+            extra=build_log_extra(
+                component="auth",
+                operation="delete_account",
+                status="failed",
+                user_id=user_id,
+            ),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Account deletion could not be scheduled; try again",
+        ) from exc
+    current_user.is_active = False
+    db.commit()
+    return DeleteAccountResponse()
 
 
 @router.post("/debug/new-user", response_model=TokenResponse)

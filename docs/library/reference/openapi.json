@@ -1074,6 +1074,16 @@
       },
       "BriefingBlockDto": {
         "properties": {
+          "alignment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BriefingFigureAlignment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "caption": {
             "anyOf": [
               {
@@ -1395,6 +1405,15 @@
         ],
         "title": "BriefingDiscussionDto",
         "type": "object"
+      },
+      "BriefingFigureAlignment": {
+        "description": "Horizontal edge used by an inline Briefing figure.",
+        "enum": [
+          "left",
+          "right"
+        ],
+        "title": "BriefingFigureAlignment",
+        "type": "string"
       },
       "BriefingFigurePlacement": {
         "description": "Editorial size hint for a Briefing figure.",
@@ -4533,6 +4552,39 @@
           }
         },
         "title": "DebugUserSessionRequest",
+        "type": "object"
+      },
+      "DeleteAccountRequest": {
+        "description": "Fresh Apple credentials proving the account deletion request.",
+        "properties": {
+          "authorization_code": {
+            "minLength": 1,
+            "title": "Authorization Code",
+            "type": "string"
+          },
+          "id_token": {
+            "minLength": 1,
+            "title": "Id Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id_token",
+          "authorization_code"
+        ],
+        "title": "DeleteAccountRequest",
+        "type": "object"
+      },
+      "DeleteAccountResponse": {
+        "description": "Accepted account deletion response.",
+        "properties": {
+          "status": {
+            "default": "deletion_scheduled",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "DeleteAccountResponse",
         "type": "object"
       },
       "DeleteStatus": {
@@ -17113,6 +17165,51 @@
       }
     },
     "/auth/me": {
+      "delete": {
+        "description": "Verify fresh Apple credentials, revoke the grant, and schedule deletion.",
+        "operationId": "deleteMeCurrentAccount",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteAccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Current Account",
+        "tags": [
+          "auth"
+        ]
+      },
       "get": {
         "description": "Get current authenticated user information.\n\nArgs:\n    current_user: Current authenticated user from JWT token\n\nReturns:\n    Current user information\n\nRaises:\n    HTTPException: 401 if token is invalid",
         "operationId": "getMeCurrentUserInfo",

@@ -8,7 +8,7 @@ def test_root_describes_private_service_without_exposing_admin(client):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
-    assert "Newsly" in response.text
+    assert "Newsbuddy" in response.text
     assert "password" not in response.text.lower()
     assert "/admin" not in response.text
 

@@ -41,6 +41,19 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class DeleteAccountRequest(BaseModel):
+    """Fresh Apple credentials proving the account deletion request."""
+
+    id_token: str = Field(..., min_length=1)
+    authorization_code: str = Field(..., min_length=1)
+
+
+class DeleteAccountResponse(BaseModel):
+    """Accepted account deletion response."""
+
+    status: str = "deletion_scheduled"
+
+
 class AccessTokenResponse(BaseModel):
     """Response schema for token refresh."""
 

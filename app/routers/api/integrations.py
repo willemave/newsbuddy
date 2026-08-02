@@ -111,7 +111,10 @@ def disconnect_x(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> IntegrationDisconnectResponse:
     """Disconnect the user's X integration."""
-    disconnect_x_connection(db, user=current_user)
+    try:
+        disconnect_x_connection(db, user=current_user)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return IntegrationDisconnectResponse()
 
 

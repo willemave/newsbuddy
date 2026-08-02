@@ -34,6 +34,7 @@ from app.services.x_api import (
     fetch_bookmarks,
     get_authenticated_user,
     refresh_oauth_token,
+    revoke_oauth_token,
 )
 from app.services.x_bookmark_destinations import reconcile_x_bookmark_destination
 from app.services.x_sync_schedule import (
@@ -333,9 +334,17 @@ def exchange_x_oauth(
 
 
 def disconnect_x_connection(db: Session, *, user: User) -> XConnectionView:
-    """Disable an X connection and clear stored tokens."""
+    """Revoke and disable an X connection before clearing stored tokens."""
     connection = _get_connection(db, user_id=_require_user_id(user))
     if connection:
+        encrypted_token = connection.refresh_token_encrypted or connection.access_token_encrypted
+        if encrypted_token:
+            revoke_oauth_token(
+                token=decrypt_token(encrypted_token),
+                token_type_hint=(
+                    "refresh_token" if connection.refresh_token_encrypted else "access_token"
+                ),
+            )
         metadata = dict(connection.connection_metadata or {})
         metadata.pop(OAUTH_PENDING_KEY, None)
         metadata["disconnected_at"] = _now_utc_iso()

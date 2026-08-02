@@ -226,6 +226,21 @@ def test_refresh_oauth_token_omits_redirect_uri(monkeypatch) -> None:
     assert captured["auth"] == ("client-id", "client-secret")
 
 
+def test_revoke_oauth_token_uses_revoke_endpoint(monkeypatch) -> None:
+    captured = _patch_oauth_token_request(monkeypatch)
+
+    x_api.revoke_oauth_token(token="refresh-token", token_type_hint="refresh_token")
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://api.x.com/2/oauth2/revoke"
+    assert captured["data"] == {
+        "token": "refresh-token",
+        "token_type_hint": "refresh_token",
+        "client_id": "client-id",
+    }
+    assert captured["auth"] == ("client-id", "client-secret")
+
+
 def test_fetch_tweet_by_id_records_vendor_usage(db_session, monkeypatch) -> None:
     @contextmanager
     def fake_get_db():

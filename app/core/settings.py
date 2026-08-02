@@ -203,20 +203,12 @@ class IntegrationSettingsView(BaseModel):
 
 
 class ObservabilitySettingsView(BaseModel):
-    """Grouped logging and tracing settings without exposing secrets."""
+    """Grouped operational logging settings."""
 
     environment: str
     public_base_url: str | None
     debug: bool
     log_level: str
-    langfuse_enabled: bool
-    langfuse_public_key_configured: bool
-    langfuse_secret_key_configured: bool
-    langfuse_host: str
-    langfuse_sample_rate: float | None
-    langfuse_include_content: bool
-    langfuse_include_binary_content: bool
-    langfuse_instrumentation_version: int
 
 
 class Settings(BaseSettings):
@@ -251,6 +243,12 @@ class Settings(BaseSettings):
     apple_signin_audiences: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["org.willemaw.newsly"]
     )
+    apple_team_id: str | None = None
+    apple_key_id: str | None = None
+    apple_private_key: str | None = None
+    apple_client_id: str = "org.willemaw.newsly"
+    apple_token_url: str = "https://appleid.apple.com/auth/token"
+    apple_revoke_url: str = "https://appleid.apple.com/auth/revoke"
 
     # Worker configuration
     max_workers: int = 1
@@ -360,16 +358,6 @@ class Settings(BaseSettings):
     exa_content_result_cost_usd: float | None = Field(default=0.001, ge=0.0)
     exa_summary_result_cost_usd: float | None = Field(default=0.001, ge=0.0)
     exa_search_included_results: int = Field(default=10, ge=0)
-
-    # Langfuse tracing
-    langfuse_enabled: bool = True
-    langfuse_public_key: str | None = None
-    langfuse_secret_key: str | None = None
-    langfuse_host: str = "https://cloud.langfuse.com"
-    langfuse_sample_rate: float | None = None
-    langfuse_include_content: bool = True
-    langfuse_include_binary_content: bool = False
-    langfuse_instrumentation_version: Literal[2, 3, 4, 5] = 5
 
     # Feed discovery
     discovery_model: str = Field(
@@ -753,14 +741,6 @@ class Settings(BaseSettings):
             public_base_url=str(self.public_base_url) if self.public_base_url else None,
             debug=self.debug,
             log_level=self.log_level,
-            langfuse_enabled=self.langfuse_enabled,
-            langfuse_public_key_configured=bool(self.langfuse_public_key),
-            langfuse_secret_key_configured=bool(self.langfuse_secret_key),
-            langfuse_host=self.langfuse_host,
-            langfuse_sample_rate=self.langfuse_sample_rate,
-            langfuse_include_content=self.langfuse_include_content,
-            langfuse_include_binary_content=self.langfuse_include_binary_content,
-            langfuse_instrumentation_version=self.langfuse_instrumentation_version,
         )
 
     def redacted_diagnostics(self) -> dict[str, object]:

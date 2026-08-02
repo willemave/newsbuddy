@@ -23,7 +23,7 @@ def test_production_compose_keeps_postgres_outside_app_containers() -> None:
         environment = services[service_name]["environment"]
         assert environment["DATABASE_URL"].startswith("${NEWSLY_DATABASE_URL:")
         assert environment["PUBLIC_BASE_URL"] == (
-            "${NEWSLY_PUBLIC_BASE_URL:-https://racknerd-3b1b61d.willemsavenue.com}"
+            "${NEWSLY_PUBLIC_BASE_URL:-https://news.willemsavenue.com}"
         )
 
 
@@ -94,7 +94,7 @@ def test_nginx_routes_through_atomic_active_upstream() -> None:
     assert "include /etc/nginx/newsly-active-upstream.conf" in nginx_config
     assert "proxy_pass http://newsly_backend" in nginx_config
     assert "listen 443 ssl http2" in nginx_config
-    assert "racknerd-3b1b61d.willemsavenue.com" in nginx_config
+    assert "news.willemsavenue.com" in nginx_config
     assert "location = /robots.txt" in nginx_config
     assert 'X-Robots-Tag "noindex, nofollow, noarchive" always' in nginx_config
     assert "A private news reading and learning service." in nginx_config

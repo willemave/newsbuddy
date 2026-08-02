@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -42,11 +43,6 @@ from app.routers.api import (
     scraper_configs,
     share_actions,
 )
-from app.services.langfuse_tracing import (
-    flush_langfuse_tracing,
-    initialize_langfuse_tracing,
-    langfuse_trace_context,
-)
 from app.utils.image_urls import IMAGE_VERSION_QUERY_PARAM
 
 # Initialize
@@ -66,7 +62,7 @@ PUBLIC_HOME_HTML = """<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow, noarchive">
-  <title>Newsly</title>
+  <title>Newsbuddy</title>
   <style>
     :root { color-scheme: light; font-family: system-ui, sans-serif; }
     body { margin: 0; background: #f7f5f1; color: #24221f; }
@@ -78,13 +74,55 @@ PUBLIC_HOME_HTML = """<!doctype html>
 </head>
 <body>
   <main>
-    <h1>Newsly</h1>
+    <h1>Newsbuddy</h1>
     <p>A private news reading and learning service.</p>
-    <p><a href="/health">Service status</a></p>
+    <p><a href="/privacy">Privacy</a> · <a href="/support">Support</a> · <a href="/terms">Terms</a> · <a href="/health">Service status</a></p>
   </main>
 </body>
 </html>
 """
+PUBLIC_DOCUMENT_STYLE = """
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #f7f5f1; color: #24221f; }
+    main { max-width: 46rem; margin: 4rem auto; padding: 0 1.5rem 4rem; }
+    h1, h2 { line-height: 1.2; } h2 { margin-top: 2rem; }
+    p, li { color: #4f4b46; line-height: 1.65; }
+    a { color: #7b4328; } nav { margin-bottom: 2rem; }
+  </style>
+"""
+PRIVACY_HTML = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Newsbuddy Privacy Policy</title>
+{PUBLIC_DOCUMENT_STYLE}</head><body><main><nav><a href="/">Newsbuddy</a></nav>
+<h1>Privacy Policy</h1><p>Effective August 1, 2026.</p>
+<p>Newsbuddy is a personal news reading and learning service. This policy explains the data the service processes to provide the app.</p>
+<h2>Data we process</h2><ul>
+<li>Apple account identifiers, name, and email supplied through Sign in with Apple.</li>
+<li>Articles, links, feeds, X bookmarks, prompts, chats, voice transcripts, preferences, and feedback you submit or choose to synchronize.</li>
+<li>Generated summaries, briefings, learning materials, images, and audio.</li>
+<li>Operational records such as request identifiers, error details, task status, and provider usage needed to operate and secure the service.</li>
+</ul>
+<h2>External processing</h2><p>To provide requested features, Newsbuddy may send relevant content and instructions to service providers for artificial-intelligence processing, search and retrieval, transcription, speech, image generation, web extraction, hosting, and error monitoring. Providers currently used by configured features can include OpenAI, Anthropic, Google, Cerebras, OpenRouter, ElevenLabs, Exa, E2B, Firecrawl, Runware, Sentry, Cloudflare, and X. Only data needed for the requested operation is sent.</p>
+<h2>X synchronization</h2><p>If you connect X, Newsbuddy stores encrypted OAuth credentials on its server and periodically imports your bookmarks in the background. You can disconnect X in Settings. Disconnecting stops future synchronization and revokes the connection; deleting your Newsbuddy account also removes the connection and associated credentials.</p>
+<h2>Retention and deletion</h2><p>Data is retained while your account is active and as needed to operate requested features. You can delete your account in the app. Deletion deactivates access, revokes connected services, cancels pending work, and removes account-linked records and files, subject to short-lived backups and legal obligations.</p>
+<h2>Your choices</h2><p>You control whether to connect X, submit voice recordings, or use features that send content to external processors. You may disconnect X or delete your account from Settings.</p>
+<h2>Contact</h2><p>Questions may be sent to <a href="mailto:willem.ave@gmail.com">willem.ave@gmail.com</a>.</p>
+</main></body></html>"""
+SUPPORT_HTML = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Newsbuddy Support</title>
+{PUBLIC_DOCUMENT_STYLE}</head><body><main><nav><a href="/">Newsbuddy</a></nav>
+<h1>Support</h1><p>For help with Newsbuddy, email <a href="mailto:willem.ave@gmail.com">willem.ave@gmail.com</a>.</p>
+<h2>Account and integrations</h2><p>Sign in with Apple is required. X can be connected or disconnected from Settings. Account deletion is available in Settings under Account.</p>
+<h2>Processing time</h2><p>New articles, bookmarks, briefings, and learning materials may take several minutes to prepare. The app shows their processing state while work is underway.</p>
+</main></body></html>"""
+TERMS_HTML = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Newsbuddy Terms</title>
+{PUBLIC_DOCUMENT_STYLE}</head><body><main><nav><a href="/">Newsbuddy</a></nav>
+<h1>Terms of Use</h1><p>Effective August 1, 2026.</p>
+<p>Newsbuddy provides personal tools for collecting, summarizing, and learning from content you choose. You remain responsible for the links, feeds, accounts, and instructions you submit and for complying with applicable laws and third-party terms.</p>
+<p>Generated material may be incomplete or inaccurate and should not be relied on as professional advice. The service may change or be unavailable, and abusive or unlawful use may result in account suspension.</p>
+<p>You may stop using the service and delete your account at any time from Settings. Questions may be sent to <a href="mailto:willem.ave@gmail.com">willem.ave@gmail.com</a>.</p>
+</main></body></html>"""
 PRIVATE_ORIGIN_HEADERS = {
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
@@ -105,13 +143,9 @@ def _resolve_static_mount_paths() -> tuple[Path, Path]:
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Initialize and teardown application services."""
     logger.info("Starting up...")
-    initialize_langfuse_tracing()
     init_db()
     logger.info("Database initialized")
-    try:
-        yield
-    finally:
-        flush_langfuse_tracing()
+    yield
 
 
 # Create app
@@ -346,17 +380,7 @@ async def log_requests(request: Request, call_next):
             )
 
         try:
-            with langfuse_trace_context(
-                trace_name=f"http.{request.method.lower()}",
-                metadata={
-                    "source": "realtime",
-                    "path": path,
-                    "method": request.method,
-                    "request_id": request_id,
-                },
-                tags=["realtime", "http"],
-            ):
-                response = await call_next(request)
+            response = await call_next(request)
         except Exception as exc:
             duration_ms = (time.perf_counter() - start_time) * 1000
             logger.exception(
@@ -476,6 +500,24 @@ app.include_router(openai.router, prefix="/api")
 async def public_home() -> HTMLResponse:
     """Describe the private service without exposing its admin sign-in flow."""
     return HTMLResponse(PUBLIC_HOME_HTML, headers=PRIVATE_ORIGIN_HEADERS)
+
+
+@app.get("/privacy", include_in_schema=False, response_class=HTMLResponse)
+async def privacy_policy() -> HTMLResponse:
+    """Publish the privacy policy required by the public clients and stores."""
+    return HTMLResponse(PRIVACY_HTML, headers=PRIVATE_ORIGIN_HEADERS)
+
+
+@app.get("/support", include_in_schema=False, response_class=HTMLResponse)
+async def support_page() -> HTMLResponse:
+    """Publish public support and account-management guidance."""
+    return HTMLResponse(SUPPORT_HTML, headers=PRIVATE_ORIGIN_HEADERS)
+
+
+@app.get("/terms", include_in_schema=False, response_class=HTMLResponse)
+async def terms_page() -> HTMLResponse:
+    """Publish the service terms."""
+    return HTMLResponse(TERMS_HTML, headers=PRIVATE_ORIGIN_HEADERS)
 
 
 @app.get("/robots.txt", include_in_schema=False, response_class=PlainTextResponse)

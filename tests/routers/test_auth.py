@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, create_refresh_token
+from app.models.contracts import TaskType
 from app.models.db import UserIntegrationConnection
 
 
@@ -551,3 +552,82 @@ def test_auth_me_repairs_invalid_email(
 
     db_session.refresh(user)
     assert user.email.endswith("@example.com")
+
+
+def test_delete_account_reauthenticates_deactivates_and_enqueues(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.routers.auth.verify_apple_token",
+        lambda _token: {"sub": test_user.apple_id},
+    )
+    revoked: list[str] = []
+    monkeypatch.setattr(
+        "app.routers.auth.exchange_and_revoke_apple_authorization",
+        lambda code: revoked.append(code),
+    )
+
+    enqueued: list[tuple[object, dict[str, object]]] = []
+
+    class FakeGateway:
+        def enqueue(self, task_type, **kwargs) -> int:
+            enqueued.append((task_type, kwargs))
+            return 1
+
+    monkeypatch.setattr("app.routers.auth.get_task_queue_gateway", lambda: FakeGateway())
+
+    response = client.request(
+        "DELETE",
+        "/auth/me",
+        json={"id_token": "fresh-token", "authorization_code": "fresh-code"},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "deletion_scheduled"}
+    db_session.refresh(test_user)
+    assert test_user.is_active is False
+    assert revoked == ["fresh-code"]
+    assert enqueued == [
+        (
+            TaskType.DELETE_USER_ACCOUNT,
+            {
+                "payload": {"user_id": test_user.id},
+                "dedupe_key": f"delete-user-account:{test_user.id}",
+            },
+        )
+    ]
+
+
+def test_delete_account_stays_active_when_deletion_cannot_be_queued(
+    client,
+    db_session,
+    test_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.routers.auth.verify_apple_token",
+        lambda _token: {"sub": test_user.apple_id},
+    )
+    monkeypatch.setattr(
+        "app.routers.auth.exchange_and_revoke_apple_authorization",
+        lambda _code: None,
+    )
+
+    class FailingGateway:
+        def enqueue(self, task_type, **kwargs) -> int:
+            raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr("app.routers.auth.get_task_queue_gateway", lambda: FailingGateway())
+
+    response = client.request(
+        "DELETE",
+        "/auth/me",
+        json={"id_token": "fresh-token", "authorization_code": "fresh-code"},
+    )
+
+    assert response.status_code == 503
+    db_session.refresh(test_user)
+    assert test_user.is_active is True

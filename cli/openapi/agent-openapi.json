@@ -3527,6 +3527,39 @@
         "title": "DebugUserSessionRequest",
         "type": "object"
       },
+      "DeleteAccountRequest": {
+        "description": "Fresh Apple credentials proving the account deletion request.",
+        "properties": {
+          "authorization_code": {
+            "minLength": 1,
+            "title": "Authorization Code",
+            "type": "string"
+          },
+          "id_token": {
+            "minLength": 1,
+            "title": "Id Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id_token",
+          "authorization_code"
+        ],
+        "title": "DeleteAccountRequest",
+        "type": "object"
+      },
+      "DeleteAccountResponse": {
+        "description": "Accepted account deletion response.",
+        "properties": {
+          "status": {
+            "default": "deletion_scheduled",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "DeleteAccountResponse",
+        "type": "object"
+      },
       "DeleteStatus": {
         "description": "Status returned after deleting a resource.",
         "enum": [

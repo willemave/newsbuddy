@@ -12,8 +12,12 @@ from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.services.twitter_share import extract_tweet_id
 from app.services.vendor_costs import record_vendor_usage_out_of_band
+from app.services.x_models import XList
+from app.services.x_oauth import revoke_oauth_token
 
 logger = get_logger(__name__)
+
+__all__ = ["revoke_oauth_token"]
 
 X_API_BASE = "https://api.x.com/2"
 X_DEFAULT_SCOPES = [
@@ -93,14 +97,6 @@ class XTweetsPage:
     tweets: list[XTweet]
     included_tweets: dict[str, XTweet] = field(default_factory=dict)
     next_token: str | None = None
-
-
-@dataclass(frozen=True)
-class XList:
-    """Minimal X list payload used for sync."""
-
-    id: str
-    name: str
 
 
 def is_tweet_url(url: str) -> bool:
@@ -542,6 +538,8 @@ def _request_json(
         )
         raise RuntimeError(f"X API {response.status_code}: {detail}")
 
+    if not response.content:
+        return {}
     try:
         payload = response.json()
     except Exception as exc:  # noqa: BLE001

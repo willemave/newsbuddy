@@ -244,6 +244,13 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
         "app.pipeline.handlers.briefing_refresh",
         "BriefingRefreshHandler",
     ),
+    TaskSpec(
+        TaskType.DELETE_USER_ACCOUNT,
+        TaskQueue.BACKFILL,
+        RequiredUserPayload,
+        "app.pipeline.handlers.delete_user_account",
+        "DeleteUserAccountHandler",
+    ),
 )
 
 TASK_SPECS: dict[TaskType, TaskSpec] = {spec.task_type: spec for spec in _TASK_SPEC_SEQUENCE}

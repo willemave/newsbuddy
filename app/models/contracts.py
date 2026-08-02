@@ -64,6 +64,7 @@ class TaskType(StrEnum):
     GENERATE_AUDIO_EPISODE = "generate_audio_episode"
     RUN_LLM_TASK = "run_llm_task"
     BRIEFING_REFRESH = "briefing_refresh"
+    DELETE_USER_ACCOUNT = "delete_user_account"
 
 
 class TaskQueue(StrEnum):
@@ -313,6 +314,13 @@ class BriefingFigurePlacement(StrEnum):
 
     INSET = "inset"
     FULL = "full"
+
+
+class BriefingFigureAlignment(StrEnum):
+    """Horizontal edge used by an inline Briefing figure."""
+
+    LEFT = "left"
+    RIGHT = "right"
 
 
 class BriefingRunKind(StrEnum):
