@@ -984,6 +984,12 @@ Behavioral notes:
 - image URLs can short-circuit to skipped states
 - plain-text URLs are downloaded directly and summarized from their text body
 - HTML is the broad fallback: crawl4ai is primary, with Firecrawl scrape as the paid recovery path when crawl4ai fails or returns suspect content.
+- `app/processing_strategies/crawl4ai_manager.py` owns one process-lifetime Crawl4AI crawler on a
+  dedicated event-loop thread. Access is single-flight, but every caller has a deadline covering
+  both lock admission and the async crawl; deadline expiry cancels the crawl and replaces the
+  crawler. Crawl4AI 0.9.2's public
+  `max_pages_before_recycle` setting releases each completed page/context while retaining the
+  browser process, so application code does not reach into Crawl4AI's private browser internals.
 
 ### 10.6 Podcast-specific flow
 

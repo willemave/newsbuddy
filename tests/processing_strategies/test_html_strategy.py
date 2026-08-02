@@ -1,3 +1,5 @@
+import threading
+import time
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -5,6 +7,7 @@ import httpx  # For creating mock Headers
 import pytest
 
 from app.http_client.robust_http_client import RobustHttpClient
+from app.processing_strategies import crawl4ai_manager as crawler_manager_module
 from app.processing_strategies import html_strategy as html_strategy_module
 from app.processing_strategies.html_strategy import HtmlProcessorStrategy
 from app.services.firecrawl_client import FirecrawlScrapeResult, FirecrawlUnavailableError
@@ -153,11 +156,11 @@ def test_extract_data_successful(html_strategy: HtmlProcessorStrategy):
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with patch(
-        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+        "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
     ):
         extracted_data = html_strategy.extract_data(SAMPLE_HTML_CONTENT, url)
 
@@ -195,11 +198,11 @@ This is the article content.
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with patch(
-        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+        "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
     ):
         extracted_data = html_strategy.extract_data("", url)
 
@@ -228,11 +231,11 @@ def test_extract_data_pubmed_source(html_strategy: HtmlProcessorStrategy):
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with patch(
-        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+        "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
     ):
         extracted_data = html_strategy.extract_data("", url)
 
@@ -257,11 +260,11 @@ def test_extract_data_arxiv_source(html_strategy: HtmlProcessorStrategy):
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with patch(
-        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+        "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
     ):
         extracted_data = html_strategy.extract_data("", url)
 
@@ -279,11 +282,11 @@ def test_extract_data_failure(html_strategy: HtmlProcessorStrategy):
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with patch(
-        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+        "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
     ):
         extracted_data = html_strategy.extract_data("", url)
 
@@ -309,11 +312,11 @@ def test_extract_data_failure_includes_error_message_details(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with patch(
-        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+        "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
     ):
         extracted_data = html_strategy.extract_data("", url)
 
@@ -348,11 +351,13 @@ def test_extract_data_uses_firecrawl_fallback_when_crawl_returns_empty_body(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.scrape_url_with_firecrawl",
             return_value=FirecrawlScrapeResult(
@@ -399,11 +404,13 @@ def test_extract_data_recovers_gate_page_with_firecrawl(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.scrape_url_with_firecrawl",
             return_value=FirecrawlScrapeResult(
@@ -451,11 +458,13 @@ def test_extract_data_rejects_malformed_firecrawl_fallback(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.scrape_url_with_firecrawl",
             return_value=FirecrawlScrapeResult(
@@ -505,11 +514,13 @@ def test_extract_data_prefers_readability_text_for_chrome_heavy_crawl(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.trafilatura.extract",
             return_value=readable_text,
@@ -602,8 +613,8 @@ def test_extract_data_uses_direct_readability_for_espn_chrome_heavy_crawl(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     direct_response = httpx.Response(
         200,
@@ -613,7 +624,9 @@ def test_extract_data_uses_direct_readability_for_espn_chrome_heavy_crawl(
     cast(Any, html_strategy.http_client.get).return_value = direct_response
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.trafilatura.extract",
             side_effect=[crawl_text, direct_readable_text],
@@ -657,8 +670,8 @@ def test_extract_data_retries_direct_readability_header_candidates(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     blocked_response = httpx.Response(
         403,
@@ -678,7 +691,9 @@ def test_extract_data_retries_direct_readability_header_candidates(
     cast(Any, html_strategy.http_client.get).side_effect = [blocked_error, direct_response]
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.trafilatura.extract",
             side_effect=[crawl_text, direct_readable_text],
@@ -704,7 +719,7 @@ def test_extract_data_uses_github_readme_for_repo_urls(
     )
     cast(Any, html_strategy.http_client.get).return_value = response
 
-    with patch("app.processing_strategies.html_strategy.AsyncWebCrawler") as crawler:
+    with patch("app.processing_strategies.crawl4ai_manager.AsyncWebCrawler") as crawler:
         extracted_data = html_strategy.extract_data("", url)
 
     assert extracted_data["title"] == "example/project README"
@@ -753,8 +768,8 @@ def test_extract_data_prefers_direct_readability_before_subtle_chrome_fallback(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     direct_response = httpx.Response(
         200,
@@ -764,7 +779,9 @@ def test_extract_data_prefers_direct_readability_before_subtle_chrome_fallback(
     cast(Any, html_strategy.http_client.get).return_value = direct_response
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.trafilatura.extract",
             side_effect=[subtle_chrome_text, direct_readable_text],
@@ -795,14 +812,14 @@ def test_extract_data_with_browser_close_error(html_strategy: HtmlProcessorStrat
     # Mock crawler that raises error on close
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
     # Simulate the browser close error
-    mock_crawler.__aexit__ = AsyncMock(
+    mock_crawler.close = AsyncMock(
         side_effect=Exception("Browser.close: Connection closed while reading from the driver")
     )
 
     with patch(
-        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+        "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
     ):
         # Should not raise an exception despite browser close error
         extracted_data = html_strategy.extract_data("", url)
@@ -839,19 +856,21 @@ def test_extract_data_reuses_crawler_across_retry_attempts(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(side_effect=[Exception("timeout"), mock_result])
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with patch(
-        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+        "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
     ) as crawler_class:
         extracted_data = html_strategy.extract_data("", url)
 
     assert extracted_data["title"] == "Retry Article"
     assert mock_crawler.arun.await_count == 2
     crawler_class.assert_called_once()
-    mock_crawler.__aenter__.assert_awaited_once()
-    mock_crawler.__aexit__.assert_not_awaited()
+    browser_config = crawler_class.call_args.kwargs["config"]
+    assert browser_config.max_pages_before_recycle == 1
+    mock_crawler.start.assert_awaited_once()
+    mock_crawler.close.assert_not_awaited()
 
 
 def test_extract_data_reuses_crawler_across_extractions(html_strategy: HtmlProcessorStrategy):
@@ -877,11 +896,11 @@ def test_extract_data_reuses_crawler_across_extractions(html_strategy: HtmlProce
             make_result(second_url, "Second Article"),
         ]
     )
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with patch(
-        "app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler
+        "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
     ) as crawler_class:
         first = html_strategy.extract_data("", first_url)
         second = html_strategy.extract_data("", second_url)
@@ -890,40 +909,120 @@ def test_extract_data_reuses_crawler_across_extractions(html_strategy: HtmlProce
     assert second["title"] == "Second Article"
     assert mock_crawler.arun.await_count == 2
     crawler_class.assert_called_once()
-    mock_crawler.__aenter__.assert_awaited_once()
-    mock_crawler.__aexit__.assert_not_awaited()
+    mock_crawler.start.assert_awaited_once()
+    mock_crawler.close.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_reusable_crawler_closes_idle_pages_after_each_crawl():
-    """A warm browser must not retain the fully rendered article page."""
-    manager = html_strategy_module._ReusableCrawlerManager()
+def test_reusable_crawler_timeout_cancels_and_replaces_crawler():
+    """A hung crawl must release its caller and not poison the next crawl."""
+    manager = crawler_manager_module.ReusableCrawlerManager()
     browser_config = MagicMock()
     run_config = MagicMock(session_id=None)
     browser_config_key = ("test",)
+    cancelled = threading.Event()
 
-    page = AsyncMock()
-    context = MagicMock()
-    context.pages = [page]
+    async def hang_forever(**_kwargs: Any) -> None:
+        try:
+            await crawler_manager_module.asyncio.Event().wait()
+        finally:
+            cancelled.set()
 
-    result = MagicMock()
+    recovered_result = MagicMock()
+    timed_out_crawler = AsyncMock()
+    timed_out_crawler.start = AsyncMock(return_value=timed_out_crawler)
+    timed_out_crawler.close = AsyncMock(return_value=None)
+    timed_out_crawler.arun = AsyncMock(side_effect=hang_forever)
+
+    recovered_crawler = AsyncMock()
+    recovered_crawler.start = AsyncMock(return_value=recovered_crawler)
+    recovered_crawler.close = AsyncMock(return_value=None)
+    recovered_crawler.arun = AsyncMock(return_value=recovered_result)
+
+    try:
+        with patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler",
+            side_effect=[timed_out_crawler, recovered_crawler],
+        ):
+            with pytest.raises(TimeoutError, match="crawl timeout"):
+                manager.run(
+                    browser_config=browser_config,
+                    browser_config_key=browser_config_key,
+                    url="https://example.com/hangs",
+                    run_config=run_config,
+                    timeout_seconds=0.05,
+                )
+
+            actual = manager.run(
+                browser_config=browser_config,
+                browser_config_key=browser_config_key,
+                url="https://example.com/recovers",
+                run_config=run_config,
+                timeout_seconds=1,
+            )
+
+        assert actual is recovered_result
+        assert cancelled.wait(timeout=0.5)
+        timed_out_crawler.close.assert_awaited_once()
+        recovered_crawler.start.assert_awaited_once()
+    finally:
+        manager.close()
+
+
+def test_reusable_crawler_lock_wait_obeys_crawl_deadline():
+    """A caller queued behind another crawl must not wait forever for the lock."""
+    manager = crawler_manager_module.ReusableCrawlerManager()
+    lock_acquired = threading.Event()
+    release_lock = threading.Event()
+
+    def hold_lock() -> None:
+        with manager._lock:
+            lock_acquired.set()
+            release_lock.wait(timeout=1)
+
+    holder = threading.Thread(target=hold_lock)
+    holder.start()
+    assert lock_acquired.wait(timeout=0.5)
+
+    started_at = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError, match="waiting for crawler access"):
+            manager.run(
+                browser_config=MagicMock(),
+                browser_config_key=("test",),
+                url="https://example.com/queued",
+                run_config=MagicMock(),
+                timeout_seconds=0.05,
+            )
+        assert time.monotonic() - started_at < 0.5
+    finally:
+        release_lock.set()
+        holder.join(timeout=0.5)
+        manager.close()
+
+
+@pytest.mark.asyncio
+async def test_reusable_crawler_close_is_bounded(monkeypatch):
+    """A stuck browser close must clear reusable state within its cleanup bound."""
+    manager = crawler_manager_module.ReusableCrawlerManager()
+
+    async def hang_close() -> None:
+        await crawler_manager_module.asyncio.Event().wait()
+
     crawler = AsyncMock()
-    crawler.arun = AsyncMock(return_value=result)
-    crawler.crawler_strategy.browser_manager.contexts_by_config = {"default": context}
+    crawler.close = AsyncMock(side_effect=hang_close)
     manager._crawler = crawler
-    manager._crawler_key = browser_config_key
-    manager._created_at = html_strategy_module.time.monotonic()
-
-    actual = await manager._arun(
-        browser_config=browser_config,
-        browser_config_key=browser_config_key,
-        url="https://example.com/article",
-        run_config=run_config,
+    manager._crawler_key = ("test",)
+    manager._created_at = crawler_manager_module.time.monotonic()
+    monkeypatch.setattr(
+        crawler_manager_module,
+        "REUSABLE_CRAWLER_ASYNC_CLOSE_TIMEOUT_SECONDS",
+        0.01,
     )
 
-    assert actual is result
-    page.close.assert_awaited_once()
-    assert manager._crawler is crawler
+    await manager._close_crawler()
+
+    assert manager._crawler is None
+    crawler.close.assert_awaited_once()
 
 
 def test_extract_data_uses_firecrawl_for_discussion_only_extraction(
@@ -949,11 +1048,13 @@ def test_extract_data_uses_firecrawl_for_discussion_only_extraction(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.scrape_url_with_firecrawl",
             return_value=FirecrawlScrapeResult(
@@ -999,13 +1100,15 @@ def test_extract_data_fails_when_firecrawl_fallback_is_unusable(
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     mock_get = cast(Any, html_strategy.http_client.get)
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.scrape_url_with_firecrawl",
             return_value=FirecrawlScrapeResult(
@@ -1114,14 +1217,16 @@ def test_extract_data_includes_table_strategy(monkeypatch, mock_http_client):
 
     mock_crawler = AsyncMock()
     mock_crawler.arun = AsyncMock(return_value=mock_result)
-    mock_crawler.__aenter__ = AsyncMock(return_value=mock_crawler)
-    mock_crawler.__aexit__ = AsyncMock(return_value=None)
+    mock_crawler.start = AsyncMock(return_value=mock_crawler)
+    mock_crawler.close = AsyncMock(return_value=None)
 
     table_strategy = MagicMock(name="table_strategy")
     run_config_instance = MagicMock(name="run_config")
 
     with (
-        patch("app.processing_strategies.html_strategy.AsyncWebCrawler", return_value=mock_crawler),
+        patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler", return_value=mock_crawler
+        ),
         patch(
             "app.processing_strategies.html_strategy.LLMConfig", return_value=MagicMock()
         ) as llm_config_cls,

@@ -9,8 +9,8 @@ from app.processing_strategies.html_strategy import HtmlProcessorStrategy
 def _build_crawler(mock_result: MagicMock) -> AsyncMock:
     crawler = AsyncMock()
     crawler.arun = AsyncMock(return_value=mock_result)
-    crawler.__aenter__ = AsyncMock(return_value=crawler)
-    crawler.__aexit__ = AsyncMock(return_value=None)
+    crawler.start = AsyncMock(return_value=crawler)
+    crawler.close = AsyncMock(return_value=None)
     return crawler
 
 
@@ -22,7 +22,9 @@ class TestHtmlStrategyEventLoop:
         mock_http_client = MagicMock()
         strategy = HtmlProcessorStrategy(mock_http_client)
 
-        with patch("app.processing_strategies.html_strategy.AsyncWebCrawler") as mock_crawler_class:
+        with patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler"
+        ) as mock_crawler_class:
             mock_result = MagicMock()
             mock_result.success = True
             mock_result.markdown = MagicMock()
@@ -50,14 +52,16 @@ class TestHtmlStrategyEventLoop:
         url = "https://example.com/article"
 
         with (
-            patch("app.processing_strategies.html_strategy.AsyncWebCrawler") as mock_crawler_class,
+            patch(
+                "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler"
+            ) as mock_crawler_class,
             patch.object(strategy, "_firecrawl_fallback_fetch", return_value=None),
             patch.object(strategy, "_should_use_extraction_fallback", return_value=False),
         ):
             crawler = AsyncMock()
             crawler.arun = AsyncMock(side_effect=Exception("Crawl4ai extraction failed"))
-            crawler.__aenter__ = AsyncMock(return_value=crawler)
-            crawler.__aexit__ = AsyncMock(return_value=None)
+            crawler.start = AsyncMock(return_value=crawler)
+            crawler.close = AsyncMock(return_value=None)
             mock_crawler_class.return_value = crawler
 
             result = strategy.extract_data("dummy_content", url)
@@ -72,7 +76,9 @@ class TestHtmlStrategyEventLoop:
         mock_http_client = MagicMock()
         strategy = HtmlProcessorStrategy(mock_http_client)
 
-        with patch("app.processing_strategies.html_strategy.AsyncWebCrawler") as mock_crawler_class:
+        with patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler"
+        ) as mock_crawler_class:
 
             def create_mock_result(url):
                 mock_result = MagicMock()
@@ -86,8 +92,8 @@ class TestHtmlStrategyEventLoop:
 
             crawler = AsyncMock()
             crawler.arun = AsyncMock(side_effect=lambda url, config: create_mock_result(url))
-            crawler.__aenter__ = AsyncMock(return_value=crawler)
-            crawler.__aexit__ = AsyncMock(return_value=None)
+            crawler.start = AsyncMock(return_value=crawler)
+            crawler.close = AsyncMock(return_value=None)
             mock_crawler_class.return_value = crawler
 
             urls = [
@@ -119,7 +125,9 @@ class TestHtmlStrategyEventLoop:
             "https://example.com/article",
         ]
 
-        with patch("app.processing_strategies.html_strategy.AsyncWebCrawler") as mock_crawler_class:
+        with patch(
+            "app.processing_strategies.crawl4ai_manager.AsyncWebCrawler"
+        ) as mock_crawler_class:
             mock_result = MagicMock()
             mock_result.success = True
             mock_result.markdown = MagicMock()

@@ -3,7 +3,6 @@ This module defines the strategy for processing standard HTML web pages using cr
 """
 
 import asyncio
-import atexit
 import logging
 import re
 import threading
@@ -15,7 +14,6 @@ from urllib.parse import urlparse
 import httpx
 import trafilatura
 from crawl4ai import (
-    AsyncWebCrawler,
     BrowserConfig,
     CacheMode,
     CrawlerRunConfig,
@@ -28,201 +26,21 @@ from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
+from app.processing_strategies.crawl4ai_manager import (
+    CRAWL4AI_CONTEXT_RECYCLE_PAGES,
+    CRAWL4AI_OPERATION_GRACE_SECONDS,
+    REUSABLE_CRAWLER_MANAGER,
+)
 from app.services.firecrawl_client import FirecrawlClientError, scrape_url_with_firecrawl
 from app.utils.dates import parse_date_with_tz
 from app.utils.title_utils import clean_title
 
 logger = get_logger(__name__)
 
-REUSABLE_CRAWLER_MAX_CRAWLS = 50
-REUSABLE_CRAWLER_MAX_AGE_SECONDS = 15 * 60
-
-
-class _ReusableCrawlerManager:
-    """Own one async crawl4ai crawler on a persistent loop thread."""
-
-    def __init__(self) -> None:
-        self._lock = threading.RLock()
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._thread: threading.Thread | None = None
-        self._crawler: Any | None = None
-        self._crawler_key: tuple[Any, ...] | None = None
-        self._created_at = 0.0
-        self._crawl_count = 0
-
-    def run(
-        self,
-        *,
-        browser_config: BrowserConfig,
-        browser_config_key: tuple[Any, ...],
-        url: str,
-        run_config: CrawlerRunConfig,
-    ) -> Any:
-        """Run one crawl on the shared crawler, serializing access."""
-        with self._lock:
-            loop = self._ensure_loop_locked()
-            future = asyncio.run_coroutine_threadsafe(
-                self._arun(
-                    browser_config=browser_config,
-                    browser_config_key=browser_config_key,
-                    url=url,
-                    run_config=run_config,
-                ),
-                loop,
-            )
-            return future.result()
-
-    def mark_broken(self) -> None:
-        """Discard the current crawler after a browser-level failure."""
-        with self._lock:
-            loop = self._loop
-            if loop is None or loop.is_closed():
-                self._reset_state_locked()
-                return
-            future = asyncio.run_coroutine_threadsafe(self._close_crawler(), loop)
-            try:
-                future.result(timeout=10)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Error closing broken crawler (non-critical): %s", exc)
-
-    def close(self) -> None:
-        """Close the crawler and stop the loop thread."""
-        with self._lock:
-            loop = self._loop
-            thread = self._thread
-            if loop is None:
-                self._reset_state_locked()
-                return
-            if not loop.is_closed():
-                future = asyncio.run_coroutine_threadsafe(self._close_crawler(), loop)
-                try:
-                    future.result(timeout=10)
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("Error closing reusable crawler (non-critical): %s", exc)
-                loop.call_soon_threadsafe(loop.stop)
-            if thread is not None and thread.is_alive():
-                thread.join(timeout=5)
-            self._reset_state_locked()
-
-    def _ensure_loop_locked(self) -> asyncio.AbstractEventLoop:
-        if self._loop is not None and not self._loop.is_closed():
-            return self._loop
-
-        ready = threading.Event()
-
-        def _run_loop() -> None:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            self._loop = loop
-            ready.set()
-            try:
-                loop.run_forever()
-            finally:
-                pending = asyncio.all_tasks(loop)
-                for task in pending:
-                    task.cancel()
-                if pending:
-                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.run_until_complete(loop.shutdown_default_executor())
-                asyncio.set_event_loop(None)
-                loop.close()
-
-        self._thread = threading.Thread(
-            target=_run_loop,
-            name="crawl4ai-reusable-crawler",
-            daemon=True,
-        )
-        self._thread.start()
-        ready.wait(timeout=5)
-        if self._loop is None:
-            raise RuntimeError("Reusable crawler loop failed to start")
-        return self._loop
-
-    async def _arun(
-        self,
-        *,
-        browser_config: BrowserConfig,
-        browser_config_key: tuple[Any, ...],
-        url: str,
-        run_config: CrawlerRunConfig,
-    ) -> Any:
-        crawler = await self._get_crawler(browser_config, browser_config_key)
-        try:
-            result = await crawler.arun(url=url, config=run_config)
-            self._crawl_count += 1
-            return result
-        finally:
-            await self._close_idle_pages(crawler, run_config)
-
-    async def _close_idle_pages(self, crawler: Any, run_config: CrawlerRunConfig) -> None:
-        """Release Crawl4AI pages while keeping its browser process warm."""
-        if getattr(run_config, "session_id", None):
-            return
-
-        try:
-            browser_manager = crawler.crawler_strategy.browser_manager
-            contexts_by_config = browser_manager.contexts_by_config
-            if not isinstance(contexts_by_config, dict):
-                return
-
-            for context in list(contexts_by_config.values()):
-                for page in list(context.pages):
-                    await page.close()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to close idle Crawl4AI pages: %s", exc)
-
-    async def _get_crawler(
-        self,
-        browser_config: BrowserConfig,
-        browser_config_key: tuple[Any, ...],
-    ) -> Any:
-        now = time.monotonic()
-        should_recycle = self._crawler is not None and (
-            self._crawler_key != browser_config_key
-            or self._crawl_count >= REUSABLE_CRAWLER_MAX_CRAWLS
-            or (now - self._created_at) >= REUSABLE_CRAWLER_MAX_AGE_SECONDS
-        )
-        if should_recycle:
-            await self._close_crawler()
-
-        if self._crawler is None:
-            crawler = AsyncWebCrawler(config=browser_config)
-            self._crawler = await crawler.__aenter__()
-            self._crawler_key = browser_config_key
-            self._created_at = now
-            self._crawl_count = 0
-        return self._crawler
-
-    async def _close_crawler(self) -> None:
-        crawler = self._crawler
-        self._crawler = None
-        self._crawler_key = None
-        self._created_at = 0.0
-        self._crawl_count = 0
-        if crawler is None:
-            return
-        try:
-            await crawler.__aexit__(None, None, None)
-        except Exception as close_error:  # noqa: BLE001
-            logger.debug("Error closing browser (non-critical): %s", close_error)
-
-    def _reset_state_locked(self) -> None:
-        self._loop = None
-        self._thread = None
-        self._crawler = None
-        self._crawler_key = None
-        self._created_at = 0.0
-        self._crawl_count = 0
-
-
-_REUSABLE_CRAWLER_MANAGER = _ReusableCrawlerManager()
-atexit.register(_REUSABLE_CRAWLER_MANAGER.close)
-
 
 def _close_reusable_crawler_for_tests() -> None:
     """Close the shared crawler so tests can isolate patched crawler classes."""
-    _REUSABLE_CRAWLER_MANAGER.close()
+    REUSABLE_CRAWLER_MANAGER.close()
 
 
 def _run_coro_sync[T](coro: asyncio.Future[T] | Coroutine[Any, Any, T]) -> T:
@@ -1375,10 +1193,10 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                 ignore_https_errors=True,
                 java_script_enabled=True,
                 extra_args=["--disable-blink-features=AutomationControlled"],
+                max_pages_before_recycle=CRAWL4AI_CONTEXT_RECYCLE_PAGES,
                 verbose=False,
             )
             browser_config_key = (
-                id(AsyncWebCrawler),
                 True,
                 1920,
                 1080,
@@ -1387,6 +1205,7 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                 True,
                 True,
                 ("--disable-blink-features=AutomationControlled",),
+                CRAWL4AI_CONTEXT_RECYCLE_PAGES,
             )
 
             # Get source-specific configuration
@@ -1396,6 +1215,9 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
             wait_for_timeout_ms = int(source_config.get("wait_for_timeout_ms", page_timeout_ms))
             max_crawl_attempts = max(1, int(source_config.get("max_crawl_attempts", 3)))
             retry_delay_seconds = float(source_config.get("crawl_retry_delay_seconds", 1.5))
+            crawl_timeout_seconds = (
+                page_timeout_ms + (wait_for_timeout_ms if source_config.get("wait_for") else 0)
+            ) / 1000 + CRAWL4AI_OPERATION_GRACE_SECONDS
 
             # Configure crawler run
             run_config = CrawlerRunConfig(
@@ -1454,11 +1276,12 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                     for attempt in range(1, max_crawl_attempts + 1):
                         should_retry = False
                         try:
-                            result = _REUSABLE_CRAWLER_MANAGER.run(
+                            result = REUSABLE_CRAWLER_MANAGER.run(
                                 browser_config=browser_config,
                                 browser_config_key=browser_config_key,
                                 url=url,
                                 run_config=run_config,
+                                timeout_seconds=crawl_timeout_seconds,
                             )
                             logger.debug(
                                 "HtmlStrategy: Crawl finished "
@@ -1488,13 +1311,13 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
                                     max_crawl_attempts,
                                 )
                             else:
-                                _REUSABLE_CRAWLER_MANAGER.mark_broken()
+                                REUSABLE_CRAWLER_MANAGER.mark_broken()
                                 raise
                         if should_retry:
                             time.sleep(retry_delay_seconds)
 
                     if last_error is not None:
-                        _REUSABLE_CRAWLER_MANAGER.mark_broken()
+                        REUSABLE_CRAWLER_MANAGER.mark_broken()
                         raise last_error
                     raise RuntimeError("Crawl4ai retry loop exited without result")
                 finally:
