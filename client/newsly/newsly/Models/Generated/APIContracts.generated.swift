@@ -135,6 +135,7 @@ enum APITaskType: Codable, Equatable, Hashable {
     case generate_audio_episode
     case run_llm_task
     case briefing_refresh
+    case delete_user_account
     case unknown(String)
 
     static let knownCases: [APITaskType] = [
@@ -158,6 +159,7 @@ enum APITaskType: Codable, Equatable, Hashable {
         .generate_audio_episode,
         .run_llm_task,
         .briefing_refresh,
+        .delete_user_account,
     ]
 
     var rawValue: String {
@@ -182,6 +184,7 @@ enum APITaskType: Codable, Equatable, Hashable {
         case .generate_audio_episode: "generate_audio_episode"
         case .run_llm_task: "run_llm_task"
         case .briefing_refresh: "briefing_refresh"
+        case .delete_user_account: "delete_user_account"
         case .unknown(let rawValue): rawValue
         }
     }
@@ -208,6 +211,7 @@ enum APITaskType: Codable, Equatable, Hashable {
         case "generate_audio_episode": self = .generate_audio_episode
         case "run_llm_task": self = .run_llm_task
         case "briefing_refresh": self = .briefing_refresh
+        case "delete_user_account": self = .delete_user_account
         default: self = .unknown(rawValue)
         }
     }
@@ -627,6 +631,11 @@ enum APIBriefingBlockType: String, Codable, CaseIterable {
     case passage = "passage"
     case figure = "figure"
     case pullquote = "pullquote"
+}
+
+enum APIBriefingFigureAlignment: String, Codable, CaseIterable {
+    case left = "left"
+    case right = "right"
 }
 
 enum APIBriefingFigurePlacement: String, Codable, CaseIterable {

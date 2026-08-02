@@ -15,8 +15,15 @@ enum ServerConfigurationDefaults {
     static let hostKey = "serverHost"
     static let portKey = "serverPort"
     static let useHTTPSKey = "useHTTPS"
+#if DEBUG
     static let defaultHost = "localhost"
     static let defaultPort = "8000"
+    static let defaultUseHTTPS = false
+#else
+    static let defaultHost = "news.willemsavenue.com"
+    static let defaultPort = "443"
+    static let defaultUseHTTPS = true
+#endif
 
     static func applyDebugDefaultsIfNeeded(to userDefaults: UserDefaults) {
 #if DEBUG
@@ -46,8 +53,12 @@ enum ServerConfigurationDefaults {
     }
 
     static func hasPersistedServerConfiguration(in userDefaults: UserDefaults) -> Bool {
+#if DEBUG
         persistedString(forKey: hostKey, in: userDefaults) != nil
             && persistedString(forKey: portKey, in: userDefaults) != nil
+#else
+        true
+#endif
     }
 
     static func resolvedConfiguration(
@@ -56,13 +67,17 @@ enum ServerConfigurationDefaults {
         launchPort: String? = nil,
         launchUseHTTPS: Bool? = nil
     ) -> (host: String, port: String, useHTTPS: Bool) {
+#if DEBUG
         (
             host: launchHost ?? persistedString(forKey: hostKey, in: userDefaults) ?? defaultHost,
             port: launchPort ?? persistedString(forKey: portKey, in: userDefaults) ?? defaultPort,
             useHTTPS: launchUseHTTPS
                 ?? (userDefaults.object(forKey: useHTTPSKey) as? Bool)
-                ?? false
+                ?? defaultUseHTTPS
         )
+#else
+        (host: defaultHost, port: defaultPort, useHTTPS: defaultUseHTTPS)
+#endif
     }
 
     static func baseURL(in userDefaults: UserDefaults) -> URL? {
@@ -74,7 +89,10 @@ enum ServerConfigurationDefaults {
         }
 #endif
         let scheme = configuration.useHTTPS ? "https" : "http"
-        return URL(string: "\(scheme)://\(host):\(configuration.port)")
+        let isDefaultPort = (scheme == "https" && configuration.port == "443")
+            || (scheme == "http" && configuration.port == "80")
+        let portSuffix = isDefaultPort ? "" : ":\(configuration.port)"
+        return URL(string: "\(scheme)://\(host)\(portSuffix)")
     }
 
     private static func persistedString(forKey key: String, in userDefaults: UserDefaults) -> String? {

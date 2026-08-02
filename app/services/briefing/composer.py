@@ -12,7 +12,7 @@ from pydantic_ai.agent import AgentRunResult
 
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
-from app.models.contracts import BriefingFigurePlacement
+from app.models.contracts import BriefingFigureAlignment, BriefingFigurePlacement
 from app.services.briefing.layout_models import (
     ComposerBlock,
     ComposerLayout,
@@ -443,6 +443,7 @@ def deterministic_layout(
                 caption=first_image.title,
                 # Inset figures float inside the adjacent passage on the client.
                 placement=BriefingFigurePlacement.INSET,
+                alignment=BriefingFigureAlignment.RIGHT,
             )
         )
     pullquote_source = next((source for source in sources if source.key_points), None)

@@ -8,6 +8,7 @@
 import SwiftUI
 import UIKit
 
+#if DEBUG
 struct DebugMenuView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(AuthenticationViewModel.self) private var authViewModel
@@ -474,6 +475,7 @@ struct DebugMenuView: View {
         showingAlert = true
     }
 }
+#endif
 
 struct TokenInputView: View {
     @Environment(\.dismiss) var dismiss

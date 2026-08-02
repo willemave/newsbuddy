@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsSectionStack: View {
     let authState: AuthState
     let isApprovingCLILink: Bool
+    let isDeletingAccount: Bool
     let isFeedbackVisible: Bool
     let xConnection: XConnectionResponse?
     let settings: AppSettings
@@ -18,6 +19,7 @@ struct SettingsSectionStack: View {
     let isProcessingMarkAll: Bool
     let onLinkCLI: () -> Void
     let onSignOut: () -> Void
+    let onDeleteAccount: () -> Void
     let onGiveFeedback: () -> Void
     let onAddExpert: () -> Void
     let onRemoveExpert: (Int) -> Void
@@ -33,8 +35,10 @@ struct SettingsSectionStack: View {
             SettingsAccountSection(
                 authState: authState,
                 isApprovingCLILink: isApprovingCLILink,
+                isDeletingAccount: isDeletingAccount,
                 onLinkCLI: onLinkCLI,
-                onSignOut: onSignOut
+                onSignOut: onSignOut,
+                onDeleteAccount: onDeleteAccount
             )
             SettingsFeedbackSection(
                 isVisible: isFeedbackVisible,
@@ -56,6 +60,7 @@ struct SettingsSectionStack: View {
                 isProcessing: isProcessingMarkAll,
                 onMarkAll: onMarkAll
             )
+            SettingsLegalSection()
 
             #if DEBUG && targetEnvironment(simulator)
             SettingsDebugSection(onOpenDebugMenu: onOpenDebugMenu)

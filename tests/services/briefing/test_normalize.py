@@ -129,6 +129,18 @@ def test_normalize_layout_defaults_invalid_figure_placement_to_inset() -> None:
     assert layout.blocks[0]["placement"] == BriefingFigurePlacement.INSET.value
 
 
+def test_normalize_layout_alternates_missing_figure_alignment() -> None:
+    layout = normalize_layout(
+        [
+            {"type": "figure", "source_key": "content:1", "caption": "One"},
+            {"type": "figure", "source_key": "content:1", "caption": "Two"},
+        ],
+        source_keys={"content:1"},
+    )
+
+    assert [block["alignment"] for block in layout.blocks] == ["right", "left"]
+
+
 def test_strip_insight_markers_and_source_key_extraction_are_stable() -> None:
     markdown = (
         "[One](newsly://briefing/news/3) starts. "

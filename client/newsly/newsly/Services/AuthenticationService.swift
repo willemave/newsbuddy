@@ -28,18 +28,21 @@ protocol AuthenticationServicing: AnyObject {
     func logout()
     func getCurrentUser() async throws -> User
 
+    #if DEBUG
     @MainActor
     func createDebugSession(
         userId: Int?,
         hasCompletedOnboarding: Bool?,
         hasCompletedNewUserTutorial: Bool?
     ) async throws -> AuthSession
+    #endif
 }
 
 /// Authentication service handling Apple Sign In and token management
 final class AuthenticationService: NSObject {
     static let shared = AuthenticationService()
 
+    #if DEBUG
     private struct DebugSessionRequest: Encodable {
         let userId: Int?
         let hasCompletedOnboarding: Bool?
@@ -51,6 +54,7 @@ final class AuthenticationService: NSObject {
             case hasCompletedNewUserTutorial = "has_completed_new_user_tutorial"
         }
     }
+    #endif
 
     private override init() {
         super.init()
@@ -100,6 +104,40 @@ final class AuthenticationService: NSObject {
         KeychainManager.shared.clearAll()
         SharedContainer.userDefaults.removeObject(forKey: "accessToken")
         NotificationCenter.default.post(name: .authDidLogOut, object: nil)
+    }
+
+    /// Reauthenticate with Apple, request server-side revocation, and clear local data.
+    @MainActor
+    func deleteAccount() async throws {
+        let provider = ASAuthorizationAppleIDProvider()
+        let request = provider.createRequest()
+        let controller = ASAuthorizationController(authorizationRequests: [request])
+        let credentials = try await withCheckedThrowingContinuation { continuation in
+            let delegate = AppleAccountDeletionDelegate(continuation: continuation)
+            controller.delegate = delegate
+            controller.presentationContextProvider = delegate
+            objc_setAssociatedObject(controller, "deletionDelegate", delegate, .OBJC_ASSOCIATION_RETAIN)
+            controller.performRequests()
+        }
+
+        guard let token = KeychainManager.shared.getToken(key: .accessToken) else {
+            throw AuthError.notAuthenticated
+        }
+        let url = URL(string: "\(AppSettings.shared.baseURL)\(APIEndpoints.authMe)")!
+        var backendRequest = URLRequest(url: url)
+        backendRequest.httpMethod = "DELETE"
+        backendRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        backendRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        backendRequest.httpBody = try JSONEncoder().encode(credentials)
+        let (data, response) = try await URLSession.newslyDefault.data(for: backendRequest)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AuthError.appleSignInFailed
+        }
+        guard httpResponse.statusCode == 202 else {
+            let message = String(data: data, encoding: .utf8)
+            throw AuthError.serverError(statusCode: httpResponse.statusCode, message: message)
+        }
+        logout()
     }
 
     /// Get current user from backend
@@ -183,6 +221,7 @@ final class AuthenticationService: NSObject {
         }
     }
 
+    #if DEBUG
     /// Create or resume a debug session (debug servers only).
     @MainActor
     func createDebugSession(
@@ -223,6 +262,7 @@ final class AuthenticationService: NSObject {
             throw AuthError.networkError(urlError)
         }
     }
+    #endif
 
     // MARK: - Private Helpers
 
@@ -265,6 +305,65 @@ final class AuthenticationService: NSObject {
         }.joined()
 
         return hashString
+    }
+}
+
+private struct AppleAccountDeletionCredentials: Encodable {
+    let idToken: String
+    let authorizationCode: String
+
+    enum CodingKeys: String, CodingKey {
+        case idToken = "id_token"
+        case authorizationCode = "authorization_code"
+    }
+}
+
+@MainActor
+private final class AppleAccountDeletionDelegate: NSObject, ASAuthorizationControllerDelegate,
+    ASAuthorizationControllerPresentationContextProviding
+{
+    let continuation: CheckedContinuation<AppleAccountDeletionCredentials, Error>
+
+    init(continuation: CheckedContinuation<AppleAccountDeletionCredentials, Error>) {
+        self.continuation = continuation
+    }
+
+    func authorizationController(
+        controller: ASAuthorizationController,
+        didCompleteWithAuthorization authorization: ASAuthorization
+    ) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let tokenData = credential.identityToken,
+              let codeData = credential.authorizationCode,
+              let idToken = String(data: tokenData, encoding: .utf8),
+              let authorizationCode = String(data: codeData, encoding: .utf8) else {
+            continuation.resume(throwing: AuthError.appleSignInFailed)
+            return
+        }
+        continuation.resume(
+            returning: AppleAccountDeletionCredentials(
+                idToken: idToken,
+                authorizationCode: authorizationCode
+            )
+        )
+    }
+
+    func authorizationController(
+        controller: ASAuthorizationController,
+        didCompleteWithError error: Error
+    ) {
+        continuation.resume(throwing: error)
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            if let window = windowScene.windows.first(where: { $0.isKeyWindow })
+                ?? windowScene.windows.first {
+                return window
+            }
+        }
+        return ASPresentationAnchor()
     }
 }
 

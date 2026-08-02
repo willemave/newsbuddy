@@ -8,8 +8,10 @@ import SwiftUI
 struct SettingsAccountSection: View {
     let authState: AuthState
     let isApprovingCLILink: Bool
+    let isDeletingAccount: Bool
     let onLinkCLI: () -> Void
     let onSignOut: () -> Void
+    let onDeleteAccount: () -> Void
 
     var body: some View {
         // Signed out there is nothing to show, so the header goes with it rather
@@ -50,6 +52,21 @@ struct SettingsAccountSection: View {
                         }
                     }
                     .buttonStyle(.plain)
+
+                    RowDivider(leadingInset: Spacing.rowHorizontal)
+
+                    Button(action: onDeleteAccount) {
+                        SettingsRow(
+                            icon: "person.crop.circle.badge.minus",
+                            iconColor: .statusDestructive,
+                            title: "Delete Account",
+                            subtitle: "Permanently remove your account and data"
+                        ) {
+                            if isDeletingAccount { ProgressView() } else { EmptyView() }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDeletingAccount)
                 }
                 .settingsCard()
             }

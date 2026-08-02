@@ -10,6 +10,7 @@ struct TwitterSettingsView: View {
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var isUpdatingXConnection = false
+    @State private var showingConnectDisclosure = false
     @State private var showingDisconnectConfirmation = false
     @State private var xConnection: XConnectionResponse?
 
@@ -46,6 +47,14 @@ struct TwitterSettingsView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("New bookmarks stop syncing. Posts already in your feed stay there.")
+        }
+        .alert("Connect X bookmark sync?", isPresented: $showingConnectDisclosure) {
+            Button("Cancel", role: .cancel) { }
+            Button("Continue to X") {
+                Task { await connectX() }
+            }
+        } message: {
+            Text("Newsbuddy will securely store your X authorization and import your bookmarks in the background about every 15 minutes. You can disconnect and revoke access here at any time.")
         }
         .task {
             await loadAccountState()
@@ -159,7 +168,7 @@ struct TwitterSettingsView: View {
                     .disabled(isUpdatingXConnection)
                 } else {
                     Button {
-                        Task { await connectX() }
+                        showingConnectDisclosure = true
                     } label: {
                         SettingsRow(
                             icon: "link.badge.plus",

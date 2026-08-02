@@ -62,7 +62,10 @@ final class AppSettings {
 #endif
         }
         let scheme = useHTTPS ? "https" : "http"
-        return "\(scheme)://\(normalizedHost):\(serverPort)"
+        let isDefaultPort = (scheme == "https" && serverPort == "443")
+            || (scheme == "http" && serverPort == "80")
+        let portSuffix = isDefaultPort ? "" : ":\(serverPort)"
+        return "\(scheme)://\(normalizedHost)\(portSuffix)"
     }
 
     func setAppTextSize(_ index: Int) {

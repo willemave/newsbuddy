@@ -33,8 +33,10 @@ final class AuthenticationViewModel {
     private let tokenStore: any AuthTokenStore
     @ObservationIgnored
     private var lastKnownUser: User?
+    #if DEBUG
     @ObservationIgnored
     private var hasAttemptedE2EAutoLogin = false
+    #endif
     @ObservationIgnored
     private var authenticationRequiredObserver: NSObjectProtocol?
 
@@ -86,11 +88,13 @@ final class AuthenticationViewModel {
 
         // No tokens at all -> user must sign in
         guard hasRefreshToken || hasAccessToken else {
+            #if DEBUG
             if E2ETestLaunch.shouldAutoLogin && !hasAttemptedE2EAutoLogin {
                 hasAttemptedE2EAutoLogin = true
                 performE2EAutoLogin()
                 return
             }
+            #endif
             authState = .unauthenticated
             return
         }
@@ -140,6 +144,7 @@ final class AuthenticationViewModel {
         authState = .authenticated(user)
     }
 
+    #if DEBUG
     func startDebugSession(userID: Int) {
         authService.logout()
         lastKnownUser = nil
@@ -161,6 +166,7 @@ final class AuthenticationViewModel {
             }
         }
     }
+    #endif
 
     // MARK: - Private
 
@@ -234,6 +240,7 @@ final class AuthenticationViewModel {
         }
     }
 
+    #if DEBUG
     private func performE2EAutoLogin() {
         Task {
             do {
@@ -251,6 +258,7 @@ final class AuthenticationViewModel {
             }
         }
     }
+    #endif
 
     private func presentAuthError(_ error: Error) {
         if let authorizationError = error as? ASAuthorizationError,

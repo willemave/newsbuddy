@@ -5,9 +5,12 @@
 
 import SwiftUI
 import UIKit
+import AuthenticationServices
 
 private enum SettingsSheetDestination: String, Identifiable {
+    #if DEBUG && targetEnvironment(simulator)
     case debugMenu
+    #endif
     case cliLinkScanner
     case feedback
 
@@ -26,6 +29,8 @@ struct SettingsView: View {
     @State private var isProcessingMarkAll = false
     @State private var activeSheet: SettingsSheetDestination?
     @State private var isApprovingCLILink = false
+    @State private var isDeletingAccount = false
+    @State private var showingDeleteAccountConfirmation = false
     @State private var councilPersonasDraft: [CouncilPersona] = []
     @State private var serverCouncilPersonas: [CouncilPersona] = []
     @State private var newExpertName = ""
@@ -43,6 +48,7 @@ struct SettingsView: View {
                 SettingsSectionStack(
                     authState: authViewModel.authState,
                     isApprovingCLILink: isApprovingCLILink,
+                    isDeletingAccount: isDeletingAccount,
                     isFeedbackVisible: authViewModel.authState.authenticatedUser != nil,
                     xConnection: xConnection,
                     settings: settings,
@@ -53,12 +59,13 @@ struct SettingsView: View {
                     isProcessingMarkAll: isProcessingMarkAll,
                     onLinkCLI: { activeSheet = .cliLinkScanner },
                     onSignOut: authViewModel.logout,
+                    onDeleteAccount: { showingDeleteAccountConfirmation = true },
                     onGiveFeedback: { activeSheet = .feedback },
                     onAddExpert: addExpert,
                     onRemoveExpert: removeExpert,
                     onSaveCouncilPersonas: saveCouncilPersonasIncludingPending,
                     onMarkAll: { showMarkAllDialog = true },
-                    onOpenDebugMenu: { activeSheet = .debugMenu }
+                    onOpenDebugMenu: openDebugMenu
                 )
             }
             .onAppear {
@@ -93,11 +100,25 @@ struct SettingsView: View {
         } message: {
             Text("Choose which unread content should be marked as read.")
         }
+        .confirmationDialog(
+            "Permanently delete your account?",
+            isPresented: $showingDeleteAccountConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account", role: .destructive) {
+                Task { await deleteAccount() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("You will confirm with Apple. Newsbuddy will revoke connected services and permanently remove your account, content, conversations, and generated files.")
+        }
         .sheet(item: $activeSheet) { destination in
             switch destination {
+            #if DEBUG && targetEnvironment(simulator)
             case .debugMenu:
                 DebugMenuView()
                     .environment(authViewModel)
+            #endif
             case .cliLinkScanner:
                 CLILinkScannerSheet { scannedCode in
                     Task {
@@ -120,6 +141,14 @@ struct SettingsView: View {
         }
     }
 
+    private var openDebugMenu: () -> Void {
+        #if DEBUG && targetEnvironment(simulator)
+        return { activeSheet = .debugMenu }
+        #else
+        return { }
+        #endif
+    }
+
     private func addExpert() {
         let name = newExpertName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, councilPersonasDraft.count < CouncilPersona.maxExperts else { return }
@@ -132,6 +161,23 @@ struct SettingsView: View {
         councilPersonasDraft.append(persona)
         newExpertName = ""
         hasUnsavedCouncilPersonaEdits = councilPersonasDraft != serverCouncilPersonas
+    }
+
+    @MainActor
+    private func deleteAccount() async {
+        guard !isDeletingAccount else { return }
+        isDeletingAccount = true
+        defer { isDeletingAccount = false }
+        do {
+            try await AuthenticationService.shared.deleteAccount()
+            authViewModel.logout()
+        } catch let authorizationError as ASAuthorizationError
+            where authorizationError.code == .canceled {
+            return
+        } catch {
+            alertMessage = "Account deletion failed: \(error.localizedDescription)"
+            showingAlert = true
+        }
     }
 
     private func removeExpert(at index: Int) {

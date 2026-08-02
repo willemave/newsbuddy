@@ -8,6 +8,7 @@
 import Foundation
 
 enum E2ETestLaunch {
+#if DEBUG
     private static let arguments = ProcessInfo.processInfo.arguments
     private static let defaults = UserDefaults.standard
     private static let argumentValues = parsedArgumentValues()
@@ -207,7 +208,23 @@ enum E2ETestLaunch {
         guard isEnabled else { return nil }
         return date(for: visualNowKey)
     }
-
+#else
+    static let isEnabled = false
+    static let shouldAutoLogin = false
+    static let serverHost: String? = nil
+    static let serverPort: String? = nil
+    static let useHTTPS: Bool? = nil
+    static let userID: Int? = nil
+    static let completeOnboarding = false
+    static let completeTutorial = false
+    static let onboardingFixture: String? = nil
+    static let openChatSessionId: Int? = nil
+    static let openContentId: Int? = nil
+    static let openContentType: String? = nil
+    static let fakeSpeechEnabled = false
+    static let fakeSpeechTranscript: String? = nil
+    static let visualNow: Date? = nil
+#endif
 }
 
 enum SharedContainer {

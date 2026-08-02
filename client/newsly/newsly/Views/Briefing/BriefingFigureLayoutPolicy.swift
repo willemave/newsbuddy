@@ -21,6 +21,13 @@ enum BriefingFigureLayoutPolicy {
         placement ?? .inset
     }
 
+    static func alignment(
+        _ alignment: APIBriefingFigureAlignment?,
+        fallbackIndex: Int
+    ) -> APIBriefingFigureAlignment {
+        alignment ?? (fallbackIndex.isMultiple(of: 2) ? .right : .left)
+    }
+
     static func usesInlineLayout(
         placement: APIBriefingFigurePlacement?,
         hasImage: Bool,

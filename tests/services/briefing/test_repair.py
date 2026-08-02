@@ -26,8 +26,10 @@ def test_backfill_adds_inset_figure_after_citing_passage() -> None:
     first_figure = result.blocks[1]
     assert first_figure["source_key"] == "content:1"
     assert first_figure["placement"] == "inset"
+    assert first_figure["alignment"] == "right"
     assert first_figure["image_url"] == "/static/images/content/1.png"
     assert first_figure["caption"] == "Article 1"
+    assert result.blocks[3]["alignment"] == "left"
     assert "figure_backfill:2" in result.warnings
 
 
@@ -229,6 +231,49 @@ def test_invalid_placement_is_canonicalized_to_inset() -> None:
 
     figures = [block for block in result.blocks if block["type"] == "figure"]
     assert [figure["placement"] for figure in figures] == ["inset"]
+
+
+def test_figure_alignment_alternates_even_when_model_repeats_a_side() -> None:
+    sources = [_source(1), _source(2), _source(3)]
+    blocks = [
+        _passage("[First](newsly://briefing/content/1) covers agents."),
+        {"type": "figure", "source_key": "content:1", "placement": "inset"},
+        _passage("[Second](newsly://briefing/content/2) covers infrastructure."),
+        {"type": "figure", "source_key": "content:2", "placement": "inset"},
+        _passage("[Third](newsly://briefing/content/3) covers models."),
+        {
+            "type": "figure",
+            "source_key": "content:3",
+            "placement": "inset",
+            "alignment": "left",
+        },
+    ]
+
+    result = repair_layout(blocks, sources=sources, figure_budget=12)
+
+    figures = [block for block in result.blocks if block["type"] == "figure"]
+    assert [figure["alignment"] for figure in figures] == ["right", "left", "right"]
+    assert "consecutive_inset_alignment_alternated" in result.warnings
+
+
+def test_first_explicit_figure_alignment_controls_alternating_sequence() -> None:
+    sources = [_source(1), _source(2)]
+    blocks = [
+        _passage("[First](newsly://briefing/content/1) covers agents."),
+        {
+            "type": "figure",
+            "source_key": "content:1",
+            "placement": "inset",
+            "alignment": "left",
+        },
+        _passage("[Second](newsly://briefing/content/2) covers infrastructure."),
+        {"type": "figure", "source_key": "content:2", "placement": "inset"},
+    ]
+
+    result = repair_layout(blocks, sources=sources, figure_budget=12)
+
+    figures = [block for block in result.blocks if block["type"] == "figure"]
+    assert [figure["alignment"] for figure in figures] == ["left", "right"]
 
 
 def test_em_dashes_replaced_across_block_types() -> None:

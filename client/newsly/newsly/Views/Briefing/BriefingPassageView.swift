@@ -8,6 +8,7 @@ struct BriefingPassageView: UIViewRepresentable {
 
     let content: BriefingAttributedTextBuilder.Result
     var floatingExclusionSize: CGSize? = nil
+    var floatingExclusionAlignment: APIBriefingFigureAlignment = .right
     let onOpenSource: (String) -> Void
     var onOpenDiscussion: (String) -> Void = { _ in }
     let onDig: (String, String) -> Void
@@ -41,6 +42,7 @@ struct BriefingPassageView: UIViewRepresentable {
         context.coordinator.onOpenSource = onOpenSource
         context.coordinator.onOpenDiscussion = onOpenDiscussion
         uiView.floatingExclusionSize = floatingExclusionSize
+        uiView.floatingExclusionAlignment = floatingExclusionAlignment
         if let scaledText = context.coordinator.scaledTextIfNeeded(
             content.attributedText,
             compatibleWith: uiView.traitCollection
@@ -65,6 +67,7 @@ struct BriefingPassageView: UIViewRepresentable {
             contentRevision: context.coordinator.contentRevision,
             width: width,
             floatingExclusionSize: floatingExclusionSize,
+            floatingExclusionAlignment: floatingExclusionAlignment,
             dynamicTypeSize: dynamicTypeSize,
             colorScheme: colorScheme,
             accessibilityContrast: accessibilityContrast
@@ -115,6 +118,7 @@ struct BriefingPassageView: UIViewRepresentable {
             let contentRevision: Int
             let width: CGFloat
             let floatingExclusionSize: CGSize?
+            let floatingExclusionAlignment: APIBriefingFigureAlignment
             let dynamicTypeSize: DynamicTypeSize
             let colorScheme: ColorScheme
             let accessibilityContrast: ColorSchemeContrast

@@ -20,7 +20,7 @@ struct BriefingEmptyStateView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     Text(
-                        "Newsly is checking your sources and grouping related stories. "
+                        "Newsbuddy is checking your sources and grouping related stories. "
                             + "The first readable category will appear here when there is enough to brief you on."
                     )
                         .font(.appBody)

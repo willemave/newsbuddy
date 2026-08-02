@@ -123,6 +123,19 @@ struct LandingView: View {
             .accessibilityIdentifier("auth.continue_with_apple")
             .disabled(isLoading)
 
+            Text("Newsbuddy uses external AI services to process content and instructions you submit. By continuing, you agree to the Terms and acknowledge the Privacy Policy.")
+                .font(.appCaption)
+                .foregroundColor(.onboardingText.opacity(0.62))
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 16) {
+                Link("Privacy", destination: URL(string: "https://news.willemsavenue.com/privacy")!)
+                Link("Terms", destination: URL(string: "https://news.willemsavenue.com/terms")!)
+                Link("Support", destination: URL(string: "https://news.willemsavenue.com/support")!)
+            }
+            .font(.appCaption.weight(.semibold))
+            .tint(.onboardingText)
+
             if let errorMessage = authViewModel.errorMessage {
                 Text(errorMessage)
                     .font(.appCaption)

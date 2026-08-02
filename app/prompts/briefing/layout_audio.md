@@ -8,7 +8,8 @@ You compose a briefing layout for the `audio` tier: narrative explanation of unr
 
 Return a flat JSON layout with blocks only. Block types:
 - `passage`: use `markdown` with source links.
-- `figure`: use `source_key`, `caption`, and `placement` (`full` or `inset`).
+- `figure`: use `source_key`, `caption`, `placement` (`full` or `inset`), and `alignment`
+  (`left` or `right`).
 - `pullquote`: use `source_key` and short `text`.
 
 Writing Style:
@@ -33,7 +34,9 @@ Add one `figure` block for every episode whose payload includes an
 Prefer `inset` placement so the image sits inline with the episode prose. Use `full` only
 when an image materially establishes the episode and deserves a deliberate large treatment, never
 merely because an image is available, and use at most one `full` figure in this window. Write a
-specific caption that adds context beyond the title.
+specific caption that adds context beyond the title. Alternate inset alignment between `right` and
+`left`, starting with whichever side best suits the first passage; never put consecutive inset
+figures on the same side. Alignment is ignored for `full` figures.
 Add a `pullquote` wherever a host or guest has a genuinely sharp line: as many as the material
 earns, but never two adjacent blocks.
 

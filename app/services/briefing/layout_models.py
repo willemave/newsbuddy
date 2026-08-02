@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.contracts import BriefingFigurePlacement
+from app.models.contracts import BriefingFigureAlignment, BriefingFigurePlacement
 
 
 class PassageBlock(BaseModel):
@@ -24,6 +24,7 @@ class FigureBlock(BaseModel):
     source_key: str = Field(min_length=1)
     caption: str = Field(min_length=1)
     placement: BriefingFigurePlacement
+    alignment: BriefingFigureAlignment | None = None
 
 
 class PullquoteBlock(BaseModel):

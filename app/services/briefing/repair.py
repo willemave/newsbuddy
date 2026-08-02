@@ -4,8 +4,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from app.models.contracts import BriefingFigurePlacement
-from app.services.briefing.figure_placement import canonical_figure_placement
+from app.models.contracts import BriefingFigureAlignment, BriefingFigurePlacement
+from app.services.briefing.figure_placement import (
+    alternating_figure_alignment,
+    canonical_figure_alignment,
+    canonical_figure_placement,
+)
 from app.services.briefing.layout_policy import (
     BriefingBlockRepair,
     BriefingBlockRepairAction,
@@ -92,6 +96,10 @@ def repair_layout(
             elif placement == BriefingFigurePlacement.FULL:
                 has_full_figure = True
             block["placement"] = placement.value
+            block["alignment"] = canonical_figure_alignment(
+                block.get("alignment"),
+                fallback=alternating_figure_alignment(figures_used),
+            ).value
             block["image_url"] = block.get("image_url") or source.image_url
             block["thumbnail_url"] = block.get("thumbnail_url") or source.thumbnail_url
             strip_caption = next(
@@ -153,11 +161,38 @@ def repair_layout(
             repaired,
             sources=sources,
             budget_remaining=figure_budget - figures_used,
+            figure_index=figures_used,
         )
         if backfilled:
             warnings.append(f"figure_backfill:{backfilled}")
 
+    _enforce_alternating_inset_alignments(repaired, warnings=warnings)
+
     return RepairResult(blocks=repaired, warnings=warnings)
+
+
+def _enforce_alternating_inset_alignments(
+    blocks: list[dict[str, Any]],
+    *,
+    warnings: list[str],
+) -> None:
+    """Honor the first inset hint, then prevent consecutive figures using the same edge."""
+
+    previous: BriefingFigureAlignment | None = None
+    for block in blocks:
+        if block.get("type") != "figure" or block.get("placement") != "inset":
+            continue
+        fallback = (
+            BriefingFigureAlignment.RIGHT
+            if previous is None or previous == BriefingFigureAlignment.LEFT
+            else BriefingFigureAlignment.LEFT
+        )
+        alignment = canonical_figure_alignment(block.get("alignment"), fallback=fallback)
+        if alignment == previous:
+            alignment = fallback
+            warnings.append("consecutive_inset_alignment_alternated")
+        block["alignment"] = alignment.value
+        previous = alignment
 
 
 def _backfill_source_figures(
@@ -165,6 +200,7 @@ def _backfill_source_figures(
     *,
     sources: list[BriefingSource],
     budget_remaining: int,
+    figure_index: int,
 ) -> int:
     """Insert an inset figure after the citing passage for imaged sources the LLM skipped."""
 
@@ -185,6 +221,7 @@ def _backfill_source_figures(
                 "source_key": source.source_key,
                 "caption": source.title,
                 "placement": "inset",
+                "alignment": alternating_figure_alignment(figure_index + added).value,
                 "image_url": source.image_url,
                 "thumbnail_url": source.thumbnail_url,
             },

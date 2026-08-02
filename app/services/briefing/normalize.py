@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.models.contracts import BriefingBlockType, BriefingRunKind
-from app.services.briefing.figure_placement import canonical_figure_placement
+from app.services.briefing.figure_placement import (
+    alternating_figure_alignment,
+    canonical_figure_alignment,
+    canonical_figure_placement,
+)
 from app.services.briefing.source_keys import build_source_key
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(((?:newsly|news)://briefing/(content|news)/(\d+))\)")
@@ -40,6 +44,7 @@ def normalize_layout(
     narration_parts: list[str] = []
     raw_parts: list[str] = []
     warnings: list[str] = []
+    figure_index = 0
 
     for raw_block in blocks:
         block_type = str(raw_block.get("type") or "").strip().lower()
@@ -63,6 +68,7 @@ def normalize_layout(
                     "thumbnail_url": None,
                     "caption": None,
                     "placement": None,
+                    "alignment": None,
                     "text": None,
                 }
             )
@@ -85,9 +91,14 @@ def normalize_layout(
                     "thumbnail_url": _clean_str(raw_block.get("thumbnail_url")),
                     "caption": _clean_str(raw_block.get("caption")),
                     "placement": _normalized_placement(raw_block.get("placement")),
+                    "alignment": canonical_figure_alignment(
+                        raw_block.get("alignment"),
+                        fallback=alternating_figure_alignment(figure_index),
+                    ).value,
                     "text": None,
                 }
             )
+            figure_index += 1
         elif block_type == BriefingBlockType.PULLQUOTE.value:
             text = _clean_str(raw_block.get("text"))
             source_key = _valid_source_key(raw_block.get("source_key"), source_keys)
@@ -104,6 +115,7 @@ def normalize_layout(
                     "thumbnail_url": None,
                     "caption": None,
                     "placement": None,
+                    "alignment": None,
                     "text": text[:360],
                 }
             )

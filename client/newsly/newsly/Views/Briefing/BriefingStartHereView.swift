@@ -16,7 +16,7 @@ struct BriefingStartHereView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 14)
 
-                Text("Newsly reads across the sources you chose, connects different coverage of the same story, and writes the useful context into one briefing. Categories appear as patterns emerge, then keep updating as new reporting comes in.")
+                Text("Newsbuddy reads across the sources you chose, connects different coverage of the same story, and writes the useful context into one briefing. Categories appear as patterns emerge, then keep updating as new reporting comes in.")
                     .font(.appBody)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .lineSpacing(5)
@@ -305,8 +305,8 @@ private struct BriefingStartHereGuide: View {
             detail: "Keep the stories and ideas you want to remember; they live in the Knowledge tab."
         ),
         BriefingStartHereFeature(
-            title: "Search Newsly.",
-            detail: "Find a story or detail across everything Newsly has read for you."
+            title: "Search Newsbuddy.",
+            detail: "Find a story or detail across everything Newsbuddy has read for you."
         ),
         BriefingStartHereFeature(
             title: "Ask and learn.",
@@ -314,7 +314,7 @@ private struct BriefingStartHereGuide: View {
         ),
         BriefingStartHereFeature(
             title: "Send links from anywhere.",
-            detail: "Share an article to Newsly from any app and it joins your library."
+            detail: "Share an article to Newsbuddy from any app and it joins your library."
         ),
     ]
 
@@ -325,7 +325,7 @@ private struct BriefingStartHereGuide: View {
                 features: Self.expectations
             )
             BriefingStartHereFeatureGroup(
-                heading: "And once you’re reading, Newsly can also:",
+                heading: "And once you’re reading, Newsbuddy can also:",
                 features: Self.features
             )
         }

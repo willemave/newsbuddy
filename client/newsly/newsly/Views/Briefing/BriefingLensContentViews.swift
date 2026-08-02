@@ -6,12 +6,13 @@ enum BriefingDisplayBlock: Identifiable {
         Int,
         figure: APIBriefingBlock,
         passage: APIBriefingBlock,
-        passageIndex: Int
+        passageIndex: Int,
+        alignment: APIBriefingFigureAlignment
     )
 
     var id: Int {
         switch self {
-        case .single(let index, _), .floatingFigure(let index, _, _, _):
+        case .single(let index, _), .floatingFigure(let index, _, _, _, _):
             return index
         }
     }
@@ -70,6 +71,7 @@ final class BriefingSegmentRenderModel: Identifiable {
     ) -> [BriefingDisplayBlock] {
         var items: [BriefingDisplayBlock] = []
         var index = 0
+        var inlineFigureIndex = 0
         while index < blocks.count {
             let block = blocks[index]
             if index + 1 < blocks.count,
@@ -78,8 +80,13 @@ final class BriefingSegmentRenderModel: Identifiable {
                     index,
                     figure: block,
                     passage: blocks[index + 1],
-                    passageIndex: index + 1
+                    passageIndex: index + 1,
+                    alignment: BriefingFigureLayoutPolicy.alignment(
+                        block.alignment,
+                        fallbackIndex: inlineFigureIndex
+                    )
                 ))
+                inlineFigureIndex += 1
                 index += 2
                 continue
             }
@@ -90,8 +97,13 @@ final class BriefingSegmentRenderModel: Identifiable {
                     index,
                     figure: blocks[index + 1],
                     passage: block,
-                    passageIndex: index
+                    passageIndex: index,
+                    alignment: BriefingFigureLayoutPolicy.alignment(
+                        blocks[index + 1].alignment,
+                        fallbackIndex: inlineFigureIndex
+                    )
                 ))
+                inlineFigureIndex += 1
                 index += 2
                 continue
             }
@@ -537,11 +549,14 @@ private struct BriefingSegmentView: View {
                 switch item {
                 case .single(let index, let block):
                     blockView(block, blockIndex: index)
-                case .floatingFigure(_, let figure, let passage, let passageIndex):
+                case .floatingFigure(
+                    _, let figure, let passage, let passageIndex, let alignment
+                ):
                     BriefingFloatingFigurePassage(
                         figure: figure,
                         passageContent: model.passageContentByBlockIndex[passageIndex],
                         source: source(for: figure),
+                        alignment: alignment,
                         figureOpacity: readOpacity(for: figure.briefingDirectSourceKeys),
                         passageOpacity: readOpacity(for: passage.briefingFallbackReadSourceKeys),
                         onOpenSource: onOpenSource,
@@ -665,6 +680,7 @@ private struct BriefingFloatingFigurePassage: View {
     let figure: APIBriefingBlock
     let passageContent: BriefingAttributedTextBuilder.Result?
     let source: APIBriefingSource?
+    let alignment: APIBriefingFigureAlignment
     let figureOpacity: Double
     let passageOpacity: Double
     let onOpenSource: (String) -> Void
@@ -673,11 +689,12 @@ private struct BriefingFloatingFigurePassage: View {
 
     var body: some View {
         let metrics = BriefingFigureLayoutPolicy.metrics(for: horizontalSizeClass)
-        ZStack(alignment: .topTrailing) {
+        ZStack(alignment: alignment == .left ? .topLeading : .topTrailing) {
             if let passageContent {
                 BriefingPassageView(
                     content: passageContent,
                     floatingExclusionSize: metrics.exclusionSize,
+                    floatingExclusionAlignment: alignment,
                     onOpenSource: onOpenSource,
                     onOpenDiscussion: onOpenDiscussion,
                     onDig: onDig

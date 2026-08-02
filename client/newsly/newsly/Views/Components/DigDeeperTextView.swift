@@ -17,11 +17,18 @@ class DigDeeperTextView: UITextView {
         }
     }
 
-    /// When set, text wraps around a rectangle anchored to the top-right of the
+    /// When set, text wraps around a rectangle anchored to a top edge of the
     /// text container (used for briefing passages with an inline floated figure).
     var floatingExclusionSize: CGSize? {
         didSet {
             guard floatingExclusionSize != oldValue else { return }
+            updateFloatingExclusion(forWidth: bounds.width)
+            setNeedsLayout()
+        }
+    }
+    var floatingExclusionAlignment: APIBriefingFigureAlignment = .right {
+        didSet {
+            guard floatingExclusionAlignment != oldValue else { return }
             updateFloatingExclusion(forWidth: bounds.width)
             setNeedsLayout()
         }
@@ -34,7 +41,8 @@ class DigDeeperTextView: UITextView {
             }
             return
         }
-        let rect = CGRect(x: width - size.width, y: 0, width: size.width, height: size.height)
+        let x = floatingExclusionAlignment == .left ? 0 : width - size.width
+        let rect = CGRect(x: x, y: 0, width: size.width, height: size.height)
         textContainer.exclusionPaths = [UIBezierPath(rect: rect)]
     }
 

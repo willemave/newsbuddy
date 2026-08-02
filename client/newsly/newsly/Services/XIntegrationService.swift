@@ -108,7 +108,7 @@ extension XConnectionResponse {
         if !isActive {
             return "This X connection is inactive, so bookmarked posts cannot sync into your long-form feed."
         }
-        return "Newsly could not complete X bookmark sync. Reconnect your account if this keeps happening."
+        return "Newsbuddy could not complete X bookmark sync. Reconnect your account if this keeps happening."
     }
 
     var issueDetails: String? {

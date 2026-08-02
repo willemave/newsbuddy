@@ -5869,6 +5869,7 @@ struct APIBriefingBlock: Codable {
     let thumbnailUrl: String?
     let caption: String?
     let placement: APIBriefingFigurePlacement?
+    let alignment: APIBriefingFigureAlignment?
     let text: String?
 
     init(
@@ -5880,6 +5881,7 @@ struct APIBriefingBlock: Codable {
         thumbnailUrl: String? = nil,
         caption: String? = nil,
         placement: APIBriefingFigurePlacement? = nil,
+        alignment: APIBriefingFigureAlignment? = nil,
         text: String? = nil
     ) {
         self.type = type
@@ -5890,6 +5892,7 @@ struct APIBriefingBlock: Codable {
         self.thumbnailUrl = thumbnailUrl
         self.caption = caption
         self.placement = placement
+        self.alignment = alignment
         self.text = text
     }
 
@@ -5902,6 +5905,7 @@ struct APIBriefingBlock: Codable {
         case thumbnailUrl = "thumbnail_url"
         case caption = "caption"
         case placement = "placement"
+        case alignment = "alignment"
         case text = "text"
     }
 
@@ -5915,6 +5919,7 @@ struct APIBriefingBlock: Codable {
         thumbnailUrl = try container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
         caption = try container.decodeIfPresent(String.self, forKey: .caption)
         placement = try container.decodeIfPresent(APIBriefingFigurePlacement.self, forKey: .placement)
+        alignment = try container.decodeIfPresent(APIBriefingFigureAlignment.self, forKey: .alignment)
         text = try container.decodeIfPresent(String.self, forKey: .text)
     }
 
@@ -5928,6 +5933,7 @@ struct APIBriefingBlock: Codable {
         try container.encodeIfPresent(thumbnailUrl, forKey: .thumbnailUrl)
         try container.encodeIfPresent(caption, forKey: .caption)
         try container.encodeIfPresent(placement, forKey: .placement)
+        try container.encodeIfPresent(alignment, forKey: .alignment)
         try container.encodeIfPresent(text, forKey: .text)
     }
 }
