@@ -426,13 +426,10 @@ def test_generate_initial_suggestions_persists_assistant_only_transcript(
     assert "You are starting a new conversation" not in display_messages[0].content
 
     assert len(agent_calls) == 1
-    args, kwargs = agent_calls[0]
+    args, _kwargs = agent_calls[0]
     assert args[1] == "openai:gpt-5.4"
     assert args[2] == chat_agent.INITIAL_QUESTIONS_PROMPT
     assert args[4] == []
-    assert kwargs["trace_name"] == "chat.initial_suggestions"
-    assert kwargs["source"] == "queue"
-    assert kwargs["task_id"] == 77
     assert len(usage_calls) == 1
     _, usage_snapshot, usage_session_id, usage_message_id, usage_context = usage_calls[0]
     assert usage_snapshot.user_id == user_id

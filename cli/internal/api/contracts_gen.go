@@ -307,6 +307,22 @@ func (v BriefingBlockType) Known() bool {
 	}
 }
 
+type BriefingFigureAlignment string
+
+const (
+	BriefingFigureAlignmentLeft BriefingFigureAlignment = "left"
+	BriefingFigureAlignmentRight BriefingFigureAlignment = "right"
+)
+
+func (v BriefingFigureAlignment) Known() bool {
+	switch v {
+	case BriefingFigureAlignmentLeft, BriefingFigureAlignmentRight:
+		return true
+	default:
+		return false
+	}
+}
+
 type BriefingFigurePlacement string
 
 const (
@@ -824,6 +840,7 @@ type BriefingBlock struct {
 	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
 	Caption *string `json:"caption,omitempty"`
 	Placement *BriefingFigurePlacement `json:"placement,omitempty"`
+	Alignment *BriefingFigureAlignment `json:"alignment,omitempty"`
 	Text *string `json:"text,omitempty"`
 }
 
