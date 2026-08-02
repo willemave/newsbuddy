@@ -21,9 +21,9 @@ from sqlalchemy.engine import make_url
 
 from app.core.model_defaults import (
     CHEAP_MODEL_SPEC,
-    GOOGLE_FLASH_LITE_PREVIEW_MODEL_NAME,
     IMAGE_GENERATION_MODEL_NAME,
     OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
+    PDF_EXTRACTION_MODEL_NAME,
     SMART_MODEL_SPEC,
 )
 
@@ -408,10 +408,10 @@ class Settings(BaseSettings):
     x_sync_min_interval_minutes: int = Field(default=60, ge=1)
     x_bookmark_sync_min_interval_minutes: int = Field(default=60, ge=1)
 
-    # PDF extraction (Gemini)
-    pdf_gemini_model: str = Field(
-        default=GOOGLE_FLASH_LITE_PREVIEW_MODEL_NAME,
-        description="Gemini model name for PDF extraction",
+    # PDF extraction (OpenAI Responses API)
+    pdf_extraction_model: str = Field(
+        default=PDF_EXTRACTION_MODEL_NAME,
+        description="OpenAI vision model name for native PDF extraction",
     )
 
     # Whisper transcription settings
@@ -587,14 +587,14 @@ class Settings(BaseSettings):
             raise ValueError("APPLE_SIGNIN_AUDIENCES must include at least one audience")
         return self
 
-    @field_validator("pdf_gemini_model")
+    @field_validator("pdf_extraction_model")
     @classmethod
-    def validate_pdf_gemini_model(cls, v: str) -> str:
+    def validate_pdf_extraction_model(cls, v: str) -> str:
         value = v.strip()
         if not value:
-            raise ValueError("PDF_GEMINI_MODEL must be set")
-        if not re.match(r"^gemini-[\w\.-]+$", value):
-            raise ValueError("PDF_GEMINI_MODEL must start with 'gemini-'")
+            raise ValueError("PDF_EXTRACTION_MODEL must be set")
+        if not re.match(r"^gpt-[\w\.-]+$", value):
+            raise ValueError("PDF_EXTRACTION_MODEL must start with 'gpt-'")
         return value
 
     @field_validator(

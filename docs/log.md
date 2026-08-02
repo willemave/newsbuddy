@@ -96,7 +96,6 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** Ruff and mypy passed for the crawler manager and HTML strategy; 37 focused HTML strategy tests; 139 processing-strategy tests; `git diff --check`.
 - **Remaining:** Monitor production deadline and crawler-reset logs; move browser work behind process isolation only if Chromium or Playwright proves non-cooperative after cancellation.
 - **Commits:** Included in this commit.
-
 ### 2026-08-02 — `willem/learning-deck-source-dependency` — Make Learning Deck source waits dependency-aware
 
 - **Status:** Complete
@@ -105,4 +104,24 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Added source task inspection at the existing source-not-ready boundary and covered long delays, terminal/missing dependencies, terminal redelivery, and retry-preserving deferral.
 - **Validation:** Ruff passed on the touched Python/test files; 51 focused Learning Deck, LLM handler, and queue-service tests passed; `git diff --check` passed.
 - **Remaining:** Production remains unchanged. After review and deployment, Deck 12 requires an explicit rerun because its prior LLM task is terminal.
+- **Commits:** Included in this commit.
+
+### 2026-08-02 — `detached HEAD` — Repair PDF Gemini model routing
+
+- **Status:** Complete
+- **Scope:** PDF/arXiv Gemini extraction, model defaults and pricing, provider-error classification, focused tests, and environment guidance.
+- **Decisions:** Replace the shut-down `gemini-3.1-flash-lite-preview` default with stable `gemini-3.1-flash-lite`; explicitly select the Gemini Developer API for API-key PDF extraction so the process-wide Vertex routing environment cannot redirect it through an incompatible region; retain local parsing as the fallback and classify deterministic model/location failures as warnings.
+- **Changes:** Added a shared direct-client/error-classification helper, routed both PDF strategies through it, updated the default and pricing entry, documented the setting, and added unavailable-model/region regressions.
+- **Validation:** Production worker inspection confirmed no `PDF_GEMINI_MODEL` override, `GOOGLE_GENAI_USE_VERTEXAI=true`, and the old preview default; a read-only production-key model lookup confirmed `gemini-3.1-flash-lite` supports `generateContent`; focused Ruff passed and 38 focused settings/strategy/helper/pricing tests passed.
+- **Remaining:** Deploy through the normal release workflow for production to consume the new code default; no production environment edit is required unless operators prefer to pin `PDF_GEMINI_MODEL=gemini-3.1-flash-lite` explicitly.
+- **Commits:** Uncommitted.
+
+### 2026-08-02 — `willem/openai-luna-pdf-extraction` — Replace PDF extraction with native OpenAI Luna
+
+- **Status:** Complete
+- **Scope:** Generic PDF and arXiv extraction, OpenAI provider integration, settings, dependencies, tests, and service documentation.
+- **Decisions:** Supersede the earlier Gemini routing repair after live comparison showed direct `gpt-5.6-luna` preserved page images and matched all 29 extraction checks; use Responses PDF input with Base64 bytes, high visual detail, and explicit `reasoning.effort=none`; remove local PDF parsing rather than retain an unrequested fallback.
+- **Changes:** Added the shared native OpenAI PDF extractor, moved both strategies to `PDF_EXTRACTION_MODEL=gpt-5.6-luna`, removed the Google PDF helper and local `pypdf` extraction path, and removed the now-unused `pypdf` dependency.
+- **Validation:** Focused Ruff and mypy passed; 38 focused settings/strategy/helper/pricing tests and all 140 processing-strategy tests passed; `uv lock --check`, `uv pip check`, and `git diff --check` passed.
+- **Remaining:** Deploy normally for production to consume the new code default. Production needs no setting edit because neither the old nor new PDF model variable is explicitly set; operators may explicitly pin `PDF_EXTRACTION_MODEL=gpt-5.6-luna`.
 - **Commits:** Included in this commit.

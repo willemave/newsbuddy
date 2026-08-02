@@ -1,17 +1,19 @@
-from typing import Any, cast
+from typing import Any
 
 import httpx
-from google import genai
-from google.genai.types import Part
 
 from app.core.logging import get_logger
-from app.core.model_defaults import GOOGLE_FLASH_LITE_PREVIEW_MODEL_NAME
+from app.core.model_defaults import PDF_EXTRACTION_MODEL_NAME
 from app.core.settings import get_settings
 from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
 from app.services.github_urls import normalize_github_file_url_to_raw, parse_github_file_url
 from app.services.http import NonRetryableError
-from app.services.pdf_text_extraction import extract_pdf_text
+from app.services.openai_pdf_extraction import (
+    classify_openai_pdf_error,
+    create_openai_pdf_client,
+    extract_pdf_with_openai,
+)
 from app.services.prompt_library import load_prompt
 
 logger = get_logger(__name__)
@@ -25,14 +27,14 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
 
     def __init__(self, http_client: RobustHttpClient):
         super().__init__(http_client)
-        google_api_key = getattr(settings, "google_api_key", None)
-        if not google_api_key:
-            raise ValueError("Google API key is required for PDF processing")
-        self.client = genai.Client(api_key=google_api_key)
+        openai_api_key = getattr(settings, "openai_api_key", None)
+        if not openai_api_key:
+            raise ValueError("OpenAI API key is required for PDF processing")
+        self.client = create_openai_pdf_client(openai_api_key)
         self.model_name = getattr(
             settings,
-            "pdf_gemini_model",
-            GOOGLE_FLASH_LITE_PREVIEW_MODEL_NAME,
+            "pdf_extraction_model",
+            PDF_EXTRACTION_MODEL_NAME,
         )
 
     def can_handle_url(self, url: str, response_headers: httpx.Headers | None = None) -> bool:
@@ -95,7 +97,7 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
         url: str,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Extract text from PDF content using Google Gemini API."""
+        """Extract PDF text and visual content using OpenAI's native PDF input."""
         del context
         logger.info(f"PdfStrategy: Extracting text from PDF content for URL: {url}")
         if not _looks_like_pdf(content):
@@ -103,36 +105,33 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
 
         try:
             if not self.model_name:
-                raise NonRetryableError("PDF_GEMINI_MODEL is not configured")
-            # Create a Part object from PDF bytes
-            pdf_part = Part.from_bytes(data=content, mime_type="application/pdf")
-
-            extraction_prompt = load_prompt("processing/pdf_extract_text")
-
-            response = self.client.models.generate_content(
+                raise NonRetryableError("PDF_EXTRACTION_MODEL is not configured")
+            text_content = extract_pdf_with_openai(
+                self.client,
+                content=content,
                 model=self.model_name,
-                contents=cast(Any, [pdf_part, extraction_prompt]),
-                config={"temperature": 0.3, "max_output_tokens": 50000},
+                prompt=load_prompt("processing/pdf_extract_text"),
             )
-
-            # Get the extracted text
-            text_content = response.text if hasattr(response, "text") else ""
             if not text_content:
                 raise ValueError("No text extracted from PDF")
             return self._build_extracted_data(text_content, url=url, default_title="PDF Document")
         except Exception as e:
-            logger.error(f"PdfStrategy: Failed to extract text from PDF {url}: {e}")
-            fallback_text = extract_pdf_text(content)
-            if fallback_text:
-                logger.info(
-                    "PdfStrategy: Local PDF extraction succeeded for %s after Gemini failure",
-                    url,
-                )
-                return self._build_extracted_data(
-                    fallback_text,
-                    url=url,
-                    default_title="PDF Document",
-                )
+            error_classification = classify_openai_pdf_error(e)
+            logger.error(
+                "PdfStrategy: OpenAI PDF extraction failed for %s (%s): %s",
+                url,
+                error_classification,
+                e,
+                extra={
+                    "component": "pdf_strategy",
+                    "operation": "openai_pdf_extract",
+                    "context_data": {
+                        "url": url,
+                        "model": self.model_name,
+                        "error_classification": error_classification,
+                    },
+                },
+            )
             return {
                 "title": "PDF Extraction Failed",
                 "text_content": "",

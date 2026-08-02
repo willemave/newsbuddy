@@ -118,21 +118,14 @@ def test_pdf_strategy_extract_data_sets_text_content(mocker, monkeypatch):
     monkeypatch.setattr(
         pdf_mod,
         "settings",
-        SimpleNamespace(google_api_key="test-key", pdf_gemini_model="test-model"),
+        SimpleNamespace(openai_api_key="test-key", pdf_extraction_model="test-model"),
     )
-
-    class DummyResponse:
-        text = "PDF Title\nBody"
-
-    class DummyModels:
-        def generate_content(self, **_kwargs):
-            return DummyResponse()
-
-    class DummyClient:
-        def __init__(self, api_key):
-            self.models = DummyModels()
-
-    monkeypatch.setattr(pdf_mod.genai, "Client", DummyClient)
+    monkeypatch.setattr(pdf_mod, "create_openai_pdf_client", lambda _api_key: object())
+    monkeypatch.setattr(
+        pdf_mod,
+        "extract_pdf_with_openai",
+        lambda *_args, **_kwargs: "PDF Title\nBody",
+    )
 
     strategy = pdf_mod.PdfProcessorStrategy(http_client=mocker.Mock())
     data = strategy.extract_data(b"%PDF-1.4", "https://example.com/doc.pdf")
@@ -145,21 +138,14 @@ def test_arxiv_strategy_extract_data_sets_text_content(mocker, monkeypatch):
     monkeypatch.setattr(
         arxiv_mod,
         "settings",
-        SimpleNamespace(google_api_key="test-key", pdf_gemini_model="test-model"),
+        SimpleNamespace(openai_api_key="test-key", pdf_extraction_model="test-model"),
     )
-
-    class DummyResponse:
-        text = "Arxiv Title\nBody"
-
-    class DummyModels:
-        def generate_content(self, **_kwargs):
-            return DummyResponse()
-
-    class DummyClient:
-        def __init__(self, api_key):
-            self.models = DummyModels()
-
-    monkeypatch.setattr(arxiv_mod.genai, "Client", DummyClient)
+    monkeypatch.setattr(arxiv_mod, "create_openai_pdf_client", lambda _api_key: object())
+    monkeypatch.setattr(
+        arxiv_mod,
+        "extract_pdf_with_openai",
+        lambda *_args, **_kwargs: "Arxiv Title\nBody",
+    )
 
     strategy = arxiv_mod.ArxivProcessorStrategy(http_client=mocker.Mock())
     data = strategy.extract_data(b"%PDF-1.4", "https://arxiv.org/pdf/1234.5678.pdf")

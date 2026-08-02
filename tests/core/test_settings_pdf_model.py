@@ -1,4 +1,4 @@
-"""Tests for PDF Gemini model settings."""
+"""Tests for the native OpenAI PDF extraction model setting."""
 
 import importlib
 
@@ -13,20 +13,20 @@ def _set_required_env(monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_PASSWORD", "test-password")
 
 
-def test_pdf_gemini_model_default(monkeypatch):
-    """Default model remains the explicitly configured PDF preview model."""
+def test_pdf_extraction_model_default(monkeypatch):
+    """PDF extraction defaults to the evaluated high-volume OpenAI model."""
     _set_required_env(monkeypatch)
-    monkeypatch.delenv("PDF_GEMINI_MODEL", raising=False)
+    monkeypatch.delenv("PDF_EXTRACTION_MODEL", raising=False)
     get_settings.cache_clear()
 
     settings = Settings()
-    assert settings.pdf_gemini_model == "gemini-3.1-flash-lite-preview"
+    assert settings.pdf_extraction_model == "gpt-5.6-luna"
 
 
-def test_pdf_gemini_model_invalid(monkeypatch):
+def test_pdf_extraction_model_invalid(monkeypatch):
     """Invalid model names fail validation."""
     _set_required_env(monkeypatch)
-    monkeypatch.setenv("PDF_GEMINI_MODEL", "flash-3")
+    monkeypatch.setenv("PDF_EXTRACTION_MODEL", "gemini-3.1-flash-lite")
     get_settings.cache_clear()
 
     with pytest.raises(ValueError):
@@ -36,8 +36,8 @@ def test_pdf_gemini_model_invalid(monkeypatch):
 def test_pdf_strategy_uses_settings_model(monkeypatch):
     """PdfProcessorStrategy picks up settings-based model."""
     _set_required_env(monkeypatch)
-    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
-    monkeypatch.setenv("PDF_GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("PDF_EXTRACTION_MODEL", "gpt-5.6-luna")
     get_settings.cache_clear()
 
     from app.processing_strategies import pdf_strategy as pdf_module
@@ -45,13 +45,18 @@ def test_pdf_strategy_uses_settings_model(monkeypatch):
     importlib.reload(pdf_module)
 
     class DummyClient:
-        def __init__(self, api_key: str):
-            self.api_key = api_key
+        pass
 
-    monkeypatch.setattr(pdf_module.genai, "Client", DummyClient)
+    client = DummyClient()
+
+    def client_factory(_api_key: str) -> DummyClient:
+        return client
+
+    monkeypatch.setattr(pdf_module, "create_openai_pdf_client", client_factory)
 
     class DummyHttpClient:
         pass
 
     strategy = pdf_module.PdfProcessorStrategy(http_client=DummyHttpClient())
-    assert strategy.model_name == "gemini-3.1-flash-lite-preview"
+    assert strategy.client is client
+    assert strategy.model_name == "gpt-5.6-luna"

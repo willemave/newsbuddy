@@ -124,14 +124,10 @@ def test_download_content_rejects_non_pdf_body(
 
 def test_extract_data_successful(pdf_strategy: PdfProcessorStrategy, mocker):
     """Test successful data extraction from PDF content."""
-    """Test successful data extraction from PDF content."""
-    # Mock the Google Gemini client
-    mock_response = MagicMock()
-    mock_response.text = "Test PDF Title\n\nThis is the extracted text content from the PDF."
-
-    mock_client = MagicMock()
-    mock_client.models.generate_content.return_value = mock_response
-    pdf_strategy.client = mock_client
+    mock_extract = mocker.patch(
+        "app.processing_strategies.pdf_strategy.extract_pdf_with_openai",
+        return_value="Test PDF Title\n\nThis is the extracted text content from the PDF.",
+    )
 
     url = "http://example.com/mydoc.pdf"
     extracted_data = pdf_strategy.extract_data(SAMPLE_PDF_BYTES, url)
@@ -143,35 +139,57 @@ def test_extract_data_successful(pdf_strategy: PdfProcessorStrategy, mocker):
     assert extracted_data["text_content"] == expected_text
     assert extracted_data["content_type"] == "pdf"
     assert extracted_data["final_url_after_redirects"] == url
+    assert mock_extract.call_args.kwargs["content"] == SAMPLE_PDF_BYTES
+    assert mock_extract.call_args.kwargs["model"] == pdf_strategy.model_name
 
 
-def test_extract_data_no_content(pdf_strategy: PdfProcessorStrategy, mocker):
-    """Fall back to local PDF extraction when Gemini extraction fails."""
-    mock_client = MagicMock()
-    mock_client.models.generate_content.side_effect = Exception("Failed to extract")
-    pdf_strategy.client = mock_client
-    mocker.patch(
-        "app.processing_strategies.pdf_strategy.extract_pdf_text",
-        return_value="Local PDF Title\nRecovered body",
-    )
+def test_extract_data_returns_failure_when_openai_returns_no_content(
+    pdf_strategy: PdfProcessorStrategy,
+    mocker,
+):
+    mocker.patch("app.processing_strategies.pdf_strategy.extract_pdf_with_openai", return_value="")
 
     url = "http://example.com/empty.pdf"
     extracted_data = pdf_strategy.extract_data(SAMPLE_PDF_BYTES, url)
 
-    assert extracted_data["title"] == "Local PDF Title"
-    assert extracted_data["text_content"] == "Local PDF Title\nRecovered body"
-    assert extracted_data["content_type"] == "pdf"
+    assert extracted_data["title"] == "PDF Extraction Failed"
+    assert extracted_data["text_content"] == ""
 
 
-def test_extract_data_returns_failure_when_all_pdf_extraction_paths_fail(
+def test_extract_data_classifies_unavailable_model_without_local_fallback(
     pdf_strategy: PdfProcessorStrategy,
     mocker,
 ):
-    """Return a failed extraction payload when Gemini and local fallback both fail."""
-    mock_client = MagicMock()
-    mock_client.models.generate_content.side_effect = Exception("Failed to extract")
-    pdf_strategy.client = mock_client
-    mocker.patch("app.processing_strategies.pdf_strategy.extract_pdf_text", return_value="")
+    mocker.patch(
+        "app.processing_strategies.pdf_strategy.extract_pdf_with_openai",
+        side_effect=RuntimeError("model unavailable"),
+    )
+    mocker.patch(
+        "app.processing_strategies.pdf_strategy.classify_openai_pdf_error",
+        return_value="model_unavailable",
+    )
+    error_log = mocker.patch("app.processing_strategies.pdf_strategy.logger.error")
+
+    extracted_data = pdf_strategy.extract_data(
+        SAMPLE_PDF_BYTES,
+        "http://example.com/unavailable.pdf",
+    )
+
+    assert extracted_data["text_content"] == ""
+    assert error_log.call_args.kwargs["extra"]["context_data"]["error_classification"] == (
+        "model_unavailable"
+    )
+
+
+def test_extract_data_returns_failure_when_openai_raises(
+    pdf_strategy: PdfProcessorStrategy,
+    mocker,
+):
+    """Return a failed extraction payload when OpenAI extraction fails."""
+    mocker.patch(
+        "app.processing_strategies.pdf_strategy.extract_pdf_with_openai",
+        side_effect=Exception("Failed to extract"),
+    )
 
     extracted_data = pdf_strategy.extract_data(SAMPLE_PDF_BYTES, "http://example.com/empty.pdf")
 
@@ -179,7 +197,7 @@ def test_extract_data_returns_failure_when_all_pdf_extraction_paths_fail(
     assert extracted_data["text_content"] == ""
 
 
-def test_extract_data_rejects_non_pdf_before_gemini(pdf_strategy: PdfProcessorStrategy) -> None:
+def test_extract_data_rejects_non_pdf_before_openai(pdf_strategy: PdfProcessorStrategy) -> None:
     with pytest.raises(NonRetryableError, match="not a PDF"):
         pdf_strategy.extract_data(
             b"<html>GitHub blob page</html>",

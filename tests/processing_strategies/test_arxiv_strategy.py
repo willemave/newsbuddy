@@ -50,43 +50,33 @@ def test_preprocess_preserves_pdf_query(strategy: ArxivProcessorStrategy) -> Non
     assert normalized == "https://arxiv.org/pdf/2509.15194.pdf?download=1"
 
 
-def test_extract_data_falls_back_to_local_pdf_text(mocker, monkeypatch) -> None:
+def test_extract_data_does_not_fall_back_to_local_pdf_text(mocker, monkeypatch) -> None:
     monkeypatch.setattr(
         arxiv_mod,
         "settings",
-        SimpleNamespace(google_api_key="test-key", pdf_gemini_model="test-model"),
+        SimpleNamespace(openai_api_key="test-key", pdf_extraction_model="test-model"),
     )
-
-    class DummyModels:
-        def generate_content(self, **_kwargs):
-            raise RuntimeError("User location is not supported for the API use.")
-
-    class DummyClient:
-        def __init__(self, api_key):
-            self.models = DummyModels()
-
-    monkeypatch.setattr(arxiv_mod.genai, "Client", DummyClient)
     mocker.patch(
-        "app.processing_strategies.arxiv_strategy.extract_pdf_text",
-        return_value="Recovered Arxiv Title\nRecovered body",
+        "app.processing_strategies.arxiv_strategy.create_openai_pdf_client",
+        return_value=Mock(),
+    )
+    mocker.patch(
+        "app.processing_strategies.arxiv_strategy.extract_pdf_with_openai",
+        side_effect=RuntimeError("provider unavailable"),
     )
 
     strategy = arxiv_mod.ArxivProcessorStrategy(Mock(spec=RobustHttpClient))
     data = strategy.extract_data(b"%PDF-1.4", "https://arxiv.org/pdf/1234.5678.pdf")
     llm_input = strategy.prepare_for_llm(data)
 
-    assert data["title"] == "Recovered Arxiv Title"
-    assert data["text_content"] == "Recovered Arxiv Title\nRecovered body"
-    assert llm_input["content_to_summarize"] == "Recovered Arxiv Title\nRecovered body"
+    assert data["title"] == "1234.5678.pdf"
+    assert data["text_content"] == ""
+    assert llm_input["content_to_summarize"] == ""
     assert llm_input["is_pdf"] is True
 
 
 def test_extract_data_includes_source_metadata(mocker, monkeypatch) -> None:
-    monkeypatch.setattr(arxiv_mod, "settings", SimpleNamespace(google_api_key=None))
-    monkeypatch.setattr(
-        "app.processing_strategies.arxiv_strategy.extract_pdf_text",
-        lambda _content: "Arxiv Title\nRecovered body",
-    )
+    monkeypatch.setattr(arxiv_mod, "settings", SimpleNamespace(openai_api_key=None))
     monkeypatch.setattr(
         arxiv_mod,
         "fetch_arxiv_source_metadata",

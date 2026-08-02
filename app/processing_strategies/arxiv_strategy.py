@@ -1,19 +1,21 @@
 """Strategy for processing arXiv content URLs."""
 
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import httpx  # For type hinting httpx.Headers
-from google import genai
-from google.genai.types import Part
 
 from app.core.logging import get_logger
-from app.core.model_defaults import GOOGLE_FLASH_LITE_PREVIEW_MODEL_NAME
+from app.core.model_defaults import PDF_EXTRACTION_MODEL_NAME
 from app.core.settings import get_settings
 from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
 from app.services.arxiv_metadata import fetch_arxiv_source_metadata
-from app.services.pdf_text_extraction import extract_pdf_text
+from app.services.openai_pdf_extraction import (
+    classify_openai_pdf_error,
+    create_openai_pdf_client,
+    extract_pdf_with_openai,
+)
 from app.services.prompt_library import load_prompt
 from app.services.source_metadata import attach_source_metadata, dump_source_metadata
 
@@ -117,7 +119,7 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
     ) -> dict[str, Any]:
         """
         Prepares PDF data for LLM processing.
-        Prefer Gemini extraction and fall back to local PDF text extraction.
+        Extract text and visual content through OpenAI's native PDF input.
         """
         del context
         logger.info("ArxivStrategy: Preparing PDF data for LLM processing for URL: %s", url)
@@ -133,23 +135,21 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
             }
             return attach_source_metadata(extracted_data, source_metadata)
 
-        google_api_key = getattr(settings, "google_api_key", None)
+        openai_api_key = getattr(settings, "openai_api_key", None)
         model_name = getattr(
             settings,
-            "pdf_gemini_model",
-            GOOGLE_FLASH_LITE_PREVIEW_MODEL_NAME,
+            "pdf_extraction_model",
+            PDF_EXTRACTION_MODEL_NAME,
         )
-        if google_api_key:
+        if openai_api_key:
             try:
-                client = genai.Client(api_key=google_api_key)
-                pdf_part = Part.from_bytes(data=content, mime_type="application/pdf")
-                extraction_prompt = load_prompt("processing/pdf_extract_text")
-                response = client.models.generate_content(
+                client = create_openai_pdf_client(openai_api_key)
+                text_content = extract_pdf_with_openai(
+                    client,
+                    content=content,
                     model=model_name,
-                    contents=cast(Any, [pdf_part, extraction_prompt]),
-                    config={"temperature": 0.3, "max_output_tokens": 50000},
+                    prompt=load_prompt("processing/pdf_extract_text"),
                 )
-                text_content = response.text if hasattr(response, "text") else ""
                 if text_content:
                     return self._build_extracted_data(
                         text_content,
@@ -158,38 +158,26 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
                         source_metadata=source_metadata,
                     )
             except Exception as exc:  # noqa: BLE001
-                error_message = str(exc).lower()
-                if (
-                    "failed_precondition" in error_message
-                    or "user location is not supported" in error_message
-                ):
-                    logger.warning(
-                        (
-                            "ArxivStrategy: Gemini extraction unavailable for %s; "
-                            "falling back to local PDF parsing: %s"
-                        ),
-                        url,
-                        exc,
-                    )
-                else:
-                    logger.error("ArxivStrategy: Gemini extraction failed for %s: %s", url, exc)
+                error_classification = classify_openai_pdf_error(exc)
+                logger.error(
+                    "ArxivStrategy: OpenAI PDF extraction failed for %s (%s): %s",
+                    url,
+                    error_classification,
+                    exc,
+                    extra={
+                        "component": "arxiv_strategy",
+                        "operation": "openai_pdf_extract",
+                        "context_data": {
+                            "url": url,
+                            "model": model_name,
+                            "error_classification": error_classification,
+                        },
+                    },
+                )
         else:
             logger.warning(
-                "ArxivStrategy: Google API key missing; cannot extract PDF text for %s",
+                "ArxivStrategy: OpenAI API key missing; cannot extract PDF text for %s",
                 url,
-            )
-
-        fallback_text = extract_pdf_text(content)
-        if fallback_text:
-            logger.info(
-                "ArxivStrategy: Local PDF extraction succeeded for %s after Gemini fallback",
-                url,
-            )
-            return self._build_extracted_data(
-                fallback_text,
-                url=url,
-                default_title="ArXiv PDF Document",
-                source_metadata=source_metadata,
             )
 
         parsed_url = urlparse(url)

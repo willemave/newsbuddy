@@ -53,7 +53,6 @@ dependencies = [
     "e2b>=2.35.0",
     "newspaper4k[cloudflare]>=0.9.5",
     "lxml-html-clean>=0.4.5",
-    "pypdf>=5.4.0",
     "faster-whisper>=1.2.1",
     "ctranslate2>=4.8.1",
 ]

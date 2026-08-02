@@ -241,14 +241,14 @@ def test_estimate_vendor_cost_prices_elevenlabs_flash_characters() -> None:
     assert cost == 0.5
 
 
-def test_estimate_vendor_cost_prices_explicit_gemini_flash_lite_preview() -> None:
+def test_estimate_vendor_cost_prices_explicit_gpt_5_6_luna() -> None:
     cost = vendor_costs.estimate_vendor_cost_usd(
-        provider="google",
-        model="google-gla:gemini-3.1-flash-lite-preview",
+        provider="openai",
+        model="openai:gpt-5.6-luna",
         usage={"input_tokens": 1_000, "output_tokens": 500},
     )
 
-    assert cost == 0.001
+    assert cost == 0.0008
 
 
 def test_estimate_vendor_cost_uses_long_context_rates(monkeypatch) -> None:
