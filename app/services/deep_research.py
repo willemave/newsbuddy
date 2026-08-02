@@ -17,12 +17,11 @@ from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.contracts import MessageProcessingStatus
 from app.models.db import ChatMessage, ChatSession, Content
-from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_models import DEEP_RESEARCH_MODEL
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 
 try:
-    from langfuse.openai import AsyncOpenAI
+    from openai import AsyncOpenAI
 except Exception:  # noqa: BLE001
     from openai import AsyncOpenAI
 
@@ -580,31 +579,18 @@ async def process_deep_research_message(
         )
         # Start the deep research
         client = get_deep_research_client()
-        with langfuse_trace_context(
-            trace_name="chat.deep_research",
-            user_id=state.user_id,
-            session_id=state.session_id,
-            metadata={
-                "source": source,
-                "model_spec": DEEP_RESEARCH_MODEL,
-                "content_id": state.content_id,
-                "message_id": message_id,
-                "task_id": task_id,
-            },
-            tags=["chat", "deep_research", source],
-        ):
-            response_id = await client.start_research(user_prompt, state.context)
+        response_id = await client.start_research(user_prompt, state.context)
 
-            logger.info(
-                "[DeepResearch:SUBMITTED] sid=%s mid=%s response_id=%s user_id=%s",
-                session_id,
-                message_id,
-                response_id,
-                state.user_id,
-            )
+        logger.info(
+            "[DeepResearch:SUBMITTED] sid=%s mid=%s response_id=%s user_id=%s",
+            session_id,
+            message_id,
+            response_id,
+            state.user_id,
+        )
 
-            # Wait for completion
-            result = await client.wait_for_completion(response_id)
+        # Wait for completion
+        result = await client.wait_for_completion(response_id)
 
         if result.status in ("succeeded", "completed") and result.output_text:
             with SessionLocal() as db:

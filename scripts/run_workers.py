@@ -16,7 +16,6 @@ from app.core.db import init_db
 from app.core.logging import get_logger, setup_logging
 from app.core.settings import get_settings
 from app.pipeline.threaded_task_processor import ThreadedTaskProcessor
-from app.services.langfuse_tracing import flush_langfuse_tracing, initialize_langfuse_tracing
 from app.services.queue import TaskQueue, get_queue_service
 
 logger = get_logger(__name__)
@@ -70,7 +69,6 @@ def main():
     # Setup logging
     log_level = "DEBUG" if args.debug else "INFO"
     setup_logging(level=log_level)
-    initialize_langfuse_tracing()
 
     threads = (
         args.threads if args.threads is not None else get_settings().worker_thread_count(args.queue)
@@ -162,7 +160,6 @@ def main():
         return 1
     finally:
         stats_stopped.set()
-        flush_langfuse_tracing()
 
     return 0
 

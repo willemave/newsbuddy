@@ -13,10 +13,6 @@ from app.core.settings import get_settings
 from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
 from app.services.arxiv_metadata import fetch_arxiv_source_metadata
-from app.services.langfuse_tracing import (
-    extract_google_usage_details,
-    langfuse_generation_context,
-)
 from app.services.pdf_text_extraction import extract_pdf_text
 from app.services.prompt_library import load_prompt
 from app.services.source_metadata import attach_source_metadata, dump_source_metadata
@@ -148,24 +144,11 @@ class ArxivProcessorStrategy(UrlProcessorStrategy):
                 client = genai.Client(api_key=google_api_key)
                 pdf_part = Part.from_bytes(data=content, mime_type="application/pdf")
                 extraction_prompt = load_prompt("processing/pdf_extract_text")
-                with langfuse_generation_context(
-                    name="queue.arxiv.extract_text",
+                response = client.models.generate_content(
                     model=model_name,
-                    input_data=extraction_prompt,
-                    metadata={"source": "queue", "url": url},
-                ) as generation:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=cast(Any, [pdf_part, extraction_prompt]),
-                        config={"temperature": 0.3, "max_output_tokens": 50000},
-                    )
-                    usage_details = extract_google_usage_details(response)
-                    response_text = getattr(response, "text", None)
-                    if generation is not None:
-                        generation.update(
-                            output=response_text[:400] if isinstance(response_text, str) else None,
-                            usage_details=usage_details,
-                        )
+                    contents=cast(Any, [pdf_part, extraction_prompt]),
+                    config={"temperature": 0.3, "max_output_tokens": 50000},
+                )
                 text_content = response.text if hasattr(response, "text") else ""
                 if text_content:
                     return self._build_extracted_data(

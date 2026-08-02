@@ -25,10 +25,7 @@ from app.core.model_defaults import IMAGE_GENERATION_MODEL_NAME, RUNWARE_INFOGRA
 from app.core.settings import get_settings
 from app.models.contracts import ContentType
 from app.models.domain.content import ContentData
-from app.services.langfuse_tracing import (
-    extract_google_usage_details,
-    langfuse_generation_context,
-)
+from app.services.google_usage import extract_google_usage_details
 from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 from app.utils.image_paths import (
@@ -573,7 +570,6 @@ class ImageGenerationService:
                 models=self.news_thumbnail_models,
                 prompt=prompt,
                 image_config=ImageConfig(aspect_ratio="1:1"),
-                trace_name="queue.image_generation.news_thumbnail",
                 usage_operation="image_generation.news_thumbnail",
                 usage_metadata={"image_type": "news_thumbnail"},
                 content_id=content_id,
@@ -717,7 +713,6 @@ class ImageGenerationService:
                 aspect_ratio="16:9",
                 image_size=INFOGRAPHIC_IMAGE_SIZE,
             ),
-            trace_name="queue.image_generation.infographic",
             usage_operation="image_generation.infographic",
             usage_metadata={
                 "image_type": "infographic",
@@ -735,7 +730,6 @@ class ImageGenerationService:
         models: list[str],
         prompt: str,
         image_config: ImageConfig,
-        trace_name: str,
         usage_operation: str,
         usage_metadata: dict[str, object],
         content_id: int,
@@ -743,37 +737,26 @@ class ImageGenerationService:
         client = self._get_google_client()
         for index, model in enumerate(models):
             try:
-                with langfuse_generation_context(
-                    name=trace_name,
+                response = client.models.generate_content(
                     model=model,
-                    input_data=prompt,
-                    metadata={"source": "queue", "content_id": content_id, "attempt": index + 1},
-                ) as generation:
-                    response = client.models.generate_content(
+                    contents=prompt,
+                    config=GenerateContentConfig(
+                        response_modalities=["IMAGE"],
+                        image_config=image_config,
+                    ),
+                )
+                usage_details = extract_google_usage_details(response)
+                if usage_details:
+                    record_vendor_usage_out_of_band(
+                        provider="google",
                         model=model,
-                        contents=prompt,
-                        config=GenerateContentConfig(
-                            response_modalities=["IMAGE"],
-                            image_config=image_config,
-                        ),
+                        feature="image_generation",
+                        operation=usage_operation,
+                        source="queue",
+                        usage=cast(dict[str, int | None], usage_details),
+                        content_id=content_id,
+                        metadata=usage_metadata,
                     )
-                    usage_details = extract_google_usage_details(response)
-                    if generation is not None:
-                        generation.update(
-                            output="generated_image",
-                            usage_details=usage_details,
-                        )
-                    if usage_details:
-                        record_vendor_usage_out_of_band(
-                            provider="google",
-                            model=model,
-                            feature="image_generation",
-                            operation=usage_operation,
-                            source="queue",
-                            usage=cast(dict[str, int | None], usage_details),
-                            content_id=content_id,
-                            metadata=usage_metadata,
-                        )
                 return response, model
             except Exception as exc:
                 fallback_model = models[index + 1] if index + 1 < len(models) else None

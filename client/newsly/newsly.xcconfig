@@ -1,10 +1,6 @@
 // Configuration settings file for newsly
 // This file fixes the duplicate Info.plist issue
 
-// Include secrets (API keys) - this file is gitignored
-// Copy Secrets.xcconfig.template to Secrets.xcconfig and fill in your keys
-#include? "Secrets.xcconfig"
-
 // Do not generate Info.plist automatically
 GENERATE_INFOPLIST_FILE = NO
 
@@ -13,7 +9,3 @@ INFOPLIST_FILE = newsly/Info.plist
 
 // Ensure the Info.plist is not processed multiple times
 DONT_GENERATE_INFOPLIST_FILE = NO
-
-// API Keys - passed to Info.plist for runtime access
-// These come from Secrets.xcconfig or environment variables
-OPENAI_API_KEY = $(OPENAI_API_KEY)

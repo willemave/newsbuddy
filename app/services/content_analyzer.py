@@ -28,7 +28,6 @@ from app.models.llm.content_analysis import (
     InstructionResult,
 )
 from app.services.feed_detection import extract_feed_links
-from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_models import build_pydantic_model
 from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_usage import record_model_usage
@@ -328,16 +327,7 @@ class ContentAnalyzer:
             )
 
             try:
-                with langfuse_trace_context(
-                    trace_name="queue.content_analyzer.analyze_url",
-                    metadata={
-                        "source": "queue",
-                        "url": url,
-                        "model_spec": CONTENT_ANALYSIS_MODEL_SPEC,
-                    },
-                    tags=["queue", "content_analyzer"],
-                ):
-                    result = agent.run_sync(prompt)
+                result = agent.run_sync(prompt)
                 record_model_usage(
                     "analyze_url",
                     result,

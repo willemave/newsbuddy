@@ -85,7 +85,6 @@ from app.services.chat_turn_runtime import (
 )
 from app.services.exa_client import exa_search
 from app.services.knowledge_search import search_knowledge as search_knowledge_hits
-from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_models import (
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
@@ -1249,14 +1248,7 @@ def run_assistant_turn_sync(
     prompt_sections.append(f"User request:\n{user_prompt.strip()}")
     prompt_sections.append(f"Current context:\n{deps.context_snapshot}")
     prompt = "\n\n".join(prompt_sections)
-    with langfuse_trace_context(
-        trace_name="assistant.turn.async",
-        user_id=deps.user_id,
-        session_id=deps.session_id,
-        metadata={"model_spec": model_spec, "screen_type": deps.screen_context.screen_type},
-        tags=["assistant", "chat"],
-    ):
-        return agent.run_sync(prompt, deps=deps, message_history=history)
+    return agent.run_sync(prompt, deps=deps, message_history=history)
 
 
 def _build_assistant_personal_library_runtime(

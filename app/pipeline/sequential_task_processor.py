@@ -30,7 +30,6 @@ from app.pipeline.task_handler import TaskHandler
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.task_specs import TASK_SPECS, get_task_spec
 from app.services.gateways.task_queue_gateway import TaskQueueGateway
-from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.queue import QueueService
 
 if TYPE_CHECKING:
@@ -368,32 +367,14 @@ class SequentialTaskProcessor:
 
         raw_user_id = task.payload.get("user_id")
         user_id: str | int | None = raw_user_id if isinstance(raw_user_id, (int, str)) else None
-        metadata = {
-            "source": "queue",
-            "queue_name": self.queue_name,
-            "task_id": task.id,
-            "task_type": task.task_type.value,
-            "content_id": task.content_id,
-            "retry_count": task.retry_count,
-        }
-
-        with (
-            bound_log_context(
-                task_id=task.id,
-                task_type=task.task_type.value,
-                queue_name=self.queue_name,
-                worker_id=self.worker_id,
-                content_id=task.content_id,
-                user_id=user_id,
-                source="queue",
-            ),
-            langfuse_trace_context(
-                trace_name=f"queue.{task.task_type.value.lower()}",
-                user_id=user_id,
-                session_id=self.worker_id,
-                metadata=metadata,
-                tags=["queue", self.queue_name, task.task_type.value.lower()],
-            ),
+        with bound_log_context(
+            task_id=task.id,
+            task_type=task.task_type.value,
+            queue_name=self.queue_name,
+            worker_id=self.worker_id,
+            content_id=task.content_id,
+            user_id=user_id,
+            source="queue",
         ):
             try:
                 logger.info(

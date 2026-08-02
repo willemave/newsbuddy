@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
-
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -84,8 +82,6 @@ async def test_process_deep_research_releases_db_session_during_llm(
 
     monkeypatch.setattr("app.core.db.get_session_factory", lambda: TrackingSession)
     monkeypatch.setattr(deep_research, "get_deep_research_client", lambda: FakeDeepResearchClient())
-    monkeypatch.setattr(deep_research, "langfuse_trace_context", lambda **_kwargs: nullcontext())
-
     assert chat_session.id is not None
     assert message.id is not None
     await deep_research.process_deep_research_message(

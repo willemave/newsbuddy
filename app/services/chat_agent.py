@@ -64,7 +64,6 @@ from app.services.chat_turn_runtime import (
     start_detached_chat_turn as _start_detached_chat_turn,
 )
 from app.services.exa_client import exa_search, get_exa_client
-from app.services.langfuse_tracing import langfuse_trace_context
 from app.services.llm_models import (  # noqa: F401 (re-export for API schemas)
     LLMProvider as ChatModelProvider,
 )
@@ -1015,31 +1014,12 @@ def _run_agent_sync(
     deps: ChatDeps,
     history: list[ModelMessage],
     *,
-    trace_name: str,
-    source: str,
-    task_id: int | None = None,
-    message_id: int | None = None,
     provider_api_key: str | None = None,
 ):
     """Run the chat agent synchronously in a worker thread."""
     agent = get_chat_agent(model_spec, api_key_override=provider_api_key)
     model_user_prompt = _build_run_user_prompt(user_prompt, deps)
-    metadata = {
-        "source": source,
-        "model_spec": model_spec,
-        "content_id": deps.content_id,
-        "task_id": task_id,
-        "message_id": message_id,
-    }
-    tags = ["chat", source]
-    with langfuse_trace_context(
-        trace_name=trace_name,
-        user_id=deps.user_id,
-        session_id=deps.session_id,
-        metadata=metadata,
-        tags=tags,
-    ):
-        return agent.run_sync(model_user_prompt, deps=deps, message_history=history)
+    return agent.run_sync(model_user_prompt, deps=deps, message_history=history)
 
 
 async def run_chat_turn(
@@ -1175,9 +1155,6 @@ async def run_chat_turn(
             user_prompt,
             deps,
             history,
-            trace_name="chat.turn.sync",
-            source=source,
-            task_id=task_id,
             provider_api_key=provider_api_key,
         )
         agent_ms = (perf_counter() - agent_start) * 1000
@@ -1389,10 +1366,6 @@ async def _execute_article_background_turn(
         user_prompt,
         prepared.deps,
         prepared.history,
-        trace_name="chat.turn.async",
-        source=turn.source,
-        task_id=turn.task_id,
-        message_id=turn.message_id,
         provider_api_key=prepared.provider_api_key,
     )
     agent_ms = (perf_counter() - agent_start) * 1000
@@ -1673,9 +1646,6 @@ async def _execute_initial_suggestions_turn(
         INITIAL_QUESTIONS_PROMPT,
         prepared.deps,
         [],
-        trace_name="chat.initial_suggestions",
-        source=turn.source,
-        task_id=turn.task_id,
         provider_api_key=prepared.provider_api_key,
     )
     output_text = _agent_output_text(result)

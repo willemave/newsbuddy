@@ -11,10 +11,6 @@ from app.http_client.robust_http_client import RobustHttpClient
 from app.processing_strategies.base_strategy import UrlProcessorStrategy
 from app.services.github_urls import normalize_github_file_url_to_raw, parse_github_file_url
 from app.services.http import NonRetryableError
-from app.services.langfuse_tracing import (
-    extract_google_usage_details,
-    langfuse_generation_context,
-)
 from app.services.pdf_text_extraction import extract_pdf_text
 from app.services.prompt_library import load_prompt
 
@@ -113,24 +109,11 @@ class PdfProcessorStrategy(UrlProcessorStrategy):
 
             extraction_prompt = load_prompt("processing/pdf_extract_text")
 
-            with langfuse_generation_context(
-                name="queue.pdf.extract_text",
+            response = self.client.models.generate_content(
                 model=self.model_name,
-                input_data=extraction_prompt,
-                metadata={"source": "queue", "url": url},
-            ) as generation:
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=cast(Any, [pdf_part, extraction_prompt]),
-                    config={"temperature": 0.3, "max_output_tokens": 50000},
-                )
-                usage_details = extract_google_usage_details(response)
-                response_text = getattr(response, "text", None)
-                if generation is not None:
-                    generation.update(
-                        output=response_text[:400] if isinstance(response_text, str) else None,
-                        usage_details=usage_details,
-                    )
+                contents=cast(Any, [pdf_part, extraction_prompt]),
+                config={"temperature": 0.3, "max_output_tokens": 50000},
+            )
 
             # Get the extracted text
             text_content = response.text if hasattr(response, "text") else ""
