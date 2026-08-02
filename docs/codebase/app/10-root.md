@@ -6,7 +6,7 @@ Source folder: `app`
 Application root for the FastAPI process and shared backend package namespace.
 
 ## Runtime behavior
-- `app/main.py` creates the FastAPI application, loads settings, initializes logging, initializes Langfuse tracing, initializes the database, installs middleware, mounts static folders, registers routers, and exposes health/root endpoints.
+- `app/main.py` creates the FastAPI application, loads settings, initializes logging and the database, installs middleware, mounts static folders, registers routers, and exposes public policy and health endpoints.
 - `app/openapi.py` provides stable OpenAPI operation IDs through `build_operation_id`.
 - `app/constants.py` stores cross-package constants such as aggregator subscription markers.
 - Request middleware adds request IDs, structured request/response logging, skipped log-path handling, and cache-control behavior for versioned generated image assets.

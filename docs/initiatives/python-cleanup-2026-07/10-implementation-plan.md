@@ -498,8 +498,8 @@ real-commit tests (`vendor_usage_db`, ios_e2e live-server flows). Add `pytest-xd
 
 ### WP4.2 — Extended ruff adoption
 Add `PERF`, `C4`, `RET`, `PIE`, `FURB`, `PTH` to `[tool.ruff.lint] select`; autofix the 28
-mechanical fixes; work down the remainder (~200 total today — hotspots `admin_web/logs.py`,
-`langfuse_tracing.py`'s 14 `global`s, 9× obsolete `fromisoformat(x.replace("Z",…))`). Adopt
+mechanical fixes; work down the remainder (~200 total today — hotspots `admin_web/logs.py`
+and 9× obsolete `fromisoformat(x.replace("Z",…))`). Adopt
 `PLW`/`ARG` as advisory (`--select` in a periodic check, not CI-blocking) until the count is
 near zero. Flatten the stateless service classes (`TweetSuggestionService`,
 `TweetTargetResolver`, `PaginationCursor` namespace) to module functions per the repo's own

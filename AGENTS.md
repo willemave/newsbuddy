@@ -12,6 +12,9 @@ This file stays minimal and only captures repo-specific working rules.
 
 - Never commit or push unless explicitly asked.
 - Prefer small, local changes that follow the existing layer boundaries.
+- Build changes as small, end-to-end working slices. Each increment must leave the affected product path functional and verifiable.
+- Prefer durable designs aligned with the intended architecture. Avoid disposable parallel paths; when staged compatibility is necessary, define the canonical owner and removal condition.
+- Keep `docs/log.md` current while implementing. Record concise, dated entries with the branch, scope, decisions, validation, and unfinished work; preserve unrelated entries.
 - Keep durable architecture notes in `docs/architecture.md`; keep this file limited to agent operating rules and routing.
 
 ## Working Shape

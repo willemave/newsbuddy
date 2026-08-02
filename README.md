@@ -411,7 +411,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the full system referen
 | **CLI** | Go, Cobra, registry-generated API models, `newsbuddy` binary |
 | **iOS** | SwiftUI, Apple Sign In, Share Extension |
 | **Admin / Web** | Jinja2 templates, Tailwind CSS v4 |
-| **Observability** | Langfuse tracing, structured JSONL logs |
+| **Observability** | Structured JSONL logs and vendor usage records |
 | **Infrastructure** | Docker (single-container), GitHub Actions, uv |
 
 <br>

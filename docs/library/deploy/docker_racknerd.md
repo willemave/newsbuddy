@@ -27,8 +27,12 @@ the API, workers, and scheduler connect to it over the private
 
 ```bash
 NEWSLY_DATABASE_URL=postgresql+psycopg://newsly:...@postgres:5432/newsly
-CORS_ALLOW_ORIGINS=https://racknerd-3b1b61d.willemsavenue.com
-NEWSLY_PUBLIC_BASE_URL=https://racknerd-3b1b61d.willemsavenue.com
+CORS_ALLOW_ORIGINS=https://news.willemsavenue.com
+NEWSLY_PUBLIC_BASE_URL=https://news.willemsavenue.com
+APPLE_TEAM_ID=...
+APPLE_KEY_ID=...
+APPLE_PRIVATE_KEY=...
+APPLE_CLIENT_ID=org.willemaw.newsly
 MEDIA_BASE_DIR=/data/media
 LOGS_BASE_DIR=/data/logs
 IMAGES_BASE_DIR=/data/images

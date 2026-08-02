@@ -81,7 +81,6 @@ Current bootstrap responsibilities:
 
 - load settings via `app/core/settings.py`
 - initialize structured logging
-- initialize Langfuse tracing during lifespan startup
 - initialize the database during lifespan startup
 - mount `/static/images` from `settings.images_base_dir`
 - mount `/admin/static` from `app/admin_web/static`
@@ -112,7 +111,7 @@ The app currently mounts:
 
 Actual middleware/handler behavior in `app/main.py`:
 
-- request logging with duration-based severity and Langfuse trace context
+- request logging with duration-based severity and structured context
 - CORS allowing configured origins, all methods, and all headers; production rejects wildcard origins
 - validation exceptions logged with redacted sensitive headers and bounded request body summaries
 - admin auth failures redirected to login through a custom exception handler
@@ -248,7 +247,6 @@ Most orchestration logic lives here. Major service families:
 - content interactions, Knowledge saves, read state
 - narration, transcription, and audio episodes
 - content-body storage and personal markdown sync
-- Langfuse tracing
 - Exa and external API clients
 
 ### 5.8 `app/pipeline/`
@@ -303,8 +301,8 @@ X sync and YouTube configuration paths exist outside the default scheduled scrap
   - max workers, timeouts, retry limits, checkout timeout
 - external providers
   - OpenAI, Anthropic, Google, Cerebras, OpenRouter, Exa, Firecrawl, Runware
-- tracing
-  - Langfuse host, keys, sample rate, instrumentation mode
+- observability
+  - structured logs and per-vendor usage records
 - discovery and onboarding
   - default models and limits
 - podcast search
@@ -486,10 +484,11 @@ Prefix: `/auth`
 Key endpoints:
 
 - `POST /auth/apple`
-- `POST /auth/debug/new-user`
+- `POST /auth/debug/new-user` (development only)
 - `POST /auth/refresh`
 - `GET /auth/me`
 - `PATCH /auth/me`
+- `DELETE /auth/me`
 - `GET /auth/admin/login`
 - `POST /auth/admin/login`
 - `POST /auth/admin/logout`
@@ -498,6 +497,7 @@ Behavior:
 
 - Apple Sign In creates or reuses a user and returns JWT access + refresh tokens.
 - `/me` includes onboarding flags, X sync state summary, and profile metadata.
+- Account deletion requires fresh Apple authorization, revokes the Apple grant, immediately deactivates the account after durable queueing, and removes account-owned rows and files through the backfill worker. The deletion handler also revokes X credentials and waits for active user work without consuming retries.
 - Admin auth is cookie-based and separate from mobile JWT auth.
 - The shared bearer auth dependency also accepts Newsly API keys with the `newsly_ak_...` prefix on routes that use `get_current_user`.
 
@@ -838,7 +838,7 @@ Responsibilities:
 - wait on PostgreSQL `LISTEN`/`NOTIFY` with polling fallback
 - normalize task payload into `TaskEnvelope`
 - dispatch to a typed handler
-- wrap execution in Langfuse tracing
+- bind structured task context for logs and usage records
 - renew task leases while long tasks execute
 - send the typed handler result to `QueueService` for one retry/backoff decision
 - gracefully handle shutdown signals
@@ -1330,7 +1330,7 @@ Primary layers:
 
 ### 17.2 Auth model
 
-The iOS app authenticates with Apple Sign In against `/auth/apple`, stores credentials in Keychain, and boots the authenticated shell from `AuthenticationViewModel`.
+The iOS app authenticates with Apple Sign In against `/auth/apple`, stores credentials in Keychain, and boots the authenticated shell from `AuthenticationViewModel`. Settings exposes in-app account deletion, which performs fresh Apple authorization before calling `DELETE /auth/me`.
 
 ### 17.3 Client features visible from code structure
 
@@ -1438,16 +1438,7 @@ Structured JSONL logs store operational payloads for scraper events, failures, m
 
 Current log layout includes `logs/errors/` for ERROR+ records and `logs/structured/` for structured operational streams. Request logging attaches request IDs, response-time headers, redacted header/payload summaries, route names, and duration-based severity.
 
-### 20.3 Langfuse
-
-Langfuse tracing is initialized during app startup and used in:
-
-- request traces
-- queue task traces
-- LLM generation paths
-- selected provider integrations
-
-### 20.4 Error file logging
+### 20.3 Error file logging
 
 Per repo conventions, ERROR+ logs are written to JSONL error logs under `logs/errors/`.
 
