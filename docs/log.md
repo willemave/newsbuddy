@@ -96,6 +96,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** Ruff and mypy passed for the crawler manager and HTML strategy; 37 focused HTML strategy tests; 139 processing-strategy tests; `git diff --check`.
 - **Remaining:** Monitor production deadline and crawler-reset logs; move browser work behind process isolation only if Chromium or Playwright proves non-cooperative after cancellation.
 - **Commits:** Included in this commit.
+
 ### 2026-08-02 — `willem/learning-deck-source-dependency` — Make Learning Deck source waits dependency-aware
 
 - **Status:** Complete
@@ -124,4 +125,23 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Added the shared native OpenAI PDF extractor, moved both strategies to `PDF_EXTRACTION_MODEL=gpt-5.6-luna`, removed the Google PDF helper and local `pypdf` extraction path, and removed the now-unused `pypdf` dependency.
 - **Validation:** Focused Ruff and mypy passed; 38 focused settings/strategy/helper/pricing tests and all 140 processing-strategy tests passed; `uv lock --check`, `uv pip check`, and `git diff --check` passed.
 - **Remaining:** Deploy normally for production to consume the new code default. Production needs no setting edit because neither the old nor new PDF model variable is explicitly set; operators may explicitly pin `PDF_EXTRACTION_MODEL=gpt-5.6-luna`.
+- **Commits:** Included in this commit.
+### 2026-08-02 — `willem/bound-admin-log-memory` — Bound remote log-query memory
+
+- **Status:** Complete
+- **Scope:** Production incident diagnosis plus `admin.remote_ops` structured-log readers and focused admin/queue tests.
+- **Decisions:** Treat the simultaneous Docker DNS and lease-heartbeat failures as host-memory-pressure symptoms, not a PostgreSQL outage or network recreation. Keep the existing lease fencing and retry policy; fix the unbounded operator log reads that materially contributed to the host-wide OOM.
+- **Changes:** Stream log range/search records and stop at the requested limit, retain only the bounded structured tail, and use a bounded heap for newest exception results instead of materializing the full JSONL corpus.
+- **Validation:** Production was inspected read-only: the kernel recorded a global OOM at `2026-08-02T17:05:02Z`, Docker health-check execs timed out simultaneously, PostgreSQL stayed up with zero restarts, and the four affected tasks later completed. Ruff passed for `admin` and `tests/admin`; 79 admin/deployment tests and 54 focused admin/heartbeat tests passed; targeted mypy and `git diff --check` passed.
+- **Remaining:** Deploy through the normal workflow, then monitor host OOM records and remote log-command RSS; no production mutation, restart, commit, or push was performed here.
+- **Commits:** Included in this commit.
+
+### 2026-08-02 — `willem/bound-admin-log-memory` — Remote log-query cleanup follow-up
+
+- **Status:** Complete
+- **Scope:** Review and behavior-preserving cleanup of the bounded remote log readers.
+- **Decisions:** Preserve global timestamp ordering for structured tails instead of assuming logger/PID filenames are chronological; leave log-retention policy and operator-container isolation for separate review.
+- **Changes:** Replaced the filename-order tail deque with bounded timestamp selection and strengthened the regression across deliberately misordered filenames.
+- **Validation:** Ruff passed for `admin` and `tests/admin`; 117 admin, deployment, and heartbeat tests passed; targeted mypy and `git diff --check` passed.
+- **Remaining:** Define retention for 3.1 GB of indefinitely retained production JSONL logs and consider running remote operator commands in a resource-limited one-off container.
 - **Commits:** Included in this commit.

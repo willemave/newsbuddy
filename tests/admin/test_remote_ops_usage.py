@@ -14,6 +14,8 @@ from sqlalchemy.orm import sessionmaker
 from admin.remote_ops import (
     RemoteContext,
     logs_exceptions,
+    logs_search,
+    logs_tail,
     preview_reconcile_x_bookmarks,
     preview_regenerate_images,
     preview_sanitize_content_metadata,
@@ -247,6 +249,57 @@ def test_logs_exceptions_filters_by_operation(remote_context):
 
     assert result["returned"] == 1
     assert result["exceptions"][0]["operation"] == "classify"
+
+
+def test_logs_tail_retains_only_requested_structured_records(remote_context):
+    structured_dir = remote_context.logs_dir / "structured"
+    structured_dir.mkdir()
+    (structured_dir / "z_old_structured.jsonl").write_text(
+        '{"timestamp":"2026-03-29T12:00:00Z","message":"old"}\n',
+        encoding="utf-8",
+    )
+    (structured_dir / "a_new_structured.jsonl").write_text(
+        '{"timestamp":"2026-03-30T12:00:03Z","message":"newer"}\n'
+        '{"timestamp":"2026-03-30T12:00:04Z","message":"newest"}\n',
+        encoding="utf-8",
+    )
+
+    result = logs_tail(remote_context, source="structured", limit=2)
+
+    assert [record["message"] for record in result["records"]] == ["newer", "newest"]
+
+
+def test_logs_search_stops_parsing_after_reaching_limit(remote_context, monkeypatch):
+    structured_dir = remote_context.logs_dir / "structured"
+    structured_dir.mkdir()
+    (structured_dir / "worker_structured_1.jsonl").write_text(
+        '{"timestamp":"2026-03-30T12:00:00Z","message":"match"}\n'
+        "unreachable\n",
+        encoding="utf-8",
+    )
+    from admin import remote_ops
+
+    original_parse = remote_ops.parse_jsonl_record
+
+    def parse_until_match(raw_line, *, source, file_path):
+        if raw_line == "unreachable\n":
+            raise AssertionError("search parsed beyond its bounded result set")
+        return original_parse(raw_line, source=source, file_path=file_path)
+
+    monkeypatch.setattr(remote_ops, "parse_jsonl_record", parse_until_match)
+
+    result = logs_search(
+        remote_context,
+        source="structured",
+        query="match",
+        filters={},
+        since=None,
+        until=None,
+        limit=1,
+    )
+
+    assert result["row_count"] == 1
+    assert result["records"][0]["message"] == "match"
 
 
 def test_preview_sanitize_content_metadata_returns_matching_rows(remote_context):

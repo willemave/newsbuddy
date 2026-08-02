@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import heapq
 import json
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -715,12 +717,15 @@ def logs_tail(
 ) -> dict[str, Any]:
     """Return the most recent records for a source."""
     bounded_limit = _bounded_limit(limit)
-    records = _collect_logs(context, source=source, limit=bounded_limit)
-    ordered = sorted(
-        records,
-        key=lambda record: parse_record_timestamp(record) or datetime.min.replace(tzinfo=UTC),
-    )
-    tail_records = ordered[-bounded_limit:]
+    selected: list[tuple[datetime, int, dict[str, Any]]] = []
+    for index, record in enumerate(_iter_logs(context, source=source)):
+        timestamp = parse_record_timestamp(record) or datetime.min.replace(tzinfo=UTC)
+        candidate = (timestamp, index, record)
+        if len(selected) < bounded_limit:
+            heapq.heappush(selected, candidate)
+        elif candidate[:2] > selected[0][:2]:
+            heapq.heapreplace(selected, candidate)
+    tail_records = [item[2] for item in sorted(selected, key=lambda item: item[:2])]
     return _render_logs(tail_records, unsafe_raw=unsafe_raw, limit=bounded_limit)
 
 
@@ -736,28 +741,32 @@ def logs_exceptions(
 ) -> dict[str, Any]:
     """Return the most recent error records from the structured exception logs."""
     bounded_limit = _bounded_limit(limit)
-    records = _collect_logs(context, source="errors", limit=None)
-    filtered = _filter_log_records(records, since=since, until=until)
-    ordered = sorted(
-        filtered,
-        key=lambda record: parse_record_timestamp(record) or datetime.min.replace(tzinfo=UTC),
-        reverse=True,
-    )
-
-    matched: list[dict[str, Any]] = []
-    for record in ordered:
+    available = 0
+    selected: list[tuple[datetime, int, dict[str, Any]]] = []
+    for index, record in enumerate(_iter_logs(context, source="errors")):
+        if not _record_is_in_time_range(record, since=since, until=until):
+            continue
+        available += 1
         if component and str(record.get("component")) != str(component):
             continue
         if operation and str(record.get("operation")) != str(operation):
             continue
-        matched.append(record)
-        if len(matched) >= bounded_limit:
-            break
+        timestamp = parse_record_timestamp(record) or datetime.min.replace(tzinfo=UTC)
+        candidate = (timestamp, -index, record)
+        if len(selected) < bounded_limit:
+            heapq.heappush(selected, candidate)
+        elif candidate[:2] > selected[0][:2]:
+            heapq.heapreplace(selected, candidate)
+
+    matched = [
+        item[2]
+        for item in sorted(selected, key=lambda item: item[:2], reverse=True)
+    ]
 
     rendered = matched if unsafe_raw else [redact_value(record) for record in matched]
     return {
         "limit": bounded_limit,
-        "available": len(ordered),
+        "available": available,
         "returned": len(rendered),
         "exceptions": rendered,
         "redacted": not unsafe_raw,
@@ -775,9 +784,14 @@ def logs_range(
 ) -> dict[str, Any]:
     """Return records in a time range."""
     bounded_limit = _bounded_limit(limit)
-    records = _collect_logs(context, source=source, limit=None)
-    filtered = _filter_log_records(records, since=since, until=until)
-    return _render_logs(filtered[:bounded_limit], unsafe_raw=unsafe_raw, limit=bounded_limit)
+    matched: list[dict[str, Any]] = []
+    for record in _iter_logs(context, source=source):
+        if not _record_is_in_time_range(record, since=since, until=until):
+            continue
+        matched.append(record)
+        if len(matched) >= bounded_limit:
+            break
+    return _render_logs(matched, unsafe_raw=unsafe_raw, limit=bounded_limit)
 
 
 def logs_search(
@@ -793,10 +807,10 @@ def logs_search(
 ) -> dict[str, Any]:
     """Search logs by text and structured filters."""
     bounded_limit = _bounded_limit(limit)
-    records = _collect_logs(context, source=source, limit=None)
-    time_filtered = _filter_log_records(records, since=since, until=until)
-    matched = []
-    for record in time_filtered:
+    matched: list[dict[str, Any]] = []
+    for record in _iter_logs(context, source=source):
+        if not _record_is_in_time_range(record, since=since, until=until):
+            continue
         if not record_matches_query(record, query):
             continue
         if not record_matches_filters(record, filters):
@@ -1208,50 +1222,38 @@ def _strip_disallowed_control_characters(value: str) -> str:
     )
 
 
-def _collect_logs(
-    context: RemoteContext,
-    *,
-    source: str,
-    limit: int | None,
-) -> list[dict[str, Any]]:
+def _iter_logs(context: RemoteContext, *, source: str) -> Iterator[dict[str, Any]]:
+    """Yield parsed log records without retaining the full log corpus in memory."""
     if source in {"structured", "errors"}:
         directory = context.logs_dir / source
-        records: list[dict[str, Any]] = []
         for file_path in sorted(directory.glob("*.jsonl")):
             with file_path.open(encoding="utf-8") as handle:
                 for raw_line in handle:
                     parsed = parse_jsonl_record(raw_line, source=source, file_path=str(file_path))
                     if parsed is not None:
-                        records.append(parsed)
-        return records
+                        yield parsed
+        return
 
     log_path = context.service_log_dir / f"{source}.log"
     if not log_path.exists():
-        return []
-    lines: deque[dict[str, Any]] = deque(maxlen=limit or 10_000)
+        return
     with log_path.open(encoding="utf-8") as handle:
         for raw_line in handle:
             parsed = parse_service_log_line(raw_line, source=source, file_path=str(log_path))
             if parsed is not None:
-                lines.append(parsed)
-    return list(lines)
+                yield parsed
 
 
-def _filter_log_records(
-    records: list[dict[str, Any]],
+def _record_is_in_time_range(
+    record: dict[str, Any],
     *,
     since: datetime | None,
     until: datetime | None,
-) -> list[dict[str, Any]]:
-    filtered = []
-    for record in records:
-        timestamp = parse_record_timestamp(record)
-        if since is not None and timestamp is not None and timestamp < since:
-            continue
-        if until is not None and timestamp is not None and timestamp > until:
-            continue
-        filtered.append(record)
-    return filtered
+) -> bool:
+    timestamp = parse_record_timestamp(record)
+    if since is not None and timestamp is not None and timestamp < since:
+        return False
+    return not (until is not None and timestamp is not None and timestamp > until)
 
 
 def _render_logs(records: list[dict[str, Any]], *, unsafe_raw: bool, limit: int) -> dict[str, Any]:
