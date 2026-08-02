@@ -404,10 +404,7 @@ def _run_pending_analyze_url_tasks(session_factory: sessionmaker) -> None:
                 content_id=task_row.content_id,
                 payload=dict(task_row.payload or {}),
                 retry_count=int(task_row.retry_count or 0),
-                status=task_row.status,
-                queue_name=task_row.queue_name,
                 created_at=task_row.created_at,
-                started_at=task_row.started_at,
             )
 
         result = handler.handle(task, context)
