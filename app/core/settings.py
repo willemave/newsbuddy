@@ -403,10 +403,10 @@ class Settings(BaseSettings):
     x_bookmark_sync_enabled: bool = False
     x_posts_read_cost_usd: float | None = Field(default=0.005, ge=0.0)
     x_users_read_cost_usd: float | None = Field(default=0.01, ge=0.0)
-    # Bookmarks have no since_id cursor; frequent first-page reads rely on X's
-    # same-day resource deduplication and stop at our persisted last-seen ID.
-    x_sync_min_interval_minutes: int = Field(default=15, ge=1)
-    x_bookmark_sync_min_interval_minutes: int = Field(default=15, ge=1)
+    # Bookmarks have no since_id cursor. Hourly first-page reads stop at the
+    # persisted last-seen ID and keep normal ingestion latency below 75 minutes.
+    x_sync_min_interval_minutes: int = Field(default=60, ge=1)
+    x_bookmark_sync_min_interval_minutes: int = Field(default=60, ge=1)
 
     # PDF extraction (Gemini)
     pdf_gemini_model: str = Field(

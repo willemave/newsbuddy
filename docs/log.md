@@ -37,6 +37,26 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** After deployment, safely enqueue news item 21750 once for reprocessing.
 - **Commits:** Included in this commit.
 
+### 2026-08-02 — `willem/reduce-x-api-cost` — Clean up X cost-reduction patch
+
+- **Status:** Complete
+- **Scope:** Current unstaged X cadence, usage-accounting, tests, and documentation diff.
+- **Decisions:** Preserve the implemented cadence and billing behavior; leave the separate global and bookmark-channel cooldown controls because collapsing them would change the existing config contract.
+- **Changes:** Simplified resource-ID normalization to one typed set operation, ignored malformed non-string IDs instead of stringifying them, removed a mirrored page-size assertion, and clarified that active queue deduplication is scoped by connection and trigger payload.
+- **Validation:** Focused Ruff passed; 76 X integration/API, vendor-cost, handler, and queue tests passed; `git diff --check` passed.
+- **Remaining:** None beyond the parent work item's normal review and rollout.
+- **Commits:** Included in this commit.
+
+### 2026-08-02 — `willem/reduce-x-api-cost` — Reduce X bookmark-sync cost
+
+- **Status:** Complete
+- **Scope:** X bookmark cadence, checkpoint pagination, vendor usage accounting, focused tests, and architecture/config documentation.
+- **Decisions:** Keep bookmark sync enabled and incremental; use an hourly effective interval because production has averaged about one new bookmark per day and no non-initial hour exceeded three new items; retain the 15-minute scheduler fan-out and queue deduplication so failed or jittered work is retried promptly.
+- **Changes:** Changed default X sync cooldowns from 15 to 60 minutes, reduced bookmark pages from 10 to 5 with checkpoint-driven pagination retained, documented the environment controls, attached returned X resource IDs to usage rows, and estimated X cost using its UTC-day resource deduplication while retaining raw request/resource counts.
+- **Validation:** Read-only production DB/runtime/log evidence confirmed one active connection, 95 non-retried cron tasks, 94 ten-resource reads, and zero new bookmarks over the rolling 24 hours. Focused Ruff passed; 76 X integration/API, vendor-cost, handler, and queue tests passed; `git diff --check` passed.
+- **Remaining:** Review and roll out through the normal deployment path; confirm live interval settings and compare post-deploy raw versus billable X resources. No production mutation, commit, push, or deployment was performed.
+- **Commits:** Included in this commit.
+
 ### 2026-08-01 — `main` — Add durable implementation guidance
 
 - **Status:** Complete

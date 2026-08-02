@@ -273,3 +273,5 @@ def test_fetch_tweet_by_id_records_vendor_usage(db_session, monkeypatch) -> None
     assert persisted.user_id == 11
     assert persisted.request_count == 1
     assert persisted.resource_count == 1
+    assert persisted.metadata_json["resource_ids"] == ["123"]
+    assert persisted.metadata_json["billable_resource_count"] == 1

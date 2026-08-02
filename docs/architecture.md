@@ -1269,6 +1269,16 @@ Capabilities:
 - support downstream tweet lookup, thread lookup, linked tweet lookup, and linked article resolution
 - persist sync cursors and summaries
 
+The production scheduler fans out integration jobs every 15 minutes, while the service-level
+cooldown makes hourly bookmark polling the default. Queue payload deduplication prevents duplicate
+active jobs for the same connection and trigger, and the service persists the newest bookmark ID as its checkpoint.
+Each run reads pages of 5 and stops as soon as that checkpoint is encountered, so ordinary runs
+read only the first page while still retaining bounded pagination for bursts and initial backfill.
+
+X usage telemetry keeps raw request/resource counts for operational analysis and stores returned
+resource IDs so estimated cost can follow X's UTC-day resource deduplication. This prevents repeated
+polls of the same first page from being counted as newly billable resources on every request.
+
 Explicit non-goals in the active runtime:
 
 - no reverse-chronological home timeline ingestion into news rows

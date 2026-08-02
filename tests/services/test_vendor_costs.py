@@ -147,6 +147,54 @@ def test_record_vendor_usage_out_of_band_uses_dedicated_session(db_session, monk
     assert persisted.total_tokens == 20
 
 
+def test_record_x_usage_charges_only_new_resources_within_utc_day(db_session) -> None:
+    first = vendor_costs.record_vendor_usage(
+        db_session,
+        provider="x",
+        model="posts.read",
+        feature="x_sync",
+        operation="x_sync.bookmarks.read",
+        usage={"request_count": 1, "resource_count": 2},
+        metadata={"resource_ids": ["post-1", "post-2"]},
+    )
+    second = vendor_costs.record_vendor_usage(
+        db_session,
+        provider="x",
+        model="posts.read",
+        feature="x_sync",
+        operation="x_sync.bookmarks.read",
+        usage={"request_count": 1, "resource_count": 2},
+        metadata={"resource_ids": ["post-2", "post-3"]},
+    )
+    db_session.commit()
+
+    assert first is not None
+    assert second is not None
+    assert first.resource_count == 2
+    assert first.cost_usd == 0.01
+    assert first.metadata_json["billable_resource_count"] == 2
+    assert second.resource_count == 2
+    assert second.cost_usd == 0.005
+    assert second.metadata_json["billable_resource_count"] == 1
+    assert second.metadata_json["billing_deduplication_window"] == "utc_day"
+
+
+def test_record_x_usage_without_resource_ids_keeps_conservative_cost(db_session) -> None:
+    record = vendor_costs.record_vendor_usage(
+        db_session,
+        provider="x",
+        model="posts.read",
+        feature="x_api",
+        operation="x_api.posts.read",
+        usage={"request_count": 1, "resource_count": 2},
+    )
+    db_session.commit()
+
+    assert record is not None
+    assert record.cost_usd == 0.01
+    assert "billable_resource_count" not in record.metadata_json
+
+
 def test_estimate_vendor_cost_uses_google_alias_pricing(monkeypatch) -> None:
     monkeypatch.setattr(
         vendor_costs,

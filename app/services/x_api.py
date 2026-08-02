@@ -165,7 +165,10 @@ def get_authenticated_user(*, access_token: str, telemetry: dict[str, Any] | Non
     if not user_id:
         raise RuntimeError("X /users/me response missing user id")
     _record_x_usage(
-        model="users.read", usage={"request_count": 1, "resource_count": 1}, telemetry=telemetry
+        model="users.read",
+        usage={"request_count": 1, "resource_count": 1},
+        telemetry=telemetry,
+        resource_ids=[user_id],
     )
     return XUser(
         id=user_id,
@@ -206,6 +209,7 @@ def fetch_tweet_by_id(
         model="posts.read",
         usage={"request_count": 1, "resource_count": 1 if isinstance(data, dict) else 0},
         telemetry=telemetry,
+        resource_ids=[str(data.get("id"))] if isinstance(data, dict) and data.get("id") else [],
     )
     if not isinstance(data, dict):
         return XTweetFetchResult(success=False, error="Tweet not found")
@@ -287,6 +291,7 @@ def fetch_tweets_by_ids(
         model="posts.read",
         usage={"request_count": 1, "resource_count": len(tweets)},
         telemetry=telemetry,
+        resource_ids=[tweet.id for tweet in tweets],
     )
     return tweets
 
@@ -460,6 +465,7 @@ def _fetch_tweets_page(
         model="posts.read",
         usage={"request_count": 1, "resource_count": len(page.tweets)},
         telemetry=telemetry,
+        resource_ids=[tweet.id for tweet in page.tweets],
     )
     return page
 
@@ -623,8 +629,13 @@ def _record_x_usage(
     model: str,
     usage: dict[str, int | None],
     telemetry: dict[str, Any] | None,
+    resource_ids: list[str] | None = None,
 ) -> None:
     telemetry_data = telemetry or {}
+    raw_metadata = telemetry_data.get("metadata")
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+    if resource_ids is not None:
+        metadata["resource_ids"] = resource_ids
     record_vendor_usage_out_of_band(
         provider="x",
         model=model,
@@ -638,7 +649,7 @@ def _record_x_usage(
         session_id=telemetry_data.get("session_id"),
         message_id=telemetry_data.get("message_id"),
         user_id=telemetry_data.get("user_id"),
-        metadata=telemetry_data.get("metadata"),
+        metadata=metadata,
     )
 
 

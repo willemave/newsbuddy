@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -18,8 +19,10 @@ from app.services.llm_models import resolve_model_provider
 
 logger = get_logger("vendor.cost")
 
-PRICING_VERSION = "2026-07-30"
+PRICING_VERSION = "2026-08-02"
 USD = "USD"
+X_RESOURCE_IDS_KEY = "resource_ids"
+X_BILLABLE_RESOURCE_COUNT_KEY = "billable_resource_count"
 
 
 @dataclass(frozen=True)
@@ -203,11 +206,24 @@ def record_vendor_usage(
         return None
 
     provider_name = provider or resolve_model_provider(model)
+    normalized_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    cost_usage = normalized_usage
+    billable_resource_count = _resolve_x_billable_resource_count(
+        db,
+        provider=provider_name,
+        model=model,
+        metadata=normalized_metadata,
+    )
+    if billable_resource_count is not None:
+        cost_usage = {**normalized_usage, "resource_count": billable_resource_count}
+        normalized_metadata[X_BILLABLE_RESOURCE_COUNT_KEY] = billable_resource_count
+        normalized_metadata["billing_deduplication_window"] = "utc_day"
+
     cost_usd = estimate_vendor_cost_usd(
         provider=provider_name,
         model=model,
-        usage=normalized_usage,
-        metadata=metadata,
+        usage=cost_usage,
+        metadata=normalized_metadata,
     )
     record = VendorUsageRecord(
         provider=provider_name,
@@ -231,7 +247,7 @@ def record_vendor_usage(
         cost_usd=cast(Any, cost_usd),
         currency=USD,
         pricing_version=PRICING_VERSION,
-        metadata_json=metadata or {},
+        metadata_json=normalized_metadata,
     )
     db.add(record)
     try:
@@ -295,6 +311,48 @@ def record_vendor_usage(
     )
 
     return record
+
+
+def _resolve_x_billable_resource_count(
+    db: Session,
+    *,
+    provider: str,
+    model: str,
+    metadata: dict[str, Any],
+) -> int | None:
+    """Estimate X billable resources after its UTC-day resource deduplication."""
+    if provider != "x" or model not in {"posts.read", "users.read"}:
+        return None
+
+    resource_ids = _normalize_resource_ids(metadata.get(X_RESOURCE_IDS_KEY))
+    if resource_ids is None:
+        return None
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    utc_day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_day_end = utc_day_start + timedelta(days=1)
+    prior_metadata_rows = (
+        db.query(VendorUsageRecord.metadata_json)
+        .filter(VendorUsageRecord.provider == provider)
+        .filter(VendorUsageRecord.model == model)
+        .filter(VendorUsageRecord.created_at >= utc_day_start)
+        .filter(VendorUsageRecord.created_at < utc_day_end)
+        .all()
+    )
+    previously_seen_ids: set[str] = set()
+    for (prior_metadata,) in prior_metadata_rows:
+        if not isinstance(prior_metadata, dict):
+            continue
+        prior_ids = _normalize_resource_ids(prior_metadata.get(X_RESOURCE_IDS_KEY))
+        if prior_ids is not None:
+            previously_seen_ids.update(prior_ids)
+    return len(resource_ids.difference(previously_seen_ids))
+
+
+def _normalize_resource_ids(value: object) -> set[str] | None:
+    if not isinstance(value, list):
+        return None
+    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
 
 
 def record_vendor_usage_out_of_band(

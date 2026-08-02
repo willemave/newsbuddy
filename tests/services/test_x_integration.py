@@ -333,8 +333,55 @@ def test_sync_x_sources_requests_small_bookmark_pages(
     summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
 
     assert summary.status == "success"
-    assert captured_max_results == [x_integration.BOOKMARK_SYNC_PAGE_SIZE]
-    assert captured_max_results == [10]
+    assert captured_max_results == [5]
+
+
+def test_sync_x_sources_stops_on_persisted_bookmark_checkpoint(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    """A first-page checkpoint should avoid unnecessary history pagination."""
+    connection = _build_connection(
+        test_user,
+        ["tweet.read", "users.read", "bookmark.read"],
+    )
+    db_session.add(connection)
+    db_session.flush()
+    db_session.add(
+        UserIntegrationSyncState(
+            connection_id=connection.id,
+            last_status="success",
+            sync_metadata={"bookmarks": {"last_synced_item_id": "100"}},
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_valid_access_token",
+        lambda *_args, **_kwargs: "token",
+    )
+    monkeypatch.setattr(
+        "app.services.x_integration._ensure_provider_user_id",
+        lambda *_args, **_kwargs: "42",
+    )
+    pagination_tokens: list[str | None] = []
+
+    def fake_fetch_bookmarks(**kwargs):  # noqa: ANN003
+        pagination_tokens.append(kwargs["pagination_token"])
+        return XTweetsPage(
+            tweets=[_tweet("101", "New bookmark"), _tweet("100", "Checkpoint")],
+            next_token="older-page",
+        )
+
+    monkeypatch.setattr("app.services.x_integration.fetch_bookmarks", fake_fetch_bookmarks)
+
+    summary = sync_x_sources_for_user(db_session, user_id=test_user.id)
+
+    assert pagination_tokens == [None]
+    assert summary.fetched == 2
+    assert summary.accepted == 1
+    assert summary.created == 1
 
 
 def test_sync_x_sources_persists_bookmark_tweet_snapshot_for_later_resolution(
