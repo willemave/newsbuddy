@@ -46,3 +46,13 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** Not started.
 - **Remaining:** Complete all release gates, push the tested SHA, verify the commit-matched Docker deployment and live health.
 - **Commits:** Uncommitted
+
+### 2026-08-02 — `main` — Prevent transient Briefing Retry on reopen
+
+- **Status:** Complete
+- **Scope:** iOS Briefing lens task ownership, inactive lifecycle behavior, and focused view-model tests.
+- **Decisions:** Treat replaced or cancelled lens completions as stale regardless of the URL error code, and allow the selected lens hydration to finish while cancelling only speculative neighbor loads.
+- **Changes:** Added a generation/cancellation guard to lens error handling, preserved selected-lens hydration across deactivation, disabled inactive neighbor prefetch, and added regressions for late `-1005` errors and inactive hydration.
+- **Validation:** Both new tests failed against the prior behavior; after the fix, 43 `BriefingViewModelTests` and `BriefingViewModelRefreshTests` passed, the `newsly` iOS 26.5 Simulator build succeeded, and `git diff --check` passed.
+- **Remaining:** None.
+- **Commits:** Included in this commit.

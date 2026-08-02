@@ -55,6 +55,8 @@ final class BriefingViewModel {
     private(set) var refreshPhase: RefreshPhase = .idle
     private var destination: BriefingDestination?
     private(set) var isActive = false
+    /// Direct loads may prefetch; lifecycle deactivation pauses speculative neighbors.
+    private var allowsNeighborPrefetch = true
     /// True while the selected lens is scrolled into reading — the masthead
     /// above the pager collapses to hand the space to the content.
     private(set) var isMastheadCompact = false
@@ -193,6 +195,7 @@ final class BriefingViewModel {
             beginLensRetention(for: selectedLensKey)
         }
         isActive = active
+        allowsNeighborPrefetch = active
         if active, let selectedLensKey {
             protectLens(selectedLensKey)
         }
@@ -200,7 +203,7 @@ final class BriefingViewModel {
             await self?.loadIndexIfNeeded()
         }
         if !active {
-            cancelLensLoads()
+            cancelBackgroundLensLoads()
             firstRunCoordinator.stopPolling()
         } else {
             scheduleFirstRunPollIfNeeded()
@@ -505,7 +508,8 @@ final class BriefingViewModel {
     }
 
     func prefetchNeighborsIfSelected(_ loadedKey: String) {
-        guard loadedKey == selectedLensKey,
+        guard allowsNeighborPrefetch,
+              loadedKey == selectedLensKey,
               let selected = lenses[loadedKey],
               !selected.hasMore,
               lensStates[loadedKey]?.isStale != true else {

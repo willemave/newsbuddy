@@ -135,6 +135,9 @@ extension BriefingViewModel {
                 self.scheduleSnapshotSave()
                 self.prefetchNeighborsIfSelected(key)
             } catch {
+                guard self.tasks.isCurrent(token), !Task.isCancelled else {
+                    return
+                }
                 guard !isNetworkCancellation(error) else {
                     self.mutateLensState(key) { $0.loadPhase = .idle }
                     return

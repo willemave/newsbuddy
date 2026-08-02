@@ -15,6 +15,33 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isActive)
     }
 
+    func testDeactivationKeepsSelectedLensHydrationAndCancelsPrefetch() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(lenses: [
+                    makeLensSummary(key: "today", position: 0),
+                    makeLensSummary(key: "later", position: 1),
+                ]),
+                etag: "etag-1"
+            )
+        ]
+        service.lensResponses["today"] = makeLens(key: "today", position: 0)
+        service.lensResponses["later"] = makeLens(key: "later", position: 1)
+        service.fetchLensDelayNanoseconds = 150_000_000
+        let viewModel = BriefingViewModel(service: service)
+
+        viewModel.setActive(true)
+        await waitForBriefingCondition { service.fetchLensKeys == ["today"] }
+        viewModel.setActive(false)
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(service.fetchLensKeys, ["today"])
+        XCTAssertNotNil(viewModel.lenses["today"])
+        XCTAssertNil(viewModel.lenses["later"])
+    }
+
     func testFirstRunLoadsStartHereWithoutAReadableCategory() async {
         let service = MockBriefingService()
         service.indexResults = [
@@ -738,6 +765,39 @@ final class BriefingViewModelTests: XCTestCase {
         await waitForBriefingCondition { viewModel.selectedLens?.version == 2 }
 
         XCTAssertEqual(viewModel.selectedLens?.segments.first?.id, 20)
+        XCTAssertEqual(service.fetchLensKeys, ["today", "today"])
+    }
+
+    func testCancelledOldLensErrorCannotOverwriteNewGeneration() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
+            .value(makeIndex(version: 2, lenses: [makeLensSummary(key: "today")]), etag: "etag-2"),
+        ]
+        service.lensResponses["today"] = makeLens(
+            key: "today",
+            version: 1,
+            segments: [makeSegment(id: 10)]
+        )
+        service.fetchLensDelaysNanoseconds = [500_000_000, 500_000_000]
+        service.fetchLensErrors = [URLError(.networkConnectionLost), nil]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { service.fetchLensKeys == ["today"] }
+        service.lensResponses["today"] = makeLens(
+            key: "today",
+            version: 2,
+            segments: [makeSegment(id: 20)]
+        )
+
+        await viewModel.refreshIndex()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertNil(viewModel.lensErrors["today"])
+        await waitForBriefingCondition(timeoutNanoseconds: 1_000_000_000) {
+            viewModel.selectedLens?.version == 2
+        }
         XCTAssertEqual(service.fetchLensKeys, ["today", "today"])
     }
 
