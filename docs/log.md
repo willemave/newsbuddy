@@ -145,3 +145,23 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** Ruff passed for `admin` and `tests/admin`; 117 admin, deployment, and heartbeat tests passed; targeted mypy and `git diff --check` passed.
 - **Remaining:** Define retention for 3.1 GB of indefinitely retained production JSONL logs and consider running remote operator commands in a resource-limited one-off container.
 - **Commits:** Included in this commit.
+
+### 2026-08-02 — `main` — Expand implementation principles
+
+- **Status:** Complete
+- **Scope:** Root agent guidance for simplicity, compatibility, modularity, and dependency reuse.
+- **Decisions:** Remove obsolete internal paths by default, but retain explicitly owned compatibility for active external contracts and staged migrations so deployed clients and data transitions remain safe.
+- **Changes:** Added rules favoring the simplest complete implementation, clear component boundaries, existing dependency capabilities, and established libraries that reduce overall complexity.
+- **Validation:** Reviewed the resulting Markdown and ran `git diff --check`.
+- **Remaining:** None.
+- **Commits:** Included in this commit.
+
+### 2026-08-02 — `main` — Restore X API module-size compliance
+
+- **Status:** Complete
+- **Scope:** Release-gate remediation for the X API module-size guardrail.
+- **Decisions:** Keep the public `app.services.x_api` import surface intact while moving its response value objects to the existing `x_models` owner.
+- **Changes:** Relocated X user, tweet, token, fetch-result, and page dataclasses into `x_models`; `x_api` re-exports the imported names for compatibility.
+- **Validation:** Focused Ruff, 31 X API/integration tests, module-size guardrails, and the commit-time mypy check passed.
+- **Remaining:** Complete the release gates and production deployment.
+- **Commits:** Included in this release.

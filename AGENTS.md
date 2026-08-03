@@ -12,8 +12,9 @@ This file stays minimal and only captures repo-specific working rules.
 
 - Never commit or push unless explicitly asked.
 - Prefer small, local changes that follow the existing layer boundaries.
+- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
 - Build changes as small, end-to-end working slices. Each increment must leave the affected product path functional and verifiable.
-- Prefer durable designs aligned with the intended architecture. Avoid disposable parallel paths; when staged compatibility is necessary, define the canonical owner and removal condition.
+- Prefer durable designs aligned with the intended architecture. Remove obsolete internal paths instead of adding fallbacks or compatibility layers. When an active external contract or staged migration requires compatibility, define the canonical owner and removal condition.
 - Keep `docs/log.md` current while implementing. Record concise, dated entries with the branch, scope, decisions, validation, and unfinished work; preserve unrelated entries.
 - Keep durable architecture notes in `docs/architecture.md`; keep this file limited to agent operating rules and routing.
 
@@ -73,6 +74,9 @@ Production state sync:
 ## Code Rules
 
 - Prefer functions over classes unless stateful objects clearly improve the design.
+- Keep components modular and concerns clearly separated.
+- Check the capabilities, documentation, and types of existing dependencies before writing custom code or adding a package.
+- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability; do not reimplement common functionality without a clear reason.
 - Use full type hints and validate boundary inputs with Pydantic v2.
 - Favor guard clauses and straightforward control flow over nested branches.
 - Use `lower_snake_case` for Python names and UPPER_CASE for constants.
