@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
@@ -12,7 +11,14 @@ from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.services.twitter_share import extract_tweet_id
 from app.services.vendor_costs import record_vendor_usage_out_of_band
-from app.services.x_models import XList
+from app.services.x_models import (
+    XList,
+    XTokenResponse,
+    XTweet,
+    XTweetFetchResult,
+    XTweetsPage,
+    XUser,
+)
 from app.services.x_oauth import revoke_oauth_token
 
 logger = get_logger(__name__)
@@ -35,68 +41,6 @@ X_MEDIA_FIELDS = "type,duration_ms,public_metrics"
 X_TWEET_EXPANSIONS = (
     "author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys"
 )
-
-
-@dataclass(frozen=True)
-class XUser:
-    """Normalized X user profile."""
-
-    id: str
-    username: str | None = None
-    name: str | None = None
-
-
-@dataclass(frozen=True)
-class XTweet:
-    """Normalized X tweet payload."""
-
-    id: str
-    text: str
-    author_id: str | None = None
-    author_username: str | None = None
-    author_name: str | None = None
-    created_at: str | None = None
-    like_count: int | None = None
-    retweet_count: int | None = None
-    reply_count: int | None = None
-    conversation_id: str | None = None
-    in_reply_to_user_id: str | None = None
-    referenced_tweet_types: list[str] = field(default_factory=list)
-    article_title: str | None = None
-    article_text: str | None = None
-    note_tweet_text: str | None = None
-    external_urls: list[str] = field(default_factory=list)
-    linked_tweet_ids: list[str] = field(default_factory=list)
-    has_video: bool = False
-    video_duration_ms: int | None = None
-
-
-@dataclass(frozen=True)
-class XTokenResponse:
-    """OAuth token response payload."""
-
-    access_token: str
-    refresh_token: str | None
-    expires_in: int | None
-    scopes: list[str]
-
-
-@dataclass(frozen=True)
-class XTweetFetchResult:
-    """Fetch result for a tweet lookup call."""
-
-    success: bool
-    tweet: XTweet | None = None
-    error: str | None = None
-
-
-@dataclass(frozen=True)
-class XTweetsPage:
-    """Page of tweets returned from an X API collection endpoint."""
-
-    tweets: list[XTweet]
-    included_tweets: dict[str, XTweet] = field(default_factory=dict)
-    next_token: str | None = None
 
 
 def is_tweet_url(url: str) -> bool:
