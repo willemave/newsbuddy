@@ -146,3 +146,56 @@ def test_is_external_url_allows_front_media() -> None:
         )
         is False
     )
+
+
+def test_reddit_target_failure_is_reported_in_run_stats(
+    mocker: MockerFixture,
+) -> None:
+    scraper = RedditUnifiedScraper()
+    scraper.targets = [RedditTarget(subreddit="unavailable", limit=5, visibility_scope="user")]
+    mocker.patch.object(scraper, "_get_reddit_client", return_value=mocker.Mock())
+    mocker.patch.object(
+        scraper,
+        "_scrape_subreddit",
+        side_effect=RuntimeError("provider unavailable"),
+    )
+    mocker.patch.object(
+        scraper,
+        "_save_items_with_stats",
+        return_value={
+            "saved": 0,
+            "duplicates": 0,
+            "errors": 0,
+            "error_details": [],
+            "processed_by_config_id": {},
+        },
+    )
+
+    stats = scraper.run_with_stats()
+
+    assert (stats.scraped, stats.saved, stats.errors) == (0, 0, 1)
+    assert stats.error_details == ["r/unavailable: provider unavailable"]
+
+
+def test_reddit_configured_target_without_credentials_is_an_error(
+    mocker: MockerFixture,
+) -> None:
+    scraper = RedditUnifiedScraper()
+    scraper.targets = [RedditTarget(subreddit="configured", limit=5, visibility_scope="user")]
+    mocker.patch.object(scraper, "_get_reddit_client", return_value=None)
+    mocker.patch.object(
+        scraper,
+        "_save_items_with_stats",
+        return_value={
+            "saved": 0,
+            "duplicates": 0,
+            "errors": 0,
+            "error_details": [],
+            "processed_by_config_id": {},
+        },
+    )
+
+    stats = scraper.run_with_stats()
+
+    assert (stats.scraped, stats.saved, stats.errors) == (0, 0, 1)
+    assert stats.error_details == ["reddit: Reddit credentials are not configured"]

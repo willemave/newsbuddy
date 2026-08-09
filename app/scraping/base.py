@@ -97,6 +97,7 @@ class BaseScraper(ABC):
     def __init__(self, name: str):
         self.name = name
         self.queue_service = get_queue_service()
+        self._scrape_error_details: list[str] = []
 
     @abstractmethod
     def scrape(self) -> list[dict[str, Any]]:
@@ -123,17 +124,20 @@ class BaseScraper(ABC):
         stats = ScraperStats()
 
         try:
+            self._scrape_error_details.clear()
             # Scrape items
             items = self.scrape()
             stats.scraped = len(items)
+            stats.errors = len(self._scrape_error_details)
+            stats.error_details = list(self._scrape_error_details)
             logger.info(f"Scraped {stats.scraped} items from {self.name}")
 
             # Save to database
             save_stats = self._save_items_with_stats(items)
             stats.saved = save_stats["saved"]
             stats.duplicates = save_stats["duplicates"]
-            stats.errors = save_stats["errors"]
-            stats.error_details = save_stats["error_details"]
+            stats.errors += save_stats["errors"]
+            stats.error_details.extend(save_stats["error_details"])
             stats.processed_by_config_id = save_stats["processed_by_config_id"]
 
             logger.info(
@@ -142,11 +146,19 @@ class BaseScraper(ABC):
             )
 
         except Exception as e:
-            logger.error(f"Error in {self.name} scraper: {e}")
+            logger.exception("Error in %s scraper", self.name)
             stats.errors = 1
             stats.error_details = [str(e)]
 
         return stats
+
+    def _record_scrape_error(self, source: str, exc: Exception) -> None:
+        """Include an isolated source failure in the owning scraper run stats."""
+        self._scrape_error_details.append(f"{source}: {exc}")
+
+    def _record_feed_job_error(self, feed: dict[str, Any], exc: Exception) -> None:
+        """Record an isolated configured-feed failure with a useful source label."""
+        self._record_scrape_error(str(feed.get("url") or "unknown feed"), exc)
 
     def _save_items_with_stats(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         """Save scraped items to database and return detailed statistics."""

@@ -2,6 +2,7 @@ import contextlib
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
+from xml.sax import SAXParseException
 
 from app.core.db import get_db
 from app.core.logging import get_logger
@@ -9,6 +10,7 @@ from app.models.contracts import ContentType
 from app.scraping.base import BaseScraper
 from app.scraping.feed_concurrency import run_feed_jobs
 from app.scraping.feed_fetch import fetch_and_parse_feed
+from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.scraper_configs import build_feed_payloads, list_active_configs_by_type
 
 logger = get_logger(__name__)
@@ -33,10 +35,12 @@ class PodcastUnifiedScraper(BaseScraper):
             logger.warning("No podcast feeds configured")
             return []
 
-        if len(feeds) > 1:
-            items = run_feed_jobs(feeds, self._scrape_feed, max_workers=4)
-        else:
-            items = self._scrape_feed(feeds[0])
+        items = run_feed_jobs(
+            feeds,
+            self._scrape_feed,
+            max_workers=4,
+            on_error=self._record_feed_job_error,
+        )
         logger.info(f"Podcast scraping completed. Processed {len(items)} total items")
         return items
 
@@ -61,11 +65,16 @@ class PodcastUnifiedScraper(BaseScraper):
 
         try:
             # Parse RSS feed with better encoding handling
-            parsed_feed = fetch_and_parse_feed(feed_url)
+            parsed_feed = fetch_and_parse_feed(
+                feed_url,
+                user_id=resolve_sandbox_user_id(user_id),
+                execution_id=config_id if isinstance(config_id, int) else None,
+            )
 
             # Check for parsing issues
             if parsed_feed.bozo:
-                exception_str = str(parsed_feed.bozo_exception).lower()
+                bozo_exception = parsed_feed.bozo_exception
+                exception_str = str(bozo_exception).lower()
 
                 # Check for critical errors that should skip processing
 
@@ -80,10 +89,17 @@ class PodcastUnifiedScraper(BaseScraper):
                             "context_data": {"feed_url": feed_url, "feed_name": feed_name},
                         },
                     )
-                    return items
+                    raise ValueError("Podcast feed returned HTML instead of XML")
 
-                # Check for malformed XML
-                if "not well-formed" in exception_str or "saxparseexception" in exception_str:
+                # Encoding declaration mismatches are common in otherwise usable feeds.
+                is_encoding_issue = "encoding" in exception_str or "declared as" in exception_str
+
+                # Check for malformed XML. SAXParseException's message does not include
+                # its class name, so classify by type as well as the legacy message.
+                if (
+                    isinstance(bozo_exception, SAXParseException)
+                    or "not well-formed" in exception_str
+                ) and not is_encoding_issue:
                     logger.error(
                         "Feed %s contains malformed XML. Skipping.",
                         feed_url,
@@ -93,12 +109,7 @@ class PodcastUnifiedScraper(BaseScraper):
                             "context_data": {"feed_url": feed_url, "feed_name": feed_name},
                         },
                     )
-                    return items
-
-                # Check if it's just an encoding mismatch (not critical)
-                is_encoding_issue = False
-                if "encoding" in exception_str or "declared as" in exception_str:
-                    is_encoding_issue = True
+                    raise ValueError("Podcast feed contains malformed XML")
 
                 # Only log other errors
                 if not is_encoding_issue:
@@ -134,15 +145,25 @@ class PodcastUnifiedScraper(BaseScraper):
             processed_entries = 0
             missing_audio_titles: list[str] = []
             for entry in entries_to_process:
-                item = self._process_entry(
-                    entry,
-                    feed_name,
-                    feed_info,
-                    feed_url,
-                    user_id,
-                    config_id,
-                    missing_audio_titles=missing_audio_titles,
-                )
+                try:
+                    item = self._process_entry(
+                        entry,
+                        feed_name,
+                        feed_info,
+                        feed_url,
+                        user_id,
+                        config_id,
+                        missing_audio_titles=missing_audio_titles,
+                    )
+                except Exception as entry_exc:
+                    entry_source = str(entry.get("link") or entry.get("id") or feed_url)
+                    logger.exception(
+                        "Error processing entry %s from feed %s",
+                        entry.get("id"),
+                        feed_url,
+                    )
+                    self._record_scrape_error(entry_source, entry_exc)
+                    continue
                 if item:
                     items.append(item)
                     processed_entries += 1
@@ -167,6 +188,7 @@ class PodcastUnifiedScraper(BaseScraper):
                     "context_data": {"feed_url": feed_url, "feed_name": feed_name},
                 },
             )
+            raise
         return items
 
     def _process_entry(

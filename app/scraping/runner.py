@@ -2,7 +2,7 @@ import re
 
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
-from app.models.domain.scraper_runs import ScraperStats
+from app.models.domain.scraper_runs import ScraperStats, scraper_run_status
 from app.scraping.aggregators import load_aggregator_scrapers
 from app.scraping.atom_unified import AtomScraper
 from app.scraping.base import BaseScraper
@@ -74,7 +74,7 @@ class ScraperRunner:
                         component="scraper_runner",
                         operation="run_scraper",
                         event_name="scraper.run",
-                        status="completed",
+                        status=scraper_run_status(stats),
                         source=scraper.name,
                         context_data={
                             "scraped": stats.scraped,
@@ -101,14 +101,24 @@ class ScraperRunner:
                 results[scraper.name] = ScraperStats(errors=1, error_details=[str(e)])
 
         total_saved = sum(stat.saved for stat in results.values())
+        statuses = [scraper_run_status(stat) for stat in results.values()]
+        failed_count = statuses.count("failed")
+        degraded_count = statuses.count("degraded")
         logger.info(
             "All scrapers complete",
             extra=build_log_extra(
                 component="scraper_runner",
                 operation="run_all",
                 event_name="scraper.run",
-                status="completed",
-                context_data={"total_saved": total_saved, "scraper_count": len(results)},
+                status=(
+                    "failed" if failed_count else "degraded" if degraded_count else "completed"
+                ),
+                context_data={
+                    "total_saved": total_saved,
+                    "scraper_count": len(results),
+                    "failed_count": failed_count,
+                    "degraded_count": degraded_count,
+                },
             ),
         )
 
@@ -128,7 +138,7 @@ class ScraperRunner:
                             component="scraper_runner",
                             operation="run_scraper",
                             event_name="scraper.run",
-                            status="completed",
+                            status=scraper_run_status(stats),
                             source=name,
                             context_data={
                                 "scraped": stats.scraped,

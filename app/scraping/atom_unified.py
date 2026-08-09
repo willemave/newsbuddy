@@ -13,6 +13,7 @@ from app.scraping.base import BaseScraper
 from app.scraping.feed_concurrency import run_feed_jobs
 from app.scraping.feed_fetch import fetch_and_parse_feed
 from app.scraping.rss_helpers import resolve_feed_source
+from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.scraper_configs import build_feed_payloads, list_active_configs_by_type
 
 ENCODING_OVERRIDE_EXCEPTIONS = tuple(
@@ -46,10 +47,12 @@ class AtomScraper(BaseScraper):
             logger.info("No Atom feeds configured. Skipping scrape.")
             return []
 
-        if len(feeds) > 1:
-            items = run_feed_jobs(feeds, self._scrape_feed, max_workers=4)
-        else:
-            items = self._scrape_feed(feeds[0])
+        items = run_feed_jobs(
+            feeds,
+            self._scrape_feed,
+            max_workers=4,
+            on_error=self._record_feed_job_error,
+        )
         logger.info(f"Atom scraping completed. Processed {len(items)} total items")
         return items
 
@@ -69,7 +72,11 @@ class AtomScraper(BaseScraper):
 
         logger.info(f"Scraping Atom feed: {feed_url} (source: {source_name}, limit: {limit})")
         try:
-            parsed_feed = fetch_and_parse_feed(feed_url)
+            parsed_feed = fetch_and_parse_feed(
+                feed_url,
+                user_id=resolve_sandbox_user_id(user_id),
+                execution_id=config_id if isinstance(config_id, int) else None,
+            )
 
             logger.debug(
                 "Parsed feed %s (entries=%s, bozo=%s, feed_title=%s)",
@@ -123,16 +130,26 @@ class AtomScraper(BaseScraper):
 
             processed_entries = 0
             for entry in entries_to_process:
-                item = self._process_entry(
-                    entry,
-                    feed_name,
-                    feed_description,
-                    feed_url,
-                    display_name,
-                    source_name,
-                    user_id,
-                    config_id,
-                )
+                try:
+                    item = self._process_entry(
+                        entry,
+                        feed_name,
+                        feed_description,
+                        feed_url,
+                        display_name,
+                        source_name,
+                        user_id,
+                        config_id,
+                    )
+                except Exception as entry_exc:
+                    entry_source = str(entry.get("link") or entry.get("id") or feed_url)
+                    logger.exception(
+                        "Error processing entry %s from feed %s",
+                        entry.get("id"),
+                        feed_url,
+                    )
+                    self._record_scrape_error(entry_source, entry_exc)
+                    continue
                 if item:
                     items.append(item)
                     processed_entries += 1
@@ -154,6 +171,7 @@ class AtomScraper(BaseScraper):
                     "context_data": {"feed_url": feed_url, "feed_name": "Unknown Feed"},
                 },
             )
+            raise
         return items
 
     def _process_entry(

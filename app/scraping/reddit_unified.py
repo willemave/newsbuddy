@@ -76,11 +76,15 @@ class RedditUnifiedScraper(BaseScraper):
 
     def scrape(self) -> list[dict[str, Any]]:
         """Scrape Reddit posts from multiple subreddits."""
-        all_items = []
+        all_items: list[dict[str, Any]] = []
+        if not self.targets:
+            return all_items
 
         client = self._get_reddit_client()
         if client is None:
-            return []
+            error = RuntimeError("Reddit credentials are not configured")
+            self._record_scrape_error("reddit", error)
+            return all_items
 
         for target in self.targets:
             try:
@@ -98,6 +102,7 @@ class RedditUnifiedScraper(BaseScraper):
                         "context_data": {"subreddit": target.subreddit},
                     },
                 )
+                self._record_scrape_error(f"r/{target.subreddit}", error)
                 continue
             except Exception as error:  # pragma: no cover - defensive
                 logger.exception(
@@ -110,6 +115,7 @@ class RedditUnifiedScraper(BaseScraper):
                         "context_data": {"subreddit": target.subreddit},
                     },
                 )
+                self._record_scrape_error(f"r/{target.subreddit}", error)
                 continue
 
         logger.info(f"Total Reddit items scraped: {len(all_items)}")
@@ -241,6 +247,7 @@ class RedditUnifiedScraper(BaseScraper):
                     "context_data": {"subreddit": subreddit_name},
                 },
             )
+            self._record_scrape_error(f"r/{subreddit_name}", error)
 
         return items
 

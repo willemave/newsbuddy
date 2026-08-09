@@ -5,10 +5,11 @@ from contextlib import contextmanager
 from typing import Any
 
 from sqlalchemy import event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.contracts import ContentType, TaskType
-from app.models.db import Content, NewsItem, NewsItemDiscussion, ProcessingTask
+from app.models.db import Content, ContentStatusEntry, NewsItem, NewsItemDiscussion, ProcessingTask
 from app.scraping.base import BaseScraper
 from app.services.queue import QueueService
 from app.services.queue_enqueue import TaskEnqueueRequest
@@ -301,3 +302,59 @@ def test_scraper_falls_back_to_isolated_writes_when_one_item_breaks_the_batch(
         "https://example.com/article-3",
     ]
     assert db_session.query(ProcessingTask).count() == 2
+
+
+def test_scraper_batch_conflict_finalizes_winner_and_remaining_items(
+    db_session,
+    db_session_factory,
+    test_user,
+    monkeypatch,
+):
+    """A concurrent insert winner must not discard the rest of the feed batch."""
+    _patch_scraper_db(monkeypatch, db_session_factory)
+    scraper = _BatchScraper(
+        [
+            _article_item(1, user_id=test_user.id),
+            _article_item(2, user_id=test_user.id),
+        ]
+    )
+    scraper.queue_service = QueueService()
+    persist_batch = scraper._persist_prepared_batch
+    first_attempt = True
+
+    def _persist_with_race(news_entries, content_entries):  # noqa: ANN001
+        nonlocal first_attempt
+        if first_attempt:
+            first_attempt = False
+            with db_session_factory() as competing_db:
+                competing_db.add(
+                    Content(
+                        url="https://example.com/article-1",
+                        source_url="https://example.com/article-1",
+                        content_type=ContentType.ARTICLE.value,
+                        status="new",
+                        source="Example",
+                        platform="atom",
+                        content_metadata={},
+                    )
+                )
+                competing_db.commit()
+            raise IntegrityError("INSERT INTO contents", {}, Exception("duplicate key"))
+        return persist_batch(news_entries, content_entries)
+
+    monkeypatch.setattr(scraper, "_persist_prepared_batch", _persist_with_race)
+
+    stats = scraper.run_with_stats()
+
+    assert (stats.saved, stats.duplicates, stats.errors) == (1, 1, 0)
+    rows = db_session.query(Content).order_by(Content.url).all()
+    assert [row.url for row in rows] == [
+        "https://example.com/article-1",
+        "https://example.com/article-2",
+    ]
+    assert (
+        db_session.query(ContentStatusEntry)
+        .filter_by(user_id=test_user.id, content_id=rows[0].id)
+        .one_or_none()
+        is not None
+    )

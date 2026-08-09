@@ -18,6 +18,41 @@ def test_feed_scrapers_expose_one_public_scrape_mode(scraper_type: type[BaseScra
     assert tuple(signature(scraper_type.scrape).parameters) == ("self",)
 
 
+@pytest.mark.parametrize(
+    ("scraper_type", "load_attr"),
+    [
+        (AtomScraper, "_load_feeds"),
+        (SubstackScraper, "_load_feeds"),
+        (PodcastUnifiedScraper, "_load_podcast_feeds"),
+    ],
+)
+def test_e2b_feed_fetch_failure_is_reported_in_scraper_stats(
+    scraper_type: type[BaseScraper],
+    load_attr: str,
+    monkeypatch,
+) -> None:
+    scraper = scraper_type()
+    feed_url = "https://publisher.example/feed.xml"
+    monkeypatch.setattr(
+        scraper,
+        load_attr,
+        lambda: [{"url": feed_url, "name": "Publisher", "limit": 10}],
+    )
+
+    def fail_fetch(*_args, **_kwargs):
+        raise RuntimeError("E2B unavailable")
+
+    monkeypatch.setattr(
+        f"{scraper_type.__module__}.fetch_and_parse_feed",
+        fail_fetch,
+    )
+
+    stats = scraper.run_with_stats()
+
+    assert (stats.scraped, stats.saved, stats.duplicates, stats.errors) == (0, 0, 0, 1)
+    assert stats.error_details == [f"{feed_url}: E2B unavailable"]
+
+
 def test_run_feed_jobs_is_bounded_ordered_and_failure_isolated() -> None:
     active = 0
     peak = 0
