@@ -1,22 +1,16 @@
-//
-//  LearningDeckFocusRecorder.swift
-//  newsly
-//
-
 import Foundation
 import Observation
-import SwiftUI
 
 @MainActor
 @Observable
 final class LearningDeckFocusRecorder {
-    private(set) var isRecording = false
-    private(set) var isTranscribing = false
     private(set) var isVoiceActionInFlight = false
+    private(set) var state: SpeechTranscriptionState = .idle
     var errorMessage: String?
 
-    @ObservationIgnored
-    private let transcriptionService: any SpeechTranscribing
+    var isRecording: Bool { state == .recording }
+    var isTranscribing: Bool { state == .transcribing }
+
     @ObservationIgnored
     private let voiceCoordinator: VoiceDictationCoordinator
     @ObservationIgnored
@@ -27,18 +21,21 @@ final class LearningDeckFocusRecorder {
     private var pendingTranscript: String?
     @ObservationIgnored
     private var transcriptHandler: ((String) -> Void)?
-    @ObservationIgnored
-    private var hasConfiguredCallbacks = false
 
     init(
         transcriptionService: (any SpeechTranscribing)? = nil,
         refreshTranscriptionAvailability: @escaping () async -> Bool
     ) {
-        let resolvedTranscriptionService = transcriptionService
+        let service = transcriptionService
             ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
-        self.transcriptionService = resolvedTranscriptionService
-        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: resolvedTranscriptionService)
+        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: service)
         self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            voiceCoordinator.cancel()
+        }
     }
 
     func toggleRecording(onTranscript: @escaping (String) -> Void) async {
@@ -53,16 +50,13 @@ final class LearningDeckFocusRecorder {
     }
 
     func cancelRecording() {
-        guard hasConfiguredCallbacks || isRecording || isTranscribing || pendingTranscript != nil else {
+        guard voiceCoordinator.hasActiveSession || isRecording || isTranscribing || pendingTranscript != nil else {
             return
         }
-        voiceCoordinator.stopListening()
-        transcriptionService.reset()
-        hasConfiguredCallbacks = false
+        voiceCoordinator.cancel()
         pendingTranscript = nil
         transcriptHandler = nil
-        isRecording = false
-        isTranscribing = false
+        apply(.idle)
         isVoiceActionInFlight = false
     }
 
@@ -71,89 +65,91 @@ final class LearningDeckFocusRecorder {
             await checkAndRefreshVoiceDictation()
         }
         guard voiceDictationAvailable else {
-            errorMessage = "Microphone is unavailable right now. Try again in a moment."
+            applyFailure("Microphone is unavailable right now. Try again in a moment.")
             return
         }
 
-        configureTranscriptionCallbacks()
         pendingTranscript = nil
         errorMessage = nil
         isVoiceActionInFlight = true
         defer { isVoiceActionInFlight = false }
 
         do {
-            try await transcriptionService.start()
-            isRecording = true
-            isTranscribing = false
+            try await voiceCoordinator.start(
+                onTranscriptFinal: { [weak self] transcript in
+                    self?.pendingTranscript = transcript
+                },
+                onError: { [weak self] message in
+                    self?.applyFailure(message)
+                },
+                onStateChange: { [weak self] state in
+                    self?.apply(state)
+                },
+                onStopReason: { [weak self] reason in
+                    self?.handleStopReason(reason)
+                }
+            )
         } catch {
-            errorMessage = error.localizedDescription
-            isRecording = false
-            isTranscribing = false
+            applyFailure(error.localizedDescription)
         }
     }
 
     private func stopRecording() async {
         guard isRecording else { return }
         isVoiceActionInFlight = true
+        apply(.transcribing)
         defer { isVoiceActionInFlight = false }
 
         do {
-            let transcript = try await transcriptionService.stop()
+            let transcript = try await voiceCoordinator.stop()
             pendingTranscript = nil
-            isRecording = false
-            isTranscribing = false
+            apply(.idle)
             applyTranscript(transcript)
         } catch {
-            errorMessage = error.localizedDescription
-            pendingTranscript = nil
-            isRecording = false
-            isTranscribing = false
+            applyFailure(error.localizedDescription)
         }
     }
 
     private func checkAndRefreshVoiceDictation() async {
-        if transcriptionService.isAvailable {
+        if voiceCoordinator.isAvailable {
             voiceDictationAvailable = true
             return
         }
-
         voiceDictationAvailable = await refreshTranscriptionAvailability()
     }
 
-    private func configureTranscriptionCallbacks() {
-        hasConfiguredCallbacks = true
-        voiceCoordinator.listen(
-            onTranscriptFinal: { [weak self] transcript in
-                self?.pendingTranscript = transcript
-            },
-            onError: { [weak self] message in
-                self?.errorMessage = message
-                self?.pendingTranscript = nil
-                self?.isRecording = false
-                self?.isTranscribing = false
-                self?.isVoiceActionInFlight = false
-            },
-            onStopReason: { [weak self] reason in
-                self?.handleTranscriptionStopReason(reason)
-            }
-        )
+    private func apply(_ state: SpeechTranscriptionState) {
+        if case .failed(let message) = state {
+            applyFailure(message)
+        } else {
+            self.state = state
+        }
     }
 
-    private func handleTranscriptionStopReason(_ reason: SpeechStopReason) {
+    private func applyFailure(_ message: String) {
+        state = .failed(message)
+        errorMessage = message
+        pendingTranscript = nil
+        isVoiceActionInFlight = false
+    }
+
+    private func handleStopReason(_ reason: SpeechStopReason) {
         switch reason {
         case .manual:
             return
-        case .silenceAutoStop:
+        case .silenceAutoStop, .maximumDuration:
             let transcript = pendingTranscript ?? ""
             pendingTranscript = nil
-            isRecording = false
-            isTranscribing = false
+            apply(.idle)
             isVoiceActionInFlight = false
             applyTranscript(transcript)
-        case .cancel, .failure:
+        case .noSpeechTimeout:
+            applyFailure("No speech detected. Try again.")
+        case .cancel:
             pendingTranscript = nil
-            isRecording = false
-            isTranscribing = false
+            apply(.idle)
+            isVoiceActionInFlight = false
+        case .failure:
             isVoiceActionInFlight = false
         }
     }
@@ -161,7 +157,7 @@ final class LearningDeckFocusRecorder {
     private func applyTranscript(_ transcript: String) {
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTranscript.isEmpty else {
-            errorMessage = "I didn't catch that. Try again."
+            applyFailure("I didn't catch that. Try again.")
             return
         }
 

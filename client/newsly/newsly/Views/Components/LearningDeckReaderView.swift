@@ -194,6 +194,7 @@ struct LearningDeckReaderView: View {
                 ProgressView()
                     .controlSize(.large)
                     .tint(Color.brandPrimary)
+                    .accessibilityIdentifier("learning_deck.reader.generating")
                 Text(deck.displayTitle)
                     .font(.terracottaHeadlineSmall)
                     .foregroundStyle(Color.onSurface)
@@ -216,7 +217,6 @@ struct LearningDeckReaderView: View {
                 .padding(.leading, Spacing.appHorizontalMargin)
                 .padding(.top, closeButtonTopPadding)
         }
-        .accessibilityIdentifier("learning_deck.reader.generating")
     }
 
     // MARK: - Top chrome
