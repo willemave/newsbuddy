@@ -15,6 +15,7 @@ from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.db import VendorUsageRecord
+from app.services.active_users import lock_active_user
 from app.services.llm_models import resolve_model_provider
 
 logger = get_logger("vendor.cost")
@@ -203,6 +204,22 @@ def record_vendor_usage(
     """Persist one vendor usage record and emit a structured log."""
     normalized_usage = _normalize_usage(usage)
     if normalized_usage is None:
+        return None
+    if user_id is not None and lock_active_user(db, user_id) is None:
+        logger.info(
+            "Skipped vendor usage for missing or inactive user",
+            extra=build_log_extra(
+                component="vendor_costs",
+                operation=operation,
+                event_name="vendor.usage",
+                status="skipped",
+                user_id=user_id,
+                provider=provider or resolve_model_provider(model),
+                model=model,
+                source=source,
+                context_data={"feature": feature, "reason": "inactive_user"},
+            ),
+        )
         return None
 
     provider_name = provider or resolve_model_provider(model)

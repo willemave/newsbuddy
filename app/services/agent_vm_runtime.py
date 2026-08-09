@@ -6,9 +6,26 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
+SYSTEM_USER_ID = 0
+
+
+def resolve_sandbox_user_id(value: object) -> int:
+    """Return a positive persisted user ID or the system sandbox namespace."""
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return SYSTEM_USER_ID
+
 
 class AgentVmError(RuntimeError):
     """Raised when a VM session cannot satisfy a requested operation."""
+
+
+class AgentVmDeadlineExceeded(AgentVmError):
+    """Raised when a deadline expires before a VM operation can finish."""
+
+
+class AgentVmFileSizeLimitExceeded(AgentVmError):
+    """Raised when a VM file operation exceeds its explicit byte limit."""
 
 
 @dataclass(frozen=True)
@@ -45,7 +62,7 @@ class AgentVmSession(ABC):
         self,
         command: str,
         *,
-        timeout_seconds: int | None = None,
+        timeout_seconds: float | None = None,
     ) -> AgentCommandResult:
         """Run one shell command in the VM workspace."""
 

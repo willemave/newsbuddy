@@ -50,6 +50,7 @@ build/
 !tests/ios_e2e/baselines/
 !tests/ios_e2e/baselines/**/
 !tests/ios_e2e/baselines/**/*.png
+tests/ios_e2e/baselines/**/*_diff.png
 !tests/fixtures/images/
 !tests/fixtures/images/**/
 !tests/fixtures/images/**/*.png

@@ -143,6 +143,7 @@ class LocalPersonalLibrarySandboxSession(PersonalLibrarySandboxSession):
                 glob,
                 "--max-count",
                 str(limit),
+                "-e",
                 cleaned_query,
                 ".",
             ],
@@ -205,24 +206,35 @@ class E2BPersonalLibrarySandboxSession(PersonalLibrarySandboxSession):
         if settings.chat_sandbox_template:
             create_kwargs["template"] = settings.chat_sandbox_template
 
-        self._sandbox = Sandbox.create(**create_kwargs)
+        try:
+            self._sandbox = Sandbox.create(**create_kwargs)
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxRuntimeUnavailableError(
+                f"Unable to create E2B chat sandbox: {exc}"
+            ) from exc
         self._library_root = PurePosixPath(settings.chat_sandbox_library_root)
         self._max_output_chars = settings.chat_sandbox_max_output_chars
-        self._sandbox.commands.run(f"mkdir -p {shlex.quote(self._library_root.as_posix())}")
-        record_vendor_usage_out_of_band(
-            provider="e2b",
-            model=settings.chat_sandbox_template or "default",
-            feature="chat_sandbox",
-            operation="chat_sandbox.e2b_create",
-            source="chat",
-            usage={"request_count": 1},
-            user_id=self.user_id,
-            metadata={
-                "allow_internet_access": settings.chat_sandbox_allow_internet_access,
-                "timeout_seconds": settings.chat_sandbox_timeout_seconds,
-            },
-        )
-        self._hydrate()
+        try:
+            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self._library_root.as_posix())}")
+            self._hydrate()
+            record_vendor_usage_out_of_band(
+                provider="e2b",
+                model=settings.chat_sandbox_template or "default",
+                feature="chat_sandbox",
+                operation="chat_sandbox.e2b_create",
+                source="chat",
+                usage={"request_count": 1},
+                user_id=self.user_id,
+                metadata={
+                    "allow_internet_access": settings.chat_sandbox_allow_internet_access,
+                    "timeout_seconds": settings.chat_sandbox_timeout_seconds,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.close()
+            raise SandboxRuntimeUnavailableError(
+                f"Unable to initialize E2B chat sandbox: {exc}"
+            ) from exc
 
     def execute_bash(
         self,
@@ -272,9 +284,16 @@ class E2BPersonalLibrarySandboxSession(PersonalLibrarySandboxSession):
     def _hydrate(self) -> None:
         if not self.local_root.exists():
             return
-        for path in sorted(self.local_root.rglob("*")):
-            if not path.is_file():
-                continue
+        files = sorted(path for path in self.local_root.rglob("*") if path.is_file())
+        directories = {
+            (self._library_root / path.relative_to(self.local_root).parent).as_posix()
+            for path in files
+            if path.relative_to(self.local_root).parent != Path(".")
+        }
+        if directories:
+            quoted = " ".join(shlex.quote(path) for path in sorted(directories))
+            self._sandbox.commands.run(f"mkdir -p {quoted}")
+        for path in files:
             relative = path.relative_to(self.local_root).as_posix()
             destination = (self._library_root / relative).as_posix()
             self._sandbox.files.write(destination, path.read_text(encoding="utf-8"))

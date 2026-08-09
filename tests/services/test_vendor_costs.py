@@ -9,7 +9,8 @@ from app.models.db import VendorUsageRecord
 from app.services import vendor_costs
 
 
-def test_record_vendor_usage_persists_row_and_cost(db_session, monkeypatch) -> None:
+def test_record_vendor_usage_persists_row_and_cost(db_session, user_factory, monkeypatch) -> None:
+    user = user_factory()
     monkeypatch.setattr(
         vendor_costs,
         "MODEL_PRICING",
@@ -38,7 +39,7 @@ def test_record_vendor_usage_persists_row_and_cost(db_session, monkeypatch) -> N
         content_id=42,
         session_id=7,
         message_id=9,
-        user_id=3,
+        user_id=user.id,
     )
     db_session.commit()
     assert record is not None
@@ -48,6 +49,23 @@ def test_record_vendor_usage_persists_row_and_cost(db_session, monkeypatch) -> N
     assert persisted.cache_read_tokens == 256
     assert persisted.cache_write_tokens == 128
     assert persisted.cost_usd == 0.006
+
+
+def test_record_vendor_usage_skips_inactive_user(db_session, user_factory) -> None:
+    user = user_factory(is_active=False)
+
+    record = vendor_costs.record_vendor_usage(
+        db_session,
+        provider="openai",
+        model="gpt-5.4",
+        feature="chat",
+        operation="chat.async",
+        usage={"input_tokens": 12, "output_tokens": 8, "total_tokens": 20},
+        user_id=user.id,
+    )
+
+    assert record is None
+    assert db_session.query(VendorUsageRecord).count() == 0
 
 
 def test_extract_usage_from_result_reads_provider_cache_details() -> None:

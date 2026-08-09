@@ -73,6 +73,7 @@ def remote_context(tmp_path) -> Iterator[RemoteContext]:
                     content_metadata={},
                 )
             )
+            session.flush()
             session.add_all(
                 [
                     VendorUsageRecord(
@@ -273,8 +274,7 @@ def test_logs_search_stops_parsing_after_reaching_limit(remote_context, monkeypa
     structured_dir = remote_context.logs_dir / "structured"
     structured_dir.mkdir()
     (structured_dir / "worker_structured_1.jsonl").write_text(
-        '{"timestamp":"2026-03-30T12:00:00Z","message":"match"}\n'
-        "unreachable\n",
+        '{"timestamp":"2026-03-30T12:00:00Z","message":"match"}\nunreachable\n',
         encoding="utf-8",
     )
     from admin import remote_ops
@@ -386,6 +386,7 @@ def test_reconcile_x_bookmarks_previews_and_repairs_knowledge_destination(
     harness = create_temporary_postgres_harness(
         schema_prefix="newsly_fix_x_bookmarks",
         tables=[
+            User.__table__,
             Content.__table__,
             ContentKnowledgeSave.__table__,
             ContentStatusEntry.__table__,
@@ -395,6 +396,16 @@ def test_reconcile_x_bookmarks_previews_and_repairs_knowledge_destination(
     )
     try:
         with harness.session_factory() as session:
+            session.add(
+                User(
+                    id=7,
+                    apple_id="apple-x-bookmark-repair",
+                    email="x-bookmark-repair@example.com",
+                    full_name="X Bookmark Repair",
+                    is_admin=False,
+                    is_active=True,
+                )
+            )
             canonical = Content(
                 content_type="article",
                 url="https://example.com/canonical",
@@ -468,6 +479,7 @@ def test_preview_regenerate_images_returns_failed_candidates(remote_context, mon
     harness = create_temporary_postgres_harness(
         schema_prefix="newsly_fix_regen_preview",
         tables=[
+            User.__table__,
             Content.__table__,
             ContentStatusEntry.__table__,
             ContentKnowledgeSave.__table__,
@@ -538,6 +550,7 @@ def test_regenerate_images_creates_completed_task_and_updates_metadata(
     harness = create_temporary_postgres_harness(
         schema_prefix="newsly_fix_regen_apply",
         tables=[
+            User.__table__,
             Content.__table__,
             ContentStatusEntry.__table__,
             ContentKnowledgeSave.__table__,

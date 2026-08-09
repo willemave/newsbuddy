@@ -31,7 +31,6 @@ TASK_EVENT_NAMES = {
     "download_audio": "content.download_audio",
     "transcribe": "content.transcribe",
     "summarize": "content.summarize",
-    "fetch_discussion": "content.fetch_discussion",
     "generate_image": "content.generate_image",
     "discover_feeds": "content.discover_feeds",
     "onboarding_discover": "content.onboarding_discover",

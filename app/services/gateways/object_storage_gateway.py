@@ -76,7 +76,13 @@ class LocalObjectStorageGateway(ObjectStorageGateway):
         self._root_dir.mkdir(parents=True, exist_ok=True)
 
     def _resolve_path(self, key: str) -> Path:
-        return (self._root_dir / key).resolve()
+        key_path = Path(key)
+        if not key or key_path.is_absolute() or ".." in key_path.parts:
+            raise ValueError("Object storage key must be a relative path within the storage root")
+        path = (self._root_dir / key_path).resolve(strict=False)
+        if path == self._root_dir or not path.is_relative_to(self._root_dir):
+            raise ValueError("Object storage key escapes the storage root")
+        return path
 
     def put_text(self, *, key: str, text: str, content_type: str) -> StoredObjectMetadata:
         return self.put_bytes(key=key, data=text.encode("utf-8"), content_type=content_type)

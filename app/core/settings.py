@@ -156,8 +156,6 @@ class ProviderSettingsView(BaseModel):
     chat_sandbox_provider: str
     chat_sandbox_e2b_api_key_configured: bool
     learning_deck_model: str
-    learning_sandbox_provider: str
-    learning_sandbox_e2b_api_key_configured: bool
 
 
 class DiscoverySettingsView(BaseModel):
@@ -457,7 +455,7 @@ class Settings(BaseSettings):
         default_factory=lambda: Path.cwd() / "data" / "personal_markdown"
     )
     personal_markdown_max_slug_length: int = Field(default=80, ge=16, le=160)
-    chat_sandbox_provider: Literal["disabled", "local", "e2b"] = "disabled"
+    chat_sandbox_provider: Literal["disabled", "local", "e2b"] = "e2b"
     chat_sandbox_e2b_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("CHAT_SANDBOX_E2B_API_KEY", "E2B_API_KEY"),
@@ -465,19 +463,9 @@ class Settings(BaseSettings):
     chat_sandbox_template: str | None = None
     chat_sandbox_timeout_seconds: int = Field(default=900, ge=60, le=86_400)
     chat_sandbox_allow_internet_access: bool = True
-    chat_sandbox_library_root: str = "/workspace/personal_markdown"
+    chat_sandbox_library_root: str = "/tmp/newsly/personal_markdown"
     chat_sandbox_max_output_chars: int = Field(default=12_000, ge=1_000, le=100_000)
     learning_deck_model: str = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
-    learning_sandbox_provider: Literal["disabled", "e2b"] = "e2b"
-    learning_sandbox_e2b_api_key: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("LEARNING_SANDBOX_E2B_API_KEY", "E2B_API_KEY"),
-    )
-    learning_sandbox_template: str | None = None
-    learning_sandbox_timeout_seconds: int = Field(default=1800, ge=60, le=86_400)
-    learning_sandbox_allow_internet_access: bool = True
-    learning_sandbox_workdir: str = "/tmp/newsly_learning_deck"
-    learning_sandbox_max_output_chars: int = Field(default=20_000, ge=1_000, le=200_000)
     llm_task_model: str = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
     llm_task_sandbox_provider: Literal["disabled", "local", "e2b"] = "e2b"
     llm_task_sandbox_e2b_api_key: str | None = Field(
@@ -489,7 +477,6 @@ class Settings(BaseSettings):
     llm_task_sandbox_allow_internet_access: bool = True
     llm_task_sandbox_root: str = "/tmp/newsly"
     llm_task_sandbox_max_output_chars: int = Field(default=20_000, ge=1_000, le=200_000)
-    llm_task_tool_token_ttl_seconds: int = Field(default=7200, ge=60, le=86_400)
     learning_deck_signed_url_ttl_seconds: int = Field(default=900, ge=60, le=86_400)
     learning_deck_max_index_html_bytes: int = Field(default=2_000_000, ge=10_000)
     learning_deck_max_source_notes_bytes: int = Field(default=1_000_000, ge=1_000)
@@ -583,6 +570,18 @@ class Settings(BaseSettings):
                 raise ValueError("PUBLIC_BASE_URL must be set in production")
             if public_base_url.scheme != "https":
                 raise ValueError("PUBLIC_BASE_URL must use HTTPS in production")
+            if self.llm_task_sandbox_provider != "e2b":
+                raise ValueError("LLM_TASK_SANDBOX_PROVIDER must be e2b in production")
+            if not (self.llm_task_sandbox_e2b_api_key or "").strip():
+                raise ValueError(
+                    "LLM_TASK_SANDBOX_E2B_API_KEY or E2B_API_KEY must be set in production"
+                )
+            if self.chat_sandbox_provider != "e2b":
+                raise ValueError("CHAT_SANDBOX_PROVIDER must be e2b in production")
+            if not (self.chat_sandbox_e2b_api_key or "").strip():
+                raise ValueError(
+                    "CHAT_SANDBOX_E2B_API_KEY or E2B_API_KEY must be set in production"
+                )
         if not self.apple_signin_audiences:
             raise ValueError("APPLE_SIGNIN_AUDIENCES must include at least one audience")
         return self
@@ -692,8 +691,6 @@ class Settings(BaseSettings):
             chat_sandbox_provider=self.chat_sandbox_provider,
             chat_sandbox_e2b_api_key_configured=bool(self.chat_sandbox_e2b_api_key),
             learning_deck_model=self.learning_deck_model,
-            learning_sandbox_provider=self.learning_sandbox_provider,
-            learning_sandbox_e2b_api_key_configured=bool(self.learning_sandbox_e2b_api_key),
         )
 
     @property
