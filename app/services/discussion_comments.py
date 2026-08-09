@@ -16,8 +16,14 @@ import prawcore
 from bs4 import BeautifulSoup
 
 from app.core.settings import get_settings
-from app.services.http import HttpService, NonRetryableError, fetch_quiet_compat, get_http_service
-from app.utils.url_utils import normalize_http_url
+from app.services.http import (
+    HttpFetcher,
+    HttpService,
+    NonRetryableError,
+    fetch_quiet,
+    get_http_service,
+)
+from app.utils.url_utils import is_domain_or_subdomain, normalize_http_url
 
 HN_ALGOLIA_ITEM_URL = "https://hn.algolia.com/api/v1/items/{item_id}"
 HN_FIREBASE_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{item_id}.json"
@@ -419,7 +425,7 @@ def normalize_reddit_discussion_url(url: str) -> str | None:
         return None
 
     parsed = urlparse(normalized)
-    if parsed.netloc.lower() in {"reddit.com", "old.reddit.com", "www.reddit.com"}:
+    if (parsed.hostname or "").lower() in {"reddit.com", "old.reddit.com", "www.reddit.com"}:
         return urlunparse(parsed._replace(scheme="https", netloc="www.reddit.com"))
     return normalized
 
@@ -452,8 +458,8 @@ def is_hackernews_discussion(platform: str, discussion_url: str | None) -> bool:
         return True
     if not discussion_url:
         return False
-    host = urlparse(discussion_url).netloc.lower()
-    return "ycombinator.com" in host and "item" in discussion_url
+    host = urlparse(discussion_url).hostname
+    return is_domain_or_subdomain(host, "news.ycombinator.com") and "item" in discussion_url
 
 
 def is_reddit_discussion(platform: str, discussion_url: str | None) -> bool:
@@ -462,8 +468,8 @@ def is_reddit_discussion(platform: str, discussion_url: str | None) -> bool:
         return True
     if not discussion_url:
         return False
-    host = urlparse(discussion_url).netloc.lower()
-    return "reddit.com" in host or host.endswith("redd.it")
+    host = urlparse(discussion_url).hostname
+    return is_domain_or_subdomain(host, "reddit.com") or is_domain_or_subdomain(host, "redd.it")
 
 
 def extract_links_from_comments(
@@ -543,9 +549,9 @@ def unix_to_iso(raw_timestamp: Any) -> str | None:
         return None
 
 
-def _fetch_json(http_service: HttpService, url: str) -> dict[str, Any]:
+def _fetch_json(http_service: HttpFetcher, url: str) -> dict[str, Any]:
     try:
-        response = fetch_quiet_compat(http_service, url)
+        response = fetch_quiet(http_service, url)
     except Exception as exc:  # noqa: BLE001
         status_code = _http_status_code(exc)
         message = (

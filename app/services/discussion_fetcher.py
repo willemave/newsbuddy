@@ -15,8 +15,8 @@ from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.core.settings import get_settings
 from app.models.db import Content, ContentDiscussion, NewsItem
+from app.services.agent_vm_runtime import SYSTEM_USER_ID
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.discussion_comments import (
     DiscussionFetchError,
@@ -32,10 +32,10 @@ from app.services.discussion_comments import (
     is_reddit_discussion,
     normalize_reddit_discussion_url,
 )
-from app.utils.url_utils import normalize_http_url
+from app.services.feed_research_runtime import SandboxFeedHttpService, sandboxed_http_service
+from app.utils.url_utils import is_domain_or_subdomain, normalize_http_url
 
 logger = get_logger(__name__)
-settings = get_settings()
 
 DEFAULT_DISCUSSION_COMMENT_CAP = 500
 TECHMEME_TOKEN_PATTERN = re.compile(r"/(\d{6})/(p\d+)")
@@ -231,7 +231,14 @@ def _build_discussion_payload(
     source_url = discussion_url or ""
 
     if _is_techmeme(platform, discussion_url):
-        return _build_techmeme_payload(source_url, metadata)
+        if not source_url:
+            return _missing_techmeme_payload()
+        with sandboxed_http_service(user_id=SYSTEM_USER_ID) as http_service:
+            return _build_techmeme_payload(
+                source_url,
+                metadata,
+                http_service=http_service,
+            )
 
     if is_hackernews_discussion(platform, discussion_url):
         return _build_hackernews_payload(source_url, comment_cap)
@@ -255,32 +262,19 @@ def _unsupported_payload(source_url: str, platform: str) -> DiscussionPayload:
 def _build_techmeme_payload(
     source_url: str,
     metadata: dict[str, Any],
+    *,
+    http_service: SandboxFeedHttpService,
 ) -> DiscussionPayload:
     """Build discussion payload for Techmeme.
 
     Fetches grouped discussion links and converts social/forum links into
     comment entries so the top_comment denormalization loop picks them up.
     """
-    if not source_url:
-        return DiscussionPayload(
-            status="partial",
-            mode="discussion_list",
-            payload={
-                "mode": "discussion_list",
-                "source_url": None,
-                "discussion_groups": [],
-                "comments": [],
-                "compact_comments": [],
-                "links": [],
-                "stats": {
-                    "group_count": 0,
-                    "item_count": 0,
-                },
-            },
-            error_message="Missing Techmeme discussion URL",
-        )
-
-    groups = _fetch_techmeme_discussion_groups(source_url, metadata)
+    groups = _fetch_techmeme_discussion_groups(
+        source_url,
+        metadata,
+        http_service=http_service,
+    )
     all_links = _build_group_links(groups)
     social_comments = _extract_social_comments_from_groups(groups)
     status = "completed" if groups else "partial"
@@ -300,6 +294,26 @@ def _build_techmeme_payload(
             },
         },
         error_message=None if groups else "No Techmeme discussion groups found",
+    )
+
+
+def _missing_techmeme_payload() -> DiscussionPayload:
+    return DiscussionPayload(
+        status="partial",
+        mode="discussion_list",
+        payload={
+            "mode": "discussion_list",
+            "source_url": None,
+            "discussion_groups": [],
+            "comments": [],
+            "compact_comments": [],
+            "links": [],
+            "stats": {
+                "group_count": 0,
+                "item_count": 0,
+            },
+        },
+        error_message="Missing Techmeme discussion URL",
     )
 
 
@@ -426,13 +440,13 @@ def _empty_provider_payload(
 def _fetch_techmeme_discussion_groups(
     discussion_url: str,
     metadata: dict[str, Any],
+    *,
+    http_service: SandboxFeedHttpService,
 ) -> list[dict[str, Any]]:
     canonical_url = discussion_url.split("#", maxsplit=1)[0]
-    response = httpx.get(
+    response = http_service.fetch(
         canonical_url,
-        timeout=httpx.Timeout(timeout=settings.http_timeout_seconds, connect=10.0),
         headers={"User-Agent": "news_app.discussion/1.0"},
-        follow_redirects=True,
     )
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
@@ -543,8 +557,8 @@ def _build_group_links(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _is_social_url(url: str) -> bool:
     """Return True if the URL belongs to a known social/forum domain."""
-    host = urlparse(url).netloc.lower()
-    return any(host == domain or host.endswith("." + domain) for domain in SOCIAL_DOMAINS)
+    host = urlparse(url).hostname
+    return any(is_domain_or_subdomain(host, domain) for domain in SOCIAL_DOMAINS)
 
 
 def _extract_social_comments_from_groups(
@@ -622,12 +636,15 @@ def _normalize_platform(platform: Any) -> str:
 
 
 def _is_techmeme(platform: str, discussion_url: str | None) -> bool:
-    if platform == "techmeme":
+    if platform == "techmeme" and not discussion_url:
         return True
     if not discussion_url:
         return False
-    host = urlparse(discussion_url).netloc.lower()
-    return "techmeme.com" in host
+    parsed = urlparse(discussion_url)
+    return parsed.scheme.lower() in {"http", "https"} and is_domain_or_subdomain(
+        parsed.hostname,
+        "techmeme.com",
+    )
 
 
 def _upsert_content_discussion(

@@ -8,19 +8,23 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.contracts import TaskStatus
-from app.models.db import ChatSession, Content, ContentDiscussion, ProcessingTask
+from app.models.contracts import MessageProcessingStatus, TaskStatus
+from app.models.db import ChatMessage, ChatSession, Content, ContentDiscussion, ProcessingTask
 from app.models.domain.chat_sessions import KNOWLEDGE_SESSION_TYPE
+from app.models.internal.chat_turn import ChatTurnProcessingContext
 from app.models.metadata.state import extract_share_and_chat_requests
+from app.services.active_users import lock_active_user
 from app.services.chat_agent import create_processing_message, process_message_async
+from app.services.chat_turn_queue import build_chat_turn_context
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
 from app.services.personal_markdown_library import sync_personal_markdown_for_content
 from app.services.prompt_library import render_prompt
-from app.services.queue import TaskType
+from app.services.queue import TaskEnqueueRequest, TaskType
 from app.utils.title_utils import resolve_content_display_title
 
 logger = get_logger(__name__)
@@ -28,6 +32,35 @@ logger = get_logger(__name__)
 MAX_DISCUSSION_COMMENT_SNIPPETS = 8
 MAX_DISCUSSION_GROUP_SNIPPETS = 4
 MAX_DISCUSSION_SNIPPET_CHARS = 220
+
+
+class InactiveDigDeeperUserError(ValueError):
+    """Raised when a dig-deeper side effect targets a missing or inactive user."""
+
+
+class DigDeeperTaskLink(BaseModel):
+    """Validated message identity persisted into a dig-deeper task payload."""
+
+    session_id: int = Field(gt=0)
+    message_id: int = Field(gt=0)
+    prompt: str = Field(min_length=1)
+
+    @field_validator("session_id", "message_id", mode="before")
+    @classmethod
+    def reject_boolean_ids(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("boolean ids are invalid")
+        if isinstance(value, str) and not value.strip().isdigit():
+            raise ValueError("string ids must contain only digits")
+        return value
+
+    @field_validator("prompt")
+    @classmethod
+    def normalize_prompt(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("prompt must not be blank")
+        return cleaned
 
 
 def content_ids_awaiting_first_chat_turn(
@@ -271,10 +304,32 @@ def build_dig_deeper_prompt(db: Session, content: Content) -> str:
     return f"{prompt}\n\n{discussion_context}"
 
 
+def _sync_dig_deeper_markdown(db: Session, *, content: Content, user_id: int) -> None:
+    """Best-effort sync after the owning database transaction commits."""
+    try:
+        sync_personal_markdown_for_content(
+            db,
+            user_id=user_id,
+            content_id=_require_content_id(content),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to sync personal markdown for dig-deeper session",
+            extra={
+                "component": "dig_deeper",
+                "operation": "create_session",
+                "item_id": content.id,
+                "context_data": {"user_id": user_id},
+            },
+        )
+
+
 def get_or_create_dig_deeper_session(
     db: Session,
     content: Content,
     user_id: int,
+    *,
+    commit: bool = True,
 ) -> ChatSession:
     """Get or create a chat session for dig-deeper workflows.
 
@@ -286,6 +341,10 @@ def get_or_create_dig_deeper_session(
     Returns:
         ChatSession for the content/user.
     """
+    active_user_id = lock_active_user(db, user_id)
+    if active_user_id is None:
+        raise InactiveDigDeeperUserError("Dig-deeper user is missing or inactive")
+
     title = resolve_display_title(content)
     existing = (
         db.query(ChatSession)
@@ -302,12 +361,15 @@ def get_or_create_dig_deeper_session(
             existing.title = title
             changed = True
         if changed:
-            db.commit()
-            db.refresh(existing)
+            if commit:
+                db.commit()
+                db.refresh(existing)
+            else:
+                db.flush()
         return existing
 
     session = ChatSession(
-        user_id=user_id,
+        user_id=active_user_id,
         content_id=content.id,
         title=title,
         session_type=KNOWLEDGE_SESSION_TYPE,
@@ -317,50 +379,128 @@ def get_or_create_dig_deeper_session(
         created_at=datetime.now(UTC),
     )
     db.add(session)
-    db.commit()
-    db.refresh(session)
-    try:
-        sync_personal_markdown_for_content(
-            db,
-            user_id=user_id,
-            content_id=_require_content_id(content),
-        )
-    except Exception:
-        logger.exception(
-            "Failed to sync personal markdown for dig-deeper session",
-            extra={
-                "component": "dig_deeper",
-                "operation": "create_session",
-                "item_id": content.id,
-                "context_data": {"user_id": user_id, "session_id": session.id},
-            },
-        )
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(session)
+        _sync_dig_deeper_markdown(db, content=content, user_id=active_user_id)
     return session
 
 
-def create_dig_deeper_message(
+def prepare_dig_deeper_task_message(
     db: Session,
+    *,
+    task_id: int,
     content: Content,
     user_id: int,
     initial_message: str | None = None,
-) -> tuple[int, int, str]:
-    """Create a processing message for a dig-deeper chat.
+) -> tuple[int, int, str, MessageProcessingStatus, ChatTurnProcessingContext]:
+    """Atomically create or recover the message owned by a queued task."""
+    if lock_active_user(db, user_id) is None:
+        raise InactiveDigDeeperUserError("Dig-deeper user is missing or inactive")
 
-    Args:
-        db: Database session.
-        content: Content record.
-        user_id: User requesting the dig-deeper chat.
+    task = (
+        db.query(ProcessingTask)
+        .filter(
+            ProcessingTask.id == task_id,
+            ProcessingTask.task_type == TaskType.DIG_DEEPER.value,
+            ProcessingTask.owner_user_id == user_id,
+            ProcessingTask.content_id == content.id,
+        )
+        .with_for_update()
+        .one_or_none()
+    )
+    if task is None:
+        raise ValueError("Dig-deeper task is missing or has inconsistent ownership")
 
-    Returns:
-        Tuple of (session_id, message_id, prompt).
-    """
-    session = get_or_create_dig_deeper_session(db, content, user_id)
-    prompt = initial_message.strip() if initial_message and initial_message.strip() else None
-    if prompt is None:
-        prompt = build_dig_deeper_prompt(db, content)
-    session_id = _require_session_id(session)
-    message = create_processing_message(db, session_id, prompt)
-    return session_id, _require_message_id(message), prompt
+    payload = dict(task.payload) if isinstance(task.payload, dict) else {}
+    linked_values = (
+        payload.get("session_id"),
+        payload.get("message_id"),
+        payload.get("prompt"),
+    )
+    if any(value is not None for value in linked_values):
+        try:
+            link = DigDeeperTaskLink.model_validate(payload)
+        except ValidationError as exc:
+            raise ValueError("Dig-deeper task has an invalid persisted message link") from exc
+        linked_session = (
+            db.query(ChatSession.id)
+            .filter(
+                ChatSession.id == link.session_id,
+                ChatSession.user_id == user_id,
+                ChatSession.content_id == content.id,
+            )
+            .one_or_none()
+        )
+        message = (
+            db.query(ChatMessage)
+            .filter(
+                ChatMessage.id == link.message_id,
+                ChatMessage.session_id == link.session_id,
+            )
+            .one_or_none()
+        )
+        if linked_session is None or message is None:
+            raise ValueError("Dig-deeper task message link no longer resolves")
+        try:
+            turn_context = ChatTurnProcessingContext.model_validate(message.processing_context)
+        except ValidationError as exc:
+            raise ValueError("Dig-deeper task message has invalid processing context") from exc
+        snapshot = turn_context.session
+        if (
+            turn_context.kind != "article"
+            or turn_context.user_prompt != link.prompt
+            or snapshot.effective_session_id != link.session_id
+            or snapshot.visible_session_id != link.session_id
+            or snapshot.user_id != user_id
+            or snapshot.content_id != content.id
+        ):
+            raise ValueError("Dig-deeper task message context does not match its persisted link")
+        return (
+            link.session_id,
+            link.message_id,
+            link.prompt,
+            MessageProcessingStatus(str(message.status)),
+            turn_context,
+        )
+
+    created_session = get_or_create_dig_deeper_session(db, content, user_id, commit=False)
+    initial_task_prompt = (
+        initial_message.strip() if initial_message and initial_message.strip() else None
+    )
+    prompt = initial_task_prompt or build_dig_deeper_prompt(db, content)
+    session_id = _require_session_id(created_session)
+    turn_context = build_chat_turn_context(
+        created_session,
+        visible_session_id=session_id,
+        user_prompt=prompt,
+        kind="article",
+        source="queue",
+    )
+    message = create_processing_message(
+        db,
+        session_id,
+        prompt,
+        processing_context=turn_context.model_dump(mode="json"),
+        commit=False,
+    )
+    message_id = _require_message_id(message)
+    task.payload = {
+        **payload,
+        "session_id": session_id,
+        "message_id": message_id,
+        "prompt": prompt,
+    }
+    db.commit()
+    _sync_dig_deeper_markdown(db, content=content, user_id=user_id)
+    return (
+        session_id,
+        message_id,
+        prompt,
+        MessageProcessingStatus.PROCESSING,
+        turn_context,
+    )
 
 
 def run_dig_deeper_message(
@@ -368,6 +508,7 @@ def run_dig_deeper_message(
     message_id: int,
     prompt: str,
     *,
+    turn_context: ChatTurnProcessingContext,
     task_id: int | None = None,
 ) -> None:
     """Run the dig-deeper message processing synchronously.
@@ -385,6 +526,7 @@ def run_dig_deeper_message(
             prompt,
             source="queue",
             task_id=task_id,
+            turn_context=turn_context,
         )
     )
 
@@ -406,16 +548,22 @@ def enqueue_dig_deeper_task(
     Returns:
         Processing task ID.
     """
-    del db
     payload: dict[str, Any] = {"user_id": user_id}
     cleaned_initial_message = initial_message.strip() if initial_message else None
     if cleaned_initial_message:
         payload["initial_message"] = cleaned_initial_message
     message_hash = hashlib.sha256((cleaned_initial_message or "").encode("utf-8")).hexdigest()[:16]
-    return get_task_queue_gateway().enqueue(
-        TaskType.DIG_DEEPER,
-        content_id=content_id,
-        payload=payload,
-        dedupe=True,
-        dedupe_key=f"dig_deeper|user:{user_id}|content:{content_id}|message:{message_hash}",
-    )
+    return get_task_queue_gateway().enqueue_many_in_session(
+        db,
+        [
+            TaskEnqueueRequest(
+                TaskType.DIG_DEEPER,
+                content_id=content_id,
+                payload=payload,
+                dedupe_key=(
+                    f"dig_deeper|user:{user_id}|content:{content_id}|message:{message_hash}"
+                ),
+                owner_user_id=user_id,
+            )
+        ],
+    )[0]

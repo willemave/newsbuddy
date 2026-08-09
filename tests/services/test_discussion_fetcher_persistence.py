@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any, cast
 
 import pytest
@@ -35,6 +36,19 @@ def _require_mapping(value: object | None) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
+@pytest.fixture(autouse=True)
+def _prevent_live_techmeme_sandbox(monkeypatch):
+    class _NoNetworkHttpService:
+        def fetch(self, *_args, **_kwargs):
+            raise AssertionError("test must inject Techmeme sandbox HTTP")
+
+    @contextmanager
+    def _runtime(**_kwargs):
+        yield cast(Any, _NoNetworkHttpService())
+
+    monkeypatch.setattr(discussion_fetcher, "sandboxed_http_service", _runtime)
+
+
 def test_fetch_techmeme_discussion_groups_parses_grouped_links(monkeypatch) -> None:
     html = """
     <html>
@@ -56,23 +70,72 @@ def test_fetch_techmeme_discussion_groups_parses_grouped_links(monkeypatch) -> N
     </html>
     """
 
-    monkeypatch.setattr(
-        discussion_fetcher.httpx,
-        "get",
-        lambda *args, **kwargs: FakeResponse(text=html),
-    )
+    fetched: list[tuple[str, dict[str, str] | None]] = []
+
+    class _SandboxHttpService:
+        def fetch(self, url: str, headers: dict[str, str] | None = None):
+            fetched.append((url, headers))
+            return FakeResponse(text=html)
 
     groups = discussion_fetcher._fetch_techmeme_discussion_groups(
         "https://www.techmeme.com/260217/p39#a260217p39",
         {"aggregator": {"external_id": "p39#a260217p39"}},
+        http_service=cast(Any, _SandboxHttpService()),
     )
 
+    assert fetched == [
+        (
+            "https://www.techmeme.com/260217/p39",
+            {"User-Agent": "news_app.discussion/1.0"},
+        )
+    ]
     assert len(groups) == 2
     assert groups[0]["label"] == "More"
     assert groups[1]["label"] == "Forums"
     forum_urls = [item["url"] for item in groups[1]["items"]]
     assert "https://news.ycombinator.com/item?id=123" in forum_urls
     assert "https://www.reddit.com/r/test/comments/abc123/thread/" in forum_urls
+
+
+def test_techmeme_payload_uses_e2b_transport_and_never_host_http(monkeypatch) -> None:
+    html = """
+    <div class="item">
+      <span pml="260217p39"></span>
+      <span class="drhed">Forums:</span>
+      <span class="bls"><a href="https://news.ycombinator.com/item?id=1">HN</a></span>
+    </div>
+    """
+    fetched: list[str] = []
+
+    class _SandboxHttpService:
+        def fetch(self, url: str, **_kwargs):
+            fetched.append(url)
+            return FakeResponse(text=html)
+
+    @contextmanager
+    def _runtime(**kwargs):
+        assert kwargs == {"user_id": 0}
+        yield cast(Any, _SandboxHttpService())
+
+    monkeypatch.setattr(discussion_fetcher, "sandboxed_http_service", _runtime)
+    monkeypatch.setattr(
+        discussion_fetcher.httpx,
+        "get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Techmeme HTML must not use host HTTP")
+        ),
+        raising=False,
+    )
+
+    payload = discussion_fetcher._build_discussion_payload(
+        platform="techmeme",
+        discussion_url="https://www.techmeme.com/260217/p39#a260217p39",
+        metadata={},
+        comment_cap=10,
+    )
+
+    assert payload.status == "completed"
+    assert fetched == ["https://www.techmeme.com/260217/p39"]
 
 
 def test_fetch_and_store_discussion_techmeme_persists_list(db_session, monkeypatch) -> None:

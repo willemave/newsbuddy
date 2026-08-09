@@ -17,6 +17,7 @@ from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.models.contracts import MessageProcessingStatus
 from app.models.db import ChatMessage, ChatSession, Content
+from app.models.internal.chat_turn import ChatTurnProcessingContext
 from app.services.llm_models import DEEP_RESEARCH_MODEL
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 
@@ -429,15 +430,21 @@ def _load_deep_research_turn_state(
     session_id: int,
     message_id: int,
     source: str,
+    turn_context: ChatTurnProcessingContext,
 ) -> DeepResearchTurnState | None:
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if not session:
         logger.error("[DeepResearch:ERROR] Session %s not found", session_id)
         return None
+    session_snapshot = turn_context.session
+    if session_snapshot.effective_session_id != session_id:
+        raise ValueError("Deep-research turn context does not match the requested session")
 
     context = None
-    if session.content_id:
-        content = db.query(Content).filter(Content.id == session.content_id).first()
+    if session_snapshot.context_snapshot:
+        context = session_snapshot.context_snapshot
+    elif session_snapshot.content_id:
+        content = db.query(Content).filter(Content.id == session_snapshot.content_id).first()
         if content:
             context = _build_research_context(content)
             logger.info(
@@ -449,8 +456,8 @@ def _load_deep_research_turn_state(
                     status="completed",
                     session_id=session_id,
                     message_id=message_id,
-                    user_id=session.user_id,
-                    content_id=session.content_id,
+                    user_id=session_snapshot.user_id,
+                    content_id=session_snapshot.content_id,
                     source=source,
                     context_data={"context_chars": len(context) if context else 0},
                 ),
@@ -458,18 +465,13 @@ def _load_deep_research_turn_state(
         else:
             logger.warning(
                 "[DeepResearch:CONTEXT] Content not found content_id=%s",
-                session.content_id,
+                session_snapshot.content_id,
             )
-    elif session.context_snapshot:
-        context = session.context_snapshot
-
-    if session.user_id is None:
-        raise ValueError("Deep research session is missing a user_id")
 
     return DeepResearchTurnState(
         session_id=session_id,
-        user_id=int(session.user_id),
-        content_id=session.content_id,
+        user_id=session_snapshot.user_id,
+        content_id=session_snapshot.content_id,
         context=context,
     )
 
@@ -496,10 +498,20 @@ def _persist_deep_research_success(
     ]
 
     message_json = ModelMessagesTypeAdapter.dump_json(messages).decode("utf-8")
-    db_message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+    db_message = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.id == message_id,
+            ChatMessage.session_id == state.session_id,
+        )
+        .with_for_update()
+        .first()
+    )
     session = db.query(ChatSession).filter(ChatSession.id == state.session_id).first()
     if db_message is None or session is None:
         return False
+    if db_message.status != MessageProcessingStatus.PROCESSING.value:
+        return db_message.status == MessageProcessingStatus.COMPLETED.value
 
     db_message.message_list = message_json
     db_message.status = MessageProcessingStatus.COMPLETED.value
@@ -516,6 +528,7 @@ async def process_deep_research_message(
     *,
     source: str = "realtime",
     task_id: int | None = None,
+    turn_context: ChatTurnProcessingContext,
 ) -> None:
     """Process a deep research message asynchronously.
 
@@ -557,6 +570,7 @@ async def process_deep_research_message(
                 session_id=session_id,
                 message_id=message_id,
                 source=source,
+                turn_context=turn_context,
             )
         if state is None:
             return
@@ -755,8 +769,10 @@ def _build_research_context(content: Content) -> str | None:
 
 def _update_message_failed(db: Session, message_id: int, error: str) -> None:
     """Mark a message as failed."""
-    db_message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
-    if db_message:
+    db_message = (
+        db.query(ChatMessage).filter(ChatMessage.id == message_id).with_for_update().first()
+    )
+    if db_message and db_message.status == MessageProcessingStatus.PROCESSING.value:
         db_message.status = MessageProcessingStatus.FAILED.value
         db_message.error = error
         db.commit()

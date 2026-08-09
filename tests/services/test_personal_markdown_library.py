@@ -103,6 +103,26 @@ def test_resolve_saved_at_handles_mixed_naive_and_aware_datetimes() -> None:
     assert _resolve_saved_at(naive_saved_at, aware_saved_at) == datetime(2026, 4, 3, 8, 0, 0)
 
 
+def test_personal_markdown_skips_inactive_user(
+    db_session,
+    test_user,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _enable_personal_markdown(monkeypatch, tmp_path)
+    user_id = _require_id(test_user.id)
+    test_user.is_active = False
+    db_session.commit()
+
+    result = sync_personal_markdown_library_for_user(db_session, user_id=user_id)
+    documents = collect_personal_markdown_documents_for_user(db_session, user_id=user_id)
+
+    assert result.written_files == []
+    assert result.deleted_files == []
+    assert documents == []
+    assert get_personal_markdown_user_root(user_id).exists() is False
+
+
 def test_sync_personal_markdown_library_writes_source_and_summary_files(
     db_session,
     test_user,

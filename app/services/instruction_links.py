@@ -11,10 +11,11 @@ from app.core.logging import get_logger
 from app.models.contracts import ContentClassification, ContentStatus, ContentType
 from app.models.db import Content
 from app.models.llm.content_analysis import InstructionLink
+from app.services.active_users import lock_active_user
 from app.services.content_submission import normalize_url
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
-from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
-from app.services.queue import TaskType
+from app.services.long_form_images import build_visible_long_form_image_task_requests
+from app.services.queue import TaskEnqueueRequest, TaskType
 from app.services.scraper_configs import ensure_inbox_status
 
 logger = get_logger(__name__)
@@ -80,10 +81,10 @@ def create_contents_from_instruction_links(
         return []
 
     metadata = source_content.content_metadata or {}
-    submitter_id = metadata.get("submitted_by_user_id")
+    submitter_id = lock_active_user(db, metadata.get("submitted_by_user_id"))
     if submitter_id is None:
         logger.info(
-            "Skipping instruction link creation (no submitter id)",
+            "Skipping instruction link creation (submitter missing or inactive)",
             extra={
                 "component": "instruction_links",
                 "operation": "create_contents",
@@ -101,7 +102,6 @@ def create_contents_from_instruction_links(
 
     created_ids: list[int] = []
     existing_inbox_created_ids: list[int] = []
-    has_updates = False
 
     for url in normalized_urls:
         existing = existing_by_url.get(url)
@@ -114,7 +114,6 @@ def create_contents_from_instruction_links(
                 content_type=existing.content_type,
             ):
                 existing_inbox_created_ids.append(existing_content_id)
-                has_updates = True
             continue
 
         new_content = Content(
@@ -139,35 +138,40 @@ def create_contents_from_instruction_links(
         new_content_id = _require_content_id(new_content)
         created_ids.append(new_content_id)
 
-        if ensure_inbox_status(
+        ensure_inbox_status(
             db,
             submitter_id,
             new_content_id,
             content_type=new_content.content_type,
-        ):
-            has_updates = True
-
-    if created_ids or has_updates:
-        db.commit()
-        enqueue_visible_long_form_images_for_content_ids(
-            db,
-            [*existing_inbox_created_ids, *created_ids],
         )
+
+    db.flush()
+    queue_gateway = get_task_queue_gateway()
+    image_requests = build_visible_long_form_image_task_requests(
+        db,
+        [*existing_inbox_created_ids, *created_ids],
+    )
+    if image_requests:
+        queue_gateway.enqueue_many_in_session(db, image_requests)
 
     if not created_ids:
         return []
 
     if enqueue_task is None:
-        queue_gateway = get_task_queue_gateway()
-
-        def enqueue_task(content_id: int) -> None:
-            queue_gateway.enqueue(
-                task_type=TaskType.ANALYZE_URL,
-                content_id=content_id,
-                payload={"content_id": content_id},
-            )
-
-    for content_id in created_ids:
-        enqueue_task(content_id)
+        queue_gateway.enqueue_many_in_session(
+            db,
+            [
+                TaskEnqueueRequest(
+                    task_type=TaskType.ANALYZE_URL,
+                    content_id=content_id,
+                    payload={"content_id": content_id},
+                    access_user_id=submitter_id,
+                )
+                for content_id in created_ids
+            ],
+        )
+    else:
+        for content_id in created_ids:
+            enqueue_task(content_id)
 
     return created_ids

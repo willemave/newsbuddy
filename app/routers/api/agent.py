@@ -58,8 +58,11 @@ def get_job(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> JobStatusResponse:
     """Return async job status."""
-    del current_user
-    return get_job_status.execute(db, job_id=job_id)
+    return get_job_status.execute(
+        db,
+        job_id=job_id,
+        user_id=require_user_id(current_user),
+    )
 
 
 @router.post("/agent/search", response_model=AgentSearchResponse)

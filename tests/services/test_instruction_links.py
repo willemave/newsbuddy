@@ -111,3 +111,29 @@ def test_create_contents_from_instruction_links_skips_existing(db_session, sourc
         .first()
     )
     assert status_entry is not None
+
+
+def test_create_contents_from_instruction_links_skips_inactive_submitter(
+    db_session,
+    source_content,
+    test_user,
+):
+    test_user.is_active = False
+    db_session.commit()
+    created: list[int] = []
+
+    new_ids = create_contents_from_instruction_links(
+        db_session,
+        source_content,
+        [InstructionLink(url="https://example.com/linked-after-deletion")],
+        enqueue_task=created.append,
+    )
+
+    assert new_ids == []
+    assert created == []
+    assert (
+        db_session.query(Content)
+        .filter(Content.url == "https://example.com/linked-after-deletion")
+        .first()
+        is None
+    )

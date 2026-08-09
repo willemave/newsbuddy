@@ -106,3 +106,44 @@ def test_read_file_returns_typed_failure_for_missing_artifact() -> None:
         "path": "output/index.html",
         "error": "File not found or unreadable: output/index.html",
     }
+
+
+def test_execute_bash_always_passes_a_bounded_timeout() -> None:
+    agent = _FakeAgent()
+    timeouts: list[int | None] = []
+    events: list[dict[str, Any]] = []
+
+    class Session:
+        def execute_bash(
+            self,
+            _command: str,
+            *,
+            timeout_seconds: int | None = None,
+        ) -> SimpleNamespace:
+            timeouts.append(timeout_seconds)
+            return SimpleNamespace(exit_code=0, stdout="ok", stderr="")
+
+    register_agent_vm_tools(
+        cast(Any, agent),
+        session_getter=lambda _deps: cast(Any, Session()),
+        log_event=lambda _deps, _event, payload: events.append(payload),
+        user_id_getter=lambda _deps: None,
+        metadata_getter=lambda _deps: {},
+        config=AgentToolsetConfig(
+            feature="test",
+            operation_prefix="test",
+            source="unit",
+            default_bash_timeout_seconds=45,
+            max_bash_timeout_seconds=90,
+        ),
+    )
+    execute_bash = agent.tools["execute_bash"]
+    ctx = SimpleNamespace(deps=object())
+
+    execute_bash(ctx, "first")
+    execute_bash(ctx, "second", timeout_seconds=900)
+    execute_bash(ctx, "third", timeout_seconds=0)
+
+    assert timeouts == [45, 90, 1]
+    assert [event["timeout_seconds"] for event in events] == [45, 90, 1]
+    assert [event["requested_timeout_seconds"] for event in events] == [None, 900, 0]

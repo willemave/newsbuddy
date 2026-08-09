@@ -39,6 +39,7 @@ from app.models.domain.chat_sessions import (
     LEGACY_KNOWLEDGE_SESSION_TYPES,
 )
 from app.models.internal.assistant import AssistantScreenContext
+from app.models.internal.chat_turn import ChatTurnProcessingContext, ChatTurnSessionSnapshot
 from app.repositories import read_status_repository
 from app.repositories.search_repository import (
     search_content,
@@ -47,6 +48,7 @@ from app.repositories.search_repository import (
 )
 from app.services import knowledge as knowledge_service
 from app.services.assistant_feed_finder import find_feed_options as find_feed_options_service
+from app.services.assistant_feed_subscription import subscribe_known_feed
 from app.services.chat_agent import (
     load_message_history,
     save_messages,
@@ -75,10 +77,10 @@ from app.services.chat_turn_runtime import (
     persist_detached_turn_failure as _persist_detached_turn_failure,
 )
 from app.services.chat_turn_runtime import (
-    personal_library_unavailable_message as _personal_library_unavailable_message,
+    register_personal_library_tools as _register_personal_library_tools,
 )
 from app.services.chat_turn_runtime import (
-    snapshot_detached_chat_turn as _snapshot_detached_chat_turn,
+    snapshot_detached_chat_turn_from_snapshot as _snapshot_detached_chat_turn_from_snapshot,
 )
 from app.services.chat_turn_runtime import (
     start_detached_chat_turn as _start_detached_chat_turn,
@@ -230,6 +232,7 @@ class AssistantDeps:
     screen_context: AssistantScreenContext
     context_snapshot: str
     session_factory: sessionmaker[Session]
+    llm_task_id: int | None = None
     sandbox_session: PersonalLibrarySandboxSession | None = None
     personal_library_error: str | None = None
 
@@ -336,6 +339,17 @@ def _should_route_to_feed_finder(user_text: str) -> bool:
     return has_feed_hint and has_action_hint
 
 
+def _should_route_to_weekly_discovery_action(
+    user_text: str,
+    screen_context: AssistantScreenContext | None,
+) -> bool:
+    """Detect mutation requests against the numbered weekly discovery options."""
+    if screen_context is None or screen_context.screen_type != "weekly_discovery":
+        return False
+    normalized = f" {_normalize_turn_text(user_text)} "
+    return any(marker in normalized for marker in (" add ", " subscribe ", " follow "))
+
+
 def _build_turn_instructions(
     user_text: str,
     screen_context: AssistantScreenContext | None = None,
@@ -347,6 +361,9 @@ def _build_turn_instructions(
         and screen_context.assistant_action == ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS
     ):
         return load_prompt("chat/contextual_assistant#turn_pick_interesting_unread_news")
+
+    if _should_route_to_weekly_discovery_action(user_text, screen_context):
+        return load_prompt("chat/contextual_assistant#turn_weekly_discovery_action")
 
     if _is_small_talk(user_text):
         return None
@@ -646,7 +663,8 @@ def _create_assistant_agent(
             summary = (result.snippet or "").strip().replace("\n", " ")
             if len(summary) > 220:
                 summary = f"{summary[:217]}..."
-            lines.append(f"{idx}. {title} — {url}")
+            escaped_title = title.replace("[", r"\[").replace("]", r"\]")
+            lines.append(f"{idx}. [{escaped_title}](<{url}>)")
             if summary:
                 lines.append(f"   {summary}")
         return "\n".join(lines)
@@ -659,7 +677,12 @@ def _create_assistant_agent(
     ) -> dict[str, object]:
         """Find validated blog/newsletter/podcast feeds without subscribing yet."""
 
-        result = find_feed_options_service(query=query, limit=limit, user_id=ctx.deps.user_id)
+        result = find_feed_options_service(
+            query=query,
+            limit=limit,
+            user_id=ctx.deps.user_id,
+            execution_id=ctx.deps.llm_task_id,
+        )
         return result.model_dump(mode="json")
 
     @agent.tool(name="search_knowledge")
@@ -679,51 +702,12 @@ def _create_assistant_agent(
             )
         return _format_knowledge_hits(hits, query)
 
-    @agent.tool(name="SearchMarkdownLibrary")
-    def search_markdown_library(
-        ctx: RunContext[AssistantDeps],
-        query: str,
-        limit: int = 20,
-        glob: str = "*.md",
-    ) -> str:
-        """Search the user's sandbox-mounted personal markdown library."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return _personal_library_unavailable_message(ctx.deps.personal_library_error)
-
-        normalized_limit = max(1, min(limit, 50))
-        return sandbox_session.search_files(query=query, glob=glob, limit=normalized_limit)
-
-    @agent.tool(name="ListMarkdownLibrary")
-    def list_markdown_library(
-        ctx: RunContext[AssistantDeps],
-        subpath: str = "",
-        limit: int = 200,
-    ) -> str:
-        """List markdown files in the user's sandbox-mounted personal library."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return _personal_library_unavailable_message(ctx.deps.personal_library_error)
-
-        normalized_limit = max(1, min(limit, 500))
-        return sandbox_session.list_files(subpath=subpath, limit=normalized_limit)
-
-    @agent.tool(name="ReadMarkdownFile")
-    def read_markdown_file(
-        ctx: RunContext[AssistantDeps],
-        relative_path: str,
-        max_chars: int = 12_000,
-    ) -> str:
-        """Read one markdown file from the user's sandbox-mounted personal library."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return _personal_library_unavailable_message(ctx.deps.personal_library_error)
-
-        normalized_max_chars = max(500, min(max_chars, 40_000))
-        return sandbox_session.read_file(
-            relative_path=relative_path,
-            max_chars=normalized_max_chars,
-        )
+    _register_personal_library_tools(
+        agent,
+        search_name="SearchMarkdownLibrary",
+        list_name="ListMarkdownLibrary",
+        read_name="ReadMarkdownFile",
+    )
 
     @agent.tool(name="search_subscription_feeds")
     def search_subscription_feeds_tool(
@@ -835,8 +819,18 @@ def _create_assistant_agent(
         ctx: RunContext[AssistantDeps],
         url: str,
         title: str | None = None,
+        feed_type: str | None = None,
     ) -> str:
-        """Detect and subscribe to a feed from the provided URL."""
+        """Subscribe to a feed, using its known type or detecting it from the URL."""
+        if feed_type is not None:
+            return subscribe_known_feed(
+                ctx.deps.session_factory,
+                user_id=ctx.deps.user_id,
+                url=url,
+                title=title,
+                feed_type=feed_type,
+            )
+
         with ctx.deps.session_factory() as db:
             user = db.query(User).filter(User.id == ctx.deps.user_id).first()
             if user is None:
@@ -1192,6 +1186,7 @@ def create_assistant_session(
     context_snapshot: str,
     screen_context: AssistantScreenContext,
     initial_message: str | None = None,
+    commit: bool = True,
 ) -> ChatSession:
     """Create a new assistant session."""
     title = screen_context.screen_title or "Knowledge Chat"
@@ -1226,7 +1221,9 @@ def create_assistant_session(
         updated_at=datetime.now(UTC),
     )
     db.add(session)
-    db.commit()
+    db.flush()
+    if commit:
+        db.commit()
     db.refresh(session)
     return session
 
@@ -1302,7 +1299,7 @@ class _ExecutedAssistantTurn:
 
 def _prepare_assistant_background_turn(
     db: Session,
-    session: ChatSession,
+    session: ChatTurnSessionSnapshot,
     turn: _DetachedChatTurn,
     *,
     screen_context: AssistantScreenContext,
@@ -1351,6 +1348,7 @@ def _prepare_assistant_background_turn(
         screen_context=screen_context,
         context_snapshot=context_snapshot,
         session_factory=get_session_factory(),
+        llm_task_id=turn.llm_task_id,
         sandbox_session=sandbox_session,
         personal_library_error=personal_library_error,
     )
@@ -1471,6 +1469,8 @@ async def process_assistant_turn_async(
     *,
     screen_context: AssistantScreenContext,
     source: str = "assistant",
+    task_id: int | None = None,
+    turn_context: ChatTurnProcessingContext,
 ) -> None:
     """Process one assistant turn without retaining a DB session across I/O."""
     total_start = perf_counter()
@@ -1510,11 +1510,14 @@ async def process_assistant_turn_async(
                 logger.error("Assistant session %s not found", session_id)
                 return
 
-            turn = _snapshot_detached_chat_turn(
-                session,
+            session_snapshot = turn_context.session
+            if session_snapshot.effective_session_id != session_id:
+                raise ValueError("Assistant turn context does not match the requested session")
+            turn = _snapshot_detached_chat_turn_from_snapshot(
+                session_snapshot,
                 message_id=message_id,
                 source=source,
-                task_id=None,
+                task_id=task_id,
             )
             turn, tracker = _start_detached_chat_turn(
                 prepare_db,
@@ -1527,13 +1530,14 @@ async def process_assistant_turn_async(
                     "source": turn.source,
                     "screen_type": screen_context.screen_type,
                     "assistant_action": screen_context.assistant_action,
+                    "queue_task_id": task_id,
                     "prompt_chars": len(user_prompt),
                     "model": turn.model,
                 },
             )
             prepared = _prepare_assistant_background_turn(
                 prepare_db,
-                session,
+                session_snapshot,
                 turn,
                 screen_context=screen_context,
             )
@@ -1644,6 +1648,8 @@ def seed_assistant_message(
     *,
     session_id: int,
     assistant_text: str,
+    render_metadata: ChatMessageRenderMetadata | None = None,
+    commit: bool = True,
 ) -> None:
     """Persist an assistant-only seed message into a chat session."""
     from pydantic_ai.messages import ModelResponse, TextPart
@@ -1652,4 +1658,6 @@ def seed_assistant_message(
         db,
         session_id,
         [ModelResponse(parts=[TextPart(content=assistant_text)])],
+        render_metadata=render_metadata,
+        commit=commit,
     )

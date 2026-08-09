@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.settings import get_settings
 from app.models.db import ChatSession, Content, ContentKnowledgeSave
+from app.services.active_users import lock_active_user
 from app.services.content_bodies import ContentBodyVariant, get_content_body_resolver
 from app.utils.summary_utils import extract_short_summary, extract_summary_text
 
@@ -96,11 +97,14 @@ def sync_personal_markdown_library_for_user(
     settings = get_settings()
     if not settings.personal_markdown_enabled:
         return PersonalMarkdownSyncResult(user_id=user_id, written_files=[], deleted_files=[])
+    active_user_id = lock_active_user(db, user_id)
+    if active_user_id is None:
+        return PersonalMarkdownSyncResult(user_id=user_id, written_files=[], deleted_files=[])
 
-    user_root = get_personal_markdown_user_root(user_id)
+    user_root = get_personal_markdown_user_root(active_user_id)
     user_root.mkdir(parents=True, exist_ok=True)
 
-    qualifying_reasons = _load_qualifying_content_reasons(db, user_id=user_id)
+    qualifying_reasons = _load_qualifying_content_reasons(db, user_id=active_user_id)
     written_files: list[Path] = []
     deleted_files: list[Path] = []
 
@@ -120,14 +124,14 @@ def sync_personal_markdown_library_for_user(
             _sync_content_markdown_files(
                 db=db,
                 user_root=user_root,
-                user_id=user_id,
+                user_id=active_user_id,
                 content=content,
                 reasons=reasons,
             )
         )
 
     return PersonalMarkdownSyncResult(
-        user_id=user_id,
+        user_id=active_user_id,
         written_files=written_files,
         deleted_files=deleted_files,
     )
@@ -143,8 +147,11 @@ def collect_personal_markdown_documents_for_user(
     settings = get_settings()
     if not settings.personal_markdown_enabled:
         return []
+    active_user_id = lock_active_user(db, user_id)
+    if active_user_id is None:
+        return []
 
-    qualifying_reasons = _load_qualifying_content_reasons(db, user_id=user_id)
+    qualifying_reasons = _load_qualifying_content_reasons(db, user_id=active_user_id)
     contents_by_id = _load_contents_by_id(db, set(qualifying_reasons))
     documents: list[PersonalMarkdownDocument] = []
     for content_id, reasons in qualifying_reasons.items():
@@ -154,7 +161,7 @@ def collect_personal_markdown_documents_for_user(
         documents.extend(
             _build_content_markdown_documents(
                 db=db,
-                user_id=user_id,
+                user_id=active_user_id,
                 content=content,
                 reasons=reasons,
                 include_source=include_source,
@@ -173,11 +180,14 @@ def sync_personal_markdown_for_content(
     settings = get_settings()
     if not settings.personal_markdown_enabled:
         return PersonalMarkdownSyncResult(user_id=user_id, written_files=[], deleted_files=[])
+    active_user_id = lock_active_user(db, user_id)
+    if active_user_id is None:
+        return PersonalMarkdownSyncResult(user_id=user_id, written_files=[], deleted_files=[])
 
-    user_root = get_personal_markdown_user_root(user_id)
+    user_root = get_personal_markdown_user_root(active_user_id)
     user_root.mkdir(parents=True, exist_ok=True)
 
-    reasons = _load_reasons_for_content(db, user_id=user_id, content_id=content_id)
+    reasons = _load_reasons_for_content(db, user_id=active_user_id, content_id=content_id)
     if not reasons.labels:
         deleted_files = _delete_content_files(user_root, content_id)
         return PersonalMarkdownSyncResult(
@@ -198,12 +208,12 @@ def sync_personal_markdown_for_content(
     written_files = _sync_content_markdown_files(
         db=db,
         user_root=user_root,
-        user_id=user_id,
+        user_id=active_user_id,
         content=content,
         reasons=reasons,
     )
     return PersonalMarkdownSyncResult(
-        user_id=user_id,
+        user_id=active_user_id,
         written_files=written_files,
         deleted_files=[],
     )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from app.services import discussion_fetcher
 from app.services.discussion_fetcher import (
     _extract_social_comments_from_groups,
@@ -119,6 +121,7 @@ def test_build_techmeme_payload_includes_social_comments(monkeypatch) -> None:
     payload = discussion_fetcher._build_techmeme_payload(
         "https://www.techmeme.com/260217/p39#a260217p39",
         {"aggregator": {"external_id": "p39#a260217p39"}},
+        http_service=cast(Any, object()),
     )
 
     assert payload.status == "completed"

@@ -61,6 +61,8 @@ class AgentToolsetConfig:
     source: str
     max_read_bytes: int = 100_000
     max_search_results: int = 8
+    default_bash_timeout_seconds: int = 120
+    max_bash_timeout_seconds: int = 300
     tool_policy: AgentToolPolicy = field(default_factory=AgentToolPolicy)
 
 
@@ -88,13 +90,15 @@ def register_agent_vm_tools(
         timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         session = session_getter(ctx.deps)
-        result = session.execute_bash(command, timeout_seconds=timeout_seconds)
+        bounded_timeout_seconds = _bounded_bash_timeout(timeout_seconds, config=config)
+        result = session.execute_bash(command, timeout_seconds=bounded_timeout_seconds)
         log_event(
             ctx.deps,
             "execute_bash",
             {
                 "command": command,
-                "timeout_seconds": timeout_seconds,
+                "requested_timeout_seconds": timeout_seconds,
+                "timeout_seconds": bounded_timeout_seconds,
                 "exit_code": result.exit_code,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
@@ -224,6 +228,18 @@ def _bounded_read_limit(requested: int | None, default_max: int) -> int:
     if requested is None:
         return default_max
     return min(max(int(requested), 1), default_max)
+
+
+def _bounded_bash_timeout(
+    requested: int | None,
+    *,
+    config: AgentToolsetConfig,
+) -> int:
+    maximum = max(1, int(config.max_bash_timeout_seconds))
+    default = min(max(1, int(config.default_bash_timeout_seconds)), maximum)
+    if requested is None:
+        return default
+    return min(max(1, int(requested)), maximum)
 
 
 def _policy_flag(value: Any, *, default: bool) -> bool:

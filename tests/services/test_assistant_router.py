@@ -9,7 +9,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserProm
 from pydantic_ai.models.test import TestModel
 
 from app.core.settings import get_settings
-from app.models.contracts import LlmTaskStatus, MessageProcessingStatus
+from app.models.contracts import LlmTaskStatus, MessageProcessingStatus, TaskType
 from app.models.db import (
     ChatMessage,
     ChatSession,
@@ -17,6 +17,7 @@ from app.models.db import (
     ContentStatusEntry,
     LlmTask,
     NewsItemReadStatus,
+    ProcessingTask,
     UserScraperConfig,
 )
 from app.models.internal.assistant import AssistantScreenContext
@@ -26,6 +27,8 @@ from app.repositories.search_repository import (
 )
 from app.services import assistant_router, chat_turn_runtime
 from app.services.chat_agent import create_processing_message
+from app.services.chat_turn_queue import build_chat_turn_context
+from tests.support.feed_subscription_test_helpers import stub_feed_validator
 
 
 def test_build_turn_instructions_prefers_knowledge_for_saved_content_prompts() -> None:
@@ -71,6 +74,24 @@ def test_build_turn_instructions_keeps_feed_recommendations_non_mutating() -> No
     assert "find_feed_options" in instructions
     assert "recommendation mode" in instructions
     assert "attached below for review" in instructions
+
+
+def test_build_turn_instructions_resolves_weekly_ordinal_subscription_actions() -> None:
+    """Weekly ordinal mutations should use frozen identities without rediscovery."""
+
+    instructions = assistant_router._build_turn_instructions(
+        "add first two",
+        AssistantScreenContext(
+            screen_type="weekly_discovery",
+            screen_title="Weekly Discovery",
+        ),
+    )
+
+    assert instructions is not None
+    assert "canonical numbered weekly discovery identities" in instructions
+    assert "exact feed_url as url" in instructions
+    assert "exact suggestion_type as feed_type" in instructions
+    assert "Do not search for or re-detect" in instructions
 
 
 def test_build_turn_instructions_prefers_content_search_for_feed_summary() -> None:
@@ -151,6 +172,129 @@ def test_get_or_create_agent_uses_shared_model_builder(monkeypatch) -> None:
     assert agent.model is sentinel_model
 
     chat_turn_runtime.clear_agent_cache_for_tests()
+
+
+def test_known_feed_subscription_tool_persists_once_and_is_idempotent(
+    db_session,
+    db_session_factory,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Known weekly options should subscribe directly with a durable backfill."""
+    stub_feed_validator(monkeypatch, title="Example Feed")
+    monkeypatch.setattr(
+        assistant_router,
+        "build_pydantic_model",
+        lambda *_args, **_kwargs: (TestModel(custom_output_text="ok"), {}),
+    )
+    agent = assistant_router._create_assistant_agent("test:model")
+    subscribe = agent._function_toolset.tools["subscribe_to_feed"].function
+    context = SimpleNamespace(
+        deps=SimpleNamespace(
+            user_id=test_user.id,
+            session_factory=db_session_factory,
+        )
+    )
+
+    first_result = subscribe(
+        context,
+        "HTTPS://Example.COM/feed.xml/",
+        "Example Feed",
+        "atom",
+    )
+    second_result = subscribe(
+        context,
+        "https://example.com/feed.xml",
+        "Example Feed",
+        "atom",
+    )
+
+    db_session.expire_all()
+    configs = (
+        db_session.query(UserScraperConfig).filter(UserScraperConfig.user_id == test_user.id).all()
+    )
+    assert first_result == "Subscribed to Example Feed."
+    assert second_result == "Already subscribed to Example Feed."
+    assert len(configs) == 1
+    assert configs[0].scraper_type == "atom"
+    assert configs[0].feed_url == "https://example.com/feed.xml"
+    backfill_task = (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == TaskType.BACKFILL_FEEDS.value)
+        .one()
+    )
+    assert backfill_task.owner_user_id == test_user.id
+    assert backfill_task.payload["config_ids"] == [configs[0].id]
+
+
+def test_known_feed_subscription_tool_rejects_bad_identity_and_rolls_back_queue_failure(
+    db_session,
+    db_session_factory,
+    test_user,
+    monkeypatch,
+) -> None:
+    """Invalid options and failed durable work must not persist subscriptions."""
+    stub_feed_validator(monkeypatch, title="Rollback Feed")
+    monkeypatch.setattr(
+        assistant_router,
+        "build_pydantic_model",
+        lambda *_args, **_kwargs: (TestModel(custom_output_text="ok"), {}),
+    )
+    agent = assistant_router._create_assistant_agent("test:model")
+    subscribe = agent._function_toolset.tools["subscribe_to_feed"].function
+    context = SimpleNamespace(
+        deps=SimpleNamespace(
+            user_id=test_user.id,
+            session_factory=db_session_factory,
+        )
+    )
+
+    assert (
+        subscribe(
+            context,
+            "https://example.com/feed.xml",
+            "Future Feed",
+            "future_feed_type",
+        )
+        == "Unable to subscribe: unsupported feed type future_feed_type."
+    )
+    assert (
+        subscribe(
+            context,
+            "not a URL",
+            "Malformed Feed",
+            "atom",
+        )
+        == "Unable to subscribe: invalid feed URL."
+    )
+
+    class _FailingQueueService:
+        def enqueue_many_in_session(self, _db, _requests):
+            raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr(
+        "app.commands.subscribe_feed.get_queue_service",
+        lambda: _FailingQueueService(),
+    )
+
+    assert (
+        subscribe(
+            context,
+            "https://example.com/rollback.xml",
+            "Rollback Feed",
+            "atom",
+        )
+        == "Unable to subscribe to Rollback Feed (temporary failure)."
+    )
+
+    db_session.expire_all()
+    assert db_session.query(UserScraperConfig).count() == 0
+    assert (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == TaskType.BACKFILL_FEEDS.value)
+        .count()
+        == 0
+    )
 
 
 def test_find_subscription_content_matches_uses_active_feed_names(
@@ -517,21 +661,30 @@ def test_process_assistant_turn_persists_completion_usage_and_ledger(
         ]
         return SimpleNamespace(
             output="Here is the saved article",
-            tool_calls=[],
             new_messages=lambda: messages,
         )
 
     monkeypatch.setattr(assistant_router, "run_in_threadpool", _fake_run_in_threadpool)
 
+    screen_context = AssistantScreenContext(
+        screen_type="knowledge_hub",
+        screen_title="Knowledge",
+    )
+    turn_context = build_chat_turn_context(
+        session,
+        visible_session_id=session_id,
+        user_prompt="Find my saved article",
+        kind="assistant",
+        source="queue",
+        screen_context=screen_context,
+    )
     asyncio.run(
         assistant_router.process_assistant_turn_async(
             session_id,
             message_id,
             "Find my saved article",
-            screen_context=AssistantScreenContext(
-                screen_type="knowledge_hub",
-                screen_title="Knowledge",
-            ),
+            screen_context=screen_context,
+            turn_context=turn_context,
         )
     )
 

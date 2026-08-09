@@ -9,10 +9,10 @@ from app.models.api.onboarding import (
     OnboardingDiscoveryStatusResponse,
     OnboardingFastDiscoverResponse,
 )
-from app.models.db import ProcessingTask
+from app.models.db import ProcessingTask, ProcessingTaskUserAccess
 
 
-def test_agent_job_status_returns_processing_task(client, db_session):
+def test_agent_job_status_returns_processing_task(client, db_session, test_user):
     """Job status endpoint should expose persisted queue task state."""
     task = ProcessingTask(
         task_type="process_content",
@@ -22,14 +22,41 @@ def test_agent_job_status_returns_processing_task(client, db_session):
         queue_name="content",
     )
     db_session.add(task)
+    db_session.flush()
+    db_session.add(ProcessingTaskUserAccess(task_id=task.id, user_id=test_user.id))
     db_session.commit()
-    db_session.refresh(task)
 
     response = client.get(f"/api/jobs/{task.id}")
 
     assert response.status_code == 200
     assert response.json()["id"] == task.id
     assert response.json()["status"] == "pending"
+    assert response.json()["payload"] == {}
+
+
+def test_agent_job_status_hides_other_users_tasks(
+    client_factory,
+    db_session,
+    test_user,
+    user_factory,
+) -> None:
+    task = ProcessingTask(
+        task_type="analyze_url",
+        payload={"user_id": test_user.id, "secret": "private"},
+        error_message="provider credential leaked here",
+        status="failed",
+        queue_name="content",
+    )
+    db_session.add(task)
+    db_session.flush()
+    db_session.add(ProcessingTaskUserAccess(task_id=task.id, user_id=test_user.id))
+    db_session.commit()
+    other_user = user_factory()
+
+    with client_factory(user=other_user) as other_client:
+        response = other_client.get(f"/api/jobs/{task.id}")
+
+    assert response.status_code == 404
 
 
 def test_agent_search_returns_external_results(client, monkeypatch):

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.models.contracts import MessageProcessingStatus
 from app.models.db import ChatMessage, ChatSession
 from app.services import deep_research
+from app.services.chat_turn_queue import build_chat_turn_context
 
 
 @pytest.mark.asyncio
@@ -84,10 +85,18 @@ async def test_process_deep_research_releases_db_session_during_llm(
     monkeypatch.setattr(deep_research, "get_deep_research_client", lambda: FakeDeepResearchClient())
     assert chat_session.id is not None
     assert message.id is not None
+    turn_context = build_chat_turn_context(
+        chat_session,
+        visible_session_id=chat_session.id,
+        user_prompt="Find the latest context",
+        kind="deep_research",
+        source="queue",
+    )
     await deep_research.process_deep_research_message(
         chat_session.id,
         message.id,
         "Find the latest context",
+        turn_context=turn_context,
     )
 
     assert TrackingSession.active_count == 0
