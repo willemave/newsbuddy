@@ -11,8 +11,6 @@ class SciUrlsAggregatorScraper(HtmlGroupedAggregatorScraper):
     KEY = "sciurls"
     DISPLAY_NAME = "SciURLs"
 
-    # SciURLs/FinURLs share the same template — each ``.box`` is a source block,
-    # with ``.boxhead`` containing the source link and ``ul li a`` for stories.
-    SOURCE_BLOCK_SELECTOR = ".box"
-    SOURCE_HEADING_SELECTOR = ".boxhead"
-    ARTICLE_LINK_SELECTOR = "ul li a"
+    SOURCE_BLOCK_SELECTOR = ".publisher-block"
+    SOURCE_HEADING_SELECTOR = ".publisher-header"
+    ARTICLE_LINK_SELECTOR = ".publisher-link a.article-link"

@@ -32,18 +32,24 @@ class HackerNewsAggregatorScraper(AggregatorScraper):
 
         with httpx.Client(timeout=10.0) as client:
             try:
-                top_response = client.get(f"{self.api_base_url}/topstories.json")
+                top_stories_url = f"{self.api_base_url}/topstories.json"
+                top_response = client.get(top_stories_url)
+                top_response.raise_for_status()
                 story_ids = top_response.json()[: self.settings.limit]
             except Exception as exc:  # pragma: no cover - network failure guard
                 logger.exception("Failed to fetch HN top stories: %s", exc)
+                self._record_scrape_error(top_stories_url, exc)
                 return items
 
             for story_id in story_ids:
                 try:
-                    story_response = client.get(f"{self.api_base_url}/item/{story_id}.json")
+                    story_url = f"{self.api_base_url}/item/{story_id}.json"
+                    story_response = client.get(story_url)
+                    story_response.raise_for_status()
                     story = story_response.json()
                 except Exception as exc:
                     logger.error("Error fetching HN story %s: %s", story_id, exc)
+                    self._record_scrape_error(story_url, exc)
                     continue
 
                 if not story or story.get("type") != "story" or "url" not in story:

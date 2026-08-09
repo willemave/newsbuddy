@@ -1,3 +1,7 @@
+from contextlib import contextmanager
+from types import SimpleNamespace
+
+from app.scraping.aggregators import brutalist
 from app.scraping.aggregators.brutalist import BrutalistReportAggregatorScraper
 from app.scraping.aggregators.config import HtmlTopicAggregator
 
@@ -48,3 +52,29 @@ def test_brutalist_respects_limit() -> None:
     )
     items = scraper.parse(load_fixture("brutalist", "science.html"), topic="science")
     assert len(items) == 2
+
+
+def test_brutalist_reuses_one_feed_runtime_across_topics(monkeypatch) -> None:
+    runtime_entries = 0
+    fetched_urls: list[str] = []
+
+    class FakeHttpService:
+        def fetch(self, url: str, *, headers):  # noqa: ANN001
+            del headers
+            fetched_urls.append(url)
+            return SimpleNamespace(text=load_fixture("brutalist", "science.html"))
+
+    @contextmanager
+    def fake_runtime(**kwargs):
+        nonlocal runtime_entries
+        runtime_entries += 1
+        assert kwargs == {"user_id": 0}
+        yield FakeHttpService()
+
+    monkeypatch.setattr(brutalist, "sandboxed_http_service", fake_runtime)
+
+    items = BrutalistReportAggregatorScraper(_settings(["science", "technology"])).scrape()
+
+    assert items
+    assert runtime_entries == 1
+    assert len(fetched_urls) == 2

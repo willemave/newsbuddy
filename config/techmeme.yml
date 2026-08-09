@@ -1,9 +1,0 @@
-# Techmeme feed configuration
-# limit controls how many clusters to ingest per run. Include related links to
-# capture the supporting stories that Techmeme attaches to each cluster.
-
-feed:
-  url: "https://www.techmeme.com/feed.xml"
-  limit: 20
-  include_related: true
-  max_related: 6

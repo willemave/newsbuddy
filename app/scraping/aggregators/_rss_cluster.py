@@ -21,6 +21,8 @@ from app.models.contracts import ContentType
 from app.scraping.aggregators.base import AggregatorScraper
 from app.scraping.aggregators.config import RssClusterAggregator
 from app.scraping.feed_fetch import fetch_and_parse_feed
+from app.services.agent_vm_runtime import SYSTEM_USER_ID
+from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
 
@@ -50,9 +52,10 @@ class RssClusterAggregatorScraper(AggregatorScraper):
         feed_url = str(self.settings.url)
 
         try:
-            parsed_feed = fetch_and_parse_feed(feed_url)
-        except Exception as exc:  # pragma: no cover - network guard
+            parsed_feed = fetch_and_parse_feed(feed_url, user_id=SYSTEM_USER_ID)
+        except Exception as exc:  # noqa: BLE001 - report the isolated source outage
             logger.exception("Failed to fetch %s feed: %s", self.DISPLAY_NAME, exc)
+            self._record_scrape_error(feed_url, exc)
             return items
 
         if getattr(parsed_feed, "bozo", 0):
@@ -71,12 +74,14 @@ class RssClusterAggregatorScraper(AggregatorScraper):
             try:
                 item = self._process_entry(entry, feed_title)
             except Exception as exc:  # pragma: no cover - defensive
+                entry_source = str(entry.get("link") or entry.get("id") or feed_url)
                 logger.exception(
                     "Error processing %s entry %s: %s",
                     self.DISPLAY_NAME,
                     entry.get("id"),
                     exc,
                 )
+                self._record_scrape_error(entry_source, exc)
                 continue
             if item:
                 items.append(item)
@@ -270,4 +275,4 @@ class RssClusterAggregatorScraper(AggregatorScraper):
             domain = self.extract_domain(url)
         except Exception:  # pragma: no cover
             return False
-        return domain.endswith(self.CLUSTER_DOMAIN)
+        return is_domain_or_subdomain(domain, self.CLUSTER_DOMAIN)

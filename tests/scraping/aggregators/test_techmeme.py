@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from app.scraping.aggregators.config import RssClusterAggregator
 from app.scraping.aggregators.techmeme import TechmemeAggregatorScraper
+from app.services.feed_research_runtime import FeedResearchRuntimeError
 
 
 def _settings() -> RssClusterAggregator:
@@ -14,6 +15,84 @@ def _settings() -> RssClusterAggregator:
         include_related=True,
         max_related=3,
     )
+
+
+def test_cluster_link_requires_a_domain_boundary() -> None:
+    scraper = TechmemeAggregatorScraper(_settings())
+
+    assert scraper._is_cluster_link("https://www.techmeme.com/250921/p26") is True
+    assert scraper._is_cluster_link("https://techmeme.com.evil.test/250921/p26") is False
+
+
+def test_feed_sandbox_outage_is_reported_in_run_stats() -> None:
+    scraper = TechmemeAggregatorScraper(_settings())
+    save_stats = {
+        "saved": 0,
+        "duplicates": 0,
+        "errors": 0,
+        "error_details": [],
+        "processed_by_config_id": {},
+    }
+
+    with (
+        patch(
+            "app.scraping.aggregators._rss_cluster.fetch_and_parse_feed",
+            side_effect=FeedResearchRuntimeError("E2B feed runtime unavailable"),
+        ),
+        patch.object(scraper, "_save_items_with_stats", return_value=save_stats),
+    ):
+        stats = scraper.run_with_stats()
+
+    assert stats.scraped == 0
+    assert stats.saved == 0
+    assert stats.errors == 1
+    assert stats.error_details == [
+        "https://www.techmeme.com/feed.xml: E2B feed runtime unavailable"
+    ]
+
+
+def test_malformed_entry_preserves_partial_progress_and_error_stats() -> None:
+    scraper = TechmemeAggregatorScraper(_settings())
+    malformed_entry = {
+        "id": "broken-cluster",
+        "link": "https://www.techmeme.com/broken-cluster",
+    }
+    valid_entry = {
+        "title": "Surviving cluster",
+        "link": "https://www.techmeme.com/250921/p26",
+        "description": '<a href="https://example.com/surviving-story">Story</a>',
+    }
+    parsed_feed = MagicMock()
+    parsed_feed.entries = [malformed_entry, valid_entry]
+    parsed_feed.feed = {"title": "Techmeme"}
+    parsed_feed.bozo = 0
+    save_stats = {
+        "saved": 1,
+        "duplicates": 0,
+        "errors": 0,
+        "error_details": [],
+        "processed_by_config_id": {},
+    }
+
+    with (
+        patch(
+            "app.scraping.aggregators._rss_cluster.fetch_and_parse_feed",
+            return_value=parsed_feed,
+        ),
+        patch.object(
+            scraper,
+            "_process_entry",
+            side_effect=[
+                ValueError("malformed cluster"),
+                scraper._process_entry(valid_entry, "Techmeme"),
+            ],
+        ),
+        patch.object(scraper, "_save_items_with_stats", return_value=save_stats),
+    ):
+        stats = scraper.run_with_stats()
+
+    assert (stats.scraped, stats.saved, stats.errors) == (1, 1, 1)
+    assert stats.error_details == ["https://www.techmeme.com/broken-cluster: malformed cluster"]
 
 
 def test_techmeme_scrape_returns_primary_and_related() -> None:

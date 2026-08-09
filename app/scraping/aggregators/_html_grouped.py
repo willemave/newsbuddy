@@ -1,20 +1,16 @@
 """Shared HTML-grouped parsing used by SciURLs and FinURLs.
 
-Both sites use a single homepage template that lists news items grouped by
-source. Each source block looks like::
+Both sites use a single homepage template that lists news items in publisher
+cards. Each publisher block looks like::
 
-    <div class="source">
-        <h3 class="source-title"><a href="...">Source Name</a></h3>
-        <ul class="story-list">
-            <li><a href="https://example.com/article">Article title</a></li>
-            ...
-        </ul>
+    <div class="publisher-block">
+        <div class="publisher-header">...</div>
+        <div class="publisher-link">
+            <a class="article-link" href="https://example.com/article">Article title</a>
+        </div>
     </div>
 
-The exact CSS class names vary between SciURLs and FinURLs, so subclasses
-declare ``SOURCE_BLOCK_SELECTOR`` and ``SOURCE_HEADING_SELECTOR``. The base
-parser is intentionally permissive: it falls back to scanning every list item
-under each block.
+Subclasses declare the selectors so each site retains an explicit boundary.
 """
 
 from __future__ import annotations
@@ -22,15 +18,13 @@ from __future__ import annotations
 from typing import Any, ClassVar
 from urllib.parse import urljoin
 
-import httpx
 from bs4 import BeautifulSoup, Tag
 
-from app.core.logging import get_logger
 from app.models.contracts import ContentType
 from app.scraping.aggregators.base import AggregatorScraper
 from app.scraping.aggregators.config import HtmlGroupedAggregator
-
-logger = get_logger(__name__)
+from app.services.agent_vm_runtime import SYSTEM_USER_ID
+from app.services.feed_research_runtime import sandboxed_http_service
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -56,19 +50,15 @@ class HtmlGroupedAggregatorScraper(AggregatorScraper):
         self.base_url = str(settings.url).rstrip("/")
 
     def scrape(self) -> list[dict[str, Any]]:
-        try:
-            response = httpx.get(
+        with sandboxed_http_service(user_id=SYSTEM_USER_ID) as http_service:
+            response = http_service.fetch(
                 self.base_url,
-                timeout=20.0,
-                follow_redirects=True,
                 headers={"User-Agent": USER_AGENT},
             )
-            response.raise_for_status()
-        except Exception as exc:  # pragma: no cover - network guard
-            logger.exception("Failed to fetch %s homepage: %s", self.DISPLAY_NAME, exc)
-            return []
-
-        return self.parse(response.text)
+        items = self.parse(response.text)
+        if not items:
+            raise ValueError(f"{self.name} returned no parseable items")
+        return items
 
     def parse(self, html: str) -> list[dict[str, Any]]:
         """Parse the homepage HTML into normalized aggregator items."""
@@ -107,17 +97,19 @@ class HtmlGroupedAggregatorScraper(AggregatorScraper):
         heading = block.select_one(self.SOURCE_HEADING_SELECTOR)
         if heading is None:
             return None, None
-        link = heading.find("a")
-        if isinstance(link, Tag):
-            name = link.get_text(" ", strip=True) or None
-            href = link.get("href")
-            url = (
-                self._normalize_url(urljoin(self.base_url + "/", href.strip()))
-                if isinstance(href, str) and href.strip()
-                else None
-            )
-            return name, url
-        return heading.get_text(" ", strip=True) or None, None
+
+        publisher_title = heading.select_one(".publisher-text .title .primary")
+        publisher_link = heading.select_one("a.icon-container[href]")
+        if publisher_title is None:
+            return None, None
+        name = publisher_title.get_text(" ", strip=True) or None
+        href = publisher_link.get("href") if publisher_link is not None else None
+        url = (
+            self._normalize_url(urljoin(self.base_url + "/", href.strip()))
+            if isinstance(href, str) and href.strip()
+            else None
+        )
+        return name, url
 
     def _build_item(
         self,

@@ -11,6 +11,6 @@ class FinUrlsAggregatorScraper(HtmlGroupedAggregatorScraper):
     KEY = "finurls"
     DISPLAY_NAME = "FinURLs"
 
-    SOURCE_BLOCK_SELECTOR = ".box"
-    SOURCE_HEADING_SELECTOR = ".boxhead"
-    ARTICLE_LINK_SELECTOR = "ul li a"
+    SOURCE_BLOCK_SELECTOR = ".publisher-block"
+    SOURCE_HEADING_SELECTOR = ".publisher-header"
+    ARTICLE_LINK_SELECTOR = ".publisher-link a.article-link"
