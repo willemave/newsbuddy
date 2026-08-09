@@ -48,9 +48,16 @@ final class TweetSuggestionsViewModel {
     var selectedProvider: ChatModelProvider = .openai
 
     // Voice dictation state
-    var isRecording = false
-    var isTranscribing = false
     private(set) var voiceDictationAvailable = false
+    private(set) var voiceState: SpeechTranscriptionState = .idle
+
+    var isRecording: Bool { voiceState == .recording }
+    var isTranscribing: Bool { voiceState == .transcribing }
+
+    var hasVoiceError: Bool {
+        if case .failed = voiceState { return true }
+        return false
+    }
 
     // MARK: - Private Properties
 
@@ -59,7 +66,7 @@ final class TweetSuggestionsViewModel {
     @ObservationIgnored
     private let twitterService: any TweetSharing
     @ObservationIgnored
-    private let transcriptionService: any SpeechTranscribing
+    private let voiceCoordinator: VoiceDictationCoordinator
     @ObservationIgnored
     private let authService: any AuthenticationServicing
     @ObservationIgnored
@@ -76,6 +83,10 @@ final class TweetSuggestionsViewModel {
     private var lastCreativity: Int = 5
     @ObservationIgnored
     private var voiceRecordingStartedAt: Date?
+    @ObservationIgnored
+    private var pendingVoiceTranscript: String?
+    @ObservationIgnored
+    private var suggestionRequestGeneration = 0
 
     // MARK: - Public Methods
 
@@ -90,7 +101,7 @@ final class TweetSuggestionsViewModel {
     ) {
         self.contentService = contentService
         self.twitterService = twitterService
-        self.transcriptionService = transcriptionService
+        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: transcriptionService)
         self.authService = authService
         self.tokenStore = tokenStore
         self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
@@ -99,16 +110,24 @@ final class TweetSuggestionsViewModel {
 
     deinit {
         tasks.cancelAll()
+        MainActor.assumeIsolated {
+            voiceCoordinator.cancel()
+        }
     }
 
     /// Initialize with content ID and generate suggestions.
     func initialize(contentId: Int) async {
+        suggestionRequestGeneration += 1
+        let generation = suggestionRequestGeneration
         self.contentId = contentId
         lastCreativity = creativity
 
         // Check voice dictation availability and refresh the session if needed
         await checkAndRefreshVoiceDictation()
 
+        guard generation == suggestionRequestGeneration, self.contentId == contentId else {
+            return
+        }
         await generateSuggestions()
     }
 
@@ -161,34 +180,12 @@ final class TweetSuggestionsViewModel {
 
     /// Generate tweet suggestions.
     func generateSuggestions() async {
-        guard let contentId = contentId else { return }
-
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            let message = tweakMessage.isEmpty ? nil : tweakMessage
-            let response = try await contentService.generateTweetSuggestions(
-                id: contentId,
-                message: message,
-                creativity: creativity,
-                provider: selectedProvider
-            )
-            suggestions = response.suggestions
-            logger.info("Generated \(response.suggestions.count) tweet suggestions")
-        } catch {
-            logger.error("Failed to generate suggestions: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-        }
-
-        isLoading = false
+        await requestSuggestions(isRegeneration: false)
     }
 
     /// Regenerate suggestions with current settings.
     func regenerate() async {
-        isRegenerating = true
-        await generateSuggestions()
-        isRegenerating = false
+        await requestSuggestions(isRegeneration: true)
     }
 
     /// Select a suggestion.
@@ -233,13 +230,26 @@ final class TweetSuggestionsViewModel {
 
     /// Start voice recording for tweak message.
     func startVoiceRecording() async {
-        guard !isRecording, !isTranscribing else { return }
+        guard voiceState != .starting, !isRecording, !isTranscribing else { return }
+        errorMessage = nil
         let startedAt = Date()
         voiceRecordingStartedAt = startedAt
         logger.info("Tweet suggestion voice recording start requested")
         do {
-            try await transcriptionService.start()
-            isRecording = true
+            try await voiceCoordinator.start(
+                onTranscriptFinal: { [weak self] transcript in
+                    self?.pendingVoiceTranscript = transcript
+                },
+                onError: { [weak self] message in
+                    self?.applyVoiceFailure(message)
+                },
+                onStateChange: { [weak self] state in
+                    self?.applyVoiceState(state)
+                },
+                onStopReason: { [weak self] reason in
+                    await self?.handleVoiceStopReason(reason)
+                }
+            )
             logger.info(
                 "Tweet suggestion voice recording started | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
             )
@@ -247,8 +257,13 @@ final class TweetSuggestionsViewModel {
             logger.error(
                 "Failed to start recording | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
             )
-            errorMessage = error.localizedDescription
+            applyVoiceFailure(error.localizedDescription)
         }
+    }
+
+    func retryVoiceRecording() async {
+        guard hasVoiceError else { return }
+        await startVoiceRecording()
     }
 
     /// Stop recording, transcribe, and auto-regenerate suggestions.
@@ -256,42 +271,34 @@ final class TweetSuggestionsViewModel {
         guard isRecording else { return }
 
         let startedAt = Date()
-        isRecording = false
-        isTranscribing = true
+        applyVoiceState(.transcribing)
         logger.info(
             "Tweet suggestion voice recording stop requested | captureElapsedMs=\(self.voiceRecordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1000) } ?? 0)"
         )
 
         do {
-            let transcription = try await transcriptionService.stop()
-            // Append to existing tweak message
-            if tweakMessage.isEmpty {
-                tweakMessage = transcription
-            } else {
-                tweakMessage += " " + transcription
-            }
-            isTranscribing = false
+            let transcription = try await voiceCoordinator.stop()
+            pendingVoiceTranscript = nil
+            applyVoiceState(.idle)
             logger.info(
                 "Tweet suggestion voice transcription completed | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) transcriptChars=\(transcription.count)"
             )
 
-            // Auto-regenerate with the new tweak message
-            await regenerate()
+            await applyVoiceTranscriptAndRegenerate(transcription)
         } catch {
             logger.error(
                 "Failed to transcribe | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
             )
-            errorMessage = error.localizedDescription
-            isTranscribing = false
+            applyVoiceFailure(error.localizedDescription)
         }
         voiceRecordingStartedAt = nil
     }
 
     /// Cancel voice recording.
     func cancelVoiceRecording() {
-        transcriptionService.cancel()
-        isRecording = false
-        isTranscribing = false
+        voiceCoordinator.cancel()
+        pendingVoiceTranscript = nil
+        applyVoiceState(.idle)
         if let voiceRecordingStartedAt {
             logger.info(
                 "Tweet suggestion voice recording cancelled | captureElapsedMs=\(Int(Date().timeIntervalSince(voiceRecordingStartedAt) * 1000))"
@@ -318,7 +325,90 @@ final class TweetSuggestionsViewModel {
 
     /// Check if voice dictation is available.
     var isVoiceDictationAvailable: Bool {
-        transcriptionService.isAvailable
+        voiceCoordinator.isAvailable
+    }
+
+    private func applyVoiceState(_ state: SpeechTranscriptionState) {
+        if case .failed(let message) = state {
+            applyVoiceFailure(message)
+        } else {
+            voiceState = state
+        }
+    }
+
+    private func applyVoiceFailure(_ message: String) {
+        voiceState = .failed(message)
+        errorMessage = message
+        pendingVoiceTranscript = nil
+        voiceRecordingStartedAt = nil
+    }
+
+    private func handleVoiceStopReason(_ reason: SpeechStopReason) async {
+        switch reason {
+        case .manual:
+            return
+        case .silenceAutoStop, .maximumDuration:
+            let transcript = pendingVoiceTranscript ?? ""
+            pendingVoiceTranscript = nil
+            applyVoiceState(.idle)
+            await applyVoiceTranscriptAndRegenerate(transcript)
+        case .noSpeechTimeout:
+            applyVoiceFailure("No speech detected. Try again.")
+        case .cancel:
+            pendingVoiceTranscript = nil
+            applyVoiceState(.idle)
+        case .failure:
+            break
+        }
+    }
+
+    private func applyVoiceTranscriptAndRegenerate(_ transcript: String) async {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            applyVoiceFailure("I didn't catch that. Try again.")
+            return
+        }
+        if tweakMessage.isEmpty {
+            tweakMessage = trimmed
+        } else {
+            tweakMessage += " " + trimmed
+        }
+        await regenerate()
+    }
+
+    private func requestSuggestions(isRegeneration: Bool) async {
+        guard let contentId else { return }
+        suggestionRequestGeneration += 1
+        let generation = suggestionRequestGeneration
+        let message = tweakMessage.isEmpty ? nil : tweakMessage
+        let requestedCreativity = creativity
+        let requestedProvider = selectedProvider
+
+        isLoading = true
+        isRegenerating = isRegeneration
+        errorMessage = nil
+        defer {
+            if generation == suggestionRequestGeneration {
+                isLoading = false
+                isRegenerating = false
+            }
+        }
+
+        do {
+            let response = try await contentService.generateTweetSuggestions(
+                id: contentId,
+                message: message,
+                creativity: requestedCreativity,
+                provider: requestedProvider
+            )
+            guard generation == suggestionRequestGeneration else { return }
+            suggestions = response.suggestions
+            logger.info("Generated \(response.suggestions.count) tweet suggestions")
+        } catch {
+            guard generation == suggestionRequestGeneration else { return }
+            logger.error("Failed to generate suggestions: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
     }
 
     private var hasVoiceAuthToken: Bool {

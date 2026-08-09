@@ -79,6 +79,9 @@ struct TweetSuggestionsSheet: View {
             }
         }
         .accessibilityIdentifier("content.tweet.sheet")
+        .onDisappear {
+            viewModel.cancelVoiceRecording()
+        }
     }
 
     // MARK: - Controls Section (Creativity + Voice)
@@ -160,12 +163,25 @@ struct TweetSuggestionsSheet: View {
                 }
             }
         } label: {
-            Image(systemName: viewModel.isRecording ? "stop.circle.fill" : "mic.circle.fill")
-                .font(.appSymbol(size: 40))
-                .foregroundColor(viewModel.isRecording ? .statusDestructive : .brandPrimary)
-                .symbolEffect(.pulse, isActive: viewModel.isRecording && !reduceMotion)
+            if viewModel.voiceState == .starting {
+                ProgressView()
+                    .frame(width: 40, height: 40)
+            } else {
+                Image(systemName: viewModel.isRecording ? "stop.circle.fill" : "mic.circle.fill")
+                    .font(.appSymbol(size: 40))
+                    .foregroundColor(viewModel.isRecording ? .statusDestructive : .brandPrimary)
+                    .symbolEffect(.pulse, isActive: viewModel.isRecording && !reduceMotion)
+            }
         }
-        .disabled(viewModel.isTranscribing || viewModel.isLoading || viewModel.isRegenerating)
+        .disabled(
+            viewModel.voiceState == .starting
+                || viewModel.isTranscribing
+                || viewModel.isLoading
+                || viewModel.isRegenerating
+        )
+        .accessibilityLabel(viewModel.isRecording ? "Stop tweet adjustment recording" : "Record tweet adjustment")
+        .accessibilityIdentifier("content.tweet.voice_mic")
+        .accessibilityValue(viewModel.voiceState.accessibilityValue)
     }
 
     // MARK: - Suggestions Section
@@ -208,12 +224,21 @@ struct TweetSuggestionsSheet: View {
                 .font(.appSubheadline)
                 .foregroundColor(Color.onSurfaceSecondary)
                 .multilineTextAlignment(.center)
-            Button("Retry") {
+            Button(viewModel.hasVoiceError ? "Try Voice Again" : "Try Again") {
                 Task {
-                    await viewModel.generateSuggestions()
+                    if viewModel.hasVoiceError {
+                        await viewModel.retryVoiceRecording()
+                    } else {
+                        await viewModel.generateSuggestions()
+                    }
                 }
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier(
+                viewModel.hasVoiceError
+                    ? "content.tweet.voice_retry"
+                    : "content.tweet.generate_retry"
+            )
         }
         .frame(minHeight: 200)
     }
