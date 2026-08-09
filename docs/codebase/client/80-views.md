@@ -9,7 +9,7 @@ Top-level SwiftUI screens, routed feature surfaces, and modal sheets. Subfolders
 - `AuthenticatedRootView` owns the main authenticated tab/root surface.
 - `RootTabs.swift` contains the per-tab root `NavigationStack` views; `ContentRoutes.swift` centralizes shared tab destinations.
 - Briefing, Knowledge, Learning, search, recently-read, submissions, settings/more, and detail screens bind to view models and services.
-- Briefing is the only reading composition root; Knowledge owns its saved-row presentation and Learning owns the merged chat/deck/narration timeline.
+- Briefing is the only reading composition root; Knowledge owns its saved-row presentation and reads its model-maintained ready-ID projection only when opening a route. Learning owns a revision-driven cached chat/deck/narration timeline, including chat previews flattened from Markdown when that timeline is rebuilt instead of during row rendering.
 - Saved-library, recently-read, and submissions lists use the shared `onPaginationThresholdReached` scroll-depth modifier instead of manual or last-row pagination triggers.
 - Learning chat rows and article-reader entrypoints use the shared `ContentZoomTransition` helper so chat-row-to-chat and detail-to-reader presentations use iOS 18 zoom transitions through `ContentRoutes` or the reader cover.
 - Detail edge-swipe drag and snapback use the shared `AppMotion.press` token with sensory-feedback triggers instead of bespoke springs/manual haptics.
@@ -28,7 +28,6 @@ Top-level SwiftUI screens, routed feature surfaces, and modal sheets. Subfolders
 | `ContentDetailView.swift`, `ArticleReaderView.swift` | Detail and reader surfaces. |
 | `KnowledgeView.swift`, `LearningView.swift`, `RecentlyReadView.swift`, `SearchView.swift` | Saved Knowledge, merged Learning activity, search, and reading-history screens. |
 | `ChatSessionView.swift`, `ChatSessionHistoryView.swift` | Chat session shell and history screen. |
-| `DiscoveryPersonalizeSheet.swift` | Discovery personalization sheet. |
 | `ProcessingStatsView.swift` | Processing count/status surface. |
 | `SubmissionDetailView.swift`, `SubmissionsView.swift` | Submitted URL status/detail screens. |
 | `MoreView.swift`, `DebugMenuView.swift` | More/settings/debug entrypoints. |

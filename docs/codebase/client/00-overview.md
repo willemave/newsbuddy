@@ -16,9 +16,9 @@ Folder-by-folder reference for the SwiftUI app, share extension, generated contr
 | `30-models.md` | `client/newsly/newsly/Models` | Typed client-side models for content, news, chat, search, Knowledge, Learning Decks, narration, onboarding, routes, source metadata, and API payloads. |
 | `31-models-generated.md` | `client/newsly/newsly/Models/Generated` | Generated Swift API enum contracts. |
 | `40-repositories.md` | `client/newsly/newsly/Repositories` | Repository layer for content and read-state operations. |
-| `50-services.md` | `client/newsly/newsly/Services` | App services for auth, API transport, content/news APIs, chat, discovery, audio episodes, Learning Decks, CLI link, feedback, dictation/transcription, settings, notifications, images, and integrations. |
+| `50-services.md` | `client/newsly/newsly/Services` | App services for auth, API transport, content/news APIs, chat, onboarding, audio episodes, Learning Decks, CLI link, feedback, dictation/transcription, settings, notifications, images, and integrations. |
 | `60-shared.md` | `client/newsly/newsly/Shared` | Shared app state, dependency factory, reader palette, app chrome, and app-group container helpers. |
-| `70-view-models.md` | `client/newsly/newsly/ViewModels` | Observable view models for lists, details, chat, Knowledge, discovery, onboarding, audio/narration, Learning Decks, search, settings, and tab coordination. |
+| `70-view-models.md` | `client/newsly/newsly/ViewModels` | Observable view models for lists, details, chat, Knowledge, onboarding, audio/narration, Learning Decks, search, settings, and tab coordination. |
 | `80-views.md` | `client/newsly/newsly/Views` | Top-level SwiftUI screens and routed feature surfaces. |
 | `81-views-components.md` | `client/newsly/newsly/Views/Components` | Reusable content cards, summary renderers, sheets, image loading, narration, Learning Deck, tap-to-talk, and presentation components. |
 | `82-views-onboarding.md` | `client/newsly/newsly/Views/Onboarding` | New-user onboarding flow UI and reveal/mic surfaces. |
@@ -27,7 +27,7 @@ Folder-by-folder reference for the SwiftUI app, share extension, generated contr
 | `85-views-sources.md` | `client/newsly/newsly/Views/Sources` | Feed and podcast source-management screens. |
 | `87-views-chat.md` | `client/newsly/newsly/Views/Chat` | Chat message list, composer dock, assistant/council bubbles, feed options, preview fixtures, and chat-specific subviews. |
 | `88-views-briefing.md` | `client/newsly/newsly/Views/Briefing` | Native Briefing tab renderer, passage text bridge, dig panel, source sheets, and narration bar. |
-| `90-share-extension.md` | `client/newsly/ShareExtension` | Share extension modes for content, Learning Decks, links, feeds, and chat. |
+| `90-share-extension.md` | `client/newsly/ShareExtension` | Four outcome-based Share Extension actions: Briefing, Knowledge, Deck, and Chat. |
 | `94-scripts.md` | `client/newsly/scripts` | Client-specific contract regeneration script. |
 | `95-tests.md` | `client/newsly/newslyTests`, `client/newsly/newslyUITests` | iOS unit and UI test inventory. |
 | `96-xcode-project.md` | `client/newsly/newsly.xcodeproj` | Xcode project metadata, app/share extension targets, schemes, and Swift package pins. |

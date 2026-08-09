@@ -6,10 +6,11 @@ Source folder: `client/newsly/ShareExtension`
 iOS share extension target that receives shared URLs/text from other apps and forwards user-selected actions to the backend using shared app authentication state.
 
 ## Runtime behavior
-- `ShareViewController.swift` supports multiple modes: `addContent`, `createLearningDeck`, `addLinks`, `addFeed`, and `chat`.
-- Content submissions post to `/api/content/submit` with flags such as crawl links, subscribe-to-feed, title/platform/content-type, or instruction-style link handling.
-- Learning Deck creation posts to `/api/learning/decks`.
-- Feed mode supports feed subscription behavior; chat mode hands shared material into the app chat flow.
+- `ShareViewController.swift` presents four outcome-based actions: Add to Briefing, Add to Knowledge, Create Deck, and Chat.
+- All four actions post to `/api/share-actions`; the backend owns URL classification, feed discovery, canonicalization, and asynchronous processing.
+- Add to Briefing sends `add_to_briefing`, which either subscribes to a continuing source or ingests an individual item. Add to Knowledge sends the compatible `bookmark_only` mode so the item is saved and marked read.
+- Create Deck sends `presentation`; Chat sends `chat` with a required first message. Legacy modes remain backend-only for older clients and queued tasks.
+- The controller exposes stable `share.*` accessibility identifiers, explains missing-link input, and keeps transient failures recoverable through retry or an explicit open-app action for expired authentication.
 - The extension reads auth/shared state through app group/keychain configuration and must stay aligned with app entitlements.
 - Because the extension is a separate UIKit target, shared UIKit styling lives in `newsly/Shared/ShareExtensionStyle.swift`; it resolves the accent from `ReaderPalette.brandPrimary`, which is compiled into both targets.
 
@@ -24,5 +25,5 @@ iOS share extension target that receives shared URLs/text from other apps and fo
 | `Base.lproj/MainInterface.storyboard` | Extension storyboard entrypoint. |
 
 ## Integration points
-- Backend submission routes live under `/api/content/submit` and `/api/learning/decks`.
+- Backend submission and status routes live under `/api/share-actions`.
 - URL routing behavior is covered by `ShareURLRoutingTests.swift`.
