@@ -11,6 +11,8 @@ import os.log
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
 
 struct ContentDetailView: View {
+    private static let scrollChromeStep: CGFloat = 4
+
     @Namespace private var readerTransitionNamespace
     private let navigationContext: ContentDetailNavigationContext
     private var initialContentId: Int { navigationContext.initialContentId }
@@ -128,6 +130,7 @@ struct ContentDetailView: View {
                                     inlineDiscussion: discussionCoordinator.inlineSummaryPayload(for: content),
                                     isSubscribingToFeed: viewModel.isSubscribingToFeed,
                                     feedSubscriptionSuccess: viewModel.feedSubscriptionSuccess,
+                                    feedSubscriptionSuccessMessage: viewModel.feedSubscriptionSuccessMessage,
                                     feedSubscriptionError: viewModel.feedSubscriptionError,
                                     isTranscriptExpanded: $isTranscriptExpanded,
                                     startTopicSession: { topic in
@@ -174,13 +177,12 @@ struct ContentDetailView: View {
                 }
                 .coordinateSpace(name: "detailScroll")
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    max(geometry.contentOffset.y, 0)
+                    Self.scrollChromeOffset(for: geometry.contentOffset.y)
                 } action: { _, offsetY in
                     detailScrollOffsetY = offsetY
                 }
                 .scrollClipDisabled()
                 .textSelection(.enabled)
-                .accessibilityIdentifier("content.detail.screen")
                 .task(id: viewModel.content?.id) {
                     await Task.yield()
                     await requestInitialCommentsScrollIfNeeded(scrollProxy: scrollProxy)
@@ -267,9 +269,7 @@ struct ContentDetailView: View {
             detailLogger.info(
                 "[DetailNavigation] disappear surface=\(navigationSurfaceName, privacy: .public) contentId=\(contentIdLogValue(at: currentIndex), privacy: .public) index=\(currentIndex, privacy: .public)"
             )
-            if let content = viewModel.content {
-                podcastAudioController.stopIfSpeaking(for: content)
-            }
+            podcastAudioController.stopIfSpeaking(forContentId: viewModel.content?.id)
             readingStateStore.clear()
         }
         .alert(item: $activeAlert) { alert in
@@ -493,6 +493,15 @@ struct ContentDetailView: View {
         guard distance > 0 else { return 1 }
         let raw = (detailScrollOffsetY - DetailDesign.floatingBackFadeStartOffset) / distance
         return min(max(raw, 0), 1)
+    }
+
+    private static func scrollChromeOffset(for rawOffset: CGFloat) -> CGFloat {
+        let maximumRelevantOffset = max(
+            DetailDesign.topEdgeFadeEndOffset,
+            DetailDesign.floatingBackFadeEndOffset
+        )
+        let boundedOffset = min(max(rawOffset, 0), maximumRelevantOffset)
+        return (boundedOffset / scrollChromeStep).rounded(.down) * scrollChromeStep
     }
 
     private func floatingBackTopPadding(for proxy: GeometryProxy) -> CGFloat {

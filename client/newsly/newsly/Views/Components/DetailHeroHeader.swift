@@ -189,6 +189,7 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(detailMetadataAccessibilityLabel)
+        .accessibilityIdentifier("content.detail.screen")
     }
 
     private var textOnlyHeaderTopSpacer: CGFloat {

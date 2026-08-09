@@ -133,7 +133,6 @@ struct ContentDetailSwipeContainer<Content: View>: View {
                 }
                 .simultaneousGesture(swipeGesture(viewportWidth: proxy.size.width))
                 .offset(x: dragAmount)
-                .animation(AppMotion.press, value: dragAmount)
                 .sensoryFeedback(.impact(weight: .light), trigger: thresholdFeedbackTrigger)
                 .sensoryFeedback(.impact(weight: .medium), trigger: completionFeedbackTrigger)
         }

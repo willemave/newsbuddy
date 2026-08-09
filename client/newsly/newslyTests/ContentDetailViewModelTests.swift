@@ -3,6 +3,25 @@ import XCTest
 
 @MainActor
 final class ContentDetailViewModelTests: XCTestCase {
+    func testInitialTransportCancellationShowsRetryAndNextLoadSucceeds() async throws {
+        let detail = try Self.articleDetail(id: 42)
+        let service = CancelledThenSuccessfulContentDetailService(detail: detail)
+        let viewModel = makeViewModel(contentService: service)
+        viewModel.updateContentId(detail.id, contentType: detail.contentType)
+
+        await viewModel.loadContent()
+
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertNil(viewModel.content)
+        XCTAssertEqual(viewModel.errorMessage, "Couldn't load this item. Please try again.")
+
+        await viewModel.loadContent()
+
+        XCTAssertEqual(viewModel.content?.id, detail.id)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(service.fetchCount, 2)
+    }
+
     func testReaderFallbackReusesLoadedSourceBody() async throws {
         let detail = try Self.articleDetail(id: 42)
         let service = BodyRecordingContentDetailService(detail: detail)
@@ -67,6 +86,49 @@ final class ContentDetailViewModelTests: XCTestCase {
         XCTAssertEqual(receivedURL?.absoluteString, link.url)
         XCTAssertEqual(receivedTitle, "Relevant story")
         XCTAssertEqual(viewModel.relevantLinkReadLaterState(for: link.id), .added)
+    }
+
+    func testDetectedFeedSubscriptionUsesTypedAlreadySubscribedOutcome() async throws {
+        let detail = try Self.articleDetail(id: 42, includesDetectedFeed: true)
+        let subscriber = StubDetectedFeedSubscriber(
+            result: .success(Self.scraperConfig(subscriptionOutcome: .already_subscribed))
+        )
+        let viewModel = ContentDetailViewModel(
+            contentId: detail.id,
+            contentType: detail.contentType,
+            contentService: StubContentDetailService(),
+            feedSubscriptionService: subscriber,
+            toastPresenter: StubToastPresenter()
+        )
+        viewModel.content = detail
+
+        await viewModel.subscribeToDetectedFeed()
+
+        XCTAssertTrue(viewModel.feedSubscriptionSuccess)
+        XCTAssertEqual(viewModel.feedSubscriptionSuccessMessage, "This source was already in your feed")
+        XCTAssertNil(viewModel.feedSubscriptionError)
+        XCTAssertFalse(viewModel.isSubscribingToFeed)
+    }
+
+    func testDetectedFeedSubscriptionDoesNotExposeBackendError() async throws {
+        let detail = try Self.articleDetail(id: 42, includesDetectedFeed: true)
+        let subscriber = StubDetectedFeedSubscriber(
+            result: .failure(APIError.httpError(statusCode: 500, detail: "secret backend detail"))
+        )
+        let viewModel = ContentDetailViewModel(
+            contentId: detail.id,
+            contentType: detail.contentType,
+            contentService: StubContentDetailService(),
+            feedSubscriptionService: subscriber,
+            toastPresenter: StubToastPresenter()
+        )
+        viewModel.content = detail
+
+        await viewModel.subscribeToDetectedFeed()
+
+        XCTAssertFalse(viewModel.feedSubscriptionSuccess)
+        XCTAssertEqual(viewModel.feedSubscriptionError, "Couldn't subscribe. Please try again.")
+        XCTAssertFalse(viewModel.feedSubscriptionError?.contains("secret") == true)
     }
 
     func testMediumShareMarkdownIncludesLongformArtifactExtras() throws {
@@ -311,8 +373,14 @@ final class ContentDetailViewModelTests: XCTestCase {
         return try JSONDecoder().decode(ContentDetail.self, from: data)
     }
 
-    private static func articleDetail(id: Int) throws -> ContentDetail {
-        try decodeDetail(
+    private static func articleDetail(
+        id: Int,
+        includesDetectedFeed: Bool = false
+    ) throws -> ContentDetail {
+        let detectedFeed = includesDetectedFeed
+            ? #"{"url":"https://example.com/feed.xml","type":"rss","title":"Example Feed","format":"rss"}"#
+            : "null"
+        return try decodeDetail(
             from: """
             {
               "id": \(id),
@@ -356,10 +424,24 @@ final class ContentDetailViewModelTests: XCTestCase {
               "news_summary": null,
               "image_url": null,
               "thumbnail_url": null,
-              "detected_feed": null,
-              "can_subscribe": false
+              "detected_feed": \(detectedFeed),
+              "can_subscribe": \(includesDetectedFeed)
             }
             """
+        )
+    }
+
+    private static func scraperConfig(
+        subscriptionOutcome: APIFeedSubscriptionOutcome?
+    ) -> ScraperConfig {
+        ScraperConfig(
+            id: 7,
+            scraperType: "feed",
+            config: [:],
+            feedUrl: "https://example.com/feed.xml",
+            isActive: true,
+            createdAt: Date(),
+            subscriptionOutcome: subscriptionOutcome
         )
     }
 }
@@ -495,13 +577,65 @@ private final class BodyRecordingContentDetailService: StubContentDetailService 
     }
 }
 
+private final class CancelledThenSuccessfulContentDetailService: StubContentDetailService {
+    private let detail: ContentDetail
+    private(set) var fetchCount = 0
+
+    init(detail: ContentDetail) {
+        self.detail = detail
+    }
+
+    override func fetchContentDetail(id: Int) async throws -> ContentDetail {
+        fetchCount += 1
+        if fetchCount == 1 {
+            throw URLError(.cancelled)
+        }
+        return detail
+    }
+
+    override func fetchContentBody(
+        id: Int,
+        variant: String,
+        contentType: APIContentType?
+    ) async throws -> ContentBody {
+        ContentBody(
+            contentId: id,
+            variant: variant,
+            kind: "article",
+            format: "markdown",
+            text: "Source body",
+            updatedAt: nil
+        )
+    }
+
+    override func trackContentOpened(
+        contentId: Int,
+        surface: String,
+        contextData: [String: Any]
+    ) async throws -> TrackContentInteractionResponse {
+        TrackContentInteractionResponse(
+            status: "ok",
+            recorded: true,
+            interactionId: "interaction-\(contentId)",
+            analyticsInteractionId: nil
+        )
+    }
+}
+
 private final class StubDetectedFeedSubscriber: DetectedFeedSubscribing {
+    private let result: Result<ScraperConfig, Error>
+
+    init(result: Result<ScraperConfig, Error> = .failure(StubDetailServiceError.unexpectedCall)) {
+        self.result = result
+    }
+
     func subscribeFeed(
         feedURL: String,
         feedType: String,
         displayName: String?
     ) async throws -> ScraperConfig {
-        throw StubDetailServiceError.unexpectedCall
+        _ = (feedURL, feedType, displayName)
+        return try result.get()
     }
 }
 

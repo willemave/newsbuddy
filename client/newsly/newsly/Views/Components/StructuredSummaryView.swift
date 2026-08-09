@@ -267,18 +267,6 @@ struct StructuredSummaryView: View {
         }
     }
 
-    private func categoryColor(for category: String) -> Color {
-        switch category.lowercased() {
-        case "key_finding":
-            return .onSurfaceSecondary
-        case "warning":
-            return .statusDestructive
-        case "recommendation":
-            return .brandPrimary
-        default:
-            return .onSurfaceTertiary
-        }
-    }
 }
 
 // MARK: - Modern Key Point Row

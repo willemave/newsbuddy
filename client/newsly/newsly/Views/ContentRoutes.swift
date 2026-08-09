@@ -37,7 +37,11 @@ extension View {
                         path.wrappedValue = NavigationPath()
                         path.wrappedValue.append(SessionHistoryRoute())
                     }
-                    : nil
+                    : nil,
+                onClose: {
+                    guard !path.wrappedValue.isEmpty else { return }
+                    path.wrappedValue.removeLast()
+                }
             )
             .id(route.stableKey)
             .dynamicTypeSize(contentTextSize)

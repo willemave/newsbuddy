@@ -56,7 +56,6 @@ struct ArticleReaderView: View {
                 .padding(.bottom, 56)
                 .frame(maxWidth: .infinity)
             }
-            .accessibilityIdentifier("article.reader.screen")
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
     }
@@ -176,6 +175,7 @@ struct ArticleReaderView: View {
                 )
                 .font(.terracottaBodySmall)
                 .foregroundStyle(Color.onSurfaceSecondary)
+                .accessibilityIdentifier("article.reader.screen")
 
                 if let estimatedReadTime {
                     Circle()
@@ -221,7 +221,7 @@ struct ArticleReaderView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.clockwise")
-                    Text("Retry")
+                    Text("Try Again")
                 }
                 .font(.terracottaBodySmall.weight(.semibold))
                 .foregroundStyle(Color.surfacePrimary)

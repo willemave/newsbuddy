@@ -12,6 +12,7 @@ struct DetailContentSections: View {
     let inlineDiscussion: ContentDiscussion?
     let isSubscribingToFeed: Bool
     let feedSubscriptionSuccess: Bool
+    let feedSubscriptionSuccessMessage: String?
     let feedSubscriptionError: String?
     @Binding var isTranscriptExpanded: Bool
     let startTopicSession: (String) async throws -> ChatSessionSummary
@@ -28,6 +29,7 @@ struct DetailContentSections: View {
                 feed: feed,
                 isSubscribing: isSubscribingToFeed,
                 hasSubscribed: feedSubscriptionSuccess,
+                subscriptionSuccessMessage: feedSubscriptionSuccessMessage,
                 subscriptionError: feedSubscriptionError,
                 onSubscribe: onSubscribeToDetectedFeed
             )

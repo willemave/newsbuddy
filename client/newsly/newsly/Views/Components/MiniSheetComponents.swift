@@ -6,30 +6,31 @@
 import SwiftUI
 
 struct MiniSheetHeader: View {
-    private let title: String?
+    private let title: String
+    private let titleAccessibilityIdentifier: String
     private let dismiss: () -> Void
 
-    init(title: String? = nil, dismiss: @escaping () -> Void) {
+    init(
+        title: String,
+        titleAccessibilityIdentifier: String,
+        dismiss: @escaping () -> Void
+    ) {
         self.title = title
+        self.titleAccessibilityIdentifier = titleAccessibilityIdentifier
         self.dismiss = dismiss
-    }
-
-    private var hasTitle: Bool {
-        title != nil
     }
 
     var body: some View {
         VStack(spacing: 0) {
             RoundedRectangle(cornerRadius: 2.5)
-                .fill(Color.outlineVariant.opacity(hasTitle ? 0.3 : 0.38))
-                .frame(width: hasTitle ? 36 : 38, height: 5)
+                .fill(Color.outlineVariant.opacity(0.3))
+                .frame(width: 36, height: 5)
                 .padding(.top, 8)
 
             HStack {
-                if let title {
-                    Text(title)
-                        .font(.appTitle3)
-                }
+                Text(title)
+                    .font(.appTitle3)
+                    .accessibilityIdentifier(titleAccessibilityIdentifier)
                 Spacer()
                 Button(action: dismiss) {
                     Image(systemName: "xmark")
@@ -45,8 +46,8 @@ struct MiniSheetHeader: View {
                 .accessibilityIdentifier("content.sheet.close")
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
-            .padding(.top, hasTitle ? 14 : 10)
-            .padding(.bottom, hasTitle ? 16 : 10)
+            .padding(.top, 14)
+            .padding(.bottom, 16)
         }
     }
 }
@@ -58,6 +59,7 @@ struct MiniSheetOptionRow: View {
     private let subtitle: String
     private let badge: String?
     private let disabled: Bool
+    private let accessibilityIdentifier: String?
     private let action: () -> Void
 
     init(
@@ -67,6 +69,7 @@ struct MiniSheetOptionRow: View {
         subtitle: String,
         badge: String? = nil,
         disabled: Bool = false,
+        accessibilityIdentifier: String? = nil,
         action: @escaping () -> Void
     ) {
         self.icon = icon
@@ -75,6 +78,7 @@ struct MiniSheetOptionRow: View {
         self.subtitle = subtitle
         self.badge = badge
         self.disabled = disabled
+        self.accessibilityIdentifier = accessibilityIdentifier
         self.action = action
     }
 
@@ -113,6 +117,7 @@ struct MiniSheetOptionRow: View {
         .buttonStyle(MiniSheetOptionButtonStyle())
         .disabled(disabled)
         .opacity(disabled ? 0.55 : 1)
+        .accessibilityIdentifier(ifPresent: accessibilityIdentifier)
     }
 
     private var iconView: some View {

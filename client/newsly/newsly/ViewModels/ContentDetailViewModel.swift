@@ -54,9 +54,11 @@ final class ContentDetailViewModel {
 
     // Feed subscription state
     var isSubscribingToFeed = false
-    var feedSubscriptionSuccess = false
+    var feedSubscriptionSuccessMessage: String?
     var feedSubscriptionError: String?
     private var linkSubmissionRevision = 0
+
+    var feedSubscriptionSuccess: Bool { feedSubscriptionSuccessMessage != nil }
 
     @ObservationIgnored
     private let contentService: any ContentDetailServicing
@@ -125,6 +127,9 @@ final class ContentDetailViewModel {
         self.readerErrorMessage = nil
         self.errorMessage = nil
         self.isLoading = true
+        self.isSubscribingToFeed = false
+        self.feedSubscriptionSuccessMessage = nil
+        self.feedSubscriptionError = nil
         linkSubmissionCoordinator.reset()
     }
     
@@ -183,6 +188,9 @@ final class ContentDetailViewModel {
             guard contentId == requestedContentId,
                   contentType == requestedContentType else { return }
             isLoading = false
+            if !Task.isCancelled, content == nil {
+                errorMessage = "Couldn't load this item. Please try again."
+            }
         } catch {
             guard contentId == requestedContentId,
                   contentType == requestedContentType else { return }
@@ -422,24 +430,36 @@ final class ContentDetailViewModel {
             feedSubscriptionError = "No feed detected"
             return
         }
+        let requestedContentId = contentId
+        let requestedFeedURL = feed.url
 
         isSubscribingToFeed = true
         feedSubscriptionError = nil
+        defer {
+            if contentId == requestedContentId,
+               content?.detectedFeed?.url == requestedFeedURL {
+                isSubscribingToFeed = false
+            }
+        }
 
         do {
-            _ = try await feedSubscriptionService.subscribeFeed(
+            let config = try await feedSubscriptionService.subscribeFeed(
                 feedURL: feed.url,
                 feedType: feed.type,
                 displayName: feed.title
             )
-            feedSubscriptionSuccess = true
+            guard contentId == requestedContentId,
+                  content?.detectedFeed?.url == requestedFeedURL else { return }
+            feedSubscriptionSuccessMessage = config.subscriptionOutcome == .already_subscribed
+                ? "This source was already in your feed"
+                : "You'll now receive new content from this source"
             logger.info("[ContentDetail] Successfully subscribed to feed | url=\(feed.url, privacy: .public) type=\(feed.type, privacy: .public)")
         } catch {
-            feedSubscriptionError = error.localizedDescription
+            guard contentId == requestedContentId,
+                  content?.detectedFeed?.url == requestedFeedURL else { return }
+            feedSubscriptionError = "Couldn't subscribe. Please try again."
             logger.error("[ContentDetail] Failed to subscribe to feed | error=\(error.localizedDescription)")
         }
-
-        isSubscribingToFeed = false
     }
 
     func downloadMoreFromSeries(count: Int) async {
