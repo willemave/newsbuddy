@@ -8,23 +8,20 @@
 import UIKit
 import UniformTypeIdentifiers
 
-fileprivate enum LinkHandlingMode: String, CaseIterable {
-    case addContent
-    case createLearningDeck
-    case addLinks
-    case addFeed
+fileprivate enum ShareOutcomeMode: String, CaseIterable {
+    case addToBriefing = "add_to_briefing"
+    case addToKnowledge = "add_to_knowledge"
+    case createDeck = "create_deck"
     case chat
 
     var title: String {
         switch self {
-        case .createLearningDeck:
-            return "Create learning deck"
-        case .addContent:
-            return "Add content"
-        case .addLinks:
-            return "Add links"
-        case .addFeed:
-            return "Add feed"
+        case .addToBriefing:
+            return "Add to Briefing"
+        case .addToKnowledge:
+            return "Add to Knowledge"
+        case .createDeck:
+            return "Create Deck"
         case .chat:
             return "Chat"
         }
@@ -32,14 +29,12 @@ fileprivate enum LinkHandlingMode: String, CaseIterable {
 
     var description: String {
         switch self {
-        case .createLearningDeck:
-            return "Save to Knowledge, skip Long Read, and generate a Learning Deck."
-        case .addContent:
-            return "Summarize the shared page in Newsbuddy."
-        case .addLinks:
-            return "Also crawl important links found on the page."
-        case .addFeed:
-            return "Subscribe to this site's feed in Newsbuddy."
+        case .addToBriefing:
+            return "Add this item, or subscribe to its source, for future Briefings."
+        case .addToKnowledge:
+            return "Save this item to Knowledge without adding it to Briefing."
+        case .createDeck:
+            return "Save this source and turn it into a Learning Deck."
         case .chat:
             return "Save to Knowledge and start a chat after processing."
         }
@@ -49,25 +44,28 @@ fileprivate enum LinkHandlingMode: String, CaseIterable {
 final class ShareViewController: UIViewController, UITextViewDelegate {
 
     private var sharedURL: URL?
-    private var linkHandlingMode: LinkHandlingMode = .addContent
-    private var optionViews: [LinkHandlingMode: OptionRowView] = [:]
+    private var shareOutcomeMode: ShareOutcomeMode = .addToBriefing
+    private var optionViews: [ShareOutcomeMode: OptionRowView] = [:]
+    private var submissionState = ShareSubmissionPresentationState()
 
     private let scrollView = UIScrollView()
     private let contentStack = UIStackView()
     private let titleLabel = UILabel()
+    private let urlStatusLabel = UILabel()
     private let optionsStack = UIStackView()
-    private let bookmarkOnlyToggleView = ToggleRowView(
-        title: "Bookmark only",
-        description: "Process and save this item to Knowledge, but mark it read so it skips Long Reads."
-    )
     private let chatPromptStack = UIStackView()
     private let chatPromptLabel = UILabel()
     private let chatPromptTextView = UITextView()
     private let submitButton = UIButton(type: .system)
+    private let cancelButton = UIButton(type: .system)
     private let keyboardSubmitButton = UIBarButtonItem(title: "Start chat", style: .plain, target: nil, action: nil)
 
     private var chatInitialMessage: String {
         chatPromptTextView.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasRequiredSubmissionInput: Bool {
+        shareOutcomeMode != .chat || !chatInitialMessage.isEmpty
     }
 
     override func viewDidLoad() {
@@ -119,10 +117,18 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.setContentHuggingPriority(.required, for: .vertical)
 
-        titleLabel.text = "How should Newsbuddy handle this link?"
+        titleLabel.text = "What would you like to do with this?"
         titleLabel.font = ShareExtensionStyle.titleFont(textStyle: .headline)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 0
+        titleLabel.accessibilityIdentifier = "share.title"
+
+        urlStatusLabel.text = "Reading the shared link…"
+        urlStatusLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
+        urlStatusLabel.adjustsFontForContentSizeCategory = true
+        urlStatusLabel.textColor = .secondaryLabel
+        urlStatusLabel.numberOfLines = 0
+        urlStatusLabel.accessibilityIdentifier = "share.url_status"
 
         optionsStack.axis = .vertical
         optionsStack.spacing = 12
@@ -133,10 +139,11 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         submitButton.heightAnchor.constraint(equalToConstant: 44).isActive = true
 
         contentStack.addArrangedSubview(titleLabel)
+        contentStack.addArrangedSubview(urlStatusLabel)
         contentStack.addArrangedSubview(optionsStack)
-        contentStack.addArrangedSubview(bookmarkOnlyToggleView)
         contentStack.addArrangedSubview(chatPromptStack)
         contentStack.addArrangedSubview(submitButton)
+        contentStack.addArrangedSubview(cancelButton)
 
         scrollView.alwaysBounceVertical = false
         scrollView.keyboardDismissMode = .interactive
@@ -159,8 +166,12 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }
 
     private func configureOptions() {
-        LinkHandlingMode.allCases.forEach { mode in
-            let optionView = OptionRowView(title: mode.title, description: mode.description)
+        ShareOutcomeMode.allCases.forEach { mode in
+            let optionView = OptionRowView(
+                title: mode.title,
+                description: mode.description,
+                accessibilityIdentifier: "share.action.\(mode.rawValue)"
+            )
             optionView.addTarget(self, action: #selector(handleOptionTapped(_:)), for: .touchUpInside)
             optionsStack.addArrangedSubview(optionView)
             optionViews[mode] = optionView
@@ -188,6 +199,9 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         chatPromptTextView.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
         chatPromptTextView.heightAnchor.constraint(equalToConstant: 104).isActive = true
         chatPromptTextView.inputAccessoryView = makeChatKeyboardAccessory()
+        chatPromptTextView.accessibilityLabel = "First chat message"
+        chatPromptTextView.accessibilityHint = "Required before starting the chat"
+        chatPromptTextView.accessibilityIdentifier = "share.chat.prompt"
 
         chatPromptStack.addArrangedSubview(chatPromptLabel)
         chatPromptStack.addArrangedSubview(chatPromptTextView)
@@ -213,31 +227,44 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         configuration.baseForegroundColor = .white
         submitButton.configuration = configuration
         submitButton.addTarget(self, action: #selector(handleSubmitTapped), for: .touchUpInside)
+        submitButton.accessibilityIdentifier = "share.submit"
+
+        var cancelConfiguration = UIButton.Configuration.plain()
+        cancelConfiguration.title = "Cancel"
+        cancelButton.configuration = cancelConfiguration
+        cancelButton.addTarget(self, action: #selector(handleCancelTapped), for: .touchUpInside)
+        cancelButton.accessibilityIdentifier = "share.cancel"
     }
 
     private func updateSelectionUI() {
         optionViews.forEach { mode, view in
-            view.isSelected = (mode == linkHandlingMode)
+            view.isSelected = (mode == shareOutcomeMode)
         }
-        chatPromptStack.isHidden = linkHandlingMode != .chat
-        if linkHandlingMode != .chat && chatPromptTextView.isFirstResponder {
+        chatPromptStack.isHidden = shareOutcomeMode != .chat
+        if shareOutcomeMode != .chat && chatPromptTextView.isFirstResponder {
             chatPromptTextView.resignFirstResponder()
         }
         updateSubmitButtonTitle()
-        updateBookmarkOnlyToggleAvailability()
         updateSubmitState()
     }
 
     private func updateSubmitState() {
-        let hasRequiredMessage = linkHandlingMode != .chat || !chatInitialMessage.isEmpty
-        let isSubmittable = sharedURL != nil && hasRequiredMessage
+        let canEditSubmission = submissionState.canBeginSubmission
+        optionViews.values.forEach { $0.isEnabled = canEditSubmission }
+        chatPromptTextView.isEditable = canEditSubmission
+        chatPromptTextView.isSelectable = canEditSubmission
+        let isSubmittable = sharedURL != nil
+            && hasRequiredSubmissionInput
+            && canEditSubmission
         submitButton.isEnabled = isSubmittable
         keyboardSubmitButton.isEnabled = isSubmittable
+        cancelButton.isEnabled = !submissionState.isSubmitting
     }
 
     @objc private func handleOptionTapped(_ sender: OptionRowView) {
+        guard submissionState.canBeginSubmission else { return }
         guard let match = optionViews.first(where: { $0.value == sender })?.key else { return }
-        linkHandlingMode = match
+        shareOutcomeMode = match
         updateSelectionUI()
         if match == .chat {
             focusChatPrompt()
@@ -249,41 +276,63 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }
 
     @objc private func handleSubmitTapped() {
-        guard let url = sharedURL else {
-            showError("No URL found")
+        guard submissionState.canBeginSubmission else { return }
+        guard hasRequiredSubmissionInput else {
+            focusChatPrompt()
+            return
+        }
+        guard submissionState.begin(hasValidURL: sharedURL != nil), let url = sharedURL else {
+            showError(ShareError.invalidURL)
             return
         }
 
-        submitButton.isEnabled = false
+        chatPromptTextView.resignFirstResponder()
+        updateSubmitButtonTitle()
+        updateSubmitState()
 
         Task {
             do {
                 try await submitURL(url)
                 await MainActor.run {
+                    self.submissionState.succeed()
                     self.extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
                 }
             } catch {
                 await MainActor.run {
+                    self.submissionState.fail(self.presentationFailure(for: error))
+                    self.updateSubmitButtonTitle()
                     self.updateSubmitState()
-                    self.showError(error.localizedDescription)
+                    self.showError(error)
                 }
             }
         }
+    }
+
+    @objc private func handleCancelTapped() {
+        guard !submissionState.isSubmitting else { return }
+        extensionContext?.cancelRequest(withError: ShareError.userCancelled)
     }
 
     // MARK: - URL Extraction
 
     private func extractSharedURL() {
         guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem] else {
+            urlStatusLabel.text = "No web link was found. Share a page or URL and try again."
             return
         }
+
+        let loadingGroup = DispatchGroup()
+        var didRequestValue = false
 
         for item in extensionItems {
             guard let attachments = item.attachments else { continue }
 
             for attachment in attachments {
                 if attachment.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+                    didRequestValue = true
+                    loadingGroup.enter()
                     attachment.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { [weak self] item, _ in
+                        defer { loadingGroup.leave() }
                         if let url = item as? URL {
                             self?.updateSharedURL(url)
                             return
@@ -295,15 +344,16 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
                 }
 
                 if attachment.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
+                    didRequestValue = true
+                    loadingGroup.enter()
                     attachment.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { [weak self] item, _ in
+                        defer { loadingGroup.leave() }
                         if let text = item as? String {
                             let urls = ShareURLRouting.extractURLs(from: text)
-                            if let firstURL = urls.first {
-                                self?.updateSharedURL(firstURL)
-                                for url in urls.dropFirst() {
-                                    self?.updateSharedURL(url)
-                                }
-                            } else if let url = URL(string: text), url.scheme != nil {
+                            for url in urls {
+                                self?.updateSharedURL(url)
+                            }
+                            if urls.isEmpty, let url = URL(string: text), url.scheme != nil {
                                 self?.updateSharedURL(url)
                             }
                         }
@@ -311,41 +361,58 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
                 }
             }
         }
+
+        guard didRequestValue else {
+            urlStatusLabel.text = "No web link was found. Share a page or URL and try again."
+            return
+        }
+
+        loadingGroup.notify(queue: .main) { [weak self] in
+            guard let self, self.sharedURL == nil else { return }
+            self.urlStatusLabel.text = "No web link was found. Share a page or URL and try again."
+            self.updateSubmitState()
+        }
     }
 
     private func updateSharedURL(_ candidate: URL) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            guard ShareURLRouting.isWebURL(candidate) else { return }
             let best = ShareURLRouting.preferredURL(current: self.sharedURL, candidate: candidate)
             guard best != self.sharedURL else { return }
             self.sharedURL = best
+            self.urlStatusLabel.text = "Ready: \(best.host ?? best.absoluteString)"
             self.updateSubmitState()
             let handlerKind = ShareURLRouting.handler(for: best).kind.rawValue
             print("🔗 [ShareExt] extracted URL=\(best.absoluteString) handler=\(handlerKind)")
         }
     }
 
-    private func updateBookmarkOnlyToggleAvailability() {
-        let shouldHideBookmarkOnlyToggle = linkHandlingMode != .addContent
-        bookmarkOnlyToggleView.isHidden = shouldHideBookmarkOnlyToggle
-        if shouldHideBookmarkOnlyToggle {
-            bookmarkOnlyToggleView.isEnabled = false
-            return
-        }
-
-        bookmarkOnlyToggleView.isEnabled = true
-    }
-
     private func updateSubmitButtonTitle() {
         var configuration = submitButton.configuration ?? UIButton.Configuration.filled()
         let title: String
-        switch linkHandlingMode {
-        case .createLearningDeck:
-            title = "Create deck"
-        case .chat:
-            title = "Start chat"
-        case .addContent, .addLinks, .addFeed:
-            title = "Submit"
+        if submissionState.isSubmitting {
+            switch shareOutcomeMode {
+            case .addToBriefing:
+                title = "Adding to Briefing…"
+            case .addToKnowledge:
+                title = "Saving to Knowledge…"
+            case .createDeck:
+                title = "Creating deck…"
+            case .chat:
+                title = "Starting chat…"
+            }
+        } else {
+            switch shareOutcomeMode {
+            case .addToBriefing:
+                title = "Add to Briefing"
+            case .addToKnowledge:
+                title = "Add to Knowledge"
+            case .createDeck:
+                title = "Create deck"
+            case .chat:
+                title = "Start chat"
+            }
         }
         configuration.title = title
         submitButton.configuration = configuration
@@ -371,7 +438,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }
 
     @objc private func handleKeyboardFrameWillChange(_ notification: Notification) {
-        guard linkHandlingMode == .chat else { return }
+        guard shareOutcomeMode == .chat else { return }
 
         let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? TimeInterval
             ?? 0.25
@@ -386,7 +453,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }
 
     private func scrollChatPromptIntoView(animated: Bool) {
-        guard linkHandlingMode == .chat, !chatPromptStack.isHidden else { return }
+        guard shareOutcomeMode == .chat, !chatPromptStack.isHidden else { return }
 
         view.layoutIfNeeded()
         let promptFrame = chatPromptStack.convert(chatPromptStack.bounds, to: scrollView)
@@ -400,7 +467,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         let payload = ShareActionRequest(
             url: url.absoluteString,
             mode: shareActionMode(),
-            chatInitialMessage: linkHandlingMode == .chat ? chatInitialMessage : nil
+            chatInitialMessage: shareOutcomeMode == .chat ? chatInitialMessage : nil
         )
         let requestBody = try JSONEncoder().encode(payload)
 
@@ -432,46 +499,90 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }
 
     private func shareActionMode() -> String {
-        if linkHandlingMode == .addContent && shouldSaveToKnowledgeAndMarkRead() {
+        switch shareOutcomeMode {
+        case .addToBriefing:
+            return "add_to_briefing"
+        case .addToKnowledge:
             return "bookmark_only"
-        }
-        switch linkHandlingMode {
-        case .addContent:
-            return "add_content"
-        case .createLearningDeck:
+        case .createDeck:
             return "presentation"
-        case .addLinks:
-            return "add_links"
-        case .addFeed:
-            return "add_feed"
         case .chat:
             return "chat"
         }
     }
 
-    private func shouldSaveToKnowledgeAndMarkRead() -> Bool {
-        switch linkHandlingMode {
-        case .addContent:
-            return bookmarkOnlyToggleView.isOn
-        case .chat:
-            return true
-        case .addLinks, .addFeed, .createLearningDeck:
-            return false
-        }
-    }
-
     // MARK: - Error Handling
 
-    private func showError(_ message: String) {
+    private func showError(_ error: Error) {
         let alert = UIAlertController(
-            title: "Error",
-            message: message,
+            title: "Couldn't finish",
+            message: error.localizedDescription,
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+        switch submissionState.recoveryAction {
+        case .openApp:
+            alert.addAction(UIAlertAction(title: "Open Newsbuddy", style: .default) { _ in
+                guard let appURL = URL(string: "newsly://") else { return }
+                self.extensionContext?.open(appURL) { opened in
+                    DispatchQueue.main.async {
+                        self.submissionState.finishOpeningApp(opened: opened)
+                        self.updateSubmitButtonTitle()
+                        self.updateSubmitState()
+                        if opened {
+                            self.extensionContext?.completeRequest(
+                                returningItems: [],
+                                completionHandler: nil
+                            )
+                        } else {
+                            self.showManualOpenFallback()
+                        }
+                    }
+                }
+            })
+        case .retry:
+            alert.addAction(UIAlertAction(title: "Try Again", style: .default) { _ in
+                self.handleSubmitTapped()
+            })
+        case .none:
+            break
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
             self.extensionContext?.cancelRequest(withError: ShareError.userCancelled)
         })
         present(alert, animated: true)
+    }
+
+    private func showManualOpenFallback() {
+        let alert = UIAlertController(
+            title: "Open Newsbuddy manually",
+            message: "Copy the link, close this share sheet, and open Newsbuddy to sign in. Then share it again.",
+            preferredStyle: .alert
+        )
+        if let sharedURL {
+            alert.addAction(UIAlertAction(title: "Copy Link & Close", style: .default) { _ in
+                self.submissionState.finishManualFallback()
+                UIPasteboard.general.url = sharedURL
+                self.extensionContext?.completeRequest(returningItems: nil)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Close", style: .cancel) { _ in
+            self.extensionContext?.cancelRequest(withError: ShareError.userCancelled)
+        })
+        present(alert, animated: true)
+    }
+
+    private func presentationFailure(for error: Error) -> ShareSubmissionFailure {
+        guard let shareError = error as? ShareError else {
+            return .recoverable
+        }
+        switch shareError {
+        case .notAuthenticated:
+            return .authenticationRequired
+        case .invalidURL:
+            return .invalidURL
+        case .invalidResponse, .networkError, .serverError, .userCancelled:
+            return .recoverable
+        }
     }
 }
 
@@ -495,7 +606,7 @@ private final class OptionRowView: UIControl {
     private let descriptionLabel = UILabel()
     private let indicatorView = UIImageView()
 
-    init(title: String, description: String) {
+    init(title: String, description: String, accessibilityIdentifier: String) {
         super.init(frame: .zero)
 
         layer.cornerRadius = 12
@@ -503,6 +614,10 @@ private final class OptionRowView: UIControl {
         layer.borderColor = UIColor.separator.cgColor
         backgroundColor = .secondarySystemBackground
         isUserInteractionEnabled = true
+        isAccessibilityElement = true
+        accessibilityLabel = title
+        accessibilityHint = description
+        self.accessibilityIdentifier = accessibilityIdentifier
 
         titleLabel.text = title
         titleLabel.font = ShareExtensionStyle.font(textStyle: .body, weight: .medium)
@@ -560,7 +675,22 @@ private final class OptionRowView: UIControl {
         }
     }
 
+    override var isEnabled: Bool {
+        didSet {
+            updateSelectionState()
+        }
+    }
+
     private func updateSelectionState() {
+        var traits: UIAccessibilityTraits = [.button]
+        if isSelected {
+            traits.insert(.selected)
+        }
+        if !isEnabled {
+            traits.insert(.notEnabled)
+        }
+        accessibilityTraits = traits
+        alpha = isEnabled ? 1 : 0.55
         if isSelected {
             indicatorView.image = UIImage(systemName: "checkmark.circle.fill")
             layer.borderColor = ShareExtensionStyle.brandAccent.cgColor
@@ -574,80 +704,6 @@ private final class OptionRowView: UIControl {
         } else {
             backgroundColor = isSelected ? UIColor.systemBackground : UIColor.secondarySystemBackground
         }
-    }
-}
-
-private final class ToggleRowView: UIControl {
-
-    private let titleLabel = UILabel()
-    private let descriptionLabel = UILabel()
-    private let toggleSwitch = UISwitch()
-
-    var isOn: Bool {
-        get { toggleSwitch.isOn }
-        set { toggleSwitch.setOn(newValue, animated: false) }
-    }
-
-    override var isEnabled: Bool {
-        didSet {
-            toggleSwitch.isEnabled = isEnabled
-            alpha = isEnabled ? 1.0 : 0.5
-        }
-    }
-
-    init(title: String, description: String) {
-        super.init(frame: .zero)
-
-        layer.cornerRadius = 12
-        layer.borderWidth = 1
-        layer.borderColor = UIColor.separator.cgColor
-        backgroundColor = .secondarySystemBackground
-        isUserInteractionEnabled = true
-
-        titleLabel.text = title
-        titleLabel.font = ShareExtensionStyle.font(textStyle: .body, weight: .medium)
-        titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.textColor = .label
-
-        descriptionLabel.text = description
-        descriptionLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
-        descriptionLabel.adjustsFontForContentSizeCategory = true
-        descriptionLabel.textColor = .secondaryLabel
-        descriptionLabel.numberOfLines = 0
-
-        toggleSwitch.setContentHuggingPriority(.required, for: .horizontal)
-        toggleSwitch.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let labelsStack = UIStackView(arrangedSubviews: [titleLabel, descriptionLabel])
-        labelsStack.axis = .vertical
-        labelsStack.spacing = 4
-        labelsStack.alignment = .fill
-
-        let rowStack = UIStackView(arrangedSubviews: [labelsStack, toggleSwitch])
-        rowStack.axis = .horizontal
-        rowStack.alignment = .center
-        rowStack.spacing = 12
-        rowStack.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(rowStack)
-
-        NSLayoutConstraint.activate([
-            rowStack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            rowStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            rowStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            rowStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
-        ])
-
-        addTarget(self, action: #selector(handleControlTapped), for: .touchUpInside)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    @objc private func handleControlTapped() {
-        guard isEnabled else { return }
-        isOn.toggle()
     }
 }
 
@@ -666,7 +722,7 @@ enum ShareError: LocalizedError {
         case .notAuthenticated:
             return "Session expired. Open Newsbuddy and sign in again."
         case .invalidURL:
-            return "Invalid URL"
+            return "No web link was found. Share a page or URL and try again."
         case .invalidResponse:
             return "Invalid server response"
         case .networkError(let message):

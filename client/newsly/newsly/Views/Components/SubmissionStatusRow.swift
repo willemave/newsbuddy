@@ -129,6 +129,8 @@ struct SubmissionStatusRow: View {
             return "arrow.triangle.2.circlepath"
         case .completed:
             return "checkmark.circle.fill"
+        case .no_action:
+            return "arrow.uturn.forward.circle.fill"
         case .queued:
             return "clock.fill"
         default:
@@ -144,6 +146,8 @@ struct SubmissionStatusRow: View {
             return .onSurfaceSecondary.opacity(0.9)
         case .subscribed, .already_subscribed, .completed:
             return .statusActive
+        case .no_action:
+            return .brandPrimary
         case .processing:
             return .brandPrimary
         case .queued:

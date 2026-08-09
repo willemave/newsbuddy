@@ -47,6 +47,7 @@ struct SubmissionsView: View {
                 } label: {
                     SubmissionStatusRow(submission: submission)
                 }
+                .accessibilityIdentifier("submission.row.\(submission.id)")
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 12))
                 .listRowSeparator(.hidden)

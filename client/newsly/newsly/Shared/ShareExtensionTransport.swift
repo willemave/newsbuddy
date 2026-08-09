@@ -28,6 +28,83 @@ enum ShareExtensionTransportError: LocalizedError {
     }
 }
 
+enum ShareSubmissionFailure: Equatable {
+    case invalidURL
+    case authenticationRequired
+    case recoverable
+}
+
+enum ShareSubmissionRecoveryAction: Equatable {
+    case retry
+    case openApp
+}
+
+/// Pure presentation state shared by the extension controller and native tests.
+/// Network transport remains separate; this model only owns submission and recovery transitions.
+struct ShareSubmissionPresentationState: Equatable {
+    enum Phase: Equatable {
+        case ready
+        case submitting
+        case failed(ShareSubmissionFailure)
+        case completed
+        case manualOpenFallback
+    }
+
+    private(set) var phase: Phase = .ready
+
+    var isSubmitting: Bool {
+        phase == .submitting
+    }
+
+    var canBeginSubmission: Bool {
+        switch phase {
+        case .ready, .failed(.invalidURL), .failed(.recoverable):
+            true
+        case .submitting, .failed(.authenticationRequired), .completed, .manualOpenFallback:
+            false
+        }
+    }
+
+    var recoveryAction: ShareSubmissionRecoveryAction? {
+        switch phase {
+        case .failed(.invalidURL), .ready, .submitting, .completed, .manualOpenFallback:
+            nil
+        case .failed(.authenticationRequired):
+            .openApp
+        case .failed(.recoverable):
+            .retry
+        }
+    }
+
+    mutating func begin(hasValidURL: Bool) -> Bool {
+        guard canBeginSubmission else { return false }
+        guard hasValidURL else {
+            phase = .failed(.invalidURL)
+            return false
+        }
+        phase = .submitting
+        return true
+    }
+
+    mutating func fail(_ failure: ShareSubmissionFailure) {
+        phase = .failed(failure)
+    }
+
+    mutating func succeed() {
+        phase = .completed
+    }
+
+    mutating func finishOpeningApp(opened: Bool) {
+        guard phase == .failed(.authenticationRequired) else { return }
+        phase = opened ? .completed : .manualOpenFallback
+    }
+
+    mutating func finishManualFallback() {
+        guard phase == .manualOpenFallback else { return }
+        phase = .completed
+    }
+}
+
 /// The extension's intentionally small authenticated transport surface.
 ///
 /// Keeping this separate prevents the extension target from compiling the main app's API client,
@@ -38,16 +115,20 @@ final class ShareExtensionTransport {
     private let session: URLSession
     private let tokenStore: any AuthTokenStore
     private let baseURLProvider: () -> URL?
+    private let processLock: AuthRefreshProcessLock
+    private let refreshCoordinator = ShareExtensionRefreshCoordinator()
 
     init(
         session: URLSession = ShareExtensionTransport.makeSession(),
         tokenStore: any AuthTokenStore = KeychainManager.shared,
+        processLock: AuthRefreshProcessLock = .shared,
         baseURLProvider: @escaping () -> URL? = {
             ServerConfigurationDefaults.baseURL(in: SharedContainer.userDefaults)
         }
     ) {
         self.session = session
         self.tokenStore = tokenStore
+        self.processLock = processLock
         self.baseURLProvider = baseURLProvider
     }
 
@@ -112,9 +193,21 @@ final class ShareExtensionTransport {
     }
 
     private func refreshAccessToken() async throws -> String {
+        let task = await refreshCoordinator.task { [weak self] in
+            guard let self else { throw ShareExtensionTransportError.notAuthenticated }
+            return try await self.processLock.withLock {
+                // The main app may have rotated while this extension waited.
+                try await self.performRefreshAccessToken()
+            }
+        }
+        return try await task.value
+    }
+
+    private func performRefreshAccessToken(rotatedRetryCount: Int = 1) async throws -> String {
         guard let refreshToken = nonEmptyToken(tokenStore.getToken(key: .refreshToken)) else {
             throw ShareExtensionTransportError.notAuthenticated
         }
+        let attemptedAccessToken = nonEmptyToken(tokenStore.getToken(key: .accessToken))
         let payload = ShareExtensionRefreshRequest(refreshToken: refreshToken)
         let request = try makeRequest(
             endpoint: "/auth/refresh",
@@ -128,15 +221,31 @@ final class ShareExtensionTransport {
         case 200...299:
             do {
                 let tokens = try JSONDecoder().decode(ShareExtensionRefreshResponse.self, from: data)
-                tokenStore.saveToken(tokens.accessToken, key: .accessToken)
+                // Make rotation visible before the access token so a concurrent app
+                // process never clears the newly issued one-time credential.
                 tokenStore.saveToken(tokens.refreshToken, key: .refreshToken)
+                tokenStore.saveToken(tokens.accessToken, key: .accessToken)
                 return tokens.accessToken
             } catch {
                 throw ShareExtensionTransportError.invalidResponse
             }
         case 401, 403:
-            tokenStore.deleteToken(key: .accessToken)
-            tokenStore.deleteToken(key: .refreshToken)
+            let currentRefreshToken = nonEmptyToken(tokenStore.getToken(key: .refreshToken))
+            if currentRefreshToken != refreshToken {
+                if let currentAccessToken = nonEmptyToken(tokenStore.getToken(key: .accessToken)),
+                   currentAccessToken != attemptedAccessToken {
+                    return currentAccessToken
+                }
+                if rotatedRetryCount > 0, currentRefreshToken != nil {
+                    return try await performRefreshAccessToken(
+                        rotatedRetryCount: rotatedRetryCount - 1
+                    )
+                }
+                throw ShareExtensionTransportError.notAuthenticated
+            }
+
+            // Leave cleanup to the main app's authenticated lifecycle. A mixed-version
+            // app/extension pair must never be able to delete newly rotated credentials.
             throw ShareExtensionTransportError.notAuthenticated
         default:
             throw ShareExtensionTransportError.server(
@@ -225,6 +334,37 @@ final class ShareExtensionTransport {
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 60
         return URLSession(configuration: configuration)
+    }
+}
+
+private actor ShareExtensionRefreshCoordinator {
+    private struct ActiveRefresh {
+        let id: UUID
+        let task: Task<String, Error>
+    }
+
+    private var activeRefresh: ActiveRefresh?
+
+    func task(
+        operation: @escaping @Sendable () async throws -> String
+    ) -> Task<String, Error> {
+        if let activeRefresh {
+            return activeRefresh.task
+        }
+
+        let refreshID = UUID()
+        let task = Task { try await operation() }
+        activeRefresh = ActiveRefresh(id: refreshID, task: task)
+        Task { [weak self] in
+            _ = try? await task.value
+            await self?.finish(refreshID: refreshID)
+        }
+        return task
+    }
+
+    private func finish(refreshID: UUID) {
+        guard activeRefresh?.id == refreshID else { return }
+        activeRefresh = nil
     }
 }
 

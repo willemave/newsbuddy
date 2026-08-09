@@ -67,6 +67,27 @@ struct SubmissionDetailView: View {
                 }
             }
 
+            if let recoveryURL = submission.recoveryURL {
+                Section(header: Text("Try again")) {
+                    Text(
+                        submission.effectiveOutcome == .no_action
+                            ? "Share this link again, then choose Newsbuddy and a different action."
+                            : "Share this link again to retry it in Newsbuddy."
+                    )
+                        .foregroundStyle(Color.onSurfaceSecondary)
+
+                    ShareLink(item: recoveryURL) {
+                        Label("Share Again", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .accessibilityIdentifier(
+                        submission.effectiveOutcome == .no_action
+                            ? "submission.no_action.retry"
+                            : "submission.retry"
+                    )
+                }
+            }
+
             if submission.isFeedSubscription {
                 Section(header: Text("Feed")) {
                     if let feedTitle = submission.detectedFeed?.title, !feedTitle.isEmpty {
@@ -117,6 +138,8 @@ struct SubmissionDetailView: View {
             return .statusDestructive
         case .subscribed, .already_subscribed, .completed:
             return .statusActive
+        case .no_action:
+            return .brandPrimary
         default:
             return .onSurfaceSecondary
         }

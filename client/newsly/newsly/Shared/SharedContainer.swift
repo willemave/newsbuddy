@@ -6,6 +6,14 @@
 //
 
 import Foundation
+import Darwin
+
+// Swift imports the `flock` function with the same name as Darwin's `flock`
+// structure. The explicit function type resolves that ambiguity without a C shim.
+private func newslyFlock(_ descriptor: Int32, _ operation: Int32) -> Int32 {
+    let flockFunction: (Int32, Int32) -> Int32 = flock
+    return flockFunction(descriptor, operation)
+}
 
 enum E2ETestLaunch {
 #if DEBUG
@@ -132,6 +140,7 @@ enum E2ETestLaunch {
     static let openContentTypeKey = "newslyE2EOpenContentType"
     static let fakeSpeechEnabledKey = "newslyE2EFakeSpeechEnabled"
     static let fakeSpeechTranscriptKey = "newslyE2EFakeSpeechTranscript"
+    static let fakeSpeechScenarioKey = "newslyE2EFakeSpeechScenario"
     static let visualNowKey = "newslyE2EVisualNow"
 
     static var isEnabled: Bool {
@@ -204,6 +213,11 @@ enum E2ETestLaunch {
         return string(for: fakeSpeechTranscriptKey)
     }
 
+    static var fakeSpeechScenario: String? {
+        guard fakeSpeechEnabled else { return nil }
+        return string(for: fakeSpeechScenarioKey)
+    }
+
     static var visualNow: Date? {
         guard isEnabled else { return nil }
         return date(for: visualNowKey)
@@ -223,6 +237,7 @@ enum E2ETestLaunch {
     static let openContentType: String? = nil
     static let fakeSpeechEnabled = false
     static let fakeSpeechTranscript: String? = nil
+    static let fakeSpeechScenario: String? = nil
     static let visualNow: Date? = nil
 #endif
 }
@@ -258,6 +273,105 @@ enum SharedContainer {
             return defaults
         }
         return .standard
+    }
+
+    static var authRefreshLockFileURL: URL? {
+        if let appGroupId,
+           let containerURL = FileManager.default.containerURL(
+               forSecurityApplicationGroupIdentifier: appGroupId
+           ) {
+            return containerURL.appendingPathComponent(".auth-refresh.lock", isDirectory: false)
+        }
+
+#if DEBUG
+        // Unit-test hosts may not receive the app-group entitlement. This still
+        // serializes every refresh in that host; signed app/extension builds use
+        // the shared container above.
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("com.newsly.auth-refresh.lock", isDirectory: false)
+#else
+        return nil
+#endif
+    }
+}
+
+enum AuthRefreshProcessLockError: LocalizedError {
+    case sharedContainerUnavailable
+    case openFailed(Int32)
+    case lockFailed(Int32)
+    case timedOut
+
+    var errorDescription: String? {
+        switch self {
+        case .sharedContainerUnavailable:
+            "Shared authentication storage is unavailable."
+        case .openFailed(let code):
+            "Could not open the authentication lock (errno \(code))."
+        case .lockFailed(let code):
+            "Could not acquire the authentication lock (errno \(code))."
+        case .timedOut:
+            "Timed out waiting for another authentication refresh to finish."
+        }
+    }
+}
+
+/// Serializes one-time refresh-token rotation across the app and Share Extension.
+/// `flock` remains held across the network request and token publication, so every
+/// participant re-reads credentials only after the previous rotation is complete.
+final class AuthRefreshProcessLock: @unchecked Sendable {
+    static let shared = AuthRefreshProcessLock()
+
+    private let fileURLProvider: () -> URL?
+    private let acquisitionTimeoutSeconds: TimeInterval = 30
+    private let retryDelayNanoseconds: UInt64 = 25_000_000
+
+    init(
+        fileURLProvider: @escaping () -> URL? = { SharedContainer.authRefreshLockFileURL }
+    ) {
+        self.fileURLProvider = fileURLProvider
+    }
+
+    func withLock<T>(_ operation: () async throws -> T) async throws -> T {
+        let descriptor = try await acquireDescriptor()
+        defer {
+            _ = newslyFlock(descriptor, LOCK_UN)
+            _ = Darwin.close(descriptor)
+        }
+        try Task.checkCancellation()
+        return try await operation()
+    }
+
+    private func acquireDescriptor() async throws -> Int32 {
+        guard let fileURL = fileURLProvider() else {
+            throw AuthRefreshProcessLockError.sharedContainerUnavailable
+        }
+
+        let descriptor = Darwin.open(fileURL.path, O_CREAT | O_RDWR, mode_t(0o600))
+        guard descriptor >= 0 else {
+            throw AuthRefreshProcessLockError.openFailed(errno)
+        }
+        var shouldCloseDescriptor = true
+        defer {
+            if shouldCloseDescriptor {
+                _ = Darwin.close(descriptor)
+            }
+        }
+
+        let deadline = Date().addingTimeInterval(acquisitionTimeoutSeconds)
+        while newslyFlock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            let code = errno
+            guard code == EWOULDBLOCK || code == EAGAIN else {
+                throw AuthRefreshProcessLockError.lockFailed(code)
+            }
+            guard Date() < deadline else {
+                throw AuthRefreshProcessLockError.timedOut
+            }
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: retryDelayNanoseconds)
+        }
+
+        shouldCloseDescriptor = false
+        return descriptor
     }
 }
 
@@ -390,8 +504,10 @@ enum ShareURLRouting {
         return handlerPriority(for: match.kind) + qualityScore(url)
     }
 
-    private static func isWebURL(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased() else { return false }
+    static func isWebURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              let host = url.host?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !host.isEmpty else { return false }
         return scheme == "http" || scheme == "https"
     }
 

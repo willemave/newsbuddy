@@ -122,6 +122,7 @@ struct SubmissionStatusItem: Identifiable {
     let isSelfSubmission: Bool
     let submissionKind: APISubmissionKind
     let outcome: APISubmissionOutcome
+    let rationale: String?
     let detectedFeed: DetectedFeed?
     let feedSubscription: SubmissionFeedSubscription?
 
@@ -139,6 +140,7 @@ struct SubmissionStatusItem: Identifiable {
         isSelfSubmission = response.isSelfSubmission
         submissionKind = response.submissionKind
         outcome = response.outcome
+        rationale = response.rationale
         detectedFeed = response.detectedFeed.map {
             DetectedFeed(url: $0.url, type: $0.type, title: $0.title, format: $0.format)
         }
@@ -159,6 +161,7 @@ struct SubmissionStatusItem: Identifiable {
         isSelfSubmission: Bool,
         submissionKind: APISubmissionKind = .content,
         outcome: APISubmissionOutcome = .processing,
+        rationale: String? = nil,
         detectedFeed: DetectedFeed? = nil,
         feedSubscription: SubmissionFeedSubscription? = nil
     ) {
@@ -175,6 +178,7 @@ struct SubmissionStatusItem: Identifiable {
         self.isSelfSubmission = isSelfSubmission
         self.submissionKind = submissionKind
         self.outcome = outcome
+        self.rationale = rationale
         self.detectedFeed = detectedFeed
         self.feedSubscription = feedSubscription
     }
@@ -206,6 +210,8 @@ struct SubmissionStatusItem: Identifiable {
             return "Processing"
         case .completed:
             return "Completed"
+        case .no_action:
+            return "No action taken"
         case .failed:
             return "Failed"
         case .skipped:
@@ -236,26 +242,26 @@ struct SubmissionStatusItem: Identifiable {
 
     var errorDisplayText: String? {
         guard isError else { return nil }
-        if let errorMessage, !errorMessage.isEmpty {
-            return errorMessage
-        }
         switch effectiveOutcome {
         case .skipped:
             return "Processing was skipped."
         case .feed_not_found:
             return "No RSS or Atom feed was found for this URL."
         case .feed_fetch_failed:
-            return "The page could not be checked for feeds."
+            return "Newsly couldn't check this page for feeds. Try submitting it again."
         case .feed_subscription_failed:
-            return "The feed could not be added."
+            return "Newsly couldn't add this feed. Try submitting it again."
         default:
-            return "Processing failed."
+            return "Newsly couldn't finish processing this item. Try submitting it again."
         }
     }
 
     var statusDetailText: String? {
         if let errorDisplayText {
             return errorDisplayText
+        }
+        if effectiveOutcome == .no_action {
+            return rationale ?? "Newsly could not find an action to take for this link."
         }
         if isLearningDeck {
             switch effectiveOutcome {
@@ -313,6 +319,23 @@ struct SubmissionStatusItem: Identifiable {
     /// call-site name used throughout the view layer.
     var effectiveOutcome: APISubmissionOutcome {
         outcome
+    }
+
+    var recoveryURL: URL? {
+        let canRecover: Bool
+        if effectiveOutcome == .no_action {
+            canRecover = true
+        } else {
+            canRecover = isSelfSubmission && isError
+        }
+
+        guard canRecover,
+              let candidate = URL(string: url),
+              let scheme = candidate.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        return candidate
     }
 
     var statusDateDisplay: String? {

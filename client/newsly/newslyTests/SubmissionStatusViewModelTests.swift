@@ -84,6 +84,149 @@ final class SubmissionStatusViewModelTests: XCTestCase {
         XCTAssertEqual(item.errorDisplayText, "No RSS or Atom feed was found for this URL.")
     }
 
+    func testGenericFailureDoesNotExposeBackendErrorText() {
+        let item = SubmissionStatusItem(
+            id: 46,
+            contentType: .article,
+            url: "https://example.com/article",
+            sourceUrl: nil,
+            title: "Example article",
+            status: .failed,
+            errorMessage: "sqlalchemy.exc.OperationalError: internal-host:5432",
+            createdAt: "2026-05-26T22:09:04Z",
+            processedAt: "2026-05-26T22:09:10Z",
+            submittedVia: "share_sheet",
+            isSelfSubmission: true,
+            outcome: .failed
+        )
+
+        XCTAssertEqual(
+            item.errorDisplayText,
+            "Newsly couldn't finish processing this item. Try submitting it again."
+        )
+        XCTAssertFalse(item.errorDisplayText?.contains("sqlalchemy") == true)
+        XCTAssertFalse(item.errorDisplayText?.contains("internal-host") == true)
+        XCTAssertEqual(item.recoveryURL?.absoluteString, item.url)
+    }
+
+    func testNoActionShowsRationaleAndOffersShareSheetRecovery() {
+        let item = SubmissionStatusItem(
+            id: 47,
+            contentType: .unknown,
+            url: "https://example.com/unsupported-homepage",
+            sourceUrl: nil,
+            title: nil,
+            status: .completed,
+            errorMessage: nil,
+            createdAt: "2026-05-26T22:09:04Z",
+            processedAt: "2026-05-26T22:09:10Z",
+            submittedVia: "share_action",
+            isSelfSubmission: true,
+            outcome: .no_action,
+            rationale: "Neither a continuing source nor an eligible item was found."
+        )
+
+        XCTAssertEqual(item.statusLabel, "No action taken")
+        XCTAssertFalse(item.isError)
+        XCTAssertEqual(
+            item.statusDetailText,
+            "Neither a continuing source nor an eligible item was found."
+        )
+        XCTAssertEqual(item.recoveryURL?.absoluteString, item.url)
+    }
+
+    func testFailedShareActionOffersShareSheetRecovery() {
+        let item = SubmissionStatusItem(
+            id: 48,
+            contentType: .article,
+            url: "https://example.com/failed-share",
+            sourceUrl: nil,
+            title: "Failed share",
+            status: .failed,
+            errorMessage: nil,
+            createdAt: "2026-05-26T22:09:04Z",
+            processedAt: "2026-05-26T22:09:10Z",
+            submittedVia: "share_action",
+            isSelfSubmission: true,
+            outcome: .failed
+        )
+
+        XCTAssertEqual(item.recoveryURL?.absoluteString, item.url)
+    }
+
+    func testFeedFailureFromShareActionOffersShareSheetRecovery() {
+        let item = SubmissionStatusItem(
+            id: 49,
+            contentType: .unknown,
+            url: "https://example.com/feed-page",
+            sourceUrl: nil,
+            title: nil,
+            status: .failed,
+            errorMessage: nil,
+            createdAt: "2026-05-26T22:09:04Z",
+            processedAt: "2026-05-26T22:09:10Z",
+            submittedVia: "share_action",
+            isSelfSubmission: true,
+            submissionKind: .feed_subscription,
+            outcome: .feed_fetch_failed
+        )
+
+        XCTAssertEqual(item.recoveryURL?.absoluteString, item.url)
+    }
+
+    func testLegacyInstructionShareFailureOffersShareSheetRecovery() {
+        let item = SubmissionStatusItem(
+            id: 50,
+            contentType: .article,
+            url: "https://example.com/instruction-share",
+            sourceUrl: nil,
+            title: nil,
+            status: .failed,
+            errorMessage: nil,
+            createdAt: "2026-05-26T22:09:04Z",
+            processedAt: nil,
+            submittedVia: "share_sheet_instruction",
+            isSelfSubmission: true,
+            outcome: .failed
+        )
+
+        XCTAssertEqual(item.recoveryURL?.absoluteString, item.url)
+    }
+
+    func testFailedNonShareAndUnsafeShareURLsDoNotExposeRecovery() {
+        let nonShare = SubmissionStatusItem(
+            id: 51,
+            contentType: .article,
+            url: "https://example.com/non-share",
+            sourceUrl: nil,
+            title: nil,
+            status: .failed,
+            errorMessage: nil,
+            createdAt: "2026-05-26T22:09:04Z",
+            processedAt: nil,
+            submittedVia: "assistant",
+            isSelfSubmission: false,
+            outcome: .failed
+        )
+        let unsafeShare = SubmissionStatusItem(
+            id: 52,
+            contentType: .unknown,
+            url: "javascript:alert(1)",
+            sourceUrl: nil,
+            title: nil,
+            status: .failed,
+            errorMessage: nil,
+            createdAt: "2026-05-26T22:09:04Z",
+            processedAt: nil,
+            submittedVia: "share_action",
+            isSelfSubmission: true,
+            outcome: .failed
+        )
+
+        XCTAssertNil(nonShare.recoveryURL)
+        XCTAssertNil(unsafeShare.recoveryURL)
+    }
+
     func testUnseenCountDefaultsToAllLoadedSubmissions() {
         let isolated = makeIsolatedDefaults()
         let defaults = isolated.defaults

@@ -115,4 +115,15 @@ final class ShareURLRoutingTests: XCTestCase {
             ]
         )
     }
+
+    func testOnlyHTTPAndHTTPSURLsCanBecomeShareTargets() {
+        XCTAssertTrue(ShareURLRouting.isWebURL(URL(string: "https://example.com/story")!))
+        XCTAssertTrue(ShareURLRouting.isWebURL(URL(string: "http://example.com/story")!))
+        XCTAssertFalse(ShareURLRouting.isWebURL(URL(fileURLWithPath: "/tmp/private.pdf")))
+        XCTAssertFalse(ShareURLRouting.isWebURL(URL(string: "mailto:reader@example.com")!))
+        XCTAssertFalse(ShareURLRouting.isWebURL(URL(string: "newsly://content/42")!))
+        XCTAssertFalse(ShareURLRouting.isWebURL(URL(string: "https:///missing-host")!))
+        XCTAssertFalse(ShareURLRouting.isWebURL(URL(string: "https://:443/path")!))
+        XCTAssertFalse(ShareURLRouting.isWebURL(URL(string: "https://%20/path")!))
+    }
 }
