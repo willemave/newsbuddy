@@ -300,6 +300,40 @@ final class BriefingNarrationControllerTests: XCTestCase {
         XCTAssertEqual(playbackService.playedTargets.count, 2)
     }
 
+    func testSlowerEarlierLensCannotReplaceLatestPlaybackIntent() async {
+        let service = MockBriefingService()
+        service.narrationManifestsByLens = [
+            "slow": makeBriefingNarration(
+                episodeGroupID: "slow-group",
+                chapters: [makeAudioEpisode(id: 41)]
+            ),
+            "latest": makeBriefingNarration(
+                episodeGroupID: "latest-group",
+                chapters: [makeAudioEpisode(id: 42)]
+            ),
+        ]
+        service.narrationRequestWaitLensKeys = ["slow"]
+        let playbackService = MockBriefingNarrationPlaybackService()
+        let controller = makeController(
+            service: service,
+            playbackService: playbackService
+        )
+
+        let slowPlayback = Task { @MainActor in
+            await controller.playChapter(at: 0, for: "slow")
+        }
+        await waitFor { service.narrationLensKeys.contains("slow") }
+
+        await controller.playChapter(at: 0, for: "latest")
+        XCTAssertEqual(playbackService.playedTargets, [.audioEpisode(42)])
+
+        service.resumeNarrationRequest(lensKey: "slow")
+        await slowPlayback.value
+
+        XCTAssertEqual(playbackService.playedTargets, [.audioEpisode(42)])
+        XCTAssertEqual(playbackService.speakingTarget, .audioEpisode(42))
+    }
+
     private func makeController(
         service: MockBriefingService,
         playbackService: (any BriefingNarrationPlaybackControlling)? = nil,

@@ -106,10 +106,15 @@ final class NarrationPlaybackService {
     private var playbackFirstProgressLogged = false
 
     @ObservationIgnored
+    private var playbackRequestGeneration = 0
+
+    @ObservationIgnored
+    private var playbackSessionID: UUID?
+
+    @ObservationIgnored
     private var playbackFinishedHandler: NarrationPlaybackFinishedHandler?
 
-    private init() {
-        let preferenceStore = NarrationPlaybackPreferenceStore.shared
+    init(preferenceStore: NarrationPlaybackPreferenceStore = .shared) {
         self.preferenceStore = preferenceStore
         self.playbackRate = preferenceStore.preferredPlaybackRate()
     }
@@ -137,7 +142,20 @@ final class NarrationPlaybackService {
 
     func playStreamingNarration(
         for target: NarrationTarget,
-        rate: Float = defaultPlaybackRate,
+        onFinished: NarrationPlaybackFinishedHandler? = nil,
+        fetchStreamResource: () async throws -> AuthorizedMediaResource
+    ) async throws {
+        try await playStreamingNarration(
+            for: target,
+            rate: playbackRate,
+            onFinished: onFinished,
+            fetchStreamResource: fetchStreamResource
+        )
+    }
+
+    func playStreamingNarration(
+        for target: NarrationTarget,
+        rate: Float,
         onFinished: NarrationPlaybackFinishedHandler? = nil,
         fetchStreamResource: () async throws -> AuthorizedMediaResource
     ) async throws {
@@ -164,13 +182,19 @@ final class NarrationPlaybackService {
         }
 
         stop()
+        let requestGeneration = playbackRequestGeneration
 
         do {
             let resource = try await fetchStreamResource()
+            guard requestGeneration == playbackRequestGeneration else {
+                throw CancellationError()
+            }
             narrationPlaybackLogger.info(
                 "Streaming narration resource ready | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt))"
             )
             try playAudioStream(resource, for: target, onFinished: onFinished)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             narrationPlaybackLogger.error(
                 "Streaming narration failed before playback | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
@@ -179,11 +203,12 @@ final class NarrationPlaybackService {
         }
     }
 
+    @discardableResult
     func playAudioStream(
         _ resource: AuthorizedMediaResource,
         for target: NarrationTarget,
         onFinished: NarrationPlaybackFinishedHandler? = nil
-    ) throws {
+    ) throws -> AVPlayerItem {
         let startedAt = Date()
         let resumeTime = savedPlaybackPositions[target] ?? 0
         stop()
@@ -197,10 +222,12 @@ final class NarrationPlaybackService {
             let item = AVPlayerItem(asset: asset)
             let player = AVPlayer(playerItem: item)
             player.automaticallyWaitsToMinimizeStalling = false
+            let playbackSessionID = UUID()
 
             streamPlayer = player
-            speakingTarget = target
+            self.playbackSessionID = playbackSessionID
             playbackFinishedHandler = onFinished
+            speakingTarget = target
             isSpeaking = true
             isPaused = false
             progress.reset()
@@ -209,7 +236,11 @@ final class NarrationPlaybackService {
             playbackTimeControlPlayingLogged = false
             playbackTimeControlWaitingLogged = false
             playbackFirstProgressLogged = false
-            observeStreamItem(item)
+            observeStreamItem(
+                item,
+                playbackSessionID: playbackSessionID,
+                target: target
+            )
             observeStreamPlayer(player)
 
             if resumeTime > 0 {
@@ -224,6 +255,7 @@ final class NarrationPlaybackService {
                 "AVPlayer stream play called | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt)) resumeSeconds=\(resumeTime, privacy: .public) headerCount=\(resource.headers.count) minimizeStalling=\(player.automaticallyWaitsToMinimizeStalling)"
             )
             startProgressTimer()
+            return item
         } catch {
             narrationPlaybackLogger.error(
                 "AVPlayer stream setup failed | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
@@ -257,6 +289,7 @@ final class NarrationPlaybackService {
     }
 
     func stop() {
+        playbackRequestGeneration += 1
         let target = speakingTarget
         if let target {
             narrationPlaybackLogger.info(
@@ -302,26 +335,23 @@ final class NarrationPlaybackService {
         return true
     }
 
-    private func observeStreamItem(_ item: AVPlayerItem) {
+    private func observeStreamItem(
+        _ item: AVPlayerItem,
+        playbackSessionID: UUID,
+        target: NarrationTarget
+    ) {
         removeStreamObservers()
         streamEndObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                if let target = self?.speakingTarget {
-                    narrationPlaybackLogger.info(
-                        "Streaming narration reached end | target=\(String(describing: target), privacy: .public)"
-                    )
-                }
-                let finishedTarget = self?.speakingTarget
-                let finishedHandler = self?.playbackFinishedHandler
-                self?.resetPlaybackState(clearSavedPositionFor: finishedTarget)
-                if let finishedTarget {
-                    finishedHandler?(finishedTarget)
-                }
-                await self?.recordPlaybackFinished(for: finishedTarget)
+            Task { @MainActor [weak self] in
+                await self?.handleStreamEnded(
+                    item: item,
+                    playbackSessionID: playbackSessionID,
+                    target: target
+                )
             }
         }
         streamFailureObserver = NotificationCenter.default.addObserver(
@@ -329,13 +359,12 @@ final class NarrationPlaybackService {
             object: item,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                if let target = self?.speakingTarget {
-                    narrationPlaybackLogger.error(
-                        "Streaming narration player failed | target=\(String(describing: target), privacy: .public)"
-                    )
-                }
-                self?.resetPlaybackState(clearSavedPositionFor: self?.speakingTarget)
+            Task { @MainActor [weak self] in
+                self?.handleStreamFailure(
+                    item: item,
+                    playbackSessionID: playbackSessionID,
+                    target: target
+                )
             }
         }
         streamItemStatusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
@@ -352,6 +381,41 @@ final class NarrationPlaybackService {
                 )
             }
         }
+    }
+
+    private func handleStreamEnded(
+        item: AVPlayerItem,
+        playbackSessionID: UUID,
+        target: NarrationTarget
+    ) async {
+        guard self.playbackSessionID == playbackSessionID,
+              streamPlayer?.currentItem === item,
+              speakingTarget == target else {
+            return
+        }
+        narrationPlaybackLogger.info(
+            "Streaming narration reached end | target=\(String(describing: target), privacy: .public)"
+        )
+        let finishedHandler = playbackFinishedHandler
+        resetPlaybackState(clearSavedPositionFor: target)
+        finishedHandler?(target)
+        await recordPlaybackFinished(for: target)
+    }
+
+    private func handleStreamFailure(
+        item: AVPlayerItem,
+        playbackSessionID: UUID,
+        target: NarrationTarget
+    ) {
+        guard self.playbackSessionID == playbackSessionID,
+              streamPlayer?.currentItem === item,
+              speakingTarget == target else {
+            return
+        }
+        narrationPlaybackLogger.error(
+            "Streaming narration player failed | target=\(String(describing: target), privacy: .public)"
+        )
+        resetPlaybackState(clearSavedPositionFor: target)
     }
 
     private func observeStreamPlayer(_ player: AVPlayer) {
@@ -468,6 +532,8 @@ final class NarrationPlaybackService {
             savedPlaybackPositions.removeValue(forKey: target)
         }
         streamPlayer = nil
+        playbackSessionID = nil
+        playbackFinishedHandler = nil
         isSpeaking = false
         isPaused = false
         speakingTarget = nil
@@ -477,7 +543,6 @@ final class NarrationPlaybackService {
         playbackTimeControlPlayingLogged = false
         playbackTimeControlWaitingLogged = false
         playbackFirstProgressLogged = false
-        playbackFinishedHandler = nil
         try? AVAudioSession.sharedInstance().setActive(
             false,
             options: [.notifyOthersOnDeactivation]

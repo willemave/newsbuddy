@@ -66,6 +66,8 @@ final class BriefingNarrationController {
     private let pollMaxAttempts: Int
     @ObservationIgnored
     private var preparations: [String: Preparation] = [:]
+    @ObservationIgnored
+    private var playbackIntentID = UUID()
 
     init(
         briefingService: any BriefingServicing,
@@ -139,13 +141,35 @@ final class BriefingNarrationController {
         if let target,
            playbackService.speakingTarget == target,
            playbackService.isSpeaking {
+            _ = beginPlaybackIntent()
             playbackService.pause()
             return
         }
-        await playChapter(at: narrationChapterIndex(for: lensKey), for: lensKey)
+        guard !session(for: lensKey).isPreparing else { return }
+        let playbackIntentID = beginPlaybackIntent()
+        await playChapter(
+            at: narrationChapterIndex(for: lensKey),
+            for: lensKey,
+            playbackIntentID: playbackIntentID
+        )
     }
 
     func playChapter(at chapterIndex: Int, for lensKey: String) async {
+        guard !session(for: lensKey).isPreparing else { return }
+        let playbackIntentID = beginPlaybackIntent()
+        await playChapter(
+            at: chapterIndex,
+            for: lensKey,
+            playbackIntentID: playbackIntentID
+        )
+    }
+
+    private func playChapter(
+        at chapterIndex: Int,
+        for lensKey: String,
+        playbackIntentID: UUID
+    ) async {
+        guard self.playbackIntentID == playbackIntentID else { return }
         guard !session(for: lensKey).isPreparing else { return }
         clearError(for: lensKey)
 
@@ -163,6 +187,7 @@ final class BriefingNarrationController {
 
         do {
             let episode = try await prepareNarrationChapter(at: chapterIndex, for: lensKey)
+            guard self.playbackIntentID == playbackIntentID else { return }
             try await playbackService.playStreamingNarration(
                 for: .audioEpisode(episode.id),
                 rate: playbackService.playbackRate,
@@ -171,7 +196,8 @@ final class BriefingNarrationController {
                         await self?.advanceNarration(
                             after: finishedTarget,
                             chapterIndex: chapterIndex,
-                            lensKey: lensKey
+                            lensKey: lensKey,
+                            playbackIntentID: playbackIntentID
                         )
                     }
                 }
@@ -181,6 +207,7 @@ final class BriefingNarrationController {
         } catch where isNetworkCancellation(error) {
             return
         } catch {
+            guard self.playbackIntentID == playbackIntentID else { return }
             briefingNarrationLogger.error(
                 "Narration playback failed | lensKey=\(lensKey, privacy: .public) error=\(error.localizedDescription, privacy: .private)"
             )
@@ -420,9 +447,11 @@ final class BriefingNarrationController {
     private func advanceNarration(
         after finishedTarget: NarrationTarget,
         chapterIndex: Int,
-        lensKey: String
+        lensKey: String,
+        playbackIntentID: UUID
     ) async {
-        guard case .audioEpisode(let episodeID) = finishedTarget,
+        guard self.playbackIntentID == playbackIntentID,
+              case .audioEpisode(let episodeID) = finishedTarget,
               let nextIndex = nextNarrationChapterIndex(
                 afterFinishedEpisodeID: episodeID,
                 chapterIndex: chapterIndex,
@@ -430,7 +459,17 @@ final class BriefingNarrationController {
               ) else {
             return
         }
-        await playChapter(at: nextIndex, for: lensKey)
+        await playChapter(
+            at: nextIndex,
+            for: lensKey,
+            playbackIntentID: playbackIntentID
+        )
+    }
+
+    private func beginPlaybackIntent() -> UUID {
+        let id = UUID()
+        playbackIntentID = id
+        return id
     }
 
     private func storeNarration(_ narration: BriefingNarration, for lensKey: String) {

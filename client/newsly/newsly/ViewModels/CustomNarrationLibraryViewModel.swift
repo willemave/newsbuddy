@@ -6,7 +6,29 @@
 import Foundation
 import Observation
 
+private enum CustomNarrationTaskKey: Hashable {
+    case episodePolling(Int)
+}
+
+private enum CustomNarrationMutation {
+    case upsert(AudioEpisode)
+    case remove
+}
+
+private struct VersionedCustomNarrationMutation {
+    let revision: Int
+    let mutation: CustomNarrationMutation
+}
+
+@MainActor
 protocol CustomNarrationLibraryServicing: AnyObject {
+    func createCustomNarrationEpisode(
+        contentIds: [Int],
+        newsItemIds: [Int],
+        title: String?,
+        markSourceContentReadOnPlay: Bool,
+        delivery: AudioEpisodeDelivery
+    ) async throws -> AudioEpisode
     func fetchEpisode(id: Int) async throws -> AudioEpisode
     func fetchCustomNarrationEpisodes(limit: Int) async throws -> [AudioEpisode]
     func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource
@@ -18,9 +40,13 @@ extension AudioEpisodeService: CustomNarrationLibraryServicing {}
 @MainActor
 @Observable
 final class CustomNarrationLibraryViewModel {
-    private(set) var episodes: [AudioEpisode] = []
+    private(set) var episodes: [AudioEpisode] = [] {
+        didSet { timelineRevision &+= 1 }
+    }
+    private(set) var timelineRevision = 0
     private(set) var isLoading = false
     private(set) var sharingEpisodeIds: Set<Int> = []
+    private(set) var loadErrorMessage: String?
     var errorMessage: String?
 
     @ObservationIgnored
@@ -35,34 +61,76 @@ final class CustomNarrationLibraryViewModel {
     private let readStateCache: ReadStateCache
     @ObservationIgnored
     private var readNotifiedEpisodeIds: Set<Int> = []
+    @ObservationIgnored
+    private let tasks = TaskBag<CustomNarrationTaskKey>()
+    @ObservationIgnored
+    private let pollingIntervalNanoseconds: UInt64
+    @ObservationIgnored
+    private let pollingAttemptLimit: Int
+    @ObservationIgnored
+    private var activeLoadRequestID: UUID?
+    @ObservationIgnored
+    private var mutationRevision = 0
+    @ObservationIgnored
+    private var episodeMutations: [Int: VersionedCustomNarrationMutation] = [:]
 
     init(
         playbackService: NarrationPlaybackService,
         audioService: any CustomNarrationLibraryServicing,
         badgeStatsStore: BadgeStatsStore,
         toastPresenter: any ToastPresenting,
-        readStateCache: ReadStateCache? = nil
+        readStateCache: ReadStateCache? = nil,
+        pollingIntervalNanoseconds: UInt64 = 3_000_000_000,
+        pollingAttemptLimit: Int = 120
     ) {
         self.playbackService = playbackService
         self.audioService = audioService
         self.badgeStatsStore = badgeStatsStore
         self.toastPresenter = toastPresenter
         self.readStateCache = readStateCache ?? ReadStateCache()
+        self.pollingIntervalNanoseconds = pollingIntervalNanoseconds
+        self.pollingAttemptLimit = pollingAttemptLimit
+    }
+
+    deinit {
+        tasks.cancelAll()
     }
 
     func load() async {
-        guard !isLoading else { return }
+        let requestID = UUID()
+        let requestStartRevision = mutationRevision
+        activeLoadRequestID = requestID
         isLoading = true
-        defer { isLoading = false }
+        loadErrorMessage = nil
+        defer {
+            if activeLoadRequestID == requestID {
+                activeLoadRequestID = nil
+                isLoading = false
+            }
+        }
 
         do {
-            episodes = try await audioService.fetchCustomNarrationEpisodes(limit: 20)
-            errorMessage = nil
+            let loadedEpisodes = try await audioService.fetchCustomNarrationEpisodes(limit: 20)
+            guard activeLoadRequestID == requestID, !Task.isCancelled else { return }
+            episodes = reconcileLoadedEpisodes(
+                loadedEpisodes,
+                requestStartRevision: requestStartRevision
+            )
+            episodes.forEach(startPollingIfNeeded)
         } catch where isNetworkCancellation(error) {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            guard activeLoadRequestID == requestID, !Task.isCancelled else { return }
+            loadErrorMessage = error.localizedDescription
         }
+    }
+
+    func clearError() {
+        errorMessage = nil
+    }
+
+    func cancelPolling() {
+        tasks.cancelAll()
     }
 
     func isPlaying(_ episode: AudioEpisode) -> Bool {
@@ -117,6 +185,30 @@ final class CustomNarrationLibraryViewModel {
         }
     }
 
+    func retry(_ episode: AudioEpisode) async {
+        guard episode.isFailed,
+              !episode.sourceContentIds.isEmpty || !episode.sourceItemIds.isEmpty
+        else { return }
+
+        do {
+            let replacement = try await audioService.createCustomNarrationEpisode(
+                contentIds: episode.sourceContentIds,
+                newsItemIds: episode.sourceItemIds,
+                title: episode.title,
+                markSourceContentReadOnPlay: !episode.readOnPlayContentIds.isEmpty
+                    || !episode.readOnPlayNewsItemIds.isEmpty,
+                delivery: .background
+            )
+            removeEpisode(id: episode.id)
+            upsert(replacement)
+            errorMessage = nil
+        } catch where isNetworkCancellation(error) {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func shareLinks(for episode: AudioEpisode) async -> AudioEpisodeShareResponse? {
         guard episode.isCompleted, !sharingEpisodeIds.contains(episode.id) else { return nil }
         sharingEpisodeIds.insert(episode.id)
@@ -138,7 +230,7 @@ final class CustomNarrationLibraryViewModel {
     private func refresh(_ episode: AudioEpisode) async {
         do {
             let latest = try await audioService.fetchEpisode(id: episode.id)
-            replace(latest)
+            upsert(latest)
         } catch where isNetworkCancellation(error) {
             return
         } catch {
@@ -146,10 +238,108 @@ final class CustomNarrationLibraryViewModel {
         }
     }
 
-    private func replace(_ episode: AudioEpisode) {
+    private func upsert(
+        _ episode: AudioEpisode,
+        startsPolling: Bool = true
+    ) {
+        recordMutation(.upsert(episode), for: episode.id)
         if let index = episodes.firstIndex(where: { $0.id == episode.id }) {
             episodes[index] = episode
+        } else {
+            episodes.insert(episode, at: 0)
         }
+
+        if startsPolling {
+            startPollingIfNeeded(episode)
+        }
+    }
+
+    private func removeEpisode(id: Int) {
+        recordMutation(.remove, for: id)
+        tasks.cancel(.episodePolling(id))
+        episodes.removeAll { $0.id == id }
+    }
+
+    private func recordMutation(_ mutation: CustomNarrationMutation, for episodeID: Int) {
+        mutationRevision &+= 1
+        episodeMutations[episodeID] = VersionedCustomNarrationMutation(
+            revision: mutationRevision,
+            mutation: mutation
+        )
+    }
+
+    private func reconcileLoadedEpisodes(
+        _ loadedEpisodes: [AudioEpisode],
+        requestStartRevision: Int
+    ) -> [AudioEpisode] {
+        var reconciled = loadedEpisodes
+
+        for current in episodes where !current.isGenerating {
+            guard let index = reconciled.firstIndex(where: { $0.id == current.id }),
+                  reconciled[index].isGenerating else {
+                continue
+            }
+            reconciled[index] = current
+        }
+
+        let loadedEpisodeIDs = Set(loadedEpisodes.map(\.id))
+        let mutations = episodeMutations.sorted { $0.value.revision < $1.value.revision }
+        for (episodeID, versionedMutation) in mutations {
+            switch versionedMutation.mutation {
+            case .upsert(let episode):
+                if versionedMutation.revision <= requestStartRevision,
+                   loadedEpisodeIDs.contains(episodeID) {
+                    episodeMutations.removeValue(forKey: episodeID)
+                    continue
+                }
+                reconciled.removeAll { $0.id == episodeID }
+                reconciled.insert(episode, at: 0)
+            case .remove:
+                reconciled.removeAll { $0.id == episodeID }
+                if versionedMutation.revision <= requestStartRevision,
+                   !loadedEpisodeIDs.contains(episodeID) {
+                    episodeMutations.removeValue(forKey: episodeID)
+                }
+            }
+        }
+        return reconciled
+    }
+
+    private func startPollingIfNeeded(_ episode: AudioEpisode) {
+        let key = CustomNarrationTaskKey.episodePolling(episode.id)
+        guard episode.isGenerating else {
+            tasks.cancel(key)
+            return
+        }
+
+        tasks.runIfIdle(key) { [weak self] in
+            await self?.pollUntilTerminal(startingWith: episode)
+        }
+    }
+
+    private func pollUntilTerminal(startingWith episode: AudioEpisode) async {
+        var current = episode
+        var lastFetchError: Error?
+
+        for _ in 0..<pollingAttemptLimit {
+            guard !Task.isCancelled, current.isGenerating else { return }
+            do {
+                try await Task.sleep(nanoseconds: pollingIntervalNanoseconds)
+                guard !Task.isCancelled else { return }
+                current = try await audioService.fetchEpisode(id: current.id)
+                guard !Task.isCancelled else { return }
+                upsert(current, startsPolling: false)
+                lastFetchError = nil
+            } catch where isNetworkCancellation(error) {
+                return
+            } catch {
+                lastFetchError = error
+            }
+        }
+
+        guard !Task.isCancelled, current.isGenerating else { return }
+        errorMessage = lastFetchError?.localizedDescription
+            ?? AudioEpisodeServiceError.preparationTimedOut.userFacingMessage
     }
 
     private func markReadSourcesLocallyIfNeeded(_ episode: AudioEpisode) async {

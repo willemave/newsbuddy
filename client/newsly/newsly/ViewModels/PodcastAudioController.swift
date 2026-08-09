@@ -24,6 +24,7 @@ final class PodcastAudioController {
 
     private var loadingAudioEpisodeContentIds: Set<Int> = []
     private var audioEpisodeByContentId: [Int: AudioEpisode] = [:]
+    private var audioRequestGeneration = 0
     private let audioEpisodeService: any PodcastAudioEpisodeServicing
 
     init(
@@ -86,8 +87,10 @@ final class PodcastAudioController {
         stopIfSpeaking(forContentId: content.id)
     }
 
-    func stopIfSpeaking(forContentId contentId: Int) {
-        guard let target = target(forContentId: contentId),
+    func stopIfSpeaking(forContentId contentId: Int?) {
+        audioRequestGeneration += 1
+        guard let contentId,
+              let target = target(forContentId: contentId),
               playbackService.speakingTarget == target else {
             return
         }
@@ -111,6 +114,8 @@ final class PodcastAudioController {
         }
         guard supportsAudio(for: content) else { return }
         guard !isLoading(for: content) else { return }
+        audioRequestGeneration += 1
+        let requestGeneration = audioRequestGeneration
         podcastAudioLogger.info(
             "Flow started | contentId=\(content.id) type=\(content.contentType.rawValue, privacy: .public) rate=\(playbackRate)"
         )
@@ -127,20 +132,32 @@ final class PodcastAudioController {
                 )
             } else {
                 episode = try await createAudioEpisode(for: content)
+                guard requestGeneration == audioRequestGeneration else { return }
                 podcastAudioLogger.info(
                     "Episode created | contentId=\(content.id) episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(self.elapsedMilliseconds(since: startedAt))"
                 )
             }
             audioEpisodeByContentId[content.id] = episode
-            guard currentContentId == content.id else { return }
+            guard requestGeneration == audioRequestGeneration,
+                  currentContentId == content.id else { return }
             let target = NarrationTarget.audioEpisode(episode.id)
             try await playbackService.playStreamingNarration(
                 for: target,
                 rate: playbackRate,
                 fetchStreamResource: {
-                    try await self.audioEpisodeService.streamResource(for: episode)
+                    let resource = try await self.audioEpisodeService.streamResource(for: episode)
+                    guard requestGeneration == self.audioRequestGeneration else {
+                        throw CancellationError()
+                    }
+                    return resource
                 }
             )
+            guard requestGeneration == audioRequestGeneration else {
+                if playbackService.speakingTarget == target {
+                    playbackService.stop()
+                }
+                return
+            }
             podcastAudioLogger.info(
                 "Playback requested | contentId=\(content.id) episodeId=\(episode.id) elapsedMs=\(self.elapsedMilliseconds(since: startedAt))"
             )
@@ -159,12 +176,12 @@ final class PodcastAudioController {
         case .article, .podcast, .insight_report, .unknown, .unknownRaw:
             return try await audioEpisodeService.createContentCouncilEpisode(
                 contentId: content.id,
-                delivery: .inline
+                delivery: .stream
             )
         case .news:
             return try await audioEpisodeService.createNewsItemDiscussionEpisode(
                 newsItemId: content.id,
-                delivery: .inline
+                delivery: .stream
             )
         }
     }

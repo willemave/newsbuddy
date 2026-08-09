@@ -15,7 +15,6 @@ private func elapsedMilliseconds(since start: Date) -> Int {
 enum AudioEpisodeDelivery: String {
     case background
     case stream
-    case inline
 }
 
 enum AudioEpisodeServiceError: LocalizedError, Equatable {
