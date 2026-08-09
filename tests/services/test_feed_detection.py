@@ -58,6 +58,52 @@ def test_extract_feed_links_from_anchors_resolves_relative_url() -> None:
     ]
 
 
+def test_extract_feed_links_uses_urljoin_for_parent_relative_urls() -> None:
+    links = feed_detection.extract_feed_links(
+        '<link rel="alternate" type="application/atom+xml" href="../feed.xml">',
+        "https://example.com/blog/posts/article",
+    )
+
+    assert links[0]["feed_url"] == "https://example.com/blog/feed.xml"
+
+
+def test_feed_link_titles_are_cleaned_for_display() -> None:
+    link_tag_results = feed_detection.extract_feed_links(
+        '<link rel="alternate" type="application/rss+xml" href="/feed" '
+        'title="Research &amp; Ideas &raquo;">',
+        "https://example.com/articles/post",
+    )
+    anchor_results = feed_detection.extract_feed_links_from_anchors(
+        '<a href="/feed">Research &amp; Ideas &raquo;</a>',
+        "https://example.com/articles/post",
+    )
+
+    assert link_tag_results[0]["title"] == "Research & Ideas »"
+    assert anchor_results[0]["title"] == "Research & Ideas »"
+
+
+def test_generic_page_linking_to_substack_is_not_classified_as_substack() -> None:
+    result = feed_detection._classify_feed_type_heuristic(
+        "https://example.com/feed.atom",
+        "https://example.com/",
+        "Example",
+        '<a href="https://writer.substack.com/p/story">Related story</a>',
+    )
+
+    assert result.feed_type == "atom"
+
+
+def test_custom_domain_substack_requires_platform_html_marker() -> None:
+    result = feed_detection._classify_feed_type_heuristic(
+        "https://newsletter.example/feed",
+        "https://newsletter.example/",
+        "Example Newsletter",
+        '<link rel="preconnect" href="https://substackcdn.com">',
+    )
+
+    assert result.feed_type == "substack"
+
+
 def test_extract_podcast_feed_links_handles_sequoia_stream_links_structure(
     monkeypatch,
 ) -> None:
@@ -110,9 +156,6 @@ def test_detect_from_html_resolves_sequoia_fixture_before_generic_candidates(
     )
 
     class DummyHttpService:
-        def head(self, url: str, allow_statuses=None, **_kwargs):  # noqa: ANN001
-            return SimpleNamespace(status_code=200)
-
         def fetch(self, url: str, **_kwargs):  # noqa: ANN001
             fetched_urls.append(url)
             return SimpleNamespace(
@@ -123,7 +166,6 @@ def test_detect_from_html_resolves_sequoia_fixture_before_generic_candidates(
 
     detector = feed_detection.FeedDetector(
         use_llm=False,
-        use_exa_search=False,
         http_service=cast(Any, DummyHttpService()),
     )
 
@@ -157,10 +199,7 @@ def test_validate_feed_candidate_parses_rss(monkeypatch) -> None:
     rss_payload = b'<?xml version="1.0"?><rss><channel><title>Test Feed</title></channel></rss>'
 
     class DummyHttpService:
-        def head(self, url: str, allow_statuses=None):  # noqa: ANN001
-            return SimpleNamespace(status_code=200)
-
-        def fetch(self, url: str):  # noqa: ANN001
+        def fetch(self, url: str, **_kwargs):  # noqa: ANN001
             return SimpleNamespace(
                 headers={"content-type": "application/rss+xml"},
                 content=rss_payload,
@@ -168,7 +207,6 @@ def test_validate_feed_candidate_parses_rss(monkeypatch) -> None:
 
     detector = feed_detection.FeedDetector(
         use_llm=False,
-        use_exa_search=False,
         http_service=cast(Any, DummyHttpService()),
     )
 
@@ -181,14 +219,35 @@ def test_validate_feed_candidate_parses_rss(monkeypatch) -> None:
     }
 
 
+def test_validate_feed_candidate_cleans_feed_title() -> None:
+    rss_payload = (
+        b'<?xml version="1.0"?><rss><channel><title>Research &amp;amp; Ideas</title>'
+        b"</channel></rss>"
+    )
+
+    class DummyHttpService:
+        def fetch(self, url: str, **_kwargs):  # noqa: ANN001
+            return SimpleNamespace(
+                headers={"content-type": "application/rss+xml"},
+                content=rss_payload,
+            )
+
+    detector = feed_detection.FeedDetector(
+        use_llm=False,
+        http_service=cast(Any, DummyHttpService()),
+    )
+
+    result = detector._validate_feed_candidate("https://example.com/rss.xml")
+
+    assert result is not None
+    assert result["title"] == "Research & Ideas"
+
+
 def test_validate_feed_candidate_rejects_html_article() -> None:
     html_payload = b"<html><head><title>Example Article</title></head><body>Hello</body></html>"
 
     class DummyHttpService:
-        def head(self, url: str, allow_statuses=None):  # noqa: ANN001
-            return SimpleNamespace(status_code=200)
-
-        def fetch(self, url: str):  # noqa: ANN001
+        def fetch(self, url: str, **_kwargs):  # noqa: ANN001
             return SimpleNamespace(
                 headers={"content-type": "text/html; charset=utf-8"},
                 content=html_payload,
@@ -196,7 +255,6 @@ def test_validate_feed_candidate_rejects_html_article() -> None:
 
     detector = feed_detection.FeedDetector(
         use_llm=False,
-        use_exa_search=False,
         http_service=cast(Any, DummyHttpService()),
     )
 
@@ -205,34 +263,36 @@ def test_validate_feed_candidate_rejects_html_article() -> None:
     assert result is None
 
 
-def test_validate_feed_candidate_uses_quiet_probe_flags() -> None:
+def test_validate_feed_candidate_rejects_generic_xml_without_feed_semantics() -> None:
+    class DummyHttpService:
+        def fetch(self, url: str, **_kwargs):  # noqa: ANN001
+            return SimpleNamespace(
+                headers={"content-type": "application/xml"},
+                content=b"<?xml version='1.0'?><catalog><item>Not a feed</item></catalog>",
+            )
+
+    detector = feed_detection.FeedDetector(
+        use_llm=False,
+        http_service=cast(Any, DummyHttpService()),
+    )
+
+    assert detector.validate_feed_url("https://example.com/catalog.xml") is None
+
+
+def test_validate_feed_candidate_uses_one_quiet_get_probe() -> None:
     rss_payload = b'<?xml version="1.0"?><rss><channel><title>Test Feed</title></channel></rss>'
     observed: dict[str, object] = {}
 
     class DummyHttpService:
-        def head(
-            self,
-            url: str,
-            allow_statuses=None,
-            *,
-            log_client_errors: bool = True,
-            log_exceptions: bool = True,
-        ):  # noqa: ANN001
-            observed["head"] = {
-                "url": url,
-                "allow_statuses": allow_statuses,
-                "log_client_errors": log_client_errors,
-                "log_exceptions": log_exceptions,
-            }
-            return SimpleNamespace(status_code=200)
-
         def fetch(
             self,
             url: str,
+            headers: dict[str, str] | None = None,
             *,
             log_client_errors: bool = True,
             log_exceptions: bool = True,
         ):  # noqa: ANN001
+            assert headers is None
             observed["fetch"] = {
                 "url": url,
                 "log_client_errors": log_client_errors,
@@ -245,7 +305,6 @@ def test_validate_feed_candidate_uses_quiet_probe_flags() -> None:
 
     detector = feed_detection.FeedDetector(
         use_llm=False,
-        use_exa_search=False,
         http_service=cast(Any, DummyHttpService()),
     )
 
@@ -255,12 +314,6 @@ def test_validate_feed_candidate_uses_quiet_probe_flags() -> None:
         "feed_url": "https://example.com/rss.xml",
         "feed_format": "rss",
         "title": "Test Feed",
-    }
-    assert observed["head"] == {
-        "url": "https://example.com/rss.xml",
-        "allow_statuses": {405},
-        "log_client_errors": False,
-        "log_exceptions": False,
     }
     assert observed["fetch"] == {
         "url": "https://example.com/rss.xml",

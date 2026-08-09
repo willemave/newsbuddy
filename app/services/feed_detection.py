@@ -8,7 +8,7 @@ from __future__ import annotations
 import html as html_lib
 import re
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import feedparser
 from pydantic import BaseModel, Field
@@ -19,11 +19,11 @@ from app.core.logging import get_logger
 from app.core.model_defaults import SMART_MODEL_SPEC
 from app.models.contracts import ContentType
 from app.services.apple_podcasts import resolve_apple_podcast_feed_url
-from app.services.exa_client import ExaClientError, exa_search
-from app.services.http import HttpService, fetch_quiet_compat, head_quiet_compat
+from app.services.http import HttpFetcher, fetch_quiet
 from app.services.llm_agents import get_basic_agent
 from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_usage import record_model_usage
+from app.utils.title_utils import clean_title
 
 logger = get_logger(__name__)
 
@@ -76,33 +76,22 @@ FEED_ANCHOR_HINTS = (
     "atom",
     "feed",
 )
-FEED_URL_HINTS = (
-    "rss",
-    "atom",
-    "feed",
-    ".xml",
-)
-FEED_CONTENT_TYPE_HINTS = (
-    "application/rss+xml",
-    "application/atom+xml",
-    "application/xml",
-    "text/xml",
-    "application/rdf+xml",
-)
-FEED_DOCUMENT_MARKERS = (
-    b"<rss",
-    b"<feed",
-    b"<rdf:rdf",
+FEED_DOCUMENT_ROOT_PATTERN = re.compile(
+    rb"<(?:[a-z_][\w.-]*:)?(?:rss|feed|rdf)\b",
+    re.IGNORECASE,
 )
 MAX_FEED_CANDIDATE_FETCHES = 6
-MAX_EXA_RESULTS = 5
-MAX_EXA_CANDIDATES = 8
 
 SUBSTACK_MARKERS = (
     "substack.com",
     "substackcdn.com",
     "substackcdn",
     "substack.com/api/v1/",
+)
+SUBSTACK_HTML_MARKERS = (
+    "substackcdn.com",
+    "substack.com/api/v1/",
+    "a substack publication",
 )
 
 PODCAST_HOST_MARKERS = (
@@ -155,15 +144,7 @@ class FeedClassificationResult(BaseModel):
 
 def _resolve_url(href: str, page_url: str) -> str:
     """Resolve relative URLs against the page URL."""
-    if href.startswith(("http://", "https://")):
-        return href
-
-    parsed_page = urlparse(page_url)
-    if href.startswith("/"):
-        return f"{parsed_page.scheme}://{parsed_page.netloc}{href}"
-
-    base_path = parsed_page.path.rsplit("/", 1)[0]
-    return f"{parsed_page.scheme}://{parsed_page.netloc}{base_path}/{href}"
+    return urljoin(page_url, html_lib.unescape(href.strip()))
 
 
 def extract_feed_links(html_content: str, page_url: str) -> list[dict[str, str]]:
@@ -207,7 +188,7 @@ def extract_feed_links(html_content: str, page_url: str) -> list[dict[str, str]]
 
         # Extract title
         title_match = re.search(r"title=[\"']([^\"']*)[\"']", link_tag, re.IGNORECASE)
-        title = title_match.group(1) if title_match else None
+        title = clean_title(title_match.group(1)) if title_match else None
 
         feeds.append(
             {
@@ -234,6 +215,7 @@ def extract_feed_links_from_anchors(html_content: str, page_url: str) -> list[di
             continue
 
         anchor_text_raw = re.sub(r"<[^>]+>", "", match.group(2) or "").strip()
+        title = clean_title(anchor_text_raw)
         combined = f"{href} {anchor_text_raw}".lower()
         if not any(hint in combined for hint in FEED_ANCHOR_HINTS):
             continue
@@ -245,7 +227,7 @@ def extract_feed_links_from_anchors(html_content: str, page_url: str) -> list[di
             {
                 "feed_url": feed_url,
                 "feed_format": feed_format,
-                "title": anchor_text_raw or "",
+                "title": title or "",
             }
         )
 
@@ -305,11 +287,6 @@ def _extract_canonical_page_urls(html_content: str, page_url: str) -> list[str]:
     return list(dict.fromkeys(candidates))
 
 
-def _looks_like_feed_url(url: str) -> bool:
-    lowered = url.lower()
-    return any(hint in lowered for hint in FEED_URL_HINTS)
-
-
 def _extract_candidate_section_paths(path: str) -> list[str]:
     segments = [segment for segment in path.split("/") if segment]
     if not segments:
@@ -366,26 +343,16 @@ def _infer_feed_format(
 
 def _looks_like_feed_document(
     parsed_feed: Any,
-    content_type: str | None,
     content: bytes,
 ) -> bool:
     """Return True when the fetched payload appears to be a real feed document."""
-    content_type_value = (content_type or "").lower()
-    if any(hint in content_type_value for hint in FEED_CONTENT_TYPE_HINTS):
-        return True
-
     version = str(getattr(parsed_feed, "version", "") or "").lower()
-    if "rss" in version or "atom" in version:
-        return True
-
-    head = content[:2000].lower()
-    return any(marker in head for marker in FEED_DOCUMENT_MARKERS)
-
-
-def _extract_urls_from_text(text: str) -> list[str]:
-    if not text:
-        return []
-    return re.findall(r"https?://[^\s\"'<>]+", text)
+    has_feed_root = FEED_DOCUMENT_ROOT_PATTERN.search(content[:4000]) is not None
+    has_feed_semantics = bool(getattr(parsed_feed, "feed", None)) or bool(
+        getattr(parsed_feed, "entries", None)
+    )
+    recognized_version = "rss" in version or "atom" in version
+    return has_feed_root and recognized_version and has_feed_semantics
 
 
 def classify_feed_type_with_llm(
@@ -497,7 +464,7 @@ def _is_substack_feed(feed_url: str, page_url: str, html_content: str | None) ->
         return True
     if html_content:
         normalized_html = html_content.lower()
-        if "substack" in normalized_html:
+        if any(marker in normalized_html for marker in SUBSTACK_HTML_MARKERS):
             return True
     return False
 
@@ -551,14 +518,12 @@ class FeedDetector:
     def __init__(
         self,
         *,
+        http_service: HttpFetcher,
         use_llm: bool = True,
-        use_exa_search: bool = True,
-        http_service: HttpService | None = None,
         max_candidate_fetches: int = MAX_FEED_CANDIDATE_FETCHES,
     ):
         self.use_llm = use_llm
-        self.use_exa_search = use_exa_search
-        self.http_service = http_service or HttpService()
+        self.http_service = http_service
         self.max_candidate_fetches = max_candidate_fetches
 
     def classify_feed_type(
@@ -593,39 +558,7 @@ class FeedDetector:
 
     def _validate_feed_candidate(self, feed_url: str) -> dict[str, str] | None:
         try:
-            head_response = head_quiet_compat(
-                self.http_service,
-                feed_url,
-                allow_statuses={405},
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.debug(
-                "Feed candidate HEAD failed: %s",
-                e,
-                extra={
-                    "component": "feed_detection",
-                    "operation": "validate_feed_candidate_head",
-                    "context_data": {"feed_url": feed_url, "error": str(e)},
-                },
-            )
-            return None
-
-        if head_response.status_code >= 400 and head_response.status_code != 405:
-            return None
-
-        if head_response.status_code == 405:
-            logger.debug(
-                "HEAD not allowed for %s, falling back to GET",
-                feed_url,
-                extra={
-                    "component": "feed_detection",
-                    "operation": "validate_feed_candidate_head",
-                    "context_data": {"feed_url": feed_url, "status_code": 405},
-                },
-            )
-
-        try:
-            response = fetch_quiet_compat(self.http_service, feed_url)
+            response = fetch_quiet(self.http_service, feed_url)
         except Exception as e:  # noqa: BLE001
             logger.debug(
                 "Feed candidate fetch failed: %s",
@@ -643,14 +576,13 @@ class FeedDetector:
             return None
         if not _looks_like_feed_document(
             parsed_feed,
-            response.headers.get("content-type"),
             response.content,
         ):
             return None
 
         title = None
         if getattr(parsed_feed, "feed", None):
-            title = parsed_feed.feed.get("title")
+            title = clean_title(parsed_feed.feed.get("title"))
 
         feed_format = _infer_feed_format(
             parsed_feed,
@@ -708,50 +640,6 @@ class FeedDetector:
             break
         return validated
 
-    def _find_feed_candidates_via_exa(self, page_url: str) -> list[str]:
-        parsed = urlparse(page_url)
-        domain = parsed.netloc
-        if not domain:
-            return []
-
-        query = f"site:{domain} rss feed"
-        try:
-            results = exa_search(
-                query,
-                num_results=MAX_EXA_RESULTS,
-                include_domains=[domain],
-                raise_on_error=True,
-            )
-        except ExaClientError as exc:
-            logger.warning(
-                "Feed candidate Exa search failed for %s",
-                page_url,
-                extra={
-                    "component": "feed_detection",
-                    "operation": "find_feed_candidates_via_exa",
-                    "context_data": {
-                        "page_url": page_url,
-                        "query": query,
-                        "error": str(exc),
-                    },
-                },
-            )
-            return []
-
-        candidates: list[str] = []
-        for result in results:
-            if _looks_like_feed_url(result.url):
-                candidates.append(result.url)
-            candidates.extend(
-                [
-                    url
-                    for url in _extract_urls_from_text(result.snippet or "")
-                    if _looks_like_feed_url(url)
-                ]
-            )
-
-        return list(dict.fromkeys(candidates))[:MAX_EXA_CANDIDATES]
-
     def _discover_feed_links(
         self,
         page_url: str,
@@ -784,12 +672,6 @@ class FeedDetector:
             validated_anchor_feeds = self._validate_feed_links(anchor_feeds)
             if validated_anchor_feeds:
                 return validated_anchor_feeds
-
-        if self.use_exa_search:
-            exa_candidates = self._find_feed_candidates_via_exa(page_url)
-            exa_feeds = self._validate_feed_candidates(exa_candidates)
-            if exa_feeds:
-                return exa_feeds
 
         return []
 
@@ -876,7 +758,7 @@ def detect_feeds_from_html(
     content_type: ContentType | str | None = None,
     *,
     force_detect: bool = False,
-    use_exa_search: bool = True,
+    detector: FeedDetector,
     db: Session | None = None,
     usage_persist: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
@@ -894,7 +776,6 @@ def detect_feeds_from_html(
     Returns:
         Dict with detected_feed info, or None if no feed found or not applicable
     """
-    detector = FeedDetector(use_exa_search=use_exa_search)
     return detector.detect_from_html(
         html_content,
         page_url,

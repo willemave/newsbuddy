@@ -2,7 +2,7 @@ import atexit
 import logging
 import threading
 from contextlib import nullcontext
-from typing import Any
+from typing import Protocol
 from urllib.parse import urlparse
 
 import httpx
@@ -120,49 +120,31 @@ def _is_retryable_http_error(error: BaseException) -> bool:
     return isinstance(error, httpx.TransportError)
 
 
-def fetch_quiet_compat(
-    http_service: Any,
+class HttpFetcher(Protocol):
+    """Minimal transport contract used by feed and discussion probes."""
+
+    def fetch(
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
+        *,
+        log_client_errors: bool = True,
+        log_exceptions: bool = True,
+    ) -> httpx.Response: ...
+
+
+def fetch_quiet(
+    http_service: HttpFetcher,
     url: str,
     headers: dict[str, str] | None = None,
 ) -> httpx.Response:
-    """Fetch with quiet probe flags when the injected service supports them."""
-    kwargs: dict[str, Any] = {
-        "log_client_errors": False,
-        "log_exceptions": False,
-    }
-    if headers is not None:
-        kwargs["headers"] = headers
-    try:
-        return http_service.fetch(url, **kwargs)
-    except TypeError:
-        if headers is None:
-            return http_service.fetch(url)
-        return http_service.fetch(url, headers=headers)
-
-
-def head_quiet_compat(
-    http_service: Any,
-    url: str,
-    headers: dict[str, str] | None = None,
-    allow_statuses: set[int] | None = None,
-) -> httpx.Response:
-    """HEAD with quiet probe flags when the injected service supports them."""
-    kwargs: dict[str, Any] = {
-        "log_client_errors": False,
-        "log_exceptions": False,
-    }
-    if headers is not None:
-        kwargs["headers"] = headers
-    if allow_statuses is not None:
-        kwargs["allow_statuses"] = allow_statuses
-    try:
-        return http_service.head(url, **kwargs)
-    except TypeError:
-        if headers is not None:
-            return http_service.head(url, headers=headers, allow_statuses=allow_statuses)
-        if allow_statuses is not None:
-            return http_service.head(url, allow_statuses=allow_statuses)
-        return http_service.head(url)
+    """Fetch once while suppressing expected probe failures from error logs."""
+    return http_service.fetch(
+        url,
+        headers=headers,
+        log_client_errors=False,
+        log_exceptions=False,
+    )
 
 
 class HttpService:

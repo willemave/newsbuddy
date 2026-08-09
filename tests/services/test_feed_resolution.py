@@ -53,7 +53,7 @@ def test_resolve_feed_candidate_repairs_invalid_candidate_from_site_html() -> No
     class DummyDetector:
         def __init__(self) -> None:
             self.http_service = SimpleNamespace(
-                fetch=lambda url: SimpleNamespace(
+                fetch=lambda url, **_kwargs: SimpleNamespace(
                     url="https://example.com/show",
                     text="<html>podcast page</html>",
                 )
@@ -97,7 +97,7 @@ def test_resolve_feed_candidate_can_prefer_site_discovery_over_guessed_feed() ->
     class DummyDetector:
         def __init__(self) -> None:
             self.http_service = SimpleNamespace(
-                fetch=lambda url: SimpleNamespace(
+                fetch=lambda url, **_kwargs: SimpleNamespace(
                     url="https://example.com/show",
                     text="<html>podcast page</html>",
                 )
@@ -149,10 +149,12 @@ def test_resolve_feed_candidate_fetches_site_quietly_when_supported() -> None:
         def fetch(
             self,
             url: str,
+            headers: dict[str, str] | None = None,
             *,
             log_client_errors: bool = True,
             log_exceptions: bool = True,
         ):  # noqa: ANN001
+            assert headers is None
             observed["url"] = url
             observed["log_client_errors"] = log_client_errors
             observed["log_exceptions"] = log_exceptions

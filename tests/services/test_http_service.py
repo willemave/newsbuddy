@@ -6,9 +6,27 @@ import pytest
 from app.services.http import (
     HttpService,
     NonRetryableError,
+    fetch_quiet,
     get_http_service,
     reset_http_service_for_testing,
 )
+
+
+def test_fetch_quiet_does_not_reissue_when_fetch_raises_type_error() -> None:
+    class _Fetcher:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def fetch(self, *_args, **_kwargs) -> httpx.Response:
+            self.calls += 1
+            raise TypeError("transport failed after dispatch")
+
+    fetcher = _Fetcher()
+
+    with pytest.raises(TypeError, match="after dispatch"):
+        fetch_quiet(fetcher, "https://example.com/feed.xml")
+
+    assert fetcher.calls == 1
 
 
 class _ExplodingClient:

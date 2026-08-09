@@ -8,6 +8,8 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 from app.pipeline.task_context import TaskContext
+from app.services import feed_subscription_resolution
+from app.services.feed_detection import FeedDetector
 
 
 def metadata_dict(value: object | None) -> dict[str, Any]:
@@ -18,7 +20,12 @@ def metadata_dict(value: object | None) -> dict[str, Any]:
 def build_task_context(db_session, queue_gateway: Mock) -> TaskContext:
     @contextmanager
     def _db_context():
-        yield db_session
+        try:
+            yield db_session
+            db_session.commit()
+        except Exception:
+            db_session.rollback()
+            raise
 
     return TaskContext(
         queue_service=Mock(),
@@ -30,29 +37,47 @@ def build_task_context(db_session, queue_gateway: Mock) -> TaskContext:
     )
 
 
-def stub_successful_initial_backfill(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        lambda request: SimpleNamespace(
-            config_id=request.config_id,
-            base_limit=1,
-            target_limit=1 + request.count,
-            scraped=1,
-            saved=1,
-            duplicates=0,
-            errors=0,
-        ),
-    )
+def stub_feed_subscription_runtime(monkeypatch) -> None:
+    """Route feed-subscription probes through a deterministic fake sandbox."""
+
+    class _SandboxHttpService:
+        def fetch(self, url: str, **_kwargs):
+            body, headers = feed_subscription_resolution.get_http_gateway().fetch_content(url)
+            content = body.encode() if isinstance(body, str) else body
+            return SimpleNamespace(
+                url=url,
+                status_code=200,
+                headers=headers,
+                content=content,
+                text=content.decode("utf-8", errors="ignore"),
+            )
+
+    @contextmanager
+    def _runtime(**_kwargs):
+        http_service = _SandboxHttpService()
+        detector = FeedDetector(
+            http_service=http_service,  # type: ignore[arg-type]
+        )
+        yield SimpleNamespace(detector=detector, http_service=http_service)
+
+    monkeypatch.setattr(feed_subscription_resolution, "feed_research_runtime", _runtime)
 
 
 def stub_feed_validator(monkeypatch, *, title: str = "Detected Feed") -> None:
+    @contextmanager
+    def _runtime(**_kwargs):
+        detector = SimpleNamespace(
+            validate_feed_url=lambda feed_url: {
+                "feed_url": feed_url,
+                "feed_format": "rss",
+                "title": title,
+            }
+        )
+        yield SimpleNamespace(detector=detector)
+
     monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": title,
-        },
+        "app.services.scraper_config_validation.feed_research_runtime",
+        _runtime,
     )
 
 

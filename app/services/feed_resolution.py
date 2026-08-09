@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.services.http import fetch_quiet_compat
+from app.services.http import fetch_quiet
 
 URL_REGEX = r"https?://[^\s\"'<>]+"
 URL_TRIM_CHARS = ".,);]>'\""
@@ -83,7 +83,7 @@ def _resolve_from_site(
     page_html = html_content
     if page_html is None:
         try:
-            response = fetch_quiet_compat(detector.http_service, page_url)
+            response = fetch_quiet(detector.http_service, page_url)
         except Exception:  # noqa: BLE001
             return None
         page_url = str(getattr(response, "url", page_url) or page_url)
