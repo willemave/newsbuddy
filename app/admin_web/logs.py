@@ -37,6 +37,18 @@ STRUCTURED_FILTER_FIELDS = (
 logger = get_logger(__name__)
 
 
+def _resolve_log_file(filename: str) -> Path:
+    """Resolve a regular log file without allowing the path to escape the log root."""
+    root = LOGS_DIR.resolve()
+    try:
+        file_path = (root / filename).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise HTTPException(status_code=404, detail="Log file not found") from None
+    if file_path == root or not file_path.is_relative_to(root) or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Log file not found")
+    return file_path
+
+
 def _modified_timestamp_sort_key(entry: dict[str, object]) -> float:
     value = entry.get("modified_timestamp")
     if isinstance(value, (int, float)):
@@ -129,15 +141,18 @@ async def list_logs(request: Request, _: None = Depends(require_admin)):
     )
 
 
+@router.get("/logs/{filename:path}/download")
+async def download_log(filename: str, _: None = Depends(require_admin)):
+    """Download a log file."""
+    file_path = _resolve_log_file(filename)
+    return FileResponse(path=str(file_path), filename=file_path.name, media_type="text/plain")
+
+
 @router.get("/logs/{filename:path}", response_class=HTMLResponse)
 async def view_log(request: Request, filename: str, _: None = Depends(require_admin)):
     """View specific log file content."""
-    file_path = LOGS_DIR / filename
+    file_path = _resolve_log_file(filename)
     structured_filters = _get_structured_filters(request)
-
-    # Security check - ensure file is in logs directory
-    if not file_path.exists() or not str(file_path.resolve()).startswith(str(LOGS_DIR.resolve())):
-        raise HTTPException(status_code=404, detail="Log file not found")
 
     try:
         # Handle JSONL files differently
@@ -159,18 +174,6 @@ async def view_log(request: Request, filename: str, _: None = Depends(require_ad
             "structured_filters": structured_filters,
         },
     )
-
-
-@router.get("/logs/{filename:path}/download")
-async def download_log(filename: str, _: None = Depends(require_admin)):
-    """Download a log file."""
-    file_path = LOGS_DIR / filename
-
-    # Security check
-    if not file_path.exists() or not str(file_path.resolve()).startswith(str(LOGS_DIR.resolve())):
-        raise HTTPException(status_code=404, detail="Log file not found")
-
-    return FileResponse(path=str(file_path), filename=file_path.name, media_type="text/plain")
 
 
 @router.get("/errors", response_class=HTMLResponse)

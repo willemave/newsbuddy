@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
+from fastapi import HTTPException
+
 from app.admin_web import logs as logs_router
 
 
@@ -66,3 +69,40 @@ def test_matches_structured_filters_handles_missing_values() -> None:
 
     assert logs_router._matches_structured_filters(entry, {"request_id": "req_a"}) is False
     assert logs_router._matches_structured_filters(entry, {"component": "http"}) is True
+
+
+def test_resolve_log_file_rejects_prefix_sibling_and_escaping_symlink(
+    tmp_path, monkeypatch
+) -> None:
+    logs_dir = tmp_path / "logs"
+    sibling_dir = tmp_path / "logs-private"
+    logs_dir.mkdir()
+    sibling_dir.mkdir()
+    secret = sibling_dir / "secret.log"
+    secret.write_text("private", encoding="utf-8")
+    (logs_dir / "escape.log").symlink_to(secret)
+    monkeypatch.setattr(logs_router, "LOGS_DIR", logs_dir)
+
+    for filename in ("../logs-private/secret.log", "escape.log"):
+        with pytest.raises(HTTPException) as exc_info:
+            logs_router._resolve_log_file(filename)
+        assert exc_info.value.status_code == 404
+
+
+def test_log_download_route_precedes_greedy_view_route(
+    client_factory, test_user, tmp_path, monkeypatch
+) -> None:
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / "app.log").write_text("download me", encoding="utf-8")
+    monkeypatch.setattr(logs_router, "LOGS_DIR", logs_dir)
+
+    with client_factory(
+        user=test_user,
+        extra_overrides={logs_router.require_admin: lambda: test_user},
+    ) as client:
+        response = client.get("/admin/logs/app.log/download")
+
+    assert response.status_code == 200
+    assert response.text == "download me"
+    assert response.headers["content-disposition"] == 'attachment; filename="app.log"'

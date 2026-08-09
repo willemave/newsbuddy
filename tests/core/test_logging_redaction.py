@@ -1,6 +1,7 @@
 """Tests for logging redaction and filename sanitization helpers."""
 
-from app.core.logging import _redact_value, _sanitize_filename
+from app.core.logging import _sanitize_filename
+from app.core.redaction import redact_value
 
 
 class TestRedactValue:
@@ -9,13 +10,13 @@ class TestRedactValue:
     def test_redacts_authorization_header(self):
         """Test that authorization headers are redacted."""
         headers = {"authorization": "Bearer secret-token-123"}
-        result = _redact_value(headers)
+        result = redact_value(headers)
         assert result["authorization"] == "<redacted>"
 
     def test_redacts_cookie_header(self):
         """Test that cookie headers are redacted."""
         headers = {"cookie": "session=abc123; user=test"}
-        result = _redact_value(headers)
+        result = redact_value(headers)
         assert result["cookie"] == "<redacted>"
 
     def test_redacts_api_key_variations(self):
@@ -26,7 +27,7 @@ class TestRedactValue:
             "x-api-key": "key789",
             "APIKEY": "key000",
         }
-        result = _redact_value(data)
+        result = redact_value(data)
         assert result["api-key"] == "<redacted>"
         assert result["apikey"] == "<redacted>"
         assert result["x-api-key"] == "<redacted>"
@@ -39,7 +40,7 @@ class TestRedactValue:
             "access_token": "access123",
             "refresh_token": "refresh123",
         }
-        result = _redact_value(data)
+        result = redact_value(data)
         assert result["token"] == "<redacted>"
         assert result["access_token"] == "<redacted>"
         assert result["refresh_token"] == "<redacted>"
@@ -47,7 +48,7 @@ class TestRedactValue:
     def test_redacts_password_and_secret(self):
         """Test that password and secret fields are redacted."""
         data = {"password": "secret123", "secret": "mysecret", "jwt_secret_key": "jwtsec"}
-        result = _redact_value(data)
+        result = redact_value(data)
         assert result["password"] == "<redacted>"
         assert result["secret"] == "<redacted>"
         assert result["jwt_secret_key"] == "<redacted>"
@@ -55,7 +56,7 @@ class TestRedactValue:
     def test_redacts_bearer_token_in_string(self):
         """Test that Bearer tokens in strings are redacted."""
         value = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-        result = _redact_value(value)
+        result = redact_value(value)
         assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in result
         assert "Bearer <redacted>" in result
 
@@ -65,7 +66,7 @@ class TestRedactValue:
             "outer": {"inner": {"password": "secret123", "safe_field": "visible"}},
             "normal_field": "also_visible",
         }
-        result = _redact_value(data)
+        result = redact_value(data)
         assert result["outer"]["inner"]["password"] == "<redacted>"
         assert result["outer"]["inner"]["safe_field"] == "visible"
         assert result["normal_field"] == "also_visible"
@@ -73,14 +74,14 @@ class TestRedactValue:
     def test_redacts_values_in_lists(self):
         """Test that values in lists are redacted recursively."""
         data = [{"password": "secret"}, {"username": "visible"}]
-        result = _redact_value(data)
+        result = redact_value(data)
         assert result[0]["password"] == "<redacted>"
         assert result[1]["username"] == "visible"
 
     def test_redacts_values_in_tuples(self):
         """Test that values in tuples are redacted recursively."""
         data = ({"token": "secret"}, {"data": "visible"})
-        result = _redact_value(data)
+        result = redact_value(data)
         assert result[0]["token"] == "<redacted>"
         assert result[1]["data"] == "visible"
         assert isinstance(result, tuple)
@@ -88,17 +89,17 @@ class TestRedactValue:
     def test_preserves_non_sensitive_data(self):
         """Test that non-sensitive data is preserved."""
         data = {"username": "testuser", "email": "test@example.com", "count": 42}
-        result = _redact_value(data)
+        result = redact_value(data)
         assert result == data
 
     def test_handles_none_values(self):
         """Test that None values pass through unchanged."""
-        assert _redact_value(None) is None
+        assert redact_value(None) is None
 
     def test_handles_numeric_values(self):
         """Test that numeric values pass through unchanged."""
-        assert _redact_value(42) == 42
-        assert _redact_value(3.14) == 3.14
+        assert redact_value(42) == 42
+        assert redact_value(3.14) == 3.14
 
 
 class TestSanitizeFilename:

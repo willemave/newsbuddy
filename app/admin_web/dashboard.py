@@ -64,6 +64,7 @@ COST_EXTERNAL_FEATURES = (
     "object_storage",
     "chat_sandbox",
     "learning_deck_sandbox",
+    "llm_task_sandbox",
 )
 COST_TRACKED_FEATURES = tuple(
     sorted({feature for features in COST_FEATURE_GROUPS.values() for feature in features})

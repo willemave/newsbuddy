@@ -67,11 +67,6 @@ def _sanitize_filename(value: str) -> str:
     return cleaned.strip("._-") or "app"
 
 
-def _redact_value(value: Any) -> Any:
-    """Backward-compatible wrapper for shared redaction logic."""
-    return redact_value(value)
-
-
 def _default_log_record_component(record: logging.LogRecord) -> str:
     component = getattr(record, "component", None)
     if isinstance(component, str) and component.strip():
@@ -103,7 +98,7 @@ def _merge_context_data(context_data: Any, extra_fields: dict[str, Any]) -> Any:
 def _truncate_console_value(value: Any, max_chars: int = _CONSOLE_STRUCTURED_MAX_CHARS) -> str:
     """Serialize and truncate structured values for console output."""
 
-    redacted = _redact_value(value)
+    redacted = redact_value(value)
     try:
         text = json.dumps(redacted, ensure_ascii=False, default=str, separators=(",", ":"))
     except Exception:
@@ -149,7 +144,7 @@ def reset_log_context(token: Token[dict[str, Any] | None]) -> None:
 
 
 def _build_error_json_payload(record: logging.LogRecord) -> dict[str, Any]:
-    message = _redact_value(record.getMessage())
+    message = redact_value(record.getMessage())
 
     exc_type = None
     exc_value = None
@@ -177,11 +172,11 @@ def _build_error_json_payload(record: logging.LogRecord) -> dict[str, Any]:
         getattr(record, "context_data", None), _extract_extra_fields(record)
     )
     if context_data is not None:
-        context_data = _redact_value(context_data)
+        context_data = redact_value(context_data)
 
     http_details = getattr(record, "http_details", None)
     if http_details is not None:
-        http_details = _redact_value(http_details)
+        http_details = redact_value(http_details)
 
     payload: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
@@ -230,17 +225,17 @@ class _JsonLineErrorFormatter(logging.Formatter):
 
 
 def _build_structured_json_payload(record: logging.LogRecord) -> dict[str, Any]:
-    message = _redact_value(record.getMessage())
+    message = redact_value(record.getMessage())
 
     context_data = _merge_context_data(
         getattr(record, "context_data", None), _extract_extra_fields(record)
     )
     if context_data is not None:
-        context_data = _redact_value(context_data)
+        context_data = redact_value(context_data)
 
     http_details = getattr(record, "http_details", None)
     if http_details is not None:
-        http_details = _redact_value(http_details)
+        http_details = redact_value(http_details)
 
     payload: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
