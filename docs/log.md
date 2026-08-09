@@ -27,6 +27,126 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-08 — `main` — Verify the real Share Extension surface and reconcile client architecture docs
+
+- **Status:** Complete
+- **Scope:** Actual UIKit Share Extension presentation from Safari, all four visible outcome selections, Chat input gating, offline recovery, and stale client/Share documentation.
+- **Decisions:** Use AXe for HID dispatch and screenshots for state verification because this Simulator exposes only Safari—not the embedded extension subtree—in its accessibility tree. Keep onboarding acceptance claims compositional: deterministic UI/API orchestration plus separate E2B boundary tests and live sandbox canaries, not a single UI-to-live-E2B run.
+- **Changes:** Updated `docs/architecture.md` and the client overview to remove deleted discovery/quick-mic client surfaces and describe the current Briefing, Knowledge, Deck, and Chat outcomes. No product code changed.
+- **Validation:** On iOS 26.3.1, Safari shared `https://example.com/axe-share-extension` through the system share sheet into Newsbuddy. Screenshots verified the default Add to Briefing state, selectable Add to Knowledge and Create Deck states, Chat disabled with an empty required first message, Chat enabled after typing, and a failed submission retaining the prompt while offering Cancel/Try Again instead of dead-ending. Evidence is retained under `/tmp/newsly-share-extension-probe.brcvmv`; focused prelaunch AXe recovery passed 1/1 and `git diff --check` passed.
+- **Remaining:** The encompassing task still requires the quota-gated final Oracle Fable verdict. Successful backend execution for each mode remains covered by transport/state/backend tests rather than this intentionally offline UI probe.
+- **Commits:** Uncommitted; no push, deployment, or production change was performed.
+
+### 2026-08-08 — `main` — Final whole-app acceptance pending Oracle Fable reset
+
+- **Status:** In progress
+- **Scope:** Whole-app interaction, E2B feed/sandbox, voice, Share Extension, navigation/recovery, migration, queue durability, simplification, and dead-end acceptance after the nested review and remediation pass.
+- **Decisions:** Keep the exact test-passed tree frozen while waiting for the explicitly required Fable review; do not substitute another model, bypass the account limit, or add speculative cleanup. Trusted provider/control-plane APIs remain host-managed, while every untrusted page/feed candidate is fetched and validated in E2B.
+- **Changes:** The encompassing implementation now includes the verified E2B boundary and lifecycle fixes, truthful feed/backfill outcomes, owned-task and chat durability fixes, Share and Learning recovery, reduced SwiftUI render-path work, and deterministic voice metering/onboarding/podcast cancellation coverage described by the entries below.
+- **Validation:** The warning-visible backend suite passed 2,627 tests with zero warnings; Ruff, mypy, architecture, contract, migration, Go, Vulture, compile, lock, duplicate-test, and diff checks passed. Native testing passed 476/476 on iOS 26.3.1. The retained dark-mode Maestro catalog passed 19/19 on iOS 26.5 in 324.53 seconds. The second-simulator AXe matrix passed 12/12 in 84.84 seconds and produced 62 non-empty screenshots plus 62 matching accessibility-state JSON files. Live E2B canaries verified command execution, file round-trip/listing, and Daring Fireball feed discovery inside E2B with process-cache drain afterward.
+- **Remaining:** The final read-only Oracle Fable pass could not start because the configured Claude.ai Max account returned HTTP 429 with a 03:30 PDT reset. After reset: rerun Fable against this exact tree, reproduce and narrowly fix only concrete P0–P2 findings, run proportional gates if code changes, add a completion follow-up, and perform the final diff/status check. Physical-device microphone permission, acoustic threshold, route/interruption, Bluetooth/headset, and live transcription-quality checks remain manual limitations.
+- **Commits:** Uncommitted; no push, deployment, production configuration change, or authentication change was performed.
+
+### 2026-08-07 — `main` — Make every ingestion feed-sandbox seam deterministic in tests
+
+- **Status:** Complete
+- **Scope:** Analyze URL Apple podcast resolution, podcast-media Apple publisher RSS resolution, and content-worker extracted feed-link detection.
+- **Decisions:** Unit/integration tests inject a fake feed runtime and assert its exact user/execution identity plus detector/HTTP-service handoff. Live E2B remains a separate canary; ordinary unit tests must not acquire or reuse a real paid sandbox.
+- **Changes:** Added three wiring regressions and removed accidental real/cached E2B acquisition from the Apple podcast worker test.
+- **Validation:** 27 tests across the three affected pipeline modules passed; focused Ruff, mypy across all three production callsites, and `git diff --check` passed.
+- **Remaining:** The encompassing app task owns the final full suite and simulator gates.
+- **Commits:** Uncommitted
+
+### 2026-08-07 — `main` — Make Hacker News provider failures truthful
+
+- **Status:** Complete
+- **Scope:** Hacker News top-list and per-story provider failure accounting plus sandbox-boundary documentation.
+- **Decisions:** Keep the fixed Hacker News Firebase JSON API host-managed as an explicit trusted provider/control-plane API. The aggregator does not fetch linked publisher pages; those remain subject to their owning processing boundary. Preserve partial story progress while exposing every provider failure in `ScraperStats`.
+- **Changes:** Added HTTP status validation and scrape-error recording for top-list and per-story calls; documented the provider exception and publisher-page boundary; added full-outage and partial-progress regressions.
+- **Validation:** 9 focused aggregator/registry/shim tests passed; Ruff, focused mypy, and `git diff --check` passed.
+- **Remaining:** The encompassing app task owns the final repo-wide and simulator gates.
+- **Commits:** Uncommitted
+
+### 2026-08-07 — `main` — Recover failed Share submissions without a product dead end
+
+- **Status:** Complete
+- **Scope:** Submission detail recovery for terminal Share Action, legacy Share Sheet, and feed-subscription failures.
+- **Decisions:** Treat this status feed's self-submission flag as the canonical recovery boundary instead of coupling UI behavior to current or legacy `submitted_via` spellings. Preserve no-action rationale behavior; expose only validated HTTP(S) URLs; keep non-self assistant/X paths and unsafe URLs unrecoverable.
+- **Changes:** Extended `SubmissionStatusItem.recoveryURL` to self-submission errors, added concise retry guidance and the stable `submission.retry` accessibility identifier, retained `submission.no_action.retry`, and added native/source-contract/AXe regressions.
+- **Validation:** 13 focused backend/client contract tests passed; Ruff and `git diff --check` passed; 13 `SubmissionStatusViewModelTests` passed in `/tmp/newsly_share_recovery.xcresult`; the current-build AXe failure-recovery flow passed with asserted UI state, screenshot evidence, and the system Share sheet in `/tmp/newsly_axe_failed_recovery_20260807_2127`.
+- **Remaining:** The encompassing app task owns the final full native, combined Maestro/AXe, multi-simulator, and Oracle Fable gates.
+- **Commits:** Uncommitted
+
+### 2026-08-07 — `main` — Retire dead backend surfaces and enable E2B chat libraries
+
+- **Status:** Complete
+- **Scope:** Discovery HTTP retirement and generated contracts, analyze-URL workflow injection, Learning Deck legacy execution, chat personal-library sandbox/runtime, architecture notes, and focused tests.
+- **Decisions:** Remove the zero-caller `/api/discovery` product surface while preserving scheduled feed discovery, weekly discovery chat projection, and onboarding discovery. Replace five one-method analyze-URL protocols with direct bound-method callables. Retire the legacy Learning Deck generator/dedicated E2B session only after the local PostgreSQL snapshot showed four completed runs, zero non-terminal legacy rows, and zero linked active runs missing workspaces; retain historical run tables, artifact pointers, and sandbox metadata for presentation. Make E2B the source default for chat personal-library tools while retaining explicit local/disabled rollback modes.
+- **Changes:** Deleted the discovery router, API-only DTOs/commands/repository/tests and regenerated Swift/Go/OpenAPI artifacts; collapsed analyze-URL injection; removed `learning_deck_generation.py`, `learning_deck_sandbox.py`, legacy settings, and obsolete tests; required canonical `llm_tasks` workspaces for new decks; hardened E2B chat sandbox initialization/hydration cleanup; centralized the duplicated personal-library tool trio in `chat_turn_runtime.py`; added current and historical sandbox cost visibility.
+- **Validation:** Ruff passed on all touched Python; 131 focused discovery-boundary, Learning Deck, chat/sandbox, analyze-workflow, weekly-discovery, and app tests passed; both analyze-URL feed-subscription suites passed (12 tests) through their deterministic E2B boundary; generated public contracts are current. Deterministic E2B tests cover hydration, bounded search/list/read, close, and kill-on-bootstrap-failure. The existing ignored local/runtime env files still explicitly select `disabled`; no production config mutation or deployment was performed.
+- **Remaining:** The encompassing app task owns full-suite/native/AXe gates and the explicit production config switch to `CHAT_SANDBOX_PROVIDER=e2b` when accepting per-turn E2B cost.
+- **Commits:** Uncommitted
+
+### 2026-08-07 — `main` — Move feed research and validation into E2B
+
+- **Status:** Complete
+- **Scope:** Every untrusted feed-specific page/RSS path: assistant and mixed Search discovery, weekly discovery, onboarding suggestions, add-feed resolution, scraper-config validation, ingestion detection, scheduled RSS scrapers/aggregators, Apple publisher RSS, content-analyzer RSS media lookup, VM lifecycle, and product-state projection.
+- **Decisions:** Keep trusted provider/control-plane APIs (Exa, Apple/iTunes, Spotify, Podcast Index, and models) host-managed, but fetch any untrusted page or publisher-feed URL they return only through E2B. Require the canonical `FeedDetector` to receive injected HTTP and construct it only in the E2B runtime. Checkpoint a paid discovery run once per active Sunday-based weekly window so projection retries cannot rebill.
+- **Changes:** Added the sandbox HTTP adapter/runtime and migrated all feed-specific fetchers to it; removed host-HTTP detector fallbacks; reused user-scoped sandboxes with task-isolated scratch paths; hardened cache acquisition, poisoned-session eviction, bootstrap cleanup, and shutdown drain. Discovery now preserves a completed paid run across projection retries, marks canonical active subscriptions in discovery and mixed Search, and onboarding completion enqueues the canonical `discover_feeds` task once when missing. Generated public contracts expose mixed-search `is_subscribed` state.
+- **Validation:** Repository-wide `ruff check app tests` passed; 256 consolidated feed, onboarding, mixed-search, scraper, worker, lifecycle, router, and adjacent backend tests passed; public contracts are current. Focused feed-source mypy passed before the final integration sweep; the final expanded rerun is currently stopped only by a concurrent `share_actions.py` local-variable redefinition outside this scope. A configured live E2B canary fetched `lucumr.pocoo.org` inside the sandbox and resolved `https://lucumr.pocoo.org/feed.atom` as Atom. A two-thread live reuse canary produced one sandbox (`reused=false/true`) with isolated per-task marker files; all canary and accidentally created test sandboxes were explicitly killed or drained.
+- **Remaining:** The encompassing app task owns the final full-suite/native/AXe gates and production rollout. Production must have valid E2B credentials/network access; no deployment or runtime configuration was changed here.
+- **Commits:** Uncommitted
+
+### 2026-08-07 — `main` — Post-audit feed truth and race hardening
+
+- **Status:** Complete
+- **Scope:** Strict feed-sandbox provider boundary, scraper/backfill outcome truth, feed URL identity, discovery telemetry, duplicate submission finalization, and scraper batch races.
+- **Decisions:** Reject non-E2B sessions even when the generic VM setting selects local; keep independent feed failures isolated while exposing them in the owning run; treat `errors > 0` with no saved/duplicate items as a failed backfill; use one canonical URL identity before paid validation. Preserve the existing fast batch transaction plus isolated retry because it is behaviorally equivalent to per-row savepoints for a losing URL race.
+- **Changes:** Added strict provider rejection; propagated Atom/Substack/Podcast fetch exceptions into `ScraperStats`; made onboarding and Analyze URL backfills report error-only results as unavailable/failed; corrected agent tool-call telemetry to read `new_messages()`; centralized canonical feed URL normalization and short-circuited existing subscriptions before sandbox validation. The shared tree's duplicate-submission race path now re-enters canonical existing-row finalization so inbox, Knowledge, and read state are applied; batch persistence retries each item independently after a conflict so later items survive.
+- **Validation:** 302 consolidated feed/onboarding/search/scraper/worker/router tests passed; 97 focused truth/provider/canonical/race tests passed; targeted Ruff passed; mypy passed across 16 affected sources; public contracts and `git diff --check` passed. The duplicate-finalization and mid-batch conflict regressions passed in the focused set. A full backend run before the final hardening changes reached 2,362 passed and 16 skipped with one unrelated concurrent iOS wire-model-manifest failure.
+- **Remaining:** The encompassing task owns final repo-wide lint/full-suite, native/AXe gates, and rollout. No deploy or production configuration change was made.
+- **Commits:** Uncommitted
+
+### 2026-08-07 — `main` — Full-app design assessment sweep (AXe)
+
+- **Status:** Complete
+- **Scope:** Assessment only, no code changes. AXe-driven simulator sweep of every reachable screen (29 screenshots, light + dark): tabs, item details, comments, More-sheet utilities, all Settings sections and sub-screens, sources lists, error states.
+- **Decisions:** Findings centralized into a prioritized small-improvements list (P1 rough edges / P2 consistency / P3 investigate) rather than piecemeal fixes; report delivered to the user (session scratchpad `design-assessment-2026-08-07.md`).
+- **Changes:** None (report only). Headline P1 items: unify error voice + retry label, stop leaking backend error strings in Submissions, humanize Processing Stats intervals, drop always-on "Active" pills, fix Recently Read missing-thumbnail alignment, unify date formats, reader top scrim for the floating back chevron.
+- **Validation:** All findings backed by screenshots taken this session on iPhone 17 Pro sim against the local dev server.
+- **Remaining:** Implement the list (none started); investigate the empty accessibility tree observed via AXe describe-ui (possible bridge glitch, VoiceOver smoke test recommended).
+- **Commits:** Uncommitted
+
+### 2026-08-07 — `main` — AI-services disclosure added to Settings legal section
+
+- **Status:** Complete
+- **Scope:** `Views/Settings/SettingsLegalSection.swift`.
+- **Decisions:** User asked to surface the landing card's legal block in-app; Privacy/Terms/Support links already existed under Settings → Legal & Support, so the missing piece was the AI-services disclosure sentence, added as a quiet footnote under the links card (same wording as the landing consent text, minus the agree clause which only belongs at sign-in).
+- **Changes:** Footnote Text (`appCaption`, `onSurfaceTertiary`) below the legal links card.
+- **Validation:** Debug build; navigated Knowledge → More → Settings in the simulator and screenshotted the section.
+- **Remaining:** None.
+- **Commits:** Uncommitted
+
+### 2026-08-07 — `main` — Mascot purple added to onboarding ambient wash
+
+- **Status:** Complete
+- **Scope:** Follow-up to the 2026-08-06 amber-monochrome pass: `DesignTokens.swift`, `WatercolorBackground.swift`.
+- **Decisions:** Per user request, the cool depth blob in the watercolor background is now a muted mascot purple instead of `surfaceContainerHigh` slate — new token `onboardingAmbientMascot` (`#cfc0ed` light / `#45376d` dark). Amber remains dominant; purple is the single cool note tying the background to the mascot artwork.
+- **Changes:** Added the token; swapped the third blob in both the animated and reduce-motion static backgrounds.
+- **Validation:** Debug build + landing screenshots in light and dark on iPhone 17 Pro sim. `tests/client/test_ios_spacing_tokens.py`: 28 passed, only the pre-existing `test_cached_async_image_fades_use_motion_tokens` failure.
+- **Remaining:** None.
+- **Commits:** Uncommitted
+
+### 2026-08-06 — `main` — Onboarding/landing amber-monochrome design pass
+
+- **Status:** Complete
+- **Scope:** iOS onboarding + landing visual identity: `DesignTokens.swift` onboarding tokens, `WatercolorBackground.swift`, `LandingView.swift`, `OnboardingMicButton.swift`, `OnboardingLoadingStep.swift`, `tests/client/test_ios_spacing_tokens.py`.
+- **Decisions:** Aligned the first-run flow with the app's single-amber-accent doctrine (user chose "amber monochrome, both modes"). Onboarding surface/text now match reader palette charcoal/slate; selection accent is `brandPrimary` amber (was green); the four ambient blob hues (blue/peach/green/sky) became an amber tonal ramp (amber/bronze/cream) plus one cool `surfaceContainerHigh` slate blob for depth. Title glow no longer cycles four hues — fixed amber (`WatercolorBackground.titleGlow`). White neumorphic sheen on the mic button and its shadow drops to ~20% strength in dark mode.
+- **Changes:** Token repaint in `DesignTokens.swift`; blob palette + glow simplification in `WatercolorBackground`; mic stop-icon/pulse ring moved from salmon ambient to the amber accent; finalizing sparkle gradient collapsed to solid amber; landing static/animated glow unified.
+- **Validation:** Debug build + full onboarding walkthrough on iPhone 17 Pro sim (E2E launch args + onboarding fixture, local dev server) with screenshots of landing, choice, audio, suggestions, aggregators, and Reddit steps in light and dark. `tests/client/test_ios_spacing_tokens.py` passes except pre-existing `test_cached_async_image_fades_use_motion_tokens` failure from uncommitted `CachedAsyncImage.swift` edits that predate this session.
+- **Remaining:** `ios_onboarding_personalized` Maestro flow and dark visual baselines not re-run; onboarding screens are not in the baseline set so no baseline updates expected.
+- **Commits:** Uncommitted
+
 ### 2026-08-02 — `willem/fix-malformed-external-links-2026-08-02` — Ignore malformed extracted article links
 
 - **Status:** Complete
@@ -165,3 +285,273 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** Focused Ruff, 31 X API/integration tests, module-size guardrails, and the commit-time mypy check passed.
 - **Remaining:** Complete the release gates and production deployment.
 - **Commits:** Included in this release.
+
+### 2026-08-04 — `main` — Simplify Knowledge image loading
+
+- **Status:** Complete
+- **Scope:** Shared cached-image presentation and Knowledge saved-row artwork.
+- **Decisions:** Keep progressive thumbnail-to-full loading for large artwork, but make compact Knowledge rows select one thumbnail-first URL; remove implicit image fades and the Knowledge-only saturation pass so cached and downloaded images render identically.
+- **Changes:** Removed shared image-assignment animation, reduced Knowledge artwork to one request path, and removed the now-unused list-thumbnail color treatment.
+- **Validation:** The pre-change seeded Knowledge visual flow passed. After the change, all 3 `ImageCacheServiceTests` passed, the iOS Simulator build succeeded, and the same seeded primary-tabs/Knowledge visual flow passed. One intermediate Maestro attempt lost its XCUITest driver connection before reaching the app assertion; the clean retry passed. `git diff --check` passed.
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
+### 2026-08-04 — `main` — Validate personalized onboarding with real processing
+
+- **Status:** Complete
+- **Scope:** Personalized iOS onboarding, AXe Simulator runs, live local backend discovery, fake speech input, and repeated-run reliability.
+- **Decisions:** Use the existing deterministic fake speech transcriber while preserving the real onboarding API, queue, provider, persistence, backfill, and first-edition paths; suppress notification authorization only in debug E2E launches so stale system permission dialogs cannot interrupt repeated automation.
+- **Changes:** Added an E2E-only guard around the post-onboarding notification permission request. Production permission behavior is unchanged.
+- **Validation:** Three signed Simulator runs completed through AXe against the local API and workers with distinct transcripts. All three discovery runs completed; 40 selected source configurations were persisted in total; each user reached the Welcome Briefing and queued a first edition. Onboarding copy and generated lane/source text remained readable, with only intentional single-line truncation for unusually long generated source names.
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
+### 2026-08-06 — `main` — Scroll active root tab to top on reselection
+
+- **Status:** In progress.
+- **Scope:** iOS compact root-tab selection and the Briefing, Knowledge, and Learning scroll containers.
+- **Decisions:** Treat only a tap on the already-selected compact tab as a scroll request; preserve ordinary tab switching and target only the active Briefing lens.
+- **Changes:** Routed per-tab request counters from the app shell into each root scroll container and added reduced-motion-aware animated jumps to stable top anchors.
+- **Validation:** Pending focused iOS build and tests.
+- **Remaining:** Run validation and inspect the final diff.
+- **Commits:** Uncommitted.
+
+### 2026-08-06 — `main` — Complete root-tab reselection scrolling
+
+- **Status:** Complete.
+- **Scope:** Final validation of the iOS active-tab scroll-to-top behavior.
+- **Decisions:** Keep the request counter in `TabCoordinatorViewModel` so same-tab selection semantics are independently testable; leave unrelated cached-image contract drift untouched.
+- **Changes:** Added focused coordinator regression coverage and made the existing source contract resilient to the expanded `BriefingView` initializer.
+- **Validation:** The iOS Simulator build succeeded; all 7 `TabCoordinatorViewModelTests` passed; 54 of 55 client contract tests passed, with the sole failure belonging to pre-existing `CachedAsyncImage` fade-removal work; `git diff --check` passed.
+- **Remaining:** None for this feature.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Preserve source context in article chats
+
+- **Status:** Complete.
+- **Scope:** iOS article/podcast chat timeline presentation.
+- **Decisions:** Treat linked-content context as part of the conversation timeline rather than an empty-chat placeholder, so it remains available after the first turn and in reopened chats.
+- **Changes:** Render the existing article preview card ahead of populated linked-content timelines and expose a stable accessibility identifier for regression coverage.
+- **Validation:** The iOS Simulator build succeeded; the focused Maestro-backed populated article-chat/council flow passed with the source-context assertion; `git diff --check` passed for the touched files.
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Make backend product outcomes truthful and subscriptions immediate
+
+- **Status:** Complete for the backend correctness slice; broader full-app implementation remains in progress.
+- **Scope:** Feed subscription orchestration and public contracts, discovery subscription, content-insert race recovery, Share Action Add Links aggregation, onboarding discovery task outcomes, assistant tool telemetry/link formatting, and scraper batch conflict coverage.
+- **Decisions:** Reuse the queue's caller-owned transactional batch enqueue and existing backfill task; return `created` or `already_subscribed` without treating idempotency as an HTTP error; preserve Analyze URL's existing synchronous initial-download evidence while routing creation through the canonical command; treat persisted onboarding provider failures and all-failed Add Links runs as terminal non-success outcomes rather than retrying paid discovery blindly.
+- **Changes:** Added a canonical idempotent subscription command that atomically creates a config and deduplicated first-backfill task, exposed optional subscription outcome/task fields across OpenAPI, Swift, and Go, converged discovery and detected-feed creation, finalized race-losing submissions through the normal existing-row path, persisted structured partial/all-failed Add Links results, propagated onboarding discovery service failures to queue results, and extracted assistant tool names from canonical Pydantic message parts.
+- **Validation:** Ruff passed for all touched Python and test files; 70 focused router/service/pipeline tests passed; 63 assistant/chat/submission-status compatibility tests passed; 67 contract tests passed; 12 discovery/scraper-batching tests passed; public contract drift check and all Go CLI tests passed; `git diff --check` passed.
+- **Remaining:** Full-app integration, native/AXe/Maestro validation, live provider/E2B canaries, physical-device voice checks, and Oracle Fable review are owned by the encompassing implementation goal.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Resolve Add to Briefing targets in the E2B Share Action
+
+- **Status:** Complete for the backend and public-contract slice.
+- **Scope:** Composite Share Extension Add to Briefing mode, E2B result schema and prompt, host-side application, and regression coverage.
+- **Decisions:** Let the E2B Share Action resolve a shared URL to one discriminated target: a validated continuing feed, an individual Briefing-eligible item, or no action. Do not ingest an arbitrary shared homepage as a fallback, and keep final persistence in the existing subscription and content commands.
+- **Changes:** Added the `add_to_briefing` mode and prompt, typed feed/content target models, a single host action applicator, feed resolution through the existing subscription pipeline, individual-item resolution through normal inbox ingestion, and explicit missing-target/no-action handling. Regenerated OpenAPI, Swift, and Go artifacts.
+- **Validation:** 29 focused Share Action tests passed; 35 combined Share Action and iOS contract-boundary tests passed; 54 public-contract tests passed; public contract drift and all Go CLI tests passed; the full non-iOS-E2E Python suite passed with 2,368 tests and two warnings; `git diff --check` passed.
+- **Remaining:** Native Share Extension, AXe/Maestro, physical-device voice, live E2B canaries, and Oracle Fable verification are owned by the encompassing implementation goal.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Harden iOS voice sessions and accessibility automation
+
+- **Status:** Complete for the iOS voice and accessibility slice.
+- **Scope:** Shared dictation ownership, every live voice consumer, deterministic voice testing, unreachable discovery-personalization UI, and stable screen identifiers across authentication, onboarding, Briefing, Knowledge, Learning, More, Settings, content detail, and article reader surfaces.
+- **Decisions:** Reserve one exclusive speech session synchronously before permission or recorder work awaits; make cancel release ownership immediately; keep recording deadlines and lifecycle cleanup in the provider; drive E2E success, empty, failure, silence, no-speech, maximum-duration, and background paths through the production session contract; attach screen identifiers to one stable header leaf instead of accessibility ancestors that flatten their controls.
+- **Changes:** Added session-scoped event streams and per-recording files, centralized all consumers on `VoiceDictationCoordinator`, added scripted launch scenarios and focused regressions, exposed starting/recording/transcribing/failed UI states, removed the unreachable discovery-personalization sheet/view model/factory, and moved screen identifiers to masthead, navigation-title, metadata, or status-title leaves.
+- **Validation:** The iOS 26.4 Simulator build succeeded; 47 focused native voice/onboarding/consumer tests and 21 Python source-contract tests passed; AXe verified onboarding starting, recording, transcribing, no-speech retry, success, and background cancellation, then verified distinct screen and control elements through onboarding, Briefing, Knowledge, Learning, More, Settings, content detail, and the article reader; `git diff --check` passed.
+- **Remaining:** Real microphone permission prompts, acoustic silence thresholds, hardware route changes, and live backend transcription still require a physical-device/provider pass; the deterministic harness covers their app-level terminal contracts without spending provider calls.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Tune per-surface voice deadlines and close coverage gaps
+
+- **Status:** Complete.
+- **Scope:** Voice deadline ownership, onboarding recording policy, Learning Deck focus dictation tests, and personalized-onboarding Maestro selectors.
+- **Decisions:** Make recording deadlines part of each reserved speech session; default every surface to a 10-second no-speech timeout and 60-second absolute cap, while keeping onboarding intentionally shorter with a 30-second absolute cap. Keep fixture content assertions text-based, but use stable accessibility IDs for deterministic screen and control selection.
+- **Changes:** Added `SpeechRecordingDeadlines`, passed it from each coordinator into the live provider, removed hard-coded provider deadlines, set onboarding's explicit cap, added focused Learning Deck focus coverage for manual, automatic, no-speech/retry, and cancel paths, and migrated the personalized onboarding flow to stable leaf selectors.
+- **Validation:** All 53 affected native voice-consumer tests and 23 Python source-contract tests passed; the personalized onboarding YAML parsed as 17 Maestro commands and all 9 iOS content-flow tests collected; `git diff --check` passed.
+- **Remaining:** The encompassing audit still owns the full Maestro runtime pass and physical-device microphone/provider checks.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Remove confirmed SwiftUI render-path work
+
+- **Status:** Complete.
+- **Scope:** Learning timeline projection, Learning chat previews, and Knowledge saved-route ID projection.
+- **Decisions:** Rebuild the merged Learning timeline only when one of its three owning source collections changes; flatten chat Markdown as part of that cached projection; maintain ready saved-content IDs in `ContentListViewModel` and read them only when opening a detail route.
+- **Changes:** Added source revision counters for chats, decks, and narrations; made `LearningView` keep revision-driven timeline state; moved chat preview parsing into timeline construction; removed the ready-ID `compactMap` and per-row array input from Knowledge rendering.
+- **Validation:** All 21 focused native timeline, content-list, Learning chat, and Learning Deck tests passed; all 38 focused client source-contract tests and Ruff checks passed; the iOS Simulator build completed as part of the native test run; `git diff --check` passed.
+- **Remaining:** Runtime profiling with Instruments can quantify the frame-time delta, but no profiling claim is required for these mechanism-confirmed hot paths.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Complete cross-stack interaction, sandbox, and dead-end hardening
+
+- **Status:** Complete.
+- **Scope:** Every untrusted feed-research/fetch path, feed subscription and onboarding outcomes, E2B agent lifecycle, assistant/chat sandboxing, duplicate-state reconciliation, iOS interaction latency, navigation and recovery states, all voice consumers, content action sheets, Share Extension actions, accessibility automation, visual regressions, and obsolete backend/client paths.
+- **Decisions:** Make E2B the sole runtime for untrusted feed and page retrieval while retaining host calls only for trusted provider/control-plane APIs; fail truthfully when the sandbox or downstream work fails instead of returning false success; converge feed creation on one typed idempotent command and canonical content user-state ownership; remove unused APIs and abstractions instead of preserving internal compatibility; reserve one synchronous exclusive speech session and test every app-level terminal state deterministically; place AX identifiers on stable leaf elements so automation never flattens interactive descendants; compare complete sheets after those IDs moved to title leaves.
+- **Changes:** Added reusable, poison-evicting E2B session management and canonical feed-research execution across assistant search, mixed Search, weekly discovery, onboarding, validation, subscription, ingestion, scheduled RSS/Atom/Substack/podcast work, Apple Podcasts, and content media analysis; keyed session creation by template and namespace so unrelated E2B work no longer serializes while same-namespace acquisition remains singleflight and shutdown-safe; hardened chat workspace bootstrap, telemetry, citations, and cleanup; added typed subscription/backfill outcomes, duplicate-race recovery, historical URL resolution, and loser-to-winner user-state reconciliation; extracted cohesive feed candidate, onboarding audio-run, and canonical-state modules to stay within architecture limits; removed the dead `/api/discovery` surface, legacy Learning Deck generator/sandbox, dead Swift repositories/services/models/views, and unused wire fields; fixed Search/detail/chat routing, FIFO chat handoff, Knowledge/Learning/Search failure recovery, Share Extension retry/open/copy fallbacks, and narration completion; unified all onboarding/chat/Knowledge/Learning Deck/tweet dictation on the shared session contract; reduced confirmed SwiftUI render-path work; added stable AX IDs including the empty Briefing state, three new voice Maestro flows, a More→Search→detail→chat flow, source-contract tests, and meaningful full-screen visual baselines.
+- **Validation:** Real E2B feed and personal-library chat canaries verified feed discovery/parsing, workspace bootstrap, query execution, exact-namespace reuse, poison eviction, cleanup, shutdown drain, and post-drain rejection; four concurrent 200 ms namespace creations fell from 0.838 seconds serialized to 0.211 seconds keyed, a 74.8% wall-time reduction and about 3.97× throughput. The final backend suite passed 2,393 tests with two warnings; Ruff, mypy across 467 files, public-contract generation, Go test/vet, the 748-file/23-ratchet architecture guard with 112 guard tests, high-confidence Vulture scanning, YAML/document parsing, and `git diff --check` passed. Native iOS testing passed 429/429 on an iPhone 17 Pro Simulator. The final clean dark-mode Maestro catalog passed all 19 paths in 350.97 seconds after visual inspection. AXe drove Briefing→Knowledge→Learning→More→Search→detail→chat, verified leaf controls and empty-state reachability, and exercised successful and no-speech Learning Deck focus voice; earlier AXe runs covered onboarding success, no-speech retry, and background cancellation, while deterministic native/Maestro coverage exercised empty, start failure, transcription failure, silence, maximum duration, chat, Knowledge, Learning Deck, and tweet voice paths. Two broad Oracle reviews found correctness seams that were remediated; final Oracle Fable independently passed all 15 named checks with no P0–P2 finding, and a focused follow-up passed the last Share Extension interaction delta.
+- **Remaining:** Real microphone permission prompts, acoustic thresholds, hardware route/interruption behavior, and live provider transcription quality still require a physical-device pass. Production remains unchanged: no config activation, deployment, commit, or push was performed, and the current production chat-sandbox setting was not altered.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Close final voice and Share Extension lifecycle seams
+
+- **Status:** Complete.
+- **Scope:** Failed voice stops during an awaiting start and Share Extension submission controls after terminal or recovery transitions.
+- **Decisions:** Treat every failed session stop as cancellation unless another caller already released it; keep one presentation-state predicate as the owner of Share Extension submission eligibility.
+- **Changes:** Failed speech stops now invoke provider cancellation exactly once, preventing an awaiting start from acquiring late recorder ownership; Share Extension controls and tap routing now permit only ready, invalid-URL recovery, and recoverable retry phases while ignoring prohibited submitting, authentication, manual-fallback, and completed taps.
+- **Validation:** All 22 focused native voice/session/Share Extension tests passed on an iPhone 17 Pro iOS 26.5 Simulator; all 20 client service/view-model source-contract tests passed; `git diff --check` passed.
+- **Remaining:** Physical-device microphone, acoustic, route/interruption, and live transcription checks remain as documented above; no app-level P1/P2 lifecycle gap remains in these two paths.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Finish E2B concurrency and independent acceptance
+
+- **Status:** Complete.
+- **Scope:** Final E2B session-start latency, empty-Briefing automation reachability, Share Extension mutation/retry safety, and independent review of the completed hardening diff.
+- **Decisions:** Keep E2B session creation singleflight only within the same template/namespace key; use the existing presentation-state predicate as the sole owner of whether Share Extension inputs can mutate; independently validate required chat input inside the submit handler so retry callbacks cannot bypass it.
+- **Changes:** Replaced process-wide E2B creation serialization with keyed singleflight plus drain-safe lifecycle accounting; exposed the empty Briefing masthead as `briefing.screen`; froze Share Extension option and chat controls outside begin-capable phases and added a handler-level non-empty-chat guard.
+- **Validation:** The final backend suite passed 2,393 tests, the native suite passed 429 tests, and the clean dark-mode Maestro catalog passed all 19 flows. Focused post-review checks passed 11 Share Extension source contracts and 11 native state/transport tests. AXe completed the rebuilt end-to-end navigation and voice acceptance path, and Oracle Fable returned PASS for both the 15-check release audit and the focused final delta with no P0–P2 findings. `git diff --check` passed.
+- **Remaining:** Only the physical-device voice/provider checks documented above; production was not changed and no commit or push was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Close production VM and RSS outage seams
+
+- **Status:** Complete.
+- **Scope:** Production generic-agent sandbox selection and RSS-cluster scraper failure reporting.
+- **Decisions:** Permit the host-local generic VM only for development and tests; require E2B for model-authored generic agent work in production. Preserve RSS-cluster partial-progress behavior while recording an isolated E2B feed outage as an error instead of a successful empty scrape.
+- **Changes:** Production settings now reject disabled or local generic VM providers, and Techmeme-style RSS cluster fetch failures now flow through the existing `ScraperStats` error channel.
+- **Validation:** The direct regression set passed 16 tests; the broadened settings, aggregator, scraper-handler, E2B session, Learning Deck, and Share Action set passed 108 tests; Ruff and touched-file mypy passed; `git diff --check` passed.
+- **Remaining:** None for these seams.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Bound every Exa provider request
+
+- **Status:** Complete.
+- **Scope:** Shared Exa transport plus onboarding profile, parallel discovery, enrichment, and audio-discovery callers; audited chat, assistant, generic-agent, machine-search, feed discovery/detection, briefing, podcast, YouTube-equivalent, and evaluation-script paths.
+- **Decisions:** Reuse the existing 30-second canonical HTTP timeout instead of adding another setting; let callers replace it only with a tighter budget; keep timeout ownership at the shared Exa boundary so default consumers cannot bypass it.
+- **Changes:** Made the singleton Exa transport deadline-bound for both search and contents calls, added one shared request-client selector for tighter caller budgets and expired-budget short-circuiting, and propagated the existing 8/12/25-second onboarding budgets through sequential and parallel search helpers.
+- **Validation:** All 236 focused Exa, onboarding, assistant, chat, feed-discovery/detection, podcast, briefing, worker, YouTube-equivalent, and machine-agent tests passed; touched-file Ruff and mypy passed; `git diff --check` passed.
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Bound generic E2B agent sessions and VM I/O
+
+- **Status:** Complete.
+- **Scope:** Learning Deck and Share Action agent deadlines, model-authored shell commands, generic VM file reads/writes/listings, and production E2B credentials.
+- **Decisions:** Give each configured agent run one monotonic deadline; clamp shell and file operations to both per-operation limits and the remaining run budget; stream remote reads under a hard byte cap; cap file listings before returning them to the model; require the explicit E2B key that the runtime consumes when production selects the mandatory E2B provider.
+- **Changes:** Propagated deadlines through generic VM creation and model request settings; added bounded local and E2B commands, reads, writes, and listings with typed timeout failures and deterministic stream cleanup; preserved hidden relative paths in listings; and rejected production startup without an E2B API key.
+- **Validation:** All 107 focused and adjacent settings, E2B/feed-runtime, Learning Deck, Share Action, queue-handler, and API tests passed; touched-file Ruff and mypy passed; a live isolated E2B canary verified bounded create, write, read, list, bash, and cleanup behavior; `git diff --check` passed.
+- **Remaining:** None for generic VM availability; Exa request deadlines are validated separately at the shared provider boundary.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Close migration, Share Action, and download-status failure edges
+
+- **Status:** Complete.
+- **Scope:** Task-ownership migration safety, Share Action callback failure persistence, and feed initial-download status reconciliation.
+- **Decisions:** Fence new vendor-usage references before cleaning legacy orphans; parse legacy JSON identifiers without throwing; recover aborted callback transactions by rollback and durable row reload; report retried work as attempted and expired task evidence as unavailable rather than perpetually queued.
+- **Changes:** Reordered the vendor-usage NOT VALID foreign key, added range-safe task and audio identifier backfills, persisted failed Share Action task/action state after an aborted SQL transaction while preserving the original exception, and made initial-download retry and retention projections truthful.
+- **Validation:** Both PostgreSQL migration tests passed, including concurrent-writer, out-of-range payload, upgrade, validation, and downgrade coverage; all 51 focused Share Action, query, and router tests passed; touched-file Ruff, mypy, and diff checks passed.
+- **Remaining:** None for these failure paths.
+- **Commits:** Uncommitted.
+
+### 2026-08-07 — `main` — Close immediate-speech and stale audio lifecycle seams
+
+- **Status:** Complete for the three confirmed voice/audio lifecycle regressions.
+- **Scope:** Production microphone metering, onboarding cancellation during recorder startup, and podcast overview playback while content detail navigates or disappears.
+- **Decisions:** Compare microphone power with the preceding threshold before updating the existing 0.3-second calibration and freeze calibration after speech; suppress cancelled or stale onboarding startup errors after leaving the audio step; invalidate podcast preparation at every awaited boundary while stopping only playback whose target belongs to the departing content.
+- **Changes:** Added a small pure metering state reducer that preserves the existing thresholds and deadline precedence, guarded onboarding's late startup catch, added controller-owned podcast request generations around episode creation and stream resolution, and made content-detail disappearance invalidate pending audio even when no content remains loaded.
+- **Validation:** All 37 focused native metering, speech-session, scripted-speech, onboarding, podcast-controller, and narration-playback tests passed on an iPhone Simulator; all 22 focused iOS async/service boundary and transcription-router tests passed; touched-file `git diff --check` passed.
+- **Remaining:** Simulator tests deterministically cover software state transitions, but real microphone permission prompts, acoustic levels, loud ambient noise above the initial -42 dB threshold, Bluetooth/headset route changes, interruptions, and live transcription quality still require a physical-device/provider pass.
+- **Commits:** Uncommitted.
+
+### 2026-08-08 — `main` — Complete whole-app interaction, sandbox, voice, and dead-end hardening
+
+- **Status:** Complete for the whole-app implementation and simulator-verifiable acceptance goal.
+- **Scope:** Final independent review and remediation across iOS navigation and recovery, Share Extension lifecycle, every voice consumer, paid queue ownership and retry behavior, podcast/feed truthfulness, E2B feed and media boundaries, sandbox cleanup/reuse, and trusted YouTube media limits.
+- **Decisions:** Preserve the reviewed working tree while Oracle Fable inspects it; treat only independently reproducible P0–P2 findings as completion blockers; keep untrusted feeds and non-YouTube remote media inside E2B; poison and evict reusable sandboxes when scratch cleanup cannot be proven; bound trusted yt-dlp work with a separate process, process-group termination, a total deadline, and a 500 MB cap; leave production, authentication configuration, deployment, commits, and pushes untouched.
+- **Changes:** Closed the queued-chat replacement dead end, first-load detail cancellation skeleton, Share Extension non-web URL and cancellation gaps, and the voice auto-stop/manual-stop transcription race; made paid lease reclaim consume retries atomically and fenced completed, cross-user, and wrong-owner targets; made malformed podcast XML and E2B discovery outages fail truthfully; made feed size/deadline failures candidate-local while failed cleanup poisons the session; routed arbitrary enclosure downloads through a bounded E2B bridge; and bounded the retained trusted yt-dlp path, including stale partial cleanup.
+- **Validation:** The exact final code tree passed 2,669 backend tests, 480 native iOS tests on iOS 26.5, all 19 Maestro flows, and all 12 AXe scenarios on a second iOS 26.3.1 Simulator with 62 screenshots and 74 JSON artifacts. AXe also verified the real Share Extension Cancel path back to Safari. Fresh development-only E2B canaries passed generic VM write/read/list/bash, Daring Fireball feed validation, bounded media transfer, and remote cleanup without database or production writes. Ruff, mypy across 472 files, the 752-file/23-ratchet architecture guard with 137 tests, public contracts, Go test/vet, dependency checks, compileall, migration head/current `20260807_02`, and `git diff --check` passed. Final read-only Oracle Fable independently re-audited all ten original findings and seven follow-ups and returned `FINAL_VERDICT: PASS` with no concrete P0–P2.
+- **Remaining:** Physical-device microphone permission, acoustic/noise thresholds, Bluetooth/headset route changes, interruptions, and live transcription-provider quality remain hardware/provider acceptance work; optional Instruments profiling and Fable's non-blocking pre-existing infrastructure backlog are not release blockers for this goal.
+- **Commits:** Uncommitted; no push, deployment, production configuration change, or authentication change was performed.
+
+### 2026-08-08 — `main` — Stabilize the thermo-review cleanup tranche
+
+- **Status:** Complete for Phase 0 of the follow-up maintainability review.
+- **Scope:** Queued chat session reuse, mixed-search contract compatibility, refresh-token rotation/deletion serialization, onboarding discovery ownership, E2B session lifecycle, task-queue gateway forwarding, and the existing scraper/audio/mechanical cleanup tranche.
+- **Decisions:** Keep `ConsumedRefreshToken` as the server-side replay ledger; hold a shared user-row lock through refresh-token consumption so account deletion cannot race its foreign key; scope persisted onboarding runs to the queued owner; preserve the gateway contract that forwards only explicitly supplied optional arguments; retain namespace singleflight while allowing quiescent lock keys to be reclaimed.
+- **Changes:** Reused `require_writable_session` in assistant-turn creation; made missing mixed-search subscription state decode as `false`; owner-scoped audio-discovery runs and validated positive queued run IDs; cleaned up newly created E2B sandboxes when telemetry fails; restored sparse queue forwarding; and changed the per-namespace lock map to weak values.
+- **Validation:** Ruff passed on every Phase 0 file; 256 focused scraper, audio, Agent-VM, Learning Deck, feed-discovery, onboarding, chat-command, X-bookmark, and queue-gateway tests passed; 35 focused chat/auth/generated-contract tests and 15 onboarding/task-spec tests passed; generated public contracts were current; and `APIContractsGeneratedTests` passed natively on an iPhone 17 Pro iOS 26.3 Simulator.
+- **Remaining:** The attached Phase 1–3 backend and iOS cleanup slices remain; each will keep its own focused gate before the final full-suite, AXe, and Oracle Fable review. No commit, push, deployment, production configuration change, or authentication change was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-08 — `main` — Apply the cross-stack thermo review and cleanup plan
+
+- **Status:** Implementation and exact-tree local validation complete; the final Oracle Fable verdict remains after its 6:30pm Pacific quota reset.
+- **Scope:** The attached Phase 1–3 plan plus deeper backend, E2B/feed/media, queue, iOS interaction, accessibility, voice, navigation, and dead-code review.
+- **Decisions:** Keep feeds and untrusted feed discovery in E2B; retain `ConsumedRefreshToken` as the one-time refresh replay ledger; prefer narrow shared helpers over the proposed generic voice controller, mutation journal, token-rotation core, error-row hierarchy, and Learning timeline owner; do not alter authentication configuration. Treat Vulture as lead generation and preserve dynamically registered handlers, schema fields, and package exports.
+- **Changes:** Unified scraper-run status, positive task payloads, queue and subscription outcomes, URL handling, feed lookup, and onboarding search concurrency; hardened Agent-VM idle eviction, podcast provider deadlines/admission/cache/token reuse, E2B HTTP/media contexts, narration and voice-session ownership, mutation journals, and Briefing equality; extracted podcast result normalization and shared bounded Exa batching to restore module ratchets; added shared SwiftUI scroll-to-top and optional accessibility-ID modifiers; gated scripted speech to Debug; removed brittle source-shape tests and confirmed dead assignments; fixed generic pages linking to Substack being misclassified as Substack publications; and stopped feed-discovery runs from overriding the model's canonical naive-UTC timestamp, which had made a just-completed empty run miss the UTC weekly cache during Saturday evening Pacific time and repeat paid work.
+- **Validation:** Focused backend slices passed throughout, including 186 E2B/feed/media tests, 70 final feed/runtime tests, 41 Exa/onboarding/podcast tests, and the 137-test architecture guard; the exact final backend tree passed 2,718 tests in 175.25 seconds. Ruff passed app/tests/scripts; mypy passed all 472 application files; public contracts, Go test/vet, lock/dependency checks, compileall, duplicate-test guard, the 753-file/23-ratchet architecture guard, migration head/current `20260807_02`, and `git diff --check` passed. Native iOS passed 485/485 on iOS 26.5. The complete iOS E2E directory passed 38/38 on iOS 26.4: 19 Maestro flows, 14 AXe product scenarios, and 5 AXe harness tests; the dedicated AXe matrix also passed 14/14 on iOS 26.3. Fresh development-only E2B canaries passed generic VM I/O/bash, Daring Fireball page-to-Atom discovery, bounded media transfer, and zero-cache cleanup without database or production writes.
+- **Remaining:** The required exact-tree Oracle Fable invocation hit its Claude session limit without review text and is scheduled to rerun after the stated 6:30pm Pacific reset. Physical-device microphone permission, acoustics, Bluetooth/route interruptions, and live transcription-provider quality remain hardware/provider acceptance work. No commit, push, deployment, production configuration change, or authentication change was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-08 — `main` — Run the cross-runtime AXe interaction matrix
+
+- **Status:** Complete for simulator-verifiable interaction acceptance.
+- **Scope:** Share Extension/feed discovery, chat-driven new-content discovery, Knowledge projection, Learning Deck creation and voice focus, mixed Search, onboarding voice, navigation/reselection, error recovery, and every deterministic chat voice terminal state.
+- **Decisions:** Stop Oracle Fable work at the user's direction and spend no further Fable credits. Run AXe serially because its HID daemon is process-global, pair every dispatched action with fresh accessibility-tree or screenshot evidence, and keep the already-green development E2B canaries as the paid sandbox proof instead of creating new sandboxes for this AXe-only pass. Simulator fake speech remains the deterministic state-machine boundary; physical microphone/provider quality remains separate hardware acceptance.
+- **Changes:** Expanded the state-verifying AXe matrix to 20 product paths; made transient toasts ignore hit testing; gave programmatically routed chats an explicit path-pop close action without intercepting their header; exposed stable Back and Learning progress semantics; and propagated debug-login server settings into the app group so the real Share Extension submits to the matrix's dynamic live API. The four Share modes now prove UI-to-API-to-database/queue handoff, chat feed discovery proves subscription and backfill projection into Knowledge, and Learning Deck focus proves its queued processing projection.
+- **Validation:** The complete 20-test AXe matrix passed 20/20 on iOS 26.4.1 in 172.12 seconds (`/tmp/newsly-deep-axe-matrix-264-20.9xiqkZ`) and 20/20 on iOS 26.3.1 in 172.82 seconds (`/tmp/newsly-deep-axe-matrix-263-20-green.Fiu5yz`). Each run retained 140 screenshots and 160 JSON artifacts with zero empty files. Focused reruns passed chat/feed/Knowledge 1/1, Learning Deck voice focus 1/1, all Share modes 4/4, and the iOS 26.3 Share representative 1/1. Ruff formatting and lint passed for the AXe harness/matrix, 53 focused Python/source-boundary tests passed, 40 focused native Share/chat/Learning Deck tests passed with zero skips or failures, and `git diff --check` passed.
+- **Remaining:** Real microphone permission, acoustic/noise thresholds, Bluetooth/headset route changes, interruptions, and live transcription-provider quality require a physical-device pass. No Fable invocation, paid E2B rerun, commit, push, deployment, production configuration change, or authentication change was performed in this matrix pass.
+- **Commits:** Uncommitted.
+
+### 2026-08-08 — `main` — Clean the complete implementation change set
+
+- **Status:** Complete for behavior-preserving cleanup and affected-path validation.
+- **Scope:** The entire current backend, E2B/feed/sandbox, queue/cron, iOS, Share Extension, Search, chat/voice, Learning Deck, test, and documentation change set.
+- **Decisions:** Keep the refresh-token consumption model because database uniqueness is the replay-protection boundary used by concurrent rotation and account deletion. Preserve intentional external audio-delivery compatibility, layer-local session validation, stable SwiftUI observation structure, and explicit AXe scenario steps; avoid speculative controller, repository, or harness abstractions. Do not spend more Fable or E2B credits for this cleanup pass.
+- **Changes:** Centralized the feed-backfill eligibility policy; removed redundant chat ownership, lifecycle, and timestamp bookkeeping; removed an unused private Learning Deck sandbox argument and an unreachable Agent-VM path fallback; derived voice and success flags from their canonical state; hoisted repeated Search content-ID mapping; made the payload-free Share recovery case explicit; simplified cron enqueue/status accounting; removed redundant AXe sleeps; and formatted all changed Python sources, updating 48 files that had drifted.
+- **Validation:** The non-iOS-E2E backend suite passed 2,723 tests with 39 simulator tests separated; the focused cleanup backend slice passed 130/130. The architecture guard passed 753 files/23 ratchets and 137 tests, with public contracts current. Native iOS passed 485/485. The affected AXe matrix passed 13/13 on the explicit iOS 26.4 simulator and current app bundle, retaining 94 screenshots and 107 JSON artifacts with no empty files under `/tmp/newsly-cleanup-axe-affected`; all four Share modes separately passed UI-to-API-to-database/queue. An unqualified run's two Share failures were independently traced to its auto-selected older iOS 26.3 simulator/default stale bundle, where the extension could not reach the ephemeral server—not to product code. Ruff formatting and lint passed all 293 changed Python files; mypy passed 472 application files; high-confidence Vulture, Go test/vet, lock, compileall, duplicate-test, and `git diff --check` gates passed.
+- **Remaining:** Physical-device microphone permission, acoustics, Bluetooth/headset routes, interruptions, and live transcription-provider quality remain hardware/provider acceptance work. Three untouched Markdown fixture/documentation files retain their pre-existing fenced-Python formatter baseline. No Fable invocation, paid E2B rerun, commit, push, deployment, production configuration change, or authentication change was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-09 — `main` — Re-audit the complete change set after cleanup
+
+- **Status:** Complete for the second behavior-preserving cleanup pass.
+- **Scope:** Current backend queue/search/feed-research and cron changes plus Share Extension, chat voice tests, and Learning voice tests.
+- **Decisions:** Limit edits to residuals created or exposed by this implementation. Keep the public audio-delivery compatibility boundary and staged migration fallbacks; leave older submission-outcome helper duplication, Apple Podcasts title-tokenization, and evaluation-script snapshot redesign for explicit broader work.
+- **Changes:** Deferred mixed-search subscription reads until feed options exist; skipped resolved-owner queries for ownerless queue batches; reused one access-grant timestamp per batch; removed enqueue arguments already inferred by the queue boundary; collapsed feed-discovery read counting from one query per user to one grouped query; removed dead feed-research dispatch state, a newly unused feed-detection argument/logger, and unread voice-test state; removed an unconsumed Share recovery action and simplified ordered shared-URL handling.
+- **Validation:** 129 focused backend tests passed. The architecture guard passed 753 files/23 ratchets and 137 tests with public contracts current; Ruff formatting/lint passed all 293 changed Python files; mypy passed 473 sources; and high-confidence Vulture found nothing. Native chat/Learning/Share testing passed 53/53. All four live Share Extension modes passed through AXe on the explicit iOS 26.4 simulator in 59.17 seconds, retaining 47 screenshots and 51 JSON artifacts with no empty files under `/tmp/newsly-cleanup-second-axe-share`. `git diff --check` passed.
+- **Remaining:** The previous exact-tree full backend, 485-test native, and affected 13-path AXe gates remain the broad baseline; this pass reran proportional gates for its narrow delta. Physical-device voice acceptance remains separate. No Fable invocation, paid E2B rerun, commit, push, deployment, production configuration change, or authentication change was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-09 — `main` — Repair duplicate Briefing pullquotes and refine quote type
+
+- **Status:** Complete.
+- **Scope:** Briefing layout policy/repair, the production-backed layout eval suite, and iOS Briefing pullquote typography.
+- **Decisions:** Treat repeated pullquotes as deterministic layout debris after case/whitespace normalization; retain the first occurrence and every distinct quote; preserve the production segment `4351` shape as the regression fixture; keep the visual adjustment local to the existing pullquote view.
+- **Changes:** Added duplicate-pullquote assessment and repair warnings, froze the three-copy podcast failure as an eval case, added focused coverage proving distinct quotes remain, and reduced the pullquote's base serif-italic size from 20 to 15 points while preserving Dynamic Type scaling.
+- **Validation:** All 70 focused Briefing repair, composer, and eval tests passed; touched Python Ruff checks passed; the complete iOS Simulator app build succeeded with Xcode 26.5; `git diff --check` passed.
+- **Remaining:** Production segment `4351` remains immutable and will still display its stored duplicates until it is retired/refreshed; newly composed layouts will be repaired after deployment. No production mutation or deployment was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-09 — `main` — Finish the whole-change-set cleanup
+
+- **Status:** Complete for the third diff-only, behavior-preserving cleanup pass.
+- **Scope:** The entire current dirty change set, including the later Briefing duplicate-pullquote repair and typography tranche.
+- **Decisions:** Change only newly introduced redundancies with identical behavior; preserve the refresh-token replay ledger, public audio-delivery compatibility, staged migration fallbacks, explicit AXe scenario steps, and unrelated dirty-worktree work. Do not spend Fable or E2B credits or rerun simulators for source-neutral cleanup.
+- **Changes:** Reused the Briefing policy's existing normalized pullquote text; removed a dead feed-runtime timeout fallback and an unreachable private curl-URL fallback; and let AXe subprocesses inherit the current environment through Python's default instead of copying it explicitly.
+- **Validation:** All 69 focused feed-runtime, AXe-harness, Briefing repair, and Briefing-eval tests passed. Ruff lint and formatting passed all 296 changed Python files; high-confidence Vulture and `git diff --check` passed. The previously recorded full backend, native iOS, AXe, Share Extension, architecture, contract, and proportional cleanup gates remain the broad baseline.
+- **Remaining:** Broader architectural redesigns and physical-device voice/provider acceptance remain outside behavior-preserving cleanup. No Fable invocation, paid E2B rerun, simulator run, commit, push, deployment, production configuration change, or authentication change was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-09 — `main` — Make Briefing pullquotes LLM-authored suggestions
+
+- **Status:** Complete.
+- **Scope:** Audio/long-form Briefing composition prompts, structured model-output contracts, production-backed layout evals, and the previously reduced iOS pullquote typography.
+- **Decisions:** Treat pullquotes as uncited editorial callouts authored by the Briefing composer, not verbatim source quotations. Keep suggestions in a separate top-level model-response section and have layout blocks select them by ID. Enforce reference integrity and one selection per suggestion without extracting source quotes or deduplicating generated text.
+- **Changes:** Added typed `suggested_quotes` and `suggestion_id` output fields, resolved selected suggestions into the existing persisted pullquote block shape, removed deterministic fallback pullquotes and the earlier text-deduplication repair, advanced the prompt version to `briefing-v5`, and rewrote production segment `4351` as a regression for three separately suggested callouts. The 25% iOS font reduction remains unchanged.
+- **Validation:** All 170 Briefing service and production-eval tests passed; focused mypy passed; touched Python Ruff and formatting checks passed; the unchanged 25% iOS font reduction retained its successful full Simulator build; `git diff --check` passed.
+- **Remaining:** Production segment `4351` remains immutable until retired/refreshed. No production mutation or deployment was performed.
+- **Commits:** Uncommitted.
