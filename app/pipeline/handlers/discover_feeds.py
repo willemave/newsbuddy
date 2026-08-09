@@ -30,12 +30,29 @@ class DiscoverFeedsHandler:
                     "context_data": {"payload": payload},
                 },
             )
-            return TaskResult.fail("Missing user_id")
+            return TaskResult.fail("Missing user_id", retryable=False)
 
         try:
-            run_feed_discovery(user_id=user_id, trigger=payload.get("trigger", "cron"))
-            with context.db_factory() as db:
-                ensure_weekly_discovery_session(db, user_id=user_id)
+            result = run_feed_discovery(user_id=user_id, trigger=payload.get("trigger", "cron"))
+            if result.status != "completed":
+                return TaskResult.fail(
+                    f"Feed discovery run {result.run_id} finished with status {result.status}",
+                    retryable=True,
+                )
+            try:
+                with context.db_factory() as db:
+                    ensure_weekly_discovery_session(db, user_id=user_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Feed discovery projection failed",
+                    extra={
+                        "component": "feed_discovery",
+                        "operation": "project_weekly_session",
+                        "item_id": str(user_id),
+                        "context_data": {"run_id": result.run_id, "error": str(exc)},
+                    },
+                )
+                return TaskResult.fail(str(exc), retryable=True)
             return TaskResult.ok()
         except Exception as exc:  # noqa: BLE001
             logger.exception(
@@ -47,4 +64,4 @@ class DiscoverFeedsHandler:
                     "context_data": {"error": str(exc)},
                 },
             )
-            return TaskResult.fail(str(exc))
+            return TaskResult.fail(str(exc), retryable=False)

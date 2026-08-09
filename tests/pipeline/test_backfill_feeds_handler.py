@@ -157,6 +157,53 @@ def test_backfill_feeds_handler_retries_when_progress_cannot_be_recorded(monkeyp
     assert result.success is False
 
 
+def test_backfill_feeds_handler_fails_when_e2b_outage_returns_only_errors(monkeypatch) -> None:
+    recorded_progress: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "app.pipeline.handlers.backfill_feeds.backfill_feed_for_config",
+        lambda _request: Mock(saved=0, scraped=0, duplicates=0, errors=1),
+    )
+
+    def fake_record_result(_db, **kwargs):
+        recorded_progress.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.backfill_feeds.record_feed_source_result",
+        fake_record_result,
+    )
+    context = TaskContext(
+        queue_service=Mock(),
+        settings=Mock(),
+        llm_service=Mock(),
+        worker_id="test",
+        db_factory=lambda: nullcontext(Mock()),
+    )
+    task = TaskEnvelope(
+        id=4,
+        task_type=TaskType.BACKFILL_FEEDS,
+        retry_count=0,
+        payload={
+            "user_id": 7,
+            "config_ids": [11],
+            "count": 2,
+            "first_edition_run_id": 99,
+        },
+    )
+
+    result = BackfillFeedsHandler().handle(task, context)
+
+    assert result.success is False
+    assert recorded_progress == [
+        {
+            "run_id": 99,
+            "config_id": 11,
+            "processed_item_count": 0,
+            "outcome": BriefingFirstRunSourceOutcome.UNAVAILABLE,
+        }
+    ]
+
+
 def test_backfill_feeds_handler_rejects_invalid_payload() -> None:
     handler = BackfillFeedsHandler()
     task = TaskEnvelope(

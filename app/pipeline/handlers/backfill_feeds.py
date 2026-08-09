@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from app.core.logging import get_logger
 from app.models.contracts import BriefingFirstRunSourceOutcome
+from app.models.domain.scraper_runs import scraper_run_status
 from app.models.internal.feed_backfill import FeedBackfillRequest, FeedBatchBackfillRequest
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
@@ -54,15 +55,36 @@ class BackfillFeedsHandler:
                 config_id = future_to_config_id[future]
                 try:
                     result = future.result()
-                    successes += 1
+                    processed_item_count = max(result.saved + result.duplicates, 0)
+                    feed_failed = scraper_run_status(result) == "failed"
                     progress_recording_failed |= not _record_progress(
                         context,
                         run_id=request.first_edition_run_id,
                         config_id=config_id,
-                        processed_item_count=max(result.saved + result.duplicates, 0),
-                        outcome=BriefingFirstRunSourceOutcome.PROCESSED,
+                        processed_item_count=processed_item_count,
+                        outcome=(
+                            BriefingFirstRunSourceOutcome.UNAVAILABLE
+                            if feed_failed
+                            else BriefingFirstRunSourceOutcome.PROCESSED
+                        ),
                         user_id=request.user_id,
                     )
+                    if feed_failed:
+                        logger.error(
+                            "Onboarding feed backfill produced only errors",
+                            extra={
+                                "component": "feed_backfill",
+                                "operation": "onboarding_batch",
+                                "item_id": str(config_id),
+                                "context_data": {
+                                    "user_id": request.user_id,
+                                    "config_id": config_id,
+                                    "errors": result.errors,
+                                },
+                            },
+                        )
+                        continue
+                    successes += 1
                     logger.info(
                         "Completed onboarding feed backfill",
                         extra={

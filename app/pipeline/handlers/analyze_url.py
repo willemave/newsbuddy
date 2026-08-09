@@ -14,15 +14,17 @@ from app.constants import (
 from app.core.logging import get_logger
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, ProcessingTask
-from app.models.internal.feed_backfill import FeedBackfillRequest
+from app.models.internal.feed_backfill import BACKFILL_SUPPORTED_TYPES
 from app.models.metadata.state import normalize_metadata_shape, update_processing_state
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.workflows.analyze_url_workflow import AnalyzeUrlWorkflow
-from app.services.apple_podcasts import resolve_apple_podcast_episode
+from app.services.active_users import lock_active_user
+from app.services.agent_vm_runtime import resolve_sandbox_user_id
+from app.services.apple_podcasts import ApplePodcastResolution, resolve_apple_podcast_episode
 from app.services.content_analyzer import AnalysisError
 from app.services.content_metadata_merge import refresh_merge_content_metadata
-from app.services.feed_backfill import backfill_feed_for_config
+from app.services.feed_research_runtime import sandboxed_http_service
 from app.services.feed_subscription import subscribe_to_detected_feed_result
 from app.services.feed_subscription_resolution import FeedSubscriptionResolver
 from app.services.gateways.llm_gateway import get_llm_gateway
@@ -45,7 +47,9 @@ from app.services.x_api import (
     build_tweet_processing_text,
     fetch_tweet_by_id,
 )
-from app.services.x_bookmark_destinations import reconcile_x_bookmark_destinations_for_content
+from app.services.x_bookmark_destinations import (
+    reconcile_x_bookmark_destinations_for_content_in_session,
+)
 from app.services.x_integration import get_x_user_access_token
 from app.services.x_tweet_metadata import (
     hydrate_included_tweets_from_metadata,
@@ -53,8 +57,6 @@ from app.services.x_tweet_metadata import (
 )
 
 logger = get_logger(__name__)
-
-FEED_BACKFILL_SUPPORTED_TYPES = {"substack", "atom", "podcast_rss"}
 
 
 def _require_content_id(content: Content) -> int:
@@ -107,6 +109,23 @@ def _build_x_spend_cap_error(error_message: str) -> str:
     )
 
 
+def _resolve_apple_podcast_in_feed_sandbox(
+    url: str,
+    *,
+    user_id: object,
+    content_id: int | None,
+) -> ApplePodcastResolution:
+    sandbox_user_id = resolve_sandbox_user_id(user_id)
+    with sandboxed_http_service(
+        user_id=sandbox_user_id,
+        execution_id=content_id,
+    ) as http_service:
+        return resolve_apple_podcast_episode(
+            url,
+            feed_http_service=http_service,
+        )
+
+
 @dataclass(frozen=True)
 class FlowOutcome:
     """Result for optional analyze-url flows."""
@@ -123,71 +142,39 @@ class FeedSubscriptionFlow:
     def __init__(self, *, resolver: FeedSubscriptionResolver | None = None) -> None:
         self._resolver = resolver or FeedSubscriptionResolver()
 
-    def _run_initial_feed_download(
+    def _build_initial_feed_download(
         self,
         *,
-        user_id: Any,
         subscription_status: str,
         config_id: int | None,
+        backfill_task_id: int | None,
         feed_type: str | None,
     ) -> dict[str, object]:
-        """Run the one-time initial feed backfill for newly created subscriptions."""
+        """Describe the durable initial backfill for a new subscription."""
         initial_download: dict[str, object] = {
             "requested_count": DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
             "ran": False,
             "status": "skipped",
             "reason": subscription_status,
         }
-        if subscription_status != "created":
+        if subscription_status not in {"created", "reactivated"}:
             return initial_download
-        if feed_type not in FEED_BACKFILL_SUPPORTED_TYPES:
+        if feed_type not in BACKFILL_SUPPORTED_TYPES:
             initial_download["reason"] = f"unsupported_scraper_type:{feed_type}"
             return initial_download
-        if not isinstance(user_id, int):
-            initial_download["reason"] = "missing_user"
-            return initial_download
         if not isinstance(config_id, int):
-            initial_download["reason"] = "missing_config_id"
-            return initial_download
-
-        initial_download["ran"] = True
-        try:
-            result = backfill_feed_for_config(
-                FeedBackfillRequest(
-                    user_id=user_id,
-                    config_id=config_id,
-                    count=DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
-                )
+            raise RuntimeError("Activated feed subscription is missing its config id")
+        if not isinstance(backfill_task_id, int):
+            raise RuntimeError(
+                "Activated feed subscription is missing its durable initial backfill task"
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Initial feed download failed for config %s",
-                config_id,
-                extra={
-                    "component": "feed_subscription",
-                    "operation": "initial_download",
-                    "item_id": config_id,
-                    "context_data": {
-                        "user_id": user_id,
-                        "config_id": config_id,
-                        "error": str(exc),
-                    },
-                },
-            )
-            initial_download["status"] = "failed"
-            initial_download["error"] = str(exc)
-            return initial_download
 
         initial_download.update(
             {
-                "status": "completed",
-                "config_id": result.config_id,
-                "base_limit": result.base_limit,
-                "target_limit": result.target_limit,
-                "scraped": result.scraped,
-                "saved": result.saved,
-                "duplicates": result.duplicates,
-                "errors": result.errors,
+                "status": "queued",
+                "reason": subscription_status,
+                "config_id": config_id,
+                "task_id": backfill_task_id,
             }
         )
         return initial_download
@@ -205,6 +192,24 @@ class FeedSubscriptionFlow:
         metadata = dict(base_metadata)
         if not subscribe_to_feed:
             return FlowOutcome(handled=False, success=True)
+        raw_submitter_id = metadata.get("submitted_by_user_id")
+        if raw_submitter_id is not None and lock_active_user(db, raw_submitter_id) is None:
+            metadata = update_processing_state(
+                metadata,
+                subscribe_to_feed=True,
+                feed_subscription={"status": "inactive_user"},
+            )
+            content.content_metadata = refresh_merge_content_metadata(
+                db,
+                content_id=content.id,
+                base_metadata=base_metadata,
+                updated_metadata=metadata,
+            )
+            content.status = ContentStatus.SKIPPED.value
+            content.error_message = None
+            content.processed_at = datetime.now(UTC)
+            db.flush()
+            return FlowOutcome(handled=True, success=True)
 
         resolution = self._resolver.resolve(
             db=db,
@@ -239,18 +244,20 @@ class FeedSubscriptionFlow:
                 display_name=resolved_display_name,
             )
             feed_type = detected_feed.get("type")
+            initial_download = self._build_initial_feed_download(
+                subscription_status=subscription_result.status,
+                config_id=subscription_result.config_id,
+                backfill_task_id=subscription_result.backfill_task_id,
+                feed_type=feed_type if isinstance(feed_type, str) else None,
+            )
             processing_updates["feed_subscription"] = {
                 "status": subscription_result.status,
                 "feed_url": detected_feed.get("url"),
                 "feed_type": feed_type,
                 "created": subscription_result.created,
                 "config_id": subscription_result.config_id,
-                "initial_download": self._run_initial_feed_download(
-                    user_id=metadata.get("submitted_by_user_id"),
-                    subscription_status=subscription_result.status,
-                    config_id=subscription_result.config_id,
-                    feed_type=feed_type if isinstance(feed_type, str) else None,
-                ),
+                "backfill_task_id": subscription_result.backfill_task_id,
+                "initial_download": initial_download,
             }
         else:
             processing_updates = {
@@ -265,15 +272,28 @@ class FeedSubscriptionFlow:
             base_metadata=base_metadata,
             updated_metadata=metadata,
         )
-        content.status = ContentStatus.SKIPPED.value
+        subscription_error = (
+            resolution.detected_feed is not None
+            and subscription_result.status == "subscription_failed"
+        )
+        content.status = (
+            ContentStatus.FAILED.value if subscription_error else ContentStatus.SKIPPED.value
+        )
+        content.error_message = subscription_result.error_message if subscription_error else None
         content.processed_at = datetime.now(UTC)
-        db.commit()
-
+        db.flush()
         logger.info(
             "Feed subscription flow completed for content %s (status=%s)",
             content.id,
             metadata.get("feed_subscription", {}).get("status"),
         )
+        if subscription_error:
+            return FlowOutcome(
+                handled=True,
+                success=False,
+                error_message=subscription_result.error_message or "Feed subscription failed",
+                retryable=False,
+            )
         return FlowOutcome(handled=True, success=True)
 
 
@@ -323,17 +343,18 @@ class TweetResolutionFlow:
         tweet_url = canonical_tweet_url(tweet_id)
         raw_submitter_id = metadata.get("submitted_by_user_id")
         submitter_id = raw_submitter_id if isinstance(raw_submitter_id, int) else None
+        active_submitter_id = lock_active_user(db, submitter_id)
         submitted_via = str(metadata.get("submitted_via") or "").strip().lower()
         is_bookmark_submission = submitted_via == "x_bookmarks"
         if is_bookmark_submission:
-            reconcile_x_bookmark_destinations_for_content(
+            reconcile_x_bookmark_destinations_for_content_in_session(
                 db,
                 bookmark_content_id=_require_content_id(content),
-                fallback_user_id=submitter_id,
+                fallback_user_id=active_submitter_id,
             )
         access_token = None
-        if submitter_id is not None:
-            access_token = get_x_user_access_token(db, user_id=submitter_id)
+        if active_submitter_id is not None:
+            access_token = get_x_user_access_token(db, user_id=active_submitter_id)
 
         hydrated_tweet = hydrate_tweet_from_metadata(metadata, tweet_id=tweet_id)
         tweet = hydrated_tweet.tweet if hydrated_tweet is not None else None
@@ -346,7 +367,7 @@ class TweetResolutionFlow:
                     "feature": "analyze_url",
                     "operation": "analyze_url.fetch_tweet",
                     "content_id": content.id,
-                    "user_id": submitter_id,
+                    "user_id": active_submitter_id,
                 },
             )
             if not fetch_result.success or not fetch_result.tweet:
@@ -388,7 +409,7 @@ class TweetResolutionFlow:
                     content.status = ContentStatus.FAILED.value
                     content.error_message = setup_error
                     content.processed_at = datetime.now(UTC)
-                    db.commit()
+                    db.flush()
                     return FlowOutcome(
                         handled=True,
                         success=False,
@@ -407,7 +428,7 @@ class TweetResolutionFlow:
                 )
                 content.status = ContentStatus.FAILED.value
                 content.error_message = error_message
-                db.commit()
+                db.flush()
                 return FlowOutcome(handled=True, success=False, error_message=error_message)
 
             tweet = fetch_result.tweet
@@ -496,9 +517,9 @@ class TweetResolutionFlow:
             base_metadata=base_metadata,
             updated_metadata=metadata,
         )
-        db.commit()
+        db.flush()
         if is_bookmark_submission and existing_target is not None:
-            reconcile_x_bookmark_destinations_for_content(
+            reconcile_x_bookmark_destinations_for_content_in_session(
                 db,
                 bookmark_content_id=_require_content_id(content),
                 fallback_user_id=submitter_id,
@@ -550,7 +571,11 @@ class UrlAnalysisFlow:
                 content.platform = platform
                 metadata["platform"] = platform
             if platform == "apple_podcasts":
-                resolution = resolve_apple_podcast_episode(url)
+                resolution = _resolve_apple_podcast_in_feed_sandbox(
+                    url,
+                    user_id=metadata.get("submitted_by_user_id"),
+                    content_id=content.id,
+                )
                 if resolution.feed_url:
                     metadata.setdefault("feed_url", resolution.feed_url)
                 if resolution.episode_title:
@@ -570,7 +595,7 @@ class UrlAnalysisFlow:
                 base_metadata=base_metadata,
                 updated_metadata=metadata,
             )
-            db.commit()
+            db.flush()
             return None
 
         llm_gateway = get_llm_gateway()
@@ -583,6 +608,7 @@ class UrlAnalysisFlow:
                 "operation": "content_analyzer.analyze_url",
                 "source": "queue",
                 "content_id": content.id,
+                "user_id": metadata.get("submitted_by_user_id"),
                 "metadata": {"url": str(url)},
             },
         )
@@ -651,7 +677,7 @@ class UrlAnalysisFlow:
             base_metadata=base_metadata,
             updated_metadata=metadata,
         )
-        db.commit()
+        db.flush()
         return result if not isinstance(result, AnalysisError) else None
 
 
@@ -683,7 +709,7 @@ class InstructionPayloadCleaner:
             updated_payload = dict(task.payload)
             updated_payload.pop("instruction", None)
             task.payload = updated_payload
-            db.commit()
+            db.flush()
 
 
 class AnalyzeUrlHandler:
@@ -692,17 +718,12 @@ class AnalyzeUrlHandler:
     task_type = TaskType.ANALYZE_URL
 
     def __init__(self) -> None:
-        self._feed_flow = FeedSubscriptionFlow()
-        self._tweet_resolution_flow = TweetResolutionFlow()
-        self._analysis_flow = UrlAnalysisFlow()
-        self._instruction_fanout = InstructionLinkFanout()
-        self._payload_cleaner = InstructionPayloadCleaner()
         self._workflow = AnalyzeUrlWorkflow(
-            feed_flow=self._feed_flow,
-            tweet_resolution_flow=self._tweet_resolution_flow,
-            analysis_flow=self._analysis_flow,
-            instruction_fanout=self._instruction_fanout,
-            payload_cleaner=self._payload_cleaner,
+            feed_flow=FeedSubscriptionFlow().run,
+            tweet_resolution_flow=TweetResolutionFlow().run,
+            analysis_flow=UrlAnalysisFlow().run,
+            instruction_fanout=InstructionLinkFanout().run,
+            payload_cleaner=InstructionPayloadCleaner().run,
         )
 
     def handle(self, task: TaskEnvelope, context: TaskContext) -> TaskResult:

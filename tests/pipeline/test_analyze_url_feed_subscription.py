@@ -5,18 +5,107 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from app.constants import DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT, SELF_SUBMISSION_SOURCE
 from app.models.contracts import ContentStatus, ContentType
-from app.models.db import Content, UserScraperConfig
-from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
+from app.models.db import Content, ProcessingTask, UserScraperConfig
+from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler, FeedSubscriptionFlow
 from app.pipeline.task_models import TaskEnvelope
 from app.services.queue import TaskType
 from tests.support.feed_subscription_test_helpers import (
     build_task_context,
     metadata_dict,
     stub_detector_feed,
-    stub_successful_initial_backfill,
+    stub_feed_subscription_runtime,
+    stub_feed_validator,
 )
+
+
+@pytest.fixture(autouse=True)
+def _use_fake_feed_sandbox(monkeypatch, test_user):
+    assert test_user.id == 1
+    stub_feed_subscription_runtime(monkeypatch)
+
+
+def _assert_queued_backfill(db_session, *, config_id: int) -> ProcessingTask:
+    task = (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == TaskType.BACKFILL_FEEDS.value)
+        .one()
+    )
+    payload = metadata_dict(task.payload)
+    assert payload["user_id"] == 1
+    assert payload["config_ids"] == [config_id]
+    assert payload["count"] == DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT
+    return task
+
+
+def test_created_feed_subscription_requires_durable_backfill_task() -> None:
+    with pytest.raises(RuntimeError, match="durable initial backfill task"):
+        FeedSubscriptionFlow()._build_initial_feed_download(
+            subscription_status="created",
+            config_id=2,
+            backfill_task_id=None,
+            feed_type="atom",
+        )
+
+
+def test_reactivated_feed_subscription_projects_durable_backfill_task() -> None:
+    initial_download = FeedSubscriptionFlow()._build_initial_feed_download(
+        subscription_status="reactivated",
+        config_id=2,
+        backfill_task_id=11,
+        feed_type="atom",
+    )
+
+    assert initial_download == {
+        "requested_count": DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
+        "ran": False,
+        "status": "queued",
+        "reason": "reactivated",
+        "config_id": 2,
+        "task_id": 11,
+    }
+
+
+def test_feed_subscription_flow_skips_resolution_for_inactive_user(
+    db_session,
+    test_user,
+) -> None:
+    test_user.is_active = False
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://example.com/inactive-feed",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": test_user.id,
+            "subscribe_to_feed": True,
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    resolver = Mock()
+    resolver.resolve.side_effect = AssertionError("inactive user must not run feed research")
+
+    outcome = FeedSubscriptionFlow(resolver=resolver).run(
+        db_session,
+        content,
+        dict(content.content_metadata),
+        str(content.url),
+        True,
+    )
+
+    db_session.refresh(content)
+    assert outcome.handled is True
+    assert outcome.success is True
+    assert content.status == ContentStatus.SKIPPED.value
+    assert metadata_dict(content.content_metadata)["feed_subscription"] == {
+        "status": "inactive_user"
+    }
+    assert db_session.query(UserScraperConfig).count() == 0
 
 
 def test_subscribe_to_feed_accepts_direct_feed_url(db_session, monkeypatch) -> None:
@@ -35,6 +124,7 @@ def test_subscribe_to_feed_accepts_direct_feed_url(db_session, monkeypatch) -> N
     db_session.add(content)
     db_session.commit()
     db_session.refresh(content)
+    stub_feed_validator(monkeypatch)
 
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.FeedDetector.validate_feed_url",
@@ -45,34 +135,9 @@ def test_subscribe_to_feed_accepts_direct_feed_url(db_session, monkeypatch) -> N
         },
     )
     monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {"feed_url": feed_url},
-    )
-    monkeypatch.setattr(
         "app.services.feed_subscription_resolution.FeedDetector.classify_feed_type",
         lambda _self, **_kwargs: SimpleNamespace(feed_type="atom"),
     )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        lambda request: SimpleNamespace(
-            config_id=request.config_id,
-            base_limit=1,
-            target_limit=1 + request.count,
-            scraped=2,
-            saved=2,
-            duplicates=0,
-            errors=0,
-        ),
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Register Spill",
-        },
-    )
-
     queue_gateway = Mock()
     context = build_task_context(db_session, queue_gateway=queue_gateway)
     task = TaskEnvelope(
@@ -100,11 +165,9 @@ def test_subscribe_to_feed_accepts_direct_feed_url(db_session, monkeypatch) -> N
     assert feed_subscription["feed_url"] == "https://example.com/feed.xml"
     assert feed_subscription["feed_type"] == "atom"
     assert feed_subscription["created"] is True
-    assert initial_download["ran"] is True
-    assert initial_download["status"] == "completed"
+    assert initial_download["ran"] is False
+    assert initial_download["status"] == "queued"
     assert initial_download["requested_count"] == DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT
-    assert initial_download["scraped"] == 2
-    assert initial_download["saved"] == 2
     queue_gateway.enqueue.assert_not_called()
 
     config = (
@@ -114,6 +177,11 @@ def test_subscribe_to_feed_accepts_direct_feed_url(db_session, monkeypatch) -> N
     )
     assert config is not None
     assert config.scraper_type == "atom"
+    backfill_task = _assert_queued_backfill(db_session, config_id=int(config.id))
+    assert feed_subscription["config_id"] == config.id
+    assert feed_subscription["backfill_task_id"] == backfill_task.id
+    assert initial_download["config_id"] == config.id
+    assert initial_download["task_id"] == backfill_task.id
 
 
 def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_title(
@@ -136,14 +204,11 @@ def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_tit
     db_session.add(content)
     db_session.commit()
     db_session.refresh(content)
+    stub_feed_validator(monkeypatch, title="Register Spill")
 
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.FeedDetector.validate_feed_url",
         lambda _self, feed_url: None,
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {"feed_url": feed_url},
     )
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.get_http_gateway",
@@ -160,27 +225,6 @@ def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_tit
             }
         },
     )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Register Spill",
-        },
-    )
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        lambda request: SimpleNamespace(
-            config_id=request.config_id,
-            base_limit=1,
-            target_limit=1 + request.count,
-            scraped=1,
-            saved=1,
-            duplicates=0,
-            errors=0,
-        ),
-    )
-
     queue_gateway = Mock()
     context = build_task_context(db_session, queue_gateway=queue_gateway)
     task = TaskEnvelope(
@@ -207,7 +251,7 @@ def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_tit
     assert feed_subscription["feed_url"] == ("https://registerspill.thorstenball.com/feed.xml")
     assert feed_subscription["feed_type"] == "substack"
     assert feed_subscription["created"] is True
-    assert initial_download["status"] == "completed"
+    assert initial_download["status"] == "queued"
     queue_gateway.enqueue.assert_not_called()
 
     config = (
@@ -221,6 +265,7 @@ def test_subscribe_to_feed_from_article_page_uses_detected_feed_url_and_page_tit
     assert config is not None
     assert config.scraper_type == "substack"
     assert config.display_name == "Register Spill"
+    _assert_queued_backfill(db_session, config_id=int(config.id))
 
 
 def test_subscribe_to_feed_explores_shared_page_links_until_feed_is_found(
@@ -246,7 +291,6 @@ def test_subscribe_to_feed_explores_shared_page_links_until_feed_is_found(
 
     feed_url = "https://publisher.example.com/feed.xml"
     stub_detector_feed(monkeypatch, feed_url=feed_url, feed_type="atom", title="Publisher")
-    stub_successful_initial_backfill(monkeypatch)
 
     pages = {
         "https://links.example.com/today": (
@@ -323,10 +367,9 @@ def test_subscribe_to_feed_from_apple_podcast_share_uses_publisher_rss(
 
     feed_url = "https://feeds.example.com/example-show.xml"
     stub_detector_feed(monkeypatch, feed_url=feed_url, feed_type="podcast_rss")
-    stub_successful_initial_backfill(monkeypatch)
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.resolve_apple_podcast_episode",
-        lambda _url: SimpleNamespace(
+        lambda _url, **_kwargs: SimpleNamespace(
             feed_url=feed_url,
             episode_title="Example episode",
             audio_url=None,
@@ -390,7 +433,6 @@ def test_subscribe_to_feed_from_spotify_page_uses_linked_podcast_feed(
 
     feed_url = "https://feeds.example.com/spotify-show.xml"
     stub_detector_feed(monkeypatch, feed_url=feed_url, feed_type="podcast_rss")
-    stub_successful_initial_backfill(monkeypatch)
     monkeypatch.setattr(
         "app.services.feed_detection.resolve_apple_podcast_feed_url",
         lambda _url: feed_url,
@@ -446,14 +488,6 @@ def test_subscribe_to_feed_from_youtube_channel_creates_youtube_config(
     db_session.add(content)
     db_session.commit()
     db_session.refresh(content)
-
-    def _unexpected_backfill(_request):
-        raise AssertionError("YouTube subscriptions should not use RSS initial backfill")
-
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        _unexpected_backfill,
-    )
 
     queue_gateway = Mock()
     context = build_task_context(db_session, queue_gateway=queue_gateway)
@@ -517,9 +551,6 @@ def test_subscribe_to_feed_from_youtube_video_uses_oembed_author_channel(
     db_session.commit()
     db_session.refresh(content)
 
-    def _unexpected_backfill(_request):
-        raise AssertionError("YouTube subscriptions should not use RSS initial backfill")
-
     def _fetch(url: str):
         assert url.startswith("https://www.youtube.com/oembed?")
         return (
@@ -527,10 +558,6 @@ def test_subscribe_to_feed_from_youtube_video_uses_oembed_author_channel(
             {},
         )
 
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        _unexpected_backfill,
-    )
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.get_http_gateway",
         lambda: SimpleNamespace(fetch_content=_fetch),
@@ -598,6 +625,7 @@ def test_subscribe_to_feed_existing_subscription_skips_initial_download(
     db_session.add(content)
     db_session.commit()
     db_session.refresh(content)
+    stub_feed_validator(monkeypatch, title="Example Feed")
 
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.FeedDetector.validate_feed_url",
@@ -610,22 +638,6 @@ def test_subscribe_to_feed_existing_subscription_skips_initial_download(
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.FeedDetector.classify_feed_type",
         lambda _self, **_kwargs: SimpleNamespace(feed_type="atom"),
-    )
-
-    def _unexpected_backfill(_request):
-        raise AssertionError("initial backfill should not run for existing subscriptions")
-
-    monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        _unexpected_backfill,
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Example Feed",
-        },
     )
 
     queue_gateway = Mock()
@@ -645,7 +657,7 @@ def test_subscribe_to_feed_existing_subscription_skips_initial_download(
     assert result.success is True
     assert feed_subscription["status"] == "already_exists"
     assert feed_subscription["created"] is False
-    assert feed_subscription["config_id"] is None
+    assert feed_subscription["config_id"] == existing_config.id
     assert feed_subscription["initial_download"] == {
         "requested_count": DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
         "ran": False,
@@ -654,7 +666,7 @@ def test_subscribe_to_feed_existing_subscription_skips_initial_download(
     }
 
 
-def test_subscribe_to_feed_records_initial_download_failure(
+def test_subscribe_to_feed_queue_failure_is_retryable_and_rolls_back(
     db_session,
     monkeypatch,
 ) -> None:
@@ -673,6 +685,7 @@ def test_subscribe_to_feed_records_initial_download_failure(
     db_session.add(content)
     db_session.commit()
     db_session.refresh(content)
+    stub_feed_validator(monkeypatch, title="Failing Feed")
 
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.FeedDetector.validate_feed_url",
@@ -683,28 +696,17 @@ def test_subscribe_to_feed_records_initial_download_failure(
         },
     )
     monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {"feed_url": feed_url},
-    )
-    monkeypatch.setattr(
         "app.services.feed_subscription_resolution.FeedDetector.classify_feed_type",
         lambda _self, **_kwargs: SimpleNamespace(feed_type="atom"),
     )
 
-    def _failing_backfill(_request):
-        raise ValueError("scraper exploded")
+    class _FailingQueueService:
+        def enqueue_many_in_session(self, _db, _requests):
+            raise RuntimeError("queue unavailable")
 
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.backfill_feed_for_config",
-        _failing_backfill,
-    )
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda feed_url: {
-            "feed_url": feed_url,
-            "feed_format": "rss",
-            "title": "Failing Feed",
-        },
+        "app.commands.subscribe_feed.get_queue_service",
+        lambda: _FailingQueueService(),
     )
 
     queue_gateway = Mock()
@@ -718,15 +720,22 @@ def test_subscribe_to_feed_records_initial_download_failure(
 
     result = AnalyzeUrlHandler().handle(task, context)
 
+    assert result.success is False
+    assert result.retryable is True
+    assert result.error_message == "queue unavailable"
+
+    db_session.rollback()
     db_session.refresh(content)
-    metadata = metadata_dict(content.content_metadata)
-    feed_subscription = metadata_dict(metadata["feed_subscription"])
-    initial_download = metadata_dict(feed_subscription["initial_download"])
-    assert result.success is True
-    assert content.status == ContentStatus.SKIPPED.value
-    assert feed_subscription["status"] == "created"
-    assert feed_subscription["created"] is True
-    assert initial_download["ran"] is True
-    assert initial_download["status"] == "failed"
-    assert initial_download["requested_count"] == DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT
-    assert initial_download["error"] == "scraper exploded"
+    assert content.status == ContentStatus.NEW.value
+    assert (
+        db_session.query(UserScraperConfig)
+        .filter(UserScraperConfig.feed_url == content.url)
+        .count()
+        == 0
+    )
+    assert (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == TaskType.BACKFILL_FEEDS.value)
+        .count()
+        == 0
+    )

@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content
 from app.pipeline.task_context import TaskContext
@@ -17,7 +19,12 @@ from app.services.queue import TaskType
 def _build_context(db_session, queue_gateway: Mock) -> TaskContext:
     @contextmanager
     def _db_context():
-        yield db_session
+        try:
+            yield db_session
+            db_session.commit()
+        except Exception:
+            db_session.rollback()
+            raise
 
     return TaskContext(
         queue_service=Mock(),
@@ -59,11 +66,11 @@ def test_workflow_propagates_non_retryable_twitter_failures(db_session) -> None:
     context = _build_context(db_session, queue_gateway=queue_gateway)
 
     workflow = AnalyzeUrlWorkflow(
-        feed_flow=feed_flow,
-        tweet_resolution_flow=twitter_flow,
-        analysis_flow=analysis_flow,
-        instruction_fanout=instruction_fanout,
-        payload_cleaner=payload_cleaner,
+        feed_flow=feed_flow.run,
+        tweet_resolution_flow=twitter_flow.run,
+        analysis_flow=analysis_flow.run,
+        instruction_fanout=instruction_fanout.run,
+        payload_cleaner=payload_cleaner.run,
     )
 
     task = TaskEnvelope(
@@ -88,7 +95,7 @@ def test_workflow_propagates_non_retryable_twitter_failures(db_session) -> None:
     analysis_flow.run.assert_not_called()
     instruction_fanout.run.assert_not_called()
     payload_cleaner.run.assert_not_called()
-    queue_gateway.enqueue.assert_not_called()
+    queue_gateway.enqueue_many_in_session.assert_not_called()
 
 
 def test_workflow_uses_content_metadata_for_feed_subscription(db_session) -> None:
@@ -114,11 +121,11 @@ def test_workflow_uses_content_metadata_for_feed_subscription(db_session) -> Non
     context = _build_context(db_session, queue_gateway=queue_gateway)
 
     workflow = AnalyzeUrlWorkflow(
-        feed_flow=feed_flow,
-        tweet_resolution_flow=twitter_flow,
-        analysis_flow=analysis_flow,
-        instruction_fanout=instruction_fanout,
-        payload_cleaner=payload_cleaner,
+        feed_flow=feed_flow.run,
+        tweet_resolution_flow=twitter_flow.run,
+        analysis_flow=analysis_flow.run,
+        instruction_fanout=instruction_fanout.run,
+        payload_cleaner=payload_cleaner.run,
     )
 
     task = TaskEnvelope(
@@ -141,4 +148,50 @@ def test_workflow_uses_content_metadata_for_feed_subscription(db_session) -> Non
     assert feed_flow.run.call_args.args[4] is True
     twitter_flow.run.assert_not_called()
     analysis_flow.run.assert_not_called()
-    queue_gateway.enqueue.assert_not_called()
+    queue_gateway.enqueue_many_in_session.assert_not_called()
+
+
+def test_workflow_rolls_back_analysis_when_process_enqueue_fails(db_session) -> None:
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://example.com/atomic-analysis",
+        source="self submission",
+        status=ContentStatus.NEW.value,
+        content_metadata={},
+    )
+    db_session.add(content)
+    db_session.commit()
+    content_id = int(content.id)
+
+    def mutate_content(_db, row, _metadata, _url, _instruction):
+        row.title = "Must roll back"
+        return None
+
+    queue_gateway = Mock()
+    queue_gateway.enqueue_many_in_session.side_effect = RuntimeError("queue unavailable")
+    workflow = AnalyzeUrlWorkflow(
+        feed_flow=lambda *_args: SimpleNamespace(handled=False, success=True),
+        tweet_resolution_flow=lambda *_args: SimpleNamespace(handled=False, success=True),
+        analysis_flow=mutate_content,
+        instruction_fanout=Mock(),
+        payload_cleaner=Mock(),
+    )
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        workflow.run(
+            task=TaskEnvelope(
+                id=44,
+                task_type=TaskType.ANALYZE_URL,
+                content_id=content_id,
+                payload={"content_id": content_id},
+            ),
+            context=_build_context(db_session, queue_gateway),
+            analysis_instruction=None,
+            instruction=None,
+            crawl_links=False,
+            subscribe_to_feed=False,
+        )
+
+    db_session.expire_all()
+    persisted = db_session.query(Content).filter(Content.id == content_id).one()
+    assert persisted.title is None

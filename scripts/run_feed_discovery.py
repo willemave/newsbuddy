@@ -18,7 +18,7 @@ from app.core.logging import get_logger, setup_logging
 from app.core.observability import bound_log_context, build_log_extra
 from app.models.db import ContentReadStatus
 from app.models.db.users import User
-from app.services.queue import QueueService, TaskType
+from app.services.queue import QueueService, TaskEnqueueRequest, TaskType
 
 logger = get_logger(__name__)
 
@@ -59,7 +59,9 @@ def main() -> None:
 
         with get_db() as db:
             if args.user_id:
-                user = db.query(User).filter(User.id == args.user_id).first()
+                user = (
+                    db.query(User).filter(User.id == args.user_id, User.is_active.is_(True)).first()
+                )
                 if user is None or not user.has_completed_onboarding:
                     skipped += 1
                     logger.info(
@@ -98,29 +100,59 @@ def main() -> None:
                         ),
                     )
                     return
-                queue.enqueue(
-                    TaskType.DISCOVER_FEEDS,
-                    payload={"user_id": args.user_id, "trigger": "cron"},
+                queue.enqueue_many_in_session(
+                    db,
+                    [
+                        TaskEnqueueRequest(
+                            TaskType.DISCOVER_FEEDS,
+                            payload={"user_id": args.user_id, "trigger": "cron"},
+                            owner_user_id=args.user_id,
+                        )
+                    ],
                 )
                 enqueued = 1
             else:
-                rows = db.query(User.id).filter(User.has_completed_onboarding.is_(True)).all()
-                user_ids = [row[0] for row in rows]
-                for user_id in user_ids:
-                    read_count = (
-                        db.query(func.count(ContentReadStatus.id))
-                        .filter(ContentReadStatus.user_id == user_id)
-                        .scalar()
-                        or 0
+                rows = (
+                    db.query(User.id)
+                    .filter(
+                        User.is_active.is_(True),
+                        User.has_completed_onboarding.is_(True),
                     )
+                    .all()
+                )
+                user_ids = [user_id for (user_id,) in rows]
+                read_counts = (
+                    {
+                        user_id: int(read_count)
+                        for user_id, read_count in (
+                            db.query(
+                                ContentReadStatus.user_id,
+                                func.count(ContentReadStatus.id),
+                            )
+                            .filter(ContentReadStatus.user_id.in_(user_ids))
+                            .group_by(ContentReadStatus.user_id)
+                            .all()
+                        )
+                    }
+                    if user_ids
+                    else {}
+                )
+                requests: list[TaskEnqueueRequest] = []
+                for user_id in user_ids:
+                    read_count = read_counts.get(user_id, 0)
                     if read_count < min_recent_reads:
                         skipped += 1
                         continue
-                    queue.enqueue(
-                        TaskType.DISCOVER_FEEDS,
-                        payload={"user_id": user_id, "trigger": "cron"},
+                    requests.append(
+                        TaskEnqueueRequest(
+                            TaskType.DISCOVER_FEEDS,
+                            payload={"user_id": user_id, "trigger": "cron"},
+                            owner_user_id=user_id,
+                        )
                     )
-                    enqueued += 1
+                enqueued = len(requests)
+                if requests:
+                    queue.enqueue_many_in_session(db, requests)
 
         logger.info(
             "Feed discovery cron run completed",

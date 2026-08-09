@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -11,63 +12,9 @@ from app.models.contracts import ContentStatus, TaskType
 from app.models.db import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.services.queue import TaskEnqueueRequest
 
 logger = get_logger(__name__)
-
-
-class FeedFlowProtocol(Protocol):
-    """Protocol for feed subscription flow."""
-
-    def run(
-        self,
-        db: Session,
-        content: Content,
-        metadata: dict[str, Any],
-        url: str,
-        subscribe_to_feed: bool,
-    ) -> Any:
-        """Execute flow and return outcome."""
-
-
-class TweetResolutionFlowProtocol(Protocol):
-    """Protocol for submitted-tweet resolution flow."""
-
-    def run(
-        self,
-        db: Session,
-        content: Content,
-        metadata: dict[str, Any],
-        url: str,
-    ) -> Any:
-        """Execute flow and return outcome."""
-
-
-class AnalysisFlowProtocol(Protocol):
-    """Protocol for URL analysis flow."""
-
-    def run(
-        self,
-        db: Session,
-        content: Content,
-        metadata: dict[str, Any],
-        url: str,
-        analysis_instruction: str | None,
-    ) -> Any | None:
-        """Execute flow and return analysis result."""
-
-
-class InstructionFanoutProtocol(Protocol):
-    """Protocol for instruction-link fanout flow."""
-
-    def run(self, db: Session, content: Content, analysis_result: Any) -> None:
-        """Create child content from links."""
-
-
-class PayloadCleanerProtocol(Protocol):
-    """Protocol for task payload cleanup."""
-
-    def run(self, db: Session, task_id: int) -> None:
-        """Cleanup transient payload fields."""
 
 
 class AnalyzeUrlWorkflow:
@@ -76,11 +23,11 @@ class AnalyzeUrlWorkflow:
     def __init__(
         self,
         *,
-        feed_flow: FeedFlowProtocol,
-        tweet_resolution_flow: TweetResolutionFlowProtocol,
-        analysis_flow: AnalysisFlowProtocol,
-        instruction_fanout: InstructionFanoutProtocol,
-        payload_cleaner: PayloadCleanerProtocol,
+        feed_flow: Callable[[Session, Content, dict[str, Any], str, bool], Any],
+        tweet_resolution_flow: Callable[[Session, Content, dict[str, Any], str], Any],
+        analysis_flow: Callable[[Session, Content, dict[str, Any], str, str | None], Any | None],
+        instruction_fanout: Callable[[Session, Content, Any], None],
+        payload_cleaner: Callable[[Session, int], None],
     ) -> None:
         self._feed_flow = feed_flow
         self._tweet_resolution_flow = tweet_resolution_flow
@@ -104,7 +51,6 @@ class AnalyzeUrlWorkflow:
             return TaskResult.fail("No content_id provided")
 
         content_id = int(content_id)
-        should_enqueue_process_content = True
         with context.db_factory() as db:
             content = db.query(Content).filter(Content.id == content_id).first()
             if not content:
@@ -116,7 +62,7 @@ class AnalyzeUrlWorkflow:
                 metadata.get("subscribe_to_feed")
             )
 
-            feed_result = self._feed_flow.run(
+            feed_result = self._feed_flow(
                 db,
                 content,
                 metadata,
@@ -124,9 +70,16 @@ class AnalyzeUrlWorkflow:
                 effective_subscribe_to_feed,
             )
             if feed_result.handled:
-                return TaskResult.ok() if feed_result.success else TaskResult.fail()
+                return (
+                    TaskResult.ok()
+                    if feed_result.success
+                    else TaskResult.fail(
+                        feed_result.error_message or "Feed subscription failed",
+                        retryable=feed_result.retryable,
+                    )
+                )
 
-            tweet_resolution_result = self._tweet_resolution_flow.run(
+            tweet_resolution_result = self._tweet_resolution_flow(
                 db,
                 content,
                 metadata,
@@ -140,7 +93,7 @@ class AnalyzeUrlWorkflow:
 
             analysis_result = None
             if not tweet_resolution_result.handled:
-                analysis_result = self._analysis_flow.run(
+                analysis_result = self._analysis_flow(
                     db,
                     content,
                     metadata,
@@ -154,18 +107,20 @@ class AnalyzeUrlWorkflow:
                 and analysis_result
                 and analysis_result.instruction
             ):
-                self._instruction_fanout.run(db, content, analysis_result)
+                self._instruction_fanout(db, content, analysis_result)
 
             if instruction and task.id:
-                self._payload_cleaner.run(db, task.id)
+                self._payload_cleaner(db, task.id)
 
             should_enqueue_process_content = content.status not in {
                 ContentStatus.SKIPPED.value,
                 ContentStatus.FAILED.value,
                 ContentStatus.COMPLETED.value,
             }
-
-        if should_enqueue_process_content:
-            context.queue.enqueue(TaskType.PROCESS_CONTENT, content_id=content_id)
-            logger.info("Enqueued PROCESS_CONTENT for content %s", content_id)
+            if should_enqueue_process_content:
+                context.queue.enqueue_many_in_session(
+                    db,
+                    [TaskEnqueueRequest(TaskType.PROCESS_CONTENT, content_id=content_id)],
+                )
+                logger.info("Enqueued PROCESS_CONTENT for content %s", content_id)
         return TaskResult.ok()

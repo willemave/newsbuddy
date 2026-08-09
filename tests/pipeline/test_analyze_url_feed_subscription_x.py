@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content
@@ -16,8 +18,14 @@ from tests.support.feed_subscription_test_helpers import (
     build_task_context,
     metadata_dict,
     stub_detector_feed,
-    stub_successful_initial_backfill,
+    stub_feed_subscription_runtime,
 )
+
+
+@pytest.fixture(autouse=True)
+def _use_fake_feed_sandbox(monkeypatch, test_user):
+    assert test_user.id == 1
+    stub_feed_subscription_runtime(monkeypatch)
 
 
 def test_subscribe_to_feed_from_x_share_uses_tweet_article_url(
@@ -44,7 +52,6 @@ def test_subscribe_to_feed_from_x_share_uses_tweet_article_url(
 
     feed_url = "https://stratechery.com/feed/"
     stub_detector_feed(monkeypatch, feed_url=feed_url, feed_type="atom", title="Stratechery")
-    stub_successful_initial_backfill(monkeypatch)
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.fetch_tweet_by_id",
         lambda **_kwargs: XTweetFetchResult(
@@ -129,7 +136,6 @@ def test_subscribe_to_feed_from_x_share_prefers_feed_like_external_url(
 
     feed_url = "https://example.com/rss.xml"
     stub_detector_feed(monkeypatch, feed_url=feed_url, feed_type="atom", title="Example")
-    stub_successful_initial_backfill(monkeypatch)
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.fetch_tweet_by_id",
         lambda **_kwargs: XTweetFetchResult(

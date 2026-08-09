@@ -7,6 +7,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import Mock
 
+import pytest
+
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import (
@@ -16,11 +18,25 @@ from app.models.db import (
     UserIntegrationConnection,
     UserIntegrationSyncedItem,
 )
+from app.models.llm.content_analysis import (
+    ContentAnalysisOutput,
+    ContentAnalysisResult,
+    InstructionLink,
+    InstructionResult,
+)
 from app.pipeline.handlers.analyze_url import AnalyzeUrlHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
+from app.services.apple_podcasts import ApplePodcastResolution
 from app.services.queue import TaskType
 from app.services.x_api import XTweet, XTweetFetchResult, XTweetsPage
+
+
+@pytest.fixture(autouse=True)
+def _active_users(test_user, user_factory) -> None:
+    second_user = user_factory()
+    assert test_user.id == 1
+    assert second_user.id == 2
 
 
 def _metadata(value: object | None) -> dict[str, Any]:
@@ -31,7 +47,12 @@ def _metadata(value: object | None) -> dict[str, Any]:
 def _build_context(db_session, queue_gateway: Mock) -> TaskContext:
     @contextmanager
     def _db_context():
-        yield db_session
+        try:
+            yield db_session
+            db_session.commit()
+        except Exception:
+            db_session.rollback()
+            raise
 
     return TaskContext(
         queue_service=Mock(),
@@ -41,6 +62,244 @@ def _build_context(db_session, queue_gateway: Mock) -> TaskContext:
         queue_gateway=queue_gateway,
         db_factory=_db_context,
     )
+
+
+def _assert_process_content_enqueued(
+    queue_gateway: Mock,
+    *,
+    db_session,
+    content_id: int,
+) -> None:
+    queue_gateway.enqueue_many_in_session.assert_called_once()
+    call = queue_gateway.enqueue_many_in_session.call_args
+    assert call.args[0] is db_session
+    requests = call.args[1]
+    assert len(requests) == 1
+    assert requests[0].task_type == TaskType.PROCESS_CONTENT
+    assert requests[0].content_id == content_id
+
+
+def test_pattern_analysis_rolls_back_when_process_enqueue_fails(db_session) -> None:
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://www.youtube.com/watch?v=atomic-pattern",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={},
+    )
+    db_session.add(content)
+    db_session.commit()
+    content_id = int(content.id)
+    queue_gateway = Mock()
+    queue_gateway.enqueue_many_in_session.side_effect = RuntimeError("queue unavailable")
+
+    result = AnalyzeUrlHandler().handle(
+        TaskEnvelope(
+            id=10,
+            task_type=TaskType.ANALYZE_URL,
+            content_id=content_id,
+            payload={"content_id": content_id},
+        ),
+        _build_context(db_session, queue_gateway),
+    )
+
+    assert result.success is False
+    db_session.expire_all()
+    persisted = db_session.query(Content).filter(Content.id == content_id).one()
+    assert persisted.content_type == ContentType.UNKNOWN.value
+    assert persisted.platform is None
+    assert persisted.content_metadata == {}
+
+
+def test_apple_podcast_pattern_resolution_uses_feed_sandbox_runtime(
+    db_session,
+    monkeypatch,
+) -> None:
+    apple_url = "https://podcasts.apple.com/us/podcast/example/id123?i=456"
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url=apple_url,
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_action",
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    content_id = int(content.id)
+    sandbox_http_service = object()
+    runtime_calls: list[dict[str, object]] = []
+
+    @contextmanager
+    def _feed_runtime(**kwargs):
+        runtime_calls.append(kwargs)
+        yield sandbox_http_service
+
+    def _resolve(url: str, *, feed_http_service: object) -> ApplePodcastResolution:
+        assert url == apple_url
+        assert feed_http_service is sandbox_http_service
+        return ApplePodcastResolution(
+            feed_url="https://publisher.example/show.xml",
+            episode_title="Sandboxed Episode",
+            audio_url="https://cdn.example/episode.mp3",
+        )
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.sandboxed_http_service",
+        _feed_runtime,
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.resolve_apple_podcast_episode",
+        _resolve,
+    )
+    queue_gateway = Mock()
+
+    result = AnalyzeUrlHandler().handle(
+        TaskEnvelope(
+            id=13,
+            task_type=TaskType.ANALYZE_URL,
+            content_id=content_id,
+            payload={"content_id": content_id},
+        ),
+        _build_context(db_session, queue_gateway),
+    )
+
+    assert result.success is True
+    assert runtime_calls == [{"user_id": 1, "execution_id": content_id}]
+    db_session.refresh(content)
+    metadata = _metadata(content.content_metadata)
+    assert metadata["feed_url"] == "https://publisher.example/show.xml"
+    assert metadata["audio_url"] == "https://cdn.example/episode.mp3"
+    _assert_process_content_enqueued(
+        queue_gateway,
+        db_session=db_session,
+        content_id=content_id,
+    )
+
+
+def test_tweet_resolution_rolls_back_when_process_enqueue_fails(db_session) -> None:
+    original_url = "https://x.com/someuser/status/123456789"
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url=original_url,
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_sheet",
+            "platform_hint": "twitter",
+            "tweet_snapshot": {
+                "id": "123456789",
+                "text": "Story link",
+                "author_id": "42",
+                "author_username": "willem",
+                "author_name": "Willem",
+                "created_at": "2026-03-27T21:56:00Z",
+                "like_count": 12,
+                "retweet_count": 3,
+                "reply_count": 1,
+                "conversation_id": "123456789",
+                "external_urls": ["https://example.com/atomic-story"],
+                "linked_tweet_ids": [],
+                "referenced_tweet_types": [],
+            },
+            "tweet_snapshot_source": "share_sheet",
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    content_id = int(content.id)
+    queue_gateway = Mock()
+    queue_gateway.enqueue_many_in_session.side_effect = RuntimeError("queue unavailable")
+
+    result = AnalyzeUrlHandler().handle(
+        TaskEnvelope(
+            id=11,
+            task_type=TaskType.ANALYZE_URL,
+            content_id=content_id,
+            payload={"content_id": content_id},
+        ),
+        _build_context(db_session, queue_gateway),
+    )
+
+    assert result.success is False
+    db_session.expire_all()
+    persisted = db_session.query(Content).filter(Content.id == content_id).one()
+    assert persisted.url == original_url
+    assert persisted.content_type == ContentType.UNKNOWN.value
+    assert "tweet_processing_text" not in _metadata(persisted.content_metadata)
+
+
+def test_instruction_fanout_rolls_back_when_process_enqueue_fails(
+    db_session,
+    monkeypatch,
+) -> None:
+    source_url = "https://example.com/atomic-instruction-source"
+    child_url = "https://example.com/atomic-instruction-child"
+    content = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url=source_url,
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_sheet",
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    content_id = int(content.id)
+
+    analysis_output = ContentAnalysisOutput(
+        analysis=ContentAnalysisResult(
+            content_type="article",
+            original_url=source_url,
+            platform="web",
+        ),
+        instruction=InstructionResult(links=[InstructionLink(url=child_url)]),
+    )
+    llm_gateway = Mock()
+    llm_gateway.analyze_url.return_value = analysis_output
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_llm_gateway",
+        lambda: llm_gateway,
+    )
+
+    queue_gateway = Mock()
+    queue_gateway.enqueue_many_in_session.side_effect = [
+        [701],
+        RuntimeError("queue unavailable"),
+    ]
+    monkeypatch.setattr(
+        "app.services.instruction_links.get_task_queue_gateway",
+        lambda: queue_gateway,
+    )
+
+    result = AnalyzeUrlHandler().handle(
+        TaskEnvelope(
+            id=12,
+            task_type=TaskType.ANALYZE_URL,
+            content_id=content_id,
+            payload={
+                "content_id": content_id,
+                "instruction": "Find the linked source",
+                "crawl_links": True,
+            },
+        ),
+        _build_context(db_session, queue_gateway),
+    )
+
+    assert result.success is False
+    db_session.expire_all()
+    persisted = db_session.query(Content).filter(Content.id == content_id).one()
+    assert persisted.content_type == ContentType.UNKNOWN.value
+    assert persisted.platform is None
+    assert db_session.query(Content).filter(Content.url == child_url).first() is None
+    assert queue_gateway.enqueue_many_in_session.call_count == 2
 
 
 def test_tweet_submission_missing_x_app_auth_fails_fast(
@@ -102,7 +361,7 @@ def test_tweet_submission_missing_x_app_auth_fails_fast(
     assert "X_APP_BEARER_TOKEN" in (content.error_message or "")
     assert tweet_enrichment["status"] == "failed"
     assert tweet_enrichment["reason"] == "x_app_auth_unavailable"
-    queue_gateway.enqueue.assert_not_called()
+    queue_gateway.enqueue_many_in_session.assert_not_called()
     assert db_session.query(Content).count() == 1
 
 
@@ -157,7 +416,7 @@ def test_tweet_submission_spend_cap_failure_is_non_retryable(
     assert content.status == ContentStatus.FAILED.value
     assert tweet_enrichment["status"] == "deferred"
     assert tweet_enrichment["reason"] == "x_spend_cap_reached"
-    queue_gateway.enqueue.assert_not_called()
+    queue_gateway.enqueue_many_in_session.assert_not_called()
 
 
 def test_tweet_bookmark_failure_remains_visible_in_knowledge(
@@ -203,6 +462,58 @@ def test_tweet_bookmark_failure_remains_visible_in_knowledge(
     assert result.success is False
     assert bookmark.status == ContentStatus.FAILED.value
     assert db_session.query(ContentKnowledgeSave).filter_by(user_id=1, content_id=bookmark.id).one()
+
+
+def test_tweet_bookmark_does_not_restore_state_for_inactive_user(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    test_user.is_active = False
+    bookmark = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/someuser/status/987654321",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": test_user.id,
+            "submitted_via": "x_bookmarks",
+            "platform_hint": "twitter",
+        },
+    )
+    db_session.add(bookmark)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(success=False, error="Tweet lookup failed"),
+    )
+
+    def unexpected_token_lookup(*_args, **_kwargs):
+        raise AssertionError("inactive user token must not be loaded")
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        unexpected_token_lookup,
+    )
+    result = AnalyzeUrlHandler().handle(
+        TaskEnvelope(
+            id=1003,
+            task_type=TaskType.ANALYZE_URL,
+            content_id=bookmark.id,
+            payload={"content_id": bookmark.id},
+        ),
+        _build_context(db_session, queue_gateway=Mock()),
+    )
+
+    assert result.success is False
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=test_user.id, content_id=bookmark.id)
+        .first()
+        is None
+    )
 
 
 def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
@@ -338,7 +649,7 @@ def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
     )
     assert db_session.query(ContentKnowledgeSave).filter_by(user_id=2).count() == 1
     assert db_session.query(Content).filter(Content.url == "https://example.com/story").count() == 1
-    queue_gateway.enqueue.assert_not_called()
+    queue_gateway.enqueue_many_in_session.assert_not_called()
 
 
 def test_tweet_bookmark_uses_sync_snapshot_before_fetching_x_again(
@@ -402,8 +713,9 @@ def test_tweet_bookmark_uses_sync_snapshot_before_fetching_x_again(
     assert result.success is True
     assert bookmark_shell.url == "https://example.com/story"
     assert metadata["tweet_lookup_source"] == "bookmark_sync_snapshot"
-    queue_gateway.enqueue.assert_called_once_with(
-        TaskType.PROCESS_CONTENT,
+    _assert_process_content_enqueued(
+        queue_gateway,
+        db_session=db_session,
         content_id=bookmark_shell.id,
     )
 
@@ -495,8 +807,9 @@ def test_tweet_bookmark_uses_included_snapshot_for_linked_tweet_resolution(
     assert bookmark_shell.url == "https://example.com/story"
     assert metadata["tweet_resolution_source"] == "linked_tweet"
     assert metadata["tweet_lookup_source"] == "bookmark_sync_snapshot"
-    queue_gateway.enqueue.assert_called_once_with(
-        TaskType.PROCESS_CONTENT,
+    _assert_process_content_enqueued(
+        queue_gateway,
+        db_session=db_session,
         content_id=bookmark_shell.id,
     )
 
@@ -587,8 +900,9 @@ def test_tweet_bookmark_records_native_x_article_metadata(
     assert "tweet_only" not in metadata
     assert status_row is None
     assert knowledge_row is not None
-    queue_gateway.enqueue.assert_called_once_with(
-        TaskType.PROCESS_CONTENT,
+    _assert_process_content_enqueued(
+        queue_gateway,
+        db_session=db_session,
         content_id=bookmark_shell.id,
     )
 
@@ -673,8 +987,9 @@ def test_tweet_bookmark_resolves_linked_podcast_as_long_form_podcast(
     assert metadata["tweet_resolution_source"] == "root_tweet"
     assert status_row is None
     assert knowledge_row is not None
-    queue_gateway.enqueue.assert_called_once_with(
-        TaskType.PROCESS_CONTENT,
+    _assert_process_content_enqueued(
+        queue_gateway,
+        db_session=db_session,
         content_id=bookmark_shell.id,
     )
 
@@ -738,7 +1053,11 @@ def test_tweet_share_uses_root_article_url_without_fanout(db_session, monkeypatc
     assert metadata["tweet_resolution_tweet_id"] == "123456789"
     assert metadata["tweet_thread_lookup_status"] == "not_needed"
     assert db_session.query(Content).count() == 1
-    queue_gateway.enqueue.assert_called_once_with(TaskType.PROCESS_CONTENT, content_id=content.id)
+    _assert_process_content_enqueued(
+        queue_gateway,
+        db_session=db_session,
+        content_id=content.id,
+    )
 
 
 def test_tweet_share_resolves_article_from_linked_tweet(db_session, monkeypatch) -> None:

@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -21,12 +21,26 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.services.feed_detection import FeedDetector, classify_feed_type_with_llm
-from app.services.http import get_http_service
+from app.services.feed_research_runtime import SandboxFeedHttpService, feed_research_runtime
 
 DEFAULT_MODELS = [
     "openai:gpt-5.4",
     "google-gla:gemini-3-flash-preview",
 ]
+
+
+class _NoNetworkHttpService:
+    """Fail closed if URL-only classification unexpectedly performs I/O."""
+
+    def fetch(self, *_args, **_kwargs):
+        raise AssertionError("URL-only feed evaluation must not perform network I/O")
+
+
+def _heuristic_detector() -> FeedDetector:
+    return FeedDetector(
+        use_llm=False,
+        http_service=cast(Any, _NoNetworkHttpService()),
+    )
 
 
 def _load_yaml_feeds(path: Path) -> list[dict[str, Any]]:
@@ -126,16 +140,9 @@ def _evaluate_llm_cases(
     return {"total": total, "hits": hits, "accuracy": accuracy, "rows": rows}
 
 
-def _fetch_html(url: str) -> str | None:
-    http_service = get_http_service()
-    body, _headers = http_service.fetch_content(url)
-    if isinstance(body, str):
-        return body
-    return None
-
-
 def _inspect_page_urls(
     detector: FeedDetector,
+    http_service: SandboxFeedHttpService,
     urls: list[str],
     *,
     source: str,
@@ -144,8 +151,13 @@ def _inspect_page_urls(
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for url in urls:
-        html_content = _fetch_html(url)
-        if not html_content:
+        try:
+            response = http_service.fetch(url)
+            html_content = response.text
+        except Exception as exc:  # noqa: BLE001 - preserve per-URL evaluation output
+            results.append({"url": url, "error": str(exc) or "fetch_failed"})
+            continue
+        if not html_content.strip():
             results.append({"url": url, "error": "fetch_failed"})
             continue
         feed_data = detector.detect_from_html(
@@ -235,7 +247,7 @@ def main() -> None:
         config_dir = Path(args.config_dir)
         cases = _build_labeled_cases(config_dir, args.limit)
 
-        heuristic_detector = FeedDetector(use_llm=False)
+        heuristic_detector = _heuristic_detector()
         heuristic_results = _evaluate_heuristic_cases(heuristic_detector, cases)
 
         for model_spec in [m.strip() for m in args.models.split(",") if m.strip()]:
@@ -254,22 +266,26 @@ def main() -> None:
 
     page_inspection = None
     if page_urls:
-        page_inspection = {
-            "heuristic": _inspect_page_urls(
-                FeedDetector(use_llm=False),
-                page_urls,
-                source=args.page_source,
-                content_type=args.page_content_type,
-            ),
-        }
+        with feed_research_runtime(user_id=0, use_llm=False) as runtime:
+            page_inspection = {
+                "heuristic": _inspect_page_urls(
+                    runtime.detector,
+                    runtime.http_service,
+                    page_urls,
+                    source=args.page_source,
+                    content_type=args.page_content_type,
+                ),
+            }
         for model_spec in llm_results or [m.strip() for m in args.models.split(",") if m.strip()]:
-            page_inspection[model_spec] = _inspect_page_urls(
-                FeedDetector(use_llm=True),
-                page_urls,
-                source=args.page_source,
-                content_type=args.page_content_type,
-                model_spec=model_spec,
-            )
+            with feed_research_runtime(user_id=0, use_llm=True) as runtime:
+                page_inspection[model_spec] = _inspect_page_urls(
+                    runtime.detector,
+                    runtime.http_service,
+                    page_urls,
+                    source=args.page_source,
+                    content_type=args.page_content_type,
+                    model_spec=model_spec,
+                )
 
     output = {
         "heuristic": heuristic_results,
