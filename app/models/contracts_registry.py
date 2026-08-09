@@ -91,17 +91,6 @@ from app.models.api.content_actions import (
 from app.models.api.content_discussions import (
     ContentDiscussionResponse,
 )
-from app.models.api.discovery import (
-    DiscoveryAddItemRequest,
-    DiscoveryAddItemResponse,
-    DiscoveryDismissRequest,
-    DiscoveryDismissResponse,
-    DiscoveryHistoryResponse,
-    DiscoveryRefreshResponse,
-    DiscoverySubscribeRequest,
-    DiscoverySubscribeResponse,
-    DiscoverySuggestionsResponse,
-)
 from app.models.api.feedback import SubmitFeedbackRequest, SubmitFeedbackResponse
 from app.models.api.integrations import (
     DeleteUserLlmIntegrationResponse,
@@ -164,6 +153,7 @@ from app.models.contracts import (
     DeleteStatus,
     DiscussionMode,
     FeedFormat,
+    FeedSubscriptionOutcome,
     FeedType,
     IntegrationDisconnectStatus,
     KnowledgeMutationStatus,
@@ -252,6 +242,12 @@ CONTRACT_ENUMS: list[EnumSpec] = [
     EnumSpec(DiscussionMode, targets=Target.IOS, open=False),
     EnumSpec(FeedType, targets=Target.IOS, open=True),
     EnumSpec(FeedFormat, targets=Target.IOS, open=True),
+    EnumSpec(
+        FeedSubscriptionOutcome,
+        targets=Target.IOS | Target.CLI,
+        open=True,
+        swift_name="APIFeedSubscriptionOutcome",
+    ),
     EnumSpec(AudioEpisodeKind, targets=Target.IOS, open=True),
     EnumSpec(AudioEpisodeStatus, targets=Target.IOS, open=True),
     EnumSpec(BriefingTier, targets=Target.IOS | Target.CLI, open=False),
@@ -375,15 +371,6 @@ CONTRACT_MODELS: list[ModelSpec] = [
     ModelSpec(BriefingRefreshResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(ScraperConfigResponse, targets=Target.IOS | Target.CLI),
     ModelSpec(SubscribeToFeedRequest, targets=Target.IOS | Target.CLI),
-    ModelSpec(DiscoverySuggestionsResponse, targets=Target.IOS),
-    ModelSpec(DiscoveryHistoryResponse, targets=Target.IOS),
-    ModelSpec(DiscoveryRefreshResponse, targets=Target.IOS),
-    ModelSpec(DiscoverySubscribeRequest, targets=Target.IOS),
-    ModelSpec(DiscoverySubscribeResponse, targets=Target.IOS),
-    ModelSpec(DiscoveryAddItemRequest, targets=Target.IOS),
-    ModelSpec(DiscoveryAddItemResponse, targets=Target.IOS),
-    ModelSpec(DiscoveryDismissRequest, targets=Target.IOS),
-    ModelSpec(DiscoveryDismissResponse, targets=Target.IOS),
     ModelSpec(XOAuthStartRequest, targets=Target.IOS),
     ModelSpec(XOAuthStartResponse, targets=Target.IOS),
     ModelSpec(XOAuthExchangeRequest, targets=Target.IOS),

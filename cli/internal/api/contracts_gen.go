@@ -76,12 +76,12 @@ const (
 	TaskTypeDownloadTweetVideoAudio TaskType = "download_tweet_video_audio"
 	TaskTypeTranscribeTweetVideo TaskType = "transcribe_tweet_video"
 	TaskTypeSummarize TaskType = "summarize"
-	TaskTypeFetchDiscussion TaskType = "fetch_discussion"
 	TaskTypeFetchNewsItemDiscussion TaskType = "fetch_news_item_discussion"
 	TaskTypeGenerateImage TaskType = "generate_image"
 	TaskTypeDiscoverFeeds TaskType = "discover_feeds"
 	TaskTypeOnboardingDiscover TaskType = "onboarding_discover"
 	TaskTypeDigDeeper TaskType = "dig_deeper"
+	TaskTypeChatTurn TaskType = "chat_turn"
 	TaskTypeSyncIntegration TaskType = "sync_integration"
 	TaskTypeGenerateAudioEpisode TaskType = "generate_audio_episode"
 	TaskTypeRunLLMTask TaskType = "run_llm_task"
@@ -91,7 +91,7 @@ const (
 
 func (v TaskType) Known() bool {
 	switch v {
-	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchDiscussion, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeSyncIntegration, TaskTypeGenerateAudioEpisode, TaskTypeRunLLMTask, TaskTypeBriefingRefresh, TaskTypeDeleteUserAccount:
+	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeChatTurn, TaskTypeSyncIntegration, TaskTypeGenerateAudioEpisode, TaskTypeRunLLMTask, TaskTypeBriefingRefresh, TaskTypeDeleteUserAccount:
 		return true
 	default:
 		return false
@@ -206,6 +206,7 @@ const (
 	SubmissionOutcomeQueued SubmissionOutcome = "queued"
 	SubmissionOutcomeProcessing SubmissionOutcome = "processing"
 	SubmissionOutcomeCompleted SubmissionOutcome = "completed"
+	SubmissionOutcomeNoAction SubmissionOutcome = "no_action"
 	SubmissionOutcomeFailed SubmissionOutcome = "failed"
 	SubmissionOutcomeSkipped SubmissionOutcome = "skipped"
 	SubmissionOutcomeSubscribed SubmissionOutcome = "subscribed"
@@ -217,7 +218,24 @@ const (
 
 func (v SubmissionOutcome) Known() bool {
 	switch v {
-	case SubmissionOutcomeQueued, SubmissionOutcomeProcessing, SubmissionOutcomeCompleted, SubmissionOutcomeFailed, SubmissionOutcomeSkipped, SubmissionOutcomeSubscribed, SubmissionOutcomeAlreadySubscribed, SubmissionOutcomeFeedNotFound, SubmissionOutcomeFeedFetchFailed, SubmissionOutcomeFeedSubscriptionFailed:
+	case SubmissionOutcomeQueued, SubmissionOutcomeProcessing, SubmissionOutcomeCompleted, SubmissionOutcomeNoAction, SubmissionOutcomeFailed, SubmissionOutcomeSkipped, SubmissionOutcomeSubscribed, SubmissionOutcomeAlreadySubscribed, SubmissionOutcomeFeedNotFound, SubmissionOutcomeFeedFetchFailed, SubmissionOutcomeFeedSubscriptionFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+type FeedSubscriptionOutcome string
+
+const (
+	FeedSubscriptionOutcomeCreated FeedSubscriptionOutcome = "created"
+	FeedSubscriptionOutcomeReactivated FeedSubscriptionOutcome = "reactivated"
+	FeedSubscriptionOutcomeAlreadySubscribed FeedSubscriptionOutcome = "already_subscribed"
+)
+
+func (v FeedSubscriptionOutcome) Known() bool {
+	switch v {
+	case FeedSubscriptionOutcomeCreated, FeedSubscriptionOutcomeReactivated, FeedSubscriptionOutcomeAlreadySubscribed:
 		return true
 	default:
 		return false
@@ -609,6 +627,8 @@ type ScraperConfigResponse struct {
 	IsActive bool `json:"is_active"`
 	CreatedAt time.Time `json:"created_at"`
 	Stats *ScraperConfigStatsResponse `json:"stats,omitempty"`
+	SubscriptionOutcome *FeedSubscriptionOutcome `json:"subscription_outcome,omitempty"`
+	BackfillTaskID *int `json:"backfill_task_id,omitempty"`
 }
 
 type SubscribeToFeedRequest struct {
@@ -821,6 +841,7 @@ type SubmissionStatusResponse struct {
 	IsSelfSubmission *bool `json:"is_self_submission,omitempty"`
 	SubmissionKind *SubmissionKind `json:"submission_kind,omitempty"`
 	Outcome *SubmissionOutcome `json:"outcome,omitempty"`
+	Rationale *string `json:"rationale,omitempty"`
 	DetectedFeed *DetectedFeed `json:"detected_feed,omitempty"`
 	FeedSubscription *SubmissionFeedSubscriptionResponse `json:"feed_subscription,omitempty"`
 }

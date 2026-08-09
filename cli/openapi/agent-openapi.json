@@ -484,6 +484,14 @@
             "title": "Id",
             "type": "string"
           },
+          "is_subscribed": {
+            "contract": {
+              "lenient": true
+            },
+            "default": false,
+            "title": "Is Subscribed",
+            "type": "boolean"
+          },
           "rationale": {
             "maxLength": 600,
             "nullable": true,
@@ -870,6 +878,10 @@
       },
       "BriefingBlockDto": {
         "properties": {
+          "alignment": {
+            "$ref": "#/components/schemas/BriefingFigureAlignment",
+            "nullable": true
+          },
           "caption": {
             "nullable": true,
             "title": "Caption",
@@ -1095,6 +1107,15 @@
         ],
         "title": "BriefingDiscussionDto",
         "type": "object"
+      },
+      "BriefingFigureAlignment": {
+        "description": "Horizontal edge used by an inline Briefing figure.",
+        "enum": [
+          "left",
+          "right"
+        ],
+        "title": "BriefingFigureAlignment",
+        "type": "string"
       },
       "BriefingFigurePlacement": {
         "description": "Editorial size hint for a Briefing figure.",
@@ -3625,341 +3646,6 @@
         "title": "DetectedFeed",
         "type": "object"
       },
-      "DiscoveryAddItemRequest": {
-        "description": "Request to add single items from discovery suggestions.",
-        "properties": {
-          "suggestion_ids": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Suggestion Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "suggestion_ids"
-        ],
-        "title": "DiscoveryAddItemRequest",
-        "type": "object"
-      },
-      "DiscoveryAddItemResponse": {
-        "description": "Response for adding items from discovery suggestions.",
-        "properties": {
-          "created": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Created",
-            "type": "array"
-          },
-          "errors": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Errors",
-            "type": "array"
-          },
-          "skipped": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Skipped",
-            "type": "array"
-          }
-        },
-        "title": "DiscoveryAddItemResponse",
-        "type": "object"
-      },
-      "DiscoveryDismissRequest": {
-        "description": "Request to dismiss discovery suggestions.",
-        "properties": {
-          "suggestion_ids": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Suggestion Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "suggestion_ids"
-        ],
-        "title": "DiscoveryDismissRequest",
-        "type": "object"
-      },
-      "DiscoveryDismissResponse": {
-        "description": "Response for discovery dismissal action.",
-        "properties": {
-          "dismissed": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Dismissed",
-            "type": "array"
-          }
-        },
-        "title": "DiscoveryDismissResponse",
-        "type": "object"
-      },
-      "DiscoveryHistoryResponse": {
-        "description": "Discovery suggestions across multiple runs.",
-        "properties": {
-          "runs": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoveryRunSuggestions"
-            },
-            "title": "Runs",
-            "type": "array"
-          }
-        },
-        "title": "DiscoveryHistoryResponse",
-        "type": "object"
-      },
-      "DiscoveryRefreshResponse": {
-        "description": "Response for manual discovery refresh.",
-        "properties": {
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "task_id": {
-            "nullable": true,
-            "title": "Task Id",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "DiscoveryRefreshResponse",
-        "type": "object"
-      },
-      "DiscoveryRunSuggestions": {
-        "description": "Discovery suggestions grouped by run.",
-        "properties": {
-          "direction_summary": {
-            "nullable": true,
-            "title": "Direction Summary",
-            "type": "string"
-          },
-          "feeds": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Feeds",
-            "type": "array"
-          },
-          "podcasts": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Podcasts",
-            "type": "array"
-          },
-          "run_created_at": {
-            "title": "Run Created At",
-            "type": "string"
-          },
-          "run_id": {
-            "title": "Run Id",
-            "type": "integer"
-          },
-          "run_status": {
-            "title": "Run Status",
-            "type": "string"
-          },
-          "youtube": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Youtube",
-            "type": "array"
-          }
-        },
-        "required": [
-          "run_id",
-          "run_status",
-          "run_created_at"
-        ],
-        "title": "DiscoveryRunSuggestions",
-        "type": "object"
-      },
-      "DiscoverySubscribeRequest": {
-        "description": "Request to subscribe to discovery suggestions.",
-        "properties": {
-          "suggestion_ids": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Suggestion Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "suggestion_ids"
-        ],
-        "title": "DiscoverySubscribeRequest",
-        "type": "object"
-      },
-      "DiscoverySubscribeResponse": {
-        "description": "Response for discovery subscription action.",
-        "properties": {
-          "errors": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Errors",
-            "type": "array"
-          },
-          "skipped": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Skipped",
-            "type": "array"
-          },
-          "subscribed": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Subscribed",
-            "type": "array"
-          }
-        },
-        "title": "DiscoverySubscribeResponse",
-        "type": "object"
-      },
-      "DiscoverySuggestionResponse": {
-        "description": "Suggested feed/podcast/YouTube subscription item.",
-        "properties": {
-          "channel_id": {
-            "nullable": true,
-            "title": "Channel Id",
-            "type": "string"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "string"
-          },
-          "description": {
-            "nullable": true,
-            "title": "Description",
-            "type": "string"
-          },
-          "feed_url": {
-            "title": "Feed Url",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "item_url": {
-            "nullable": true,
-            "title": "Item Url",
-            "type": "string"
-          },
-          "playlist_id": {
-            "nullable": true,
-            "title": "Playlist Id",
-            "type": "string"
-          },
-          "rationale": {
-            "nullable": true,
-            "title": "Rationale",
-            "type": "string"
-          },
-          "score": {
-            "nullable": true,
-            "title": "Score",
-            "type": "number"
-          },
-          "site_url": {
-            "nullable": true,
-            "title": "Site Url",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "suggestion_type": {
-            "title": "Suggestion Type",
-            "type": "string"
-          },
-          "title": {
-            "nullable": true,
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "suggestion_type",
-          "feed_url",
-          "status",
-          "created_at"
-        ],
-        "title": "DiscoverySuggestionResponse",
-        "type": "object"
-      },
-      "DiscoverySuggestionsResponse": {
-        "description": "Grouped discovery suggestions for the latest run.",
-        "properties": {
-          "direction_summary": {
-            "nullable": true,
-            "title": "Direction Summary",
-            "type": "string"
-          },
-          "feeds": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Feeds",
-            "type": "array"
-          },
-          "podcasts": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Podcasts",
-            "type": "array"
-          },
-          "run_created_at": {
-            "nullable": true,
-            "title": "Run Created At",
-            "type": "string"
-          },
-          "run_id": {
-            "nullable": true,
-            "title": "Run Id",
-            "type": "integer"
-          },
-          "run_status": {
-            "nullable": true,
-            "title": "Run Status",
-            "type": "string"
-          },
-          "youtube": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Youtube",
-            "type": "array"
-          }
-        },
-        "title": "DiscoverySuggestionsResponse",
-        "type": "object"
-      },
       "DiscussionCommentResponse": {
         "description": "Normalized discussion comment.",
         "properties": {
@@ -4304,12 +3990,23 @@
         "title": "FeedFormat",
         "type": "string"
       },
+      "FeedSubscriptionOutcome": {
+        "description": "Idempotent result of subscribing to a feed.",
+        "enum": [
+          "created",
+          "reactivated",
+          "already_subscribed"
+        ],
+        "title": "FeedSubscriptionOutcome",
+        "type": "string"
+      },
       "FeedType": {
         "description": "Supported feed/source categories exposed in client contracts.",
         "enum": [
           "atom",
           "substack",
-          "podcast_rss"
+          "podcast_rss",
+          "youtube"
         ],
         "title": "FeedType",
         "type": "string"
@@ -4893,6 +4590,7 @@
         "description": "Specific mode inside an LLM task family.",
         "enum": [
           "add_content",
+          "add_to_briefing",
           "add_links",
           "add_feed",
           "chat",
@@ -5048,6 +4746,14 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "is_subscribed": {
+            "contract": {
+              "lenient": true
+            },
+            "default": false,
+            "title": "Is Subscribed",
+            "type": "boolean"
           },
           "rationale": {
             "nullable": true,
@@ -6078,6 +5784,11 @@
           }
         },
         "properties": {
+          "backfill_task_id": {
+            "nullable": true,
+            "title": "Backfill Task Id",
+            "type": "integer"
+          },
           "config": {
             "additionalProperties": true,
             "title": "Config",
@@ -6116,6 +5827,10 @@
           },
           "stats": {
             "$ref": "#/components/schemas/ScraperConfigStatsResponse",
+            "nullable": true
+          },
+          "subscription_outcome": {
+            "$ref": "#/components/schemas/FeedSubscriptionOutcome",
             "nullable": true
           }
         },
@@ -6469,6 +6184,7 @@
           "queued",
           "processing",
           "completed",
+          "no_action",
           "failed",
           "skipped",
           "subscribed",
@@ -6551,6 +6267,11 @@
             "description": "ISO timestamp when content was processed",
             "nullable": true,
             "title": "Processed At",
+            "type": "string"
+          },
+          "rationale": {
+            "nullable": true,
+            "title": "Rationale",
             "type": "string"
           },
           "source_url": {

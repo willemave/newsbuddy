@@ -574,6 +574,14 @@
             "title": "Id",
             "type": "string"
           },
+          "is_subscribed": {
+            "contract": {
+              "lenient": true
+            },
+            "default": false,
+            "title": "Is Subscribed",
+            "type": "boolean"
+          },
           "rationale": {
             "anyOf": [
               {
@@ -4658,425 +4666,6 @@
         "title": "DetectedFeed",
         "type": "object"
       },
-      "DiscoveryAddItemRequest": {
-        "description": "Request to add single items from discovery suggestions.",
-        "properties": {
-          "suggestion_ids": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Suggestion Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "suggestion_ids"
-        ],
-        "title": "DiscoveryAddItemRequest",
-        "type": "object"
-      },
-      "DiscoveryAddItemResponse": {
-        "description": "Response for adding items from discovery suggestions.",
-        "properties": {
-          "created": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Created",
-            "type": "array"
-          },
-          "errors": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Errors",
-            "type": "array"
-          },
-          "skipped": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Skipped",
-            "type": "array"
-          }
-        },
-        "title": "DiscoveryAddItemResponse",
-        "type": "object"
-      },
-      "DiscoveryDismissRequest": {
-        "description": "Request to dismiss discovery suggestions.",
-        "properties": {
-          "suggestion_ids": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Suggestion Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "suggestion_ids"
-        ],
-        "title": "DiscoveryDismissRequest",
-        "type": "object"
-      },
-      "DiscoveryDismissResponse": {
-        "description": "Response for discovery dismissal action.",
-        "properties": {
-          "dismissed": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Dismissed",
-            "type": "array"
-          }
-        },
-        "title": "DiscoveryDismissResponse",
-        "type": "object"
-      },
-      "DiscoveryHistoryResponse": {
-        "description": "Discovery suggestions across multiple runs.",
-        "properties": {
-          "runs": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoveryRunSuggestions"
-            },
-            "title": "Runs",
-            "type": "array"
-          }
-        },
-        "title": "DiscoveryHistoryResponse",
-        "type": "object"
-      },
-      "DiscoveryRefreshResponse": {
-        "description": "Response for manual discovery refresh.",
-        "properties": {
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task Id"
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "DiscoveryRefreshResponse",
-        "type": "object"
-      },
-      "DiscoveryRunSuggestions": {
-        "description": "Discovery suggestions grouped by run.",
-        "properties": {
-          "direction_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Direction Summary"
-          },
-          "feeds": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Feeds",
-            "type": "array"
-          },
-          "podcasts": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Podcasts",
-            "type": "array"
-          },
-          "run_created_at": {
-            "title": "Run Created At",
-            "type": "string"
-          },
-          "run_id": {
-            "title": "Run Id",
-            "type": "integer"
-          },
-          "run_status": {
-            "title": "Run Status",
-            "type": "string"
-          },
-          "youtube": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Youtube",
-            "type": "array"
-          }
-        },
-        "required": [
-          "run_id",
-          "run_status",
-          "run_created_at"
-        ],
-        "title": "DiscoveryRunSuggestions",
-        "type": "object"
-      },
-      "DiscoverySubscribeRequest": {
-        "description": "Request to subscribe to discovery suggestions.",
-        "properties": {
-          "suggestion_ids": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Suggestion Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "suggestion_ids"
-        ],
-        "title": "DiscoverySubscribeRequest",
-        "type": "object"
-      },
-      "DiscoverySubscribeResponse": {
-        "description": "Response for discovery subscription action.",
-        "properties": {
-          "errors": {
-            "items": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Errors",
-            "type": "array"
-          },
-          "skipped": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Skipped",
-            "type": "array"
-          },
-          "subscribed": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Subscribed",
-            "type": "array"
-          }
-        },
-        "title": "DiscoverySubscribeResponse",
-        "type": "object"
-      },
-      "DiscoverySuggestionResponse": {
-        "description": "Suggested feed/podcast/YouTube subscription item.",
-        "properties": {
-          "channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Channel Id"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "string"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "feed_url": {
-            "title": "Feed Url",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "item_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Item Url"
-          },
-          "playlist_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Playlist Id"
-          },
-          "rationale": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rationale"
-          },
-          "score": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Score"
-          },
-          "site_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Site Url"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "suggestion_type": {
-            "title": "Suggestion Type",
-            "type": "string"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          }
-        },
-        "required": [
-          "id",
-          "suggestion_type",
-          "feed_url",
-          "status",
-          "created_at"
-        ],
-        "title": "DiscoverySuggestionResponse",
-        "type": "object"
-      },
-      "DiscoverySuggestionsResponse": {
-        "description": "Grouped discovery suggestions for the latest run.",
-        "properties": {
-          "direction_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Direction Summary"
-          },
-          "feeds": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Feeds",
-            "type": "array"
-          },
-          "podcasts": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Podcasts",
-            "type": "array"
-          },
-          "run_created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Created At"
-          },
-          "run_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Id"
-          },
-          "run_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Status"
-          },
-          "youtube": {
-            "items": {
-              "$ref": "#/components/schemas/DiscoverySuggestionResponse"
-            },
-            "title": "Youtube",
-            "type": "array"
-          }
-        },
-        "title": "DiscoverySuggestionsResponse",
-        "type": "object"
-      },
       "DiscussionCommentResponse": {
         "description": "Normalized discussion comment.",
         "properties": {
@@ -5523,12 +5112,23 @@
         "title": "FeedFormat",
         "type": "string"
       },
+      "FeedSubscriptionOutcome": {
+        "description": "Idempotent result of subscribing to a feed.",
+        "enum": [
+          "created",
+          "reactivated",
+          "already_subscribed"
+        ],
+        "title": "FeedSubscriptionOutcome",
+        "type": "string"
+      },
       "FeedType": {
         "description": "Supported feed/source categories exposed in client contracts.",
         "enum": [
           "atom",
           "substack",
-          "podcast_rss"
+          "podcast_rss",
+          "youtube"
         ],
         "title": "FeedType",
         "type": "string"
@@ -6296,6 +5896,7 @@
         "description": "Specific mode inside an LLM task family.",
         "enum": [
           "add_content",
+          "add_to_briefing",
           "add_links",
           "add_feed",
           "chat",
@@ -6475,6 +6076,14 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "is_subscribed": {
+            "contract": {
+              "lenient": true
+            },
+            "default": false,
+            "title": "Is Subscribed",
+            "type": "boolean"
           },
           "rationale": {
             "anyOf": [
@@ -7726,6 +7335,17 @@
           }
         },
         "properties": {
+          "backfill_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backfill Task Id"
+          },
           "config": {
             "additionalProperties": true,
             "title": "Config",
@@ -7784,6 +7404,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ScraperConfigStatsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subscription_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeedSubscriptionOutcome"
               },
               {
                 "type": "null"
@@ -8291,6 +7921,7 @@
           "queued",
           "processing",
           "completed",
+          "no_action",
           "failed",
           "skipped",
           "subscribed",
@@ -8398,6 +8029,17 @@
             ],
             "description": "ISO timestamp when content was processed",
             "title": "Processed At"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
           },
           "source_url": {
             "anyOf": [
@@ -10842,8 +10484,7 @@
               "default": "background",
               "enum": [
                 "background",
-                "stream",
-                "inline"
+                "stream"
               ],
               "title": "Delivery",
               "type": "string"
@@ -10905,8 +10546,7 @@
               "default": "background",
               "enum": [
                 "background",
-                "stream",
-                "inline"
+                "stream"
               ],
               "title": "Delivery",
               "type": "string"
@@ -11283,8 +10923,7 @@
               "default": "background",
               "enum": [
                 "background",
-                "stream",
-                "inline"
+                "stream"
               ],
               "title": "Delivery",
               "type": "string"
@@ -11350,8 +10989,7 @@
               "default": "background",
               "enum": [
                 "background",
-                "stream",
-                "inline"
+                "stream"
               ],
               "title": "Delivery",
               "type": "string"
@@ -13766,8 +13404,7 @@
               "default": "background",
               "enum": [
                 "background",
-                "stream",
-                "inline"
+                "stream"
               ],
               "title": "Delivery",
               "type": "string"
@@ -14493,311 +14130,6 @@
         "tags": [
           "content"
         ]
-      }
-    },
-    "/api/discovery/add-item": {
-      "post": {
-        "operationId": "addDiscoveryItems",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiscoveryAddItemRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscoveryAddItemResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Add single items from discovery suggestions"
-      }
-    },
-    "/api/discovery/clear": {
-      "post": {
-        "operationId": "clearDiscoverySuggestions",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscoveryDismissResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Clear all discovery suggestions"
-      }
-    },
-    "/api/discovery/dismiss": {
-      "post": {
-        "operationId": "dismissDiscoverySuggestions",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiscoveryDismissRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscoveryDismissResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Dismiss discovery suggestions"
-      }
-    },
-    "/api/discovery/history": {
-      "get": {
-        "operationId": "getDiscoveryHistory",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 6,
-              "maximum": 12,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscoveryHistoryResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get discovery suggestions across recent runs"
-      }
-    },
-    "/api/discovery/refresh": {
-      "post": {
-        "operationId": "refreshDiscovery",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscoveryRefreshResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Trigger discovery refresh"
-      }
-    },
-    "/api/discovery/search/podcasts": {
-      "get": {
-        "operationId": "searchDiscoveryPodcastEpisodes",
-        "parameters": [
-          {
-            "description": "Podcast episode search query",
-            "in": "query",
-            "name": "q",
-            "required": true,
-            "schema": {
-              "description": "Podcast episode search query",
-              "maxLength": 200,
-              "minLength": 2,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 10,
-              "maximum": 25,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PodcastEpisodeSearchResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Search podcast episodes online"
-      }
-    },
-    "/api/discovery/subscribe": {
-      "post": {
-        "operationId": "subscribeDiscoverySuggestions",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiscoverySubscribeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscoverySubscribeResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Subscribe to discovery suggestions"
-      }
-    },
-    "/api/discovery/suggestions": {
-      "get": {
-        "operationId": "getDiscoverySuggestions",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscoverySuggestionsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Get discovery suggestions"
       }
     },
     "/api/feedback": {
@@ -15966,8 +15298,7 @@
               "default": "background",
               "enum": [
                 "background",
-                "stream",
-                "inline"
+                "stream"
               ],
               "title": "Delivery",
               "type": "string"

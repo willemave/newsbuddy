@@ -12,6 +12,7 @@ extension APITaskType: OpenContractEnum {}
 extension APITaskStatus: OpenContractEnum {}
 extension APISummaryKind: OpenContractEnum {}
 extension APISubmissionOutcome: OpenContractEnum {}
+extension APIFeedSubscriptionOutcome: OpenContractEnum {}
 extension APIFeedType: OpenContractEnum {}
 extension APIFeedFormat: OpenContractEnum {}
 extension APIAudioEpisodeKind: OpenContractEnum {}
@@ -35,6 +36,10 @@ final class APIContractsGeneratedTests: XCTestCase {
         try assertUnknown(APITaskStatus.self, rawValue: "future_task_status")
         try assertUnknown(APISummaryKind.self, rawValue: "future_summary_kind")
         try assertUnknown(APISubmissionOutcome.self, rawValue: "future_submission_outcome")
+        try assertUnknown(
+            APIFeedSubscriptionOutcome.self,
+            rawValue: "future_feed_subscription_outcome"
+        )
         try assertUnknown(APIFeedType.self, rawValue: "future_feed_type")
         try assertUnknown(APIFeedFormat.self, rawValue: "future_feed_format")
         try assertUnknown(APIAudioEpisodeKind.self, rawValue: "future_audio_kind")
@@ -132,6 +137,26 @@ final class APIContractsGeneratedTests: XCTestCase {
         XCTAssertNil(detail.summaryVersion)
         XCTAssertEqual(detail.detectedFeed?.url, "https://newsletter.example.com/feed")
         XCTAssertEqual(detail.canSubscribe, true)
+    }
+
+    func testMixedSearchFeedDefaultsMissingSubscriptionStateToFalse() throws {
+        let json = """
+        {
+            "id": "feed-1",
+            "title": "Example feed",
+            "site_url": "https://example.com",
+            "feed_url": "https://example.com/feed.xml",
+            "feed_type": "atom",
+            "feed_format": "rss"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(
+            APIMixedSearchFeedResultResponse.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertFalse(decoded.isSubscribed)
     }
 
     func testRequiredDatetimeFieldThrowsOnUnparseableValue() {

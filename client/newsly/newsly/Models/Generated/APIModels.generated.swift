@@ -2717,6 +2717,8 @@ struct APIScraperConfigResponse: Codable {
     let isActive: Bool
     let createdAt: Date
     let stats: APIScraperConfigStatsResponse?
+    let subscriptionOutcome: APIFeedSubscriptionOutcome?
+    let backfillTaskId: Int?
 
     init(
         id: Int,
@@ -2727,7 +2729,9 @@ struct APIScraperConfigResponse: Codable {
         limit: Int? = nil,
         isActive: Bool,
         createdAt: Date,
-        stats: APIScraperConfigStatsResponse? = nil
+        stats: APIScraperConfigStatsResponse? = nil,
+        subscriptionOutcome: APIFeedSubscriptionOutcome? = nil,
+        backfillTaskId: Int? = nil
     ) {
         self.id = id
         self.scraperType = scraperType
@@ -2738,6 +2742,8 @@ struct APIScraperConfigResponse: Codable {
         self.isActive = isActive
         self.createdAt = createdAt
         self.stats = stats
+        self.subscriptionOutcome = subscriptionOutcome
+        self.backfillTaskId = backfillTaskId
     }
 
     enum CodingKeys: String, CodingKey {
@@ -2750,6 +2756,8 @@ struct APIScraperConfigResponse: Codable {
         case isActive = "is_active"
         case createdAt = "created_at"
         case stats = "stats"
+        case subscriptionOutcome = "subscription_outcome"
+        case backfillTaskId = "backfill_task_id"
     }
 
     init(from decoder: Decoder) throws {
@@ -2767,6 +2775,8 @@ struct APIScraperConfigResponse: Codable {
         }
         createdAt = createdAtParsed
         stats = try container.decodeIfPresent(APIScraperConfigStatsResponse.self, forKey: .stats)
+        subscriptionOutcome = try container.decodeIfPresent(APIFeedSubscriptionOutcome.self, forKey: .subscriptionOutcome)
+        backfillTaskId = try container.decodeIfPresent(Int.self, forKey: .backfillTaskId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2780,6 +2790,8 @@ struct APIScraperConfigResponse: Codable {
         try container.encode(isActive, forKey: .isActive)
         try container.encode(ServerDate.format(createdAt), forKey: .createdAt)
         try container.encodeIfPresent(stats, forKey: .stats)
+        try container.encodeIfPresent(subscriptionOutcome, forKey: .subscriptionOutcome)
+        try container.encodeIfPresent(backfillTaskId, forKey: .backfillTaskId)
     }
 }
 
@@ -2816,288 +2828,6 @@ struct APISubscribeToFeedRequest: Codable {
         try container.encode(feedUrl, forKey: .feedUrl)
         try container.encode(feedType, forKey: .feedType)
         try container.encodeIfPresent(displayName, forKey: .displayName)
-    }
-}
-
-struct APIDiscoverySuggestionsResponse: Codable {
-    let runId: Int?
-    let runStatus: String?
-    let runCreatedAt: String?
-    let directionSummary: String?
-    let feeds: [APIDiscoverySuggestionResponse]
-    let podcasts: [APIDiscoverySuggestionResponse]
-    let youtube: [APIDiscoverySuggestionResponse]
-
-    init(
-        runId: Int? = nil,
-        runStatus: String? = nil,
-        runCreatedAt: String? = nil,
-        directionSummary: String? = nil,
-        feeds: [APIDiscoverySuggestionResponse] = [],
-        podcasts: [APIDiscoverySuggestionResponse] = [],
-        youtube: [APIDiscoverySuggestionResponse] = []
-    ) {
-        self.runId = runId
-        self.runStatus = runStatus
-        self.runCreatedAt = runCreatedAt
-        self.directionSummary = directionSummary
-        self.feeds = feeds
-        self.podcasts = podcasts
-        self.youtube = youtube
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case runId = "run_id"
-        case runStatus = "run_status"
-        case runCreatedAt = "run_created_at"
-        case directionSummary = "direction_summary"
-        case feeds = "feeds"
-        case podcasts = "podcasts"
-        case youtube = "youtube"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        runId = try container.decodeIfPresent(Int.self, forKey: .runId)
-        runStatus = try container.decodeIfPresent(String.self, forKey: .runStatus)
-        runCreatedAt = try container.decodeIfPresent(String.self, forKey: .runCreatedAt)
-        directionSummary = try container.decodeIfPresent(String.self, forKey: .directionSummary)
-        feeds = try container.decode([APIDiscoverySuggestionResponse].self, forKey: .feeds)
-        podcasts = try container.decode([APIDiscoverySuggestionResponse].self, forKey: .podcasts)
-        youtube = try container.decode([APIDiscoverySuggestionResponse].self, forKey: .youtube)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(runId, forKey: .runId)
-        try container.encodeIfPresent(runStatus, forKey: .runStatus)
-        try container.encodeIfPresent(runCreatedAt, forKey: .runCreatedAt)
-        try container.encodeIfPresent(directionSummary, forKey: .directionSummary)
-        try container.encode(feeds, forKey: .feeds)
-        try container.encode(podcasts, forKey: .podcasts)
-        try container.encode(youtube, forKey: .youtube)
-    }
-}
-
-struct APIDiscoveryHistoryResponse: Codable {
-    let runs: [APIDiscoveryRunSuggestions]
-
-    init(
-        runs: [APIDiscoveryRunSuggestions] = []
-    ) {
-        self.runs = runs
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case runs = "runs"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        runs = try container.decode([APIDiscoveryRunSuggestions].self, forKey: .runs)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(runs, forKey: .runs)
-    }
-}
-
-struct APIDiscoveryRefreshResponse: Codable {
-    let status: String
-    let taskId: Int?
-
-    init(
-        status: String,
-        taskId: Int? = nil
-    ) {
-        self.status = status
-        self.taskId = taskId
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case status = "status"
-        case taskId = "task_id"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        status = try container.decode(String.self, forKey: .status)
-        taskId = try container.decodeIfPresent(Int.self, forKey: .taskId)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(status, forKey: .status)
-        try container.encodeIfPresent(taskId, forKey: .taskId)
-    }
-}
-
-struct APIDiscoverySubscribeRequest: Codable {
-    let suggestionIds: [Int]
-
-    init(
-        suggestionIds: [Int]
-    ) {
-        self.suggestionIds = suggestionIds
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case suggestionIds = "suggestion_ids"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        suggestionIds = try container.decode([Int].self, forKey: .suggestionIds)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(suggestionIds, forKey: .suggestionIds)
-    }
-}
-
-struct APIDiscoverySubscribeResponse: Codable {
-    let subscribed: [Int]
-    let skipped: [Int]
-    let errors: [[String: String]]
-
-    init(
-        subscribed: [Int] = [],
-        skipped: [Int] = [],
-        errors: [[String: String]] = []
-    ) {
-        self.subscribed = subscribed
-        self.skipped = skipped
-        self.errors = errors
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case subscribed = "subscribed"
-        case skipped = "skipped"
-        case errors = "errors"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        subscribed = try container.decode([Int].self, forKey: .subscribed)
-        skipped = try container.decode([Int].self, forKey: .skipped)
-        errors = try container.decode([[String: String]].self, forKey: .errors)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(subscribed, forKey: .subscribed)
-        try container.encode(skipped, forKey: .skipped)
-        try container.encode(errors, forKey: .errors)
-    }
-}
-
-struct APIDiscoveryAddItemRequest: Codable {
-    let suggestionIds: [Int]
-
-    init(
-        suggestionIds: [Int]
-    ) {
-        self.suggestionIds = suggestionIds
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case suggestionIds = "suggestion_ids"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        suggestionIds = try container.decode([Int].self, forKey: .suggestionIds)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(suggestionIds, forKey: .suggestionIds)
-    }
-}
-
-struct APIDiscoveryAddItemResponse: Codable {
-    let created: [Int]
-    let skipped: [Int]
-    let errors: [[String: String]]
-
-    init(
-        created: [Int] = [],
-        skipped: [Int] = [],
-        errors: [[String: String]] = []
-    ) {
-        self.created = created
-        self.skipped = skipped
-        self.errors = errors
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case created = "created"
-        case skipped = "skipped"
-        case errors = "errors"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        created = try container.decode([Int].self, forKey: .created)
-        skipped = try container.decode([Int].self, forKey: .skipped)
-        errors = try container.decode([[String: String]].self, forKey: .errors)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(created, forKey: .created)
-        try container.encode(skipped, forKey: .skipped)
-        try container.encode(errors, forKey: .errors)
-    }
-}
-
-struct APIDiscoveryDismissRequest: Codable {
-    let suggestionIds: [Int]
-
-    init(
-        suggestionIds: [Int]
-    ) {
-        self.suggestionIds = suggestionIds
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case suggestionIds = "suggestion_ids"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        suggestionIds = try container.decode([Int].self, forKey: .suggestionIds)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(suggestionIds, forKey: .suggestionIds)
-    }
-}
-
-struct APIDiscoveryDismissResponse: Codable {
-    let dismissed: [Int]
-
-    init(
-        dismissed: [Int] = []
-    ) {
-        self.dismissed = dismissed
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case dismissed = "dismissed"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        dismissed = try container.decode([Int].self, forKey: .dismissed)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(dismissed, forKey: .dismissed)
     }
 }
 
@@ -4898,6 +4628,7 @@ struct APISubmissionStatusResponse: Codable {
     let isSelfSubmission: Bool
     let submissionKind: APISubmissionKind
     let outcome: APISubmissionOutcome
+    let rationale: String?
     let detectedFeed: APIDetectedFeed?
     let feedSubscription: APISubmissionFeedSubscriptionResponse?
 
@@ -4915,6 +4646,7 @@ struct APISubmissionStatusResponse: Codable {
         isSelfSubmission: Bool = true,
         submissionKind: APISubmissionKind = .content,
         outcome: APISubmissionOutcome = .processing,
+        rationale: String? = nil,
         detectedFeed: APIDetectedFeed? = nil,
         feedSubscription: APISubmissionFeedSubscriptionResponse? = nil
     ) {
@@ -4931,6 +4663,7 @@ struct APISubmissionStatusResponse: Codable {
         self.isSelfSubmission = isSelfSubmission
         self.submissionKind = submissionKind
         self.outcome = outcome
+        self.rationale = rationale
         self.detectedFeed = detectedFeed
         self.feedSubscription = feedSubscription
     }
@@ -4949,6 +4682,7 @@ struct APISubmissionStatusResponse: Codable {
         case isSelfSubmission = "is_self_submission"
         case submissionKind = "submission_kind"
         case outcome = "outcome"
+        case rationale = "rationale"
         case detectedFeed = "detected_feed"
         case feedSubscription = "feed_subscription"
     }
@@ -4968,6 +4702,7 @@ struct APISubmissionStatusResponse: Codable {
         isSelfSubmission = try container.decode(Bool.self, forKey: .isSelfSubmission)
         submissionKind = try container.decode(APISubmissionKind.self, forKey: .submissionKind)
         outcome = try container.decode(APISubmissionOutcome.self, forKey: .outcome)
+        rationale = try container.decodeIfPresent(String.self, forKey: .rationale)
         detectedFeed = try container.decodeIfPresent(APIDetectedFeed.self, forKey: .detectedFeed)
         feedSubscription = try container.decodeIfPresent(APISubmissionFeedSubscriptionResponse.self, forKey: .feedSubscription)
     }
@@ -4987,6 +4722,7 @@ struct APISubmissionStatusResponse: Codable {
         try container.encode(isSelfSubmission, forKey: .isSelfSubmission)
         try container.encode(submissionKind, forKey: .submissionKind)
         try container.encode(outcome, forKey: .outcome)
+        try container.encodeIfPresent(rationale, forKey: .rationale)
         try container.encodeIfPresent(detectedFeed, forKey: .detectedFeed)
         try container.encodeIfPresent(feedSubscription, forKey: .feedSubscription)
     }
@@ -5074,6 +4810,7 @@ struct APIMixedSearchFeedResultResponse: Codable {
     let description: String?
     let rationale: String?
     let evidenceUrl: String?
+    let isSubscribed: Bool
 
     init(
         id: String,
@@ -5084,7 +4821,8 @@ struct APIMixedSearchFeedResultResponse: Codable {
         feedFormat: String,
         description: String? = nil,
         rationale: String? = nil,
-        evidenceUrl: String? = nil
+        evidenceUrl: String? = nil,
+        isSubscribed: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -5095,6 +4833,7 @@ struct APIMixedSearchFeedResultResponse: Codable {
         self.description = description
         self.rationale = rationale
         self.evidenceUrl = evidenceUrl
+        self.isSubscribed = isSubscribed
     }
 
     enum CodingKeys: String, CodingKey {
@@ -5107,6 +4846,7 @@ struct APIMixedSearchFeedResultResponse: Codable {
         case description = "description"
         case rationale = "rationale"
         case evidenceUrl = "evidence_url"
+        case isSubscribed = "is_subscribed"
     }
 
     init(from decoder: Decoder) throws {
@@ -5120,6 +4860,7 @@ struct APIMixedSearchFeedResultResponse: Codable {
         description = try container.decodeIfPresent(String.self, forKey: .description)
         rationale = try container.decodeIfPresent(String.self, forKey: .rationale)
         evidenceUrl = try container.decodeIfPresent(String.self, forKey: .evidenceUrl)
+        isSubscribed = try container.decodeIfPresent(Bool.self, forKey: .isSubscribed) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -5133,6 +4874,7 @@ struct APIMixedSearchFeedResultResponse: Codable {
         try container.encodeIfPresent(description, forKey: .description)
         try container.encodeIfPresent(rationale, forKey: .rationale)
         try container.encodeIfPresent(evidenceUrl, forKey: .evidenceUrl)
+        try container.encode(isSubscribed, forKey: .isSubscribed)
     }
 }
 
@@ -6031,162 +5773,6 @@ struct APIScraperConfigStatsResponse: Codable {
     }
 }
 
-struct APIDiscoverySuggestionResponse: Codable {
-    let id: Int
-    let suggestionType: String
-    let siteUrl: String?
-    let feedUrl: String
-    let itemUrl: String?
-    let title: String?
-    let description: String?
-    let channelId: String?
-    let playlistId: String?
-    let rationale: String?
-    let score: Double?
-    let status: String
-    let createdAt: String
-
-    init(
-        id: Int,
-        suggestionType: String,
-        siteUrl: String? = nil,
-        feedUrl: String,
-        itemUrl: String? = nil,
-        title: String? = nil,
-        description: String? = nil,
-        channelId: String? = nil,
-        playlistId: String? = nil,
-        rationale: String? = nil,
-        score: Double? = nil,
-        status: String,
-        createdAt: String
-    ) {
-        self.id = id
-        self.suggestionType = suggestionType
-        self.siteUrl = siteUrl
-        self.feedUrl = feedUrl
-        self.itemUrl = itemUrl
-        self.title = title
-        self.description = description
-        self.channelId = channelId
-        self.playlistId = playlistId
-        self.rationale = rationale
-        self.score = score
-        self.status = status
-        self.createdAt = createdAt
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id = "id"
-        case suggestionType = "suggestion_type"
-        case siteUrl = "site_url"
-        case feedUrl = "feed_url"
-        case itemUrl = "item_url"
-        case title = "title"
-        case description = "description"
-        case channelId = "channel_id"
-        case playlistId = "playlist_id"
-        case rationale = "rationale"
-        case score = "score"
-        case status = "status"
-        case createdAt = "created_at"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(Int.self, forKey: .id)
-        suggestionType = try container.decode(String.self, forKey: .suggestionType)
-        siteUrl = try container.decodeIfPresent(String.self, forKey: .siteUrl)
-        feedUrl = try container.decode(String.self, forKey: .feedUrl)
-        itemUrl = try container.decodeIfPresent(String.self, forKey: .itemUrl)
-        title = try container.decodeIfPresent(String.self, forKey: .title)
-        description = try container.decodeIfPresent(String.self, forKey: .description)
-        channelId = try container.decodeIfPresent(String.self, forKey: .channelId)
-        playlistId = try container.decodeIfPresent(String.self, forKey: .playlistId)
-        rationale = try container.decodeIfPresent(String.self, forKey: .rationale)
-        score = try container.decodeIfPresent(Double.self, forKey: .score)
-        status = try container.decode(String.self, forKey: .status)
-        createdAt = try container.decode(String.self, forKey: .createdAt)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(suggestionType, forKey: .suggestionType)
-        try container.encodeIfPresent(siteUrl, forKey: .siteUrl)
-        try container.encode(feedUrl, forKey: .feedUrl)
-        try container.encodeIfPresent(itemUrl, forKey: .itemUrl)
-        try container.encodeIfPresent(title, forKey: .title)
-        try container.encodeIfPresent(description, forKey: .description)
-        try container.encodeIfPresent(channelId, forKey: .channelId)
-        try container.encodeIfPresent(playlistId, forKey: .playlistId)
-        try container.encodeIfPresent(rationale, forKey: .rationale)
-        try container.encodeIfPresent(score, forKey: .score)
-        try container.encode(status, forKey: .status)
-        try container.encode(createdAt, forKey: .createdAt)
-    }
-}
-
-struct APIDiscoveryRunSuggestions: Codable {
-    let runId: Int
-    let runStatus: String
-    let runCreatedAt: String
-    let directionSummary: String?
-    let feeds: [APIDiscoverySuggestionResponse]
-    let podcasts: [APIDiscoverySuggestionResponse]
-    let youtube: [APIDiscoverySuggestionResponse]
-
-    init(
-        runId: Int,
-        runStatus: String,
-        runCreatedAt: String,
-        directionSummary: String? = nil,
-        feeds: [APIDiscoverySuggestionResponse] = [],
-        podcasts: [APIDiscoverySuggestionResponse] = [],
-        youtube: [APIDiscoverySuggestionResponse] = []
-    ) {
-        self.runId = runId
-        self.runStatus = runStatus
-        self.runCreatedAt = runCreatedAt
-        self.directionSummary = directionSummary
-        self.feeds = feeds
-        self.podcasts = podcasts
-        self.youtube = youtube
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case runId = "run_id"
-        case runStatus = "run_status"
-        case runCreatedAt = "run_created_at"
-        case directionSummary = "direction_summary"
-        case feeds = "feeds"
-        case podcasts = "podcasts"
-        case youtube = "youtube"
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        runId = try container.decode(Int.self, forKey: .runId)
-        runStatus = try container.decode(String.self, forKey: .runStatus)
-        runCreatedAt = try container.decode(String.self, forKey: .runCreatedAt)
-        directionSummary = try container.decodeIfPresent(String.self, forKey: .directionSummary)
-        feeds = try container.decode([APIDiscoverySuggestionResponse].self, forKey: .feeds)
-        podcasts = try container.decode([APIDiscoverySuggestionResponse].self, forKey: .podcasts)
-        youtube = try container.decode([APIDiscoverySuggestionResponse].self, forKey: .youtube)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(runId, forKey: .runId)
-        try container.encode(runStatus, forKey: .runStatus)
-        try container.encode(runCreatedAt, forKey: .runCreatedAt)
-        try container.encodeIfPresent(directionSummary, forKey: .directionSummary)
-        try container.encode(feeds, forKey: .feeds)
-        try container.encode(podcasts, forKey: .podcasts)
-        try container.encode(youtube, forKey: .youtube)
-    }
-}
-
 struct APIOnboardingDiscoveryLaneStatus: Codable {
     let name: String
     let status: String
@@ -6828,6 +6414,7 @@ struct APIAssistantFeedOption: Codable {
     let description: String?
     let rationale: String?
     let evidenceUrl: String?
+    let isSubscribed: Bool
 
     init(
         id: String,
@@ -6838,7 +6425,8 @@ struct APIAssistantFeedOption: Codable {
         feedFormat: APIFeedFormat = .rss,
         description: String? = nil,
         rationale: String? = nil,
-        evidenceUrl: String? = nil
+        evidenceUrl: String? = nil,
+        isSubscribed: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -6849,6 +6437,7 @@ struct APIAssistantFeedOption: Codable {
         self.description = description
         self.rationale = rationale
         self.evidenceUrl = evidenceUrl
+        self.isSubscribed = isSubscribed
     }
 
     enum CodingKeys: String, CodingKey {
@@ -6861,6 +6450,7 @@ struct APIAssistantFeedOption: Codable {
         case description = "description"
         case rationale = "rationale"
         case evidenceUrl = "evidence_url"
+        case isSubscribed = "is_subscribed"
     }
 
     init(from decoder: Decoder) throws {
@@ -6874,6 +6464,7 @@ struct APIAssistantFeedOption: Codable {
         description = try container.decodeIfPresent(String.self, forKey: .description)
         rationale = try container.decodeIfPresent(String.self, forKey: .rationale)
         evidenceUrl = try container.decodeIfPresent(String.self, forKey: .evidenceUrl)
+        isSubscribed = try container.decodeIfPresent(Bool.self, forKey: .isSubscribed) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -6887,6 +6478,7 @@ struct APIAssistantFeedOption: Codable {
         try container.encodeIfPresent(description, forKey: .description)
         try container.encodeIfPresent(rationale, forKey: .rationale)
         try container.encodeIfPresent(evidenceUrl, forKey: .evidenceUrl)
+        try container.encode(isSubscribed, forKey: .isSubscribed)
     }
 }
 

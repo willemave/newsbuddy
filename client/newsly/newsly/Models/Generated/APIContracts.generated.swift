@@ -125,12 +125,12 @@ enum APITaskType: Codable, Equatable, Hashable {
     case download_tweet_video_audio
     case transcribe_tweet_video
     case summarize
-    case fetch_discussion
     case fetch_news_item_discussion
     case generate_image
     case discover_feeds
     case onboarding_discover
     case dig_deeper
+    case chat_turn
     case sync_integration
     case generate_audio_episode
     case run_llm_task
@@ -149,12 +149,12 @@ enum APITaskType: Codable, Equatable, Hashable {
         .download_tweet_video_audio,
         .transcribe_tweet_video,
         .summarize,
-        .fetch_discussion,
         .fetch_news_item_discussion,
         .generate_image,
         .discover_feeds,
         .onboarding_discover,
         .dig_deeper,
+        .chat_turn,
         .sync_integration,
         .generate_audio_episode,
         .run_llm_task,
@@ -174,12 +174,12 @@ enum APITaskType: Codable, Equatable, Hashable {
         case .download_tweet_video_audio: "download_tweet_video_audio"
         case .transcribe_tweet_video: "transcribe_tweet_video"
         case .summarize: "summarize"
-        case .fetch_discussion: "fetch_discussion"
         case .fetch_news_item_discussion: "fetch_news_item_discussion"
         case .generate_image: "generate_image"
         case .discover_feeds: "discover_feeds"
         case .onboarding_discover: "onboarding_discover"
         case .dig_deeper: "dig_deeper"
+        case .chat_turn: "chat_turn"
         case .sync_integration: "sync_integration"
         case .generate_audio_episode: "generate_audio_episode"
         case .run_llm_task: "run_llm_task"
@@ -201,12 +201,12 @@ enum APITaskType: Codable, Equatable, Hashable {
         case "download_tweet_video_audio": self = .download_tweet_video_audio
         case "transcribe_tweet_video": self = .transcribe_tweet_video
         case "summarize": self = .summarize
-        case "fetch_discussion": self = .fetch_discussion
         case "fetch_news_item_discussion": self = .fetch_news_item_discussion
         case "generate_image": self = .generate_image
         case "discover_feeds": self = .discover_feeds
         case "onboarding_discover": self = .onboarding_discover
         case "dig_deeper": self = .dig_deeper
+        case "chat_turn": self = .chat_turn
         case "sync_integration": self = .sync_integration
         case "generate_audio_episode": self = .generate_audio_episode
         case "run_llm_task": self = .run_llm_task
@@ -362,6 +362,7 @@ enum APISubmissionOutcome: Codable, Equatable, Hashable {
     case queued
     case processing
     case completed
+    case no_action
     case failed
     case skipped
     case subscribed
@@ -375,6 +376,7 @@ enum APISubmissionOutcome: Codable, Equatable, Hashable {
         .queued,
         .processing,
         .completed,
+        .no_action,
         .failed,
         .skipped,
         .subscribed,
@@ -389,6 +391,7 @@ enum APISubmissionOutcome: Codable, Equatable, Hashable {
         case .queued: "queued"
         case .processing: "processing"
         case .completed: "completed"
+        case .no_action: "no_action"
         case .failed: "failed"
         case .skipped: "skipped"
         case .subscribed: "subscribed"
@@ -405,6 +408,7 @@ enum APISubmissionOutcome: Codable, Equatable, Hashable {
         case "queued": self = .queued
         case "processing": self = .processing
         case "completed": self = .completed
+        case "no_action": self = .no_action
         case "failed": self = .failed
         case "skipped": self = .skipped
         case "subscribed": self = .subscribed
@@ -437,12 +441,14 @@ enum APIFeedType: Codable, Equatable, Hashable {
     case atom
     case substack
     case podcast_rss
+    case youtube
     case unknown(String)
 
     static let knownCases: [APIFeedType] = [
         .atom,
         .substack,
         .podcast_rss,
+        .youtube,
     ]
 
     var rawValue: String {
@@ -450,6 +456,7 @@ enum APIFeedType: Codable, Equatable, Hashable {
         case .atom: "atom"
         case .substack: "substack"
         case .podcast_rss: "podcast_rss"
+        case .youtube: "youtube"
         case .unknown(let rawValue): rawValue
         }
     }
@@ -459,6 +466,7 @@ enum APIFeedType: Codable, Equatable, Hashable {
         case "atom": self = .atom
         case "substack": self = .substack
         case "podcast_rss": self = .podcast_rss
+        case "youtube": self = .youtube
         default: self = .unknown(rawValue)
         }
     }
@@ -496,6 +504,47 @@ enum APIFeedFormat: Codable, Equatable, Hashable {
         switch rawValue {
         case "rss": self = .rss
         case "atom": self = .atom
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+enum APIFeedSubscriptionOutcome: Codable, Equatable, Hashable {
+    case created
+    case reactivated
+    case already_subscribed
+    case unknown(String)
+
+    static let knownCases: [APIFeedSubscriptionOutcome] = [
+        .created,
+        .reactivated,
+        .already_subscribed,
+    ]
+
+    var rawValue: String {
+        switch self {
+        case .created: "created"
+        case .reactivated: "reactivated"
+        case .already_subscribed: "already_subscribed"
+        case .unknown(let rawValue): rawValue
+        }
+    }
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "created": self = .created
+        case "reactivated": self = .reactivated
+        case "already_subscribed": self = .already_subscribed
         default: self = .unknown(rawValue)
         }
     }

@@ -46,8 +46,6 @@
     "client/newsly/newsly/Models/TweetSuggestion.swift:TweetSuggestion",
     "client/newsly/newsly/Models/TweetSuggestion.swift:TweetSuggestionsRequest",
     "client/newsly/newsly/Models/TweetSuggestion.swift:TweetSuggestionsResponse",
-    "client/newsly/newsly/Models/User.swift:AccessTokenResponse",
-    "client/newsly/newsly/Models/User.swift:RefreshTokenRequest",
     "client/newsly/newsly/Models/User.swift:TokenResponse",
     "client/newsly/newsly/Models/User.swift:UpdateUserProfileRequest",
     "client/newsly/newsly/Models/User.swift:User",

@@ -54,12 +54,12 @@ class TaskType(StrEnum):
     DOWNLOAD_TWEET_VIDEO_AUDIO = "download_tweet_video_audio"
     TRANSCRIBE_TWEET_VIDEO = "transcribe_tweet_video"
     SUMMARIZE = "summarize"
-    FETCH_DISCUSSION = "fetch_discussion"
     FETCH_NEWS_ITEM_DISCUSSION = "fetch_news_item_discussion"
     GENERATE_IMAGE = "generate_image"
     DISCOVER_FEEDS = "discover_feeds"
     ONBOARDING_DISCOVER = "onboarding_discover"
     DIG_DEEPER = "dig_deeper"
+    CHAT_TURN = "chat_turn"
     SYNC_INTEGRATION = "sync_integration"
     GENERATE_AUDIO_EPISODE = "generate_audio_episode"
     RUN_LLM_TASK = "run_llm_task"
@@ -105,6 +105,7 @@ class LlmTaskMode(StrEnum):
     """Specific mode inside an LLM task family."""
 
     ADD_CONTENT = "add_content"
+    ADD_TO_BRIEFING = "add_to_briefing"
     ADD_LINKS = "add_links"
     ADD_FEED = "add_feed"
     CHAT = "chat"
@@ -220,6 +221,7 @@ class SubmissionOutcome(StrEnum):
     QUEUED = "queued"
     PROCESSING = "processing"
     COMPLETED = "completed"
+    NO_ACTION = "no_action"
     FAILED = "failed"
     SKIPPED = "skipped"
     SUBSCRIBED = "subscribed"
@@ -243,6 +245,7 @@ class FeedType(StrEnum):
     ATOM = "atom"
     SUBSTACK = "substack"
     PODCAST_RSS = "podcast_rss"
+    YOUTUBE = "youtube"
 
 
 class FeedFormat(StrEnum):
@@ -250,6 +253,14 @@ class FeedFormat(StrEnum):
 
     RSS = "rss"
     ATOM = "atom"
+
+
+class FeedSubscriptionOutcome(StrEnum):
+    """Idempotent result of subscribing to a feed."""
+
+    CREATED = "created"
+    REACTIVATED = "reactivated"
+    ALREADY_SUBSCRIBED = "already_subscribed"
 
 
 class AudioEpisodeKind(StrEnum):
