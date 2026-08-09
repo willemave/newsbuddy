@@ -109,11 +109,8 @@ def get_db_session() -> Generator[Session]:
         db.close()
 
 
-def get_readonly_db_session() -> Generator[Session]:
-    """Get a read-only database session for FastAPI dependency injection."""
-    SessionLocal = get_session_factory()
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# This must be the same dependency object, not a wrapper. FastAPI then reuses the
+# authenticated request's session for read routes instead of opening a second
+# connection merely because the route historically used a "readonly" spelling.
+# SQL ownership remains explicit in the query/service layers.
+get_readonly_db_session = get_db_session

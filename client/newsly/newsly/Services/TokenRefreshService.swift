@@ -18,15 +18,18 @@ final class TokenRefreshService: TokenRefreshing {
 
     private let session: URLSession
     private let tokenStore: AuthTokenStore
+    private let processLock: AuthRefreshProcessLock
     private let refreshCoordinator = RefreshCoordinator(cooldownSeconds: 10)
     private let logger = Logger(subsystem: "com.newsly", category: "TokenRefreshService")
 
     init(
         session: URLSession = .newslyDefault,
-        tokenStore: AuthTokenStore = KeychainManager.shared
+        tokenStore: AuthTokenStore = KeychainManager.shared,
+        processLock: AuthRefreshProcessLock = .shared
     ) {
         self.session = session
         self.tokenStore = tokenStore
+        self.processLock = processLock
     }
 
     var hasStoredCredentialMaterial: Bool {
@@ -45,37 +48,32 @@ final class TokenRefreshService: TokenRefreshing {
     }
 
     func refreshAccessToken() async throws -> String {
-        if let task = await refreshCoordinator.activeTask() {
-            return try await task.value
-        }
-
-        if let cached = await refreshCoordinator.cachedToken(
+        let task = await refreshCoordinator.task(
             accessToken: tokenStore.getToken(key: .accessToken)
-        ) {
-            return cached
-        }
-
-        let task = Task { [weak self] () throws -> String in
-            defer {
-                Task { [weak self] in
-                    await self?.refreshCoordinator.clearTask()
-                }
-            }
+        ) { [weak self] in
             guard let self else { throw AuthError.refreshFailed }
-            let token = try await self.performRefreshAccessToken()
-            await self.refreshCoordinator.markSuccess()
-            return token
+            do {
+                return try await self.processLock.withLock {
+                    // The lock may have been contended by the Share Extension.
+                    // Read the refresh token only after acquiring it.
+                    try await self.performRefreshAccessToken()
+                }
+            } catch let error as AuthRefreshProcessLockError {
+                self.logger.error(
+                    "[AuthRefresh] Cross-process lock failed | description=\(error.localizedDescription, privacy: .public)"
+                )
+                throw AuthError.refreshFailed
+            }
         }
-
-        await refreshCoordinator.setTask(task)
         return try await task.value
     }
 
-    private func performRefreshAccessToken() async throws -> String {
+    private func performRefreshAccessToken(rotatedRetryCount: Int = 1) async throws -> String {
         guard let refreshToken = tokenStore.getToken(key: .refreshToken) else {
             logger.error("[AuthRefresh] Missing refresh token")
             throw AuthError.noRefreshToken
         }
+        let attemptedAccessToken = tokenStore.getToken(key: .accessToken)
 
         guard let url = URL(string: "\(AppSettings.shared.baseURL)/auth/refresh") else {
             throw AuthError.serverError(statusCode: -1, message: "Invalid refresh URL")
@@ -97,15 +95,36 @@ final class TokenRefreshService: TokenRefreshing {
             case 200:
                 let decoder = JSONDecoder()
                 let tokenResponse = try decoder.decode(TokenRefreshResponsePayload.self, from: data)
-                tokenStore.saveToken(tokenResponse.accessToken, key: .accessToken)
+                // Publish the rotated one-time credential first. A concurrent process
+                // can then recognize that its rejected token is stale without deleting it.
                 tokenStore.saveToken(tokenResponse.refreshToken, key: .refreshToken)
+                tokenStore.saveToken(tokenResponse.accessToken, key: .accessToken)
                 tokenStore.deleteLegacyTokenIfAvailable(named: "openaiApiKey")
                 logger.info("[AuthRefresh] Refresh succeeded")
                 return tokenResponse.accessToken
 
             case 401, 403:
-                tokenStore.deleteToken(key: .accessToken)
-                tokenStore.deleteToken(key: .refreshToken)
+                let currentRefreshToken = tokenStore.getToken(key: .refreshToken)
+                if currentRefreshToken != refreshToken {
+                    if let currentAccessToken = tokenStore.getToken(key: .accessToken),
+                       !currentAccessToken.isEmpty,
+                       currentAccessToken != attemptedAccessToken {
+                        logger.info("[AuthRefresh] Reusing tokens rotated by another process")
+                        return currentAccessToken
+                    }
+                    if rotatedRetryCount > 0, currentRefreshToken?.isEmpty == false {
+                        logger.info("[AuthRefresh] Retrying with refresh token rotated by another process")
+                        return try await performRefreshAccessToken(
+                            rotatedRetryCount: rotatedRetryCount - 1
+                        )
+                    }
+                    throw AuthError.refreshTokenExpired
+                }
+
+                // AuthenticationService performs the eventual logout cleanup.
+                // Never delete here: an older extension version that does not yet
+                // participate in the process lock could publish a rotated pair
+                // between our comparison and a destructive Keychain operation.
                 let detail = String(data: data, encoding: .utf8) ?? "Unknown"
                 logger.error(
                     "[AuthRefresh] Invalid refresh token | status=\(httpResponse.statusCode) detail=\(detail, privacy: .public)"
@@ -131,6 +150,7 @@ final class TokenRefreshService: TokenRefreshing {
             throw AuthError.refreshFailed
         }
     }
+
 }
 
 private struct TokenRefreshRequestPayload: Codable {
@@ -152,7 +172,12 @@ private struct TokenRefreshResponsePayload: Codable {
 }
 
 private actor RefreshCoordinator {
-    private var refreshTask: Task<String, Error>?
+    private struct ActiveRefresh {
+        let id: UUID
+        let task: Task<String, Error>
+    }
+
+    private var activeRefresh: ActiveRefresh?
     private var lastSuccessfulRefresh: Date?
     private let cooldownSeconds: TimeInterval
 
@@ -160,30 +185,43 @@ private actor RefreshCoordinator {
         self.cooldownSeconds = cooldownSeconds
     }
 
-    func activeTask() -> Task<String, Error>? {
-        refreshTask
-    }
-
-    func setTask(_ task: Task<String, Error>) {
-        refreshTask = task
-    }
-
-    func clearTask() {
-        refreshTask = nil
-    }
-
-    func markSuccess() {
-        lastSuccessfulRefresh = Date()
-    }
-
-    func cachedToken(accessToken: String?) -> String? {
-        guard let lastSuccessfulRefresh,
-              Date().timeIntervalSince(lastSuccessfulRefresh) < cooldownSeconds,
-              let token = accessToken,
-              !token.isEmpty else {
-            return nil
+    func task(
+        accessToken: String?,
+        operation: @escaping @Sendable () async throws -> String
+    ) -> Task<String, Error> {
+        if let activeRefresh {
+            return activeRefresh.task
         }
-        return token
+
+        if let lastSuccessfulRefresh,
+           Date().timeIntervalSince(lastSuccessfulRefresh) < cooldownSeconds,
+           let accessToken,
+           !accessToken.isEmpty {
+            return Task { accessToken }
+        }
+
+        let refreshID = UUID()
+        let task = Task { try await operation() }
+        activeRefresh = ActiveRefresh(id: refreshID, task: task)
+        Task { [weak self] in
+            let succeeded: Bool
+            do {
+                _ = try await task.value
+                succeeded = true
+            } catch {
+                succeeded = false
+            }
+            await self?.finish(refreshID: refreshID, succeeded: succeeded)
+        }
+        return task
+    }
+
+    private func finish(refreshID: UUID, succeeded: Bool) {
+        guard activeRefresh?.id == refreshID else { return }
+        activeRefresh = nil
+        if succeeded {
+            lastSuccessfulRefresh = Date()
+        }
     }
 }
 

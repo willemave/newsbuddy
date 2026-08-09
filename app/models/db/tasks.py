@@ -5,6 +5,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -33,6 +34,15 @@ class ProcessingTask(Base):
     __tablename__ = "processing_tasks"
 
     id = Column(Integer, primary_key=True)
+    # Set only for work whose lifecycle is exclusively owned by one user.
+    # Shared content work remains ownerless and grants polling access through
+    # ``processing_task_user_access`` instead.
+    owner_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     task_type = Column(String(50), nullable=False, index=True)
     content_id = Column(Integer, nullable=True, index=True)
     payload = Column(JSON, default=dict)
@@ -86,6 +96,26 @@ class ProcessingTask(Base):
             postgresql_where=text("dedupe_key IS NOT NULL AND status IN ('pending', 'processing')"),
         ),
     )
+
+
+class ProcessingTaskUserAccess(Base):
+    """Users allowed to observe one async task through the jobs API."""
+
+    __tablename__ = "processing_task_user_access"
+
+    task_id = Column(
+        Integer,
+        ForeignKey("processing_tasks.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+
+    __table_args__ = (Index("idx_processing_task_user_access_user_task", "user_id", "task_id"),)
 
 
 def processing_task_lease_clear_values() -> dict[str, object]:

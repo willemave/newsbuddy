@@ -2,14 +2,19 @@
 
 import re
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, create_refresh_token
+from app.models.api.auth import RefreshTokenRequest
 from app.models.contracts import TaskType
-from app.models.db import UserIntegrationConnection
+from app.models.db import ProcessingTask, User, UserIntegrationConnection
+from app.routers import auth as auth_router
+from app.services.refresh_token_rotation import consume_refresh_token
 
 
 @pytest.fixture
@@ -229,6 +234,103 @@ def test_refresh_token_rotation(
     data2 = response2.json()
     assert "access_token" in data2
     assert "refresh_token" in data2
+
+    replay = auth_client.post(
+        "/auth/refresh",
+        json={"refresh_token": initial_refresh_token},
+    )
+    assert replay.status_code == 401
+
+
+def test_refresh_token_can_only_be_consumed_once_concurrently(
+    client_factory,
+    user_factory,
+) -> None:
+    user = user_factory(
+        apple_id="001234.concurrent-rotation",
+        email="concurrent-rotation@icloud.com",
+        is_active=True,
+    )
+    refresh_token = create_refresh_token(user.id)
+    barrier = Barrier(2)
+
+    def exchange(client: TestClient) -> int:
+        barrier.wait(timeout=5)
+        return client.post(
+            "/auth/refresh",
+            json={"refresh_token": refresh_token},
+        ).status_code
+
+    with (
+        client_factory(authenticate=False) as first_client,
+        client_factory(authenticate=False) as second_client,
+        ThreadPoolExecutor(max_workers=2) as executor,
+    ):
+        futures = [
+            executor.submit(exchange, first_client),
+            executor.submit(exchange, second_client),
+        ]
+        statuses = sorted(future.result(timeout=10) for future in futures)
+
+    assert statuses == [200, 401]
+
+
+def test_refresh_rotation_holds_user_lock_until_token_is_consumed(
+    db_session_factory,
+    user_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = user_factory(
+        apple_id="001234.refresh-delete-race",
+        email="refresh-delete-race@icloud.com",
+        is_active=True,
+    )
+    user_id = user.id
+    assert user_id is not None
+    raw_refresh_token = create_refresh_token(user_id)
+    refresh_locked_user = Event()
+    deletion_attempted = Event()
+    release_refresh = Event()
+    deletion_locked_user = Event()
+
+    def paused_consume(db, **kwargs):  # noqa: ANN001
+        refresh_locked_user.set()
+        assert deletion_attempted.wait(timeout=5)
+        assert release_refresh.wait(timeout=5)
+        return consume_refresh_token(db, **kwargs)
+
+    monkeypatch.setattr(auth_router, "consume_refresh_token", paused_consume)
+
+    def rotate_token() -> str:
+        with db_session_factory() as refresh_db:
+            response = auth_router.refresh_token(
+                RefreshTokenRequest(refresh_token=raw_refresh_token),
+                refresh_db,
+            )
+            refresh_db.commit()
+            return response.refresh_token
+
+    def delete_user() -> None:
+        with db_session_factory() as deletion_db:
+            deletion_attempted.set()
+            locked_user = deletion_db.query(User).filter(User.id == user_id).with_for_update().one()
+            deletion_locked_user.set()
+            deletion_db.delete(locked_user)
+            deletion_db.commit()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        refresh_future = executor.submit(rotate_token)
+        assert refresh_locked_user.wait(timeout=5)
+        deletion_future = executor.submit(delete_user)
+        assert deletion_attempted.wait(timeout=5)
+        assert not deletion_locked_user.wait(timeout=0.1)
+
+        release_refresh.set()
+        assert refresh_future.result(timeout=5)
+        deletion_future.result(timeout=5)
+
+    with db_session_factory() as verification_db:
+        assert verification_db.get(User, user_id) is None
 
 
 def test_validation_error_response_does_not_echo_request_body(
@@ -570,15 +672,6 @@ def test_delete_account_reauthenticates_deactivates_and_enqueues(
         lambda code: revoked.append(code),
     )
 
-    enqueued: list[tuple[object, dict[str, object]]] = []
-
-    class FakeGateway:
-        def enqueue(self, task_type, **kwargs) -> int:
-            enqueued.append((task_type, kwargs))
-            return 1
-
-    monkeypatch.setattr("app.routers.auth.get_task_queue_gateway", lambda: FakeGateway())
-
     response = client.request(
         "DELETE",
         "/auth/me",
@@ -590,15 +683,11 @@ def test_delete_account_reauthenticates_deactivates_and_enqueues(
     db_session.refresh(test_user)
     assert test_user.is_active is False
     assert revoked == ["fresh-code"]
-    assert enqueued == [
-        (
-            TaskType.DELETE_USER_ACCOUNT,
-            {
-                "payload": {"user_id": test_user.id},
-                "dedupe_key": f"delete-user-account:{test_user.id}",
-            },
-        )
-    ]
+    task = db_session.query(ProcessingTask).one()
+    assert task.task_type == TaskType.DELETE_USER_ACCOUNT.value
+    assert task.payload == {"user_id": test_user.id}
+    assert task.dedupe_key == f"delete-user-account:{test_user.id}"
+    assert task.owner_user_id is None
 
 
 def test_delete_account_stays_active_when_deletion_cannot_be_queued(
@@ -617,7 +706,7 @@ def test_delete_account_stays_active_when_deletion_cannot_be_queued(
     )
 
     class FailingGateway:
-        def enqueue(self, task_type, **kwargs) -> int:
+        def enqueue_many_in_session(self, db, requests) -> list[int]:
             raise RuntimeError("queue unavailable")
 
     monkeypatch.setattr("app.routers.auth.get_task_queue_gateway", lambda: FailingGateway())

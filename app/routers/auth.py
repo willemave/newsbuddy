@@ -33,8 +33,11 @@ from app.models.api.users import UpdateUserProfileRequest, UserResponse
 from app.models.contracts import TaskType
 from app.models.db.users import User
 from app.models.domain.user_profile import CouncilPersonaConfig, resolve_user_council_personas
+from app.services.active_users import lock_active_user
 from app.services.apple_account import exchange_and_revoke_apple_authorization
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
+from app.services.queue import TaskEnqueueRequest
+from app.services.refresh_token_rotation import consume_refresh_token
 from app.services.x_integration import has_active_x_connection, normalize_twitter_username
 
 logger = get_logger(__name__)
@@ -209,12 +212,28 @@ def delete_current_account(
 
     user_id = require_user_id(current_user)
     try:
-        get_task_queue_gateway().enqueue(
-            TaskType.DELETE_USER_ACCOUNT,
-            payload={"user_id": user_id},
-            dedupe_key=f"delete-user-account:{user_id}",
+        locked_user = (
+            db.query(User)
+            .filter(User.id == user_id, User.is_active.is_(True))
+            .with_for_update()
+            .one_or_none()
         )
+        if locked_user is None:
+            raise ValueError("Account is no longer active")
+        locked_user.is_active = False
+        get_task_queue_gateway().enqueue_many_in_session(
+            db,
+            [
+                TaskEnqueueRequest(
+                    task_type=TaskType.DELETE_USER_ACCOUNT,
+                    payload={"user_id": user_id},
+                    dedupe_key=f"delete-user-account:{user_id}",
+                )
+            ],
+        )
+        db.commit()
     except Exception as exc:  # noqa: BLE001
+        db.rollback()
         logger.exception(
             "Failed to enqueue account deletion",
             extra=build_log_extra(
@@ -228,8 +247,6 @@ def delete_current_account(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Account deletion could not be scheduled; try again",
         ) from exc
-    current_user.is_active = False
-    db.commit()
     return DeleteAccountResponse()
 
 
@@ -326,18 +343,28 @@ def refresh_token(
             raise credentials_exception
         if token_type != "refresh":
             raise credentials_exception
+        try:
+            parsed_user_id = int(user_id)
+        except ValueError:
+            raise credentials_exception from None
 
-    except jwt.InvalidTokenError:
+    except (jwt.InvalidTokenError, ValueError):
         raise credentials_exception from None
 
-    # Verify user exists and is active
-    user = db.query(User).filter(User.id == int(user_id)).first()
-
-    if user is None or not user.is_active:
+    # Hold a shared row lock through token consumption and the request commit so
+    # account deletion cannot purge this user between validation and rotation.
+    current_user_id = lock_active_user(db, parsed_user_id)
+    if current_user_id is None:
         raise credentials_exception
 
     # Generate new access token AND new refresh token (token rotation)
-    current_user_id = require_user_id(user)
+    if not consume_refresh_token(
+        db,
+        raw_token=request.refresh_token,
+        payload=payload,
+        user_id=current_user_id,
+    ):
+        raise credentials_exception
     access_token = create_access_token(current_user_id)
     new_refresh_token = create_refresh_token(current_user_id)
 

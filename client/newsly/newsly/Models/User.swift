@@ -155,28 +155,6 @@ struct AuthSession: Equatable {
     let isNewUser: Bool
 }
 
-/// Request for token refresh
-struct RefreshTokenRequest: Codable {
-    let refreshToken: String
-
-    enum CodingKeys: String, CodingKey {
-        case refreshToken = "refresh_token"
-    }
-}
-
-/// Response for token refresh (with token rotation)
-struct AccessTokenResponse: Codable {
-    let accessToken: String
-    let refreshToken: String
-    let tokenType: String
-
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
-        case refreshToken = "refresh_token"
-        case tokenType = "token_type"
-    }
-}
-
 struct UpdateUserProfileRequest: Codable {
     let fullName: String?
     let twitterUsername: String?

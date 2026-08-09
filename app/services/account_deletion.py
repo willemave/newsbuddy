@@ -5,6 +5,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from sqlalchemy import cast, or_
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
@@ -19,6 +21,8 @@ from app.models.db import (
     ChatMessage,
     ChatSession,
     CliLinkSession,
+    ConsumedRefreshToken,
+    Content,
     ContentKnowledgeSave,
     ContentReadStatus,
     ContentStatusEntry,
@@ -38,6 +42,7 @@ from app.models.db import (
     OnboardingFirstEditionRun,
     OnboardingFirstEditionSource,
     ProcessingTask,
+    ProcessingTaskUserAccess,
     User,
     UserApiKey,
     UserFeedback,
@@ -47,6 +52,7 @@ from app.models.db import (
     UserScraperConfig,
     VendorUsageRecord,
 )
+from app.models.metadata.state import remove_user_references
 from app.services.learning_deck_artifacts import delete_learning_deck_objects
 from app.services.personal_markdown_library import get_personal_markdown_user_root
 from app.services.token_crypto import decrypt_token
@@ -59,6 +65,9 @@ logger = get_logger(__name__)
 USER_OWNED_MODELS: tuple[tuple[type, str], ...] = (
     (AnalyticsInteraction, "user_id"),
     (UserApiKey, "user_id"),
+    (ConsumedRefreshToken, "user_id"),
+    (ProcessingTaskUserAccess, "user_id"),
+    (ProcessingTask, "owner_user_id"),
     (AudioEpisode, "user_id"),
     (BriefingLens, "user_id"),
     (BriefingSegment, "user_id"),
@@ -88,23 +97,21 @@ USER_OWNED_MODELS: tuple[tuple[type, str], ...] = (
 
 def cancel_pending_user_tasks(db: Session, *, user_id: int, current_task_id: int) -> bool:
     """Cancel queued work and report whether another user task is still running."""
-    user_filter = ProcessingTask.payload["user_id"].as_integer() == user_id
     db.query(ProcessingTask).filter(
         ProcessingTask.id != current_task_id,
-        user_filter,
+        ProcessingTask.owner_user_id == user_id,
         ProcessingTask.status == TaskStatus.PENDING.value,
     ).delete(synchronize_session=False)
     active_exists = (
         db.query(ProcessingTask.id)
         .filter(
             ProcessingTask.id != current_task_id,
-            user_filter,
+            ProcessingTask.owner_user_id == user_id,
             ProcessingTask.status == TaskStatus.PROCESSING.value,
         )
         .first()
         is not None
     )
-    db.commit()
     return not active_exists
 
 
@@ -119,6 +126,7 @@ def purge_user_account(db: Session, *, user_id: int, current_task_id: int) -> No
     _revoke_x_connections(db, user_id=user_id)
     _delete_user_files(db, user_id=user_id)
     _delete_indirect_rows(db, user_id=user_id)
+    _scrub_shared_content_metadata(db, user_id=user_id)
 
     for model, column_name in USER_OWNED_MODELS:
         column = getattr(model, column_name)
@@ -196,6 +204,32 @@ def _delete_indirect_rows(db: Session, *, user_id: int) -> None:
         db.query(NewsItemDiscussion).filter(
             NewsItemDiscussion.news_item_id.in_(owned_news_ids)
         ).delete(synchronize_session=False)
+
+
+def _scrub_shared_content_metadata(db: Session, *, user_id: int) -> None:
+    """Remove private user references retained on otherwise shared content rows."""
+
+    metadata = cast(Content.content_metadata, JSONB)
+    processing = metadata["processing"]
+    candidates = (
+        db.query(Content)
+        .filter(
+            or_(
+                metadata["submitted_by_user_id"].as_integer() == user_id,
+                metadata["share_and_chat_user_ids"].contains([user_id]),
+                metadata["share_and_chat_requests"].contains([{"user_id": user_id}]),
+                processing["submitted_by_user_id"].as_integer() == user_id,
+                processing["share_and_chat_user_ids"].contains([user_id]),
+                processing["share_and_chat_requests"].contains([{"user_id": user_id}]),
+            )
+        )
+        .all()
+    )
+    for content in candidates:
+        content.content_metadata = remove_user_references(
+            content.content_metadata,
+            user_id=user_id,
+        )
 
 
 def _revoke_x_connections(db: Session, *, user_id: int) -> None:

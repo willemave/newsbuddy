@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 import jwt
 
@@ -29,6 +30,8 @@ def create_token(user_id: int, token_type: str, expires_delta: timedelta) -> str
         "exp": expire,
         "iat": datetime.now(UTC),
     }
+    if token_type == "refresh":
+        payload["jti"] = str(uuid4())
 
     encoded_jwt = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt

@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.settings import get_settings
 from app.models.db import ProcessingTask
+from app.models.db.users import User
 from app.testing.postgres_harness import create_temporary_postgres_harness
 
 
@@ -28,7 +29,7 @@ def _check_constraint_names(engine) -> set[str]:
 def test_lease_token_upgrade_downgrade_and_reupgrade(monkeypatch) -> None:
     harness = create_temporary_postgres_harness(
         schema_prefix="queue_lease_token_migration",
-        tables=[ProcessingTask.__table__],
+        tables=[User.__table__, ProcessingTask.__table__],
     )
     try:
         with harness.engine.begin() as connection:
@@ -75,7 +76,7 @@ def test_lease_token_upgrade_downgrade_and_reupgrade(monkeypatch) -> None:
                 {"lease_token": uuid4()},
             ).scalar_one()
 
-        command.upgrade(config, "head")
+        command.upgrade(config, "20260730_02")
         assert "ck_processing_tasks_lease_token_has_owner" in _check_constraint_names(
             harness.engine
         )
@@ -150,7 +151,7 @@ def test_lease_token_upgrade_downgrade_and_reupgrade(monkeypatch) -> None:
         command.downgrade(config, "20260725_01")
         assert "lease_token" not in _column_names(harness.engine)
 
-        command.upgrade(config, "head")
+        command.upgrade(config, "20260730_02")
         assert "lease_token" in _column_names(harness.engine)
         assert "ck_processing_tasks_lease_token_has_owner" in _check_constraint_names(
             harness.engine

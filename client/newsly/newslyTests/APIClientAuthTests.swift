@@ -192,7 +192,7 @@ final class APIClientAuthTests: XCTestCase {
         XCTAssertEqual(tokenStore.getToken(key: .refreshToken), "new-refresh")
     }
 
-    func testTokenRefreshServiceClearsTokensWhenRefreshExpires() async {
+    func testTokenRefreshServiceDoesNotDeleteCredentialsWhenRefreshExpires() async {
         let session = makeSession()
         let tokenStore = MockTokenStore(
             accessToken: "old-access",
@@ -226,8 +226,174 @@ final class APIClientAuthTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
 
-        XCTAssertNil(tokenStore.getToken(key: .accessToken))
-        XCTAssertNil(tokenStore.getToken(key: .refreshToken))
+        XCTAssertEqual(tokenStore.getToken(key: .accessToken), "old-access")
+        XCTAssertEqual(tokenStore.getToken(key: .refreshToken), "old-refresh")
+    }
+
+    func testRejectedStaleRefreshPreservesTokensRotatedByAnotherProcess() async throws {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(
+            accessToken: "old-access",
+            refreshToken: "old-refresh"
+        )
+        let service = TokenRefreshService(session: session, tokenStore: tokenStore)
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(
+                Self.refreshToken(in: request),
+                "old-refresh",
+                "The losing request must have captured the old one-time token first"
+            )
+            tokenStore.saveToken("winner-refresh", key: .refreshToken)
+            tokenStore.saveToken("winner-access", key: .accessToken)
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"detail":"already rotated"}"#.utf8)
+            )
+        }
+
+        let accessToken = try await service.refreshAccessToken()
+
+        XCTAssertEqual(accessToken, "winner-access")
+        XCTAssertEqual(tokenStore.getToken(key: .accessToken), "winner-access")
+        XCTAssertEqual(tokenStore.getToken(key: .refreshToken), "winner-refresh")
+    }
+
+    func testProcessLockSerializesRejectedTokenCheckAndWinnerRotation() async throws {
+        let lockFileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("newsly-auth-lock-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: lockFileURL) }
+        let loserLock = AuthRefreshProcessLock(fileURLProvider: { lockFileURL })
+        let winnerLock = AuthRefreshProcessLock(fileURLProvider: { lockFileURL })
+        let tokenStore = MockTokenStore(
+            accessToken: "old-access",
+            refreshToken: "old-refresh"
+        )
+        let loserCheckedToken = expectation(description: "loser checked rejected token")
+        let winnerStarted = expectation(description: "winner attempted rotation")
+        let loserResumeGate = APIAuthAsyncGate()
+
+        let loser = Task {
+            try await loserLock.withLock {
+                let attemptedToken = tokenStore.getToken(key: .refreshToken)
+                XCTAssertEqual(attemptedToken, "old-refresh")
+                loserCheckedToken.fulfill()
+                await loserResumeGate.wait()
+                if tokenStore.getToken(key: .refreshToken) == attemptedToken {
+                    tokenStore.deleteToken(key: .refreshToken)
+                    tokenStore.deleteToken(key: .accessToken)
+                }
+            }
+        }
+        await fulfillment(of: [loserCheckedToken], timeout: 1)
+
+        let winner = Task {
+            winnerStarted.fulfill()
+            try await winnerLock.withLock {
+                tokenStore.saveToken("winner-refresh", key: .refreshToken)
+                tokenStore.saveToken("winner-access", key: .accessToken)
+            }
+        }
+        await fulfillment(of: [winnerStarted], timeout: 1)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(tokenStore.getToken(key: .refreshToken), "old-refresh")
+
+        await loserResumeGate.open()
+        try await loser.value
+        try await winner.value
+
+        XCTAssertEqual(tokenStore.getToken(key: .refreshToken), "winner-refresh")
+        XCTAssertEqual(tokenStore.getToken(key: .accessToken), "winner-access")
+    }
+
+    func testRejectedStaleRefreshRetriesWhenOnlyRefreshTokenHasRotated() async throws {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(
+            accessToken: "old-access",
+            refreshToken: "old-refresh"
+        )
+        let service = TokenRefreshService(session: session, tokenStore: tokenStore)
+        let requestCounter = LockedCounter()
+
+        MockURLProtocol.requestHandler = { request in
+            requestCounter.increment()
+            if requestCounter.value == 1 {
+                tokenStore.saveToken("winner-refresh", key: .refreshToken)
+                return (
+                    HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 401,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    Data(#"{"detail":"already rotated"}"#.utf8)
+                )
+            }
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"access_token":"final-access","refresh_token":"final-refresh"}"#.utf8)
+            )
+        }
+
+        let accessToken = try await service.refreshAccessToken()
+
+        XCTAssertEqual(accessToken, "final-access")
+        XCTAssertEqual(requestCounter.value, 2)
+        XCTAssertEqual(tokenStore.getToken(key: .refreshToken), "final-refresh")
+    }
+
+    func testConcurrentTokenRefreshCallsShareOneRequest() async throws {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(
+            accessToken: "old-access",
+            refreshToken: "old-refresh"
+        )
+        let service = TokenRefreshService(
+            session: session,
+            tokenStore: tokenStore
+        )
+        let requestStarted = expectation(description: "refresh request started")
+        requestStarted.assertForOverFulfill = false
+        let responseGate = DispatchSemaphore(value: 0)
+        let requestCounter = LockedCounter()
+
+        MockURLProtocol.requestHandler = { request in
+            requestCounter.increment()
+            requestStarted.fulfill()
+            _ = responseGate.wait(timeout: .now() + 2)
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"access_token":"new-access","refresh_token":"new-refresh"}"#.utf8)
+            )
+        }
+
+        let refreshTasks = (0..<12).map { _ in
+            Task { try await service.refreshAccessToken() }
+        }
+        await fulfillment(of: [requestStarted], timeout: 1)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(requestCounter.value, 1)
+        responseGate.signal()
+        let tokens = try await refreshTasks.asyncValues()
+
+        XCTAssertEqual(Set(tokens), ["new-access"])
+        XCTAssertEqual(requestCounter.value, 1)
     }
 
     func testServerAuthErrorUsesFriendlyMessageForHTMLGatewayResponse() {
@@ -261,9 +427,61 @@ final class APIClientAuthTests: XCTestCase {
         configuration.protocolClasses = [MockURLProtocol.self]
         return URLSession(configuration: configuration)
     }
+
+    private static func refreshToken(in request: URLRequest) -> String? {
+        guard let body = bodyData(from: request),
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: String] else {
+            return nil
+        }
+        return json["refresh_token"]
+    }
+
+    private static func bodyData(from request: URLRequest) -> Data? {
+        if let body = request.httpBody {
+            return body
+        }
+        guard let stream = request.httpBodyStream else { return nil }
+
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        let bufferSize = 1_024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while true {
+            let count = stream.read(buffer, maxLength: bufferSize)
+            if count <= 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+}
+
+private actor APIAuthAsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        for waiter in pendingWaiters {
+            waiter.resume()
+        }
+    }
 }
 
 private final class MockTokenStore: AuthTokenStore {
+    private let lock = NSLock()
     private var storage: [KeychainManager.KeychainKey: String]
 
     init(accessToken: String?, refreshToken: String?) {
@@ -278,19 +496,19 @@ private final class MockTokenStore: AuthTokenStore {
     }
 
     func getToken(key: KeychainManager.KeychainKey) -> String? {
-        storage[key]
+        lock.withLock { storage[key] }
     }
 
     func saveToken(_ token: String, key: KeychainManager.KeychainKey) {
-        storage[key] = token
+        lock.withLock { storage[key] = token }
     }
 
     func deleteToken(key: KeychainManager.KeychainKey) {
-        storage.removeValue(forKey: key)
+        lock.withLock { _ = storage.removeValue(forKey: key) }
     }
 
     func clearAll() {
-        storage.removeAll()
+        lock.withLock { storage.removeAll() }
     }
 }
 
@@ -363,4 +581,28 @@ private final class MockURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.withLock { count }
+    }
+
+    func increment() {
+        lock.withLock { count += 1 }
+    }
+}
+
+private extension Array where Element == Task<String, Error> {
+    func asyncValues() async throws -> [String] {
+        var values: [String] = []
+        values.reserveCapacity(count)
+        for task in self {
+            values.append(try await task.value)
+        }
+        return values
+    }
 }

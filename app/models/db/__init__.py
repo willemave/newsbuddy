@@ -37,8 +37,9 @@ from app.models.db.onboarding import (
     OnboardingDiscoveryRun,
     OnboardingDiscoverySuggestion,
 )
+from app.models.db.refresh_tokens import ConsumedRefreshToken
 from app.models.db.scraper_configs import UserScraperConfig
-from app.models.db.tasks import ProcessingTask
+from app.models.db.tasks import ProcessingTask, ProcessingTaskUserAccess
 from app.models.db.usage import VendorUsageRecord
 from app.models.db.users import User
 

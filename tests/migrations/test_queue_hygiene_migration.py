@@ -6,6 +6,7 @@ from sqlalchemy import inspect, text
 
 from app.core.settings import get_settings
 from app.models.db import ProcessingTask
+from app.models.db.users import User
 from app.testing.postgres_harness import create_temporary_postgres_harness
 
 
@@ -19,7 +20,7 @@ def _index_columns(engine) -> dict[str, tuple[str, ...]]:
 def test_queue_hygiene_upgrade_and_downgrade(monkeypatch) -> None:
     harness = create_temporary_postgres_harness(
         schema_prefix="queue_hygiene_migration",
-        tables=[ProcessingTask.__table__],
+        tables=[User.__table__, ProcessingTask.__table__],
     )
     try:
         with harness.engine.begin() as connection:
@@ -57,7 +58,7 @@ def test_queue_hygiene_upgrade_and_downgrade(monkeypatch) -> None:
         monkeypatch.setenv("DATABASE_URL", migration_database_url)
         get_settings.cache_clear()
         config = Config("migrations/alembic.ini")
-        command.upgrade(config, "head")
+        command.upgrade(config, "20260730_02")
 
         columns = {
             column["name"]: column
