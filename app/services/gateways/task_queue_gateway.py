@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from app.models.contracts import TaskQueue, TaskType
-from app.services.queue import QueueService, get_queue_service
+from app.services.queue import QueueService, TaskEnqueueRequest, get_queue_service
 
 
 class TaskQueueGateway:
@@ -23,20 +26,39 @@ class TaskQueueGateway:
         queue_name: TaskQueue | str | None = None,
         dedupe: bool | None = None,
         dedupe_key: str | None = None,
+        owner_user_id: int | None = None,
+        access_user_id: int | None = None,
+        available_at: datetime | None = None,
     ) -> int:
         """Enqueue task with optional dedupe and queue override."""
         enqueue_kwargs: dict[str, Any] = {"task_type": task_type}
-        if content_id is not None:
-            enqueue_kwargs["content_id"] = content_id
-        if payload is not None:
-            enqueue_kwargs["payload"] = payload
-        if queue_name is not None:
-            enqueue_kwargs["queue_name"] = queue_name
-        if dedupe is not None:
-            enqueue_kwargs["dedupe"] = dedupe
-        if dedupe_key is not None:
-            enqueue_kwargs["dedupe_key"] = dedupe_key
+        optional_arguments = {
+            "content_id": content_id,
+            "payload": payload,
+            "queue_name": queue_name,
+            "dedupe": dedupe,
+            "dedupe_key": dedupe_key,
+            "owner_user_id": owner_user_id,
+            "access_user_id": access_user_id,
+            "available_at": available_at,
+        }
+        enqueue_kwargs.update(
+            {key: value for key, value in optional_arguments.items() if value is not None}
+        )
         return self._queue_service.enqueue(**enqueue_kwargs)
+
+    def enqueue_many_in_session(
+        self,
+        db: Session,
+        requests: list[TaskEnqueueRequest],
+    ) -> list[int]:
+        """Enqueue a task batch in the caller-owned transaction."""
+        return self._queue_service.enqueue_many_in_session(db, requests)
+
+    def grant_access_in_session(self, db: Session, *, task_id: int, user_id: int) -> None:
+        """Grant an active user access to an existing asynchronous job."""
+
+        self._queue_service.grant_access_in_session(db, task_id=task_id, user_id=user_id)
 
 
 _task_queue_gateway: TaskQueueGateway | None = None

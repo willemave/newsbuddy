@@ -20,6 +20,7 @@ class TaskEnvelope(BaseModel):
     model_config = ConfigDict(extra="ignore", from_attributes=True)
 
     id: int
+    owner_user_id: int | None = None
     task_type: TaskType
     content_id: int | None = None
     payload: dict[str, Any] = Field(default_factory=dict)

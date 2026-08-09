@@ -38,6 +38,10 @@ class RequiredUserPayload(TaskPayload):
     user_id: int
 
 
+class OnboardingDiscoverPayload(RequiredUserPayload):
+    run_id: int | None = Field(default=None, gt=0)
+
+
 class NewsItemIdPayload(TaskPayload):
     news_item_id: int
 
@@ -49,10 +53,19 @@ class ScrapePayload(TaskPayload):
 
 class DigDeeperPayload(RequiredUserPayload):
     initial_message: str | None = None
+    session_id: int | None = Field(default=None, gt=0)
+    message_id: int | None = Field(default=None, gt=0)
+    prompt: str | None = None
 
 
-class AudioEpisodePayload(TaskPayload):
-    audio_episode_id: int
+class AudioEpisodePayload(RequiredUserPayload):
+    user_id: int = Field(gt=0)
+    audio_episode_id: int = Field(gt=0)
+
+
+class ChatTurnPayload(RequiredUserPayload):
+    session_id: int
+    message_id: int
 
 
 class LlmTaskRunPayload(RequiredUserPayload):
@@ -77,6 +90,7 @@ class TaskSpec:
     handler_class: str
     dedupe_by_content: bool = False
     requires_context_llm_service: bool = False
+    requires_owner: bool = False
 
     def normalize_payload(self, payload: dict[str, Any] | None) -> dict[str, Any]:
         try:
@@ -102,6 +116,7 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
         FeedBatchBackfillRequest,
         "app.pipeline.handlers.backfill_feeds",
         "BackfillFeedsHandler",
+        requires_owner=True,
     ),
     TaskSpec(
         TaskType.ANALYZE_URL,
@@ -168,14 +183,6 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
         requires_context_llm_service=True,
     ),
     TaskSpec(
-        TaskType.FETCH_DISCUSSION,
-        TaskQueue.DISCUSSION,
-        ContentIdPayload,
-        "app.pipeline.handlers.fetch_discussion",
-        "FetchDiscussionHandler",
-        dedupe_by_content=True,
-    ),
-    TaskSpec(
         TaskType.FETCH_NEWS_ITEM_DISCUSSION,
         TaskQueue.DISCUSSION,
         NewsItemIdPayload,
@@ -195,17 +202,19 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
     TaskSpec(
         TaskType.DISCOVER_FEEDS,
         TaskQueue.CONTENT,
-        TaskPayload,
+        RequiredUserPayload,
         "app.pipeline.handlers.discover_feeds",
         "DiscoverFeedsHandler",
+        requires_owner=True,
     ),
     TaskSpec(
         TaskType.ONBOARDING_DISCOVER,
         TaskQueue.ONBOARDING,
-        RequiredUserPayload,
+        OnboardingDiscoverPayload,
         "app.pipeline.handlers.onboarding_discover",
         "OnboardingDiscoverHandler",
         dedupe_by_content=True,
+        requires_owner=True,
     ),
     TaskSpec(
         TaskType.DIG_DEEPER,
@@ -213,6 +222,15 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
         DigDeeperPayload,
         "app.pipeline.handlers.dig_deeper",
         "DigDeeperHandler",
+        requires_owner=True,
+    ),
+    TaskSpec(
+        TaskType.CHAT_TURN,
+        TaskQueue.CHAT,
+        ChatTurnPayload,
+        "app.pipeline.handlers.chat_turn",
+        "ChatTurnHandler",
+        requires_owner=True,
     ),
     TaskSpec(
         TaskType.SYNC_INTEGRATION,
@@ -221,6 +239,7 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
         "app.pipeline.handlers.sync_integration",
         "SyncIntegrationHandler",
         dedupe_by_content=True,
+        requires_owner=True,
     ),
     TaskSpec(
         TaskType.GENERATE_AUDIO_EPISODE,
@@ -229,6 +248,7 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
         "app.pipeline.handlers.generate_audio_episode",
         "GenerateAudioEpisodeHandler",
         dedupe_by_content=True,
+        requires_owner=True,
     ),
     TaskSpec(
         TaskType.RUN_LLM_TASK,
@@ -236,6 +256,7 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
         LlmTaskRunPayload,
         "app.pipeline.handlers.run_llm_task",
         "RunLlmTaskHandler",
+        requires_owner=True,
     ),
     TaskSpec(
         TaskType.BRIEFING_REFRESH,
@@ -243,6 +264,7 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
         BriefingRefreshPayload,
         "app.pipeline.handlers.briefing_refresh",
         "BriefingRefreshHandler",
+        requires_owner=True,
     ),
     TaskSpec(
         TaskType.DELETE_USER_ACCOUNT,

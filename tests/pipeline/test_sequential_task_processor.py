@@ -3,6 +3,8 @@
 import subprocess
 import sys
 import threading
+from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 from uuid import UUID
@@ -223,6 +225,90 @@ class TestSequentialTaskProcessor:
         assert result.retryable is False
         assert "Invalid payload for analyze_url" in (result.error_message or "")
         processor.dispatcher.dispatch.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("task_type", "payload"),
+        [
+            (TaskType.DISCOVER_FEEDS, {}),
+            (TaskType.BACKFILL_FEEDS, {"config_ids": [1], "count": 1}),
+            (TaskType.RUN_LLM_TASK, {"llm_task_id": 7}),
+            (TaskType.GENERATE_AUDIO_EPISODE, {"audio_episode_id": 8}),
+            (TaskType.BRIEFING_REFRESH, {}),
+        ],
+    )
+    def test_owned_task_skips_provider_work_for_inactive_user(
+        self,
+        processor,
+        db_session,
+        test_user,
+        task_type,
+        payload,
+    ):
+        test_user.is_active = False
+        db_session.commit()
+        owner_user_id = int(test_user.id)
+        task = TaskEnvelope(
+            id=9,
+            owner_user_id=owner_user_id,
+            task_type=task_type,
+            payload={"user_id": owner_user_id, **payload},
+        )
+
+        result = processor.process_task(task)
+
+        assert result.success is True
+        processor.dispatcher.dispatch.assert_not_called()
+
+    def test_owned_task_rejects_owner_payload_mismatch(self, processor):
+        task = TaskEnvelope(
+            id=10,
+            owner_user_id=1,
+            task_type=TaskType.RUN_LLM_TASK,
+            payload={"user_id": 2, "llm_task_id": 7},
+        )
+
+        result = processor.process_task(task)
+
+        assert result.success is False
+        assert result.retryable is False
+        assert "identity" in (result.error_message or "")
+        processor.dispatcher.dispatch.assert_not_called()
+
+    def test_owned_task_releases_active_user_preflight_before_dispatch(
+        self,
+        processor,
+        monkeypatch,
+    ):
+        guard_exited = False
+
+        @contextmanager
+        def owner_guard():
+            nonlocal guard_exited
+            yield Mock()
+            guard_exited = True
+
+        monkeypatch.setattr(
+            "app.pipeline.sequential_task_processor.lock_active_user",
+            lambda _db, user_id: user_id,
+        )
+
+        def dispatch_after_guard(_task, _context):
+            assert guard_exited is True
+            return TaskResult.ok()
+
+        processor.dispatcher.dispatch.side_effect = dispatch_after_guard
+        task = TaskEnvelope(
+            id=11,
+            owner_user_id=1,
+            task_type=TaskType.RUN_LLM_TASK,
+            payload={"user_id": 1, "llm_task_id": 7},
+        )
+        context = replace(processor.context, db_factory=owner_guard)
+
+        result = processor.process_task(task, context=context)
+
+        assert result.success is True
+        processor.dispatcher.dispatch.assert_called_once()
 
     def test_process_task_sets_default_error_message(self, processor):
         """Test default error message when handler returns none."""

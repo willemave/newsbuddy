@@ -17,6 +17,7 @@ class ClaimedTask(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: int
+    owner_user_id: int | None = None
     task_type: str
     content_id: int | None
     payload: dict[str, Any]

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models.db import ProcessingTask
+from app.models.db import ProcessingTask, ProcessingTaskUserAccess
 from app.models.internal.queue import ClaimedTask, TaskResult
 from app.services.queue import (
     QueueService,
@@ -214,9 +214,11 @@ def test_finalize_task_deferral_preserves_retry_budget_and_clears_error(
     assert task.available_at >= datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=110)
 
 
-def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
+def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch, user_factory):
     """Tasks are partitioned into the expected default queue."""
     queue = _patch_db(monkeypatch, db_session)
+    user = user_factory()
+    assert user.id is not None
 
     content_task_id = queue.enqueue(TaskType.SUMMARIZE, content_id=1)
     image_task_id = queue.enqueue(TaskType.GENERATE_IMAGE, content_id=9)
@@ -224,25 +226,33 @@ def test_enqueue_assigns_default_queue_by_task_type(db_session, monkeypatch):
     tweet_video_task_id = queue.enqueue(TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO, content_id=4)
     audio_episode_task_id = queue.enqueue(
         TaskType.GENERATE_AUDIO_EPISODE,
-        payload={"audio_episode_id": 8},
+        payload={"audio_episode_id": 8, "user_id": user.id},
+        owner_user_id=user.id,
     )
     backfill_task_id = queue.enqueue(
         TaskType.BACKFILL_FEEDS,
-        payload={"user_id": 11, "config_ids": [1], "count": 5},
+        payload={"user_id": user.id, "config_ids": [1], "count": 5},
+        owner_user_id=user.id,
     )
     news_discussion_task_id = queue.enqueue(
         TaskType.FETCH_NEWS_ITEM_DISCUSSION,
         payload={"news_item_id": 77},
     )
-    onboarding_task_id = queue.enqueue(TaskType.ONBOARDING_DISCOVER, payload={"user_id": 11})
+    onboarding_task_id = queue.enqueue(
+        TaskType.ONBOARDING_DISCOVER,
+        payload={"user_id": user.id},
+        owner_user_id=user.id,
+    )
     integration_task_id = queue.enqueue(
         TaskType.SYNC_INTEGRATION,
-        payload={"user_id": 11, "provider": "x"},
+        payload={"user_id": user.id, "provider": "x"},
+        owner_user_id=user.id,
     )
     chat_task_id = queue.enqueue(
         TaskType.DIG_DEEPER,
         content_id=3,
-        payload={"user_id": 11},
+        payload={"user_id": user.id},
+        owner_user_id=user.id,
     )
 
     tasks = {
@@ -340,6 +350,73 @@ def test_enqueue_dedupes_content_tasks_by_default(db_session, monkeypatch):
     assert len(queued_tasks) == 1
 
 
+def test_enqueue_shared_dedupe_grants_each_requesting_user_access(
+    db_session,
+    monkeypatch,
+    user_factory,
+) -> None:
+    queue = _patch_db(monkeypatch, db_session)
+    first_user = user_factory()
+    second_user = user_factory()
+
+    first_task_id = queue.enqueue(
+        TaskType.PROCESS_CONTENT,
+        content_id=42,
+        access_user_id=first_user.id,
+    )
+    second_task_id = queue.enqueue(
+        TaskType.PROCESS_CONTENT,
+        content_id=42,
+        access_user_id=second_user.id,
+    )
+
+    assert second_task_id == first_task_id
+    assert {
+        user_id
+        for (user_id,) in db_session.query(ProcessingTaskUserAccess.user_id)
+        .filter(ProcessingTaskUserAccess.task_id == first_task_id)
+        .all()
+    } == {first_user.id, second_user.id}
+
+
+def test_enqueue_owned_task_rejects_inactive_user(
+    db_session,
+    monkeypatch,
+    user_factory,
+) -> None:
+    queue = _patch_db(monkeypatch, db_session)
+    user = user_factory(is_active=False)
+
+    with pytest.raises(ValueError, match="missing or inactive"):
+        queue.enqueue(
+            TaskType.DIG_DEEPER,
+            content_id=42,
+            payload={"user_id": user.id},
+            owner_user_id=user.id,
+        )
+
+    assert db_session.query(ProcessingTask).count() == 0
+
+
+def test_enqueue_owned_task_rejects_payload_owner_mismatch(
+    db_session,
+    monkeypatch,
+    user_factory,
+) -> None:
+    queue = _patch_db(monkeypatch, db_session)
+    first_user = user_factory()
+    second_user = user_factory()
+
+    with pytest.raises(ValueError, match="must match payload user_id"):
+        queue.enqueue(
+            TaskType.RUN_LLM_TASK,
+            payload={"user_id": second_user.id, "llm_task_id": 7},
+            owner_user_id=first_user.id,
+        )
+
+    assert db_session.query(ProcessingTask).count() == 0
+
+
 def test_enqueue_dedupes_news_discussion_tasks_by_payload(db_session, monkeypatch):
     """News-item discussion tasks are deduped even though they use payload IDs."""
     queue = _patch_db(monkeypatch, db_session)
@@ -370,12 +447,22 @@ def test_enqueue_validates_payload_against_task_spec(db_session, monkeypatch):
         queue.enqueue(TaskType.ANALYZE_URL, payload={"content_id": "not-an-int"})
 
 
-def test_enqueue_allows_distinct_onboarding_payloads(db_session, monkeypatch):
+def test_enqueue_allows_distinct_onboarding_payloads(db_session, monkeypatch, user_factory):
     """Onboarding dedupe still allows multiple active jobs with different payloads."""
     queue = _patch_db(monkeypatch, db_session)
 
-    first_task_id = queue.enqueue(TaskType.ONBOARDING_DISCOVER, payload={"user_id": 1})
-    second_task_id = queue.enqueue(TaskType.ONBOARDING_DISCOVER, payload={"user_id": 2})
+    first_user = user_factory()
+    second_user = user_factory()
+    first_task_id = queue.enqueue(
+        TaskType.ONBOARDING_DISCOVER,
+        payload={"user_id": first_user.id},
+        owner_user_id=first_user.id,
+    )
+    second_task_id = queue.enqueue(
+        TaskType.ONBOARDING_DISCOVER,
+        payload={"user_id": second_user.id},
+        owner_user_id=second_user.id,
+    )
     assert second_task_id != first_task_id
 
     queued_tasks = (
@@ -386,9 +473,11 @@ def test_enqueue_allows_distinct_onboarding_payloads(db_session, monkeypatch):
     assert len(queued_tasks) == 2
 
 
-def test_enqueue_dedupes_targeted_payload_tasks(db_session, monkeypatch):
+def test_enqueue_dedupes_targeted_payload_tasks(db_session, monkeypatch, user_factory):
     """Payload-keyed tasks should reuse active work for the same logical request."""
     queue = _patch_db(monkeypatch, db_session)
+    user = user_factory()
+    assert user.id is not None
 
     first_news_task_id = queue.enqueue(TaskType.PROCESS_NEWS_ITEM, payload={"news_item_id": 1})
     second_news_task_id = queue.enqueue(TaskType.PROCESS_NEWS_ITEM, payload={"news_item_id": 1})
@@ -396,21 +485,25 @@ def test_enqueue_dedupes_targeted_payload_tasks(db_session, monkeypatch):
 
     first_onboarding_task_id = queue.enqueue(
         TaskType.ONBOARDING_DISCOVER,
-        payload={"user_id": 1, "run_id": 7},
+        payload={"user_id": user.id, "run_id": 7},
+        owner_user_id=user.id,
     )
     second_onboarding_task_id = queue.enqueue(
         TaskType.ONBOARDING_DISCOVER,
-        payload={"user_id": 1, "run_id": 7},
+        payload={"user_id": user.id, "run_id": 7},
+        owner_user_id=user.id,
     )
     assert second_onboarding_task_id == first_onboarding_task_id
 
     first_sync_task_id = queue.enqueue(
         TaskType.SYNC_INTEGRATION,
-        payload={"user_id": 1, "provider": "x", "trigger": "cron"},
+        payload={"user_id": user.id, "provider": "x", "trigger": "cron"},
+        owner_user_id=user.id,
     )
     second_sync_task_id = queue.enqueue(
         TaskType.SYNC_INTEGRATION,
-        payload={"user_id": 1, "provider": "x", "trigger": "cron"},
+        payload={"user_id": user.id, "provider": "x", "trigger": "cron"},
+        owner_user_id=user.id,
     )
     assert second_sync_task_id == first_sync_task_id
 
@@ -452,9 +545,9 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
                 queue_name=TaskQueue.BACKFILL.value,
             ),
             ProcessingTask(
-                task_type=TaskType.FETCH_DISCUSSION.value,
+                task_type=TaskType.FETCH_NEWS_ITEM_DISCUSSION.value,
                 status=TaskStatus.PENDING.value,
-                payload={},
+                payload={"news_item_id": 1},
                 queue_name=TaskQueue.DISCUSSION.value,
             ),
             ProcessingTask(
@@ -515,7 +608,7 @@ def test_dequeue_filters_by_queue_name(db_session, monkeypatch):
         queue_name=TaskQueue.DISCUSSION,
     )
     assert discussion_task is not None
-    assert discussion_task.task_type == TaskType.FETCH_DISCUSSION.value
+    assert discussion_task.task_type == TaskType.FETCH_NEWS_ITEM_DISCUSSION.value
     assert discussion_task.queue_name == TaskQueue.DISCUSSION.value
 
     chat_task = queue.dequeue(worker_id="chat-test", queue_name=TaskQueue.CHAT)
@@ -601,6 +694,49 @@ def test_dequeue_reclaims_expired_processing_task(db_session, monkeypatch):
     assert refreshed.locked_by == "worker-reclaim"
     assert refreshed.lease_expires_at is not None
     assert refreshed.lease_expires_at > now
+
+
+@pytest.mark.parametrize(
+    ("task_type", "queue_name"),
+    [
+        (TaskType.CHAT_TURN, TaskQueue.CHAT),
+        (TaskType.RUN_LLM_TASK, TaskQueue.LLM),
+        (TaskType.GENERATE_AUDIO_EPISODE, TaskQueue.AUDIO_EPISODE),
+    ],
+)
+def test_reclaiming_paid_task_consumes_retry_budget(
+    db_session,
+    monkeypatch,
+    user_factory,
+    task_type: TaskType,
+    queue_name: TaskQueue,
+) -> None:
+    queue = _patch_db(monkeypatch, db_session)
+    user = user_factory()
+    assert user.id is not None
+    now = datetime.now(UTC).replace(tzinfo=None)
+    task = ProcessingTask(
+        owner_user_id=user.id,
+        task_type=task_type.value,
+        status=TaskStatus.PROCESSING.value,
+        payload={"user_id": user.id},
+        queue_name=queue_name.value,
+        retry_count=2,
+        available_at=now - timedelta(minutes=10),
+        started_at=now - timedelta(minutes=10),
+        locked_at=now - timedelta(minutes=10),
+        locked_by="stale-worker",
+        lease_expires_at=now - timedelta(seconds=1),
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    reclaimed = queue.dequeue(worker_id="replacement-worker", queue_name=queue_name)
+
+    assert reclaimed is not None
+    assert reclaimed.retry_count == 3
+    db_session.refresh(task)
+    assert task.retry_count == 3
 
 
 def test_renew_lease_extends_processing_task(db_session, monkeypatch):

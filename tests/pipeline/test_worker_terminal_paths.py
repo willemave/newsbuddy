@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 
 from pydantic import HttpUrl, TypeAdapter
 from sqlalchemy.exc import IntegrityError
@@ -10,13 +11,18 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import (
+    ChatSession,
     Content,
     ContentKnowledgeSave,
+    ContentReadStatus,
+    ContentStatusEntry,
+    ContentUnlikes,
     UserIntegrationConnection,
     UserIntegrationSyncedItem,
 )
 from app.models.domain.content_mapper import content_to_domain
 from app.pipeline.worker import ContentWorker
+from app.services.canonical_content_state import finalize_canonical_user_state
 
 
 def _require_id(value: int | None) -> int:
@@ -96,7 +102,12 @@ def test_update_canonical_url_marks_existing_content_id(monkeypatch, db_session)
     assert str(domain_content.url) == "https://example.com/original"
 
 
-def test_handle_canonical_integrity_conflict_marks_content_skipped(monkeypatch, db_session) -> None:
+def test_handle_canonical_integrity_conflict_marks_content_skipped(
+    monkeypatch,
+    db_session,
+    test_user,
+) -> None:
+    assert test_user.id == 1
     _patch_worker_db(monkeypatch, db_session)
 
     existing = Content(
@@ -143,10 +154,108 @@ def test_handle_canonical_integrity_conflict_marks_content_skipped(monkeypatch, 
     )
 
 
-def test_process_content_reconciles_bookmark_after_canonicalization(
+def test_canonical_conflict_relinks_ordinary_submission_user_state(
     monkeypatch,
     db_session,
 ) -> None:
+    _patch_worker_db(monkeypatch, db_session)
+    sync_calls: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "app.services.canonical_content_state.sync_personal_markdown_for_content",
+        lambda _db, *, user_id, content_id: sync_calls.append((user_id, content_id)),
+    )
+
+    winner = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://example.com/ordinary-canonical",
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={},
+    )
+    loser = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://example.com/ordinary-original",
+        status=ContentStatus.PROCESSING.value,
+        content_metadata={"submitted_by_user_id": 7, "submitted_via": "share_sheet"},
+    )
+    db_session.add_all([winner, loser])
+    db_session.flush()
+    winner_id = _require_id(winner.id)
+    loser_id = _require_id(loser.id)
+    older = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1)
+    newer = older + timedelta(hours=2)
+    chat_session = ChatSession(
+        user_id=7,
+        content_id=loser_id,
+        title="Canonical destination",
+        session_type="knowledge_chat",
+    )
+    db_session.add_all(
+        [
+            ContentStatusEntry(user_id=7, content_id=loser_id, status="inbox"),
+            ContentReadStatus(user_id=7, content_id=winner_id, read_at=older),
+            ContentReadStatus(user_id=7, content_id=loser_id, read_at=newer),
+            ContentKnowledgeSave(user_id=7, content_id=winner_id, saved_at=older),
+            ContentKnowledgeSave(user_id=7, content_id=loser_id, saved_at=newer),
+            ContentUnlikes(user_id=7, content_id=loser_id, unliked_at=newer),
+            chat_session,
+        ]
+    )
+    db_session.commit()
+
+    domain_content = content_to_domain(loser)
+    domain_content.url = TypeAdapter(HttpUrl).validate_python(str(winner.url))
+    integrity_error = IntegrityError(
+        "UPDATE contents ...",
+        {},
+        Exception("UNIQUE constraint failed: contents.url, contents.content_type"),
+    )
+
+    assert ContentWorker()._handle_canonical_integrity_conflict(
+        domain_content,
+        integrity_error,
+    )
+
+    db_session.refresh(loser)
+    db_session.refresh(chat_session)
+    assert loser.status == ContentStatus.SKIPPED.value
+    assert loser.content_metadata is not None
+    assert loser.content_metadata["canonical_content_id"] == winner_id
+    assert chat_session.content_id == winner_id
+    assert db_session.query(ContentStatusEntry).filter_by(content_id=loser_id).count() == 0
+    assert db_session.query(ContentStatusEntry).filter_by(content_id=winner_id).count() == 1
+    assert db_session.query(ContentReadStatus).filter_by(content_id=loser_id).count() == 0
+    assert (
+        db_session.query(ContentReadStatus).filter_by(content_id=winner_id).one().read_at == newer
+    )
+    assert db_session.query(ContentKnowledgeSave).filter_by(content_id=loser_id).count() == 0
+    assert (
+        db_session.query(ContentKnowledgeSave).filter_by(content_id=winner_id).one().saved_at
+        == newer
+    )
+    assert db_session.query(ContentUnlikes).filter_by(content_id=loser_id).count() == 0
+    assert db_session.query(ContentUnlikes).filter_by(content_id=winner_id).count() == 1
+    assert sync_calls == [(7, loser_id), (7, winner_id)]
+
+    assert (
+        finalize_canonical_user_state(
+            db_session,
+            loser_content_id=loser_id,
+            winner_content_id=winner_id,
+        )
+        == set()
+    )
+    db_session.commit()
+    assert db_session.query(ContentStatusEntry).filter_by(content_id=winner_id).count() == 1
+    assert db_session.query(ContentReadStatus).filter_by(content_id=winner_id).count() == 1
+    assert db_session.query(ContentKnowledgeSave).filter_by(content_id=winner_id).count() == 1
+
+
+def test_process_content_reconciles_bookmark_after_canonicalization(
+    monkeypatch,
+    db_session,
+    test_user,
+) -> None:
+    assert test_user.id == 1
     _patch_worker_db(monkeypatch, db_session)
 
     existing = Content(

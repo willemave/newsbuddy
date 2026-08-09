@@ -29,6 +29,7 @@ from app.pipeline.task_context import TaskContext
 from app.pipeline.task_handler import TaskHandler
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.task_specs import TASK_SPECS, get_task_spec
+from app.services.active_users import lock_active_user
 from app.services.gateways.task_queue_gateway import TaskQueueGateway
 from app.services.queue import QueueService
 
@@ -343,8 +344,9 @@ class SequentialTaskProcessor:
     ) -> TaskResult:
         """Process a single task."""
         start_time = time.perf_counter()
+        task_spec = get_task_spec(task.task_type)
         try:
-            normalized_payload = get_task_spec(task.task_type).normalize_payload(task.payload)
+            normalized_payload = task_spec.normalize_payload(task.payload)
         except ValueError as exc:
             logger.error(
                 "Task payload failed spec validation",
@@ -396,7 +398,11 @@ class SequentialTaskProcessor:
                         context_data={"payload_keys": sorted(task.payload.keys())},
                     ),
                 )
-                result = self.dispatcher.dispatch(task, context or self.context)
+                effective_context = context or self.context
+                if task_spec.requires_owner:
+                    result = self._dispatch_owned_task(task, effective_context)
+                else:
+                    result = self.dispatcher.dispatch(task, effective_context)
                 if not result.success and not result.error_message and not result.deferred:
                     result = TaskResult(
                         success=False,
@@ -437,6 +443,48 @@ class SequentialTaskProcessor:
                     ),
                 )
                 return TaskResult.fail(str(exc))
+
+    def _dispatch_owned_task(
+        self,
+        task: TaskEnvelope,
+        context: TaskContext,
+    ) -> TaskResult:
+        """Preflight user-owned work before dispatching without holding a DB lock."""
+
+        owner_user_id = task.owner_user_id
+        payload_user_id = task.payload.get("user_id")
+        if (
+            owner_user_id is None
+            or isinstance(payload_user_id, bool)
+            or not isinstance(payload_user_id, int)
+            or payload_user_id != owner_user_id
+        ):
+            return TaskResult.fail(
+                "Owned task identity is missing or inconsistent",
+                retryable=False,
+            )
+
+        with context.db_factory() as owner_guard_db:
+            if lock_active_user(owner_guard_db, owner_user_id) is None:
+                logger.info(
+                    "Skipping owned task because its user is inactive",
+                    extra=_task_extra(
+                        task,
+                        processor=self,
+                        operation="active_owner_preflight",
+                        status="skipped",
+                        context_data={"owner_user_id": owner_user_id},
+                    ),
+                )
+                return TaskResult.ok()
+
+        # The claimed task remains PROCESSING while its handler runs. Account
+        # deletion marks the user inactive immediately, then defers its purge
+        # until processing user-owned tasks finish. Releasing this preflight
+        # transaction avoids pinning a connection across external I/O and, more
+        # importantly, lets handlers update the same user row in their own
+        # transaction without waiting on our own shared lock.
+        return self.dispatcher.dispatch(task, context)
 
     def _finalize_processed_task(
         self,

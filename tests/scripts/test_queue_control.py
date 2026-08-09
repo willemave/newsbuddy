@@ -144,7 +144,7 @@ def test_move_tasks_to_spec_queues_moves_misrouted_rows(db_session) -> None:
         queue_name=TaskQueue.MEDIA.value,
     )
     completed_misrouted_task = ProcessingTask(
-        task_type=TaskType.FETCH_DISCUSSION.value,
+        task_type="fetch_discussion",
         content_id=4,
         payload={},
         status=TaskStatus.COMPLETED.value,
@@ -193,9 +193,8 @@ def test_move_tasks_to_spec_queues_moves_misrouted_rows(db_session) -> None:
 def test_move_tasks_to_spec_queues_dry_run_leaves_rows_unchanged(db_session) -> None:
     """Spec-driven move previews do not mutate queue assignments."""
     task = ProcessingTask(
-        task_type=TaskType.FETCH_DISCUSSION.value,
-        content_id=1,
-        payload={},
+        task_type=TaskType.FETCH_NEWS_ITEM_DISCUSSION.value,
+        payload={"news_item_id": 1},
         status=TaskStatus.PENDING.value,
         queue_name=TaskQueue.CONTENT.value,
     )

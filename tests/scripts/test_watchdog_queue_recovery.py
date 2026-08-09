@@ -118,7 +118,7 @@ def test_run_watchdog_once_moves_misrouted_queue_rows(db_session) -> None:
         queue_name=TaskQueue.MEDIA.value,
     )
     completed_misrouted_task = ProcessingTask(
-        task_type=TaskType.FETCH_DISCUSSION.value,
+        task_type="fetch_discussion",
         status=TaskStatus.COMPLETED.value,
         payload={},
         queue_name=TaskQueue.CONTENT.value,

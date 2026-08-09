@@ -131,6 +131,25 @@ def test_shutdown_stops_every_claim_loop() -> None:
     assert all(not instance.running for instance in instances)
 
 
+def test_shutdown_releases_agent_vm_resources_after_threads_join() -> None:
+    processor = ThreadedTaskProcessor(TaskQueue.CONTENT, threads=2)
+    instances: list = []
+    with (
+        patch(
+            "app.pipeline.threaded_task_processor.SequentialTaskProcessor",
+            _fake_processor_class(instances),
+        ),
+        patch("app.pipeline.threaded_task_processor.warm_queue_models"),
+        patch(
+            "app.pipeline.threaded_task_processor.close_process_agent_vm_sessions"
+        ) as close_agent_vms,
+    ):
+        processor.run()
+
+    assert all(not instance.running for instance in instances)
+    close_agent_vms.assert_called_once_with()
+
+
 def test_max_tasks_is_one_exact_process_wide_budget() -> None:
     """Bounded drains must not multiply the limit or strand idle claim loops."""
     instances = _run_with_fake_processors(threads=6, max_tasks=3)

@@ -6,19 +6,27 @@ from datetime import timedelta
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.engine import Engine
 
 from app.core.db import get_engine
-from app.models.contracts import TaskStatus
+from app.models.contracts import TaskStatus, TaskType
 from app.models.db import ProcessingTask
 from app.models.db.tasks import processing_task_lease_clear_values
 from app.models.internal.queue import ClaimedTask, TaskTransition
 
 _TASKS = ProcessingTask.__table__
+_LEASE_RECLAIM_BUDGET_TASK_TYPES = frozenset(
+    {
+        TaskType.CHAT_TURN.value,
+        TaskType.GENERATE_AUDIO_EPISODE.value,
+        TaskType.RUN_LLM_TASK.value,
+    }
+)
 
 _CLAIM_COLUMNS = (
     _TASKS.c.id,
+    _TASKS.c.owner_user_id,
     _TASKS.c.task_type,
     _TASKS.c.content_id,
     _TASKS.c.payload,
@@ -143,6 +151,16 @@ class ProcessingTaskQueueRepository:
                 locked_by=worker_id,
                 lease_token=lease_token,
                 lease_expires_at=now + timedelta(seconds=max(lease_seconds, 1)),
+                retry_count=case(
+                    (
+                        and_(
+                            _TASKS.c.status == TaskStatus.PROCESSING.value,
+                            _TASKS.c.task_type.in_(_LEASE_RECLAIM_BUDGET_TASK_TYPES),
+                        ),
+                        _TASKS.c.retry_count + 1,
+                    ),
+                    else_=_TASKS.c.retry_count,
+                ),
             )
             .returning(*_CLAIM_COLUMNS)
         )

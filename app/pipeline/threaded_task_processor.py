@@ -11,6 +11,7 @@ from app.core.observability import build_log_extra
 from app.core.settings import get_settings
 from app.pipeline.queue_notifications import QueueNotificationListener
 from app.pipeline.sequential_task_processor import SequentialTaskProcessor
+from app.services.agent_vm_sessions import close_process_agent_vm_sessions
 from app.services.news_embeddings import warm_news_embedding_model
 from app.services.news_reranker import warm_news_reranker_model
 from app.services.queue import QueueService, TaskQueue
@@ -128,6 +129,7 @@ class ThreadedTaskProcessor:
             self._request_shutdown()
             self._join_all(worker_threads)
             self._listener.close()
+            close_process_agent_vm_sessions()
 
         logger.info(
             "Threaded task processor stopped (queue=%s, processed %s tasks)",

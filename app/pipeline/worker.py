@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.logging import get_logger
@@ -13,7 +12,6 @@ from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content
 from app.models.domain.content import ContentData
 from app.models.domain.content_mapper import content_to_domain, domain_to_content
-from app.models.metadata.access import metadata_view
 from app.models.metadata.state import (
     normalize_metadata_shape,
     update_processing_state,
@@ -25,6 +23,11 @@ from app.pipeline.tweet_video_metadata import (
 )
 from app.processing_strategies.registry import get_strategy_registry
 from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
+from app.services.canonical_content_state import (
+    finalize_canonical_user_state,
+    reconcile_canonical_x_bookmark_destinations,
+    sync_canonical_personal_library,
+)
 from app.services.content_bodies import sync_content_body_storage
 from app.services.content_lifecycle import (
     TERMINAL_STATUSES,
@@ -42,7 +45,6 @@ from app.services.llm_summarization import ContentSummarizer, get_content_summar
 from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
 from app.services.queue import TaskType, get_queue_service
 from app.services.source_metadata import SOURCE_METADATA_KEY, attach_source_metadata
-from app.services.x_bookmark_destinations import reconcile_x_bookmark_destinations_for_content
 from app.services.youtube_equivalent_resolver import (
     resolve_youtube_equivalent,
 )
@@ -53,29 +55,6 @@ from app.utils.url_utils import is_http_url, normalize_http_url
 logger = get_logger(__name__)
 settings = get_settings()
 DISCUSSION_PREVIEW_METADATA_KEYS: tuple[str, ...] = ("top_comment", "comment_count")
-
-
-def _reconcile_canonical_x_bookmark_destinations(
-    db: Session,
-    *,
-    content_id: int,
-    metadata: dict[str, Any],
-) -> None:
-    view = metadata_view(metadata)
-    raw_canonical_id = view.processing_flag("canonical_content_id")
-    try:
-        canonical_id = int(raw_canonical_id)
-    except (TypeError, ValueError):
-        return
-    if canonical_id <= 0 or canonical_id == content_id:
-        return
-
-    submitted_via = str(view.processing_flag("submitted_via") or "").strip().lower()
-    reconcile_x_bookmark_destinations_for_content(
-        db,
-        bookmark_content_id=content_id,
-        fallback_user_id=(view.submission_user_id() if submitted_via == "x_bookmarks" else None),
-    )
 
 
 def get_llm_service() -> ContentSummarizer:
@@ -241,7 +220,7 @@ class ContentWorker:
                         sync_content_body_storage(db, content=db_content)
                         try:
                             db.commit()
-                            _reconcile_canonical_x_bookmark_destinations(
+                            reconcile_canonical_x_bookmark_destinations(
                                 db,
                                 content_id=content_id,
                                 metadata=content.metadata,
@@ -543,16 +522,22 @@ class ContentWorker:
             # Detect feeds for user-submitted content
             feed_links = extracted_data.get("feed_links")
             if feed_links:
-                from app.services.feed_detection import FeedDetector
+                from app.services.agent_vm_runtime import resolve_sandbox_user_id
+                from app.services.feed_research_runtime import feed_research_runtime
 
-                feed_detector = FeedDetector()
-                feed_data = feed_detector.detect_from_links(
-                    feed_links,
-                    final_url,
-                    page_title=extracted_title,
-                    source=existing_metadata.get("source"),
-                    content_type=content.content_type,
-                )
+                submitter_id = existing_metadata.get("submitted_by_user_id")
+                sandbox_user_id = resolve_sandbox_user_id(submitter_id)
+                with feed_research_runtime(
+                    user_id=sandbox_user_id,
+                    execution_id=content.id,
+                ) as runtime:
+                    feed_data = runtime.detector.detect_from_links(
+                        feed_links,
+                        final_url,
+                        page_title=extracted_title,
+                        source=existing_metadata.get("source"),
+                        content_type=content.content_type,
+                    )
                 if feed_data:
                     metadata_update["detected_feed"] = feed_data.get("detected_feed")
                     if feed_data.get("all_detected_feeds"):
@@ -844,9 +829,23 @@ class ContentWorker:
             db_content.status = ContentStatus.SKIPPED.value
             db_content.error_message = "Canonical URL conflicts with existing content"
             db_content.processed_at = datetime.now(UTC)
+            affected_library_user_ids: set[int] = set()
+            if content.id is not None and duplicate_id is not None:
+                affected_library_user_ids = finalize_canonical_user_state(
+                    db,
+                    loser_content_id=content.id,
+                    winner_content_id=duplicate_id,
+                )
             db.commit()
+            if content.id is not None and duplicate_id is not None:
+                sync_canonical_personal_library(
+                    db,
+                    user_ids=affected_library_user_ids,
+                    loser_content_id=content.id,
+                    winner_content_id=duplicate_id,
+                )
             if content.id is not None:
-                _reconcile_canonical_x_bookmark_destinations(
+                reconcile_canonical_x_bookmark_destinations(
                     db,
                     content_id=content.id,
                     metadata=metadata,

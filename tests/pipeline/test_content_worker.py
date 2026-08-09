@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from pydantic import HttpUrl
 
 from app.models.contracts import ContentStatus, ContentType
 from app.models.domain.content import ContentData
@@ -730,7 +731,7 @@ class TestContentWorker:
                 thumbnail_url="https://i.ytimg.com/vi/abc123xyz/hqdefault.jpg",
             ),
             search_query="The Future of Software Engineering with AI Lightspeed Venture Partners",
-            resolved_url="https://podcasts.apple.com/us/podcast/example/id1?i=2",
+            resolved_url=HttpUrl("https://podcasts.apple.com/us/podcast/example/id1?i=2"),
             resolved_title="The Future of Software! When AI Becomes Your Reliability Team",
             content_type="podcast",
             platform="apple_podcasts",
@@ -809,7 +810,7 @@ class TestContentWorker:
                 author_name="Latent Space",
             ),
             search_query="Owning the AI Pareto Frontier Latent Space",
-            resolved_url="https://www.latent.space/p/jeffdean",
+            resolved_url=HttpUrl("https://www.latent.space/p/jeffdean"),
             resolved_title="Owning the AI Pareto Frontier — Jeff Dean",
             content_type="article",
             platform="substack",

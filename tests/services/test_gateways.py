@@ -5,13 +5,18 @@ import sys
 from io import BytesIO
 from unittest.mock import Mock
 
+import pytest
 from botocore.exceptions import ClientError
 
 from app.models.contracts import ContentType, TaskQueue, TaskType
 from app.services.gateways.http_gateway import HttpGateway, get_http_gateway
 from app.services.gateways.llm_gateway import LlmGateway, get_llm_gateway
-from app.services.gateways.object_storage_gateway import S3CompatibleObjectStorageGateway
+from app.services.gateways.object_storage_gateway import (
+    LocalObjectStorageGateway,
+    S3CompatibleObjectStorageGateway,
+)
 from app.services.gateways.task_queue_gateway import TaskQueueGateway, get_task_queue_gateway
+from app.services.queue import TaskEnqueueRequest
 
 
 def _s3_gateway(client: Mock) -> S3CompatibleObjectStorageGateway:
@@ -19,6 +24,47 @@ def _s3_gateway(client: Mock) -> S3CompatibleObjectStorageGateway:
     gateway._bucket = "content-bodies"
     gateway._client = client
     return gateway
+
+
+def test_local_object_storage_supports_nested_keys(tmp_path) -> None:
+    gateway = LocalObjectStorageGateway(tmp_path / "objects")
+
+    metadata = gateway.put_text(
+        key="articles/1.md",
+        text="hello",
+        content_type="text/markdown",
+    )
+
+    assert metadata.key == "articles/1.md"
+    assert gateway.get_text(key="articles/1.md") == "hello"
+    assert gateway.exists(key="articles/1.md") is True
+
+
+@pytest.mark.parametrize("key", ["", "../escape.txt", "nested/../../escape.txt"])
+def test_local_object_storage_rejects_keys_outside_root(tmp_path, key: str) -> None:
+    gateway = LocalObjectStorageGateway(tmp_path / "objects")
+
+    with pytest.raises(ValueError, match="storage root"):
+        gateway.put_bytes(key=key, data=b"no", content_type="text/plain")
+
+
+def test_local_object_storage_rejects_absolute_key(tmp_path) -> None:
+    gateway = LocalObjectStorageGateway(tmp_path / "objects")
+
+    with pytest.raises(ValueError, match="storage root"):
+        gateway.get_bytes(key=str(tmp_path / "outside.txt"))
+
+
+def test_local_object_storage_rejects_symlink_escape(tmp_path) -> None:
+    root = tmp_path / "objects"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    gateway = LocalObjectStorageGateway(root)
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="escapes"):
+        gateway.put_bytes(key="linked/escape.txt", data=b"no", content_type="text/plain")
+    assert not (outside / "escape.txt").exists()
 
 
 def test_gateway_package_import_does_not_load_concrete_gateways() -> None:
@@ -196,6 +242,29 @@ def test_task_queue_gateway_enqueue_builds_kwargs():
         dedupe=True,
         dedupe_key="content|process_content|content:1",
     )
+
+
+def test_task_queue_gateway_forwards_caller_owned_batch() -> None:
+    """Caller-owned queue batches retain their transaction session."""
+    queue_service = Mock()
+    queue_service.enqueue_many_in_session.return_value = [41, 42]
+    gateway = TaskQueueGateway(queue_service=queue_service)
+    db = Mock()
+    requests = [
+        TaskEnqueueRequest(
+            TaskType.ONBOARDING_DISCOVER,
+            payload={"user_id": 1},
+            owner_user_id=1,
+        ),
+        TaskEnqueueRequest(
+            TaskType.DISCOVER_FEEDS,
+            payload={"user_id": 1},
+            owner_user_id=1,
+        ),
+    ]
+
+    assert gateway.enqueue_many_in_session(db, requests) == [41, 42]
+    queue_service.enqueue_many_in_session.assert_called_once_with(db, requests)
 
 
 def test_get_task_queue_gateway_returns_cached_instance(monkeypatch):
