@@ -1,4 +1,6 @@
-from app.models.db import Content, ContentStatusEntry
+from app.models.contracts import TaskType
+from app.models.db import Content, ContentStatusEntry, ProcessingTask
+from app.services.queue import TaskEnqueueRequest
 
 
 def test_submission_creates_content_status(client, db_session, test_user) -> None:
@@ -28,19 +30,6 @@ def test_submission_of_existing_visible_article_enqueues_generated_image(
     monkeypatch,
     test_user,
 ) -> None:
-    enqueue_calls: list[tuple[str, int | None]] = []
-
-    def _fake_enqueue(self, task_type, content_id=None, payload=None, queue_name=None, dedupe=None):
-        _ = self, payload, queue_name, dedupe
-        enqueue_calls.append((task_type.value, content_id))
-        return 999
-
-    monkeypatch.setattr("app.services.queue.QueueService.enqueue", _fake_enqueue)
-    monkeypatch.setattr(
-        "app.services.long_form_images.has_generated_long_form_image",
-        lambda content: False,
-    )
-
     existing = Content(
         url="https://example.com/visible-article",
         content_type="article",
@@ -66,10 +55,24 @@ def test_submission_of_existing_visible_article_enqueues_generated_image(
     )
     db_session.add(existing)
     db_session.commit()
+    monkeypatch.setattr(
+        "app.services.content_submission.build_visible_long_form_image_task_requests",
+        lambda _db, content_ids: [
+            TaskEnqueueRequest(TaskType.GENERATE_IMAGE, content_id=content_ids[0])
+        ],
+    )
 
     response = client.post(
         "/api/content/submit",
         json={"url": existing.url, "content_type": "article", "title": "Existing"},
     )
     assert response.status_code in (200, 201)
-    assert ("generate_image", existing.id) in enqueue_calls
+    image_task = (
+        db_session.query(ProcessingTask)
+        .filter(
+            ProcessingTask.task_type == TaskType.GENERATE_IMAGE.value,
+            ProcessingTask.content_id == existing.id,
+        )
+        .one()
+    )
+    assert image_task.status == "pending"

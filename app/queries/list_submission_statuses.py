@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
@@ -27,8 +28,17 @@ from app.models.contracts import (
     LlmTaskKind,
     LlmTaskMode,
     LlmTaskStatus,
+    TaskStatus,
+    TaskType,
 )
-from app.models.db import Content, LearningDeck, LearningDeckRun, LlmTask, LlmTaskAction
+from app.models.db import (
+    Content,
+    LearningDeck,
+    LearningDeckRun,
+    LlmTask,
+    LlmTaskAction,
+    ProcessingTask,
+)
 from app.models.metadata.access import ContentMetadataView, metadata_view
 from app.utils.pagination import PaginationCursor
 
@@ -85,6 +95,11 @@ def execute(
 
     actions_by_task_id = _actions_by_task_id(db, tasks)
     content_by_id = _content_targets_by_id(db, actions_by_task_id)
+    initial_download_tasks_by_id = _initial_download_tasks_by_id(
+        db,
+        user_id=user_id,
+        contents=content_by_id.values(),
+    )
     deck_targets_by_id = _learning_deck_targets_by_id(
         db,
         user_id=user_id,
@@ -100,6 +115,7 @@ def execute(
                 actions=actions_by_task_id.get(_require_task_id(task.id), []),
                 content_by_id=content_by_id,
                 deck_targets_by_id=deck_targets_by_id,
+                initial_download_tasks_by_id=initial_download_tasks_by_id,
             )
         )
         is not None
@@ -219,12 +235,52 @@ def _learning_deck_targets_by_id(
     return targets
 
 
+def _initial_download_tasks_by_id(
+    db: Session,
+    *,
+    user_id: int,
+    contents: Iterable[Content],
+) -> dict[int, ProcessingTask]:
+    task_ids = {
+        task_id
+        for content in contents
+        if (task_id := _initial_download_task_id(content)) is not None
+    }
+    if not task_ids:
+        return {}
+    return {
+        int(task.id): task
+        for task in (
+            db.query(ProcessingTask)
+            .filter(
+                ProcessingTask.id.in_(task_ids),
+                ProcessingTask.owner_user_id == user_id,
+                ProcessingTask.task_type == TaskType.BACKFILL_FEEDS.value,
+            )
+            .all()
+        )
+        if task.id is not None
+    }
+
+
+def _initial_download_task_id(content: Content) -> int | None:
+    metadata = metadata_view(content.content_metadata or {})
+    raw_subscription = _dict_or_none(metadata.processing_flag("feed_subscription"))
+    if raw_subscription is None:
+        return None
+    raw_initial_download = _dict_or_none(raw_subscription.get("initial_download"))
+    if raw_initial_download is None:
+        return None
+    return _int_or_none(raw_initial_download.get("task_id"))
+
+
 def _build_task_submission_response(
     task: LlmTask,
     *,
     actions: list[LlmTaskAction],
     content_by_id: dict[int, Content],
     deck_targets_by_id: dict[int, tuple[LearningDeck, LearningDeckRun | LlmTask]],
+    initial_download_tasks_by_id: dict[int, ProcessingTask],
 ) -> SubmissionStatusResponse | None:
     try:
         action = _primary_action(actions)
@@ -234,6 +290,7 @@ def _build_task_submission_response(
                 task,
                 action=action,
                 content=content_by_id[content_id],
+                initial_download_tasks_by_id=initial_download_tasks_by_id,
             )
 
         deck_id = _action_learning_deck_id(action) if action else None
@@ -281,6 +338,7 @@ def _build_content_target_submission_response(
     *,
     action: LlmTaskAction | None,
     content: Content,
+    initial_download_tasks_by_id: dict[int, ProcessingTask],
 ) -> SubmissionStatusResponse:
     metadata = metadata_view(content.content_metadata or {})
     raw_content_type = content.content_type
@@ -289,7 +347,8 @@ def _build_content_target_submission_response(
         raise ValueError("Submission content target is missing required fields")
     detected_feed = _build_detected_feed(metadata.detected_feed())
     feed_subscription = _build_feed_subscription(
-        _dict_or_none(metadata.processing_flag("feed_subscription"))
+        _dict_or_none(metadata.processing_flag("feed_subscription")),
+        initial_download_tasks_by_id=initial_download_tasks_by_id,
     )
     submission_kind: SubmissionKind = (
         SubmissionKind.FEED_SUBSCRIPTION
@@ -327,6 +386,7 @@ def _build_llm_task_submission_response(
 ) -> SubmissionStatusResponse:
     task_status = LlmTaskStatus(str(task.status))
     content_status = _llm_task_content_status(task_status)
+    no_action_rationale = _completed_no_action_rationale(task, task_status=task_status)
     return SubmissionStatusResponse(
         id=_require_task_id(task.id),
         content_type=_task_content_type(task),
@@ -340,7 +400,12 @@ def _build_llm_task_submission_response(
         submitted_via="share_action",
         is_self_submission=True,
         submission_kind=_task_submission_kind(task, action),
-        outcome=_llm_task_outcome(task_status),
+        outcome=(
+            SubmissionOutcome.NO_ACTION
+            if no_action_rationale is not None
+            else _llm_task_outcome(task_status)
+        ),
+        rationale=no_action_rationale,
         detected_feed=None,
         feed_subscription=None,
     )
@@ -484,6 +549,19 @@ def _task_output(task: LlmTask) -> dict[str, Any]:
     return task.output_json if isinstance(task.output_json, dict) else {}
 
 
+def _completed_no_action_rationale(
+    task: LlmTask,
+    *,
+    task_status: LlmTaskStatus,
+) -> str | None:
+    if task_status != LlmTaskStatus.COMPLETED:
+        return None
+    output = _task_output(task)
+    if output.get("action") != "no_action":
+        return None
+    return _clean_string(output.get("rationale")) or "Newsly could not find an action to take."
+
+
 def _action_input(action: LlmTaskAction | None) -> dict[str, Any]:
     if action is None or not isinstance(action.action_input, dict):
         return {}
@@ -515,6 +593,8 @@ def _build_detected_feed(raw_feed: dict[str, Any] | None) -> DetectedFeed | None
 
 def _build_feed_subscription(
     raw_subscription: dict[str, Any] | None,
+    *,
+    initial_download_tasks_by_id: dict[int, ProcessingTask],
 ) -> SubmissionFeedSubscriptionResponse | None:
     if not raw_subscription:
         return None
@@ -526,18 +606,38 @@ def _build_feed_subscription(
         created=_bool_or_none(raw_subscription.get("created")),
         config_id=_int_or_none(raw_subscription.get("config_id")),
         initial_download=_build_initial_download(
-            _dict_or_none(raw_subscription.get("initial_download"))
+            _dict_or_none(raw_subscription.get("initial_download")),
+            initial_download_tasks_by_id=initial_download_tasks_by_id,
         ),
     )
 
 
 def _build_initial_download(
     raw_initial_download: dict[str, Any] | None,
+    *,
+    initial_download_tasks_by_id: dict[int, ProcessingTask],
 ) -> SubmissionFeedInitialDownloadResponse | None:
     if not raw_initial_download:
         return None
+    projected_initial_download = dict(raw_initial_download)
+    task_id = _int_or_none(projected_initial_download.get("task_id"))
+    task = initial_download_tasks_by_id.get(task_id) if task_id is not None else None
+    if task is not None:
+        _overlay_initial_download_task_state(projected_initial_download, task=task)
+    elif task_id is not None and _clean_string(projected_initial_download.get("status")) in {
+        "pending",
+        "processing",
+        "queued",
+    }:
+        # Terminal queue rows are removed after retention. Do not project their
+        # stale enqueue-time metadata as work that is still running forever.
+        projected_initial_download.update(
+            ran=None,
+            status="unavailable",
+            error="Initial download status is no longer available.",
+        )
     try:
-        return SubmissionFeedInitialDownloadResponse.model_validate(raw_initial_download)
+        return SubmissionFeedInitialDownloadResponse.model_validate(projected_initial_download)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Ignoring invalid feed initial download metadata: %s",
@@ -548,6 +648,30 @@ def _build_initial_download(
             },
         )
         return None
+
+
+def _overlay_initial_download_task_state(
+    initial_download: dict[str, Any],
+    *,
+    task: ProcessingTask,
+) -> None:
+    status = str(task.status)
+    if status == TaskStatus.PENDING.value:
+        initial_download.update(
+            ran=int(task.retry_count or 0) > 0,
+            status="queued",
+            error=None,
+        )
+    elif status == TaskStatus.PROCESSING.value:
+        initial_download.update(ran=True, status="processing", error=None)
+    elif status == TaskStatus.COMPLETED.value:
+        initial_download.update(ran=True, status="completed", error=None)
+    elif status == TaskStatus.FAILED.value:
+        initial_download.update(
+            ran=True,
+            status="failed",
+            error="Initial download failed",
+        )
 
 
 def _is_feed_subscription_submission(
@@ -579,7 +703,7 @@ def _resolve_submission_outcome(
         return SubmissionOutcome.FAILED
 
     subscription_status = (feed_subscription.status if feed_subscription else "").lower()
-    if subscription_status == "created":
+    if subscription_status in {"created", "reactivated"}:
         return SubmissionOutcome.SUBSCRIBED
     if subscription_status == "already_exists":
         return SubmissionOutcome.ALREADY_SUBSCRIBED

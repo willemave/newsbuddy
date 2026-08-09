@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import Any, TypedDict
 
 import feedparser
-import httpx
 import trafilatura
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import WebSearch
@@ -27,7 +26,9 @@ from app.models.llm.content_analysis import (
     InstructionLink,
     InstructionResult,
 )
+from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.feed_detection import extract_feed_links
+from app.services.feed_research_runtime import sandboxed_http_service
 from app.services.llm_models import build_pydantic_model
 from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_usage import record_model_usage
@@ -91,29 +92,30 @@ class DetectedMedia(TypedDict):
 CONTENT_ANALYZER_SYSTEM_PROMPT = load_prompt("content/analyzer#system")
 
 
-def _fetch_page_content(url: str) -> tuple[str | None, str | None]:
+def _fetch_page_content(
+    url: str,
+    *,
+    http_service: Any,
+) -> tuple[str | None, str | None]:
     """Fetch page HTML and extract text content.
 
     Returns:
         Tuple of (raw_html, extracted_text). Either may be None on failure.
     """
     try:
-        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-            response = client.get(
-                url,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/120.0.0.0 Safari/537.36"
-                    )
-                },
-            )
-            response.raise_for_status()
-            html = response.text
-            # Extract readable text using trafilatura
-            text = trafilatura.extract(html, include_links=True) or ""
-            return html, text
+        response = http_service.fetch(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            },
+        )
+        html = response.text
+        text = trafilatura.extract(html, include_links=True) or ""
+        return html, text
     except Exception as e:
         logger.warning(f"Failed to fetch page content: {e}")
         return None, None
@@ -130,7 +132,12 @@ def _empty_detected_media() -> DetectedMedia:
     }
 
 
-def _detect_media_in_html(html: str, page_url: str) -> DetectedMedia:
+def _detect_media_in_html(
+    html: str,
+    page_url: str,
+    *,
+    http_service: Any,
+) -> DetectedMedia:
     """Scan HTML for podcast/video platform links, audio files, and RSS feeds.
 
     Args:
@@ -170,9 +177,12 @@ def _detect_media_in_html(html: str, page_url: str) -> DetectedMedia:
         has_platform_embed = any(
             p in detected["platforms"] for p in ("spotify", "apple_podcasts", "overcast")
         )
-        if has_platform_embed and not detected["audio_urls"]:
+        if has_platform_embed and not detected["audio_urls"] and detected["rss_feeds"]:
             for feed_url in detected["rss_feeds"][:2]:  # Try first 2 feeds
-                audio_url = _extract_audio_from_rss(feed_url)
+                audio_url = _extract_audio_from_rss(
+                    feed_url,
+                    http_service=http_service,
+                )
                 if audio_url:
                     detected["rss_audio_url"] = audio_url
                     logger.info(f"Extracted audio URL from RSS feed: {audio_url[:80]}...")
@@ -183,7 +193,7 @@ def _detect_media_in_html(html: str, page_url: str) -> DetectedMedia:
     return detected
 
 
-def _extract_audio_from_rss(feed_url: str) -> str | None:
+def _extract_audio_from_rss(feed_url: str, *, http_service: Any) -> str | None:
     """Parse RSS feed and extract first audio enclosure URL.
 
     Args:
@@ -193,7 +203,11 @@ def _extract_audio_from_rss(feed_url: str) -> str | None:
         First audio URL found, or None if no audio enclosures.
     """
     try:
-        feed = feedparser.parse(feed_url)
+        response = http_service.fetch(
+            feed_url,
+            headers={"Accept": "application/rss+xml"},
+        )
+        feed = feedparser.parse(response.content)
 
         # Skip if parsing failed completely
         if feed.bozo and not feed.entries:
@@ -276,24 +290,40 @@ class ContentAnalyzer:
                 },
             )
 
-            # Step 1: Fetch the actual page content (best-effort)
-            html, text = _fetch_page_content(url)
-            if not html:
-                logger.warning(
-                    "Content analyzer fetch failed; continuing with web search only",
-                    extra={
-                        "component": "content_analyzer",
-                        "operation": "fetch_page_content",
-                        "context_data": {"url": url},
-                    },
-                )
-                html = ""
-                text = ""
-
-            # Step 2: Scan HTML for podcast/video links and RSS feeds
-            detected: DetectedMedia = (
-                _detect_media_in_html(html or "", url) if html else _empty_detected_media()
+            usage_user_id = (usage_persist or {}).get("user_id")
+            sandbox_user_id = resolve_sandbox_user_id(usage_user_id)
+            usage_content_id = (usage_persist or {}).get("content_id")
+            execution_id = (
+                usage_content_id
+                if isinstance(usage_content_id, int) and not isinstance(usage_content_id, bool)
+                else None
             )
+            # Page fetch and any linked RSS fetches share one E2B-backed runtime.
+            with sandboxed_http_service(
+                user_id=sandbox_user_id,
+                execution_id=execution_id,
+            ) as http_service:
+                html, text = _fetch_page_content(url, http_service=http_service)
+                if not html:
+                    logger.warning(
+                        "Content analyzer fetch failed; continuing with web search only",
+                        extra={
+                            "component": "content_analyzer",
+                            "operation": "fetch_page_content",
+                            "context_data": {"url": url},
+                        },
+                    )
+                    html = ""
+                    text = ""
+                detected = (
+                    _detect_media_in_html(
+                        html,
+                        url,
+                        http_service=http_service,
+                    )
+                    if html
+                    else _empty_detected_media()
+                )
 
             # Step 3: Use LLM to analyze content with detected media info
             agent = self._get_agent()

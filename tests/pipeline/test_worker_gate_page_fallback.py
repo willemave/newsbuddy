@@ -236,3 +236,77 @@ def test_process_article_fails_gate_page_without_recovered_content(
     assert content.status == ContentStatus.FAILED
     assert content.metadata["extraction_failed"] is True
     assert content.error_message == "access gate detected: challenge/JS wall content"
+
+
+def test_process_article_detects_extracted_feed_links_in_feed_sandbox(
+    monkeypatch,
+    db_session,
+) -> None:
+    article_url = "https://publisher.example/posts/sandbox-boundary"
+    feed_links = [
+        {
+            "url": "https://publisher.example/feed.xml",
+            "type": "application/rss+xml",
+        }
+    ]
+    strategy = _FakeHtmlStrategy(
+        {
+            "title": "Sandbox Boundary",
+            "text_content": "A complete article body for sandbox wiring coverage.",
+            "content_type": "html",
+            "final_url_after_redirects": article_url,
+            "feed_links": feed_links,
+        }
+    )
+    _patch_worker_dependencies(monkeypatch, strategy)
+    db_content = Content(
+        content_type=ContentType.ARTICLE.value,
+        url=article_url,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": "Publisher",
+            "submitted_by_user_id": 23,
+        },
+    )
+    db_session.add(db_content)
+    db_session.commit()
+    db_session.refresh(db_content)
+    detector = Mock()
+    detector.detect_from_links.return_value = {
+        "detected_feed": {
+            "url": "https://publisher.example/feed.xml",
+            "type": "atom",
+            "title": "Publisher",
+        },
+        "all_detected_feeds": [],
+    }
+    runtime_calls: list[dict[str, object]] = []
+
+    @contextmanager
+    def _feed_runtime(**kwargs):
+        runtime_calls.append(kwargs)
+        yield Mock(detector=detector)
+
+    monkeypatch.setattr(
+        "app.services.feed_research_runtime.feed_research_runtime",
+        _feed_runtime,
+    )
+
+    worker = ContentWorker()
+    content = content_to_domain(db_content)
+    success = worker._process_article(content)
+
+    assert success is True
+    assert runtime_calls == [{"user_id": 23, "execution_id": db_content.id}]
+    detector.detect_from_links.assert_called_once_with(
+        feed_links,
+        article_url,
+        page_title="Sandbox Boundary",
+        source="Publisher",
+        content_type=ContentType.ARTICLE,
+    )
+    assert content.metadata["detected_feed"] == {
+        "url": "https://publisher.example/feed.xml",
+        "type": "atom",
+        "title": "Publisher",
+    }

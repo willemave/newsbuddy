@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.orm import Session
@@ -17,6 +18,8 @@ from app.models.contracts import (
     LlmTaskKind,
     LlmTaskMode,
     LlmTaskStatus,
+    TaskStatus,
+    TaskType,
 )
 from app.models.db import LearningDeck, LearningDeckRun, LlmTask, LlmTaskAction
 from app.queries import list_submission_statuses
@@ -194,6 +197,36 @@ def test_list_submission_statuses_projects_share_action_status_without_target(
     assert failed_item.error_message == "Share Action failed"
 
 
+def test_list_submission_statuses_projects_no_action_rationale_for_recovery(
+    db_session: Session,
+    test_user,
+) -> None:
+    task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_TO_BRIEFING,
+        url="https://example.com/unsupported-homepage",
+        created_at=datetime(2026, 6, 28, 12, 0, 0),
+        output_json={
+            "action": "no_action",
+            "rationale": "Neither a continuing source nor an eligible item was found.",
+        },
+    )
+
+    response = list_submission_statuses.execute(
+        db_session,
+        user_id=test_user.id,
+        cursor=None,
+        limit=10,
+    )
+
+    item = next(item for item in response.submissions if item.id == task.id)
+    assert item.status == "completed"
+    assert item.outcome == "no_action"
+    assert item.rationale == "Neither a continuing source nor an eligible item was found."
+    assert item.url == "https://example.com/unsupported-homepage"
+
+
 def test_list_submission_statuses_includes_learning_deck_targets_only_from_share_actions(
     db_session: Session,
     test_user,
@@ -254,6 +287,7 @@ def test_list_submission_statuses_includes_learning_deck_targets_only_from_share
     ("subscription_status", "expected_outcome"),
     [
         ("created", "subscribed"),
+        ("reactivated", "subscribed"),
         ("already_exists", "already_subscribed"),
         ("no_feed_found", "feed_not_found"),
         ("fetch_failed", "feed_fetch_failed"),
@@ -326,6 +360,228 @@ def test_list_submission_statuses_maps_feed_subscription_outcomes(
     assert item.feed_subscription.status == subscription_status
     assert item.feed_subscription.initial_download is not None
     assert item.feed_subscription.initial_download.requested_count == 2
+
+
+@pytest.mark.parametrize(
+    ("task_status", "retry_count", "expected_status", "expected_ran", "expected_error"),
+    [
+        (TaskStatus.PENDING, 0, "queued", False, None),
+        (TaskStatus.PENDING, 1, "queued", True, None),
+        (TaskStatus.PROCESSING, 0, "processing", True, None),
+        (TaskStatus.COMPLETED, 0, "completed", True, None),
+        (TaskStatus.FAILED, 3, "failed", True, "Initial download failed"),
+    ],
+)
+def test_list_submission_statuses_reconciles_owned_initial_download_task(
+    db_session: Session,
+    content_factory,
+    processing_task_factory,
+    test_user,
+    task_status: TaskStatus,
+    retry_count: int,
+    expected_status: str,
+    expected_ran: bool,
+    expected_error: str | None,
+) -> None:
+    now = datetime(2026, 6, 28, 12, 0, 0)
+    lease_fields = (
+        {
+            "locked_at": now,
+            "locked_by": "submission-status-test",
+            "lease_token": uuid4(),
+            "lease_expires_at": now + timedelta(minutes=1),
+        }
+        if task_status == TaskStatus.PROCESSING
+        else {}
+    )
+    backfill_task = processing_task_factory(
+        owner_user_id=test_user.id,
+        task_type=TaskType.BACKFILL_FEEDS,
+        payload={"user_id": test_user.id, "config_ids": [42], "count": 2},
+        status=task_status,
+        queue_name="backfill",
+        error_message="internal provider detail",
+        retry_count=retry_count,
+        **lease_fields,
+    )
+    content = content_factory(
+        url=f"https://example.com/reconciled-{task_status.value}",
+        source_url=f"https://example.com/reconciled-{task_status.value}",
+        content_type=ContentType.UNKNOWN.value,
+        status=ContentStatus.SKIPPED.value,
+        content_metadata={
+            "processing": {
+                "submitted_by_user_id": test_user.id,
+                "submitted_via": "share_action",
+                "subscribe_to_feed": True,
+                "detected_feed": {
+                    "url": "https://example.com/feed.xml",
+                    "type": "atom",
+                },
+                "feed_subscription": {
+                    "status": "created",
+                    "initial_download": {
+                        "task_id": backfill_task.id,
+                        "requested_count": 2,
+                        "ran": False,
+                        "status": "queued",
+                    },
+                },
+            }
+        },
+    )
+    share_task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_FEED,
+        url=content.url,
+        created_at=now,
+        action_name="subscribe_to_feed",
+        action_result={"content_id": content.id},
+    )
+
+    response = list_submission_statuses.execute(
+        db_session,
+        user_id=test_user.id,
+        cursor=None,
+        limit=10,
+    )
+
+    item = next(item for item in response.submissions if item.id == share_task.id)
+    assert item.feed_subscription is not None
+    initial_download = item.feed_subscription.initial_download
+    assert initial_download is not None
+    assert initial_download.status == expected_status
+    assert initial_download.ran is expected_ran
+    assert initial_download.error == expected_error
+
+
+def test_list_submission_statuses_does_not_project_another_users_backfill_task(
+    db_session: Session,
+    content_factory,
+    processing_task_factory,
+    test_user,
+    user_factory,
+) -> None:
+    other_user = user_factory()
+    foreign_task = processing_task_factory(
+        owner_user_id=other_user.id,
+        task_type=TaskType.BACKFILL_FEEDS,
+        payload={"user_id": other_user.id, "config_ids": [42], "count": 2},
+        status=TaskStatus.FAILED,
+        queue_name="backfill",
+        error_message="private foreign error",
+    )
+    content = content_factory(
+        url="https://example.com/foreign-backfill-reference",
+        source_url="https://example.com/foreign-backfill-reference",
+        content_type=ContentType.UNKNOWN.value,
+        status=ContentStatus.SKIPPED.value,
+        content_metadata={
+            "processing": {
+                "submitted_by_user_id": test_user.id,
+                "submitted_via": "share_action",
+                "subscribe_to_feed": True,
+                "feed_subscription": {
+                    "status": "created",
+                    "initial_download": {
+                        "task_id": foreign_task.id,
+                        "requested_count": 2,
+                        "ran": False,
+                        "status": "queued",
+                    },
+                },
+            }
+        },
+    )
+    share_task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_FEED,
+        url=content.url,
+        created_at=datetime(2026, 6, 28, 12, 0, 0),
+        action_name="subscribe_to_feed",
+        action_result={"content_id": content.id},
+    )
+
+    response = list_submission_statuses.execute(
+        db_session,
+        user_id=test_user.id,
+        cursor=None,
+        limit=10,
+    )
+
+    item = next(item for item in response.submissions if item.id == share_task.id)
+    assert item.feed_subscription is not None
+    initial_download = item.feed_subscription.initial_download
+    assert initial_download is not None
+    assert initial_download.status == "unavailable"
+    assert initial_download.ran is None
+    assert initial_download.error == "Initial download status is no longer available."
+
+
+def test_list_submission_statuses_marks_cleaned_initial_download_task_unavailable(
+    db_session: Session,
+    content_factory,
+    processing_task_factory,
+    test_user,
+) -> None:
+    cleaned_task = processing_task_factory(
+        owner_user_id=test_user.id,
+        task_type=TaskType.BACKFILL_FEEDS,
+        payload={"user_id": test_user.id, "config_ids": [42], "count": 2},
+        status=TaskStatus.COMPLETED,
+        queue_name="backfill",
+    )
+    cleaned_task_id = cleaned_task.id
+    db_session.delete(cleaned_task)
+    db_session.commit()
+    content = content_factory(
+        url="https://example.com/cleaned-backfill-reference",
+        source_url="https://example.com/cleaned-backfill-reference",
+        content_type=ContentType.UNKNOWN.value,
+        status=ContentStatus.SKIPPED.value,
+        content_metadata={
+            "processing": {
+                "submitted_by_user_id": test_user.id,
+                "submitted_via": "share_action",
+                "subscribe_to_feed": True,
+                "feed_subscription": {
+                    "status": "created",
+                    "initial_download": {
+                        "task_id": cleaned_task_id,
+                        "requested_count": 2,
+                        "ran": False,
+                        "status": "queued",
+                    },
+                },
+            }
+        },
+    )
+    share_task, _ = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_FEED,
+        url=content.url,
+        created_at=datetime(2026, 6, 28, 12, 0, 0),
+        action_name="subscribe_to_feed",
+        action_result={"content_id": content.id},
+    )
+
+    response = list_submission_statuses.execute(
+        db_session,
+        user_id=test_user.id,
+        cursor=None,
+        limit=10,
+    )
+
+    item = next(item for item in response.submissions if item.id == share_task.id)
+    assert item.feed_subscription is not None
+    initial_download = item.feed_subscription.initial_download
+    assert initial_download is not None
+    assert initial_download.status == "unavailable"
+    assert initial_download.ran is None
+    assert initial_download.error == "Initial download status is no longer available."
 
 
 def test_list_submission_statuses_keeps_generic_skipped_content_as_skipped(

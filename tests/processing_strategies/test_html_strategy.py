@@ -76,6 +76,8 @@ def test_detect_source(html_strategy: HtmlProcessorStrategy):
     )
     assert html_strategy._detect_source("https://arxiv.org/abs/1234.5678") == "Arxiv"
     assert html_strategy._detect_source("https://arxiv.org/pdf/1234.5678") == "Arxiv"
+    assert html_strategy._detect_source("https://arxiv.org.evil.test/abs/1234.5678") == "web"
+    assert html_strategy._detect_source("https://substack.com.evil.test/post") == "web"
     assert html_strategy._detect_source("https://example.com/article") == "web"
 
 

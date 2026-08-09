@@ -22,6 +22,7 @@ from app.models.metadata.summaries import (
 )
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.services.active_users import lock_active_user
 from app.services.briefing.events import enqueue_content_for_briefing_if_ready
 from app.services.content_bodies import get_content_body_resolver, sync_content_body_storage
 from app.services.content_lifecycle import build_content_lifecycle_log_extra
@@ -502,12 +503,6 @@ class SummarizeHandler:
 
                     metadata["summarization_date"] = datetime.now(UTC).isoformat()
                     metadata["summarization_input_fingerprint"] = input_fingerprint
-                    if share_and_chat_requests:
-                        metadata = remove_processing_fields(
-                            metadata,
-                            "share_and_chat_user_ids",
-                            "share_and_chat_requests",
-                        )
                     if content.content_type == ContentType.ARTICLE.value:
                         interesting_links = select_interesting_external_links(
                             text_to_summarize,
@@ -553,23 +548,44 @@ class SummarizeHandler:
                         enqueue_content_for_briefing_if_ready(db, content_id=content_id)
 
                     if share_and_chat_requests:
+                        enqueued_user_ids: list[int] = []
                         for request in share_and_chat_requests:
                             user_id = request.get("user_id")
-                            if not isinstance(user_id, int):
+                            active_user_id = lock_active_user(db, user_id)
+                            if active_user_id is None:
                                 continue
                             initial_message = request.get("initial_message")
                             enqueue_dig_deeper_task(
                                 db,
                                 content_id,
-                                user_id,
+                                active_user_id,
                                 initial_message=(
                                     initial_message if isinstance(initial_message, str) else None
                                 ),
                             )
+                            enqueued_user_ids.append(active_user_id)
+
+                        # The persisted request is the retry intent. Clear it in
+                        # the same transaction that durably inserts every chat
+                        # task, before any fallible image follow-up can roll the
+                        # inserts back on context exit.
+                        fanout_base_metadata = dict(content.content_metadata or {})
+                        cleared_fanout_metadata = remove_processing_fields(
+                            fanout_base_metadata,
+                            "share_and_chat_user_ids",
+                            "share_and_chat_requests",
+                        )
+                        content.content_metadata = refresh_merge_content_metadata(
+                            db,
+                            content_id=content.id,
+                            base_metadata=fanout_base_metadata,
+                            updated_metadata=cleared_fanout_metadata,
+                        )
+                        db.commit()
                         logger.info(
                             "Enqueued dig-deeper tasks for content %s (users=%s)",
                             content_id,
-                            [request["user_id"] for request in share_and_chat_requests],
+                            enqueued_user_ids,
                         )
 
                     if content.content_type == ContentType.NEWS.value:

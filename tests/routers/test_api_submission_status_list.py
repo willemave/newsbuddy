@@ -12,6 +12,8 @@ from app.models.contracts import (
     LlmTaskKind,
     LlmTaskMode,
     LlmTaskStatus,
+    TaskStatus,
+    TaskType,
 )
 from app.models.db import LearningDeck, LearningDeckRun, LlmTask, LlmTaskAction
 
@@ -141,6 +143,17 @@ def test_submission_status_list_projects_share_action_tasks(
         status=LlmTaskStatus.FAILED,
         error_message="Share Action failed",
     )
+    no_action_task = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_TO_BRIEFING,
+        url="https://example.com/unsupported-homepage",
+        created_at=now,
+        output_json={
+            "action": "no_action",
+            "rationale": "Neither a continuing source nor an eligible item was found.",
+        },
+    )
 
     response = client.get("/api/content/submissions/list")
     assert response.status_code == 200
@@ -152,6 +165,7 @@ def test_submission_status_list_projects_share_action_tasks(
     assert feed_task.id in ids
     assert deck_task.id in ids
     assert failed_task.id in ids
+    assert no_action_task.id in ids
     assert deck_run.id is not None
     assert -deck_run.id not in ids
     assert all(item["url"] != direct_content.url for item in payload["submissions"])
@@ -159,6 +173,15 @@ def test_submission_status_list_projects_share_action_tasks(
     failed_item = next(item for item in payload["submissions"] if item["id"] == failed_task.id)
     assert failed_item["error_message"] == "Share Action failed"
     assert failed_item["outcome"] == "failed"
+
+    no_action_item = next(
+        item for item in payload["submissions"] if item["id"] == no_action_task.id
+    )
+    assert no_action_item["status"] == "completed"
+    assert no_action_item["outcome"] == "no_action"
+    assert (
+        no_action_item["rationale"] == "Neither a continuing source nor an eligible item was found."
+    )
 
     skipped_item = next(item for item in payload["submissions"] if item["id"] == skipped_task.id)
     assert skipped_item["submission_kind"] == "content"
@@ -176,6 +199,65 @@ def test_submission_status_list_projects_share_action_tasks(
     assert deck_item["outcome"] == "completed"
 
 
+def test_submission_status_list_reconciles_initial_download_without_exposing_task_id(
+    client,
+    db_session,
+    content_factory,
+    processing_task_factory,
+    test_user,
+) -> None:
+    backfill_task = processing_task_factory(
+        owner_user_id=test_user.id,
+        task_type=TaskType.BACKFILL_FEEDS,
+        payload={"user_id": test_user.id, "config_ids": [12], "count": 2},
+        status=TaskStatus.FAILED,
+        queue_name="backfill",
+        error_message="internal provider detail",
+    )
+    content = content_factory(
+        url="https://example.com/failed-initial-download",
+        source_url="https://example.com/failed-initial-download",
+        content_type=ContentType.UNKNOWN.value,
+        status=ContentStatus.SKIPPED.value,
+        title="Failed initial download",
+        content_metadata={
+            "processing": {
+                "submitted_by_user_id": test_user.id,
+                "submitted_via": "share_action",
+                "subscribe_to_feed": True,
+                "feed_subscription": {
+                    "status": "created",
+                    "initial_download": {
+                        "task_id": backfill_task.id,
+                        "requested_count": 2,
+                        "ran": False,
+                        "status": "queued",
+                    },
+                },
+            }
+        },
+    )
+    share_task = _create_share_action_task(
+        db_session,
+        user_id=test_user.id,
+        mode=LlmTaskMode.ADD_FEED,
+        url=content.url,
+        created_at=datetime(2026, 6, 28, 12, 0, 0),
+        action_name="subscribe_to_feed",
+        action_result={"content_id": content.id},
+    )
+
+    response = client.get("/api/content/submissions/list")
+
+    assert response.status_code == 200
+    item = next(row for row in response.json()["submissions"] if row["id"] == share_task.id)
+    initial_download = item["feed_subscription"]["initial_download"]
+    assert initial_download["status"] == "failed"
+    assert initial_download["ran"] is True
+    assert initial_download["error"] == "Initial download failed"
+    assert "task_id" not in initial_download
+
+
 def _create_share_action_task(
     db_session,
     *,
@@ -188,6 +270,7 @@ def _create_share_action_task(
     action_status: LlmTaskActionStatus = LlmTaskActionStatus.APPLIED,
     action_input: dict | None = None,
     action_result: dict | None = None,
+    output_json: dict | None = None,
     error_message: str | None = None,
 ) -> LlmTask:
     completed_at = created_at if status in {LlmTaskStatus.COMPLETED, LlmTaskStatus.FAILED} else None
@@ -202,7 +285,7 @@ def _create_share_action_task(
         allowed_actions=[action_name] if action_name else [],
         tool_policy={},
         input_json={"url": url, "mode": mode.value},
-        output_json={},
+        output_json=output_json or {},
         artifact_manifest={},
         usage_json={},
         status_history=[],

@@ -217,6 +217,56 @@ def test_summarize_task_updates_article_metadata(
     assert content.content_metadata["excerpt"]
 
 
+def test_summarize_skips_share_chat_fanout_for_inactive_user(
+    db_session,
+    mock_structured_summary,
+    monkeypatch,
+):
+    content = Mock(spec=Content)
+    content.id = 1
+    content.content_type = "article"
+    content.status = "processing"
+    content.content_metadata = {
+        "content": "This is the full text content of the article.",
+        "share_and_chat_requests": [{"user_id": 99, "initial_message": "Explain it."}],
+    }
+    db_session.first.return_value = content
+
+    llm_service = Mock()
+    llm_service.summarize.return_value = mock_structured_summary
+    inactive_guard = Mock(return_value=None)
+    monkeypatch.setattr(
+        "app.pipeline.handlers.summarize.lock_active_user",
+        inactive_guard,
+    )
+
+    def unexpected_enqueue(*_args, **_kwargs):
+        raise AssertionError("inactive user must not receive a dig-deeper task")
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.summarize.enqueue_dig_deeper_task",
+        unexpected_enqueue,
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.summarize.select_interesting_external_links",
+        lambda *_args, **_kwargs: [],
+    )
+    handler = SummarizeHandler()
+    context = _build_context(db_session, llm_service)
+    task = TaskEnvelope(
+        id=1,
+        task_type=TaskType.SUMMARIZE,
+        content_id=1,
+        payload={"content_id": 1},
+    )
+
+    result = handler.handle(task, context)
+
+    assert result.success is True
+    inactive_guard.assert_called_once_with(db_session, 99)
+    assert "share_and_chat_requests" not in content.content_metadata
+
+
 def test_summarize_task_persists_interesting_external_links(
     db_session,
     mock_structured_summary,

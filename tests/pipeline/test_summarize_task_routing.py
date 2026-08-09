@@ -6,8 +6,9 @@ from unittest.mock import Mock
 from sqlalchemy.orm import sessionmaker
 
 from app.models.contracts import SummaryKind, SummaryVersion
-from app.models.db import Content, ContentStatusEntry
+from app.models.db import Content, ContentStatusEntry, ProcessingTask
 from app.models.metadata.longform_artifacts import LongformArtifactEnvelope
+from app.models.metadata.state import extract_share_and_chat_requests
 from app.models.metadata.summaries import NewsSummary
 from app.pipeline.handlers.summarize import SummarizeHandler
 from app.pipeline.task_context import TaskContext
@@ -294,6 +295,97 @@ def test_summarize_article_does_not_enqueue_image_when_not_visible(db_session) -
 
     assert handler.handle(task, context).success is True
     queue_service.enqueue.assert_not_called()
+
+
+def test_summarize_preserves_chat_intent_when_task_enqueue_fails(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    content = Content(
+        content_type="article",
+        url="https://example.com/chat-intent-retry",
+        status="processing",
+        content_metadata={
+            "content": "Some content",
+            "share_and_chat_requests": [
+                {"user_id": test_user.id, "initial_message": "Explain this."}
+            ],
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.pipeline.handlers.summarize.enqueue_dig_deeper_task",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("queue insert failed")),
+    )
+    handler = SummarizeHandler()
+    context = _build_context(db_session, Mock(), DummySummarizer())
+    task = TaskEnvelope(
+        id=23,
+        task_type=TaskType.SUMMARIZE,
+        content_id=content.id,
+    )
+
+    result = handler.handle(task, context)
+
+    assert result.success is False
+    db_session.rollback()
+    db_session.refresh(content)
+    assert extract_share_and_chat_requests(content.content_metadata) == [
+        {"user_id": test_user.id, "initial_message": "Explain this."}
+    ]
+    assert (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == TaskType.DIG_DEEPER.value)
+        .count()
+        == 0
+    )
+
+
+def test_summarize_commits_chat_task_before_fallible_image_followup(
+    db_session,
+    test_user,
+    _isolated_content_image_storage,
+) -> None:
+    content = Content(
+        content_type="article",
+        url="https://example.com/chat-before-image",
+        status="processing",
+        content_metadata={
+            "content": "Some content",
+            "share_and_chat_requests": [{"user_id": test_user.id}],
+        },
+    )
+    db_session.add(content)
+    db_session.commit()
+    _add_inbox_status(db_session, test_user.id, content.id)
+    queue_service = Mock()
+    queue_service.enqueue.side_effect = RuntimeError("image queue unavailable")
+    handler = SummarizeHandler()
+    context = _build_context(db_session, queue_service, DummySummarizer())
+    task = TaskEnvelope(
+        id=24,
+        task_type=TaskType.SUMMARIZE,
+        content_id=content.id,
+    )
+
+    result = handler.handle(task, context)
+
+    assert result.success is False
+    db_session.rollback()
+    db_session.refresh(content)
+    assert extract_share_and_chat_requests(content.content_metadata) == []
+    dig_deeper_task = (
+        db_session.query(ProcessingTask)
+        .filter(
+            ProcessingTask.task_type == TaskType.DIG_DEEPER.value,
+            ProcessingTask.content_id == content.id,
+            ProcessingTask.owner_user_id == test_user.id,
+        )
+        .one()
+    )
+    assert dig_deeper_task.payload["user_id"] == test_user.id
 
 
 def test_summarize_pdf_article_writes_longform_artifact(db_session) -> None:

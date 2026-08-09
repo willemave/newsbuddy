@@ -1,5 +1,6 @@
 """Tests for user-submitted content endpoint."""
 
+import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -376,6 +377,62 @@ def test_existing_pending_analyze_task_merges_instruction_crawl_links_and_platfo
     assert task.payload["crawl_links"] is True
 
 
+@pytest.mark.parametrize(
+    ("request_payload", "expected_payload"),
+    [
+        ({"subscribe_to_feed": True}, {"subscribe_to_feed": True}),
+        ({"crawl_links": True}, {"crawl_links": True}),
+        (
+            {"note": "Find every related source"},
+            {"instruction": "Find every related source"},
+        ),
+    ],
+)
+def test_action_submission_does_not_reuse_active_process_content_task(
+    client,
+    db_session,
+    request_payload,
+    expected_payload,
+):
+    """Action-bearing repeats need ANALYZE_URL because PROCESS_CONTENT cannot run them."""
+    existing = Content(
+        url="https://example.com/already-processing",
+        content_type=ContentType.ARTICLE.value,
+        status=ContentStatus.PROCESSING.value,
+        source=SELF_SUBMISSION_SOURCE,
+        content_metadata={},
+    )
+    db_session.add(existing)
+    db_session.flush()
+    process_task = ProcessingTask(
+        task_type=TaskType.PROCESS_CONTENT.value,
+        content_id=existing.id,
+        payload={"content_id": existing.id},
+        status=TaskStatus.PENDING.value,
+        queue_name=TaskQueue.CONTENT.value,
+    )
+    db_session.add(process_task)
+    db_session.commit()
+
+    response = client.post(
+        "/api/content/submit",
+        json={"url": existing.url, **request_payload},
+    )
+
+    assert response.status_code == 200
+    analyze_task = (
+        db_session.query(ProcessingTask)
+        .filter(
+            ProcessingTask.content_id == existing.id,
+            ProcessingTask.task_type == TaskType.ANALYZE_URL.value,
+        )
+        .one()
+    )
+    assert response.json()["task_id"] == analyze_task.id
+    for key, value in expected_payload.items():
+        assert analyze_task.payload[key] == value
+
+
 def test_duplicate_completed_submission_updates_source_url_and_platform_without_reanalyzing(
     client,
     db_session,
@@ -428,16 +485,17 @@ def test_submit_duplicate_constraint_reuses_existing_record_and_enqueues_task(
     client,
     db_session,
     monkeypatch,
+    test_user,
 ):
     """A duplicate insert race should fall back to the existing row."""
-    original_commit = db_session.commit
-    commit_calls = 0
+    original_flush = db_session.flush
+    flush_calls = 0
 
-    def _commit_with_duplicate() -> None:
-        nonlocal commit_calls
-        commit_calls += 1
-        if commit_calls != 1:
-            original_commit()
+    def _flush_with_duplicate(*args, **kwargs) -> None:
+        nonlocal flush_calls
+        flush_calls += 1
+        if flush_calls != 1:
+            original_flush(*args, **kwargs)
             return
 
         competing_session = sessionmaker(bind=db_session.get_bind())()
@@ -458,9 +516,15 @@ def test_submit_duplicate_constraint_reuses_existing_record_and_enqueues_task(
 
         raise IntegrityError("INSERT INTO contents", {}, Exception("duplicate key"))
 
-    monkeypatch.setattr(db_session, "commit", _commit_with_duplicate)
+    monkeypatch.setattr(db_session, "flush", _flush_with_duplicate)
 
-    response = client.post("/api/content/submit", json={"url": "https://example.com/article"})
+    response = client.post(
+        "/api/content/submit",
+        json={
+            "url": "https://example.com/article",
+            "save_to_knowledge_and_mark_read": True,
+        },
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -473,6 +537,24 @@ def test_submit_duplicate_constraint_reuses_existing_record_and_enqueues_task(
 
     task = db_session.query(ProcessingTask).filter_by(content_id=contents[0].id).one()
     assert task.task_type == TaskType.ANALYZE_URL.value
+    assert (
+        db_session.query(ContentStatusEntry)
+        .filter_by(user_id=test_user.id, content_id=contents[0].id)
+        .one_or_none()
+        is not None
+    )
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=test_user.id, content_id=contents[0].id)
+        .one_or_none()
+        is not None
+    )
+    assert (
+        db_session.query(ContentReadStatus)
+        .filter_by(user_id=test_user.id, content_id=contents[0].id)
+        .one_or_none()
+        is not None
+    )
 
 
 def test_reject_invalid_scheme(client):

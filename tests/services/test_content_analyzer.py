@@ -1,14 +1,18 @@
 """Tests for content analyzer service."""
 
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+import app.services.content_analyzer as content_analyzer_module
 from app.models.contracts import ContentType
 from app.services.content_analyzer import (
     ContentAnalysisOutput,
     ContentAnalysisResult,
     ContentAnalyzer,
+    _detect_media_in_html,
     get_content_analyzer,
 )
 from app.services.url_detection import (
@@ -169,6 +173,40 @@ class TestContentAnalysisResult:
 class TestContentAnalyzer:
     """Tests for ContentAnalyzer class using Responses API."""
 
+    def test_rss_media_lookup_uses_feed_sandbox(self):
+        """Publisher RSS referenced by an embed page is fetched through E2B."""
+        calls: list[tuple[str, dict[str, str]]] = []
+
+        class FakeHttpService:
+            def fetch(self, url, *, headers):
+                calls.append((url, headers))
+                return SimpleNamespace(
+                    content=b"""
+                    <rss><channel><item>
+                      <enclosure url="https://cdn.example/audio.mp3"
+                                 type="audio/mpeg" />
+                    </item></channel></rss>
+                    """
+                )
+
+        detected = _detect_media_in_html(
+            """
+            <a href="https://open.spotify.com/episode/abc123">Listen</a>
+            <link rel="alternate" type="application/rss+xml"
+                  href="https://publisher.example/feed.xml" />
+            """,
+            "https://publisher.example/episode",
+            http_service=FakeHttpService(),
+        )
+
+        assert detected["rss_audio_url"] == "https://cdn.example/audio.mp3"
+        assert calls == [
+            (
+                "https://publisher.example/feed.xml",
+                {"Accept": "application/rss+xml"},
+            )
+        ]
+
     @patch("app.services.content_analyzer.get_settings")
     def test_missing_api_key_raises_error(self, mock_settings):
         """Missing API key should raise ValueError."""
@@ -179,12 +217,21 @@ class TestContentAnalyzer:
             analyzer._get_agent()
 
     @patch("app.services.content_analyzer._fetch_page_content")
-    def test_analyze_url_with_spotify_link(self, mock_fetch):
+    def test_analyze_url_with_spotify_link(self, mock_fetch, monkeypatch):
         """URL with Spotify link is parsed as podcast from LLM output."""
         mock_fetch.return_value = (
             '<a href="https://open.spotify.com/episode/abc123">Listen</a>',
             "Test Episode Title\nSome content...",
         )
+        runtime_calls: list[dict[str, object]] = []
+        runtime_http_service = SimpleNamespace()
+
+        @contextmanager
+        def fake_runtime(**kwargs):
+            runtime_calls.append(kwargs)
+            yield runtime_http_service
+
+        monkeypatch.setattr(content_analyzer_module, "sandboxed_http_service", fake_runtime)
 
         analyzer = ContentAnalyzer()
         analyzer._agent = type(
@@ -219,11 +266,19 @@ class TestContentAnalyzer:
         assert result.analysis.content_type == "podcast"
         assert result.analysis.media_url is None
         assert result.analysis.platform == "spotify"
+        assert runtime_calls == [{"user_id": 0, "execution_id": None}]
+        assert mock_fetch.call_args.kwargs["http_service"] is runtime_http_service
 
     @patch("app.services.content_analyzer._fetch_page_content")
-    def test_analyze_url_fetch_failure_still_uses_llm(self, mock_fetch):
+    def test_analyze_url_fetch_failure_still_uses_llm(self, mock_fetch, monkeypatch):
         """Failed page fetch still attempts LLM analysis."""
         mock_fetch.return_value = (None, None)
+
+        @contextmanager
+        def fake_runtime(**_kwargs):
+            yield SimpleNamespace()
+
+        monkeypatch.setattr(content_analyzer_module, "sandboxed_http_service", fake_runtime)
 
         analyzer = ContentAnalyzer()
         analyzer._agent = type(

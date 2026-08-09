@@ -34,6 +34,7 @@ from app.processing_strategies.crawl4ai_manager import (
 from app.services.firecrawl_client import FirecrawlClientError, scrape_url_with_firecrawl
 from app.utils.dates import parse_date_with_tz
 from app.utils.title_utils import clean_title
+from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
 
@@ -332,18 +333,20 @@ class HtmlProcessorStrategy(UrlProcessorStrategy):
 
     def _detect_source(self, url: str) -> str:
         """Detect the source type from URL."""
-        if "pubmed.ncbi.nlm.nih.gov" in url or "pmc.ncbi.nlm.nih.gov" in url:
+        hostname = urlparse(url).hostname
+        if is_domain_or_subdomain(hostname, "pubmed.ncbi.nlm.nih.gov") or is_domain_or_subdomain(
+            hostname, "pmc.ncbi.nlm.nih.gov"
+        ):
             return "PubMed"
-        elif "arxiv.org" in url:
+        if is_domain_or_subdomain(hostname, "arxiv.org"):
             return "Arxiv"
-        elif "substack.com" in url:
+        if is_domain_or_subdomain(hostname, "substack.com"):
             return "Substack"
-        elif "medium.com" in url:
+        if is_domain_or_subdomain(hostname, "medium.com"):
             return "Medium"
-        elif "chinatalk.media" in url:
+        if is_domain_or_subdomain(hostname, "chinatalk.media"):
             return "ChinaTalk"
-        else:
-            return "web"
+        return "web"
 
     def preprocess_url(self, url: str) -> str:
         """

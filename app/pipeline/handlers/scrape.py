@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.core.logging import get_logger
 from app.models.contracts import BriefingFirstRunSourceOutcome
-from app.models.domain.scraper_runs import ScraperStats
+from app.models.domain.scraper_runs import ScraperStats, is_zero_progress_scrape_failure
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.task_specs import ScrapePayload
@@ -28,7 +28,17 @@ class ScrapeHandler:
             runner = ScraperRunner()
 
             if sources == ["all"]:
-                runner.run_all_with_stats()
+                results = runner.run_all_with_stats()
+                all_source_failures = [
+                    name
+                    for name, stats in results.items()
+                    if is_zero_progress_scrape_failure(stats)
+                ]
+                if all_source_failures:
+                    return TaskResult.fail(
+                        f"Scraper sources failed: {', '.join(all_source_failures)}",
+                        retryable=True,
+                    )
                 return TaskResult.ok()
 
             failures: list[str] = []
@@ -42,6 +52,8 @@ class ScrapeHandler:
                         source=source,
                         stats=stats,
                     )
+                    if is_zero_progress_scrape_failure(stats):
+                        failures.append(source)
                 except Exception as exc:  # noqa: BLE001
                     failures.append(source)
                     progress_recording_failed |= not _record_progress(
@@ -65,7 +77,10 @@ class ScrapeHandler:
             if progress_recording_failed:
                 return TaskResult.fail("Could not record onboarding scraper progress")
             if failures:
-                return TaskResult.fail(f"Scraper sources failed: {', '.join(failures)}")
+                return TaskResult.fail(
+                    f"Scraper sources failed: {', '.join(failures)}",
+                    retryable=True,
+                )
             return TaskResult.ok()
         except Exception as exc:  # noqa: BLE001
             logger.error("Scraper error: %s", exc, exc_info=True)
@@ -99,7 +114,7 @@ def _record_progress(
     processed_item_count = _processed_item_count(stats)
     outcome = (
         BriefingFirstRunSourceOutcome.UNAVAILABLE
-        if stats is None or (stats.errors > 0 and processed_item_count == 0)
+        if is_zero_progress_scrape_failure(stats)
         else BriefingFirstRunSourceOutcome.PROCESSED
     )
     try:

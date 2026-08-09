@@ -6,12 +6,24 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.api.jobs import JobStatusResponse
-from app.models.db import ProcessingTask
+from app.models.contracts import TaskStatus
+from app.models.db import ProcessingTask, ProcessingTaskUserAccess
 
 
-def execute(db: Session, *, job_id: int) -> JobStatusResponse:
+def execute(db: Session, *, job_id: int, user_id: int) -> JobStatusResponse:
     """Return job status for a processing task."""
-    task = db.query(ProcessingTask).filter(ProcessingTask.id == job_id).first()
+    task = (
+        db.query(ProcessingTask)
+        .join(
+            ProcessingTaskUserAccess,
+            ProcessingTaskUserAccess.task_id == ProcessingTask.id,
+        )
+        .filter(
+            ProcessingTask.id == job_id,
+            ProcessingTaskUserAccess.user_id == user_id,
+        )
+        .first()
+    )
     if task is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if task.id is None or task.task_type is None or task.status is None or task.queue_name is None:
@@ -22,10 +34,10 @@ def execute(db: Session, *, job_id: int) -> JobStatusResponse:
         status=task.status,
         queue_name=task.queue_name,
         content_id=task.content_id,
-        payload=task.payload or {},
+        payload={},
         retry_count=task.retry_count or 0,
         created_at=task.created_at,
         started_at=task.started_at,
         completed_at=task.completed_at,
-        error_message=task.error_message,
+        error_message="Job failed" if task.status == TaskStatus.FAILED.value else None,
     )

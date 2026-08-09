@@ -177,10 +177,7 @@ class ContentListResponse(BaseModel):
 class NarrationResponse(BaseModel):
     """Unified narration payload for any supported narration target."""
 
-    target_type: NarrationTargetType = Field(
-        ...,
-        description="Narration target family",
-    )
+    target_type: NarrationTargetType = Field(..., description="Narration target family")
     target_id: int = Field(..., description="Target identifier within the target family")
     title: str = Field(..., description="Resolved title for spoken playback")
     narration_text: str = Field(..., description="Plain-text narration script for voice playback")
@@ -263,6 +260,7 @@ class SubmissionStatusResponse(BaseModel):
         SubmissionOutcome.PROCESSING,
         description="Semantic submission outcome for user-facing display",
     )
+    rationale: str | None = None
     detected_feed: DetectedFeed | None = Field(
         None, description="RSS/Atom feed detected while handling a feed subscription request"
     )
@@ -316,6 +314,7 @@ class MixedSearchFeedResultResponse(BaseModel):
     description: str | None = None
     rationale: str | None = None
     evidence_url: str | None = None
+    is_subscribed: bool = lenient_field(False)
 
 
 class MixedSearchResponse(BaseModel):

@@ -18,12 +18,12 @@ from app.models.metadata.state import (
     normalize_metadata_shape,
     update_processing_state,
 )
+from app.repositories import read_status_repository
 from app.services import knowledge as knowledge_service
-from app.services import read_status
 from app.services.dig_deeper import enqueue_dig_deeper_task
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
-from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
-from app.services.queue import TaskStatus, TaskType
+from app.services.long_form_images import build_visible_long_form_image_task_requests
+from app.services.queue import TaskEnqueueRequest, TaskStatus, TaskType
 from app.services.scraper_configs import ensure_inbox_status
 
 logger = get_logger(__name__)
@@ -81,6 +81,7 @@ def _require_content_status(content: Content) -> str:
 def _ensure_analyze_url_task(
     db: Session,
     content_id: int,
+    user_id: int,
     instruction: str | None = None,
     *,
     crawl_links: bool = False,
@@ -97,55 +98,89 @@ def _ensure_analyze_url_task(
     Returns:
         ProcessingTask ID.
     """
-    # Check for existing ANALYZE_URL or PROCESS_CONTENT task
+    active_statuses = [TaskStatus.PENDING.value, TaskStatus.PROCESSING.value]
     existing_task = (
         db.query(ProcessingTask)
-        .filter(ProcessingTask.content_id == content_id)
         .filter(
-            ProcessingTask.task_type.in_(
-                [TaskType.ANALYZE_URL.value, TaskType.PROCESS_CONTENT.value]
-            )
+            ProcessingTask.content_id == content_id,
+            ProcessingTask.task_type == TaskType.ANALYZE_URL.value,
+            ProcessingTask.status.in_(active_statuses),
         )
-        .filter(ProcessingTask.status.in_([TaskStatus.PENDING.value, TaskStatus.PROCESSING.value]))
         .first()
     )
     if existing_task:
-        if existing_task.task_type == TaskType.ANALYZE_URL.value:
-            existing_payload = dict(existing_task.payload or {})
-            existing_payload.setdefault("content_id", content_id)
-            updated = False
-            cleaned_instruction = instruction.strip() if instruction else None
-            if cleaned_instruction and existing_payload.get("instruction") != cleaned_instruction:
-                existing_payload["instruction"] = cleaned_instruction
-                updated = True
-            if crawl_links and existing_payload.get("crawl_links") is not True:
-                existing_payload["crawl_links"] = True
-                updated = True
-            if subscribe_to_feed and existing_payload.get("subscribe_to_feed") is not True:
-                existing_payload["subscribe_to_feed"] = True
-                updated = True
-            if updated:
-                existing_task.payload = existing_payload
-                db.commit()
+        existing_payload = dict(existing_task.payload or {})
+        existing_payload.setdefault("content_id", content_id)
+        updated = False
+        cleaned_instruction = instruction.strip() if instruction else None
+        if cleaned_instruction and existing_payload.get("instruction") != cleaned_instruction:
+            existing_payload["instruction"] = cleaned_instruction
+            updated = True
+        if crawl_links and existing_payload.get("crawl_links") is not True:
+            existing_payload["crawl_links"] = True
+            updated = True
+        if subscribe_to_feed and existing_payload.get("subscribe_to_feed") is not True:
+            existing_payload["subscribe_to_feed"] = True
+            updated = True
+        if updated:
+            existing_task.payload = existing_payload
         existing_task_id = existing_task.id
         if existing_task_id is None:
             raise ValueError("Existing analyze task is missing an id")
-        return int(existing_task_id)
+        resolved_task_id = int(existing_task_id)
+        get_task_queue_gateway().grant_access_in_session(
+            db,
+            task_id=resolved_task_id,
+            user_id=user_id,
+        )
+        return resolved_task_id
+
+    # Ordinary repeats can observe the existing processing job. Action-bearing
+    # submissions need a fresh ANALYZE_URL turn because PROCESS_CONTENT cannot
+    # perform feed discovery, instruction analysis, or link crawling.
+    cleaned_instruction = instruction.strip() if instruction else None
+    if not (cleaned_instruction or crawl_links or subscribe_to_feed):
+        existing_process_task = (
+            db.query(ProcessingTask)
+            .filter(
+                ProcessingTask.content_id == content_id,
+                ProcessingTask.task_type == TaskType.PROCESS_CONTENT.value,
+                ProcessingTask.status.in_(active_statuses),
+            )
+            .first()
+        )
+        if existing_process_task is not None:
+            existing_task_id = existing_process_task.id
+            if existing_task_id is None:
+                raise ValueError("Existing process task is missing an id")
+            resolved_task_id = int(existing_task_id)
+            get_task_queue_gateway().grant_access_in_session(
+                db,
+                task_id=resolved_task_id,
+                user_id=user_id,
+            )
+            return resolved_task_id
 
     payload: dict[str, object] = {"content_id": content_id}
-    if instruction and instruction.strip():
-        payload["instruction"] = instruction.strip()
+    if cleaned_instruction:
+        payload["instruction"] = cleaned_instruction
     if crawl_links:
         payload["crawl_links"] = True
     if subscribe_to_feed:
         payload["subscribe_to_feed"] = True
 
-    return get_task_queue_gateway().enqueue(
-        TaskType.ANALYZE_URL,
-        content_id=content_id,
-        payload=payload,
-        dedupe=True,
-    )
+    return get_task_queue_gateway().enqueue_many_in_session(
+        db,
+        [
+            TaskEnqueueRequest(
+                TaskType.ANALYZE_URL,
+                content_id=content_id,
+                payload=payload,
+                dedupe=True,
+                access_user_id=user_id,
+            )
+        ],
+    )[0]
 
 
 def _apply_submission_user_state(
@@ -160,10 +195,9 @@ def _apply_submission_user_state(
 ) -> None:
     should_mark_read = save_to_knowledge_and_mark_read or share_and_chat
     if should_mark_read:
-        read_status.mark_content_as_read(db, content_id, user_id)
+        read_status_repository.mark_content_as_read_in_session(db, content_id, user_id)
     if save_to_knowledge_and_mark_read:
-        # This flag now means "save to knowledge and mark read".
-        knowledge_service.save_to_knowledge(db, content_id, user_id)
+        knowledge_service.save_to_knowledge_in_session(db, content_id, user_id)
     if share_and_chat and enqueue_dig_deeper:
         enqueue_dig_deeper_task(
             db,
@@ -240,17 +274,12 @@ def submit_user_content(
         existing_content_id = _require_content_id(existing)
         existing_content_type = _require_content_type(existing)
         existing_status = _require_content_status(existing)
-        content_fields_updated = False
-        metadata_updated = False
         if not existing.source_url:
             existing.source_url = raw_url
-            content_fields_updated = True
         if payload.title and not existing.title:
             existing.title = payload.title
-            content_fields_updated = True
         if platform_hint and not existing.platform:
             existing.platform = platform_hint
-            content_fields_updated = True
         if subscribe_to_feed:
             existing_metadata = normalize_metadata_shape(dict(existing.content_metadata or {}))
             existing_metadata = update_processing_state(
@@ -275,7 +304,6 @@ def submit_user_content(
                     platform_hint=platform_hint,
                 )
             existing.content_metadata = existing_metadata
-            db.commit()
         else:
             if share_and_chat and existing_status != ContentStatus.COMPLETED.value:
                 existing.content_metadata = append_share_and_chat_request(
@@ -283,19 +311,13 @@ def submit_user_content(
                     user_id=current_user_id,
                     initial_message=chat_initial_message,
                 )
-                metadata_updated = True
-            status_created = False
             if create_inbox_status:
-                status_created = ensure_inbox_status(
+                ensure_inbox_status(
                     db,
                     current_user_id,
                     existing_content_id,
                     content_type=existing_content_type,
                 )
-            if status_created or content_fields_updated or metadata_updated:
-                db.commit()
-            if status_created:
-                enqueue_visible_long_form_image_if_needed(db, existing)
             _apply_submission_user_state(
                 db,
                 user_id=current_user_id,
@@ -315,9 +337,24 @@ def submit_user_content(
             task_id = _ensure_analyze_url_task(
                 db,
                 existing_content_id,
+                current_user_id,
                 instruction=instruction,
                 crawl_links=crawl_links,
                 subscribe_to_feed=subscribe_to_feed,
+            )
+        image_requests = build_visible_long_form_image_task_requests(
+            db,
+            [existing_content_id],
+        )
+        if image_requests:
+            get_task_queue_gateway().enqueue_many_in_session(db, image_requests)
+        db.commit()
+        db.refresh(existing)
+        if save_to_knowledge_and_mark_read:
+            knowledge_service.sync_knowledge_markdown(
+                db,
+                content_id=existing_content_id,
+                user_id=current_user_id,
             )
         return ContentSubmissionResponse(
             content_id=existing_content_id,
@@ -371,51 +408,29 @@ def submit_user_content(
     db.add(new_content)
 
     try:
-        db.commit()
+        db.flush()
     except IntegrityError as exc:
         db.rollback()
         logger.warning("Self-submission hit duplicate constraint for %s: %s", normalized_url, exc)
         existing = db.query(Content).filter(Content.url == normalized_url).first()
         if not existing:
             raise
-        existing_content_id = _require_content_id(existing)
-        existing_content_type = _require_content_type(existing)
-        existing_status = _require_content_status(existing)
-        task_id = _ensure_analyze_url_task(
+        # Re-enter the existing-row path so the race loser receives the same
+        # inbox, Knowledge, read, chat, metadata, and task finalization as a
+        # request that observed the winner before attempting its insert.
+        return submit_user_content(
             db,
-            existing_content_id,
-            instruction=instruction,
-            crawl_links=crawl_links,
-            subscribe_to_feed=subscribe_to_feed,
-        )
-        return ContentSubmissionResponse(
-            content_id=existing_content_id,
-            content_type=ContentType(existing_content_type),
-            status=ContentStatus(existing_status),
-            platform=existing.platform,
-            already_exists=True,
-            message=(
-                "Feed subscription queued"
-                if subscribe_to_feed
-                else "Content already submitted; using existing record"
-            ),
-            task_id=task_id,
-            source=existing.source or SELF_SUBMISSION_SOURCE,
+            payload,
+            current_user,
+            submitted_via=submission_channel,
         )
 
-    db.refresh(new_content)
     new_content_id = _require_content_id(new_content)
     new_content_type = _require_content_type(new_content)
     new_content_status = _require_content_status(new_content)
     if not subscribe_to_feed:
-        status_created = False
         if create_inbox_status:
-            status_created = ensure_inbox_status(
-                db, current_user_id, new_content_id, content_type=new_content_type
-            )
-        if status_created:
-            db.commit()
-            enqueue_visible_long_form_image_if_needed(db, new_content)
+            ensure_inbox_status(db, current_user_id, new_content_id, content_type=new_content_type)
         _apply_submission_user_state(
             db,
             user_id=current_user_id,
@@ -427,10 +442,22 @@ def submit_user_content(
     task_id = _ensure_analyze_url_task(
         db,
         new_content_id,
+        current_user_id,
         instruction=instruction,
         crawl_links=crawl_links,
         subscribe_to_feed=subscribe_to_feed,
     )
+    image_requests = build_visible_long_form_image_task_requests(db, [new_content_id])
+    if image_requests:
+        get_task_queue_gateway().enqueue_many_in_session(db, image_requests)
+    db.commit()
+    db.refresh(new_content)
+    if save_to_knowledge_and_mark_read:
+        knowledge_service.sync_knowledge_markdown(
+            db,
+            content_id=new_content_id,
+            user_id=current_user_id,
+        )
 
     return ContentSubmissionResponse(
         content_id=new_content_id,
