@@ -13,7 +13,8 @@ struct OnboardingAudioStep: View {
             onboardingHeaderBlock(
                 eyebrow: "VOICE SETUP",
                 title: "Tell us what you read",
-                subtitle: "Say a few topics, names, or sources you follow. We'll use that to tune the feed."
+                subtitle: "Say a few topics, names, or sources you follow. We'll use that to tune the feed.",
+                titleAccessibilityIdentifier: "onboarding.audio.screen"
             )
             .padding(.top, 24)
 
@@ -48,13 +49,13 @@ struct OnboardingAudioStep: View {
                     .font(.appCaption)
                     .foregroundColor(.statusDestructive)
                     .padding(.bottom, 8)
+                    .accessibilityIdentifier("onboarding.audio.error")
             }
         }
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .task {
             await viewModel.startAudioCaptureIfNeeded()
         }
-        .accessibilityIdentifier("onboarding.audio.screen")
     }
 
     private var audioProcessingView: some View {
@@ -65,6 +66,7 @@ struct OnboardingAudioStep: View {
             Text("Processing your interests...")
                 .font(.appCallout)
                 .foregroundColor(.onboardingText.opacity(0.7))
+                .accessibilityIdentifier("onboarding.audio.state.transcribing")
 
             if hasTopicPreview {
                 topicPreviewCard(

@@ -16,7 +16,8 @@ struct OnboardingRedditStep: View {
                         eyebrow: "REDDIT",
                         title: "Add subreddit feeds",
                         subtitle: "Focused communities add topic-level posts alongside the broader headline mix.",
-                        isLeading: true
+                        isLeading: true,
+                        titleAccessibilityIdentifier: "onboarding.reddit.screen"
                     )
 
                     if viewModel.subredditSuggestions.isEmpty {
@@ -40,7 +41,6 @@ struct OnboardingRedditStep: View {
 
             footer
         }
-        .accessibilityIdentifier("onboarding.reddit.screen")
     }
 
     private var footer: some View {

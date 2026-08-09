@@ -32,7 +32,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         let user = makeUser(id: 41)
         let viewModel = OnboardingViewModel(
             user: user,
-            service: .shared,
+            service: OnboardingService.shared,
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -44,6 +44,148 @@ final class OnboardingStateStoreTests: XCTestCase {
         XCTAssertEqual(snapshot?.isPersonalized, false)
         XCTAssertNil(snapshot?.discoveryRunId)
         XCTAssertTrue(viewModel.isShowingDefaultConfirmation)
+    }
+
+    func testVoiceCaptureUsesThirtySecondOnboardingDeadline() async {
+        let transcriber = FakeSpeechTranscriber()
+        let viewModel = OnboardingViewModel(
+            user: makeUser(id: 46),
+            service: OnboardingService.shared,
+            dictationService: transcriber,
+            onboardingStateStore: store
+        )
+        viewModel.startPersonalized()
+
+        await viewModel.startAudioCapture()
+
+        XCTAssertEqual(
+            transcriber.requestedDeadlines,
+            [
+                SpeechRecordingDeadlines(
+                    noSpeechTimeoutSeconds: 10,
+                    maximumDurationSeconds: 30
+                )
+            ]
+        )
+        viewModel.resetAudioState()
+    }
+
+    func testChoosingDefaultsDuringAudioStartupDoesNotRestoreAStaleError() async {
+        let transcriber = DeferredStartSpeechTranscriber()
+        let viewModel = OnboardingViewModel(
+            user: makeUser(id: 49),
+            service: OnboardingService.shared,
+            dictationService: transcriber,
+            onboardingStateStore: store
+        )
+        viewModel.startPersonalized()
+
+        let startTask = Task { @MainActor in
+            await viewModel.startAudioCapture()
+        }
+        let didStart = await waitUntil { transcriber.isStarting }
+        XCTAssertTrue(didStart)
+
+        viewModel.chooseDefaults()
+        await startTask.value
+
+        XCTAssertEqual(viewModel.step, .suggestions)
+        XCTAssertFalse(viewModel.isPersonalized)
+        XCTAssertEqual(viewModel.audioState, .idle)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(viewModel.hasDictationError)
+        XCTAssertFalse(transcriber.hasActiveSession)
+    }
+
+    func testAbandonedAudioDiscoveryResponseCannotRestorePersonalizedLoading() async {
+        let service = DeferredOnboardingService()
+        let viewModel = OnboardingViewModel(
+            user: makeUser(id: 47),
+            service: service,
+            dictationService: FakeSpeechTranscriber(transcript: "AI infrastructure"),
+            onboardingStateStore: store
+        )
+        viewModel.startPersonalized()
+        await viewModel.startAudioCapture()
+        let didStartRecording = await waitUntil { viewModel.audioState == .recording }
+        XCTAssertTrue(didStartRecording)
+
+        let discoveryTask = Task { await viewModel.stopAudioCaptureAndDiscover() }
+        let didStartDiscovery = await waitUntil { service.hasPendingAudioDiscovery }
+        XCTAssertTrue(didStartDiscovery)
+
+        viewModel.chooseDefaults()
+        service.resolveAudioDiscovery(
+            OnboardingAudioDiscoverResponse(
+                runId: 901,
+                runStatus: "pending",
+                topicSummary: "Stale personalized profile",
+                inferredTopics: ["stale"],
+                lanes: []
+            )
+        )
+        await discoveryTask.value
+
+        XCTAssertEqual(viewModel.step, .suggestions)
+        XCTAssertFalse(viewModel.isPersonalized)
+        XCTAssertNil(viewModel.discoveryRunId)
+        XCTAssertNil(viewModel.topicSummary)
+        XCTAssertNil(store.progress(userId: 47)?.discoveryRunId)
+    }
+
+    func testCancelledPollResponseCannotRestoreAbandonedRunAfterRetry() async {
+        let service = DeferredOnboardingService(
+            immediateAudioResponse: OnboardingAudioDiscoverResponse(
+                runId: 902,
+                runStatus: "pending",
+                topicSummary: "Current profile",
+                inferredTopics: ["AI"],
+                lanes: []
+            )
+        )
+        let viewModel = OnboardingViewModel(
+            user: makeUser(id: 48),
+            service: service,
+            dictationService: FakeSpeechTranscriber(transcript: "AI infrastructure"),
+            onboardingStateStore: store
+        )
+        viewModel.startPersonalized()
+        await viewModel.startAudioCapture()
+        let didStartRecording = await waitUntil { viewModel.audioState == .recording }
+        XCTAssertTrue(didStartRecording)
+        await viewModel.stopAudioCaptureAndDiscover()
+        let didStartPolling = await waitUntil { service.hasPendingDiscoveryStatus }
+        XCTAssertTrue(didStartPolling)
+
+        viewModel.retryPersonalization()
+        service.resolveDiscoveryStatus(
+            OnboardingDiscoveryStatusResponse(
+                runId: 902,
+                runStatus: "completed",
+                topicSummary: "Stale profile",
+                inferredTopics: ["stale"],
+                lanes: [],
+                suggestions: OnboardingFastDiscoverResponse(
+                    recommendedPods: [],
+                    recommendedSubstacks: [
+                        makeSuggestion(
+                            suggestionType: "substack",
+                            title: "Stale Feed",
+                            feedURL: "https://stale.example/feed"
+                        )
+                    ],
+                    recommendedSubreddits: []
+                ),
+                errorMessage: nil
+            )
+        )
+        await settleAsyncWork()
+
+        XCTAssertEqual(viewModel.step, .audio)
+        XCTAssertTrue(viewModel.isPersonalized)
+        XCTAssertNil(viewModel.discoveryRunId)
+        XCTAssertNil(viewModel.suggestions)
+        XCTAssertNil(viewModel.topicSummary)
     }
 
     func testInitRestoresPersistedSuggestionsStepAndSelections() {
@@ -90,7 +232,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
-            service: .shared,
+            service: OnboardingService.shared,
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -139,7 +281,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
-            service: .shared,
+            service: OnboardingService.shared,
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -172,7 +314,7 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         let viewModel = OnboardingViewModel(
             user: user,
-            service: .shared,
+            service: OnboardingService.shared,
             dictationService: FakeSpeechTranscriber(),
             onboardingStateStore: store
         )
@@ -229,37 +371,145 @@ final class OnboardingStateStoreTests: XCTestCase {
             updatedAt: now
         )
     }
+
+    private func waitUntil(
+        attempts: Int = 100,
+        condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        for _ in 0..<attempts {
+            if condition() { return true }
+            await Task.yield()
+        }
+        return condition()
+    }
+
+    private func settleAsyncWork() async {
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+    }
 }
 
 @MainActor
 private final class FakeSpeechTranscriber: SpeechTranscribing {
-    var onTranscriptDelta: ((String) -> Void)?
-    var onTranscriptFinal: ((String) -> Void)?
-    var onError: ((String) -> Void)?
-    var onStateChange: ((SpeechTranscriptionState) -> Void)?
-    var onStopReason: ((SpeechStopReason) -> Void)?
-
     var isAvailable: Bool { true }
-    private(set) var isRecording = false
-    private(set) var isTranscribing = false
+    private(set) var requestedDeadlines: [SpeechRecordingDeadlines] = []
+    private let transcript: String
 
-    func start() async throws {
-        isRecording = true
+    init(transcript: String = "") {
+        self.transcript = transcript
     }
 
-    func stop() async throws -> String {
-        isRecording = false
-        isTranscribing = false
-        return ""
+    func makeSession(
+        deadlines: SpeechRecordingDeadlines
+    ) throws -> SpeechTranscriptionSession {
+        requestedDeadlines.append(deadlines)
+        let id = UUID()
+        let pair = AsyncStream<SpeechTranscriptionEvent>.makeStream()
+        return SpeechTranscriptionSession(
+            id: id,
+            events: pair.stream,
+            start: { _ in pair.continuation.yield(.stateChange(.recording)) },
+            stop: { [transcript] _ in
+                pair.continuation.finish()
+                return transcript
+            },
+            cancel: { _ in pair.continuation.finish() }
+        )
+    }
+}
+
+@MainActor
+private final class DeferredStartSpeechTranscriber: SpeechTranscribing {
+    var isAvailable: Bool { true }
+    private(set) var isStarting = false
+    private(set) var hasActiveSession = false
+
+    private var activeSessionID: UUID?
+    private var startContinuation: CheckedContinuation<Void, Never>?
+
+    func makeSession(
+        deadlines: SpeechRecordingDeadlines
+    ) throws -> SpeechTranscriptionSession {
+        _ = deadlines
+        let id = UUID()
+        let pair = AsyncStream<SpeechTranscriptionEvent>.makeStream()
+        activeSessionID = id
+        hasActiveSession = true
+        return SpeechTranscriptionSession(
+            id: id,
+            events: pair.stream,
+            start: { [weak self] sessionID in
+                guard let self, activeSessionID == sessionID else {
+                    throw VoiceDictationError.noActiveSession
+                }
+                isStarting = true
+                await withCheckedContinuation { continuation in
+                    self.startContinuation = continuation
+                }
+                guard activeSessionID == sessionID else {
+                    throw VoiceDictationError.noActiveSession
+                }
+            },
+            stop: { _ in throw VoiceDictationError.recordingFailed },
+            cancel: { [weak self] sessionID in
+                guard let self, activeSessionID == sessionID else { return }
+                activeSessionID = nil
+                hasActiveSession = false
+                startContinuation?.resume()
+                startContinuation = nil
+                pair.continuation.finish()
+            }
+        )
+    }
+}
+
+@MainActor
+private final class DeferredOnboardingService: OnboardingServicing {
+    private let immediateAudioResponse: OnboardingAudioDiscoverResponse?
+    private var audioContinuation: CheckedContinuation<OnboardingAudioDiscoverResponse, Error>?
+    private var statusContinuation: CheckedContinuation<OnboardingDiscoveryStatusResponse, Error>?
+
+    init(immediateAudioResponse: OnboardingAudioDiscoverResponse? = nil) {
+        self.immediateAudioResponse = immediateAudioResponse
     }
 
-    func cancel() {
-        isRecording = false
-        isTranscribing = false
+    var hasPendingAudioDiscovery: Bool { audioContinuation != nil }
+    var hasPendingDiscoveryStatus: Bool { statusContinuation != nil }
+
+    func audioDiscover(
+        request: OnboardingAudioDiscoverRequest
+    ) async throws -> OnboardingAudioDiscoverResponse {
+        _ = request
+        if let immediateAudioResponse {
+            return immediateAudioResponse
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            audioContinuation = continuation
+        }
     }
 
-    func reset() {
-        isRecording = false
-        isTranscribing = false
+    func discoveryStatus(runId: Int) async throws -> OnboardingDiscoveryStatusResponse {
+        _ = runId
+        return try await withCheckedThrowingContinuation { continuation in
+            statusContinuation = continuation
+        }
+    }
+
+    func complete(request: OnboardingCompleteRequest) async throws -> OnboardingCompleteResponse {
+        _ = request
+        fatalError("Completion is not used by these tests")
+    }
+
+    func resolveAudioDiscovery(_ response: OnboardingAudioDiscoverResponse) {
+        let continuation = audioContinuation
+        audioContinuation = nil
+        continuation?.resume(returning: response)
+    }
+
+    func resolveDiscoveryStatus(_ response: OnboardingDiscoveryStatusResponse) {
+        let continuation = statusContinuation
+        statusContinuation = nil
+        continuation?.resume(returning: response)
     }
 }

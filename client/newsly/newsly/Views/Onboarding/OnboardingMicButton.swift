@@ -27,7 +27,7 @@ struct OnboardingMicButton: View {
             ZStack {
                 if audioState == .recording {
                     Circle()
-                        .stroke(Color.onboardingAmbientTertiary.opacity(0.45), lineWidth: 2.5)
+                        .stroke(Color.onboardingSelectionAccent.opacity(0.45), lineWidth: 2.5)
                         .frame(width: 144, height: 144)
                         .scaleEffect(reduceMotion ? 1.0 : pulseScale)
                         .opacity(reduceMotion ? 0.78 : 2.0 - Double(pulseScale))
@@ -59,11 +59,11 @@ struct OnboardingMicButton: View {
                     )
                     .overlay(
                         Circle()
-                            .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                            .stroke(sheenColor(0.35), lineWidth: 1)
                     )
                     .overlay(alignment: .topLeading) {
                         Circle()
-                            .fill(Color.white.opacity(0.45))
+                            .fill(sheenColor(0.45))
                             .frame(width: 42, height: 42)
                             .blur(radius: 18)
                             .offset(x: 18, y: 18)
@@ -75,7 +75,7 @@ struct OnboardingMicButton: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(audioState == .transcribing)
+        .disabled(audioState == .starting || audioState == .transcribing)
         .scaleEffect(isPressed ? 0.96 : 1.0)
         .animation(AppMotion.press, value: isPressed)
         .simultaneousGesture(
@@ -92,22 +92,22 @@ struct OnboardingMicButton: View {
             Image(systemName: "mic.fill")
                 .font(.appSymbol(size: 36, weight: .medium))
                 .foregroundColor(.onboardingText)
-                .opacity(audioState == .idle || audioState == .error ? 1 : 0)
-                .scaleEffect(audioState == .idle || audioState == .error ? 1 : 0.25)
-                .blur(radius: audioState == .idle || audioState == .error ? 0 : 4)
+                .opacity(audioState == .idle || audioState == .failed ? 1 : 0)
+                .scaleEffect(audioState == .idle || audioState == .failed ? 1 : 0.25)
+                .blur(radius: audioState == .idle || audioState == .failed ? 0 : 4)
 
             Image(systemName: "stop.fill")
                 .font(.appSymbol(size: 30, weight: .medium))
-                .foregroundColor(.onboardingAmbientTertiary)
+                .foregroundColor(.onboardingSelectionAccent)
                 .opacity(audioState == .recording ? 1 : 0)
                 .scaleEffect(audioState == .recording ? 1 : 0.25)
                 .blur(radius: audioState == .recording ? 0 : 4)
 
             ProgressView()
                 .tint(.onboardingText)
-                .opacity(audioState == .transcribing ? 1 : 0)
-                .scaleEffect(audioState == .transcribing ? 1 : 0.25)
-                .blur(radius: audioState == .transcribing ? 0 : 4)
+                .opacity(audioState == .starting || audioState == .transcribing ? 1 : 0)
+                .scaleEffect(audioState == .starting || audioState == .transcribing ? 1 : 0.25)
+                .blur(radius: audioState == .starting || audioState == .transcribing ? 0 : 4)
         }
         .animation(AppMotion.panel, value: audioState)
     }
@@ -127,6 +127,9 @@ struct OnboardingMicButton: View {
                 .font(.appSans(size: 11, weight: .medium))
                 .tracking(2.5)
                 .foregroundColor(.onboardingText.opacity(0.55))
+                .accessibilityIdentifier(
+                    "onboarding.audio.state.\(audioState.accessibilityIdentifier)"
+                )
 
             Text(statusDetail)
                 .font(.appCaption)
@@ -138,9 +141,10 @@ struct OnboardingMicButton: View {
     private var statusText: String {
         switch audioState {
         case .idle: return "TAP TO SPEAK"
+        case .starting: return "STARTING"
         case .recording: return "LISTENING"
         case .transcribing: return "PROCESSING"
-        case .error: return "TAP TO RETRY"
+        case .failed: return "TAP TO RETRY"
         }
     }
 
@@ -148,21 +152,34 @@ struct OnboardingMicButton: View {
         switch audioState {
         case .idle:
             return "Say a few topics, names, or newsletters."
+        case .starting:
+            return "Getting the microphone ready."
         case .recording:
             return "Tap again when you're done."
         case .transcribing:
             return "Matching newsletters, podcasts, and Reddit."
-        case .error:
+        case .failed:
             return "We missed that. Give it another try."
         }
+    }
+
+    /// White specular sheen in light mode; nearly gone on dark charcoal where a
+    /// bright rim would read as a hard edge instead of a highlight.
+    private func sheenColor(_ lightOpacity: CGFloat) -> Color {
+        Color(UIColor { tc in
+            UIColor.white.withAlphaComponent(
+                tc.userInterfaceStyle == .dark ? lightOpacity * 0.2 : lightOpacity
+            )
+        })
     }
 
     private var accessibilityText: String {
         switch audioState {
         case .idle: return "Tap to start recording"
+        case .starting: return "Starting microphone"
         case .recording: return "Recording. Tap to stop."
         case .transcribing: return "Processing speech"
-        case .error: return "Tap to retry recording"
+        case .failed: return "Tap to retry recording"
         }
     }
 
@@ -174,11 +191,11 @@ struct OnboardingMicButton: View {
 
     private func handleTap() {
         switch audioState {
-        case .idle, .error:
+        case .idle, .failed:
             onStart()
         case .recording:
             onStop()
-        case .transcribing:
+        case .starting, .transcribing:
             break
         }
     }

@@ -52,7 +52,6 @@ struct OnboardingFlowView: View {
             AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized),
             value: viewModel.step
         )
-        .accessibilityIdentifier("onboarding.screen")
     }
 
     @ViewBuilder

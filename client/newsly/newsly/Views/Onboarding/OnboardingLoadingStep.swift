@@ -14,7 +14,8 @@ struct OnboardingLoadingStep: View {
             onboardingHeaderBlock(
                 eyebrow: "MATCHING SOURCES",
                 title: "Finding your feeds",
-                subtitle: "Searching newsletters, podcasts, and Reddit for a strong first set."
+                subtitle: "Searching newsletters, podcasts, and Reddit for a strong first set.",
+                titleAccessibilityIdentifier: "onboarding.loading.screen"
             )
             .padding(.top, 24)
 
@@ -63,7 +64,6 @@ struct OnboardingLoadingStep: View {
             loadingFooter
         }
         .padding(.horizontal, Spacing.appHorizontalMargin)
-        .accessibilityIdentifier("onboarding.loading.screen")
     }
 
     private var loadingFooter: some View {
@@ -190,16 +190,7 @@ struct OnboardingLoadingStep: View {
         HStack(alignment: .center, spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.onboardingAmbientPrimary.opacity(0.22),
-                                Color.onboardingSelectionAccent.opacity(0.22),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(Color.onboardingSelectionAccent.opacity(0.18))
                     .frame(width: 26, height: 26)
 
                 FinalizingSparkle()
@@ -241,13 +232,7 @@ private struct FinalizingSparkle: View {
     var body: some View {
         Image(systemName: "sparkles")
             .font(.appSymbol(size: 12, weight: .semibold))
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [.onboardingAmbientPrimary, .onboardingSelectionAccent],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .foregroundStyle(Color.onboardingSelectionAccent)
             .scaleEffect(breathing ? 1.12 : 0.92)
             .opacity(breathing ? 1.0 : 0.78)
             .onAppear {

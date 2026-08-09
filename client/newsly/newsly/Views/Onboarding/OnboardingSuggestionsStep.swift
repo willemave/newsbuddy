@@ -16,7 +16,8 @@ struct OnboardingSuggestionsStep: View {
                         eyebrow: viewModel.isShowingDefaultConfirmation ? "QUICK START" : nil,
                         title: viewModel.isShowingDefaultConfirmation ? "Start without personalized sources" : "Your picks",
                         subtitle: suggestionsSubtitle,
-                        isLeading: true
+                        isLeading: true,
+                        titleAccessibilityIdentifier: "onboarding.suggestions.screen"
                     )
 
                     if viewModel.substackSuggestions.isEmpty
@@ -53,7 +54,6 @@ struct OnboardingSuggestionsStep: View {
 
             footer
         }
-        .accessibilityIdentifier("onboarding.suggestions.screen")
     }
 
     private var footer: some View {

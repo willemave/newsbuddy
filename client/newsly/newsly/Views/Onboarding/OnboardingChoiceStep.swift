@@ -29,6 +29,7 @@ struct OnboardingChoiceStep: View {
                         .font(.watercolorDisplay)
                         .foregroundColor(.onboardingText)
                         .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("onboarding.choice.screen")
                     Text("I'm going to help you get onboarded.\nLet's get going.")
                         .font(.watercolorSubtitle)
                         .foregroundColor(.onboardingText.opacity(0.74))
@@ -81,6 +82,5 @@ struct OnboardingChoiceStep: View {
         }
         .padding(24)
         .padding(.bottom, 16)
-        .accessibilityIdentifier("onboarding.choice.screen")
     }
 }

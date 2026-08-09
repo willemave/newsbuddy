@@ -17,6 +17,17 @@ private func onboardingVoiceElapsedMilliseconds(since start: Date) -> Int {
     Int(Date().timeIntervalSince(start) * 1000)
 }
 
+@MainActor
+protocol OnboardingServicing: AnyObject {
+    func audioDiscover(
+        request: OnboardingAudioDiscoverRequest
+    ) async throws -> OnboardingAudioDiscoverResponse
+    func discoveryStatus(runId: Int) async throws -> OnboardingDiscoveryStatusResponse
+    func complete(request: OnboardingCompleteRequest) async throws -> OnboardingCompleteResponse
+}
+
+extension OnboardingService: OnboardingServicing {}
+
 enum OnboardingStep: Int, Codable {
     case intro = 0
     case choice = 1
@@ -88,14 +99,30 @@ let onboardingBrutalistTopics: [String] = [
 
 enum OnboardingAudioState: Equatable {
     case idle
+    case starting
     case recording
     case transcribing
-    case error
+    case failed
+
+    var accessibilityIdentifier: String {
+        switch self {
+        case .idle: "idle"
+        case .starting: "starting"
+        case .recording: "recording"
+        case .transcribing: "transcribing"
+        case .failed: "failed"
+        }
+    }
 }
 
 @MainActor
 @Observable
 final class OnboardingViewModel {
+    private static let voiceRecordingDeadlines = SpeechRecordingDeadlines(
+        noSpeechTimeoutSeconds: 10,
+        maximumDurationSeconds: 30
+    )
+
     private enum TaskKey: Hashable {
         case discoveryPolling
     }
@@ -127,9 +154,7 @@ final class OnboardingViewModel {
     var twitterUsername: String = ""
 
     @ObservationIgnored
-    private let service: OnboardingService
-    @ObservationIgnored
-    private let dictationService: any SpeechTranscribing
+    private let service: any OnboardingServicing
     @ObservationIgnored
     private let voiceCoordinator: VoiceDictationCoordinator
     @ObservationIgnored
@@ -148,18 +173,22 @@ final class OnboardingViewModel {
     private var isSubmittingAudioDiscovery = false
     @ObservationIgnored
     private var audioCaptureStartedAt: Date?
+    @ObservationIgnored
+    private var discoveryGeneration = 0
 
     init(
         user: User,
-        service: OnboardingService,
+        service: any OnboardingServicing,
         dictationService: (any SpeechTranscribing)? = nil,
         onboardingStateStore: OnboardingStateStore
     ) {
         self.user = user
         self.service = service
         let resolvedDictationService = dictationService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
-        self.dictationService = resolvedDictationService
-        self.voiceCoordinator = VoiceDictationCoordinator(transcriber: resolvedDictationService)
+        self.voiceCoordinator = VoiceDictationCoordinator(
+            transcriber: resolvedDictationService,
+            deadlines: Self.voiceRecordingDeadlines
+        )
         self.onboardingStateStore = onboardingStateStore
         self.twitterUsername = user.twitterUsername ?? ""
 
@@ -173,8 +202,9 @@ final class OnboardingViewModel {
     deinit {
         tasks.cancelAll()
         audioTimer?.invalidate()
-        let service = dictationService
-        Task { @MainActor in service.cancel() }
+        MainActor.assumeIsolated {
+            voiceCoordinator.cancel()
+        }
     }
 
     var substackSuggestions: [OnboardingSuggestion] {
@@ -234,10 +264,11 @@ final class OnboardingViewModel {
 
     func continueWaitingForDiscovery() {
         guard let runId = discoveryRunId else { return }
+        let generation = discoveryGeneration
         hasReachedDiscoveryPollingLimit = false
         discoveryErrorMessage = nil
         persistProgress()
-        startPolling(runId: runId)
+        startPolling(runId: runId, generation: generation)
     }
 
     func resumeDiscoveryIfNeeded() async {
@@ -250,12 +281,15 @@ final class OnboardingViewModel {
         }
 
         discoveryRunId = runId
-        await refreshDiscoveryStatus(runId: runId)
+        let generation = discoveryGeneration
+        await refreshDiscoveryStatus(runId: runId, generation: generation)
 
+        guard generation == discoveryGeneration, discoveryRunId == runId else { return }
         if isDiscoveryTerminalStatus(discoveryRunStatus) || hasReachedDiscoveryPollingLimit {
             return
         }
-        startPolling(runId: runId)
+        guard step == .loading else { return }
+        startPolling(runId: runId, generation: generation)
     }
 
     func startAudioCaptureIfNeeded() async {
@@ -265,22 +299,39 @@ final class OnboardingViewModel {
     }
 
     func startAudioCapture() async {
+        guard audioState == .idle || audioState == .failed else { return }
         let startedAt = Date()
-        configureDictationCallbacks()
         errorMessage = nil
         hasMicPermissionDenied = false
         hasDictationError = false
-        audioState = .recording
+        audioState = .starting
         audioCaptureStartedAt = startedAt
-        startAudioTimer()
         onboardingVoiceLogger.info("Onboarding audio capture start requested")
 
         do {
-            try await dictationService.start()
+            try await voiceCoordinator.start(
+                onTranscriptFinal: { [weak self] transcript in
+                    await self?.handleFinalTranscript(transcript)
+                },
+                onError: { [weak self] message in
+                    self?.handleAudioErrorMessage(message)
+                },
+                onStateChange: { [weak self] state in
+                    self?.applyDictationState(state)
+                },
+                onStopReason: { [weak self] reason in
+                    self?.handleDictationStopReason(reason)
+                }
+            )
             onboardingVoiceLogger.info(
                 "Onboarding audio capture started | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt))"
             )
+        } catch is CancellationError {
+            onboardingVoiceLogger.debug(
+                "Onboarding audio capture start cancelled | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt))"
+            )
         } catch {
+            guard step == .audio else { return }
             onboardingVoiceLogger.error(
                 "Onboarding audio capture failed | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
             )
@@ -297,7 +348,8 @@ final class OnboardingViewModel {
             "Onboarding audio capture stop requested | captureElapsedMs=\(self.audioCaptureStartedAt.map { onboardingVoiceElapsedMilliseconds(since: $0) } ?? 0)"
         )
         do {
-            _ = try await dictationService.stop()
+            let transcript = try await voiceCoordinator.stop()
+            await handleFinalTranscript(transcript)
             onboardingVoiceLogger.info(
                 "Onboarding audio capture stopped | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt))"
             )
@@ -310,8 +362,7 @@ final class OnboardingViewModel {
     }
 
     func resetAudioState() {
-        dictationService.cancel()
-        voiceCoordinator.stopListening()
+        voiceCoordinator.cancel()
         audioState = .idle
         audioDurationSeconds = 0
         hasMicPermissionDenied = false
@@ -422,11 +473,15 @@ final class OnboardingViewModel {
 
     private func beginDiscovery(transcript: String) async {
         guard !isSubmittingAudioDiscovery else { return }
+        discoveryGeneration += 1
+        let generation = discoveryGeneration
         let startedAt = Date()
         isSubmittingAudioDiscovery = true
         defer {
-            isSubmittingAudioDiscovery = false
-            audioCaptureStartedAt = nil
+            if generation == discoveryGeneration {
+                isSubmittingAudioDiscovery = false
+                audioCaptureStartedAt = nil
+            }
         }
 
         do {
@@ -438,6 +493,7 @@ final class OnboardingViewModel {
                 locale: Locale.current.identifier
             )
             let response = try await service.audioDiscover(request: request)
+            guard generation == discoveryGeneration, step == .audio else { return }
             discoveryRunId = response.runId
             discoveryRunStatus = response.runStatus
             topicSummary = response.topicSummary
@@ -446,7 +502,7 @@ final class OnboardingViewModel {
             hasReachedDiscoveryPollingLimit = false
             step = .loading
             persistProgress()
-            startPolling(runId: response.runId)
+            startPolling(runId: response.runId, generation: generation)
             onboardingVoiceLogger.info(
                 "Onboarding audio discovery started | runId=\(response.runId) laneCount=\(response.lanes.count) elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt))"
             )
@@ -454,39 +510,68 @@ final class OnboardingViewModel {
             onboardingVoiceLogger.error(
                 "Onboarding audio discovery failed | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
             )
+            guard generation == discoveryGeneration, step == .audio else { return }
             errorMessage = error.localizedDescription
-            audioState = .error
+            audioState = .failed
             hasDictationError = true
         }
     }
 
-    private func refreshDiscoveryStatus(runId: Int) async {
+    private func refreshDiscoveryStatus(runId: Int, generation: Int) async {
         do {
             let status = try await service.discoveryStatus(runId: runId)
+            guard generation == discoveryGeneration,
+                  discoveryRunId == runId,
+                  status.runId == runId,
+                  step == .loading
+            else { return }
             applyDiscoveryStatus(status)
         } catch {
+            guard generation == discoveryGeneration,
+                  discoveryRunId == runId,
+                  step == .loading
+            else { return }
             discoveryErrorMessage = error.localizedDescription
             persistProgress()
         }
     }
 
-    private func startPolling(runId: Int) {
-        tasks.runReplacing(.discoveryPolling) { [weak self] in
+    private func startPolling(runId: Int, generation: Int) {
+        tasks.runReplacing(.discoveryPolling) { [weak self] token in
             guard let self else { return }
             let deadline = Date().addingTimeInterval(onboardingDiscoveryPollingTimeoutSeconds)
             while !Task.isCancelled {
-                await self.refreshDiscoveryStatus(runId: runId)
+                guard self.tasks.isCurrent(token),
+                      generation == self.discoveryGeneration,
+                      self.discoveryRunId == runId,
+                      self.step == .loading
+                else { return }
+
+                await self.refreshDiscoveryStatus(runId: runId, generation: generation)
+
+                guard self.tasks.isCurrent(token),
+                      generation == self.discoveryGeneration,
+                      self.discoveryRunId == runId
+                else { return }
 
                 if self.isDiscoveryTerminalStatus(self.discoveryRunStatus) {
                     break
                 }
+
+                guard self.step == .loading else { return }
 
                 if Date() >= deadline {
                     self.handleDiscoveryTimeout()
                     break
                 }
 
-                try? await Task.sleep(nanoseconds: onboardingDiscoveryPollingIntervalNanoseconds)
+                do {
+                    try await Task.sleep(
+                        nanoseconds: onboardingDiscoveryPollingIntervalNanoseconds
+                    )
+                } catch {
+                    return
+                }
             }
         }
     }
@@ -561,14 +646,14 @@ final class OnboardingViewModel {
             switch dictationError {
             case .noMicrophoneAccess:
                 hasMicPermissionDenied = true
-                audioState = .error
+                audioState = .failed
             default:
                 hasDictationError = true
-                audioState = .error
+                audioState = .failed
             }
         } else {
             hasDictationError = true
-            audioState = .error
+            audioState = .failed
         }
         stopAudioTimer()
     }
@@ -581,6 +666,7 @@ final class OnboardingViewModel {
     }
 
     private func clearDiscoveryState() {
+        discoveryGeneration += 1
         tasks.cancel(.discoveryPolling)
         discoveryRunId = nil
         discoveryRunStatus = nil
@@ -599,8 +685,7 @@ final class OnboardingViewModel {
     }
 
     private func stopAudioCapture() {
-        dictationService.cancel()
-        voiceCoordinator.stopListening()
+        voiceCoordinator.cancel()
         stopAudioTimer()
         audioState = .idle
         if let audioCaptureStartedAt {
@@ -611,43 +696,49 @@ final class OnboardingViewModel {
         audioCaptureStartedAt = nil
     }
 
-    private func configureDictationCallbacks() {
-        voiceCoordinator.listen(
-            onTranscriptFinal: { [weak self] transcript in
-                guard let self else { return }
-                guard self.step == .audio else { return }
-                guard self.audioState == .recording || self.audioState == .transcribing else {
-                    return
-                }
+    private func handleFinalTranscript(_ transcript: String) async {
+        guard step == .audio else { return }
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            handleAudioErrorMessage("No speech detected. Please try again.")
+            return
+        }
 
-                let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else {
-                    self.errorMessage = "No speech detected. Please try again."
-                    self.hasDictationError = true
-                    self.audioState = .error
-                    self.stopAudioTimer()
-                    return
-                }
-
-                self.audioState = .transcribing
-                self.stopAudioTimer()
-                onboardingVoiceLogger.info(
-                    "Onboarding transcript final | transcriptChars=\(trimmed.count) captureElapsedMs=\(self.audioCaptureStartedAt.map { onboardingVoiceElapsedMilliseconds(since: $0) } ?? 0)"
-                )
-                await self.beginDiscovery(transcript: trimmed)
-            },
-            onError: { [weak self] message in
-                guard let self else { return }
-                guard self.step == .audio else { return }
-                self.errorMessage = message
-                self.hasDictationError = true
-                self.audioState = .error
-                self.stopAudioTimer()
-            },
-            onStopReason: { [weak self] reason in
-                self?.handleDictationStopReason(reason)
-            }
+        audioState = .transcribing
+        stopAudioTimer()
+        onboardingVoiceLogger.info(
+            "Onboarding transcript final | transcriptChars=\(trimmed.count) captureElapsedMs=\(self.audioCaptureStartedAt.map { onboardingVoiceElapsedMilliseconds(since: $0) } ?? 0)"
         )
+        await beginDiscovery(transcript: trimmed)
+    }
+
+    private func handleAudioErrorMessage(_ message: String) {
+        guard step == .audio else { return }
+        errorMessage = message
+        hasDictationError = true
+        audioState = .failed
+        stopAudioTimer()
+    }
+
+    private func applyDictationState(_ state: SpeechTranscriptionState) {
+        guard step == .audio else { return }
+        switch state {
+        case .idle:
+            if audioState != .failed {
+                audioState = .idle
+            }
+            stopAudioTimer()
+        case .starting:
+            audioState = .starting
+        case .recording:
+            audioState = .recording
+            startAudioTimer()
+        case .transcribing:
+            audioState = .transcribing
+            stopAudioTimer()
+        case .failed(let message):
+            handleAudioErrorMessage(message)
+        }
     }
 
     private func handleDictationStopReason(_ reason: SpeechStopReason) {
@@ -655,14 +746,16 @@ final class OnboardingViewModel {
         switch reason {
         case .manual:
             return
-        case .silenceAutoStop:
+        case .silenceAutoStop, .maximumDuration:
             return
+        case .noSpeechTimeout:
+            handleAudioErrorMessage("No speech detected. Please try again.")
         case .cancel:
             audioState = .idle
             stopAudioTimer()
         case .failure:
             hasDictationError = true
-            audioState = .error
+            audioState = .failed
             stopAudioTimer()
         }
     }
@@ -679,9 +772,6 @@ final class OnboardingViewModel {
 
     private func handleAudioTimerTick() {
         audioDurationSeconds += 1
-        if audioDurationSeconds >= 30 && audioState == .recording {
-            Task { await stopAudioCaptureAndDiscover() }
-        }
     }
 
     private func stopAudioTimer() {

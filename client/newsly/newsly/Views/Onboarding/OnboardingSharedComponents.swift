@@ -77,7 +77,8 @@ func onboardingHeaderBlock(
     eyebrow: String? = nil,
     title: String,
     subtitle: String,
-    isLeading: Bool = false
+    isLeading: Bool = false,
+    titleAccessibilityIdentifier: String? = nil
 ) -> some View {
     let horizontalAlignment: HorizontalAlignment = isLeading ? .leading : .center
     let textAlignment: TextAlignment = isLeading ? .leading : .center
@@ -92,6 +93,7 @@ func onboardingHeaderBlock(
         }
 
         Text(title)
+            .accessibilityIdentifier(ifPresent: titleAccessibilityIdentifier)
             .font(.appTitle2)
             .foregroundColor(.onboardingText)
             .multilineTextAlignment(textAlignment)

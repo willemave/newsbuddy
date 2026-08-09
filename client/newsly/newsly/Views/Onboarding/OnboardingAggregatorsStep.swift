@@ -17,7 +17,8 @@ struct OnboardingAggregatorsStep: View {
                         eyebrow: "FAST NEWS",
                         title: "Add news aggregators",
                         subtitle: "Broad headline streams across tech, science, finance, politics, and media.",
-                        isLeading: true
+                        isLeading: true,
+                        titleAccessibilityIdentifier: "onboarding.aggregators.screen"
                     )
 
                     OnboardingAggregatorSection(
@@ -35,7 +36,6 @@ struct OnboardingAggregatorsStep: View {
 
             footer
         }
-        .accessibilityIdentifier("onboarding.aggregators.screen")
     }
 
     private var footer: some View {
