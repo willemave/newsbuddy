@@ -41,6 +41,7 @@ struct AuthenticatedRootView: View {
                     .environment(authViewModel)
                     .withToast()
                     .task {
+                        guard !E2ETestLaunch.isEnabled else { return }
                         await LocalNotificationService.shared.requestAuthorization()
                     }
             }

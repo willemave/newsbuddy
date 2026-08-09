@@ -25,6 +25,7 @@ struct ContentView: View {
     @State private var learningPath = NavigationPath()
     @State private var morePath = NavigationPath()
     @State private var showMoreSheet = false
+    @State private var isMoreSheetActive = false
     @State private var compactTabBarHeight: CGFloat = 0
     @Environment(\.scenePhase) private var scenePhase
 
@@ -49,6 +50,7 @@ struct ContentView: View {
             Tab("Briefing", systemImage: "newspaper", value: RootTab.briefing) {
                 BriefingTab(
                     path: $briefingPath,
+                    scrollToTopRequest: tabCoordinator.scrollToTopRequest(for: .briefing),
                     viewModel: tabCoordinator.briefingVM,
                     readingStateStore: readingStateStore,
                     readStateCache: readStateCache,
@@ -59,6 +61,7 @@ struct ContentView: View {
             Tab("Knowledge", systemImage: "books.vertical.fill", value: RootTab.knowledge) {
                 KnowledgeTab(
                     path: $knowledgePath,
+                    scrollToTopRequest: tabCoordinator.scrollToTopRequest(for: .knowledge),
                     readStateCache: readStateCache,
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize,
@@ -69,10 +72,12 @@ struct ContentView: View {
             Tab("Learning", systemImage: "sparkles", value: RootTab.learning) {
                 LearningTab(
                     path: $learningPath,
+                    scrollToTopRequest: tabCoordinator.scrollToTopRequest(for: .learning),
                     viewModel: learningHubViewModel,
                     readStateCache: readStateCache,
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize,
+                    onSelectSession: openChatSession,
                     onOpenMore: { showMoreSheet = true }
                 )
             }
@@ -85,7 +90,7 @@ struct ContentView: View {
             BriefingCompactTabBarInset(
                 selectedTab: tabCoordinator.selectedTab,
                 isVisible: isCompactTabBarVisible,
-                onSelect: { tabCoordinator.selectedTab = $0 }
+                onSelect: selectRootTab
             )
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.height
@@ -94,7 +99,9 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showMoreSheet, onDismiss: {
+            isMoreSheetActive = false
             morePath = NavigationPath()
+            drainPendingChatRoute()
         }) {
             NavigationStack(path: $morePath) {
                 MoreView(
@@ -110,6 +117,9 @@ struct ContentView: View {
                 )
             }
             .presentationDragIndicator(.visible)
+            .onAppear {
+                isMoreSheetActive = true
+            }
         }
         .tint(Color.appChromeAccent)
         .font(.appBody)
@@ -121,6 +131,7 @@ struct ContentView: View {
             chatSessionManager.setPollingSuspended(scenePhase != .active)
             updateBriefingActivity()
             applyE2ERoutesIfNeeded()
+            drainPendingChatRoute()
         }
         .onChange(of: tabCoordinator.selectedTab) { _, newValue in
             logger.info("[TabChange] selectedTab=\(String(describing: newValue), privacy: .public)")
@@ -137,6 +148,12 @@ struct ContentView: View {
         }
         .onChange(of: learningPath.count) { oldValue, newValue in
             logRootPathChange(tab: .learning, oldDepth: oldValue, newDepth: newValue)
+            if oldValue > 0, newValue == 0 {
+                if let presentedRoute = chatNavigation.presentedRoute {
+                    chatNavigation.acknowledgePresented(presentedRoute)
+                }
+                drainPendingChatRoute()
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             chatSessionManager.setPollingSuspended(newPhase != .active)
@@ -145,11 +162,9 @@ struct ContentView: View {
                 applyE2ERoutesIfNeeded()
             }
         }
-        .onChange(of: chatNavigation.pendingRoute) { _, route in
-            guard let route else { return }
-            logger.info("[Navigation] openChatSession sessionId=\(route.sessionId, privacy: .public)")
-            openChatSession(route: route)
-            chatNavigation.clear(route: route)
+        .onChange(of: chatNavigation.queuedRoute) { _, route in
+            guard route != nil else { return }
+            drainPendingChatRoute()
         }
         .task {
             await BadgeStatsStore.shared.refreshStats()
@@ -175,6 +190,10 @@ struct ContentView: View {
         tabCoordinator.briefingVM.setActive(isActive)
     }
 
+    private func selectRootTab(_ tab: RootTab) {
+        tabCoordinator.select(tab)
+    }
+
     private var isCompactTabBarVisible: Bool {
         switch tabCoordinator.selectedTab {
         case .briefing:
@@ -193,6 +212,32 @@ struct ContentView: View {
     }
 
     private func openChatSession(route: ChatSessionRoute) {
+        chatNavigation.open(route)
+        guard !showMoreSheet, !isMoreSheetActive else {
+            showMoreSheet = false
+            return
+        }
+        drainPendingChatRoute()
+    }
+
+    private func drainPendingChatRoute() {
+        guard let route = chatNavigation.queuedRoute else { return }
+        guard !showMoreSheet, !isMoreSheetActive else {
+            showMoreSheet = false
+            return
+        }
+        let replacesBackgroundChat = chatNavigation.presentedRoute != nil
+            && tabCoordinator.selectedTab != .learning
+        guard learningPath.isEmpty || replacesBackgroundChat else { return }
+        guard chatNavigation.beginPresentation(
+            route,
+            replacingPresented: replacesBackgroundChat
+        ) else { return }
+        logger.info("[Navigation] openChatSession sessionId=\(route.sessionId, privacy: .public)")
+        presentChatSession(route)
+    }
+
+    private func presentChatSession(_ route: ChatSessionRoute) {
         if tabCoordinator.selectedTab == .briefing {
             briefingPath = NavigationPath()
         }

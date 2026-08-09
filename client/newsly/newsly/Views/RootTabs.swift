@@ -27,6 +27,7 @@ private func pushBriefingContentDetail(
 
 struct BriefingTab: View {
     @Binding var path: NavigationPath
+    let scrollToTopRequest: Int
     @Namespace private var contentTransitionNamespace
     let viewModel: BriefingViewModel
     let readingStateStore: ReadingStateStore
@@ -35,7 +36,11 @@ struct BriefingTab: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            BriefingView(viewModel: viewModel, onOpenContent: pushDetail)
+            BriefingView(
+                viewModel: viewModel,
+                scrollToTopRequest: scrollToTopRequest,
+                onOpenContent: pushDetail
+            )
                 .dynamicTypeSize(contentTextSize)
                 .withContentRoutes(
                     path: $path,
@@ -55,6 +60,7 @@ struct BriefingTab: View {
 
 struct KnowledgeTab: View {
     @Binding var path: NavigationPath
+    let scrollToTopRequest: Int
     let readStateCache: ReadStateCache
     let readingStateStore: ReadingStateStore
     let contentTextSize: DynamicTypeSize
@@ -63,6 +69,7 @@ struct KnowledgeTab: View {
     var body: some View {
         NavigationStack(path: $path) {
             KnowledgeView(
+                scrollToTopRequest: scrollToTopRequest,
                 onSelectContent: pushContent,
                 onSearch: { path.append(KnowledgeSearchRoute()) },
                 onOpenMore: onOpenMore,
@@ -91,17 +98,20 @@ struct KnowledgeTab: View {
 
 struct LearningTab: View {
     @Binding var path: NavigationPath
+    let scrollToTopRequest: Int
     @Namespace private var chatTransitionNamespace
     let viewModel: LearningHubViewModel
     let readStateCache: ReadStateCache
     let readingStateStore: ReadingStateStore
     let contentTextSize: DynamicTypeSize
+    let onSelectSession: (ChatSessionRoute) -> Void
     let onOpenMore: () -> Void
 
     var body: some View {
         NavigationStack(path: $path) {
             LearningView(
-                onSelectSession: pushSession,
+                scrollToTopRequest: scrollToTopRequest,
+                onSelectSession: onSelectSession,
                 onOpenMore: onOpenMore,
                 viewModel: viewModel,
                 readStateCache: readStateCache,
@@ -118,11 +128,6 @@ struct LearningTab: View {
             )
         }
         .toolbar(.hidden, for: .tabBar)
-    }
-
-    private func pushSession(_ route: ChatSessionRoute) {
-        path = NavigationPath()
-        path.append(route)
     }
 }
 

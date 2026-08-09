@@ -35,6 +35,8 @@ final class TabCoordinatorViewModel {
         }
     }
 
+    private(set) var scrollToTopRequests: [RootTab: Int] = [:]
+
     @ObservationIgnored
     let briefingVM: BriefingViewModel
 
@@ -58,5 +60,17 @@ final class TabCoordinatorViewModel {
             .flatMap { defaults.string(forKey: $0) }
             .flatMap(RootTab.init(rawValue:))
         self.selectedTab = initialTab ?? restoredTab ?? .briefing
+    }
+
+    func select(_ tab: RootTab) {
+        guard selectedTab == tab else {
+            selectedTab = tab
+            return
+        }
+        scrollToTopRequests[tab, default: 0] += 1
+    }
+
+    func scrollToTopRequest(for tab: RootTab) -> Int {
+        scrollToTopRequests[tab, default: 0]
     }
 }

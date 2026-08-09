@@ -13,6 +13,25 @@ final class TabCoordinatorViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectingActiveTabRequestsScrollToTopWithoutChangingSelection() {
+        let coordinator = TabCoordinatorViewModel(
+            briefingVM: BriefingViewModel(service: MockBriefingService()),
+            initialTab: .briefing
+        )
+
+        coordinator.select(.knowledge)
+        XCTAssertEqual(coordinator.selectedTab, .knowledge)
+        XCTAssertEqual(coordinator.scrollToTopRequest(for: .knowledge), 0)
+
+        coordinator.select(.knowledge)
+        coordinator.select(.knowledge)
+
+        XCTAssertEqual(coordinator.selectedTab, .knowledge)
+        XCTAssertEqual(coordinator.scrollToTopRequest(for: .knowledge), 2)
+        XCTAssertEqual(coordinator.scrollToTopRequest(for: .briefing), 0)
+    }
+
+    @MainActor
     func testSelectedTabRestoresPerUser() {
         let suiteName = "TabCoordinatorViewModelTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
