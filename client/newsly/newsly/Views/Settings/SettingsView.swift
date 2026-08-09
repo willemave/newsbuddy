@@ -79,9 +79,11 @@ struct SettingsView: View {
             }
         }
         .background(Color.surfacePrimary.ignoresSafeArea())
-        .accessibilityIdentifier("settings.screen")
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
-        .appNavigationTitle("Settings")
+        .appNavigationTitle(
+            "Settings",
+            accessibilityIdentifier: "settings.screen"
+        )
         .alert("Settings", isPresented: $showingAlert) {
             Button("OK", role: .cancel) { }
         } message: {

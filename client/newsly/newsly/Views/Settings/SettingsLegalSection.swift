@@ -20,6 +20,12 @@ struct SettingsLegalSection: View {
                 }
             }
             .settingsCard()
+
+            Text("Newsbuddy uses external AI services to process content and instructions you submit.")
+                .font(.appCaption)
+                .foregroundStyle(Color.onSurfaceTertiary)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.top, 10)
         }
     }
 }
