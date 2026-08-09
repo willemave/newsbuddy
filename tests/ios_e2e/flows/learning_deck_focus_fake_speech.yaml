@@ -1,0 +1,41 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenContentType: article
+      newslyE2EOpenContentId: "${CONTENT_ID}"
+      newslyE2EFakeSpeechEnabled: true
+      newslyE2EFakeSpeechTranscript: "${TRANSCRIPT}"
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 15000
+- tapOn:
+    id: content.action.learning_deck
+- extendedWaitUntil:
+    visible:
+      id: learning_deck.create.sheet
+    timeout: 8000
+- tapOn:
+    id: learning_deck.focus_mic
+- extendedWaitUntil:
+    visible:
+      id: learning_deck.focus_recording
+    timeout: 5000
+- tapOn:
+    id: learning_deck.focus_mic
+- extendedWaitUntil:
+    visible: "${TRANSCRIPT}"
+    timeout: 8000
+- assertVisible:
+    id: learning_deck.create.focus

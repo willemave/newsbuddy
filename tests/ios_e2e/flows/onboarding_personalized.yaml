@@ -15,37 +15,37 @@ appId: "${APP_ID}"
       newslyE2EFakeSpeechEnabled: true
       newslyE2EFakeSpeechTranscript: "${TRANSCRIPT}"
 - assertVisible:
-    text: Newsbuddy
+    id: onboarding.choice.screen
 - tapOn:
-    text: Personalize with voice
+    id: onboarding.choice.personalized
 - assertVisible:
-    text: Tell us what you read
+    id: onboarding.audio.screen
 - assertVisible:
-    text: LISTENING
+    id: onboarding.audio.state.recording
 - tapOn:
-    text: Tap again when you're done.
+    id: onboarding.audio.mic
 - extendedWaitUntil:
     visible:
-      text: NEWSLETTERS
+      id: onboarding.suggestions.screen
     timeout: 30000
 - assertVisible:
-    text: Your picks
+    id: onboarding.suggestions.screen
 - assertVisible:
-    text: Stratechery
+    id: "onboarding.suggestion.https://stratechery.com/feed"
 - assertVisible:
-    text: Latent Space
+    id: "onboarding.suggestion.https://www.latent.space/feed"
 - tapOn:
-    text: Latent Space
+    id: "onboarding.suggestion.https://www.latent.space/feed"
 - tapOn:
-    text: Continue
+    id: onboarding.suggestions.continue
 - assertVisible:
-    text: Add news aggregators
+    id: onboarding.aggregators.screen
 - tapOn:
-    text: Continue
+    id: onboarding.aggregators.continue
 - assertVisible:
-    text: Add subreddit feeds
+    id: onboarding.reddit.screen
 - tapOn:
-    text: Start with .* sources
+    id: onboarding.complete
 - extendedWaitUntil:
     visible:
       id: briefing.screen

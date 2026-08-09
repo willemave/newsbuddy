@@ -16,6 +16,8 @@ appId: "${APP_ID}"
 - assertVisible:
     id: knowledge.chat_input
 - assertVisible:
+    id: chat.article_context
+- assertVisible:
     id: knowledge.mode_menu
 - tapOn:
     id: knowledge.mode_menu

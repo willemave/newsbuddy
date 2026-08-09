@@ -23,8 +23,6 @@ appId: "${APP_ID}"
     id: briefing.segment.${ARTICLE_SEGMENT_ID}
 - takeScreenshot:
     path: "${BASELINE_DIR}/briefing-articles"
-    cropOn:
-      id: briefing.screen
 - tapOn:
     id: briefing.tier.news
 - extendedWaitUntil:
@@ -35,8 +33,6 @@ appId: "${APP_ID}"
     id: briefing.segment.${NEWS_SEGMENT_ID}
 - takeScreenshot:
     path: "${BASELINE_DIR}/briefing-news"
-    cropOn:
-      id: briefing.screen
 - tapOn:
     id: tab.knowledge
 - extendedWaitUntil:
@@ -73,5 +69,3 @@ appId: "${APP_ID}"
 - assertVisible: Settings
 - takeScreenshot:
     path: "${BASELINE_DIR}/main-more"
-    cropOn:
-      id: more.screen

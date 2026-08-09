@@ -1,0 +1,47 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+      newslyE2EOpenContentType: article
+      newslyE2EOpenContentId: "${CONTENT_ID}"
+      newslyE2EFakeSpeechEnabled: true
+      newslyE2EFakeSpeechTranscript: "${TRANSCRIPT}"
+- extendedWaitUntil:
+    visible:
+      id: content.detail.screen
+    timeout: 15000
+- tapOn:
+    id: content.action.share
+- extendedWaitUntil:
+    visible:
+      id: content.share.sheet
+    timeout: 8000
+- tapOn:
+    id: content.share.tweet_suggestions
+- extendedWaitUntil:
+    visible:
+      id: content.tweet.sheet
+    timeout: 10000
+- extendedWaitUntil:
+    visible: "Baseline tweet 1"
+    timeout: 10000
+- tapOn:
+    id: content.tweet.voice_mic
+- extendedWaitUntil:
+    visible: "Stop tweet adjustment recording"
+    timeout: 5000
+- tapOn:
+    id: content.tweet.voice_mic
+- extendedWaitUntil:
+    visible: "Voice-adjusted tweet 1"
+    timeout: 10000

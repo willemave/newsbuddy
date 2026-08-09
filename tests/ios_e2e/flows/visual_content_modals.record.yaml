@@ -23,8 +23,6 @@ appId: "${APP_ID}"
     id: content.detail.title.${CONTENT_ID}
 - takeScreenshot:
     path: "${BASELINE_DIR}/detail-article"
-    cropOn:
-      id: content.detail.screen
 - tapOn:
     id: content.action.share
 - extendedWaitUntil:
@@ -33,8 +31,6 @@ appId: "${APP_ID}"
     timeout: 8000
 - takeScreenshot:
     path: "${BASELINE_DIR}/modal-share"
-    cropOn:
-      id: content.share.sheet
 - tapOn:
     id: content.sheet.close
 - waitForAnimationToEnd
@@ -46,8 +42,6 @@ appId: "${APP_ID}"
     timeout: 8000
 - takeScreenshot:
     path: "${BASELINE_DIR}/modal-download"
-    cropOn:
-      id: content.download.sheet
 - tapOn:
     id: content.sheet.close
 - waitForAnimationToEnd
@@ -59,8 +53,6 @@ appId: "${APP_ID}"
     timeout: 8000
 - takeScreenshot:
     path: "${BASELINE_DIR}/modal-chat"
-    cropOn:
-      id: content.chat.sheet
 - tapOn:
     id: content.sheet.close
 - waitForAnimationToEnd

@@ -23,8 +23,6 @@ appId: "${APP_ID}"
     id: content.detail.title.${CONTENT_ID}
 - assertScreenshot:
     path: "${BASELINE_DIR}/detail-article.png"
-    cropOn:
-      id: content.detail.screen
     thresholdPercentage: 94
 - tapOn:
     id: content.action.share
@@ -34,8 +32,6 @@ appId: "${APP_ID}"
     timeout: 8000
 - assertScreenshot:
     path: "${BASELINE_DIR}/modal-share.png"
-    cropOn:
-      id: content.share.sheet
     thresholdPercentage: 98
 - tapOn:
     id: content.sheet.close
@@ -48,8 +44,6 @@ appId: "${APP_ID}"
     timeout: 8000
 - assertScreenshot:
     path: "${BASELINE_DIR}/modal-download.png"
-    cropOn:
-      id: content.download.sheet
     thresholdPercentage: 98
 - tapOn:
     id: content.sheet.close
@@ -62,8 +56,6 @@ appId: "${APP_ID}"
     timeout: 8000
 - assertScreenshot:
     path: "${BASELINE_DIR}/modal-chat.png"
-    cropOn:
-      id: content.chat.sheet
     thresholdPercentage: 98
 - tapOn:
     id: content.sheet.close

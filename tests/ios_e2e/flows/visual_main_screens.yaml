@@ -23,8 +23,6 @@ appId: "${APP_ID}"
     id: briefing.segment.${ARTICLE_SEGMENT_ID}
 - assertScreenshot:
     path: "${BASELINE_DIR}/briefing-articles.png"
-    cropOn:
-      id: briefing.screen
     thresholdPercentage: 94
 - tapOn:
     id: briefing.tier.news
@@ -36,8 +34,6 @@ appId: "${APP_ID}"
     id: briefing.segment.${NEWS_SEGMENT_ID}
 - assertScreenshot:
     path: "${BASELINE_DIR}/briefing-news.png"
-    cropOn:
-      id: briefing.screen
     thresholdPercentage: 94
 - tapOn:
     id: tab.knowledge
@@ -77,6 +73,4 @@ appId: "${APP_ID}"
 - assertVisible: Settings
 - assertScreenshot:
     path: "${BASELINE_DIR}/main-more.png"
-    cropOn:
-      id: more.screen
     thresholdPercentage: 94
