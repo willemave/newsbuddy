@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AliasChoices,
@@ -20,6 +20,7 @@ _HTTP_URL_ADAPTER = TypeAdapter(HttpUrl)
 
 SHARE_ACTION_MODES = {
     LlmTaskMode.ADD_CONTENT,
+    LlmTaskMode.ADD_TO_BRIEFING,
     LlmTaskMode.ADD_LINKS,
     LlmTaskMode.ADD_FEED,
     LlmTaskMode.CHAT,
@@ -117,6 +118,36 @@ class ShareActionChatCandidate(BaseModel):
     initial_message: str | None = None
 
 
+class ShareActionBriefingTargetBase(BaseModel):
+    """Shared fields for one resolved Add-to-Briefing target."""
+
+    url: str
+    title: str | None = None
+    platform: str | None = None
+    rationale: str | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ShareActionBriefingFeedTarget(ShareActionBriefingTargetBase):
+    """Continuing source resolved to a canonical feed URL."""
+
+    kind: Literal["feed"]
+
+
+class ShareActionBriefingContentTarget(ShareActionBriefingTargetBase):
+    """Individual item resolved to a canonical Briefing-eligible URL."""
+
+    kind: Literal["content"]
+    content_type: str | None = None
+
+
+type ShareActionBriefingTarget = Annotated[
+    ShareActionBriefingFeedTarget | ShareActionBriefingContentTarget,
+    Field(discriminator="kind"),
+]
+
+
 class ShareActionAgentResult(BaseModel):
     """Typed final result read from `output/result.json`."""
 
@@ -126,6 +157,7 @@ class ShareActionAgentResult(BaseModel):
     content_urls: list[ShareActionCandidate] = Field(default_factory=list)
     presentation: ShareActionPresentationCandidate | None = None
     chat: ShareActionChatCandidate | None = None
+    briefing_target: ShareActionBriefingTarget | None = None
     title: str | None = None
     platform: str | None = None
     content_type: str | None = None

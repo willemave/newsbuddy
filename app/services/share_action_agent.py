@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any, cast
 
 from pydantic_ai import Agent
@@ -20,7 +21,11 @@ from app.services.agent_toolset import (
     AgentToolsetConfig,
     register_agent_vm_tools,
 )
-from app.services.agent_vm_runtime import AgentVmSession, agent_vm_session_log_payload
+from app.services.agent_vm_runtime import (
+    AgentVmDeadlineExceeded,
+    AgentVmSession,
+    agent_vm_session_log_payload,
+)
 from app.services.agent_vm_sessions import create_agent_vm_session
 from app.services.llm_models import build_pydantic_model, resolve_model_provider
 from app.services.llm_tasks import require_llm_task_id
@@ -85,10 +90,14 @@ def run_share_action_agent(
 ) -> ShareActionAgentRunResult:
     """Run a Share Action agent and read its typed output artifact."""
     settings = get_settings()
+    deadline = monotonic() + settings.llm_task_sandbox_timeout_seconds
     llm_task_id = require_llm_task_id(task)
     user_id = _require_int(task.user_id, "LLM task user id")
-    sandbox_factory = sandbox_factory or _create_configured_sandbox
-    sandbox = sandbox_factory(task)
+    sandbox = (
+        sandbox_factory(task)
+        if sandbox_factory is not None
+        else _create_configured_sandbox(task, deadline=deadline)
+    )
     agent_log_events: list[dict[str, Any]] = []
     try:
         _append_agent_log_event(
@@ -118,7 +127,10 @@ def run_share_action_agent(
             result = agent.run_sync(
                 _build_user_prompt(task),
                 deps=deps,
-                model_settings=_build_runtime_model_settings(base_model_settings),
+                model_settings=_build_runtime_model_settings(
+                    base_model_settings,
+                    deadline=deadline,
+                ),
             )
         except Exception as exc:
             _append_agent_log_event(
@@ -186,7 +198,11 @@ def _register_tools(agent: Agent[ShareActionAgentDeps, str], *, task: LlmTask) -
     )
 
 
-def _create_configured_sandbox(task: LlmTask) -> AgentVmSession:
+def _create_configured_sandbox(
+    task: LlmTask,
+    *,
+    deadline: float | None = None,
+) -> AgentVmSession:
     return create_agent_vm_session(
         user_id=_require_int(task.user_id, "LLM task user id"),
         llm_task_id=require_llm_task_id(task),
@@ -197,6 +213,7 @@ def _create_configured_sandbox(task: LlmTask) -> AgentVmSession:
             "LLM task shared workspace path",
         ),
         feature=f"share_action.{task.mode}",
+        deadline=deadline,
     )
 
 
@@ -244,11 +261,21 @@ def _load_mode_prompt(task: LlmTask) -> str:
     return load_prompt(f"llm_tasks/share_action.{task.mode}")
 
 
-def _build_runtime_model_settings(base_model_settings: ModelSettings | None) -> ModelSettings:
-    settings = get_settings()
+def _build_runtime_model_settings(
+    base_model_settings: ModelSettings | None,
+    *,
+    deadline: float,
+) -> ModelSettings:
     runtime_settings = dict(base_model_settings or {})
-    runtime_settings["timeout"] = settings.llm_task_sandbox_timeout_seconds
+    runtime_settings["timeout"] = _remaining_run_timeout(deadline)
     return cast(ModelSettings, runtime_settings)
+
+
+def _remaining_run_timeout(deadline: float) -> float:
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise AgentVmDeadlineExceeded("Share Action agent deadline was exceeded")
+    return remaining
 
 
 def _read_result_json(sandbox: AgentVmSession) -> ShareActionAgentResult:

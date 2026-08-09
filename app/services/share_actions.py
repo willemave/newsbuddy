@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
+from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.commands import ingest_content as ingest_content_command
+from app.core.logging import get_logger
 from app.models.api.share_actions import (
     ShareActionAgentResult,
     ShareActionCreateRequest,
@@ -24,13 +24,12 @@ from app.models.contracts import (
     LlmTaskMode,
     LlmTaskStatus,
     LlmWorkflowState,
-    TaskStatus,
     TaskType,
 )
-from app.models.db import Content, LlmTask, LlmTaskAction, ProcessingTask, User
-from app.pipeline.task_specs import get_task_spec
+from app.models.db import Content, LlmTask, LlmTaskAction, User
 from app.services.content_submission import normalize_url
 from app.services.dig_deeper import get_or_create_dig_deeper_session
+from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.learning_decks import create_or_rerun_learning_deck
 from app.services.llm_tasks import (
     LlmTaskError,
@@ -44,6 +43,7 @@ from app.services.llm_tasks import (
     set_llm_task_status,
     utcnow,
 )
+from app.services.queue import TaskEnqueueRequest
 from app.services.share_action_agent import (
     ShareActionAgentExecutionError,
     ShareActionAgentRunResult,
@@ -51,6 +51,7 @@ from app.services.share_action_agent import (
 )
 from app.services.share_action_workflows import (
     AddLinksActionInput,
+    AddToBriefingActionInput,
     ContentActionInput,
     FeedActionInput,
     LearningDeckActionInput,
@@ -66,6 +67,16 @@ from app.services.share_action_workflows import (
 ShareActionAgentRunner = Callable[[Session, LlmTask], ShareActionAgentRunResult]
 
 DEFAULT_SHARE_ACTION_APPROVAL_POLICY = {"default": LlmTaskApprovalPolicy.AUTO_APPLY.value}
+logger = get_logger(__name__)
+
+
+class ShareActionApplyOutcome(StrEnum):
+    """Stable internal outcomes persisted in Share Action result JSON."""
+
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    SUBMITTED = "submitted"
 
 
 def create_share_action(
@@ -242,11 +253,22 @@ def apply_share_task_action(db: Session, *, task: LlmTask, action: LlmTaskAction
         return
     if action.action_status != LlmTaskActionStatus.APPROVED.value:
         return
+    task_id = require_llm_task_id(task)
+    action_id = action.id
+    if action_id is None:
+        raise LlmTaskError("Share Action callback is missing an id")
+    approved_by_user_id = action.approved_by_user_id
+    approved_at = action.approved_at
     action.action_status = LlmTaskActionStatus.APPLYING.value
     action.started_at = utcnow()
+    started_at = action.started_at
+    failed_result: dict[str, Any] | None = None
     db.flush()
     try:
         result = _apply_action(db, task=task, action=action)
+        if result.get("outcome") == ShareActionApplyOutcome.FAILED:
+            failed_result = result
+            raise LlmTaskError(result.get("error") or "Share Action applied no items")
         mark_llm_task_action_applied(db, action=action, action_result=result)
         if not _has_pending_approval_actions(db, task=task):
             set_llm_task_status(
@@ -257,7 +279,42 @@ def apply_share_task_action(db: Session, *, task: LlmTask, action: LlmTaskAction
                 note="Approved Share Action applied",
             )
     except Exception as exc:
-        mark_llm_task_action_failed(db, action=action, error_message=str(exc))
+        try:
+            # Applicators can fail during flush or commit, leaving the session
+            # unusable until rollback. Reload both durable rows before recording
+            # the terminal callback state.
+            db.rollback()
+            persisted_task = db.query(LlmTask).filter(LlmTask.id == task_id).one()
+            persisted_action = db.query(LlmTaskAction).filter(LlmTaskAction.id == action_id).one()
+            persisted_action.approved_by_user_id = approved_by_user_id
+            persisted_action.approved_at = approved_at
+            persisted_action.started_at = started_at
+            if failed_result is not None:
+                persisted_action.action_result = failed_result
+            mark_llm_task_action_failed(db, action=persisted_action, error_message=str(exc))
+            set_llm_task_status(
+                db,
+                persisted_task,
+                status=LlmTaskStatus.FAILED,
+                workflow_state=LlmWorkflowState.FAILED,
+                note="Share Action application failed",
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+            # Approval callbacks run outside the task-level orchestrator, so
+            # persist both terminal rows before returning the application error.
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.exception(
+                "Could not persist failed Share Action application state",
+                extra={
+                    "component": "share_action",
+                    "operation": "persist_application_failure",
+                    "task_id": task_id,
+                    "context_data": {"action_id": action_id},
+                },
+            )
         raise
 
 
@@ -432,6 +489,48 @@ def _apply_subscribe_to_feed_action(
     return {"content_id": result.content_id, "task_id": result.job_id}
 
 
+def _apply_add_to_briefing_action(
+    db: Session,
+    _task: LlmTask,
+    user: User,
+    action_input: ShareActionInput,
+) -> dict[str, Any]:
+    if not isinstance(action_input, AddToBriefingActionInput):
+        raise LlmTaskError("add_to_briefing action input has the wrong schema")
+    target = action_input.root
+    if target.kind == "feed":
+        result = _submit_content(
+            db,
+            user=user,
+            action_input=FeedActionInput(
+                url=target.url,
+                title=target.title,
+                platform=target.platform,
+                instruction=target.rationale,
+            ),
+            subscribe_to_feed=True,
+        )
+    else:
+        result = _submit_content(
+            db,
+            user=user,
+            action_input=ContentActionInput(
+                url=target.url,
+                title=target.title,
+                platform=target.platform,
+                content_type=target.content_type,
+                instruction=target.rationale,
+            ),
+        )
+    return {
+        "resolved_kind": target.kind,
+        "resolved_url": target.url,
+        "content_id": result.content_id,
+        "task_id": result.job_id,
+        "already_exists": result.response.already_exists,
+    }
+
+
 def _apply_enqueue_chat_action(
     db: Session,
     task: LlmTask,
@@ -572,23 +671,48 @@ def _apply_add_links(
     applied: list[dict[str, Any]] = []
     for candidate in action_input.content_urls[:20]:
         try:
-            result = _submit_content(
+            submission_result = _submit_content(
                 db,
                 user=user,
                 action_input=candidate,
                 save_to_knowledge_and_mark_read=workflow.save_shared_source_to_knowledge,
             )
         except Exception as exc:  # noqa: BLE001
-            applied.append({"url": candidate.url, "error": str(exc)})
+            db.rollback()
+            applied.append(
+                {
+                    "url": candidate.url,
+                    "outcome": ShareActionApplyOutcome.FAILED,
+                    "error": str(exc),
+                }
+            )
             continue
         applied.append(
             {
                 "url": candidate.url,
-                "content_id": result.content_id,
-                "task_id": result.job_id,
+                "outcome": ShareActionApplyOutcome.SUBMITTED,
+                "content_id": submission_result.content_id,
+                "task_id": submission_result.job_id,
             }
         )
-    return {"items": applied}
+    succeeded_count = sum(item["outcome"] == ShareActionApplyOutcome.SUBMITTED for item in applied)
+    failed_count = len(applied) - succeeded_count
+    if failed_count == 0:
+        outcome = ShareActionApplyOutcome.COMPLETED
+    elif succeeded_count > 0:
+        outcome = ShareActionApplyOutcome.PARTIAL
+    else:
+        outcome = ShareActionApplyOutcome.FAILED
+    result: dict[str, Any] = {
+        "outcome": outcome,
+        "attempted_count": len(applied),
+        "succeeded_count": succeeded_count,
+        "failed_count": failed_count,
+        "items": applied,
+    }
+    if outcome == ShareActionApplyOutcome.FAILED:
+        result["error"] = "All discovered links failed to submit"
+    return result
 
 
 _SHARE_ACTION_APPLICATORS: dict[
@@ -598,6 +722,7 @@ _SHARE_ACTION_APPLICATORS: dict[
     "add_content": _apply_add_content_action,
     "save_to_knowledge": _apply_save_to_knowledge_action,
     "subscribe_to_feed": _apply_subscribe_to_feed_action,
+    "add_to_briefing": _apply_add_to_briefing_action,
     "enqueue_chat": _apply_enqueue_chat_action,
     "add_links": _apply_add_links,
     "create_learning_deck": _apply_create_learning_deck_action,
@@ -605,35 +730,16 @@ _SHARE_ACTION_APPLICATORS: dict[
 
 
 def _enqueue_llm_task(db: Session, *, llm_task_id: int, user_id: int) -> int:
-    task_spec = get_task_spec(TaskType.RUN_LLM_TASK)
-    payload = task_spec.normalize_payload({"llm_task_id": llm_task_id, "user_id": user_id})
-    task = ProcessingTask(
-        task_type=TaskType.RUN_LLM_TASK.value,
-        payload=payload,
-        status=TaskStatus.PENDING.value,
-        queue_name=task_spec.queue.value,
-        available_at=utcnow(),
-    )
-    db.add(task)
-    db.flush()
-    if task.id is None:
-        raise LlmTaskError("Share Action queue task was not created")
-    db.execute(
-        select(
-            func.pg_notify(
-                "processing_tasks",
-                json.dumps(
-                    {
-                        "task_id": int(task.id),
-                        "task_type": TaskType.RUN_LLM_TASK.value,
-                        "queue_name": task_spec.queue.value,
-                    },
-                    separators=(",", ":"),
-                ),
+    return get_task_queue_gateway().enqueue_many_in_session(
+        db,
+        [
+            TaskEnqueueRequest(
+                TaskType.RUN_LLM_TASK,
+                payload={"llm_task_id": llm_task_id, "user_id": user_id},
+                owner_user_id=user_id,
             )
-        )
-    )
-    return int(task.id)
+        ],
+    )[0]
 
 
 def _input_knowledge_content_id(task: LlmTask) -> int | None:

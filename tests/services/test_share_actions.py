@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
 
 from app.models.api.share_actions import ShareActionAgentResult, ShareActionCreateRequest
@@ -17,6 +19,7 @@ from app.models.db import (
     Content,
     ContentKnowledgeSave,
     ContentReadStatus,
+    ContentStatusEntry,
     LearningDeck,
     LlmTask,
     LlmTaskAction,
@@ -24,9 +27,18 @@ from app.models.db import (
 )
 from app.models.metadata.state import extract_share_and_chat_requests
 from app.services import share_actions
-from app.services.llm_tasks import LlmTaskError
+from app.services.llm_tasks import (
+    LlmTaskError,
+    approve_llm_task_action,
+    request_llm_task_action,
+    set_llm_task_status,
+)
 from app.services.share_action_agent import ShareActionAgentRunResult
-from app.services.share_actions import create_share_action, run_share_action_task
+from app.services.share_actions import (
+    apply_share_task_action,
+    create_share_action,
+    run_share_action_task,
+)
 
 
 def _share_request(**values: object) -> ShareActionCreateRequest:
@@ -71,6 +83,111 @@ def test_create_share_action_enqueues_generic_llm_task(db_session, test_user) ->
     assert queued.payload == {"llm_task_id": task.id, "user_id": test_user.id}
 
 
+def test_apply_share_task_action_failure_terminally_fails_action_and_task(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url="https://example.com/feed-page",
+            mode=LlmTaskMode.ADD_FEED,
+            approval_policy={"default": LlmTaskApprovalPolicy.APPROVAL_REQUIRED.value},
+        ),
+    )
+    task = db_session.query(LlmTask).filter_by(id=response.task_id).one()
+    action = request_llm_task_action(
+        db_session,
+        task=task,
+        action_name="subscribe_to_feed",
+        action_input={"url": "https://example.com/feed.xml"},
+    )
+    approve_llm_task_action(db_session, action=action, approved_by_user_id=test_user.id)
+    set_llm_task_status(
+        db_session,
+        task,
+        status=LlmTaskStatus.AWAITING_APPROVAL,
+        workflow_state="awaiting_approval",
+        note="Awaiting test approval",
+    )
+    db_session.commit()
+
+    def fail_apply(*_args, **_kwargs):
+        raise RuntimeError("feed application unavailable")
+
+    monkeypatch.setattr(share_actions, "_apply_action", fail_apply)
+
+    with pytest.raises(RuntimeError, match="feed application unavailable"):
+        apply_share_task_action(db_session, task=task, action=action)
+
+    db_session.expire_all()
+    persisted_task = db_session.query(LlmTask).filter_by(id=task.id).one()
+    persisted_action = db_session.query(LlmTaskAction).filter_by(id=action.id).one()
+    assert persisted_action.action_status == LlmTaskActionStatus.FAILED.value
+    assert persisted_action.error_message == "feed application unavailable"
+    assert persisted_task.status == LlmTaskStatus.FAILED.value
+    assert persisted_task.workflow_state == "failed"
+    assert persisted_task.error_type == "RuntimeError"
+    assert persisted_task.error_message == "feed application unavailable"
+
+
+def test_apply_share_task_action_recovers_from_aborted_database_transaction(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url="https://example.com/feed-page",
+            mode=LlmTaskMode.ADD_FEED,
+            approval_policy={"default": LlmTaskApprovalPolicy.APPROVAL_REQUIRED.value},
+        ),
+    )
+    task = db_session.query(LlmTask).filter_by(id=response.task_id).one()
+    action = request_llm_task_action(
+        db_session,
+        task=task,
+        action_name="subscribe_to_feed",
+        action_input={"url": "https://example.com/feed.xml"},
+    )
+    approve_llm_task_action(db_session, action=action, approved_by_user_id=test_user.id)
+    set_llm_task_status(
+        db_session,
+        task,
+        status=LlmTaskStatus.AWAITING_APPROVAL,
+        workflow_state="awaiting_approval",
+        note="Awaiting test approval",
+    )
+    db_session.commit()
+    task_id = task.id
+    action_id = action.id
+
+    def fail_apply(db, **_kwargs):
+        db.execute(text("SELECT 1 / 0"))
+        return {}
+
+    monkeypatch.setattr(share_actions, "_apply_action", fail_apply)
+
+    with pytest.raises(DataError, match="division by zero"):
+        apply_share_task_action(db_session, task=task, action=action)
+
+    db_session.expire_all()
+    persisted_task = db_session.query(LlmTask).filter_by(id=task_id).one()
+    persisted_action = db_session.query(LlmTaskAction).filter_by(id=action_id).one()
+    assert persisted_action.action_status == LlmTaskActionStatus.FAILED.value
+    assert persisted_action.error_message is not None
+    assert "division by zero" in persisted_action.error_message
+    assert persisted_task.status == LlmTaskStatus.FAILED.value
+    assert persisted_task.workflow_state == "failed"
+    assert persisted_task.error_type == "DataError"
+    assert persisted_task.error_message is not None
+    assert "division by zero" in persisted_task.error_message
+
+
 def test_create_share_action_defers_source_ingestion_to_worker(
     db_session,
     test_user,
@@ -112,6 +229,163 @@ def test_create_share_action_feed_does_not_save_source_to_knowledge(
     assert db_session.query(ContentKnowledgeSave).count() == 0
 
 
+def test_run_add_to_briefing_feed_target_subscribes_without_ingesting_homepage(
+    db_session,
+    test_user,
+) -> None:
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url="https://example.com/publication",
+            mode=LlmTaskMode.ADD_TO_BRIEFING,
+        ),
+    )
+
+    task = run_share_action_task(
+        db_session,
+        llm_task_id=response.task_id,
+        agent_runner=_fake_agent_result(
+            _agent_result(
+                action="add_to_briefing",
+                briefing_target={
+                    "kind": "feed",
+                    "url": "https://example.com/feed.xml",
+                    "title": "Example Publication",
+                    "rationale": "Validated source feed",
+                },
+            )
+        ),
+    )
+
+    assert task.status == LlmTaskStatus.COMPLETED.value
+    assert db_session.query(Content).filter_by(url="https://example.com/publication").count() == 0
+    content = db_session.query(Content).filter_by(url="https://example.com/feed.xml").one()
+    assert content.content_metadata["subscribe_to_feed"] is True
+    assert db_session.query(ContentKnowledgeSave).filter_by(content_id=content.id).count() == 0
+    action = db_session.query(LlmTaskAction).filter_by(llm_task_id=response.task_id).one()
+    assert action.action_name == "add_to_briefing"
+    assert action.action_result["resolved_kind"] == "feed"
+    assert action.action_result["resolved_url"] == "https://example.com/feed.xml"
+
+
+def test_run_add_to_briefing_content_target_uses_briefing_content_pipeline(
+    db_session,
+    test_user,
+) -> None:
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url="https://example.com/tracked-story",
+            mode=LlmTaskMode.ADD_TO_BRIEFING,
+        ),
+    )
+
+    run_share_action_task(
+        db_session,
+        llm_task_id=response.task_id,
+        agent_runner=_fake_agent_result(
+            _agent_result(
+                action="add_to_briefing",
+                briefing_target={
+                    "kind": "content",
+                    "url": "https://example.com/canonical-story",
+                    "title": "Canonical Story",
+                    "content_type": "article",
+                    "rationale": "Canonical individual article",
+                },
+            )
+        ),
+    )
+
+    assert db_session.query(Content).filter_by(url="https://example.com/tracked-story").count() == 0
+    content = db_session.query(Content).filter_by(url="https://example.com/canonical-story").one()
+    assert not content.content_metadata.get("subscribe_to_feed")
+    assert (
+        db_session.query(ContentStatusEntry)
+        .filter_by(user_id=test_user.id, content_id=content.id, status="inbox")
+        .one_or_none()
+        is not None
+    )
+    action = db_session.query(LlmTaskAction).filter_by(llm_task_id=response.task_id).one()
+    assert action.action_result["resolved_kind"] == "content"
+
+
+def test_run_add_to_briefing_no_action_creates_no_product_state(
+    db_session,
+    test_user,
+) -> None:
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url="https://example.com/unsupported-homepage",
+            mode=LlmTaskMode.ADD_TO_BRIEFING,
+        ),
+    )
+
+    task = run_share_action_task(
+        db_session,
+        llm_task_id=response.task_id,
+        agent_runner=_fake_agent_result(
+            _agent_result(
+                action="no_action",
+                rationale="Neither a source nor an eligible item",
+            )
+        ),
+    )
+
+    assert task.status == LlmTaskStatus.COMPLETED.value
+    assert task.output_json == {
+        "action": "no_action",
+        "primary_url": None,
+        "feed_url": None,
+        "content_urls": [],
+        "presentation": None,
+        "chat": None,
+        "briefing_target": None,
+        "title": None,
+        "platform": None,
+        "content_type": None,
+        "rationale": "Neither a source nor an eligible item",
+        "sources_used": [],
+        "confidence": None,
+    }
+    assert db_session.query(Content).count() == 0
+    assert db_session.query(LlmTaskAction).filter_by(llm_task_id=response.task_id).count() == 0
+
+
+def test_run_add_to_briefing_rejects_missing_target_without_product_state(
+    db_session,
+    test_user,
+) -> None:
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url="https://example.com/ambiguous",
+            mode=LlmTaskMode.ADD_TO_BRIEFING,
+        ),
+    )
+
+    with pytest.raises(LlmTaskError, match="missing briefing_target"):
+        run_share_action_task(
+            db_session,
+            llm_task_id=response.task_id,
+            agent_runner=_fake_agent_result(
+                _agent_result(
+                    action="add_to_briefing",
+                    rationale="Ambiguous output",
+                )
+            ),
+        )
+
+    task = db_session.query(LlmTask).filter_by(id=response.task_id).one()
+    assert task.status == LlmTaskStatus.FAILED.value
+    assert db_session.query(Content).count() == 0
+
+
 @pytest.mark.parametrize(
     "mode, expected",
     [
@@ -121,6 +395,7 @@ def test_create_share_action_feed_does_not_save_source_to_knowledge(
         (LlmTaskMode.PRESENTATION, True),
         (LlmTaskMode.BOOKMARK_ONLY, True),
         (LlmTaskMode.ADD_FEED, False),
+        (LlmTaskMode.ADD_TO_BRIEFING, False),
     ],
 )
 def test_share_action_workflow_owns_source_save_policy(
@@ -283,6 +558,102 @@ def test_run_share_action_add_links_uses_bounded_idempotency_key(
     assert action.action_status == LlmTaskActionStatus.APPLIED.value
     assert action.idempotency_key is not None
     assert len(action.idempotency_key) <= 512
+
+
+def test_run_share_action_add_links_persists_partial_result(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url="https://example.com/partial-link-list",
+            mode=LlmTaskMode.ADD_LINKS,
+        ),
+    )
+    original_submit = share_actions._submit_content
+
+    def _selective_submit(*args, **kwargs):
+        if kwargs["action_input"].url.endswith("/bad"):
+            raise ValueError("candidate rejected")
+        return original_submit(*args, **kwargs)
+
+    monkeypatch.setattr(share_actions, "_submit_content", _selective_submit)
+
+    run_share_action_task(
+        db_session,
+        llm_task_id=response.task_id,
+        agent_runner=_fake_agent_result(
+            _agent_result(
+                action="add_links",
+                primary_url="https://example.com/partial-link-list",
+                content_urls=[
+                    {"url": "https://example.com/good"},
+                    {"url": "https://example.com/bad"},
+                ],
+            )
+        ),
+    )
+
+    action = db_session.query(LlmTaskAction).filter_by(llm_task_id=response.task_id).one()
+    assert action.action_status == LlmTaskActionStatus.APPLIED.value
+    assert action.action_result["outcome"] == "partial"
+    assert action.action_result["attempted_count"] == 2
+    assert action.action_result["succeeded_count"] == 1
+    assert action.action_result["failed_count"] == 1
+    assert action.action_result["items"][1] == {
+        "url": "https://example.com/bad",
+        "outcome": "failed",
+        "error": "candidate rejected",
+    }
+
+
+def test_run_share_action_add_links_fails_when_no_candidate_applies(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url="https://example.com/failed-link-list",
+            mode=LlmTaskMode.ADD_LINKS,
+        ),
+    )
+    original_submit = share_actions._submit_content
+
+    def _reject_candidates(*args, **kwargs):
+        if "/failed-candidate-" in kwargs["action_input"].url:
+            raise ValueError("candidate rejected")
+        return original_submit(*args, **kwargs)
+
+    monkeypatch.setattr(share_actions, "_submit_content", _reject_candidates)
+
+    with pytest.raises(LlmTaskError, match="All discovered links failed"):
+        run_share_action_task(
+            db_session,
+            llm_task_id=response.task_id,
+            agent_runner=_fake_agent_result(
+                _agent_result(
+                    action="add_links",
+                    primary_url="https://example.com/failed-link-list",
+                    content_urls=[
+                        {"url": "https://example.com/failed-candidate-1"},
+                        {"url": "https://example.com/failed-candidate-2"},
+                    ],
+                )
+            ),
+        )
+
+    task = db_session.query(LlmTask).filter_by(id=response.task_id).one()
+    action = db_session.query(LlmTaskAction).filter_by(llm_task_id=response.task_id).one()
+    assert task.status == LlmTaskStatus.FAILED.value
+    assert action.action_status == LlmTaskActionStatus.FAILED.value
+    assert action.action_result["outcome"] == "failed"
+    assert action.action_result["failed_count"] == 2
 
 
 def test_run_share_action_chat_uses_content_pipeline_without_preprocessing_agent(

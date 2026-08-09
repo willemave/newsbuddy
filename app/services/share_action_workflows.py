@@ -8,9 +8,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, RootModel
 
-from app.models.api.share_actions import ShareActionAgentResult
+from app.models.api.share_actions import ShareActionAgentResult, ShareActionBriefingTarget
 from app.models.contracts import LlmTaskMode
 from app.models.db import LlmTask
 from app.services.llm_tasks import LlmTaskError
@@ -57,8 +57,16 @@ class LearningDeckActionInput(ShareActionInputModel):
     interests_prompt: str | None = None
 
 
+class AddToBriefingActionInput(RootModel[ShareActionBriefingTarget]):
+    """Discriminated feed-or-content target persisted for host application."""
+
+
 type ShareActionInput = (
-    ContentActionInput | FeedActionInput | AddLinksActionInput | LearningDeckActionInput
+    ContentActionInput
+    | FeedActionInput
+    | AddLinksActionInput
+    | LearningDeckActionInput
+    | AddToBriefingActionInput
 )
 ShareActionInputBuilder = Callable[[LlmTask, ShareActionAgentResult], ShareActionInput]
 
@@ -157,6 +165,16 @@ def _build_bookmark_input(task: LlmTask, result: ShareActionAgentResult) -> Cont
     return _build_content_input(task, result)
 
 
+def _build_add_to_briefing_input(
+    _task: LlmTask,
+    result: ShareActionAgentResult,
+) -> AddToBriefingActionInput:
+    target = result.briefing_target
+    if target is None:
+        raise LlmTaskError("Add-to-Briefing result is missing briefing_target")
+    return AddToBriefingActionInput(root=target)
+
+
 def _build_feed_input(task: LlmTask, result: ShareActionAgentResult) -> FeedActionInput:
     return FeedActionInput(
         url=result.feed_url or result.primary_url or _input_url(task),
@@ -226,6 +244,14 @@ SHARE_ACTION_WORKFLOWS: dict[LlmTaskMode, ShareActionWorkflowSpec] = {
         accepted_result_actions=frozenset({"add_content"}),
         input_model=ContentActionInput,
         build_input=_build_content_input,
+    ),
+    LlmTaskMode.ADD_TO_BRIEFING: ShareActionWorkflowSpec(
+        mode=LlmTaskMode.ADD_TO_BRIEFING,
+        host_action_name="add_to_briefing",
+        accepted_result_actions=frozenset({"add_to_briefing"}),
+        input_model=AddToBriefingActionInput,
+        build_input=_build_add_to_briefing_input,
+        save_shared_source_to_knowledge=False,
     ),
     LlmTaskMode.ADD_LINKS: ShareActionWorkflowSpec(
         mode=LlmTaskMode.ADD_LINKS,
