@@ -97,6 +97,7 @@ require_cmd() {
 
 require_cmd axe
 require_cmd xcrun
+require_cmd jq
 
 if [[ -z "$UDID" ]]; then
   UDID="$(axe list-simulators | awk -F '|' '$3 ~ /Booted/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1; exit}')"
@@ -168,44 +169,41 @@ echo "Capturing launch artifacts..."
 axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/00_launch_ui.json"
 axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/00_launch.png" >/dev/null
 
+assert_id() {
+  local identifier="$1"
+  local ui_file="$2"
+  if ! jq -e --arg identifier "$identifier" \
+    '.. | objects | select(.AXUniqueId == $identifier)' "$ui_file" >/dev/null; then
+    echo "Required accessibility identifier not found: $identifier" >&2
+    exit 1
+  fi
+}
+
+assert_id "briefing.screen" "$OUTPUT_DIR/00_launch_ui.json"
+
 echo "Navigating to Knowledge tab..."
-if ! axe tap --id "tab.knowledge" --udid "$UDID" >/dev/null 2>&1; then
-  # Coordinate fallback tuned for iPhone 17 Pro portrait.
-  axe tap -x 265 -y 818 --udid "$UDID" >/dev/null 2>&1 || true
-fi
-sleep 1
+axe tap --id "tab.knowledge" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
 axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/01_knowledge_ui.json"
 axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/01_knowledge.png" >/dev/null
+assert_id "knowledge.screen" "$OUTPUT_DIR/01_knowledge_ui.json"
 
-echo "Navigating to Live segment..."
-LIVE_TAP_X=320
-LIVE_TAP_Y=85
-picker_frame="$(jq -r '..|objects|select(.AXUniqueId=="knowledge.tab_picker")|"\(.frame.x) \(.frame.y) \(.frame.width) \(.frame.height)"' "$OUTPUT_DIR/01_knowledge_ui.json" | head -n 1)"
-if [[ -n "$picker_frame" ]]; then
-  read -r picker_x picker_y picker_w picker_h <<<"$picker_frame"
-  LIVE_TAP_X="$(awk "BEGIN {printf \"%.0f\", $picker_x + ($picker_w * 0.84)}")"
-  LIVE_TAP_Y="$(awk "BEGIN {printf \"%.0f\", $picker_y + ($picker_h / 2)}")"
-fi
-axe tap -x "$LIVE_TAP_X" -y "$LIVE_TAP_Y" --udid "$UDID" >/dev/null 2>&1 || true
-sleep 1
-axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/02_live_ui.json"
-axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/02_live.png" >/dev/null
+echo "Navigating to Learning tab..."
+axe tap --id "tab.learning" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
+axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/02_learning_ui.json"
+axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/02_learning.png" >/dev/null
+assert_id "learning.screen" "$OUTPUT_DIR/02_learning_ui.json"
 
-echo "Connecting live session..."
-if ! axe tap --id "live.connect" --udid "$UDID" >/dev/null 2>&1; then
-  if ! axe tap --label "Connect" --udid "$UDID" >/dev/null 2>&1; then
-    axe tap --id "live.controls" --udid "$UDID" >/dev/null 2>&1 || true
-  fi
-fi
-sleep 2
-axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/03_connected_ui.json"
-axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/03_connected.png" >/dev/null
+echo "Opening More sheet..."
+axe tap --id "learning.more_menu" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
+axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/03_more_ui.json"
+axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/03_more.png" >/dev/null
+assert_id "more.screen" "$OUTPUT_DIR/03_more_ui.json"
 
-if jq -e '..|objects|select(.AXUniqueId=="live.status")' "$OUTPUT_DIR/03_connected_ui.json" >/dev/null 2>&1; then
-  echo "Live UI identifiers detected (live.status present)."
-else
-  echo "Warning: live.status identifier not found; inspect artifacts."
-fi
+echo "Opening Search from More..."
+axe tap --id "more.search" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
+axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/04_search_ui.json"
+axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/04_search.png" >/dev/null
+assert_id "search.input" "$OUTPUT_DIR/04_search_ui.json"
 
 echo "Done. Artifacts written to:"
 echo "  $OUTPUT_DIR"

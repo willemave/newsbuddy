@@ -39,65 +39,13 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-SIMULATOR_ID="$(
-python3 - <<'PY'
-import json
-import os
-import subprocess
-import sys
-
-specified = os.environ.get("NEWSLY_MAESTRO_SIMULATOR_ID")
-if specified:
-    print(specified)
-    raise SystemExit
-
-specified_name = os.environ.get("NEWSLY_MAESTRO_SIMULATOR_NAME")
-
-def load(*args: str) -> dict:
-    return json.loads(subprocess.check_output(["xcrun", "simctl", "list", *args, "-j"], text=True))
-
-if specified_name:
-    for device_sets in (load("devices", "booted"), load("devices", "available")):
-        for runtime_devices in device_sets.get("devices", {}).values():
-            for device in runtime_devices:
-                if (
-                    device.get("name") == specified_name
-                    and device.get("isAvailable", True)
-                ):
-                    print(device["udid"])
-                    raise SystemExit
-    sys.exit(f"No available simulator named {specified_name!r} found")
-
-booted = load("devices", "booted")
-for runtime_devices in booted.get("devices", {}).values():
-    for device in runtime_devices:
-        if device.get("state") == "Booted" and device.get("isAvailable", True):
-            print(device["udid"])
-            raise SystemExit
-
-available = load("devices", "available")
-preferred_names = ["iPhone 17 Pro", "iPhone 17", "iPhone 16 Pro", "iPhone 16", "iPhone 15 Pro", "iPhone 15"]
-fallback = None
-for runtime_devices in available.get("devices", {}).values():
-    for device in runtime_devices:
-        if not device.get("isAvailable", True):
-            continue
-        name = device.get("name", "")
-        if "iPhone" not in name:
-            continue
-        if fallback is None:
-            fallback = device["udid"]
-        if name in preferred_names:
-            print(device["udid"])
-            raise SystemExit
-
-if fallback:
-    print(fallback)
-    raise SystemExit
-
-sys.exit("No available iPhone simulator found")
-PY
-)"
+simulator_selector_args=()
+if [[ -n "${NEWSLY_MAESTRO_SIMULATOR_ID:-}" ]]; then
+  simulator_selector_args+=(--udid "$NEWSLY_MAESTRO_SIMULATOR_ID")
+elif [[ -n "${NEWSLY_MAESTRO_SIMULATOR_NAME:-}" ]]; then
+  simulator_selector_args+=(--name "$NEWSLY_MAESTRO_SIMULATOR_NAME")
+fi
+SIMULATOR_ID="$(python3 "$REPO_ROOT/scripts/select_ios_simulator.py" "${simulator_selector_args[@]}")"
 
 open -a Simulator
 xcrun simctl boot "$SIMULATOR_ID" >/dev/null 2>&1 || true
@@ -140,6 +88,8 @@ xcrun simctl install "$SIMULATOR_ID" "$APP_PATH"
 
 export NEWSLY_MAESTRO_APP_ID="$APP_ID"
 export NEWSLY_MAESTRO_SIMULATOR_ID="$SIMULATOR_ID"
+export NEWSLY_AXE_APP_PATH="${NEWSLY_AXE_APP_PATH:-$APP_PATH}"
+export NEWSLY_AXE_SIMULATOR_ID="${NEWSLY_AXE_SIMULATOR_ID:-$SIMULATOR_ID}"
 
 cd "$REPO_ROOT"
 uv run pytest tests/ios_e2e "$@"

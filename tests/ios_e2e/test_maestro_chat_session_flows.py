@@ -72,8 +72,6 @@ def test_chat_session_council_button_starts_council_and_switches_branches(
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -159,13 +157,10 @@ def test_chat_session_long_transcript_send_follows_latest_reply(
             display_user_prompt=f"Scroll matrix user turn {turn}",
         )
 
-    _fake_process_message_async, _fake_process_assistant_turn_async = (
-        completed_chat_processors_factory(assistant_reply=follow_up_reply)
-    )
-    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
+    complete_queued_turn = completed_chat_processors_factory(assistant_reply=follow_up_reply)
     monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
+        "app.commands.send_chat_message.stage_queued_chat_turn",
+        complete_queued_turn,
     )
 
     run_ios_flow(

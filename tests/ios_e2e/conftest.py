@@ -1,4 +1,4 @@
-"""Shared harness for Maestro-driven iOS E2E tests."""
+"""Shared live-backend harnesses for Maestro- and AXe-driven iOS E2E tests."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -21,12 +21,23 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.db import get_db_session, get_readonly_db_session
 from app.main import app
+from scripts.select_ios_simulator import SimulatorSelectionError, select_live_ios_simulator
+from tests.ios_e2e.axe_harness import AxeRunner
 from tests.support.fixture_files import encode_launch_fixture
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IOS_E2E_DIR = Path(__file__).resolve().parent
 MAESTRO_FLOW_DIR = IOS_E2E_DIR / "flows"
 DEFAULT_APP_ID = "org.willemaw.newsly"
+DEFAULT_AXE_APP_PATH = Path(
+    "/tmp/newsly_codex_build/Build/Products/Debug-iphonesimulator/newsly.app"
+)
+AXE_ARTIFACT_ROOT = Path(
+    os.environ.get(
+        "NEWSLY_AXE_ARTIFACT_ROOT",
+        f"/tmp/newsly_axe_e2e_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}",
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -83,6 +94,47 @@ def _find_maestro_binary() -> str | None:
     return None
 
 
+def _find_axe_binary() -> str | None:
+    return shutil.which("axe")
+
+
+def _require_axe_simulator(udid: str, *, strict: bool) -> None:
+    result = subprocess.run(
+        ["axe", "list-simulators"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"AXe could not list simulators: {result.stderr.strip()}")
+
+    matching_lines = [line for line in result.stdout.splitlines() if line.startswith(udid)]
+    if not matching_lines:
+        message = f"Requested AXe simulator {udid} is unavailable"
+        if strict:
+            pytest.fail(message)
+        pytest.skip(message)
+    if any("| Booted |" in line for line in matching_lines):
+        return
+
+    boot_result = subprocess.run(
+        ["xcrun", "simctl", "boot", udid],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if boot_result.returncode != 0 and "current state: Booted" not in boot_result.stderr:
+        pytest.skip(f"Requested AXe simulator {udid} could not boot: {boot_result.stderr.strip()}")
+    ready_result = subprocess.run(
+        ["xcrun", "simctl", "bootstatus", udid, "-b"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if ready_result.returncode != 0:
+        pytest.skip(f"Requested AXe simulator {udid} did not finish booting")
+
+
 def _require_java_runtime() -> None:
     result = subprocess.run(
         ["java", "-version"],
@@ -106,11 +158,9 @@ def maestro_bin() -> str:
 
 @pytest.fixture
 def live_server(
-    maestro_bin: str,
     db_session_factory: sessionmaker,
 ) -> Iterator[LiveServer]:
-    """Expose the FastAPI app over HTTP with test DB dependency overrides."""
-    del maestro_bin
+    """Expose FastAPI over HTTP for either Maestro or AXe iOS tests."""
 
     def override_get_db() -> Iterator[Session]:
         db = db_session_factory()
@@ -140,6 +190,53 @@ def live_server(
         server.should_exit = True
         thread.join(timeout=10)
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def axe_runner(request: pytest.FixtureRequest) -> Iterator[AxeRunner]:
+    """Install a current app build and drive one explicit simulator with AXe."""
+    axe_binary = _find_axe_binary()
+    if axe_binary is None:
+        pytest.skip("AXe CLI is not installed")
+
+    app_bundle_path = Path(os.environ.get("NEWSLY_AXE_APP_PATH", str(DEFAULT_AXE_APP_PATH)))
+    if not app_bundle_path.is_dir():
+        pytest.skip(
+            "Current Newsly simulator app bundle is unavailable at "
+            f"{app_bundle_path}. Build it or set NEWSLY_AXE_APP_PATH."
+        )
+
+    explicit_udid = os.environ.get("NEWSLY_AXE_SIMULATOR_ID")
+    explicit_name = os.environ.get("NEWSLY_AXE_SIMULATOR_NAME")
+    try:
+        udid = select_live_ios_simulator(
+            explicit_udid=explicit_udid,
+            explicit_name=explicit_name,
+        )
+    except SimulatorSelectionError as exc:
+        if explicit_udid or explicit_name:
+            pytest.fail(str(exc))
+        pytest.skip(str(exc))
+    _require_axe_simulator(udid, strict=bool(explicit_udid or explicit_name))
+
+    artifact_dir = AXE_ARTIFACT_ROOT / request.node.name
+    runner = AxeRunner(
+        axe_binary=axe_binary,
+        udid=udid,
+        bundle_id=os.environ.get("NEWSLY_AXE_APP_ID", DEFAULT_APP_ID),
+        app_bundle_path=app_bundle_path,
+        artifact_dir=artifact_dir,
+    )
+    runner.install_clean()
+    try:
+        yield runner
+    finally:
+        subprocess.run(
+            ["xcrun", "simctl", "terminate", udid, runner.bundle_id],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 @pytest.fixture
@@ -238,58 +335,32 @@ def run_ios_flow(
 
 
 @pytest.fixture
-def completed_chat_processors_factory(
-    db_session_factory: sessionmaker,
-) -> Callable[..., tuple[Callable[..., Awaitable[None]], Callable[..., Awaitable[None]]]]:
-    """Build deterministic async chat processor stubs backed by the test DB."""
+def completed_chat_processors_factory() -> Callable[..., Callable[..., object]]:
+    """Build a deterministic inline terminalizer around durable queue staging."""
     from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
     from app.services.chat_agent import update_message_completed
+    from app.services.chat_turn_queue import stage_queued_chat_turn
 
     def _build(
         *,
         assistant_reply: str,
-    ) -> tuple[Callable[..., Awaitable[None]], Callable[..., Awaitable[None]]]:
-        async def _process_message_async(
-            session_id: int,
-            message_id: int,
-            prompt: str,
-            *,
-            source: str = "chat",
-            task_id: int | None = None,
-        ) -> None:
-            del session_id, source, task_id
-            worker_db = db_session_factory()
-            try:
-                update_message_completed(
-                    worker_db,
-                    message_id,
-                    [
-                        ModelRequest(parts=[UserPromptPart(content=prompt)]),
-                        ModelResponse(parts=[TextPart(content=assistant_reply)]),
-                    ],
-                    display_user_prompt=prompt,
-                )
-            finally:
-                worker_db.close()
-
-        async def _process_assistant_turn_async(
-            session_id: int,
-            message_id: int,
-            prompt: str,
-            *,
-            screen_context,
-            source: str = "assistant",
-        ) -> None:
-            del screen_context
-            await _process_message_async(
-                session_id,
-                message_id,
-                prompt,
-                source=source,
+    ) -> Callable[..., object]:
+        def _stage_and_complete(db, *, context):
+            message = stage_queued_chat_turn(db, context=context)
+            update_message_completed(
+                db,
+                message.id,
+                [
+                    ModelRequest(parts=[UserPromptPart(content=context.user_prompt)]),
+                    ModelResponse(parts=[TextPart(content=assistant_reply)]),
+                ],
+                display_user_prompt=context.user_prompt,
+                commit=False,
             )
+            return message
 
-        return _process_message_async, _process_assistant_turn_async
+        return _stage_and_complete
 
     return _build
 

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from copy import deepcopy
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+from sqlalchemy import event
 
 from app.core.settings import get_settings
 from app.models.contracts import (
@@ -42,6 +46,8 @@ from app.services.onboarding.internal_models import (
     _DiscoverSuggestion,
     _DiscoveryWebResult,
 )
+from app.services.tweet_suggestions import TweetSuggestionData, TweetSuggestionsResult
+from tests.support.feed_subscription_test_helpers import stub_feed_validator
 
 pytestmark = [pytest.mark.integration, pytest.mark.ios_e2e]
 
@@ -292,6 +298,102 @@ def test_learning_tab_long_press_regenerates_deck_with_existing_focus(
     assert tasks[-1].input_json["interests_prompt"] == "Focus on the existing tradeoffs"
 
 
+def test_more_search_detail_chat_handoff_dismisses_sheet_and_shows_chat(
+    run_ios_flow,
+    create_sample_content,
+    sample_article_long,
+    test_user,
+    db_session,
+) -> None:
+    fixture = deepcopy(sample_article_long)
+    fixture["title"] = "Maestro Search Handoff Article"
+    content = create_sample_content(fixture)
+
+    run_ios_flow(
+        "more_search_detail_chat_handoff.yaml",
+        extra_env={
+            "CONTENT_ID": str(content.id),
+            "QUERY": "Maestro Search Handoff",
+        },
+    )
+
+    db_session.expire_all()
+    session = (
+        db_session.query(ChatSession)
+        .filter(
+            ChatSession.user_id == test_user.id,
+            ChatSession.content_id == content.id,
+        )
+        .one_or_none()
+    )
+    assert session is not None
+
+
+def test_tweet_adjustment_fake_speech_regenerates_visible_suggestions(
+    run_ios_flow,
+    create_sample_content,
+    sample_article_long,
+    monkeypatch,
+) -> None:
+    content = create_sample_content(sample_article_long)
+    transcript = "Focus on the surprising tradeoff"
+
+    def _fake_generate_tweet_suggestions(
+        *,
+        content,
+        message,
+        creativity,
+        length,
+        llm_provider,
+    ):
+        del content, llm_provider
+        prefix = "Voice-adjusted" if message == transcript else "Baseline"
+        return TweetSuggestionsResult(
+            content_id=content_id,
+            creativity=creativity,
+            length=length,
+            model="ios-e2e",
+            suggestions=[
+                TweetSuggestionData(
+                    id=index,
+                    text=f"{prefix} tweet {index}",
+                    style_label="test",
+                )
+                for index in range(1, 4)
+            ],
+        )
+
+    content_id = content.id
+    monkeypatch.setattr(
+        "app.commands.generate_tweet_suggestions.generate_tweet_suggestions",
+        _fake_generate_tweet_suggestions,
+    )
+
+    run_ios_flow(
+        "tweet_fake_speech.yaml",
+        extra_env={
+            "CONTENT_ID": str(content.id),
+            "TRANSCRIPT": transcript,
+        },
+    )
+
+
+def test_learning_deck_focus_fake_speech_populates_focus_field(
+    run_ios_flow,
+    create_sample_content,
+    sample_article_long,
+) -> None:
+    content = create_sample_content(sample_article_long)
+
+    run_ios_flow(
+        "learning_deck_focus_fake_speech.yaml",
+        extra_env={
+            "CONTENT_ID": str(content.id),
+            "TRANSCRIPT": "Focus on operating tradeoffs",
+        },
+    )
+
+
 def test_long_form_list_mark_read_action_updates_backend_state(
     run_ios_flow,
     create_sample_content,
@@ -507,8 +609,6 @@ def test_council_tabs_switch_between_mocked_branch_replies(
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -546,14 +646,10 @@ def test_chat_mic_toggle_flow_uses_mocked_speech_and_sends_message(
         title="Mocked Mic Session",
         session_type="knowledge_chat",
     )
-    _fake_process_message_async, _fake_process_assistant_turn_async = (
-        completed_chat_processors_factory(assistant_reply=assistant_reply)
-    )
-
-    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
+    complete_queued_turn = completed_chat_processors_factory(assistant_reply=assistant_reply)
     monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
+        "app.commands.send_chat_message.stage_queued_chat_turn",
+        complete_queued_turn,
     )
 
     run_ios_flow(
@@ -591,14 +687,10 @@ def test_knowledge_new_chat_mic_opens_full_chat_session(
     initial_count = (
         db_session.query(ChatSession).filter(ChatSession.user_id == test_user.id).count()
     )
-    _fake_process_message_async, _fake_process_assistant_turn_async = (
-        completed_chat_processors_factory(assistant_reply=assistant_reply)
-    )
-
-    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
+    complete_queued_turn = completed_chat_processors_factory(assistant_reply=assistant_reply)
     monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
+        "app.commands.create_assistant_turn.stage_queued_chat_turn",
+        complete_queued_turn,
     )
 
     run_ios_flow("knowledge_new_chat.yaml", extra_env={"TRANSCRIPT": transcript})
@@ -647,19 +739,41 @@ def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(
             self.calls: list[tuple[TaskType, dict | None]] = []
             self._next_task_id = 0
 
-        def enqueue(self, task_type, payload=None, **_kwargs) -> int:
-            self._next_task_id += 1
-            normalized_payload = payload or {}
-            self.calls.append((task_type, normalized_payload))
+        def enqueue_many_in_session(self, db, requests) -> list[int]:
+            task_ids: list[int] = []
+            audio_runs: list[tuple[int, int]] = []
+            for request in requests:
+                self._next_task_id += 1
+                normalized_payload = request.payload or {}
+                self.calls.append((request.task_type, normalized_payload))
+                task_ids.append(self._next_task_id)
+                if (
+                    request.task_type == TaskType.ONBOARDING_DISCOVER
+                    and "run_id" in normalized_payload
+                ):
+                    audio_runs.append(
+                        (
+                            int(normalized_payload["run_id"]),
+                            int(normalized_payload["user_id"]),
+                        )
+                    )
 
-            if task_type == TaskType.ONBOARDING_DISCOVER and "run_id" in normalized_payload:
-                worker_db = db_session_factory()
-                try:
-                    run_audio_discovery(worker_db, int(normalized_payload["run_id"]))
-                finally:
-                    worker_db.close()
+            if audio_runs:
 
-            return self._next_task_id
+                def process_audio_runs_after_commit(_session) -> None:
+                    for run_id, user_id in audio_runs:
+                        worker_db = db_session_factory()
+                        try:
+                            run_audio_discovery(
+                                worker_db,
+                                run_id,
+                                user_id=user_id,
+                            )
+                        finally:
+                            worker_db.close()
+
+                event.listen(db, "after_commit", process_audio_runs_after_commit, once=True)
+            return task_ids
 
     async def _fake_build_audio_lane_plan(transcript: str, locale: str | None) -> _AudioPlanOutput:
         del transcript, locale
@@ -673,8 +787,9 @@ def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(
         lane_name=None,
         lane_target=None,
         telemetry=None,
+        request_timeout_seconds=None,
     ):
-        del num_results, include_social, telemetry
+        del num_results, include_social, telemetry, request_timeout_seconds
         return [
             _DiscoveryWebResult(
                 title=f"{lane_name or 'Discovery'} result {index + 1}",
@@ -731,9 +846,27 @@ def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(
     )
     db_session.commit()
 
+    stub_feed_validator(monkeypatch)
+
+    @contextmanager
+    def _feed_runtime(**_kwargs):
+        yield SimpleNamespace(detector=SimpleNamespace())
+
     monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda url: {"feed_url": url},
+        "app.services.onboarding.discovery_run.feed_research_runtime",
+        _feed_runtime,
+    )
+    monkeypatch.setattr(
+        "app.services.onboarding.audio_discovery_run.feed_research_runtime",
+        _feed_runtime,
+    )
+    monkeypatch.setattr(
+        "app.services.onboarding.suggestion_projection.resolve_feed_candidate",
+        lambda **kwargs: {
+            "feed_url": kwargs["candidate_feed_urls"][0],
+            "feed_format": "rss",
+            "title": kwargs.get("title") or "",
+        },
     )
     monkeypatch.setattr(
         "app.services.onboarding.entrypoints._build_audio_lane_plan",
@@ -744,7 +877,15 @@ def test_personalized_onboarding_flow_runs_live_audio_discovery_with_fake_mic(
         _fake_run_discovery_exa_queries,
     )
     monkeypatch.setattr(
+        "app.services.onboarding.audio_discovery_run._run_discovery_exa_queries",
+        _fake_run_discovery_exa_queries,
+    )
+    monkeypatch.setattr(
         "app.services.onboarding.discovery_run._run_discover_output_with_fallback",
+        _fake_run_discover_output_with_fallback,
+    )
+    monkeypatch.setattr(
+        "app.services.onboarding.audio_discovery_run._run_discover_output_with_fallback",
         _fake_run_discover_output_with_fallback,
     )
     monkeypatch.setattr(
