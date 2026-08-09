@@ -5,6 +5,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -33,7 +34,12 @@ class VendorUsageRecord(Base):
     content_id = Column(Integer, nullable=True, index=True)
     session_id = Column(Integer, nullable=True, index=True)
     message_id = Column(Integer, nullable=True, index=True)
-    user_id = Column(Integer, nullable=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     input_tokens = Column(Integer, nullable=True)
     cache_read_tokens = Column(Integer, nullable=True)
     cache_write_tokens = Column(Integer, nullable=True)

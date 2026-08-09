@@ -21,6 +21,10 @@ class AssistantFeedOption(BaseModel):
     description: str | None = Field(default=None, max_length=600)
     rationale: str | None = Field(default=None, max_length=600)
     evidence_url: str | None = Field(default=None, max_length=2048)
+    is_subscribed: bool = Field(
+        default=False,
+        json_schema_extra={"contract": {"lenient": True}},
+    )
 
     @field_validator("title", mode="before")
     @classmethod

@@ -12,7 +12,7 @@ from app.models.db import Content, ContentKnowledgeSave, ContentStatusEntry, Pro
 from app.models.domain.content_display import is_ready_for_long_form_summary
 from app.models.domain.content_mapper import content_to_domain
 from app.services.content_status_state_machine import ContentStatusStateMachine
-from app.services.queue import QueueService, TaskType
+from app.services.queue import QueueService, TaskEnqueueRequest, TaskType
 from app.utils.image_paths import get_content_images_dir
 
 CANCELLED_NOT_VISIBLE_UNDER_FEED_RULES = "cancelled_not_visible_under_feed_rules"
@@ -129,29 +129,25 @@ def enqueue_visible_long_form_image_if_needed(
     )
 
 
-def enqueue_visible_long_form_images_for_content_ids(
+def build_visible_long_form_image_task_requests(
     db: Session,
     content_ids: list[int],
-    *,
-    queue_service: QueueEnqueuer | None = None,
-) -> list[int]:
-    """Enqueue generated images for eligible content ids."""
+) -> list[TaskEnqueueRequest]:
+    """Build image tasks for eligible content without committing queue work."""
     if not content_ids:
         return []
 
-    effective_queue_service = queue_service or QueueService()
-    enqueued_task_ids: list[int] = []
+    requests: list[TaskEnqueueRequest] = []
     unique_content_ids = list(dict.fromkeys(content_ids))
     contents = db.query(Content).filter(Content.id.in_(unique_content_ids)).all()
     for content in contents:
-        task_id = enqueue_visible_long_form_image_if_needed(
-            db,
-            content,
-            queue_service=effective_queue_service,
-        )
-        if task_id is not None:
-            enqueued_task_ids.append(task_id)
-    return enqueued_task_ids
+        if not is_visible_long_form_image_candidate(db, content):
+            continue
+        content_id = _require_content_id(content)
+        if has_generated_long_form_image(content) or has_active_generate_image_task(db, content_id):
+            continue
+        requests.append(TaskEnqueueRequest(TaskType.GENERATE_IMAGE, content_id=content_id))
+    return requests
 
 
 def cancel_ineligible_pending_generate_image_tasks(
