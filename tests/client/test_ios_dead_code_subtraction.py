@@ -62,6 +62,12 @@ DELETED_IOS_PATHS = [
     "client/newsly/newsly/Views/CustomNarrationListSheet.swift",
     "client/newsly/newsly/Views/CustomNarrationPickerSheet.swift",
     "client/newsly/newslyTests/CustomNarrationCreationViewModelTests.swift",
+    "client/newsly/newsly/ViewModels/DiscoveryPersonalizeViewModel.swift",
+    "client/newsly/newsly/Views/DiscoveryPersonalizeSheet.swift",
+    "client/newsly/newsly/Repositories/ContentRepository.swift",
+    "client/newsly/newsly/Services/ContentImagePrefetcher.swift",
+    "client/newsly/newsly/Views/Components/FastReadBriefingComponents.swift",
+    "client/newsly/newsly/Models/ReadFilter.swift",
 ]
 
 DELETED_FONT_PATHS = [

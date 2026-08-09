@@ -23,8 +23,6 @@ enum ImageRequestSizing {
 /// A cached version of AsyncImage that uses ImageCacheService for memory and disk caching.
 /// Supports progressive loading from thumbnail to full image.
 struct CachedAsyncImage<Content: View, Placeholder: View>: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     let url: URL?
     let thumbnailUrl: URL?
     let scale: CGFloat
@@ -95,9 +93,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         if let cached = await ImageCacheService.shared.image(for: url, targetPixelSize: targetPixelSize) {
             if Task.isCancelled { return }
             await MainActor.run {
-                withAnimation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)) {
-                    loadedImage = cached
-                }
+                loadedImage = cached
             }
             return
         }
@@ -124,9 +120,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         ) {
             if Task.isCancelled { return }
             await MainActor.run {
-                withAnimation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)) {
-                    loadedImage = image
-                }
+                loadedImage = image
             }
         }
     }

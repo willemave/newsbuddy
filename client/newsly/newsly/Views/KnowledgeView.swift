@@ -8,6 +8,7 @@ import SwiftUI
 struct KnowledgeSearchRoute: Hashable {}
 
 struct KnowledgeView: View {
+    let scrollToTopRequest: Int
     let onSelectContent: (ContentDetailRoute) -> Void
     let onSearch: () -> Void
     var onOpenMore: (() -> Void)?
@@ -15,13 +16,17 @@ struct KnowledgeView: View {
     @State private var viewModel: ContentListViewModel
     @State private var settings = AppSettings.shared
 
+    private static let topAnchor = "knowledge.top"
+
     init(
+        scrollToTopRequest: Int = 0,
         onSelectContent: @escaping (ContentDetailRoute) -> Void,
         onSearch: @escaping () -> Void,
         onOpenMore: (() -> Void)? = nil,
         viewModel: ContentListViewModel? = nil,
         readStateCache: ReadStateCache? = nil
     ) {
+        self.scrollToTopRequest = scrollToTopRequest
         self.onSelectContent = onSelectContent
         self.onSearch = onSearch
         self.onOpenMore = onOpenMore
@@ -37,30 +42,38 @@ struct KnowledgeView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                EditorialMastheadHeader(
-                    title: "Knowledge",
-                    trailingAccessory: AnyView(headerActions)
-                )
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    EditorialMastheadHeader(
+                        title: "Knowledge",
+                        titleAccessibilityIdentifier: "knowledge.screen",
+                        trailingAccessory: AnyView(headerActions)
+                    )
+                    .id(Self.topAnchor)
 
-                Text("RECENTLY SAVED")
-                    .kicker()
-                    .accessibilityLabel("Recently Saved")
-                    .padding(.horizontal, Spacing.appHorizontalMargin)
-                    .padding(.bottom, 12)
+                    Text("RECENTLY SAVED")
+                        .kicker()
+                        .accessibilityLabel("Recently Saved")
+                        .padding(.horizontal, Spacing.appHorizontalMargin)
+                        .padding(.bottom, 12)
 
-                libraryContent
+                    libraryContent
+                }
+                .padding(.bottom, 32)
             }
-            .padding(.bottom, 32)
+            .onPaginationThresholdReached {
+                await viewModel.loadMoreContent()
+            }
+            .refreshable { await viewModel.loadKnowledgeLibrary() }
+            .topScreenEdgeFade()
+            .bottomScreenEdgeFade()
+            .scrollsToTopOnRequest(
+                scrollToTopRequest,
+                anchor: Self.topAnchor,
+                using: proxy
+            )
         }
-        .accessibilityIdentifier("knowledge.screen")
-        .onPaginationThresholdReached {
-            await viewModel.loadMoreContent()
-        }
-        .refreshable { await viewModel.loadKnowledgeLibrary() }
-        .topScreenEdgeFade()
-        .bottomScreenEdgeFade()
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
@@ -124,20 +137,40 @@ struct KnowledgeView: View {
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 28)
         } else {
-            let readyContentIDs = viewModel.contents.compactMap { content in
-                content.savedLibraryItemState == .ready ? content.id : nil
+            let contents = viewModel.contents
+            let lastContentID = contents.last?.id
+
+            if let errorMessage = viewModel.errorMessage {
+                KnowledgeInlineError(
+                    message: errorMessage,
+                    actionTitle: viewModel.hasActionError ? "Dismiss" : "Try Again",
+                    accessibilityIdentifier: "knowledge.error.inline",
+                    action: viewModel.hasActionError
+                        ? viewModel.clearActionError
+                        : { Task { await viewModel.loadKnowledgeLibrary() } }
+                )
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.bottom, 12)
             }
 
-            ForEach(viewModel.contents) { content in
+            ForEach(contents) { content in
                 KnowledgeSavedContentButton(
                     content: content,
-                    allContentIds: readyContentIDs,
                     accessibilityIdentifier: "knowledge.saved.\(content.id)",
-                    onSelectContent: onSelectContent,
+                    onOpen: {
+                        onSelectContent(
+                            ContentDetailRoute(
+                                summary: content,
+                                allContentIds: viewModel.readyContentIDs,
+                                navigationSurface: .savedLibrary
+                            )
+                        )
+                    },
+                    onRefresh: { Task { await viewModel.loadKnowledgeLibrary() } },
                     onRemove: { Task { await viewModel.toggleKnowledgeSave(content.id) } }
                 )
 
-                if content.id != viewModel.contents.last?.id {
+                if content.id != lastContentID {
                     Divider()
                         .padding(.leading, Spacing.appHorizontalMargin + 104)
                         .padding(.trailing, Spacing.appHorizontalMargin)
@@ -199,6 +232,19 @@ struct KnowledgeSearchView: View {
                         .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                } else if let errorMessage = viewModel.errorMessage {
+                    StateView(
+                        role: .error(message: errorMessage),
+                        actionTitle: "Try Again",
+                        action: {
+                            Task {
+                                await viewModel.loadKnowledgeLibrary(query: trimmedQuery)
+                            }
+                        }
+                    )
+                    .accessibilityIdentifier("knowledge.search.error")
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 } else if viewModel.contents.isEmpty {
                     EmptyStateView(
                         icon: "magnifyingglass",
@@ -208,16 +254,24 @@ struct KnowledgeSearchView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 } else {
-                    let readyContentIDs = viewModel.contents.compactMap { content in
-                        content.savedLibraryItemState == .ready ? content.id : nil
-                    }
+                    let contents = viewModel.contents
 
-                    ForEach(viewModel.contents) { content in
+                    ForEach(contents) { content in
                         KnowledgeSavedContentButton(
                             content: content,
-                            allContentIds: readyContentIDs,
                             accessibilityIdentifier: "knowledge.search.result.\(content.id)",
-                            onSelectContent: onSelectContent,
+                            onOpen: {
+                                onSelectContent(
+                                    ContentDetailRoute(
+                                        summary: content,
+                                        allContentIds: viewModel.readyContentIDs,
+                                        navigationSurface: .savedLibrary
+                                    )
+                                )
+                            },
+                            onRefresh: {
+                                Task { await viewModel.loadKnowledgeLibrary(query: trimmedQuery) }
+                            },
                             onRemove: { Task { await viewModel.toggleKnowledgeSave(content.id) } }
                         )
                         .listRowInsets(EdgeInsets())
@@ -292,34 +346,67 @@ struct KnowledgeSearchView: View {
 
 }
 
+private struct KnowledgeInlineError: View {
+    let message: String
+    let actionTitle: String
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.circle")
+                .foregroundStyle(Color.statusDestructive)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.terracottaBodySmall)
+                .foregroundStyle(Color.onSurfaceSecondary)
+            Spacer(minLength: 8)
+            Button(actionTitle, action: action)
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("\(accessibilityIdentifier).action")
+        }
+        .accessibilityIdentifier(accessibilityIdentifier)
+    }
+}
+
 private struct KnowledgeSavedContentButton: View {
     let content: ContentSummary
-    let allContentIds: [Int]
     let accessibilityIdentifier: String
-    let onSelectContent: (ContentDetailRoute) -> Void
+    let onOpen: () -> Void
+    let onRefresh: () -> Void
     let onRemove: () -> Void
+
+    @State private var showsPreparationStatus = false
 
     var body: some View {
         Button {
-            guard content.savedLibraryItemState == .ready else { return }
-            onSelectContent(
-                ContentDetailRoute(
-                    summary: content,
-                    allContentIds: allContentIds,
-                    navigationSurface: .savedLibrary
-                )
-            )
+            guard content.savedLibraryItemState == .ready else {
+                showsPreparationStatus = true
+                return
+            }
+            onOpen()
         } label: {
             KnowledgeSavedRow(content: content)
         }
         .buttonStyle(.plain)
-        .disabled(content.savedLibraryItemState != .ready)
         .contextMenu {
             Button(role: .destructive, action: onRemove) {
                 Label("Remove from Knowledge", systemImage: "bookmark.slash")
             }
         }
         .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityHint(
+            content.savedLibraryItemState == .ready
+                ? "Opens this saved item"
+                : "Shows preparation status and recovery actions"
+        )
+        .sheet(isPresented: $showsPreparationStatus) {
+            KnowledgePreparationStatusSheet(
+                content: content,
+                onRefresh: onRefresh,
+                onRemove: onRemove
+            )
+        }
     }
 }
 
@@ -329,10 +416,11 @@ private struct KnowledgeSavedRow: View {
     private let imageSize = CGSize(width: 92, height: 76)
 
     private var hasStalled: Bool {
-        guard content.savedLibraryItemState == .processing,
-              let createdAt = ContentTimestampFormatter.parse(content.createdAt)
-        else { return false }
-        return AppClock.now.timeIntervalSince(createdAt) > 24 * 60 * 60
+        content.hasStalledKnowledgePreparation
+    }
+
+    private var artworkURL: URL? {
+        (content.thumbnailUrl ?? content.imageUrl).flatMap(ServerImageURL.resolve)
     }
 
     var body: some View {
@@ -347,9 +435,6 @@ private struct KnowledgeSavedRow: View {
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // Stalled and unavailable items are common enough in a saved list that
-                // alarm coloring on every row reads as an emergency. State is carried by
-                // the glyph and label; recovery lives in the detail view.
                 if hasStalled {
                     Label("Preparation stalled", systemImage: "exclamationmark.circle")
                         .font(.terracottaBodySmall)
@@ -391,11 +476,14 @@ private struct KnowledgeSavedRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Image(systemName: "chevron.right")
+            Image(
+                systemName: content.savedLibraryItemState == .ready
+                    ? "chevron.right"
+                    : "info.circle"
+            )
                 .font(.appSymbol(size: 11, weight: .semibold))
                 .foregroundStyle(Color.onSurfaceTertiary)
                 .padding(.top, 4)
-                .opacity(content.savedLibraryItemState == .ready ? 1 : 0)
         }
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.vertical, 11)
@@ -404,8 +492,7 @@ private struct KnowledgeSavedRow: View {
 
     private var artwork: some View {
         CachedAsyncImage(
-            url: content.imageUrl.flatMap(ServerImageURL.resolve),
-            thumbnailUrl: content.thumbnailUrl.flatMap(ServerImageURL.resolve),
+            url: artworkURL,
             targetSize: imageSize
         ) { image in
             image
@@ -413,7 +500,6 @@ private struct KnowledgeSavedRow: View {
                 .aspectRatio(contentMode: .fill)
                 .frame(width: imageSize.width, height: imageSize.height)
                 .clipped()
-                .listThumbnailTreatment()
         } placeholder: {
             ZStack {
                 Color.surfaceSecondary
@@ -436,6 +522,111 @@ private struct KnowledgeSavedRow: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.outlineVariant.opacity(0.45), lineWidth: 0.5)
         }
+    }
+}
+
+private struct KnowledgePreparationStatusSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let content: ContentSummary
+    let onRefresh: () -> Void
+    let onRemove: () -> Void
+
+    @State private var browserDestination: BrowserDestination?
+
+    private var title: String {
+        if content.hasStalledKnowledgePreparation {
+            return "Preparation stalled"
+        }
+        switch content.savedLibraryItemState {
+        case .processing:
+            return "Preparing this item"
+        case .unavailable:
+            return "Item unavailable"
+        case .ready:
+            return "Ready to read"
+        }
+    }
+
+    private var message: String {
+        if content.hasStalledKnowledgePreparation {
+            return "Newsly has not finished preparing this save. Refresh its status or open the original source."
+        }
+        switch content.savedLibraryItemState {
+        case .processing:
+            return "Newsly is still preparing this save. You can refresh its status or read the original source now."
+        case .unavailable:
+            return "Newsly could not prepare this save, but the original source may still be available."
+        case .ready:
+            return "This save is ready."
+        }
+    }
+
+    private var originalURL: URL? {
+        guard let url = URL(string: content.url),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else { return nil }
+        return url
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                Label(title, systemImage: content.hasStalledKnowledgePreparation ? "exclamationmark.circle" : "hourglass")
+                    .font(.terracottaHeadlineMedium)
+                    .accessibilityIdentifier("knowledge.status.screen")
+
+                Text(message)
+                    .font(.terracottaBodyMedium)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+
+                Button("Refresh status") {
+                    onRefresh()
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("knowledge.status.refresh")
+
+                if let originalURL {
+                    Button("Open original") {
+                        browserDestination = BrowserDestination(url: originalURL)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("knowledge.status.open_original")
+                }
+
+                Button("Remove from Knowledge", role: .destructive) {
+                    onRemove()
+                    dismiss()
+                }
+                .accessibilityIdentifier("knowledge.status.remove")
+
+                Spacer(minLength: 0)
+            }
+            .padding(Spacing.appHorizontalMargin)
+            .background(Color.surfacePrimary.ignoresSafeArea())
+            .navigationTitle("Saved item status")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .sheet(item: $browserDestination) { destination in
+            SafariView(url: destination.url)
+        }
+    }
+}
+
+private extension ContentSummary {
+    var hasStalledKnowledgePreparation: Bool {
+        guard savedLibraryItemState == .processing,
+              let createdAt = ContentTimestampFormatter.parse(createdAt)
+        else { return false }
+        return AppClock.now.timeIntervalSince(createdAt) > 24 * 60 * 60
     }
 }
 
