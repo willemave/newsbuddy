@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from typing import Any
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -24,15 +23,11 @@ from app.models.contracts import (
     LlmTaskMode,
     LlmTaskStatus,
     LlmWorkflowState,
-    TaskStatus,
     TaskType,
 )
-from app.models.db import LearningDeck, LearningDeckRun, LlmTask, ProcessingTask, User
-from app.pipeline.task_specs import get_task_spec
-from app.services.learning_deck_artifacts import (
-    StoredLearningDeckArtifact,
-    delete_learning_deck_objects,
-)
+from app.models.db import LearningDeck, LearningDeckRun, LlmTask, User
+from app.services.gateways.task_queue_gateway import get_task_queue_gateway
+from app.services.learning_deck_artifacts import delete_learning_deck_objects
 from app.services.learning_deck_common import (
     ACTIVE_RUN_STATUSES,
     LearningDeckError,
@@ -54,10 +49,7 @@ from app.services.learning_deck_hosting import (
     read_learning_deck_source_notes_object,
     read_learning_deck_viewer_object,
 )
-from app.services.learning_deck_publication import commit_learning_deck_artifact_promotion
 from app.services.learning_deck_sources import (
-    build_content_source_snapshot,
-    build_github_source_snapshot,
     learning_deck_display_title,
     normalize_github_repository_source,
     resolve_learning_deck_create_source,
@@ -72,6 +64,7 @@ from app.services.learning_deck_tokens import (
     get_deck_by_valid_share_token,
 )
 from app.services.llm_tasks import create_llm_task, set_llm_task_status
+from app.services.queue import TaskEnqueueRequest
 
 ACTIVE_LLM_TASK_STATUSES = {
     LlmTaskStatus.QUEUED.value,
@@ -88,8 +81,6 @@ __all__ = [
     "LearningDeckSource",
     "LearningDeckSourceNotReady",
     "append_learning_deck_timeline",
-    "build_content_source_snapshot",
-    "build_github_source_snapshot",
     "build_private_learning_deck_token",
     "create_or_rerun_learning_deck",
     "decode_private_learning_deck_token",
@@ -100,11 +91,9 @@ __all__ = [
     "get_deck_by_valid_share_token",
     "get_learning_deck",
     "list_learning_decks",
-    "mark_learning_deck_run_failed",
     "normalize_github_repository_source",
     "present_learning_deck",
     "present_learning_deck_run",
-    "promote_learning_deck_run",
     "read_learning_deck_asset_object",
     "read_learning_deck_source_notes_object",
     "read_learning_deck_viewer_object",
@@ -330,98 +319,6 @@ def present_learning_deck_run(run: LearningDeckRun) -> LearningDeckRunResponse:
     )
 
 
-def mark_learning_deck_run_failed(
-    db: Session,
-    run: LearningDeckRun,
-    *,
-    error_message: str,
-) -> None:
-    """Persist a failed run without replacing the deck's latest successful artifact."""
-    run.status = LearningDeckRunStatus.FAILED.value
-    run.error_message = error_message[:4000]
-    run.completed_at = utcnow()
-    append_learning_deck_timeline(
-        run,
-        status=LearningDeckRunStatus.FAILED,
-        note="Learning Deck generation failed",
-    )
-    run_id = require_int_value(run.id, "Learning Deck run id")
-    deck_id = require_int_value(run.deck_id, "Learning Deck id")
-    deck = db.query(LearningDeck).filter(LearningDeck.id == deck_id).first()
-    if deck is not None:
-        deck.latest_run_id = run_id
-        deck.updated_at = utcnow()
-    _set_learning_run_llm_task_status(
-        db,
-        run,
-        status=LlmTaskStatus.FAILED,
-        workflow_state=LlmWorkflowState.FAILED,
-        note="Learning Deck generation failed",
-        error_type="learning_deck_generation_failed",
-        error_message=error_message[:4000],
-    )
-    db.commit()
-
-
-def promote_learning_deck_run(
-    db: Session,
-    run: LearningDeckRun,
-    *,
-    artifact: StoredLearningDeckArtifact,
-    title: str | None = None,
-    source_metadata: dict[str, Any] | None = None,
-) -> None:
-    """Promote a completed run to the deck's latest successful artifact."""
-    run_id = require_int_value(run.id, "Learning Deck run id")
-    deck_id = require_int_value(run.deck_id, "Learning Deck id")
-    deck = db.query(LearningDeck).filter(LearningDeck.id == deck_id).with_for_update().first()
-    if deck is None:
-        raise LearningDeckError("Learning Deck not found", status_code=404)
-    run.status = LearningDeckRunStatus.COMPLETED.value
-    run.completed_at = utcnow()
-    run.artifact_storage_prefix = artifact.storage_prefix
-    run.deck_object_key = artifact.deck_object_key
-    run.source_notes_object_key = artifact.source_notes_object_key
-    run.source_notes_html_object_key = artifact.source_notes_html_object_key
-    run.artifact_object_keys = artifact.artifact_object_keys
-    append_learning_deck_timeline(
-        run,
-        status=LearningDeckRunStatus.COMPLETED,
-        note="Learning Deck is ready",
-    )
-
-    _set_learning_run_llm_task_status(
-        db,
-        run,
-        status=LlmTaskStatus.COMPLETED,
-        workflow_state=LlmWorkflowState.COMPLETED,
-        note="Learning Deck is ready",
-        output_json={
-            "learning_deck_run_id": run_id,
-            "deck_id": deck_id,
-            "deck_object_key": artifact.deck_object_key,
-            "source_notes_object_key": artifact.source_notes_object_key,
-            "source_notes_html_object_key": artifact.source_notes_html_object_key,
-            "artifact_object_keys": artifact.artifact_object_keys,
-        },
-        artifact_manifest={
-            "artifact_storage_prefix": artifact.storage_prefix,
-            "deck_object_key": artifact.deck_object_key,
-            "source_notes_object_key": artifact.source_notes_object_key,
-            "source_notes_html_object_key": artifact.source_notes_html_object_key,
-            "artifact_object_keys": artifact.artifact_object_keys,
-        },
-    )
-    commit_learning_deck_artifact_promotion(
-        db,
-        deck,
-        artifact=artifact,
-        latest_run_id=run_id,
-        title=title,
-        source_metadata=source_metadata,
-    )
-
-
 def _with_submission_metadata(
     source: LearningDeckSource,
     *,
@@ -505,36 +402,16 @@ def _merged_source_metadata(
 
 def _enqueue_llm_task(db: Session, *, llm_task_id: int, user_id: int) -> int:
     """Insert the generation queue task in the caller's transaction."""
-    task_spec = get_task_spec(TaskType.RUN_LLM_TASK)
-    payload = task_spec.normalize_payload({"llm_task_id": llm_task_id, "user_id": user_id})
-    task = ProcessingTask(
-        task_type=TaskType.RUN_LLM_TASK.value,
-        payload=payload,
-        status=TaskStatus.PENDING.value,
-        queue_name=task_spec.queue.value,
-        available_at=utcnow(),
-    )
-    db.add(task)
-    db.flush()
-    if task.id is None:
-        raise LearningDeckError("Learning Deck generation task was not created", status_code=500)
-
-    db.execute(
-        select(
-            func.pg_notify(
-                "processing_tasks",
-                json.dumps(
-                    {
-                        "task_id": int(task.id),
-                        "task_type": TaskType.RUN_LLM_TASK.value,
-                        "queue_name": task_spec.queue.value,
-                    },
-                    separators=(",", ":"),
-                ),
+    return get_task_queue_gateway().enqueue_many_in_session(
+        db,
+        [
+            TaskEnqueueRequest(
+                TaskType.RUN_LLM_TASK,
+                payload={"llm_task_id": llm_task_id, "user_id": user_id},
+                owner_user_id=user_id,
             )
-        )
-    )
-    return int(task.id)
+        ],
+    )[0]
 
 
 def _active_learning_deck_task(db: Session, *, user_id: int) -> LlmTask | None:
@@ -620,34 +497,3 @@ def _latest_run_for_deck(db: Session, deck: LearningDeck) -> LearningDeckRun | N
 def _is_active_task_integrity_error(exc: IntegrityError) -> bool:
     text = str(exc.orig if exc.orig is not None else exc).lower()
     return "uq_llm_tasks_learning_deck_user_active" in text
-
-
-def _set_learning_run_llm_task_status(
-    db: Session,
-    run: LearningDeckRun,
-    *,
-    status: LlmTaskStatus,
-    workflow_state: LlmWorkflowState,
-    note: str,
-    error_type: str | None = None,
-    error_message: str | None = None,
-    output_json: dict[str, Any] | None = None,
-    artifact_manifest: dict[str, Any] | None = None,
-) -> None:
-    """Mirror Learning Deck run status onto its generic LLM task when present."""
-    if not run.llm_task_id:
-        return
-    task = db.query(LlmTask).filter(LlmTask.id == run.llm_task_id).first()
-    if task is None:
-        return
-    set_llm_task_status(
-        db,
-        task,
-        status=status,
-        workflow_state=workflow_state,
-        note=note,
-        error_type=error_type,
-        error_message=error_message,
-        output_json=output_json,
-        artifact_manifest=artifact_manifest,
-    )

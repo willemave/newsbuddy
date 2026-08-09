@@ -15,7 +15,7 @@ from app.commands.convert_news_to_article import (
 )
 from app.models.api.submissions import SubmitContentRequest
 from app.models.contracts import ContentStatus, LearningDeckSourceKind
-from app.models.db import Content, LearningDeck, LearningDeckRun, User
+from app.models.db import Content, LearningDeck, User
 from app.repositories.content_detail_repository import get_visible_content
 from app.services.content_bodies import get_content_body_resolver
 from app.services.github_urls import GitHubFileUrl, parse_github_file_url
@@ -183,12 +183,6 @@ def content_learning_deck_source(content: Content) -> LearningDeckSource:
     )
 
 
-def build_content_source_snapshot(db: Session, *, run: LearningDeckRun) -> dict[str, Any]:
-    """Build source text snapshot for a content-backed run."""
-    deck = db.query(LearningDeck).filter(LearningDeck.id == run.deck_id).first()
-    return build_content_source_snapshot_for_deck(db, deck=deck)
-
-
 def build_content_source_snapshot_for_deck(
     db: Session,
     *,
@@ -217,18 +211,6 @@ def build_content_source_snapshot_for_deck(
         "content_type": content.content_type,
         "metadata": metadata,
         "body_text": body_text,
-    }
-
-
-def build_github_source_snapshot(run: LearningDeckRun) -> dict[str, Any]:
-    """Build source snapshot for a GitHub-backed run."""
-    source_snapshot = run.source_snapshot if isinstance(run.source_snapshot, dict) else {}
-    return {
-        "source_kind": LearningDeckSourceKind.GITHUB_REPO.value,
-        "source_identity": source_snapshot.get("source_identity"),
-        "source_url": source_snapshot.get("source_url"),
-        "source_title": source_snapshot.get("source_title"),
-        "source_metadata": source_snapshot.get("source_metadata") or {},
     }
 
 

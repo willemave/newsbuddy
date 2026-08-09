@@ -207,6 +207,54 @@ def test_present_learning_deck_repairs_stale_url_title_from_source_metadata(
     assert response.source_title == response.title
 
 
+def test_present_learning_deck_keeps_completed_legacy_run_renderable(
+    db_session,
+    test_user,
+) -> None:
+    deck = LearningDeck(
+        user_id=test_user.id,
+        source_kind=LearningDeckSourceKind.GITHUB_REPO.value,
+        source_identity="github:example/legacy",
+        source_url="https://github.com/example/legacy",
+        source_title="Legacy deck",
+        source_metadata={},
+        title="Legacy deck",
+        deck_object_key="learning/legacy/index.html",
+        source_notes_html_object_key="learning/legacy/source-notes.html",
+        artifact_object_keys=["learning/legacy/index.html"],
+        share_enabled=False,
+    )
+    db_session.add(deck)
+    db_session.flush()
+    run = LearningDeckRun(
+        deck_id=deck.id,
+        user_id=test_user.id,
+        llm_task_id=None,
+        status="completed",
+        source_snapshot={},
+        timeline=[],
+        artifact_object_keys=["learning/legacy/index.html"],
+        sandbox_provider="e2b",
+        sandbox_id="legacy-sandbox",
+    )
+    db_session.add(run)
+    db_session.flush()
+    deck.latest_run_id = run.id
+    deck.latest_successful_run_id = run.id
+    db_session.commit()
+
+    response = present_learning_deck(db_session, deck)
+
+    assert response.viewer_available is True
+    assert response.source_notes_available is True
+    assert response.latest_successful_run_id == run.id
+    assert response.latest_run is not None
+    assert response.latest_run.id == run.id
+    assert response.latest_run.status.value == "completed"
+    assert run.sandbox_provider == "e2b"
+    assert run.sandbox_id == "legacy-sandbox"
+
+
 def test_create_learning_deck_reuses_source_identity_for_rerun(
     db_session,
     test_user,

@@ -39,27 +39,3 @@ class LlmTaskActionRejectRequest(BaseModel):
     """Request body for rejecting a proposed or approval-pending action."""
 
     reason: str | None = Field(default=None, max_length=1000)
-
-
-class LlmTaskWebSearchRequest(BaseModel):
-    """Internal VM tool request for host-mediated web search."""
-
-    query: str = Field(..., min_length=1, max_length=1000)
-    num_results: int = Field(default=5, ge=1, le=10)
-    category: str | None = Field(default=None, max_length=100)
-
-
-class LlmTaskWebSearchResult(BaseModel):
-    """One host-mediated search result returned to a VM task."""
-
-    title: str
-    url: str
-    snippet: str | None = None
-    published_date: str | None = None
-
-
-class LlmTaskWebSearchResponse(BaseModel):
-    """Internal VM tool response for host-mediated web search."""
-
-    query: str
-    results: list[LlmTaskWebSearchResult] = Field(default_factory=list)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -8,6 +9,7 @@ import pytest
 from app.models.contracts import LlmTaskKind, LlmTaskMode
 from app.models.db import VendorUsageRecord
 from app.services import learning_deck_agent
+from app.services.agent_vm_runtime import AgentVmDeadlineExceeded
 from app.services.learning_deck_agent import LearningDeckAgentExecutionError
 from app.services.llm_tasks import create_llm_task
 
@@ -31,6 +33,11 @@ class _FakeAgent:
         return _FakeAgentResult()
 
 
+class _DeadlineAgent(_FakeAgent):
+    def run_sync(self, *_args: Any, **_kwargs: Any) -> _FakeAgentResult:
+        raise AgentVmDeadlineExceeded("agent run expired")
+
+
 class _FakeSandbox:
     provider = "local"
     sandbox_id = "sandbox-usage"
@@ -38,6 +45,10 @@ class _FakeSandbox:
     def __init__(self) -> None:
         self.files: dict[str, str] = {}
         self.closed = False
+        self.commands: list[str] = []
+        self.lease = SimpleNamespace(
+            capabilities={"playwright": "test", "chromium": "test"},
+        )
 
     def run_command(
         self,
@@ -46,6 +57,26 @@ class _FakeSandbox:
         timeout_seconds: int | None = None,
     ) -> SimpleNamespace:
         del timeout_seconds
+        self.commands.append(_command)
+        if "require('playwright')" in _command:
+            outcome = {
+                "status": "passed",
+                "validator": "playwright_chromium",
+                "viewport": {"width": 390, "height": 844},
+                "reveal_ready": True,
+                "current_slide_exists": True,
+                "slide_count": 2,
+                "navigation": "next_previous_round_trip",
+                "initial_indices": {"h": 0, "v": 0, "f": -1},
+                "next_indices": {"h": 1, "v": 0, "f": -1},
+                "previous_indices": {"h": 0, "v": 0, "f": -1},
+                "relevant_asset_loads": 2,
+            }
+            return SimpleNamespace(
+                exit_code=0,
+                stdout=(learning_deck_agent.BROWSER_VALIDATION_RESULT_PREFIX + json.dumps(outcome)),
+                stderr="",
+            )
         return SimpleNamespace(exit_code=0, stdout="", stderr="")
 
     def execute_bash(
@@ -92,6 +123,30 @@ class _MissingOutputSandbox(_FakeSandbox):
         if path not in self.files:
             raise FileNotFoundError(path)
         return self.files[path]
+
+
+class _MissingBrowserCapabilitiesSandbox(_FakeSandbox):
+    def __init__(self) -> None:
+        super().__init__()
+        self.lease = SimpleNamespace(
+            capabilities={
+                "playwright": False,
+                "chromium": False,
+                "browser_validation_error": "Cannot find module 'playwright'",
+            }
+        )
+
+
+class _BrowserValidationFailureSandbox(_FakeSandbox):
+    def run_command(
+        self,
+        _command: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> SimpleNamespace:
+        del timeout_seconds
+        self.commands.append(_command)
+        return SimpleNamespace(exit_code=1, stdout="", stderr="ReferenceError: broken deck")
 
 
 class _RepairingAgent(_FakeAgent):
@@ -200,6 +255,7 @@ def test_learning_deck_agent_uses_generic_vm_session_when_llm_task_exists(
         "create_agent_vm_session",
         fake_create_agent_vm_session,
     )
+    monkeypatch.setattr(learning_deck_agent, "monotonic", lambda: 100.0)
 
     result = learning_deck_agent.run_learning_deck_agent(
         source_snapshot={
@@ -224,8 +280,41 @@ def test_learning_deck_agent_uses_generic_vm_session_when_llm_task_exists(
             "workspace_path": llm_task.workspace_path,
             "shared_workspace_path": llm_task.shared_workspace_path,
             "feature": "learning_deck",
+            "deadline": 100.0 + learning_deck_agent.get_settings().llm_task_sandbox_timeout_seconds,
         }
     ]
+
+
+def test_learning_deck_agent_closes_sandbox_when_agent_deadline_expires(
+    test_user,
+    vendor_usage_db,
+    monkeypatch,
+) -> None:
+    del vendor_usage_db
+    sandbox = _FakeSandbox()
+    monkeypatch.setattr(learning_deck_agent, "Agent", _DeadlineAgent)
+    monkeypatch.setattr(
+        learning_deck_agent,
+        "build_pydantic_model",
+        lambda _model_spec: (object(), {}),
+    )
+    monkeypatch.setattr(learning_deck_agent, "resolve_model_provider", lambda _model_spec: "openai")
+
+    with pytest.raises(LearningDeckAgentExecutionError, match="agent run expired") as exc_info:
+        learning_deck_agent.run_learning_deck_agent(
+            source_snapshot={"source_kind": "content", "source_title": "Source"},
+            interests_prompt=None,
+            user_id=test_user.id,
+            run_id=94,
+            sandbox_factory=lambda _user_id, _run_id: cast(Any, sandbox),
+        )
+
+    assert sandbox.closed is True
+    assert any(
+        event["event_type"] == "agent_failed"
+        and event["payload"]["failure_class"] == "AgentVmDeadlineExceeded"
+        for event in exc_info.value.agent_log_events
+    )
 
 
 def test_learning_deck_agent_log_event_accepts_deps_object() -> None:
@@ -250,6 +339,148 @@ def test_learning_deck_agent_log_event_accepts_deps_object() -> None:
             "payload": {"path": "output/index.html"},
         }
     ]
+
+
+def test_learning_deck_agent_requires_canonical_llm_task_workspace() -> None:
+    with pytest.raises(RuntimeError, match="LLM task workspace is required"):
+        learning_deck_agent._create_configured_sandbox(1, llm_task=None)
+
+
+def test_learning_deck_agent_records_browser_validation_skip_without_blocking_generation(
+    test_user,
+    vendor_usage_db,
+    monkeypatch,
+) -> None:
+    del vendor_usage_db
+    sandbox = _MissingBrowserCapabilitiesSandbox()
+    monkeypatch.setattr(learning_deck_agent, "Agent", _FakeAgent)
+    monkeypatch.setattr(
+        learning_deck_agent,
+        "build_pydantic_model",
+        lambda _model_spec: (object(), {}),
+    )
+    monkeypatch.setattr(learning_deck_agent, "resolve_model_provider", lambda _model_spec: "openai")
+
+    result = learning_deck_agent.run_learning_deck_agent(
+        source_snapshot={"source_kind": "content", "source_title": "Source"},
+        interests_prompt=None,
+        user_id=test_user.id,
+        run_id=93,
+        sandbox_factory=lambda _user_id, _run_id: cast(Any, sandbox),
+    )
+
+    assert result.browser_validation == {
+        "status": "skipped",
+        "reason": "sandbox_browser_capabilities_unavailable",
+        "missing_capabilities": ["chromium", "playwright"],
+        "capability_error": "Cannot find module 'playwright'",
+    }
+    assert sandbox.closed is True
+    assert all("require('playwright')" not in command for command in sandbox.commands)
+    assert any(
+        event["event_type"] == "browser_validation_skipped"
+        and event["payload"] == result.browser_validation
+        for event in result.agent_log_events
+    )
+
+
+def test_learning_deck_browser_validation_runs_when_capabilities_are_present() -> None:
+    sandbox = _FakeSandbox()
+
+    result = learning_deck_agent._validate_artifact_in_browser(cast(Any, sandbox))
+
+    assert result == {
+        "status": "passed",
+        "validator": "playwright_chromium",
+        "viewport": {"width": 390, "height": 844},
+        "reveal_ready": True,
+        "current_slide_exists": True,
+        "slide_count": 2,
+        "navigation": "next_previous_round_trip",
+        "initial_indices": {"h": 0, "v": 0, "f": -1},
+        "next_indices": {"h": 1, "v": 0, "f": -1},
+        "previous_indices": {"h": 0, "v": 0, "f": -1},
+        "relevant_asset_loads": 2,
+    }
+    assert len(sandbox.commands) == 1
+    browser_command = sandbox.commands[0]
+    assert "require('playwright')" in browser_command
+    assert "width: 390, height: 844" in browser_command
+    assert "window.Reveal.isReady()" in browser_command
+    assert "window.Reveal.getCurrentSlide()" in browser_command
+    assert "window.Reveal.next()" in browser_command
+    assert "window.Reveal.prev()" in browser_command
+    assert "single_slide_stable" in browser_command
+    assert "single_slide_fragment_round_trip" in browser_command
+    assert "page.on('pageerror'" in browser_command
+    assert "page.on('requestfailed'" in browser_command
+    assert "response.status() >= 400" in browser_command
+
+
+def test_browser_validation_tracks_all_deck_resource_failures() -> None:
+    sandbox = _FakeSandbox()
+
+    learning_deck_agent._validate_artifact_in_browser(cast(Any, sandbox))
+
+    browser_command = sandbox.commands[0]
+    assert "resourceType === 'script'" not in browser_command
+    assert "resourceType === 'stylesheet'" not in browser_command
+    assert "['data:', 'blob:', 'about:']" in browser_command
+    assert "request.isNavigationRequest()" in browser_command
+    assert "request.frame() === page.mainFrame() && url === deckUrl" in browser_command
+    assert "return !isSyntheticUrl && !isMainDeckDocument" in browser_command
+
+
+def test_browser_validation_returns_actionable_skip_for_missing_capabilities() -> None:
+    sandbox = _MissingBrowserCapabilitiesSandbox()
+
+    result = learning_deck_agent._validate_artifact_in_browser(cast(Any, sandbox))
+
+    assert result == {
+        "status": "skipped",
+        "reason": "sandbox_browser_capabilities_unavailable",
+        "missing_capabilities": ["chromium", "playwright"],
+        "capability_error": "Cannot find module 'playwright'",
+    }
+    assert sandbox.commands == []
+
+
+def test_learning_deck_browser_validation_rejects_render_failures_when_available() -> None:
+    sandbox = _BrowserValidationFailureSandbox()
+
+    with pytest.raises(
+        learning_deck_agent.LearningDeckArtifactError,
+        match="Browser validation failed: ReferenceError: broken deck",
+    ):
+        learning_deck_agent._validate_artifact_in_browser(cast(Any, sandbox))
+
+    assert len(sandbox.commands) == 1
+
+
+@pytest.mark.parametrize(
+    ("stdout", "expected_error"),
+    [
+        ("", "did not report a structured outcome"),
+        (
+            learning_deck_agent.BROWSER_VALIDATION_RESULT_PREFIX + "{broken",
+            "reported malformed JSON",
+        ),
+        (
+            learning_deck_agent.BROWSER_VALIDATION_RESULT_PREFIX + '{"status":"failed"}',
+            "did not report a passing outcome",
+        ),
+        (
+            learning_deck_agent.BROWSER_VALIDATION_RESULT_PREFIX + '{"status":"passed"}',
+            "reported an incomplete passing outcome",
+        ),
+    ],
+)
+def test_browser_validation_rejects_invalid_structured_outcomes(
+    stdout: str,
+    expected_error: str,
+) -> None:
+    with pytest.raises(learning_deck_agent.LearningDeckArtifactError, match=expected_error):
+        learning_deck_agent._parse_browser_validation_outcome(stdout)
 
 
 def test_learning_deck_agent_repairs_missing_required_artifacts_once(
@@ -300,7 +531,6 @@ def test_learning_deck_agent_reports_typed_failure_when_repair_does_not_create_o
 
     with pytest.raises(
         LearningDeckAgentExecutionError,
-        match="artifact_contract_failed",
     ) as exc_info:
         learning_deck_agent.run_learning_deck_agent(
             source_snapshot={"source_kind": "content", "source_title": "Source"},
@@ -311,6 +541,7 @@ def test_learning_deck_agent_reports_typed_failure_when_repair_does_not_create_o
         )
 
     assert exc_info.value.sandbox_id == sandbox.sandbox_id
+    assert exc_info.value.error_type == "artifact_contract_failed"
     assert any(
         event["event_type"] == "artifact_repair_failed" for event in exc_info.value.agent_log_events
     )

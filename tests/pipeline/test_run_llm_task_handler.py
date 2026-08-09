@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -14,7 +15,7 @@ from app.models.contracts import (
 from app.pipeline.handlers.run_llm_task import RunLlmTaskHandler
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
-from app.services.learning_deck_generation import LearningDeckGenerationWaiting
+from app.services.learning_deck_task_generation import LearningDeckGenerationWaiting
 from app.services.llm_tasks import create_llm_task
 
 
@@ -42,12 +43,15 @@ def test_run_llm_task_handler_dispatches_share_action(
     )
 
     class Context:
+        settings = SimpleNamespace(queue=SimpleNamespace(max_retries=3))
+
         def db_factory(self):
             return _SessionContext(db_session)
 
     result = RunLlmTaskHandler().handle(
         TaskEnvelope(
             id=1,
+            owner_user_id=test_user.id,
             task_type=TaskType.RUN_LLM_TASK,
             payload={"llm_task_id": llm_task.id, "user_id": test_user.id},
         ),
@@ -91,8 +95,9 @@ def test_run_llm_task_handler_dispatches_learning_deck(
     result = RunLlmTaskHandler().handle(
         TaskEnvelope(
             id=2,
+            owner_user_id=test_user.id,
             task_type=TaskType.RUN_LLM_TASK,
-            payload={"llm_task_id": llm_task.id},
+            payload={"llm_task_id": llm_task.id, "user_id": test_user.id},
         ),
         cast(TaskContext, SimpleContext(db_session)),
     )
@@ -128,8 +133,9 @@ def test_run_llm_task_handler_defers_learning_deck_source_wait(
     result = RunLlmTaskHandler().handle(
         TaskEnvelope(
             id=3,
+            owner_user_id=test_user.id,
             task_type=TaskType.RUN_LLM_TASK,
-            payload={"llm_task_id": llm_task.id},
+            payload={"llm_task_id": llm_task.id, "user_id": test_user.id},
         ),
         cast(TaskContext, SimpleContext(db_session)),
     )
@@ -165,8 +171,9 @@ def test_run_llm_task_handler_terminalizes_unexpected_executor_failure(
     result = RunLlmTaskHandler().handle(
         TaskEnvelope(
             id=4,
+            owner_user_id=test_user.id,
             task_type=TaskType.RUN_LLM_TASK,
-            payload={"llm_task_id": llm_task.id},
+            payload={"llm_task_id": llm_task.id, "user_id": test_user.id},
         ),
         cast(TaskContext, SimpleContext(db_session)),
     )
@@ -204,13 +211,91 @@ def test_run_llm_task_handler_treats_terminal_redelivery_as_noop(
     result = RunLlmTaskHandler().handle(
         TaskEnvelope(
             id=5,
+            owner_user_id=test_user.id,
             task_type=TaskType.RUN_LLM_TASK,
-            payload={"llm_task_id": llm_task.id},
+            payload={"llm_task_id": llm_task.id, "user_id": test_user.id},
         ),
         cast(TaskContext, SimpleContext(db_session)),
     )
 
     assert result.success is True
+
+
+def test_run_llm_task_reclaim_budget_exhaustion_terminalizes_without_executor(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    llm_task = create_llm_task(
+        db_session,
+        user_id=test_user.id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+        subject_id=44,
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.pipeline.handlers.run_llm_task.run_learning_deck_task",
+        lambda *_args, **_kwargs: pytest.fail("exhausted reclaim must not call an executor"),
+    )
+
+    result = RunLlmTaskHandler().handle(
+        TaskEnvelope(
+            id=6,
+            owner_user_id=test_user.id,
+            task_type=TaskType.RUN_LLM_TASK,
+            payload={"llm_task_id": llm_task.id, "user_id": test_user.id},
+            retry_count=4,
+        ),
+        cast(TaskContext, SimpleContext(db_session)),
+    )
+
+    db_session.refresh(llm_task)
+    assert result.success is False
+    assert result.retryable is False
+    assert llm_task.status == LlmTaskStatus.FAILED.value
+    assert llm_task.workflow_state == LlmWorkflowState.FAILED.value
+    assert llm_task.error_type == "lease_reclaim_budget_exhausted"
+
+
+def test_run_llm_task_rejects_cross_user_target_without_mutating_it(
+    db_session,
+    user_factory,
+    monkeypatch,
+) -> None:
+    task_owner = user_factory()
+    target_owner = user_factory()
+    llm_task = create_llm_task(
+        db_session,
+        user_id=target_owner.id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+        subject_id=44,
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.pipeline.handlers.run_llm_task.run_learning_deck_task",
+        lambda *_args, **_kwargs: pytest.fail("cross-user target must not execute"),
+    )
+
+    result = RunLlmTaskHandler().handle(
+        TaskEnvelope(
+            id=7,
+            owner_user_id=task_owner.id,
+            task_type=TaskType.RUN_LLM_TASK,
+            payload={"llm_task_id": llm_task.id, "user_id": task_owner.id},
+            retry_count=4,
+        ),
+        cast(TaskContext, SimpleContext(db_session)),
+    )
+
+    db_session.refresh(llm_task)
+    assert result.success is False
+    assert result.retryable is False
+    assert llm_task.status == LlmTaskStatus.QUEUED.value
+    assert llm_task.workflow_state == LlmWorkflowState.QUEUED.value
 
 
 class _SessionContext:
@@ -225,6 +310,8 @@ class _SessionContext:
 
 
 class SimpleContext:
+    settings = SimpleNamespace(queue=SimpleNamespace(max_retries=3))
+
     def __init__(self, db_session) -> None:
         self.db_session = db_session
 

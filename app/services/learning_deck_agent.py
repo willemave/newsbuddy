@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any, cast
 
 from pydantic_ai import Agent
@@ -19,15 +20,16 @@ from app.services.agent_toolset import (
     AgentToolsetConfig,
     register_agent_vm_tools,
 )
-from app.services.agent_vm_runtime import AgentVmSession, agent_vm_session_log_payload
+from app.services.agent_vm_runtime import (
+    AgentVmDeadlineExceeded,
+    AgentVmSession,
+    agent_vm_session_log_payload,
+)
 from app.services.agent_vm_sessions import create_agent_vm_session
 from app.services.learning_deck_artifacts import (
     LearningDeckArtifactError,
+    guess_learning_deck_content_type,
     validate_learning_deck_artifact,
-)
-from app.services.learning_deck_sandbox import (
-    create_learning_deck_sandbox_session,
-    guess_asset_content_type,
 )
 from app.services.learning_deck_theme import DECK_DESIGN_GUIDE
 from app.services.llm_models import build_pydantic_model, resolve_model_provider
@@ -42,6 +44,7 @@ OUTPUT_SOURCE_NOTES = "output/source-notes.md"
 OUTPUT_SOURCE_METADATA = "output/source-metadata.json"
 OUTPUT_ASSET_DIR = "output/assets"
 INPUT_DESIGN_BRIEF = "input/deck-design-brief.md"
+BROWSER_VALIDATION_RESULT_PREFIX = "NEWSLY_BROWSER_VALIDATION="
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,7 @@ class LearningDeckAgentResult:
     sandbox_provider: str
     sandbox_id: str | None
     source_metadata_updates: dict[str, Any]
+    browser_validation: dict[str, Any] = field(default_factory=dict)
     agent_log_events: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -69,11 +73,13 @@ class LearningDeckAgentExecutionError(RuntimeError):
         agent_log_events: list[dict[str, Any]],
         sandbox_provider: str,
         sandbox_id: str | None,
+        error_type: str = "agent_execution_failed",
     ) -> None:
         super().__init__(message)
         self.agent_log_events = agent_log_events
         self.sandbox_provider = sandbox_provider
         self.sandbox_id = sandbox_id
+        self.error_type = error_type
 
 
 @dataclass
@@ -106,10 +112,15 @@ def run_learning_deck_agent(
 ) -> LearningDeckAgentResult:
     """Run the coarse agent loop and read the artifact files it produced."""
     settings = get_settings()
+    deadline = monotonic() + settings.llm_task_sandbox_timeout_seconds
     sandbox = (
         sandbox_factory(user_id, run_id)
         if sandbox_factory is not None
-        else _create_configured_sandbox(user_id, run_id, llm_task=llm_task)
+        else _create_configured_sandbox(
+            user_id,
+            llm_task=llm_task,
+            deadline=deadline,
+        )
     )
     agent_log_events: list[dict[str, Any]] = []
     try:
@@ -143,7 +154,10 @@ def run_learning_deck_agent(
                     run_id=run_id,
                     agent_log_events=agent_log_events,
                 ),
-                model_settings=_build_runtime_model_settings(base_model_settings),
+                model_settings=_build_runtime_model_settings(
+                    base_model_settings,
+                    deadline=deadline,
+                ),
             )
         except Exception as exc:
             _append_agent_log_event(
@@ -197,7 +211,10 @@ def run_learning_deck_agent(
         )
 
         try:
-            index_html, source_notes_md = _read_and_validate_required_artifacts(sandbox)
+            index_html, source_notes_md, browser_validation = _read_and_validate_required_artifacts(
+                sandbox
+            )
+            _append_browser_validation_event(agent_log_events, browser_validation)
         except Exception as first_error:  # noqa: BLE001
             _append_agent_log_event(
                 agent_log_events,
@@ -213,7 +230,10 @@ def run_learning_deck_agent(
                         run_id=run_id,
                         agent_log_events=agent_log_events,
                     ),
-                    model_settings=_build_runtime_model_settings(base_model_settings),
+                    model_settings=_build_runtime_model_settings(
+                        base_model_settings,
+                        deadline=deadline,
+                    ),
                 )
                 record_model_usage(
                     "learning_deck_repair",
@@ -229,7 +249,10 @@ def run_learning_deck_agent(
                         "metadata": _learning_deck_usage_metadata(source_snapshot, run_id=run_id),
                     },
                 )
-                index_html, source_notes_md = _read_and_validate_required_artifacts(sandbox)
+                index_html, source_notes_md, browser_validation = (
+                    _read_and_validate_required_artifacts(sandbox)
+                )
+                _append_browser_validation_event(agent_log_events, browser_validation)
             except Exception as repair_error:  # noqa: BLE001
                 _append_agent_log_event(
                     agent_log_events,
@@ -237,10 +260,11 @@ def run_learning_deck_agent(
                     {"error": str(repair_error), "failure_class": type(repair_error).__name__},
                 )
                 raise LearningDeckAgentExecutionError(
-                    f"artifact_contract_failed: {repair_error}",
+                    str(repair_error),
                     agent_log_events=agent_log_events,
                     sandbox_provider=sandbox.provider,
                     sandbox_id=sandbox.sandbox_id,
+                    error_type="artifact_contract_failed",
                 ) from repair_error
 
         return LearningDeckAgentResult(
@@ -252,6 +276,7 @@ def run_learning_deck_agent(
             sandbox_provider=sandbox.provider,
             sandbox_id=sandbox.sandbox_id,
             source_metadata_updates=_read_source_metadata_updates(sandbox),
+            browser_validation=browser_validation,
             agent_log_events=agent_log_events,
         )
     finally:
@@ -276,7 +301,9 @@ def _register_tools(agent: Agent[LearningDeckAgentDeps, str], *, llm_task: LlmTa
     )
 
 
-def _read_and_validate_required_artifacts(sandbox: AgentVmSession) -> tuple[str, str]:
+def _read_and_validate_required_artifacts(
+    sandbox: AgentVmSession,
+) -> tuple[str, str, dict[str, Any]]:
     settings = get_settings()
     try:
         index_html = sandbox.read_file(
@@ -293,29 +320,170 @@ def _read_and_validate_required_artifacts(sandbox: AgentVmSession) -> tuple[str,
         index_html=index_html,
         source_notes_md=source_notes_md,
     )
-    _validate_artifact_in_browser(sandbox)
-    return index_html, source_notes_md
+    browser_validation = _validate_artifact_in_browser(sandbox)
+    return index_html, source_notes_md, browser_validation
 
 
-def _validate_artifact_in_browser(sandbox: AgentVmSession) -> None:
-    capabilities = getattr(getattr(sandbox, "lease", None), "capabilities", None)
-    if not isinstance(capabilities, dict) or not (
-        capabilities.get("playwright") and capabilities.get("chromium")
-    ):
-        return
+def _validate_artifact_in_browser(sandbox: AgentVmSession) -> dict[str, Any]:
+    unavailable = _browser_validation_unavailable(sandbox)
+    if unavailable is not None:
+        return unavailable
     command = r"""node - <<'NODE'
 const { chromium } = require('playwright');
 (async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-  const errors = [];
-  page.on('pageerror', error => errors.push(String(error)));
-  await page.goto('file://' + process.cwd() + '/output/index.html');
-  await page.waitForTimeout(500);
-  const sections = await page.locator('.reveal .slides section').count();
-  await browser.close();
-  if (sections < 1 || errors.length) {
-    throw new Error(JSON.stringify({ sections, errors }));
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const viewport = { width: 390, height: 844 };
+    const page = await browser.newPage({ viewport });
+    page.setDefaultTimeout(10000);
+    page.setDefaultNavigationTimeout(15000);
+
+    const deckUrl = 'file://' + process.cwd() + '/output/index.html';
+    const pageErrors = [];
+    const failedRequests = [];
+    const failedResponses = [];
+    const relevantLoads = new Set();
+    const isRelevantRequest = request => {
+      const url = request.url();
+      const isSyntheticUrl = ['data:', 'blob:', 'about:'].some(
+        scheme => url.startsWith(scheme)
+      );
+      const isMainDeckDocument = request.isNavigationRequest() &&
+        request.frame() === page.mainFrame() && url === deckUrl;
+      return !isSyntheticUrl && !isMainDeckDocument;
+    };
+
+    page.on('pageerror', error => pageErrors.push(String(error)));
+    page.on('requestfailed', request => {
+      if (!isRelevantRequest(request)) return;
+      failedRequests.push({
+        url: request.url(),
+        resource_type: request.resourceType(),
+        error: request.failure()?.errorText || 'unknown request failure',
+      });
+    });
+    page.on('response', response => {
+      const request = response.request();
+      if (!isRelevantRequest(request)) return;
+      relevantLoads.add(response.url());
+      if (response.status() >= 400) {
+        failedResponses.push({
+          url: response.url(),
+          resource_type: request.resourceType(),
+          status: response.status(),
+        });
+      }
+    });
+
+    await page.goto(deckUrl, { waitUntil: 'load' });
+    await page.waitForFunction(() => Boolean(
+      window.Reveal &&
+      typeof window.Reveal.isReady === 'function' &&
+      window.Reveal.isReady()
+    ));
+    await page.waitForFunction(() => Boolean(
+      window.Reveal &&
+      typeof window.Reveal.getCurrentSlide === 'function' &&
+      window.Reveal.getCurrentSlide()
+    ));
+
+    const readDeckState = () => page.evaluate(() => {
+      const reveal = window.Reveal;
+      const currentSlide = reveal.getCurrentSlide();
+      const indices = reveal.getIndices();
+      return {
+        current_slide_exists: Boolean(currentSlide),
+        indices: { h: indices.h, v: indices.v, f: indices.f ?? -1 },
+        slide_count: reveal.getTotalSlides(),
+      };
+    });
+    const sameIndices = (left, right) =>
+      left.h === right.h && left.v === right.v && left.f === right.f;
+
+    await page.evaluate(() => window.Reveal.slide(0, 0, -1));
+    await page.waitForFunction(() => {
+      const indices = window.Reveal.getIndices();
+      return indices.h === 0 && indices.v === 0;
+    });
+    const initial = await readDeckState();
+    if (!initial.current_slide_exists || initial.slide_count < 1) {
+      throw new Error(JSON.stringify({ reason: 'current slide unavailable', initial }));
+    }
+
+    await page.evaluate(() => window.Reveal.next());
+    let afterNext;
+    let afterPrevious;
+    let navigation;
+    if (initial.slide_count === 1) {
+      await page.waitForTimeout(100);
+      afterNext = await readDeckState();
+      await page.evaluate(() => window.Reveal.prev());
+      if (sameIndices(initial.indices, afterNext.indices)) {
+        await page.waitForTimeout(100);
+        afterPrevious = await readDeckState();
+        if (!sameIndices(initial.indices, afterPrevious.indices)) {
+          throw new Error(JSON.stringify({
+            reason: 'single-slide navigation was not stable',
+            initial,
+            afterNext,
+            afterPrevious,
+          }));
+        }
+        navigation = 'single_slide_stable';
+      } else {
+        await page.waitForFunction(expected => {
+          const current = window.Reveal.getIndices();
+          return current.h === expected.h && current.v === expected.v &&
+            (current.f ?? -1) === expected.f;
+        }, initial.indices);
+        afterPrevious = await readDeckState();
+        navigation = 'single_slide_fragment_round_trip';
+      }
+    } else {
+      await page.waitForFunction(previous => {
+        const current = window.Reveal.getIndices();
+        const fragment = current.f ?? -1;
+        return current.h !== previous.h || current.v !== previous.v ||
+          fragment !== previous.f;
+      }, initial.indices);
+      afterNext = await readDeckState();
+      await page.evaluate(() => window.Reveal.prev());
+      await page.waitForFunction(expected => {
+        const current = window.Reveal.getIndices();
+        return current.h === expected.h && current.v === expected.v &&
+          (current.f ?? -1) === expected.f;
+      }, initial.indices);
+      afterPrevious = await readDeckState();
+      navigation = 'next_previous_round_trip';
+    }
+
+    await page.waitForTimeout(250);
+    if (pageErrors.length || failedRequests.length || failedResponses.length) {
+      throw new Error(JSON.stringify({
+        reason: 'browser runtime or asset load failure',
+        page_errors: pageErrors,
+        failed_requests: failedRequests,
+        failed_responses: failedResponses,
+      }));
+    }
+
+    const outcome = {
+      status: 'passed',
+      validator: 'playwright_chromium',
+      viewport,
+      reveal_ready: true,
+      current_slide_exists: initial.current_slide_exists,
+      slide_count: initial.slide_count,
+      navigation,
+      initial_indices: initial.indices,
+      next_indices: afterNext.indices,
+      previous_indices: afterPrevious.indices,
+      relevant_asset_loads: relevantLoads.size,
+    };
+    console.log('NEWSLY_BROWSER_VALIDATION=' + JSON.stringify(outcome));
+  } finally {
+    if (browser) await browser.close();
   }
 })().catch(error => { console.error(error); process.exit(1); });
 NODE"""
@@ -323,6 +491,85 @@ NODE"""
     if result.exit_code != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "unknown browser error"
         raise LearningDeckArtifactError(f"Browser validation failed: {detail}")
+    return _parse_browser_validation_outcome(result.stdout)
+
+
+def _parse_browser_validation_outcome(stdout: str) -> dict[str, Any]:
+    payload = next(
+        (
+            line.removeprefix(BROWSER_VALIDATION_RESULT_PREFIX)
+            for line in reversed(stdout.splitlines())
+            if line.startswith(BROWSER_VALIDATION_RESULT_PREFIX)
+        ),
+        None,
+    )
+    if payload is None:
+        raise LearningDeckArtifactError(
+            "Browser validation failed: validator did not report a structured outcome"
+        )
+    try:
+        outcome = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise LearningDeckArtifactError(
+            "Browser validation failed: validator reported malformed JSON"
+        ) from exc
+    if not isinstance(outcome, dict) or outcome.get("status") != "passed":
+        raise LearningDeckArtifactError(
+            "Browser validation failed: validator did not report a passing outcome"
+        )
+    slide_count = outcome.get("slide_count")
+    if (
+        outcome.get("validator") != "playwright_chromium"
+        or outcome.get("viewport") != {"width": 390, "height": 844}
+        or outcome.get("reveal_ready") is not True
+        or outcome.get("current_slide_exists") is not True
+        or not isinstance(slide_count, int)
+        or isinstance(slide_count, bool)
+        or slide_count < 1
+        or outcome.get("navigation")
+        not in {
+            "next_previous_round_trip",
+            "single_slide_fragment_round_trip",
+            "single_slide_stable",
+        }
+    ):
+        raise LearningDeckArtifactError(
+            "Browser validation failed: validator reported an incomplete passing outcome"
+        )
+    return outcome
+
+
+def _browser_validation_unavailable(sandbox: AgentVmSession) -> dict[str, Any] | None:
+    capabilities = getattr(getattr(sandbox, "lease", None), "capabilities", None)
+    if not isinstance(capabilities, dict):
+        return {
+            "status": "skipped",
+            "reason": "sandbox_capabilities_not_reported",
+            "missing_capabilities": ["chromium", "playwright"],
+        }
+    missing = sorted(
+        capability for capability in ("chromium", "playwright") if not capabilities.get(capability)
+    )
+    if not missing:
+        return None
+    result: dict[str, Any] = {
+        "status": "skipped",
+        "reason": "sandbox_browser_capabilities_unavailable",
+        "missing_capabilities": missing,
+    }
+    detail = capabilities.get("browser_validation_error")
+    if detail:
+        result["capability_error"] = str(detail)[:1000]
+    return result
+
+
+def _append_browser_validation_event(
+    agent_log_events: list[dict[str, Any]],
+    browser_validation: dict[str, Any],
+) -> None:
+    status = browser_validation.get("status")
+    event_type = "browser_validation_passed" if status == "passed" else "browser_validation_skipped"
+    _append_agent_log_event(agent_log_events, event_type, browser_validation)
 
 
 def _artifact_repair_prompt(error: Exception) -> str:
@@ -336,20 +583,21 @@ def _artifact_repair_prompt(error: Exception) -> str:
 
 def _create_configured_sandbox(
     user_id: int,
-    run_id: int,
     *,
     llm_task: LlmTask | None = None,
+    deadline: float | None = None,
 ) -> AgentVmSession:
-    if llm_task is not None and llm_task.workspace_path and llm_task.shared_workspace_path:
-        return create_agent_vm_session(
-            user_id=user_id,
-            llm_task_id=require_llm_task_id(llm_task),
-            vm_namespace=llm_task.vm_namespace or f"user:{user_id}",
-            workspace_path=llm_task.workspace_path,
-            shared_workspace_path=llm_task.shared_workspace_path,
-            feature="learning_deck",
-        )
-    return create_learning_deck_sandbox_session(user_id=user_id, run_id=run_id)
+    if llm_task is None or not llm_task.workspace_path or not llm_task.shared_workspace_path:
+        raise RuntimeError("Learning Deck LLM task workspace is required")
+    return create_agent_vm_session(
+        user_id=user_id,
+        llm_task_id=require_llm_task_id(llm_task),
+        vm_namespace=llm_task.vm_namespace or f"user:{user_id}",
+        workspace_path=llm_task.workspace_path,
+        shared_workspace_path=llm_task.shared_workspace_path,
+        feature="learning_deck",
+        deadline=deadline,
+    )
 
 
 def _prepare_sandbox_inputs(
@@ -427,11 +675,21 @@ def _build_github_guidance(source_snapshot: dict[str, Any]) -> str:
     return guidance
 
 
-def _build_runtime_model_settings(base_model_settings: ModelSettings | None) -> ModelSettings:
-    settings = get_settings()
+def _build_runtime_model_settings(
+    base_model_settings: ModelSettings | None,
+    *,
+    deadline: float,
+) -> ModelSettings:
     runtime_settings = dict(base_model_settings or {})
-    runtime_settings["timeout"] = settings.learning_sandbox_timeout_seconds
+    runtime_settings["timeout"] = _remaining_run_timeout(deadline)
     return cast(ModelSettings, runtime_settings)
+
+
+def _remaining_run_timeout(deadline: float) -> float:
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise AgentVmDeadlineExceeded("Learning Deck agent deadline was exceeded")
+    return remaining
 
 
 def _learning_deck_usage_content_id(source_snapshot: dict[str, Any]) -> int | None:
@@ -466,7 +724,7 @@ def _collect_assets(sandbox: AgentVmSession) -> dict[str, tuple[bytes, str]]:
         relative_path = normalized.removeprefix("output/")
         assets[relative_path] = (
             sandbox.read_file_bytes(normalized, max_bytes=settings.learning_deck_max_asset_bytes),
-            guess_asset_content_type(relative_path),
+            guess_learning_deck_content_type(relative_path),
         )
     return assets
 

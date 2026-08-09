@@ -13,10 +13,15 @@ from app.models.contracts import (
     TaskType,
 )
 from app.models.db import LlmTask, ProcessingTask
-from app.services.learning_deck_agent import LearningDeckAgentResult
+from app.services.learning_deck_agent import (
+    LearningDeckAgentExecutionError,
+    LearningDeckAgentResult,
+)
 from app.services.learning_deck_artifacts import StoredLearningDeckArtifact
-from app.services.learning_deck_generation import LearningDeckGenerationWaiting
-from app.services.learning_deck_task_generation import run_learning_deck_task
+from app.services.learning_deck_task_generation import (
+    LearningDeckGenerationWaiting,
+    run_learning_deck_task,
+)
 from app.services.learning_decks import (
     create_or_rerun_learning_deck,
     delete_learning_deck,
@@ -139,6 +144,40 @@ def test_learning_deck_llm_task_uses_source_body_before_artwork_finishes(
     assert captured_source["body_text"] == "A sufficiently detailed source body."
 
 
+@pytest.mark.parametrize(
+    "error_type",
+    ["agent_execution_failed", "artifact_contract_failed"],
+)
+def test_learning_deck_llm_task_uses_typed_agent_failure(
+    db_session,
+    test_user,
+    content_factory,
+    error_type,
+) -> None:
+    _content, _deck, task = _create_task(db_session, test_user, content_factory)
+
+    def fail_agent(**_kwargs):
+        raise LearningDeckAgentExecutionError(
+            "failure text without a classification prefix",
+            agent_log_events=[],
+            sandbox_provider="e2b",
+            sandbox_id="sandbox-typed-failure",
+            error_type=error_type,
+        )
+
+    with pytest.raises(LlmTaskError, match="without a classification prefix"):
+        run_learning_deck_task(
+            db_session,
+            llm_task_id=task.id,
+            agent_runner=fail_agent,
+        )
+
+    db_session.refresh(task)
+    assert task.error_type == error_type
+    assert task.sandbox_provider == "e2b"
+    assert task.sandbox_id == "sandbox-typed-failure"
+
+
 def test_learning_deck_llm_task_publishes_and_drives_api_projection(
     db_session,
     test_user,
@@ -155,6 +194,7 @@ def test_learning_deck_llm_task_publishes_and_drives_api_projection(
         sandbox_provider="local",
         sandbox_id="sandbox-1",
         source_metadata_updates={"inspected": True},
+        browser_validation={"status": "passed", "validator": "playwright_chromium"},
         agent_log_events=[],
     )
     stored = StoredLearningDeckArtifact(
@@ -185,6 +225,8 @@ def test_learning_deck_llm_task_publishes_and_drives_api_projection(
     assert response.latest_run.id == task.id
     assert response.latest_run.interests_prompt == "Focus on topology"
     assert response.viewer_available is True
+    assert result.output_json["browser_validation"] == agent_result.browser_validation
+    assert result.artifact_manifest["browser_validation"] == agent_result.browser_validation
 
 
 def test_learning_deck_llm_task_retires_previous_artifact_bundle(

@@ -8,8 +8,10 @@ from app.core.logging import get_logger
 from app.models.contracts import LlmTaskKind, LlmTaskStatus, LlmWorkflowState, TaskType
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
-from app.services.learning_deck_generation import LearningDeckGenerationWaiting
-from app.services.learning_deck_task_generation import run_learning_deck_task
+from app.services.learning_deck_task_generation import (
+    LearningDeckGenerationWaiting,
+    run_learning_deck_task,
+)
 from app.services.llm_tasks import LlmTaskError, set_llm_task_status
 from app.services.share_actions import run_share_action_task
 
@@ -29,21 +31,34 @@ class RunLlmTaskHandler:
 
     def handle(self, task: TaskEnvelope, context: TaskContext) -> TaskResult:
         llm_task_id = task.payload.get("llm_task_id")
-        if not llm_task_id:
-            return TaskResult.fail("Missing llm_task_id", retryable=False)
+        user_id = task.payload.get("user_id")
+        if not llm_task_id or not user_id:
+            return TaskResult.fail("Missing llm_task_id or user_id", retryable=False)
         try:
             llm_task_id_int = int(llm_task_id)
+            user_id_int = int(user_id)
         except (TypeError, ValueError):
-            return TaskResult.fail(f"Invalid llm_task_id: {llm_task_id!r}", retryable=False)
+            return TaskResult.fail("Invalid llm_task_id or user_id", retryable=False)
+        if task.owner_user_id != user_id_int:
+            return TaskResult.fail("LLM task ownership mismatch", retryable=False)
 
         with context.db_factory() as db:
             from app.models.db import LlmTask
 
             llm_task = db.query(LlmTask).filter(LlmTask.id == llm_task_id_int).first()
-            if llm_task is None:
+            if llm_task is None or llm_task.user_id != user_id_int:
                 return TaskResult.fail("LLM task not found", retryable=False)
             if llm_task.status in TERMINAL_LLM_TASK_STATUSES:
                 return TaskResult.ok()
+            if task.retry_count > context.settings.queue.max_retries:
+                message = "LLM task stopped after repeated worker interruptions"
+                _mark_llm_task_failed(
+                    db,
+                    llm_task_id=llm_task_id_int,
+                    error_type="lease_reclaim_budget_exhausted",
+                    message=message,
+                )
+                return TaskResult.fail(message, retryable=False)
             try:
                 executors = {
                     LlmTaskKind.SHARE_ACTION.value: lambda: run_share_action_task(

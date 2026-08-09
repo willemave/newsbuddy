@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db_session, get_readonly_db_session
@@ -13,19 +13,8 @@ from app.models.api.llm_tasks import (
     LlmTaskActionListResponse,
     LlmTaskActionRejectRequest,
     LlmTaskActionResponse,
-    LlmTaskWebSearchRequest,
-    LlmTaskWebSearchResponse,
-    LlmTaskWebSearchResult,
 )
 from app.models.db import User
-from app.services.exa_client import ExaClientError
-from app.services.llm_task_tools import (
-    LLM_TASK_WEB_SEARCH_TOOL,
-    LlmTaskToolAuthError,
-    LlmTaskToolPermissionError,
-    run_llm_task_web_search,
-    verify_llm_task_tool_token,
-)
 from app.services.llm_tasks import (
     LlmTaskError,
     approve_llm_task_action,
@@ -37,57 +26,6 @@ from app.services.llm_tasks import (
 )
 
 router = APIRouter(prefix="/llm-tasks", tags=["llm-tasks"])
-
-
-@router.post(
-    "/{task_id}/tools/web-search",
-    response_model=LlmTaskWebSearchResponse,
-    include_in_schema=False,
-)
-def run_task_web_search_tool(
-    task_id: Annotated[int, Path(..., gt=0)],
-    payload: LlmTaskWebSearchRequest,
-    db: Annotated[Session, Depends(get_readonly_db_session)],
-    authorization: Annotated[str | None, Header()] = None,
-) -> LlmTaskWebSearchResponse:
-    """Run a host-mediated web search request from a task-scoped VM token."""
-    token = _require_bearer_token(authorization)
-    try:
-        user_id = verify_llm_task_tool_token(
-            token,
-            expected_llm_task_id=task_id,
-            expected_tool_name=LLM_TASK_WEB_SEARCH_TOOL,
-        )
-    except LlmTaskToolAuthError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-
-    task = get_llm_task(db, user_id=user_id, llm_task_id=task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="LLM task not found")
-    try:
-        results = run_llm_task_web_search(
-            task,
-            query=payload.query,
-            num_results=payload.num_results,
-            category=payload.category,
-        )
-    except LlmTaskToolPermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ExaClientError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    return LlmTaskWebSearchResponse(
-        query=payload.query,
-        results=[
-            LlmTaskWebSearchResult(
-                title=result.title,
-                url=result.url,
-                snippet=result.snippet,
-                published_date=result.published_date,
-            )
-            for result in results
-        ],
-    )
 
 
 @router.get(
@@ -172,12 +110,3 @@ def reject_task_action(
     db.commit()
     db.refresh(action)
     return present_llm_task_action(action)
-
-
-def _require_bearer_token(authorization: str | None) -> str:
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        raise HTTPException(status_code=401, detail="Missing bearer token")
-    return token.strip()

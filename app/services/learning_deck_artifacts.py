@@ -434,7 +434,7 @@ def _append_secret_and_host_path_errors(
         settings.openrouter_api_key,
         settings.cerebras_api_key,
         settings.exa_api_key,
-        settings.learning_sandbox_e2b_api_key,
+        settings.llm_task_sandbox_e2b_api_key,
     ]
     for value in secret_values:
         if isinstance(value, str) and len(value) >= 12 and value in combined:

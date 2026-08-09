@@ -30,7 +30,6 @@ from app.services.learning_deck_artifacts import (
     store_learning_deck_artifact,
 )
 from app.services.learning_deck_common import LearningDeckSourceNotReady, require_int_value
-from app.services.learning_deck_generation import LearningDeckGenerationWaiting
 from app.services.learning_deck_publication import commit_learning_deck_artifact_promotion
 from app.services.learning_deck_sources import (
     build_content_source_snapshot_for_deck,
@@ -48,6 +47,7 @@ TERMINAL_LLM_TASK_STATUSES = {
     LlmTaskStatus.FAILED.value,
     LlmTaskStatus.CANCELLED.value,
 }
+SOURCE_WAIT_RETRY_SECONDS = 300
 SOURCE_PREPARATION_TASK_TYPES = {
     TaskType.ANALYZE_URL.value,
     TaskType.PROCESS_CONTENT.value,
@@ -55,6 +55,19 @@ SOURCE_PREPARATION_TASK_TYPES = {
     TaskType.DOWNLOAD_TWEET_VIDEO_AUDIO.value,
     TaskType.TRANSCRIBE_TWEET_VIDEO.value,
 }
+
+
+class LearningDeckGenerationWaiting(RuntimeError):
+    """Raised when source preparation is still active and generation should retry."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_delay_seconds: int = SOURCE_WAIT_RETRY_SECONDS,
+    ) -> None:
+        super().__init__(message)
+        self.retry_delay_seconds = retry_delay_seconds
 
 
 def run_learning_deck_task(
@@ -157,12 +170,7 @@ def run_learning_deck_task(
         _store_agent_log(db, task, deck, exc.agent_log_events)
         task.sandbox_provider = exc.sandbox_provider
         task.sandbox_id = exc.sandbox_id
-        error_type = (
-            "artifact_contract_failed"
-            if str(exc).startswith("artifact_contract_failed:")
-            else "agent_execution_failed"
-        )
-        _fail_task(db, task, error_type, str(exc))
+        _fail_task(db, task, exc.error_type, str(exc))
     except LearningDeckArtifactError as exc:
         db.rollback()
         _fail_task(db, task, "artifact_contract_failed", str(exc))
@@ -195,6 +203,7 @@ def run_learning_deck_task(
             "source_notes_object_key": stored.source_notes_object_key,
             "source_notes_html_object_key": stored.source_notes_html_object_key,
             "artifact_object_keys": stored.artifact_object_keys,
+            "browser_validation": result.browser_validation,
         },
         artifact_manifest={
             "artifact_storage_prefix": stored.storage_prefix,
@@ -202,6 +211,7 @@ def run_learning_deck_task(
             "source_notes_object_key": stored.source_notes_object_key,
             "source_notes_html_object_key": stored.source_notes_html_object_key,
             "artifact_object_keys": stored.artifact_object_keys,
+            "browser_validation": result.browser_validation,
         },
     )
     commit_learning_deck_artifact_promotion(
@@ -315,9 +325,7 @@ def _source_terminal_error(
         db.query(ProcessingTask.id)
         .filter(ProcessingTask.content_id == content_id)
         .filter(ProcessingTask.task_type.in_(SOURCE_PREPARATION_TASK_TYPES))
-        .filter(
-            ProcessingTask.status.in_([TaskStatus.PENDING.value, TaskStatus.PROCESSING.value])
-        )
+        .filter(ProcessingTask.status.in_([TaskStatus.PENDING.value, TaskStatus.PROCESSING.value]))
         .limit(1)
         .scalar()
     )
