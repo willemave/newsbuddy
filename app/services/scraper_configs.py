@@ -27,6 +27,7 @@ from app.models.internal.scraper_configs import (
     ALLOWED_SCRAPER_TYPES,
     CreateUserScraperConfig,
     UpdateUserScraperConfig,
+    canonicalize_feed_url,
 )
 from app.services.scraper_config_validation import validate_and_normalize_scraper_config
 from app.utils.dates import parse_date_with_tz
@@ -43,10 +44,19 @@ class ScraperConfigAlreadyExistsError(ValueError):
     branch.
     """
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        existing_config: UserScraperConfig | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.existing_config = existing_config
+
 
 def _normalize_feed_url(config: dict[str, Any]) -> str:
     feed_url = (config.get("feed_url") or "").strip()
-    return feed_url
+    return canonicalize_feed_url(feed_url)
 
 
 def _extract_limit(config: dict[str, Any], default_limit: int) -> int:
@@ -88,11 +98,7 @@ def _normalize_feed_url_for_stats(feed_url: str | None) -> str | None:
     trimmed = feed_url.strip()
     if not trimmed:
         return None
-    parsed = urlparse(trimmed)
-    if not parsed.scheme or not parsed.netloc:
-        return trimmed.rstrip("/")
-    path = parsed.path.rstrip("/")
-    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}"
+    return canonicalize_feed_url(trimmed)
 
 
 def _extract_feed_domain(feed_url: str | None) -> str | None:
@@ -419,25 +425,91 @@ def create_user_scraper_config(
     db: Session, user_id: int, data: CreateUserScraperConfig
 ) -> UserScraperConfig:
     """Create a new scraper config for a user."""
-    if data.scraper_type not in ALLOWED_SCRAPER_TYPES:
-        raise ValueError("Unsupported scraper_type")
+    record = create_user_scraper_config_in_session(db, user_id, data)
+    db.commit()
+    db.refresh(record)
+    return record
 
-    normalized_config = validate_and_normalize_scraper_config(data.scraper_type, data.config)
-    feed_url = _normalize_feed_url(normalized_config)
 
-    existing = (
+def _find_existing_scraper_config(
+    db: Session,
+    *,
+    user_id: int,
+    scraper_type: str,
+    feed_url: str,
+) -> UserScraperConfig | None:
+    canonical_feed_url = canonicalize_feed_url(feed_url)
+    exact_match = (
         db.query(UserScraperConfig)
         .filter(
             and_(
                 UserScraperConfig.user_id == user_id,
-                UserScraperConfig.scraper_type == data.scraper_type,
-                UserScraperConfig.feed_url == feed_url,
+                UserScraperConfig.scraper_type == scraper_type,
+                UserScraperConfig.feed_url == canonical_feed_url,
             )
         )
         .first()
     )
+    if exact_match is not None:
+        return exact_match
+
+    # Retain the canonicalizing fallback until a staged data migration has run
+    # after every deployed writer stores canonical feed URLs.
+    candidates = (
+        db.query(UserScraperConfig)
+        .filter(
+            and_(
+                UserScraperConfig.user_id == user_id,
+                UserScraperConfig.scraper_type == scraper_type,
+            )
+        )
+        .all()
+    )
+    for candidate in candidates:
+        stored_feed_url = candidate.feed_url or _normalize_feed_url(_config_data(candidate))
+        if stored_feed_url and canonicalize_feed_url(stored_feed_url) == canonical_feed_url:
+            return candidate
+    return None
+
+
+def create_user_scraper_config_in_session(
+    db: Session, user_id: int, data: CreateUserScraperConfig
+) -> UserScraperConfig:
+    """Create a scraper config without committing the caller-owned transaction."""
+    if data.scraper_type not in ALLOWED_SCRAPER_TYPES:
+        raise ValueError("Unsupported scraper_type")
+
+    requested_feed_url = _normalize_feed_url(data.config)
+    existing = _find_existing_scraper_config(
+        db,
+        user_id=user_id,
+        scraper_type=data.scraper_type,
+        feed_url=requested_feed_url,
+    )
     if existing:
-        raise ScraperConfigAlreadyExistsError("Scraper config already exists for this feed")
+        raise ScraperConfigAlreadyExistsError(
+            "Scraper config already exists for this feed",
+            existing_config=existing,
+        )
+
+    normalized_config = validate_and_normalize_scraper_config(
+        data.scraper_type,
+        data.config,
+        user_id=user_id,
+    )
+    feed_url = _normalize_feed_url(normalized_config)
+
+    existing = _find_existing_scraper_config(
+        db,
+        user_id=user_id,
+        scraper_type=data.scraper_type,
+        feed_url=feed_url,
+    )
+    if existing:
+        raise ScraperConfigAlreadyExistsError(
+            "Scraper config already exists for this feed",
+            existing_config=existing,
+        )
 
     record = UserScraperConfig(
         user_id=user_id,
@@ -447,16 +519,23 @@ def create_user_scraper_config(
         feed_url=feed_url,
         is_active=data.is_active,
     )
-    db.add(record)
     try:
-        db.commit()
+        # Keep a concurrent uniqueness loss scoped to a savepoint so callers can
+        # recover the winning row without discarding their surrounding work.
+        with db.begin_nested():
+            db.add(record)
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
+        existing = _find_existing_scraper_config(
+            db,
+            user_id=user_id,
+            scraper_type=data.scraper_type,
+            feed_url=feed_url,
+        )
         raise ScraperConfigAlreadyExistsError(
-            "Scraper config already exists for this feed"
+            "Scraper config already exists for this feed",
+            existing_config=existing,
         ) from exc
-
-    db.refresh(record)
     return record
 
 
@@ -483,7 +562,11 @@ def update_user_scraper_config(
         scraper_type = record.scraper_type
         if not isinstance(scraper_type, str) or not scraper_type:
             raise ValueError("Scraper config type is missing")
-        normalized_config = validate_and_normalize_scraper_config(scraper_type, data.config)
+        normalized_config = validate_and_normalize_scraper_config(
+            scraper_type,
+            data.config,
+            user_id=user_id,
+        )
         normalized_feed_url = _normalize_feed_url(normalized_config)
         record.config = normalized_config
         record.feed_url = normalized_feed_url

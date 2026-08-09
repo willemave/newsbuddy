@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from app.models.api.base import UTCDateTime
+from app.models.contracts import FeedSubscriptionOutcome
 
 
 class ScraperConfigStatsResponse(BaseModel):
@@ -35,6 +36,8 @@ class ScraperConfigResponse(BaseModel):
     is_active: bool
     created_at: UTCDateTime
     stats: ScraperConfigStatsResponse | None = None
+    subscription_outcome: FeedSubscriptionOutcome | None = None
+    backfill_task_id: int | None = None
 
     model_config = ConfigDict(
         json_schema_extra={

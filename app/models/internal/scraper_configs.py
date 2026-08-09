@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import urlparse, urlunparse
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -21,6 +22,31 @@ ALLOWED_SCRAPER_TYPES = {
     "reddit",
     AGGREGATOR_SCRAPER_TYPE,
 }
+
+
+def canonicalize_feed_url(feed_url: str) -> str:
+    """Return the stable URL identity used by feed config writes and lookups."""
+    trimmed = feed_url.strip()
+    try:
+        parsed = urlparse(trimmed)
+    except Exception:
+        return trimmed.rstrip("/")
+    if not parsed.scheme or not parsed.netloc:
+        return trimmed.rstrip("/")
+    return urlunparse(
+        parsed._replace(
+            scheme=parsed.scheme.lower(),
+            netloc=parsed.netloc.lower(),
+            path=parsed.path.rstrip("/"),
+            fragment="",
+        )
+    )
+
+
+def normalize_feed_type_alias(feed_type: str) -> str:
+    """Normalize accepted feed-type aliases to the persisted scraper type."""
+    normalized = feed_type.strip().lower()
+    return "atom" if normalized == "rss" else normalized
 
 
 def _validate_limit(limit: object) -> None:
@@ -74,7 +100,7 @@ def normalize_feed_config(config: dict[str, Any]) -> dict[str, Any]:
     feed_url = config.get("feed_url")
     if not isinstance(feed_url, str) or not feed_url.strip():
         raise ValueError("config.feed_url is required")
-    config["feed_url"] = feed_url.strip()
+    config["feed_url"] = canonicalize_feed_url(feed_url)
     _validate_limit(config.get("limit"))
     return config
 

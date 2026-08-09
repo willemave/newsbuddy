@@ -1,10 +1,15 @@
 import pytest
+from sqlalchemy import event
 
+from app.models.db import UserScraperConfig
 from app.models.internal.scraper_configs import normalize_aggregator_config
+from app.services import scraper_configs
 from app.services.scraper_configs import (
     CreateUserScraperConfig,
+    ScraperConfigAlreadyExistsError,
     build_feed_payloads,
     create_user_scraper_config,
+    create_user_scraper_config_in_session,
     list_active_configs_by_type,
     list_user_scraper_configs,
 )
@@ -38,6 +43,77 @@ def test_uniqueness_enforced(db_session):
 
     with pytest.raises(ValueError):
         create_user_scraper_config(db_session, user_id=1, data=payload)
+
+
+def test_canonical_existing_feed_uses_one_indexable_exact_query(db_session) -> None:
+    existing = UserScraperConfig(
+        user_id=1,
+        scraper_type="substack",
+        display_name="Canonical Feed",
+        feed_url="https://example.com/feed",
+        config={"feed_url": "https://example.com/feed"},
+        is_active=True,
+    )
+    db_session.add(existing)
+    db_session.commit()
+    statements: list[str] = []
+
+    def capture_statement(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if "user_scraper_configs" in statement and statement.lstrip().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(db_session.bind, "before_cursor_execute", capture_statement)
+    try:
+        matched = scraper_configs._find_existing_scraper_config(
+            db_session,
+            user_id=1,
+            scraper_type="substack",
+            feed_url="HTTPS://EXAMPLE.COM/feed/#fragment",
+        )
+    finally:
+        event.remove(db_session.bind, "before_cursor_execute", capture_statement)
+
+    assert matched is existing
+    assert len(statements) == 1
+
+
+@pytest.mark.parametrize(
+    ("stored_feed_url", "stored_config"),
+    [
+        (
+            "HTTPS://EXAMPLE.COM/feed/#historical-fragment",
+            {"feed_url": "HTTPS://EXAMPLE.COM/feed/#historical-fragment", "limit": 10},
+        ),
+        (None, {"feed_url": "https://EXAMPLE.COM/feed/", "limit": 10}),
+    ],
+)
+def test_create_reuses_historical_noncanonical_feed_identity(
+    db_session,
+    stored_feed_url,
+    stored_config,
+):
+    historical = UserScraperConfig(
+        user_id=1,
+        scraper_type="substack",
+        display_name="Historical Feed",
+        feed_url=stored_feed_url,
+        config=stored_config,
+        is_active=True,
+    )
+    db_session.add(historical)
+    db_session.commit()
+
+    payload = CreateUserScraperConfig(
+        scraper_type="substack",
+        display_name="Duplicate Feed",
+        config={"feed_url": "https://example.com/feed"},
+        is_active=True,
+    )
+    with pytest.raises(ScraperConfigAlreadyExistsError) as exc_info:
+        create_user_scraper_config_in_session(db_session, user_id=1, data=payload)
+
+    assert exc_info.value.existing_config is historical
+    assert db_session.query(UserScraperConfig).count() == 1
 
 
 def test_list_filtered_by_type(db_session):

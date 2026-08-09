@@ -22,6 +22,7 @@ from app.core.logging import get_logger, setup_logging
 from app.core.observability import bound_log_context, build_log_extra
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content
+from app.models.domain.scraper_runs import scraper_run_status
 from app.scraping.runner import ScraperRunner
 from app.services.queue import get_queue_service
 
@@ -163,7 +164,7 @@ def main() -> int:
                             component="cron",
                             operation="run_scrapers",
                             event_name="scraper.run",
-                            status="completed",
+                            status=scraper_run_status(stats),
                             job_name="run_scrapers",
                             source=scraper_name,
                             context_data={
@@ -185,6 +186,17 @@ def main() -> int:
                     scraper_results[scraper_name] = 0
                     logger.warning(f"  No stats returned for {scraper_name}")
 
+            scraper_statuses = [scraper_run_status(stats) for stats in scraper_stats.values()]
+            failed_scraper_count = scraper_statuses.count("failed") + (
+                len(scraper_results) - len(scraper_stats)
+            )
+            degraded_scraper_count = scraper_statuses.count("degraded")
+            if failed_scraper_count:
+                overall_status = "failed"
+            elif stopped_due_to_backpressure or degraded_scraper_count:
+                overall_status = "degraded"
+            else:
+                overall_status = "completed"
             if scraper_stats:
                 total_scraped = sum(s.scraped for s in scraper_stats.values())
                 total_saved = sum(s.saved for s in scraper_stats.values())
@@ -196,7 +208,7 @@ def main() -> int:
                         component="cron",
                         operation="run_scrapers",
                         event_name="scraper.run",
-                        status="completed" if not stopped_due_to_backpressure else "degraded",
+                        status=overall_status,
                         job_name="run_scrapers",
                         context_data={
                             "total_scraped": total_scraped,
@@ -218,12 +230,12 @@ def main() -> int:
                 )
 
             # Summary
-            total_scraped = sum(scraper_results.values())
+            total_saved_items = sum(scraper_results.values())
             logger.info("\n" + "=" * 60)
             logger.info("Scraping completed. Summary:")
             for scraper, count in scraper_results.items():
                 logger.info(f"  {scraper}: {count} new items")
-            logger.info(f"  Total: {total_scraped} new items")
+            logger.info(f"  Total: {total_saved_items} new items")
 
             # Show final statistics
             if args.show_stats:
@@ -272,7 +284,7 @@ def main() -> int:
                     component="cron",
                     operation="run_scrapers",
                     event_name="cron.run",
-                    status="completed" if not stopped_due_to_backpressure else "degraded",
+                    status=overall_status,
                     duration_ms=(perf_counter() - run_started_at) * 1000,
                     job_name="run_scrapers",
                     trigger="manual",
@@ -280,13 +292,12 @@ def main() -> int:
                         "run_type": run_type,
                         "considered_count": len(args.scrapers or available_scrapers),
                         "saved_count": sum(scraper_results.values()),
-                        "failed_count": sum(
-                            1 for stats in scraper_stats.values() if stats.errors > 0
-                        ),
+                        "failed_count": failed_scraper_count,
+                        "degraded_count": degraded_scraper_count,
                     },
                 ),
             )
-        return 0
+        return 1 if failed_scraper_count else 0
 
     except KeyboardInterrupt:
         logger.warning("\nProcess interrupted by user")

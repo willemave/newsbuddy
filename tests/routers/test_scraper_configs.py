@@ -1,4 +1,6 @@
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,16 +13,21 @@ from app.models.db import (
     ProcessingTask,
     UserScraperConfig,
 )
+from app.services.feed_subscription import load_active_feed_urls
 
 
 @pytest.fixture(autouse=True)
 def _stub_feed_validation(monkeypatch):
-    def _validate(feed_url: str):
-        return {"feed_url": feed_url.strip()}
+    @contextmanager
+    def _runtime(**_kwargs):
+        detector = SimpleNamespace(
+            validate_feed_url=lambda feed_url: {"feed_url": feed_url.strip()}
+        )
+        yield SimpleNamespace(detector=detector)
 
     monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        _validate,
+        "app.services.scraper_config_validation.feed_research_runtime",
+        _runtime,
     )
 
 
@@ -166,6 +173,126 @@ def test_subscribe_feed_defaults_limit(client, test_user):
     assert resp.status_code == 201
     data = resp.json()
     assert data["limit"] == DEFAULT_NEW_FEED_LIMIT
+    assert data["subscription_outcome"] == "created"
+    assert isinstance(data["backfill_task_id"], int)
+
+
+def test_subscribe_feed_reuses_config_and_active_backfill(
+    client,
+    db_session,
+    test_user,
+    monkeypatch,
+):
+    validation_calls: list[str] = []
+
+    @contextmanager
+    def _runtime(**_kwargs):
+        def validate(feed_url: str) -> dict[str, str]:
+            validation_calls.append(feed_url)
+            return {"feed_url": feed_url}
+
+        yield SimpleNamespace(detector=SimpleNamespace(validate_feed_url=validate))
+
+    monkeypatch.setattr(
+        "app.services.scraper_config_validation.feed_research_runtime",
+        _runtime,
+    )
+    payload = {
+        "feed_url": "https://example.com/idempotent.xml",
+        "feed_type": "atom",
+        "display_name": "Idempotent Feed",
+    }
+
+    created = client.post("/api/scrapers/subscribe", json=payload)
+    duplicate = client.post(
+        "/api/scrapers/subscribe",
+        json={**payload, "feed_url": "https://EXAMPLE.com/idempotent.xml/"},
+    )
+
+    assert created.status_code == 201
+    assert duplicate.status_code == 200
+    assert duplicate.json()["id"] == created.json()["id"]
+    assert duplicate.json()["subscription_outcome"] == "already_subscribed"
+    assert duplicate.json()["backfill_task_id"] is None
+    assert validation_calls == ["https://example.com/idempotent.xml"]
+    tasks = (
+        db_session.query(ProcessingTask).filter(ProcessingTask.task_type == "backfill_feeds").all()
+    )
+    assert len(tasks) == 1
+    assert tasks[0].payload == {
+        "user_id": test_user.id,
+        "config_ids": [created.json()["id"]],
+        "count": 2,
+    }
+
+
+def test_subscribe_feed_reactivates_canonical_legacy_config_and_enqueues_backfill(
+    client,
+    db_session,
+    test_user,
+):
+    inactive = UserScraperConfig(
+        user_id=test_user.id,
+        scraper_type="atom",
+        display_name="Paused Feed",
+        config={"feed_url": "https://EXAMPLE.com/paused.xml/", "limit": 10},
+        feed_url=None,
+        is_active=False,
+    )
+    db_session.add(inactive)
+    db_session.commit()
+
+    response = client.post(
+        "/api/scrapers/subscribe",
+        json={
+            "feed_url": "https://example.com/paused.xml",
+            "feed_type": "atom",
+            "display_name": "Paused Feed",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == inactive.id
+    assert payload["subscription_outcome"] == "reactivated"
+    assert payload["is_active"] is True
+    assert isinstance(payload["backfill_task_id"], int)
+
+    db_session.refresh(inactive)
+    assert inactive.is_active is True
+    assert inactive.feed_url == "https://example.com/paused.xml"
+    assert load_active_feed_urls(db_session, user_id=test_user.id) == {
+        "https://example.com/paused.xml"
+    }
+
+    task = (
+        db_session.query(ProcessingTask).filter(ProcessingTask.task_type == "backfill_feeds").one()
+    )
+    assert task.id == payload["backfill_task_id"]
+    assert task.owner_user_id == test_user.id
+    assert task.payload == {
+        "user_id": test_user.id,
+        "config_ids": [inactive.id],
+        "count": 2,
+    }
+
+    duplicate = client.post(
+        "/api/scrapers/subscribe",
+        json={
+            "feed_url": "https://EXAMPLE.COM/paused.xml/",
+            "feed_type": "atom",
+            "display_name": "Paused Feed",
+        },
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json()["subscription_outcome"] == "already_subscribed"
+    assert duplicate.json()["backfill_task_id"] is None
+    assert (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == "backfill_feeds")
+        .count()
+        == 1
+    )
 
 
 def test_scraper_config_reddit(client, test_user):

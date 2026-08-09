@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import ValidationError
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from app.constants import DEFAULT_NEW_FEED_LIMIT
+from app.commands import subscribe_feed as subscribe_feed_command
 from app.core.db import get_db_session, get_readonly_db_session
 from app.core.deps import get_current_user, require_user_id
 from app.models.api.scraper_configs import (
@@ -16,6 +15,7 @@ from app.models.api.scraper_configs import (
     ScraperConfigStatsResponse,
     SubscribeToFeedRequest,
 )
+from app.models.contracts import FeedSubscriptionOutcome
 from app.models.db.users import User
 from app.models.internal.scraper_configs import CreateUserScraperConfig, UpdateUserScraperConfig
 from app.services.scraper_configs import (
@@ -28,8 +28,6 @@ from app.services.scraper_configs import (
 )
 
 router = APIRouter(prefix="/scrapers", tags=["scrapers"])
-
-ScraperTypeLiteral = Literal["substack", "atom", "podcast_rss", "youtube", "reddit"]
 
 
 def _require_config_id(config_id: int | None) -> int:
@@ -49,6 +47,8 @@ def _serialize_scraper_config(
     config,
     *,
     stats: dict[str, Any] | None = None,
+    subscription_outcome: FeedSubscriptionOutcome | None = None,
+    backfill_task_id: int | None = None,
 ) -> ScraperConfigResponse:
     config_id = _require_config_id(config.id)
     return ScraperConfigResponse(
@@ -61,6 +61,8 @@ def _serialize_scraper_config(
         is_active=config.is_active,
         created_at=config.created_at,
         stats=ScraperConfigStatsResponse(**stats) if stats is not None else None,
+        subscription_outcome=subscription_outcome,
+        backfill_task_id=backfill_task_id,
     )
 
 
@@ -164,6 +166,7 @@ def delete_scraper_config_endpoint(
 )
 def subscribe_to_feed(
     payload: SubscribeToFeedRequest,
+    response: Response,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> ScraperConfigResponse:
@@ -171,34 +174,22 @@ def subscribe_to_feed(
 
     Convenience endpoint that creates a scraper config from a detected feed.
     """
-    if payload.feed_type not in ALLOWED_SCRAPER_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported feed type: {payload.feed_type}",
-        )
     user_id = require_user_id(current_user)
-    scraper_type = cast(ScraperTypeLiteral, payload.feed_type)
-
     try:
-        create_payload = CreateUserScraperConfig(
-            scraper_type=scraper_type,
-            display_name=payload.display_name,
-            config={
-                "feed_url": payload.feed_url,
-                "limit": DEFAULT_NEW_FEED_LIMIT,
-            },
-            is_active=True,
-        )
-    except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    try:
-        record = create_user_scraper_config(db, user_id, create_payload)
+        result = subscribe_feed_command.execute(db, user_id=user_id, payload=payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    if result.outcome in {
+        FeedSubscriptionOutcome.REACTIVATED,
+        FeedSubscriptionOutcome.ALREADY_SUBSCRIBED,
+    }:
+        response.status_code = status.HTTP_200_OK
+    record = result.config
     stats_by_config = get_scraper_config_stats(db, user_id=user_id, configs=[record])
     return _serialize_scraper_config(
         record,
         stats=stats_by_config.get(_require_config_id(record.id)),
+        subscription_outcome=result.outcome,
+        backfill_task_id=result.backfill_task_id,
     )
