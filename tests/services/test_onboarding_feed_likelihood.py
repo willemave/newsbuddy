@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from app.services.onboarding.internal_models import _DiscoverSuggestion
 from app.services.onboarding.suggestion_projection import _normalize_suggestions
 
@@ -24,7 +26,7 @@ def test_normalize_suggestions_uses_candidate_feed_url_when_feed_url_missing(mon
         )
     ]
 
-    normalized = _normalize_suggestions(items, "substack")
+    normalized = _normalize_suggestions(items, "substack", detector=SimpleNamespace())
 
     assert len(normalized) == 1
     assert normalized[0].feed_url == "https://example.org/rss.xml"
@@ -49,7 +51,7 @@ def test_normalize_suggestions_uses_likely_feed_site_when_feed_like(monkeypatch)
         )
     ]
 
-    normalized = _normalize_suggestions(items, "podcast_rss")
+    normalized = _normalize_suggestions(items, "podcast_rss", detector=SimpleNamespace())
 
     assert len(normalized) == 1
     assert normalized[0].feed_url == "https://example.org/podcast-feed.xml"
@@ -79,7 +81,7 @@ def test_normalize_suggestions_prefers_site_discovery_for_podcasts(monkeypatch) 
         )
     ]
 
-    normalized = _normalize_suggestions(items, "podcast_rss")
+    normalized = _normalize_suggestions(items, "podcast_rss", detector=SimpleNamespace())
 
     assert len(normalized) == 1
     assert normalized[0].feed_url == "https://good.example.com/rss"

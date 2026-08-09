@@ -75,7 +75,9 @@ def build_onboarding_profile(request: OnboardingProfileRequest) -> OnboardingPro
         OnboardingProfileResponse with summary and inferred topics.
     """
     queries = _build_profile_queries(request)
-    results = _run_exa_queries(queries, num_results=PROFILE_EXA_RESULTS, include_social=False)
+    results = _run_exa_queries(
+        queries, num_results=PROFILE_EXA_RESULTS, request_timeout_seconds=PROFILE_TIMEOUT_SECONDS
+    )
 
     if not results:
         fallback_summary = _build_profile_fallback_summary(
@@ -239,11 +241,9 @@ async def preview_audio_lane_plan(
     )
 
 
-def _format_profile_prompt(
-    request: OnboardingProfileRequest, results: list[ExaSearchResult]
-) -> str:
+def _format_profile_prompt(request: OnboardingProfileRequest, hits: list[ExaSearchResult]) -> str:
     lines: list[str] = []
-    for idx, item in enumerate(results[:10], start=1):
+    for idx, item in enumerate(hits[:10], start=1):
         lines.append(f"{idx}. {item.title}\nurl: {item.url}\nsummary: {item.snippet or ''}")
     return render_prompt(
         "onboarding/profile#user",
@@ -254,10 +254,9 @@ def _format_profile_prompt(
 
 
 def _format_voice_parse_prompt(transcript: str, locale: str | None) -> str:
-    locale_value = locale or "unknown"
     return render_prompt(
         "onboarding/voice_parse#user",
-        locale=locale_value,
+        locale=locale or "unknown",
         transcript=transcript,
     )
 
@@ -294,8 +293,9 @@ async def _build_audio_lane_plan_with_metadata(
 
 
 def _format_audio_plan_prompt(transcript: str, locale: str | None) -> str:
-    locale_value = locale or "unknown"
-    return render_prompt("onboarding/audio_plan#user", locale=locale_value, transcript=transcript)
+    return render_prompt(
+        "onboarding/audio_plan#user", locale=locale or "unknown", transcript=transcript
+    )
 
 
 def _candidate_models(primary: str, fallbacks: tuple[str, ...]) -> list[str]:

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.constants import (
-    DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
     DEFAULT_NEW_FEED_LIMIT,
     SUPPORTED_AGGREGATOR_KEYS,
 )
@@ -24,11 +22,11 @@ from app.models.api.onboarding import (
 from app.models.contracts import ReadingExperience
 from app.models.db import OnboardingDiscoveryLane, OnboardingDiscoveryRun
 from app.models.db.users import User
-from app.models.internal.feed_backfill import FeedBatchBackfillRequest
 from app.models.internal.scraper_configs import CreateUserScraperConfig
 from app.services.briefing.first_run import complete_first_edition, start_first_edition
 from app.services.briefing.refresh import enqueue_briefing_refresh_task
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
+from app.services.onboarding.completion_tasks import build_onboarding_completion_task_batch
 from app.services.onboarding.config import FEED_SUGGESTION_TYPES
 from app.services.onboarding.discovery_run import fast_discover
 from app.services.onboarding.llm_plans import (
@@ -51,7 +49,7 @@ from app.services.onboarding.persistence import (
     _seed_selected_feed_content_for_user,
     _serialize_lane_status,
 )
-from app.services.queue import TaskType
+from app.services.queue import TaskEnqueueRequest, TaskType
 from app.services.x_integration import normalize_twitter_username
 
 logger = get_logger(__name__)
@@ -64,16 +62,7 @@ def _duration_ms(started_at: float) -> float:
 async def start_audio_discovery(
     db: Session, user_id: int, request: OnboardingAudioDiscoverRequest
 ) -> OnboardingAudioDiscoverResponse:
-    """Start onboarding discovery from an audio transcript.
-
-    Args:
-        db: Database session.
-        user_id: Current user id.
-        request: OnboardingAudioDiscoverRequest payload.
-
-    Returns:
-        OnboardingAudioDiscoverResponse with run and lane status.
-    """
+    """Start onboarding discovery from an audio transcript."""
     started_at = time.perf_counter()
     transcript = request.transcript.strip()
     if not transcript:
@@ -120,16 +109,22 @@ async def start_audio_discovery(
         db.add(lane_row)
         lanes.append(lane_row)
 
-    db.commit()
     run_id = _require_run_id(run)
     run_status = _require_run_status(run)
 
     queue_gateway = get_task_queue_gateway()
     enqueue_started_at = time.perf_counter()
-    task_id = queue_gateway.enqueue(
-        TaskType.ONBOARDING_DISCOVER,
-        payload={"user_id": user_id, "run_id": run_id},
-    )
+    task_id = queue_gateway.enqueue_many_in_session(
+        db,
+        [
+            TaskEnqueueRequest(
+                TaskType.ONBOARDING_DISCOVER,
+                payload={"user_id": user_id, "run_id": run_id},
+                owner_user_id=user_id,
+            )
+        ],
+    )[0]
+    db.commit()
     logger.info(
         "Onboarding audio discovery queued",
         extra={
@@ -162,16 +157,7 @@ async def start_audio_discovery(
 def get_onboarding_discovery_status(
     db: Session, user_id: int, run_id: int
 ) -> OnboardingDiscoveryStatusResponse:
-    """Return the latest onboarding discovery status for a run.
-
-    Args:
-        db: Database session.
-        user_id: Current user id.
-        run_id: Discovery run id.
-
-    Returns:
-        OnboardingDiscoveryStatusResponse with lane status and suggestions when ready.
-    """
+    """Return the latest discovery status and suggestions for a run."""
     run = (
         db.query(OnboardingDiscoveryRun)
         .filter(OnboardingDiscoveryRun.id == run_id, OnboardingDiscoveryRun.user_id == user_id)
@@ -207,19 +193,11 @@ def get_onboarding_discovery_status(
 def complete_onboarding(
     db: Session, user_id: int, request: OnboardingCompleteRequest
 ) -> OnboardingCompleteResponse:
-    """Finalize onboarding selections, create scraper configs, and queue crawlers.
-
-    Args:
-        db: Database session.
-        user_id: Current user id.
-        request: OnboardingCompleteRequest payload.
-
-    Returns:
-        OnboardingCompleteResponse with status and inbox count.
-    """
+    """Finalize selections, create scraper configs, and queue initial work."""
     normalized_username: str | None = None
     configured_source_count = 0
     feed_config_ids_for_backfill: list[int] = []
+    seeded_feed_content_ids: list[int] = []
     should_update_twitter_username = request.twitter_username is not None
     if should_update_twitter_username:
         normalized_username = normalize_twitter_username(request.twitter_username)
@@ -244,6 +222,7 @@ def complete_onboarding(
             data=create_data,
             operation="create_scraper_config",
             log_context={"feed_url": create_data.config.get("feed_url")},
+            raise_on_error=True,
         )
         if config is None:
             continue
@@ -267,7 +246,7 @@ def complete_onboarding(
         source = aggregator_selection.key.strip().lower()
         if source in SUPPORTED_AGGREGATOR_KEYS and source not in sources_to_scrape:
             sources_to_scrape.append(source)
-    discovery_payload: dict[str, Any] | None = None
+    discovery_payload: dict[str, object] | None = None
     if request.profile_summary:
         discovery_payload = {
             "user_id": user_id,
@@ -275,31 +254,8 @@ def complete_onboarding(
             "inferred_topics": request.inferred_topics or [],
         }
 
-    try:
-        _seed_recent_news_for_user(db, user_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception(
-            "Failed to seed onboarding news",
-            extra={
-                "component": "onboarding",
-                "operation": "seed_news",
-                "item_id": str(user_id),
-                "context_data": {"error": str(exc)},
-            },
-        )
-
-    try:
-        _seed_selected_feed_content_for_user(db, user_id, selections)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception(
-            "Failed to seed feed content for onboarding",
-            extra={
-                "component": "onboarding",
-                "operation": "seed_feed_content",
-                "item_id": str(user_id),
-                "context_data": {"error": str(exc)},
-            },
-        )
+    _seed_recent_news_for_user(db, user_id)
+    seeded_feed_content_ids = _seed_selected_feed_content_for_user(db, user_id, selections)
 
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
@@ -313,40 +269,23 @@ def complete_onboarding(
         raise RuntimeError("First-edition run was not persisted")
     first_edition_run_id = first_edition_run.id
     enqueue_briefing_refresh_task(db, user_id=user_id, mode="append", delay_seconds=0)
-    db.commit()
 
-    queue_gateway = get_task_queue_gateway()
-    task_id = None
-    if unique_feed_config_ids:
-        task_id = queue_gateway.enqueue(
-            TaskType.BACKFILL_FEEDS,
-            payload=FeedBatchBackfillRequest(
-                user_id=user_id,
-                config_ids=unique_feed_config_ids,
-                count=DEFAULT_INITIAL_FEED_ARTICLE_DOWNLOAD_COUNT,
-                first_edition_run_id=first_edition_run_id,
-            ).model_dump(exclude_none=True),
-            dedupe=True,
-        )
-    if sources_to_scrape:
-        scrape_task_id = queue_gateway.enqueue(
-            TaskType.SCRAPE,
-            payload={
-                "sources": sources_to_scrape,
-                "first_edition_run_id": first_edition_run_id,
-            },
-        )
-        if task_id is None:
-            task_id = scrape_task_id
-
-    if discovery_payload is not None:
-        queue_gateway.enqueue(
-            TaskType.ONBOARDING_DISCOVER,
-            payload=discovery_payload,
-        )
+    queue_requests, response_task_index = build_onboarding_completion_task_batch(
+        db,
+        user_id=user_id,
+        feed_config_ids=unique_feed_config_ids,
+        sources_to_scrape=sources_to_scrape,
+        first_edition_run_id=first_edition_run_id,
+        discovery_payload=discovery_payload,
+        seeded_feed_content_ids=seeded_feed_content_ids,
+    )
+    queued_task_ids = get_task_queue_gateway().enqueue_many_in_session(db, queue_requests)
+    task_id = queued_task_ids[response_task_index] if response_task_index is not None else None
 
     inbox_count = _estimate_inbox_count(db, user_id)
     inbox_count_estimate = max(inbox_count, 100)
+    tutorial_complete = _get_tutorial_flag(db, user_id)
+    db.commit()
 
     return OnboardingCompleteResponse(
         status="queued",
@@ -355,20 +294,12 @@ def complete_onboarding(
         configured_source_count=configured_source_count,
         longform_status="loading",
         has_completed_onboarding=True,
-        has_completed_new_user_tutorial=_get_tutorial_flag(db, user_id),
+        has_completed_new_user_tutorial=tutorial_complete,
     )
 
 
 def mark_tutorial_complete(db: Session, user_id: int) -> bool:
-    """Mark the onboarding tutorial as completed for a user.
-
-    Args:
-        db: Database session.
-        user_id: Current user id.
-
-    Returns:
-        Updated completion flag.
-    """
+    """Mark the onboarding tutorial as completed for a user."""
     from app.models.db.users import User
 
     user = db.query(User).filter(User.id == user_id).first()

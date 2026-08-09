@@ -4,6 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.models.api.onboarding import (
+    OnboardingAudioDiscoverRequest,
+    OnboardingCompleteRequest,
+)
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import (
     Content,
@@ -13,8 +17,14 @@ from app.models.db import (
     OnboardingDiscoverySuggestion,
     OnboardingFirstEditionRun,
     OnboardingFirstEditionSource,
+    ProcessingTask,
     UserScraperConfig,
 )
+from app.services.feed_research_runtime import (
+    FeedResearchDeadlineExceeded,
+    FeedResearchRuntimeError,
+)
+from app.services.onboarding.entrypoints import complete_onboarding, start_audio_discovery
 from app.services.queue import TaskType
 
 
@@ -33,11 +43,11 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     monkeypatch.setattr(db_session, "commit", tracking_commit)
 
     class FakeQueueGateway:
-        def enqueue(self, task_type, content_id=None, payload=None, queue_name=None, dedupe=None):
-            del content_id, queue_name, dedupe
+        def enqueue_many_in_session(self, db, requests):
+            assert db is db_session
             queue_call_commit_counts.append(commit_count)
-            calls.append((task_type.value, payload or {}))
-            return 42
+            calls.extend((request.task_type.value, request.payload or {}) for request in requests)
+            return [42] * len(requests)
 
     monkeypatch.setattr(
         "app.services.onboarding.entrypoints.get_task_queue_gateway",
@@ -88,8 +98,16 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
     assert backfill_calls[0][1]["count"] == 2
     assert any(call[0] == TaskType.SCRAPE.value for call in calls)
     assert any(call[0] == TaskType.ONBOARDING_DISCOVER.value for call in calls)
+    feed_discovery_calls = [call for call in calls if call[0] == TaskType.DISCOVER_FEEDS.value]
+    assert feed_discovery_calls == [
+        (
+            TaskType.DISCOVER_FEEDS.value,
+            {"user_id": test_user.id, "trigger": "onboarding"},
+        )
+    ]
     assert queue_call_commit_counts
-    assert min(queue_call_commit_counts) >= 1
+    assert set(queue_call_commit_counts) == {0}
+    assert commit_count == 1
     db_session.refresh(test_user)
     assert test_user.twitter_username == "willem_aw"
     assert test_user.has_completed_onboarding is True
@@ -116,6 +134,274 @@ def test_onboarding_complete_creates_configs(client, db_session, monkeypatch, te
 
 
 @pytest.mark.usefixtures("stub_valid_feed_url")
+def test_onboarding_complete_rolls_back_checkpoint_when_queue_batch_fails(
+    db_session,
+    monkeypatch,
+    test_user,
+) -> None:
+    queued_types: list[TaskType] = []
+
+    class FailingQueueGateway:
+        def enqueue_many_in_session(self, db, requests):
+            assert db is db_session
+            queued_types.extend(request.task_type for request in requests)
+            raise RuntimeError("queue insert failed")
+
+    monkeypatch.setattr(
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
+        lambda: FailingQueueGateway(),
+    )
+
+    request = OnboardingCompleteRequest.model_validate(
+        {
+            "selected_sources": [
+                {
+                    "suggestion_type": "substack",
+                    "title": "Atomic Feed",
+                    "feed_url": "https://atomic.example/feed",
+                }
+            ],
+            "selected_subreddits": ["MachineLearning"],
+            "profile_summary": "AI infrastructure",
+            "inferred_topics": ["AI"],
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="queue insert failed"):
+        complete_onboarding(db_session, test_user.id, request)
+
+    assert set(queued_types) == {
+        TaskType.BACKFILL_FEEDS,
+        TaskType.SCRAPE,
+        TaskType.ONBOARDING_DISCOVER,
+        TaskType.DISCOVER_FEEDS,
+    }
+    db_session.rollback()
+
+    persisted_user = db_session.get(type(test_user), test_user.id)
+    assert persisted_user is not None
+    assert persisted_user.has_completed_onboarding is False
+    assert (
+        db_session.query(UserScraperConfig)
+        .filter(UserScraperConfig.user_id == test_user.id)
+        .count()
+        == 0
+    )
+    assert (
+        db_session.query(OnboardingFirstEditionRun)
+        .filter(OnboardingFirstEditionRun.user_id == test_user.id)
+        .count()
+        == 0
+    )
+    assert db_session.query(ProcessingTask).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_audio_discovery_rolls_back_run_when_queue_batch_fails(
+    db_session,
+    monkeypatch,
+    test_user,
+) -> None:
+    async def fake_build_audio_lane_plan(_transcript, _locale):
+        return SimpleNamespace(
+            topic_summary="AI and robotics",
+            inferred_topics=["AI", "robotics"],
+            lanes=[
+                SimpleNamespace(
+                    name="Newsletters",
+                    goal="Find newsletters.",
+                    target="feeds",
+                    queries=["AI newsletters"],
+                )
+            ],
+        )
+
+    class FailingQueueGateway:
+        def enqueue_many_in_session(self, db, requests):
+            assert db is db_session
+            assert [request.task_type for request in requests] == [TaskType.ONBOARDING_DISCOVER]
+            raise RuntimeError("queue insert failed")
+
+    monkeypatch.setattr(
+        "app.services.onboarding.entrypoints._build_audio_lane_plan",
+        fake_build_audio_lane_plan,
+    )
+    monkeypatch.setattr(
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
+        lambda: FailingQueueGateway(),
+    )
+
+    with pytest.raises(RuntimeError, match="queue insert failed"):
+        await start_audio_discovery(
+            db_session,
+            test_user.id,
+            OnboardingAudioDiscoverRequest(transcript="AI and robotics", locale="en-US"),
+        )
+
+    db_session.rollback()
+    assert (
+        db_session.query(OnboardingDiscoveryRun)
+        .filter(OnboardingDiscoveryRun.user_id == test_user.id)
+        .count()
+        == 0
+    )
+    assert db_session.query(OnboardingDiscoveryLane).count() == 0
+    assert db_session.query(ProcessingTask).count() == 0
+
+
+def test_onboarding_complete_does_not_enqueue_duplicate_feed_discovery(
+    client,
+    db_session,
+    monkeypatch,
+    test_user,
+) -> None:
+    db_session.add(
+        ProcessingTask(
+            owner_user_id=test_user.id,
+            task_type=TaskType.DISCOVER_FEEDS.value,
+            payload={"user_id": test_user.id, "trigger": "onboarding"},
+            status="completed",
+            queue_name="content",
+        )
+    )
+    db_session.commit()
+    calls: list[TaskType] = []
+
+    class FakeQueueGateway:
+        def enqueue_many_in_session(self, db, requests):
+            assert db is db_session
+            calls.extend(request.task_type for request in requests)
+            return [42] * len(requests)
+
+    monkeypatch.setattr(
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
+        lambda: FakeQueueGateway(),
+    )
+
+    response = client.post("/api/onboarding/complete", json={})
+
+    assert response.status_code == 200
+    assert TaskType.DISCOVER_FEEDS not in calls
+
+
+def test_onboarding_complete_replaces_failed_feed_discovery_task(
+    client,
+    db_session,
+    monkeypatch,
+    test_user,
+) -> None:
+    db_session.add(
+        ProcessingTask(
+            owner_user_id=test_user.id,
+            task_type=TaskType.DISCOVER_FEEDS.value,
+            payload={"user_id": test_user.id, "trigger": "onboarding"},
+            status="failed",
+            queue_name="content",
+        )
+    )
+    db_session.commit()
+    calls: list[TaskType] = []
+
+    class FakeQueueGateway:
+        def enqueue_many_in_session(self, db, requests):
+            assert db is db_session
+            calls.extend(request.task_type for request in requests)
+            return [42] * len(requests)
+
+    monkeypatch.setattr(
+        "app.services.onboarding.entrypoints.get_task_queue_gateway",
+        lambda: FakeQueueGateway(),
+    )
+
+    response = client.post("/api/onboarding/complete", json={})
+
+    assert response.status_code == 200
+    assert TaskType.DISCOVER_FEEDS in calls
+
+
+def test_onboarding_complete_rejects_invalid_selected_feed_atomically(
+    client,
+    db_session,
+    monkeypatch,
+    test_user,
+) -> None:
+    def fake_validate(_scraper_type, config, **_kwargs):
+        if config["feed_url"].endswith("not-a-feed"):
+            raise ValueError("not an RSS/Atom feed")
+        return config
+
+    monkeypatch.setattr(
+        "app.services.scraper_configs.validate_and_normalize_scraper_config",
+        fake_validate,
+    )
+
+    response = client.post(
+        "/api/onboarding/complete",
+        json={
+            "selected_sources": [
+                {
+                    "suggestion_type": "atom",
+                    "title": "Initially valid feed",
+                    "feed_url": "https://example.com/feed.xml",
+                },
+                {
+                    "suggestion_type": "atom",
+                    "title": "Invalid feed",
+                    "feed_url": "https://example.com/not-a-feed",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "not an RSS/Atom feed"
+    db_session.expire_all()
+    assert db_session.query(UserScraperConfig).filter_by(user_id=test_user.id).count() == 0
+    assert db_session.get(type(test_user), test_user.id).has_completed_onboarding is False
+
+
+def test_onboarding_complete_reports_feed_sandbox_outage_and_rolls_back(
+    client,
+    db_session,
+    monkeypatch,
+    test_user,
+) -> None:
+    def fake_validate(_scraper_type, config, **_kwargs):
+        if config["feed_url"].endswith("unavailable.xml"):
+            raise FeedResearchRuntimeError("E2B unavailable")
+        return config
+
+    monkeypatch.setattr(
+        "app.services.scraper_configs.validate_and_normalize_scraper_config",
+        fake_validate,
+    )
+
+    response = client.post(
+        "/api/onboarding/complete",
+        json={
+            "selected_sources": [
+                {
+                    "suggestion_type": "atom",
+                    "title": "Initially valid feed",
+                    "feed_url": "https://example.com/feed.xml",
+                },
+                {
+                    "suggestion_type": "atom",
+                    "title": "Unavailable feed",
+                    "feed_url": "https://example.com/unavailable.xml",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Feed validation is temporarily unavailable"
+    db_session.expire_all()
+    assert db_session.query(UserScraperConfig).filter_by(user_id=test_user.id).count() == 0
+    assert db_session.get(type(test_user), test_user.id).has_completed_onboarding is False
+
+
+@pytest.mark.usefixtures("stub_valid_feed_url")
 def test_onboarding_complete_persists_selected_feed_reddit_and_aggregator(
     client,
     db_session,
@@ -125,10 +411,10 @@ def test_onboarding_complete_persists_selected_feed_reddit_and_aggregator(
     calls: list[tuple[str, dict]] = []
 
     class FakeQueueGateway:
-        def enqueue(self, task_type, content_id=None, payload=None, queue_name=None, dedupe=None):
-            del content_id, queue_name, dedupe
-            calls.append((task_type.value, payload or {}))
-            return 45
+        def enqueue_many_in_session(self, db, requests):
+            assert db is db_session
+            calls.extend((request.task_type.value, request.payload or {}) for request in requests)
+            return [45] * len(requests)
 
     monkeypatch.setattr(
         "app.services.onboarding.entrypoints.get_task_queue_gateway",
@@ -201,10 +487,10 @@ def test_onboarding_complete_queues_selected_aggregator_scrapes(
     calls: list[tuple[str, dict]] = []
 
     class FakeQueueGateway:
-        def enqueue(self, task_type, content_id=None, payload=None, queue_name=None, dedupe=None):
-            del content_id, queue_name, dedupe
-            calls.append((task_type.value, payload or {}))
-            return 43
+        def enqueue_many_in_session(self, db, requests):
+            assert db is db_session
+            calls.extend((request.task_type.value, request.payload or {}) for request in requests)
+            return [43] * len(requests)
 
     monkeypatch.setattr(
         "app.services.onboarding.entrypoints.get_task_queue_gateway",
@@ -248,10 +534,10 @@ def test_onboarding_complete_ignores_reddit_aggregator(
     calls: list[tuple[str, dict]] = []
 
     class FakeQueueGateway:
-        def enqueue(self, task_type, content_id=None, payload=None, queue_name=None, dedupe=None):
-            del content_id, queue_name, dedupe
-            calls.append((task_type.value, payload or {}))
-            return 44
+        def enqueue_many_in_session(self, db, requests):
+            assert db is db_session
+            calls.extend((request.task_type.value, request.payload or {}) for request in requests)
+            return [44] * len(requests)
 
     monkeypatch.setattr(
         "app.services.onboarding.entrypoints.get_task_queue_gateway",
@@ -349,6 +635,29 @@ def test_onboarding_fast_discover_does_not_use_static_defaults(client, monkeypat
     assert data["recommended_subreddits"] == []
 
 
+@pytest.mark.parametrize(
+    "error_type",
+    [FeedResearchRuntimeError, FeedResearchDeadlineExceeded],
+)
+def test_onboarding_fast_discover_reports_feed_sandbox_outage(
+    client,
+    monkeypatch,
+    error_type,
+):
+    def _unavailable(*_args, **_kwargs):
+        raise error_type("E2B unavailable")
+
+    monkeypatch.setattr("app.routers.api.onboarding.fast_discover", _unavailable)
+
+    response = client.post(
+        "/api/onboarding/fast-discover",
+        json={"profile_summary": "AI engineer", "inferred_topics": ["AI"]},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Feed discovery is temporarily unavailable"
+
+
 def test_onboarding_profile_requires_interests(client, monkeypatch):
     def fake_build_profile(_payload):
         return {
@@ -429,10 +738,10 @@ def test_onboarding_audio_discover_creates_run(client, db_session, monkeypatch, 
     calls: list[dict] = []
 
     class FakeQueueGateway:
-        def enqueue(self, task_type, content_id=None, payload=None, queue_name=None, dedupe=None):
-            del task_type, content_id, queue_name, dedupe
-            calls.append(payload or {})
-            return 99
+        def enqueue_many_in_session(self, db, requests):
+            assert db is db_session
+            calls.extend(request.payload or {} for request in requests)
+            return [99] * len(requests)
 
     monkeypatch.setattr("app.services.onboarding.llm_plans.get_basic_agent", fake_get_basic_agent)
     monkeypatch.setattr(

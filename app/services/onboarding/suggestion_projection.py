@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from typing import cast
+from urllib.parse import urlparse
 
 from app.models.api.onboarding import OnboardingFastDiscoverResponse, OnboardingSuggestion
 from app.models.contracts import OnboardingSuggestionType
+from app.services.feed_detection import FeedDetector
 from app.services.feed_resolution import resolve_feed_candidate
 from app.services.onboarding.config import (
     DEFAULT_SOURCE_LIMITS,
-    ONBOARDING_FEED_DETECTOR,
     ONBOARDING_FEED_SUGGESTION_LIMIT,
 )
 from app.services.onboarding.internal_models import (
@@ -18,6 +19,7 @@ from app.services.onboarding.internal_models import (
     _DiscoverSuggestion,
 )
 from app.services.onboarding.query_heuristics import _merge_topics
+from app.utils.url_utils import is_domain_or_subdomain
 
 
 def _normalize_suggestion_type(value: str | None) -> SuggestionType | None:
@@ -38,28 +40,28 @@ def _build_discovery_response(
     output: _DiscoverOutput,
     profile_summary: str | None = None,
     inferred_topics: list[str] | None = None,
+    *,
+    detector: FeedDetector,
 ) -> OnboardingFastDiscoverResponse:
-    feed_limit = ONBOARDING_FEED_SUGGESTION_LIMIT
     substacks = _dedupe_suggestions(
-        _normalize_suggestions(output.substacks, "substack"),
-        feed_limit,
+        _normalize_suggestions(output.substacks, "substack", detector=detector),
+        ONBOARDING_FEED_SUGGESTION_LIMIT,
     )
     podcasts = _dedupe_suggestions(
-        _normalize_suggestions(output.podcasts, "podcast_rss"),
+        _normalize_suggestions(output.podcasts, "podcast_rss", detector=detector),
         DEFAULT_SOURCE_LIMITS["podcast_rss"],
     )
     subreddits = _dedupe_suggestions(
-        _normalize_suggestions(output.subreddits, "reddit"),
+        _normalize_suggestions(output.subreddits, "reddit", detector=detector),
         DEFAULT_SOURCE_LIMITS["reddit"],
     )
 
-    response = OnboardingFastDiscoverResponse(
-        recommended_pods=podcasts,
-        recommended_substacks=substacks,
-        recommended_subreddits=subreddits,
-    )
     return _ensure_response_rationales(
-        response,
+        OnboardingFastDiscoverResponse(
+            recommended_pods=podcasts,
+            recommended_substacks=substacks,
+            recommended_subreddits=subreddits,
+        ),
         profile_summary=profile_summary,
         inferred_topics=inferred_topics,
     )
@@ -85,7 +87,6 @@ def _ensure_response_rationales(
 
 
 def _infer_feed_url_from_site(site_url: str | None) -> str | None:
-    """Infer a likely feed URL from a candidate site URL without network calls."""
     if not site_url:
         return None
     normalized = site_url.strip()
@@ -100,7 +101,10 @@ def _infer_feed_url_from_site(site_url: str | None) -> str | None:
 
 
 def _normalize_suggestions(
-    items: list[_DiscoverSuggestion], suggestion_type: SuggestionType
+    items: list[_DiscoverSuggestion],
+    suggestion_type: SuggestionType,
+    *,
+    detector: FeedDetector,
 ) -> list[OnboardingSuggestion]:
     normalized: list[OnboardingSuggestion] = []
     for item in items:
@@ -135,7 +139,7 @@ def _normalize_suggestions(
             continue
 
         resolved_feed = resolve_feed_candidate(
-            detector=ONBOARDING_FEED_DETECTOR,
+            detector=detector,
             title=item.title,
             site_url=site_url,
             candidate_feed_urls=[feed_url] if feed_url else [],
@@ -196,17 +200,13 @@ def _normalize_subreddit_name(value: str | None) -> str | None:
 def _extract_subreddit(site_url: str | None) -> str | None:
     if not site_url:
         return None
-    lowered = site_url.lower()
-    if "reddit.com/r/" not in lowered:
+    parsed = urlparse(site_url)
+    if not is_domain_or_subdomain(parsed.hostname, "reddit.com"):
         return None
-    try:
-        parts = lowered.split("reddit.com/r/")
-        if len(parts) < 2:
-            return None
-        name = parts[1].split("/")[0]
-        return name.strip()
-    except Exception:
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 2 or path_parts[0].lower() != "r":
         return None
+    return path_parts[1].strip().lower() or None
 
 
 def _suggestion_label(item: OnboardingSuggestion) -> str:

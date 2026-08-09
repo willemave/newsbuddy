@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from app.core.db import get_db
 from app.core.logging import get_logger
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.onboarding import run_audio_discovery, run_discover_enrich
 from app.services.queue import TaskType
+from app.services.weekly_discovery_chat import ensure_weekly_discovery_session
 
 logger = get_logger(__name__)
 
@@ -34,14 +34,19 @@ class OnboardingDiscoverHandler:
                     "context_data": {"payload": payload},
                 },
             )
-            return TaskResult.fail("Missing user_id")
+            return TaskResult.fail("Missing user_id", retryable=False)
 
         try:
-            with get_db() as db:
+            with context.db_factory() as db:
                 if isinstance(run_id, int):
-                    run_audio_discovery(db, run_id)
+                    result = run_audio_discovery(db, run_id, user_id=user_id)
+                    if not result.success:
+                        return TaskResult.fail(
+                            result.error_message or "Onboarding audio discovery failed",
+                            retryable=False,
+                        )
                 else:
-                    run_discover_enrich(
+                    result = run_discover_enrich(
                         db,
                         user_id=user_id,
                         profile_summary=str(profile_summary or ""),
@@ -49,6 +54,12 @@ class OnboardingDiscoverHandler:
                             inferred_topics if isinstance(inferred_topics, list) else []
                         ),
                     )
+                    if not result.success:
+                        return TaskResult.fail(
+                            result.error_message or "Onboarding discovery enrichment failed",
+                            retryable=False,
+                        )
+                ensure_weekly_discovery_session(db, user_id=user_id)
             return TaskResult.ok()
         except Exception as exc:  # noqa: BLE001
             logger.exception(

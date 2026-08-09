@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
 
 from app.models.api.onboarding import OnboardingFastDiscoverRequest
@@ -56,6 +57,7 @@ def test_build_discovery_response_preserves_generated_rationale(monkeypatch) -> 
         output,
         profile_summary="AI and startup strategy",
         inferred_topics=["AI", "startups"],
+        detector=SimpleNamespace(),
     )
 
     assert response.recommended_substacks[0].feed_url == "https://fresh.example.com/feed.xml"

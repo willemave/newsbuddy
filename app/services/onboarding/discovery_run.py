@@ -1,15 +1,16 @@
-"""Fast and background discovery execution for onboarding."""
+"""Fast and background feed discovery for onboarding."""
 
 from __future__ import annotations
-
-import time
-from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.models.api.onboarding import OnboardingFastDiscoverRequest, OnboardingFastDiscoverResponse
-from app.models.db import OnboardingDiscoveryLane, OnboardingDiscoveryRun
+from app.services.feed_research_runtime import (
+    FeedResearchDeadlineExceeded,
+    FeedResearchRuntimeError,
+    feed_research_runtime,
+)
 from app.services.onboarding.config import (
     ENRICH_EXA_RESULTS,
     ENRICH_MAX_QUERIES,
@@ -17,18 +18,14 @@ from app.services.onboarding.config import (
     FAST_DISCOVER_EXA_RESULTS,
     FAST_DISCOVER_TIMEOUT_SECONDS,
 )
-from app.services.onboarding.internal_models import _DiscoveryWebResult
+from app.services.onboarding.discovery_types import OnboardingDiscoveryExecutionResult
 from app.services.onboarding.llm_plans import (
     _format_discovery_prompt,
     _run_discover_output_with_fallback,
 )
-from app.services.onboarding.persistence import (
-    _persist_discovery_run,
-    _persist_onboarding_suggestions,
-)
+from app.services.onboarding.persistence import _persist_discovery_run
 from app.services.onboarding.query_heuristics import (
     _build_discovery_queries,
-    _normalize_lane_target,
     _select_prompt_results,
 )
 from app.services.onboarding.search import _run_discovery_exa_queries
@@ -37,21 +34,18 @@ from app.services.onboarding.suggestion_projection import _build_discovery_respo
 logger = get_logger(__name__)
 
 
-def _duration_ms(started_at: float) -> float:
-    return round((time.perf_counter() - started_at) * 1000, 2)
-
-
-def fast_discover(request: OnboardingFastDiscoverRequest) -> OnboardingFastDiscoverResponse:
-    """Run fast discovery to return onboarding suggestions.
-
-    Args:
-        request: OnboardingFastDiscoverRequest payload.
-
-    Returns:
-        OnboardingFastDiscoverResponse with grouped recommendations.
-    """
+def fast_discover(
+    request: OnboardingFastDiscoverRequest,
+    *,
+    user_id: int,
+) -> OnboardingFastDiscoverResponse:
+    """Return fast onboarding suggestions from the user's profile."""
     queries = _build_discovery_queries(request)
-    results = _run_discovery_exa_queries(queries, num_results=FAST_DISCOVER_EXA_RESULTS)
+    results = _run_discovery_exa_queries(
+        queries,
+        num_results=FAST_DISCOVER_EXA_RESULTS,
+        request_timeout_seconds=FAST_DISCOVER_TIMEOUT_SECONDS,
+    )
     prompt_results = _select_prompt_results(results)
 
     if not prompt_results:
@@ -64,11 +58,22 @@ def fast_discover(request: OnboardingFastDiscoverRequest) -> OnboardingFastDisco
             timeout_seconds=FAST_DISCOVER_TIMEOUT_SECONDS,
             operation="fast_discover",
         )
-        return _build_discovery_response(
-            output,
-            profile_summary=request.profile_summary,
-            inferred_topics=request.inferred_topics,
+        with feed_research_runtime(user_id=user_id, use_llm=False) as runtime:
+            return _build_discovery_response(
+                output,
+                profile_summary=request.profile_summary,
+                inferred_topics=request.inferred_topics,
+                detector=runtime.detector,
+            )
+    except (FeedResearchRuntimeError, FeedResearchDeadlineExceeded):
+        logger.exception(
+            "Fast onboarding feed validation is unavailable",
+            extra={
+                "component": "onboarding",
+                "operation": "fast_discover",
+            },
         )
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "Fast onboarding discovery failed",
@@ -86,29 +91,19 @@ def run_discover_enrich(
     user_id: int,
     profile_summary: str,
     inferred_topics: list[str] | None,
-) -> int | None:
-    """Run async enrich discovery and persist suggestions.
-
-    Args:
-        db: Database session.
-        user_id: Current user id.
-        profile_summary: Profile summary for queries.
-        inferred_topics: Optional topic list.
-
-    Returns:
-        Discovery run id if created, otherwise None.
-    """
+) -> OnboardingDiscoveryExecutionResult:
+    """Run asynchronous profile discovery and persist its suggestions."""
     if not profile_summary:
-        return None
+        return OnboardingDiscoveryExecutionResult(success=True)
 
     try:
-        topics = list(inferred_topics or [])[:12]
         request = OnboardingFastDiscoverRequest(
             profile_summary=profile_summary,
-            inferred_topics=topics,
+            inferred_topics=list(inferred_topics or [])[:12],
         )
-    except Exception:  # noqa: BLE001
-        return None
+    except Exception as exc:  # noqa: BLE001
+        return OnboardingDiscoveryExecutionResult(success=False, error_message=str(exc))
+
     queries = _build_discovery_queries(request, max_queries=ENRICH_MAX_QUERIES)
     results = _run_discovery_exa_queries(
         queries,
@@ -118,10 +113,11 @@ def run_discover_enrich(
             "operation": "onboarding.discover_enrich.search",
             "user_id": user_id,
         },
+        request_timeout_seconds=ENRICH_TIMEOUT_SECONDS,
     )
     prompt_results = _select_prompt_results(results)
     if not prompt_results:
-        return None
+        return OnboardingDiscoveryExecutionResult(success=True)
 
     try:
         prompt = _format_discovery_prompt(request, prompt_results)
@@ -141,233 +137,33 @@ def run_discover_enrich(
                 "context_data": {"error": str(exc)},
             },
         )
-        return None
-
-    suggestions = _build_discovery_response(
-        output,
-        profile_summary=request.profile_summary,
-        inferred_topics=request.inferred_topics,
-    )
-    return _persist_discovery_run(db, user_id, suggestions)
-
-
-def run_audio_discovery(db: Session, run_id: int) -> None:
-    """Run onboarding audio discovery lanes and persist suggestions.
-
-    Args:
-        db: Database session.
-        run_id: Onboarding discovery run id.
-    """
-    started_at = time.perf_counter()
-    run = db.query(OnboardingDiscoveryRun).filter(OnboardingDiscoveryRun.id == run_id).first()
-    if not run:
-        raise ValueError("Discovery run not found")
-    if run.status == "completed":
-        logger.info(
-            "Onboarding audio discovery skipped",
-            extra={
-                "component": "onboarding",
-                "operation": "audio_discover",
-                "status": "completed",
-                "duration_ms": _duration_ms(started_at),
-                "item_id": str(run_id),
-                "user_id": run.user_id,
-                "context_data": {"reason": "already_completed"},
-            },
-        )
-        return
+        return OnboardingDiscoveryExecutionResult(success=False, error_message=str(exc))
 
     try:
-        logger.info(
-            "Onboarding audio discovery started",
-            extra={
-                "component": "onboarding",
-                "operation": "audio_discover",
-                "status": "started",
-                "item_id": str(run_id),
-                "user_id": run.user_id,
-            },
-        )
-        run.status = "processing"
-        db.commit()
-
-        lanes = (
-            db.query(OnboardingDiscoveryLane)
-            .filter(OnboardingDiscoveryLane.run_id == run.id)
-            .order_by(OnboardingDiscoveryLane.id.asc())
-            .all()
-        )
-
-        results: list[_DiscoveryWebResult] = []
-        for lane in lanes:
-            lane_started_at = time.perf_counter()
-            lane.status = "processing"
-            lane.completed_queries = 0
-            lane.query_count = len(lane.queries or [])
-            db.commit()
-            logger.info(
-                "Onboarding audio discovery lane started",
-                extra={
-                    "component": "onboarding",
-                    "operation": "audio_discover_lane",
-                    "status": "started",
-                    "item_id": str(run_id),
-                    "user_id": run.user_id,
-                    "context_data": {
-                        "lane_id": lane.id,
-                        "lane_name": lane.lane_name,
-                        "lane_target": lane.target,
-                        "query_count": lane.query_count,
-                    },
-                },
+        with feed_research_runtime(user_id=user_id, use_llm=False) as runtime:
+            suggestions = _build_discovery_response(
+                output,
+                profile_summary=request.profile_summary,
+                inferred_topics=request.inferred_topics,
+                detector=runtime.detector,
             )
-
-            for idx, query in enumerate(lane.queries or []):
-                query_started_at = time.perf_counter()
-                query_results = _run_discovery_exa_queries(
-                    [query],
-                    num_results=FAST_DISCOVER_EXA_RESULTS,
-                    include_social=(lane.target == "reddit"),
-                    lane_name=lane.lane_name,
-                    lane_target=_normalize_lane_target(lane.target),
-                    telemetry={
-                        "feature": "onboarding",
-                        "operation": "onboarding.audio_discovery.search",
-                        "user_id": run.user_id,
-                        "metadata": {"lane_name": lane.lane_name, "lane_target": lane.target},
-                    },
-                )
-                results.extend(query_results)
-                lane.completed_queries = idx + 1
-                db.commit()
-                logger.info(
-                    "Onboarding audio discovery query completed",
-                    extra={
-                        "component": "onboarding",
-                        "operation": "audio_discover_query",
-                        "status": "completed",
-                        "duration_ms": _duration_ms(query_started_at),
-                        "item_id": str(run_id),
-                        "user_id": run.user_id,
-                        "context_data": {
-                            "lane_id": lane.id,
-                            "lane_name": lane.lane_name,
-                            "query_index": idx + 1,
-                            "query_count": lane.query_count,
-                            "result_count": len(query_results),
-                        },
-                    },
-                )
-
-            lane.status = "completed"
-            db.commit()
-            logger.info(
-                "Onboarding audio discovery lane completed",
-                extra={
-                    "component": "onboarding",
-                    "operation": "audio_discover_lane",
-                    "status": "completed",
-                    "duration_ms": _duration_ms(lane_started_at),
-                    "item_id": str(run_id),
-                    "user_id": run.user_id,
-                    "context_data": {
-                        "lane_id": lane.id,
-                        "lane_name": lane.lane_name,
-                        "query_count": lane.query_count,
-                        "completed_queries": lane.completed_queries,
-                    },
-                },
-            )
-
-        prompt_results = _select_prompt_results(results, lane_balanced=True)
-        if not prompt_results:
-            run.status = "completed"
-            run.completed_at = datetime.now(UTC)
-            db.commit()
-            logger.info(
-                "Onboarding audio discovery completed without suggestions",
-                extra={
-                    "component": "onboarding",
-                    "operation": "audio_discover",
-                    "status": "completed",
-                    "duration_ms": _duration_ms(started_at),
-                    "item_id": str(run_id),
-                    "user_id": run.user_id,
-                    "context_data": {
-                        "lane_count": len(lanes),
-                        "search_result_count": len(results),
-                        "suggestion_source": "none",
-                    },
-                },
-            )
-            return
-
-        request = OnboardingFastDiscoverRequest(
-            profile_summary=run.topic_summary or "News interests",
-            inferred_topics=list(run.inferred_topics or []),
-        )
-        prompt = _format_discovery_prompt(request, prompt_results)
-        suggestions_started_at = time.perf_counter()
-        output = _run_discover_output_with_fallback(
-            prompt=prompt,
-            timeout_seconds=FAST_DISCOVER_TIMEOUT_SECONDS,
-            operation="audio_discover_suggestions",
-            item_id=str(run_id),
-        )
-        suggestions_duration_ms = _duration_ms(suggestions_started_at)
-        suggestions = _build_discovery_response(
-            output,
-            profile_summary=request.profile_summary,
-            inferred_topics=request.inferred_topics,
-        )
-        _persist_onboarding_suggestions(db, run, suggestions)
-        run.status = "completed"
-        run.completed_at = datetime.now(UTC)
-        db.commit()
-        logger.info(
-            "Onboarding audio discovery completed",
-            extra={
-                "component": "onboarding",
-                "operation": "audio_discover",
-                "status": "completed",
-                "duration_ms": _duration_ms(started_at),
-                "item_id": str(run_id),
-                "user_id": run.user_id,
-                "context_data": {
-                    "lane_count": len(lanes),
-                    "search_result_count": len(results),
-                    "prompt_result_count": len(prompt_results),
-                    "suggestions_duration_ms": suggestions_duration_ms,
-                    "suggestion_count": (
-                        len(suggestions.recommended_pods)
-                        + len(suggestions.recommended_substacks)
-                        + len(suggestions.recommended_subreddits)
-                    ),
-                },
-            },
-        )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
-            "Onboarding audio discovery failed",
+            "Onboarding discover feed validation failed",
             extra={
                 "component": "onboarding",
-                "operation": "audio_discover",
-                "duration_ms": _duration_ms(started_at),
-                "item_id": str(run_id),
-                "user_id": run.user_id,
+                "operation": "discover_enrich_feed_validation",
+                "item_id": str(user_id),
                 "context_data": {"error": str(exc)},
             },
         )
-        run.status = "failed"
-        run.error_message = str(exc)
-        db.query(OnboardingDiscoveryLane).filter(OnboardingDiscoveryLane.run_id == run.id).update(
-            {"status": "failed"}, synchronize_session=False
-        )
-        db.commit()
+        return OnboardingDiscoveryExecutionResult(success=False, error_message=str(exc))
+
+    run_id = _persist_discovery_run(db, user_id, suggestions)
+    return OnboardingDiscoveryExecutionResult(success=True, run_id=run_id)
 
 
 __all__ = [
     "fast_discover",
-    "run_audio_discovery",
     "run_discover_enrich",
 ]

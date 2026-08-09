@@ -33,7 +33,7 @@ from app.models.db import (
 )
 from app.models.internal.scraper_configs import CreateUserScraperConfig
 from app.repositories.content_repository import apply_visibility_filters, build_visibility_context
-from app.services.long_form_images import enqueue_visible_long_form_images_for_content_ids
+from app.services.feed_research_runtime import FeedResearchRuntimeError
 from app.services.onboarding.config import (
     FEED_CONTENT_SEED_LIMIT,
     NEWS_SEED_LIMIT,
@@ -48,7 +48,7 @@ from app.services.onboarding.suggestion_projection import (
 )
 from app.services.scraper_configs import (
     ScraperConfigAlreadyExistsError,
-    create_user_scraper_config,
+    create_user_scraper_config_in_session,
 )
 
 logger = get_logger(__name__)
@@ -77,17 +77,14 @@ def _persist_scraper_config_idempotent(
     data: CreateUserScraperConfig,
     operation: str,
     log_context: dict[str, Any],
+    raise_on_error: bool = False,
 ) -> UserScraperConfig | None:
-    """Create a scraper config, treating duplicates as success.
-
-    Returns the persisted ``UserScraperConfig`` (newly created or pre-existing)
-    on success, or ``None`` if the create failed for any other reason. Errors
-    are logged with ``operation``/``log_context`` and swallowed so the caller
-    can keep going through the remaining selections.
-    """
+    """Create idempotently, optionally propagating errors for atomic callers."""
     try:
-        return create_user_scraper_config(db, user_id=user_id, data=data)
-    except ScraperConfigAlreadyExistsError:
+        return create_user_scraper_config_in_session(db, user_id=user_id, data=data)
+    except ScraperConfigAlreadyExistsError as exc:
+        if exc.existing_config is not None:
+            return exc.existing_config
         return (
             db.query(UserScraperConfig)
             .filter(UserScraperConfig.user_id == user_id)
@@ -95,6 +92,8 @@ def _persist_scraper_config_idempotent(
             .filter(UserScraperConfig.feed_url == data.config.get("feed_url"))
             .first()
         )
+    except FeedResearchRuntimeError:
+        raise
     except ValueError as exc:
         logger.error(
             "Failed to create onboarding scraper config",
@@ -105,6 +104,8 @@ def _persist_scraper_config_idempotent(
                 "context_data": {"error": str(exc), **log_context},
             },
         )
+        if raise_on_error:
+            raise
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "Unexpected error creating onboarding scraper config",
@@ -115,6 +116,8 @@ def _persist_scraper_config_idempotent(
                 "context_data": {"error": str(exc), **log_context},
             },
         )
+        if raise_on_error:
+            raise
     return None
 
 
@@ -228,7 +231,7 @@ def _seed_recent_news_for_user(db: Session, user_id: int, limit: int = NEWS_SEED
             for (content_id,) in news_ids
         ]
     )
-    db.commit()
+    db.flush()
     return len(news_ids)
 
 
@@ -237,20 +240,10 @@ def _seed_selected_feed_content_for_user(
     user_id: int,
     selections: list[OnboardingSelectedSource],
     limit: int = FEED_CONTENT_SEED_LIMIT,
-) -> int:
-    """Seed existing article/podcast content from selected feeds into user inbox.
-
-    Args:
-        db: Database session.
-        user_id: Current user id.
-        selections: Onboarding source selections (with feed_url).
-        limit: Maximum number of items to seed.
-
-    Returns:
-        Number of content items seeded.
-    """
+) -> list[int]:
+    """Seed selected feed content and return ids for image-task projection."""
     if user_id <= 0 or limit <= 0 or not selections:
-        return 0
+        return []
 
     feed_urls = list(
         {
@@ -260,7 +253,7 @@ def _seed_selected_feed_content_for_user(
         }
     )
     if not feed_urls:
-        return 0
+        return []
 
     existing = select(ContentStatusEntry.content_id).where(
         ContentStatusEntry.user_id == user_id,
@@ -281,7 +274,9 @@ def _seed_selected_feed_content_for_user(
     )
 
     if not content_ids:
-        return 0
+        return []
+
+    seeded_content_ids = [int(content_id) for (content_id,) in content_ids]
 
     db.bulk_save_objects(
         [
@@ -293,12 +288,8 @@ def _seed_selected_feed_content_for_user(
             for (content_id,) in content_ids
         ]
     )
-    db.commit()
-    enqueue_visible_long_form_images_for_content_ids(
-        db,
-        [content_id for (content_id,) in content_ids],
-    )
-    return len(content_ids)
+    db.flush()
+    return seeded_content_ids
 
 
 def _get_tutorial_flag(db: Session, user_id: int) -> bool:

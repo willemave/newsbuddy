@@ -1,5 +1,6 @@
 """Supported public API for onboarding services."""
 
+from app.services.onboarding.audio_discovery_run import run_audio_discovery
 from app.services.onboarding.config import (
     AUDIO_PLAN_FALLBACK_MODELS,
     AUDIO_PLAN_MODEL,
@@ -21,7 +22,6 @@ from app.services.onboarding.config import (
     FEED_CONTENT_SEED_LIMIT,
     FEED_SUGGESTION_TYPES,
     NEWS_SEED_LIMIT,
-    ONBOARDING_FEED_DETECTOR,
     ONBOARDING_FEED_SUGGESTION_LIMIT,
     ONBOARDING_PRIMARY_MODEL,
     PROFILE_EXA_RESULTS,
@@ -33,7 +33,7 @@ from app.services.onboarding.config import (
     VOICE_PARSE_SYSTEM_PROMPT,
     VOICE_PARSE_TIMEOUT_SECONDS,
 )
-from app.services.onboarding.discovery_run import run_audio_discovery, run_discover_enrich
+from app.services.onboarding.discovery_run import run_discover_enrich
 from app.services.onboarding.entrypoints import (
     build_onboarding_profile,
     complete_onboarding,
@@ -66,7 +66,6 @@ __all__ = [
     "FEED_CONTENT_SEED_LIMIT",
     "FEED_SUGGESTION_TYPES",
     "NEWS_SEED_LIMIT",
-    "ONBOARDING_FEED_DETECTOR",
     "ONBOARDING_FEED_SUGGESTION_LIMIT",
     "ONBOARDING_PRIMARY_MODEL",
     "PROFILE_EXA_RESULTS",

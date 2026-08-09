@@ -25,6 +25,10 @@ from app.models.api.onboarding import (
     OnboardingVoiceParseResponse,
 )
 from app.models.db.users import User
+from app.services.feed_research_runtime import (
+    FeedResearchDeadlineExceeded,
+    FeedResearchRuntimeError,
+)
 from app.services.onboarding import (
     build_onboarding_profile,
     complete_onboarding,
@@ -98,8 +102,14 @@ async def run_fast_discover(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> OnboardingFastDiscoverResponse:
     """Return fast discovery suggestions for onboarding."""
-    _ = current_user
-    return await run_in_threadpool(fast_discover, payload)
+    user_id = require_user_id(current_user)
+    try:
+        return await run_in_threadpool(fast_discover, payload, user_id=user_id)
+    except (FeedResearchRuntimeError, FeedResearchDeadlineExceeded) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Feed discovery is temporarily unavailable",
+        ) from exc
 
 
 @router.post(
@@ -178,8 +188,30 @@ def complete_onboarding_flow(
     """Persist onboarding selections and queue crawlers."""
     try:
         return complete_onboarding(db, require_user_id(current_user), payload)
+    except FeedResearchRuntimeError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Feed validation is temporarily unavailable",
+        ) from exc
     except ValueError as exc:
+        db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - transaction and dependency boundary
+        db.rollback()
+        logger.exception(
+            "Onboarding completion dependency failed",
+            extra={
+                "component": "onboarding",
+                "operation": "complete_route",
+                "status": "failed",
+                "user_id": require_user_id(current_user),
+            },
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Onboarding completion is temporarily unavailable",
+        ) from exc
 
 
 @router.post(

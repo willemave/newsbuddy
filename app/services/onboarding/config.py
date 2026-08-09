@@ -1,7 +1,6 @@
 """Shared configuration for onboarding workflows."""
 
 from app.core.model_defaults import FAST_MODEL_SPEC
-from app.services.feed_detection import FeedDetector
 from app.services.prompt_library import load_prompt
 
 ONBOARDING_PRIMARY_MODEL = FAST_MODEL_SPEC
@@ -44,8 +43,6 @@ SCRAPER_SOURCE_BY_TYPE = {
     "atom": "Atom",
     "reddit": "Reddit",
 }
-ONBOARDING_FEED_DETECTOR = FeedDetector(use_llm=False, use_exa_search=False)
-
 PROFILE_SYSTEM_PROMPT = load_prompt("onboarding/profile#system")
 FAST_DISCOVER_SYSTEM_PROMPT = load_prompt("onboarding/fast_discover#system")
 VOICE_PARSE_SYSTEM_PROMPT = load_prompt("onboarding/voice_parse#system")

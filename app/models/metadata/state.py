@@ -138,6 +138,60 @@ def remove_processing_fields(
     return normalized
 
 
+def remove_user_references(
+    metadata: dict[str, Any] | None,
+    *,
+    user_id: int,
+) -> dict[str, Any]:
+    """Remove one user's private workflow references from shared content metadata."""
+
+    cleaned = dict(metadata or {})
+    _remove_user_references_from_mapping(cleaned, user_id=user_id)
+
+    processing = cleaned.get(PROCESSING_KEY)
+    if isinstance(processing, dict):
+        processing = dict(processing)
+        _remove_user_references_from_mapping(processing, user_id=user_id)
+        cleaned[PROCESSING_KEY] = processing
+    return cleaned
+
+
+def _remove_user_references_from_mapping(
+    metadata: dict[str, Any],
+    *,
+    user_id: int,
+) -> None:
+    if _coerce_positive_int(metadata.get("submitted_by_user_id")) == user_id:
+        metadata.pop("submitted_by_user_id", None)
+
+    raw_user_ids = metadata.get("share_and_chat_user_ids")
+    if isinstance(raw_user_ids, list):
+        remaining_user_ids = [
+            value for value in raw_user_ids if _coerce_positive_int(value) != user_id
+        ]
+        if remaining_user_ids:
+            metadata["share_and_chat_user_ids"] = remaining_user_ids
+        else:
+            metadata.pop("share_and_chat_user_ids", None)
+    elif _coerce_positive_int(raw_user_ids) == user_id:
+        metadata.pop("share_and_chat_user_ids", None)
+
+    raw_requests = metadata.get("share_and_chat_requests")
+    if isinstance(raw_requests, list):
+        remaining_requests = [
+            request
+            for request in raw_requests
+            if not (
+                isinstance(request, dict)
+                and _coerce_positive_int(request.get("user_id")) == user_id
+            )
+        ]
+        if remaining_requests:
+            metadata["share_and_chat_requests"] = remaining_requests
+        else:
+            metadata.pop("share_and_chat_requests", None)
+
+
 def extract_share_and_chat_user_ids(metadata: dict[str, Any] | None) -> list[int]:
     """Return valid pending share-and-chat user IDs from metadata."""
     raw_users = merge_runtime_metadata(metadata).get("share_and_chat_user_ids")

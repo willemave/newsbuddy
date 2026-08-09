@@ -5,6 +5,10 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.api.onboarding import OnboardingFastDiscoverRequest, OnboardingFastDiscoverResponse
+from app.services.feed_research_runtime import (
+    FeedResearchDeadlineExceeded,
+    FeedResearchRuntimeError,
+)
 from app.services.onboarding import (
     AUDIO_PLAN_FALLBACK_MODELS,
     AUDIO_PLAN_MODEL,
@@ -93,10 +97,51 @@ def test_fast_discover_returns_empty_when_generation_fails(monkeypatch) -> None:
         OnboardingFastDiscoverRequest(
             profile_summary="AI engineer",
             inferred_topics=["AI"],
-        )
+        ),
+        user_id=7,
     )
 
     assert response == OnboardingFastDiscoverResponse()
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [FeedResearchRuntimeError, FeedResearchDeadlineExceeded],
+)
+def test_fast_discover_propagates_feed_sandbox_outage(monkeypatch, error_type) -> None:
+    monkeypatch.setattr(
+        "app.services.onboarding.discovery_run._run_discovery_exa_queries",
+        lambda *_args, **_kwargs: ["result"],
+    )
+    monkeypatch.setattr(
+        "app.services.onboarding.discovery_run._select_prompt_results",
+        lambda results, lane_balanced=False: results,
+    )
+    monkeypatch.setattr(
+        "app.services.onboarding.discovery_run._format_discovery_prompt",
+        lambda *_args, **_kwargs: "prompt",
+    )
+    monkeypatch.setattr(
+        "app.services.onboarding.discovery_run._run_discover_output_with_fallback",
+        lambda *_args, **_kwargs: _DiscoverOutput(),
+    )
+
+    def _unavailable_runtime(**_kwargs):
+        raise error_type("E2B unavailable")
+
+    monkeypatch.setattr(
+        "app.services.onboarding.discovery_run.feed_research_runtime",
+        _unavailable_runtime,
+    )
+
+    with pytest.raises(error_type, match="E2B unavailable"):
+        fast_discover(
+            OnboardingFastDiscoverRequest(
+                profile_summary="AI engineer",
+                inferred_topics=["AI"],
+            ),
+            user_id=7,
+        )
 
 
 @pytest.mark.asyncio

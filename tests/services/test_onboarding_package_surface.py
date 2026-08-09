@@ -4,6 +4,7 @@ from importlib.util import find_spec
 
 from app.services import onboarding
 from app.services.onboarding import (
+    audio_discovery_run,
     audio_plan_heuristics,
     discovery_run,
     entrypoints,
@@ -37,7 +38,6 @@ def test_onboarding_package_exports_only_supported_entrypoints_and_constants() -
         "FEED_CONTENT_SEED_LIMIT",
         "FEED_SUGGESTION_TYPES",
         "NEWS_SEED_LIMIT",
-        "ONBOARDING_FEED_DETECTOR",
         "ONBOARDING_FEED_SUGGESTION_LIMIT",
         "ONBOARDING_PRIMARY_MODEL",
         "PROFILE_EXA_RESULTS",
@@ -67,14 +67,14 @@ def test_onboarding_package_exports_only_supported_entrypoints_and_constants() -
 def test_onboarding_package_reexports_owned_entrypoints() -> None:
     assert onboarding.complete_onboarding is entrypoints.complete_onboarding
     assert onboarding.fast_discover is entrypoints.fast_discover
-    assert onboarding.run_audio_discovery is discovery_run.run_audio_discovery
+    assert onboarding.run_audio_discovery is audio_discovery_run.run_audio_discovery
     assert onboarding.run_discover_enrich is discovery_run.run_discover_enrich
 
 
 def test_onboarding_modules_physically_own_their_implementations() -> None:
     assert find_spec("app.services.onboarding._core") is None
     assert entrypoints.complete_onboarding.__module__ == entrypoints.__name__
-    assert discovery_run.run_audio_discovery.__module__ == discovery_run.__name__
+    assert audio_discovery_run.run_audio_discovery.__module__ == audio_discovery_run.__name__
     assert llm_plans.build_onboarding_profile.__module__ == llm_plans.__name__
     assert (
         audio_plan_heuristics._fallback_audio_lane_plan.__module__ == audio_plan_heuristics.__name__
