@@ -13,6 +13,7 @@ struct DetectedFeedCard: View {
     let feed: DetectedFeed
     let isSubscribing: Bool
     let hasSubscribed: Bool
+    let subscriptionSuccessMessage: String?
     let subscriptionError: String?
     let onSubscribe: () -> Void
 
@@ -53,17 +54,20 @@ struct DetectedFeedCard: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(isSubscribing)
+                    .accessibilityIdentifier("content.feed.subscribe")
                 }
             }
 
             if hasSubscribed {
-                Text("You'll now receive new content from this source")
+                Text(subscriptionSuccessMessage ?? "You'll now receive new content from this source")
                     .font(.appCaption)
                     .foregroundColor(.onSurfaceSecondary)
+                    .accessibilityIdentifier("content.feed.subscribed")
             } else if let error = subscriptionError {
                 Text(error)
                     .font(.appCaption)
                     .foregroundColor(.statusDestructive)
+                    .accessibilityIdentifier("content.feed.error")
             } else {
                 Text("Get new content from this source automatically")
                     .font(.appCaption)
@@ -87,6 +91,7 @@ struct DetectedFeedCard: View {
             ),
             isSubscribing: false,
             hasSubscribed: false,
+            subscriptionSuccessMessage: nil,
             subscriptionError: nil,
             onSubscribe: {}
         )
@@ -100,6 +105,7 @@ struct DetectedFeedCard: View {
             ),
             isSubscribing: true,
             hasSubscribed: false,
+            subscriptionSuccessMessage: nil,
             subscriptionError: nil,
             onSubscribe: {}
         )
@@ -113,6 +119,7 @@ struct DetectedFeedCard: View {
             ),
             isSubscribing: false,
             hasSubscribed: true,
+            subscriptionSuccessMessage: "You'll now receive new content from this source",
             subscriptionError: nil,
             onSubscribe: {}
         )

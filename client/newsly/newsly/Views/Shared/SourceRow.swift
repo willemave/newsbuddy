@@ -46,8 +46,10 @@ struct SourceRow: View {
 
             // Status + chevron
             HStack(spacing: 8) {
-                StatusChip(isActive: isActive)
-                    .accessibilityHidden(true)
+                if !isActive {
+                    StatusChip(isActive: false)
+                        .accessibilityHidden(true)
+                }
 
                 Image(systemName: "chevron.right")
                     .font(.appSymbol(size: 12, weight: .semibold))

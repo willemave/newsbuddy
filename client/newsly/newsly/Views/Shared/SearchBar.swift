@@ -11,6 +11,7 @@ struct SearchBar: View {
     var isLoading: Bool = false
     var onSubmit: (() -> Void)? = nil
     var onClear: (() -> Void)? = nil
+    var inputAccessibilityIdentifier: String?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -28,6 +29,7 @@ struct SearchBar: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .background(Color.surfacePrimary.opacity(0.001))
                 .accessibilityLabel(placeholder)
+                .accessibilityIdentifier(ifPresent: inputAccessibilityIdentifier)
                 .onSubmit { onSubmit?() }
 
             if isLoading {

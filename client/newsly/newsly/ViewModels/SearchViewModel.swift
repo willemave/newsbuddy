@@ -9,6 +9,38 @@ import Foundation
 import Observation
 
 @MainActor
+protocol SearchContentServicing: AnyObject {
+    func searchContent(
+        query: String,
+        contentType: String,
+        limit: Int,
+        cursor: String?
+    ) async throws -> ContentListResponse
+
+    func searchMixed(query: String, limit: Int) async throws -> MixedSearchResponse
+
+    func submitContent(
+        url: URL,
+        contentType: String?,
+        title: String?,
+        platform: String?
+    ) async throws -> SubmitContentResponse
+}
+
+extension ContentService: SearchContentServicing {}
+
+@MainActor
+protocol SearchFeedSubscribing: AnyObject {
+    func subscribeFeed(
+        feedURL: String,
+        feedType: String,
+        displayName: String?
+    ) async throws -> ScraperConfig
+}
+
+extension ScraperConfigService: SearchFeedSubscribing {}
+
+@MainActor
 @Observable
 final class SearchViewModel {
     private enum TaskKey: Hashable {
@@ -25,16 +57,18 @@ final class SearchViewModel {
     var isLoadingLocal: Bool = false
     var isLoadingMixed: Bool = false
     var actionInFlightIds: Set<String> = []
-    var completedActionIds: Set<String> = []
-    var errorMessage: String?
+    var completedActionLabels: [String: String] = [:]
+    var localErrorMessage: String?
+    var mixedErrorMessage: String?
+    var actionErrorMessages: [String: String] = [:]
     var hasLocalSearch: Bool = false
     var hasSubmittedSearch: Bool = false
 
     @ObservationIgnored
-    private let contentService: ContentService
+    private let contentService: any SearchContentServicing
 
     @ObservationIgnored
-    private let scraperConfigService: ScraperConfigService
+    private let scraperConfigService: any SearchFeedSubscribing
 
     @ObservationIgnored
     private let tasks = TaskBag<TaskKey>()
@@ -42,11 +76,14 @@ final class SearchViewModel {
     @ObservationIgnored
     private var localSearchGeneration = 0
 
+    @ObservationIgnored
+    private var contentResultsQuery: String?
+
     private var lastSubmittedQuery: String?
 
     init(
-        contentService: ContentService,
-        scraperConfigService: ScraperConfigService
+        contentService: any SearchContentServicing,
+        scraperConfigService: any SearchFeedSubscribing
     ) {
         self.contentService = contentService
         self.scraperConfigService = scraperConfigService
@@ -65,7 +102,7 @@ final class SearchViewModel {
     }
 
     func retrySearch() {
-        if hasSubmittedSearch {
+        if hasSubmittedSearch || mixedErrorMessage != nil {
             submitSearch()
             return
         }
@@ -81,34 +118,44 @@ final class SearchViewModel {
     func submitSearch() {
         let query = trimmedQuery
         guard query.count >= 2 else {
-            errorMessage = "Type at least 2 characters to search."
+            localErrorMessage = "Type at least 2 characters to search."
             return
         }
 
-        tasks.runReplacing(.mixed) { [weak self] in
-            await self?.runMixedSearch(for: query)
+        tasks.runReplacing(.mixed) { [weak self] token in
+            await self?.runMixedSearch(for: query, token: token)
         }
     }
 
     func subscribeToFeed(_ result: MixedSearchFeedResult) async {
         let actionId = "feed:\(result.id)"
+        guard !result.isSubscribed, completedActionLabels[actionId] == nil else { return }
         await runAction(id: actionId) {
-            _ = try await self.scraperConfigService.subscribeFeed(
+            let config = try await self.scraperConfigService.subscribeFeed(
                 feedURL: result.feedURL,
                 feedType: result.feedType,
                 displayName: result.title
             )
+            return config.subscriptionOutcome == .already_subscribed
+                ? "Already subscribed"
+                : "Subscribed"
         }
     }
 
     func addPodcastEpisode(_ result: PodcastSearchResult) async {
         let actionId = "episode:\(result.id)"
         guard let url = URL(string: result.episodeURL) else {
-            errorMessage = "Invalid episode URL"
+            actionErrorMessages[actionId] = "This episode link is invalid."
             return
         }
         await runAction(id: actionId) {
-            _ = try await self.contentService.submitContent(url: url, title: result.title)
+            _ = try await self.contentService.submitContent(
+                url: url,
+                contentType: nil,
+                title: result.title,
+                platform: nil
+            )
+            return "Added"
         }
     }
 
@@ -116,11 +163,14 @@ final class SearchViewModel {
         guard let feedURL = result.feedURL else { return }
         let actionId = "podcast-feed:\(feedURL)"
         await runAction(id: actionId) {
-            _ = try await self.scraperConfigService.subscribeFeed(
+            let config = try await self.scraperConfigService.subscribeFeed(
                 feedURL: feedURL,
                 feedType: "podcast_rss",
                 displayName: result.podcastTitle ?? result.title
             )
+            return config.subscriptionOutcome == .already_subscribed
+                ? "Already subscribed"
+                : "Subscribed"
         }
     }
 
@@ -129,24 +179,41 @@ final class SearchViewModel {
         let generation = localSearchGeneration
         let trimmed = trimmedQuery
 
+        if contentResultsQuery != trimmed {
+            contentResults = []
+            contentResultsQuery = nil
+            hasLocalSearch = false
+            localErrorMessage = nil
+        }
+
         if lastSubmittedQuery != trimmed {
+            tasks.cancel(.mixed)
+            isLoadingMixed = false
             hasSubmittedSearch = false
             feedResults = []
             podcastResults = []
-            completedActionIds = []
+            completedActionLabels = [:]
+            actionErrorMessages = [:]
+            mixedErrorMessage = nil
         }
 
         guard trimmed.count >= 2 else {
             contentResults = []
+            contentResultsQuery = nil
             hasLocalSearch = false
-            errorMessage = nil
+            localErrorMessage = nil
             isLoadingLocal = false
             return
         }
 
+        isLoadingLocal = true
+
         do {
             try await Task.sleep(for: .milliseconds(350))
         } catch {
+            if generation == localSearchGeneration {
+                isLoadingLocal = false
+            }
             return
         }
 
@@ -161,7 +228,7 @@ final class SearchViewModel {
                 isLoadingLocal = false
             }
         }
-        errorMessage = nil
+        localErrorMessage = nil
 
         do {
             let response = try await contentService.searchContent(
@@ -172,51 +239,65 @@ final class SearchViewModel {
             )
             guard !Task.isCancelled, generation == localSearchGeneration else { return }
             contentResults = response.contents
+            contentResultsQuery = query
             hasLocalSearch = true
         } catch {
             guard !Task.isCancelled, generation == localSearchGeneration else { return }
-            errorMessage = error.localizedDescription
+            localErrorMessage = "Newsly couldn't search your content."
             contentResults = []
+            contentResultsQuery = query
             hasLocalSearch = true
         }
     }
 
-    private func runMixedSearch(for query: String) async {
+    private func runMixedSearch(for query: String, token: TaskBag<TaskKey>.Token) async {
         isLoadingMixed = true
-        errorMessage = nil
+        mixedErrorMessage = nil
+        defer {
+            if tasks.isCurrent(token) {
+                isLoadingMixed = false
+            }
+        }
 
         do {
             let response = try await contentService.searchMixed(query: query, limit: 10)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  tasks.isCurrent(token),
+                  trimmedQuery == query else { return }
             lastSubmittedQuery = query
             contentResults = response.content
+            contentResultsQuery = query
             feedResults = response.feeds
             podcastResults = response.podcasts
+            for result in response.feeds where result.isSubscribed {
+                completedActionLabels["feed:\(result.id)"] = "Subscribed"
+            }
             hasLocalSearch = true
             hasSubmittedSearch = true
         } catch {
-            guard !Task.isCancelled else { return }
-            errorMessage = error.localizedDescription
+            guard !Task.isCancelled,
+                  tasks.isCurrent(token),
+                  trimmedQuery == query else { return }
+            mixedErrorMessage = "Newsly couldn't search external sources."
             feedResults = []
             podcastResults = []
             hasSubmittedSearch = true
         }
-
-        isLoadingMixed = false
     }
 
     private func runAction(
         id: String,
-        action: @escaping () async throws -> Void
+        action: @escaping () async throws -> String
     ) async {
+        guard completedActionLabels[id] == nil, !actionInFlightIds.contains(id) else { return }
         actionInFlightIds.insert(id)
+        actionErrorMessages[id] = nil
         defer { actionInFlightIds.remove(id) }
 
         do {
-            try await action()
-            completedActionIds.insert(id)
+            completedActionLabels[id] = try await action()
         } catch {
-            errorMessage = error.localizedDescription
+            actionErrorMessages[id] = "That action didn't finish. Please try again."
         }
     }
 }

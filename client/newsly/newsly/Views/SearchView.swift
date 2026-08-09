@@ -8,10 +8,9 @@
 import SwiftUI
 
 struct SearchView: View {
-    @Environment(\.openURL) private var openURL
-
     private let readStateCache: ReadStateCache
     @State private var viewModel: SearchViewModel
+    @State private var browserDestination: BrowserDestination?
 
     init(
         readStateCache: ReadStateCache? = nil,
@@ -28,22 +27,12 @@ struct SearchView: View {
 
             if !viewModel.hasQuery {
                 introSection
-            } else if let error = viewModel.errorMessage,
-                      !viewModel.isLoadingLocal,
-                      !viewModel.isLoadingMixed,
-                      viewModel.contentResults.isEmpty,
-                      viewModel.feedResults.isEmpty,
-                      viewModel.podcastResults.isEmpty {
-                Section {
-                    ErrorView(message: error) {
-                        viewModel.retrySearch()
-                    }
-                }
             } else {
                 contentSection
                 externalSectionPrompt
 
                 if viewModel.hasSubmittedSearch || viewModel.isLoadingMixed {
+                    mixedSearchErrorSection
                     feedSection
                     podcastSection
                 }
@@ -70,7 +59,11 @@ struct SearchView: View {
                     }
                 }
                 .disabled(!viewModel.hasQuery || viewModel.isLoadingMixed)
+                .accessibilityIdentifier("search.submit")
             }
+        }
+        .sheet(item: $browserDestination) { destination in
+            SafariView(url: destination.url)
         }
     }
 
@@ -82,7 +75,8 @@ struct SearchView: View {
                 isLoading: viewModel.isLoadingLocal || viewModel.isLoadingMixed,
                 onSubmit: {
                     viewModel.submitSearch()
-                }
+                },
+                inputAccessibilityIdentifier: "search.input"
             )
             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
             .listRowBackground(Color.clear)
@@ -109,14 +103,30 @@ struct SearchView: View {
                     Text("Searching your content...")
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
-            } else if viewModel.hasLocalSearch && viewModel.contentResults.isEmpty {
+            }
+
+            if let error = viewModel.localErrorMessage {
+                SearchInlineError(
+                    message: error,
+                    accessibilityIdentifier: "search.error.local",
+                    retry: viewModel.retrySearch
+                )
+            }
+
+            if viewModel.hasLocalSearch,
+               viewModel.contentResults.isEmpty,
+               viewModel.localErrorMessage == nil,
+               !viewModel.isLoadingLocal {
                 Text("No matching content.")
                     .foregroundStyle(Color.onSurfaceSecondary)
-            } else {
+            }
+
+            if !viewModel.contentResults.isEmpty {
+                let contentIDs = viewModel.contentResults.map(\.id)
                 ForEach(viewModel.contentResults, id: \.id) { item in
                     NavigationLink(value: ContentDetailRoute(
                         summary: item,
-                        allContentIds: viewModel.contentResults.map(\.id),
+                        allContentIds: contentIDs,
                         navigationSurface: .search
                     )) {
                         HStack(spacing: 12) {
@@ -146,7 +156,21 @@ struct SearchView: View {
                         }
                         .padding(.vertical, 4)
                     }
+                    .accessibilityIdentifier("search.content.\(item.id)")
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mixedSearchErrorSection: some View {
+        if let error = viewModel.mixedErrorMessage {
+            Section {
+                SearchInlineError(
+                    message: error,
+                    accessibilityIdentifier: "search.error.external",
+                    retry: viewModel.submitSearch
+                )
             }
         }
     }
@@ -178,7 +202,9 @@ struct SearchView: View {
                     Text("Finding subscribable sources...")
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
-            } else if viewModel.hasSubmittedSearch && viewModel.feedResults.isEmpty {
+            } else if viewModel.hasSubmittedSearch,
+                      viewModel.feedResults.isEmpty,
+                      viewModel.mixedErrorMessage == nil {
                 Text("No feed or source matches.")
                     .foregroundStyle(Color.onSurfaceSecondary)
             } else {
@@ -196,15 +222,16 @@ struct SearchView: View {
                         HStack(spacing: 10) {
                             Button("Open") {
                                 guard let url = URL(string: result.previewURLString) else { return }
-                                openURL(url)
+                                browserDestination = BrowserDestination(url: url)
                             }
                             .buttonStyle(.bordered)
+                            .accessibilityIdentifier("search.feed.\(result.id).open")
 
                             Button {
                                 Task { await viewModel.subscribeToFeed(result) }
                             } label: {
-                                if viewModel.completedActionIds.contains("feed:\(result.id)") {
-                                    Label("Subscribed", systemImage: "checkmark")
+                                if let completedLabel = viewModel.completedActionLabels["feed:\(result.id)"] {
+                                    Label(completedLabel, systemImage: "checkmark")
                                 } else if viewModel.actionInFlightIds.contains("feed:\(result.id)") {
                                     ProgressView()
                                 } else {
@@ -212,10 +239,23 @@ struct SearchView: View {
                                 }
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(viewModel.actionInFlightIds.contains("feed:\(result.id)"))
+                            .disabled(
+                                result.isSubscribed
+                                    || viewModel.completedActionLabels["feed:\(result.id)"] != nil
+                                    || viewModel.actionInFlightIds.contains("feed:\(result.id)")
+                            )
+                            .accessibilityIdentifier("search.feed.\(result.id).subscribe")
+                        }
+
+                        if let actionError = viewModel.actionErrorMessages["feed:\(result.id)"] {
+                            Text(actionError)
+                                .font(.listCaption)
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                                .accessibilityIdentifier("search.feed.\(result.id).error")
                         }
                     }
                     .padding(.vertical, 4)
+                    .accessibilityIdentifier("search.feed.\(result.id)")
                 }
             }
         }
@@ -229,7 +269,9 @@ struct SearchView: View {
                     Text("Searching podcast episodes...")
                         .foregroundStyle(Color.onSurfaceSecondary)
                 }
-            } else if viewModel.hasSubmittedSearch && viewModel.podcastResults.isEmpty {
+            } else if viewModel.hasSubmittedSearch,
+                      viewModel.podcastResults.isEmpty,
+                      viewModel.mixedErrorMessage == nil {
                 Text("No podcast matches.")
                     .foregroundStyle(Color.onSurfaceSecondary)
             } else {
@@ -252,15 +294,16 @@ struct SearchView: View {
                         HStack(spacing: 10) {
                             Button("Open") {
                                 guard let url = URL(string: result.episodeURL) else { return }
-                                openURL(url)
+                                browserDestination = BrowserDestination(url: url)
                             }
                             .buttonStyle(.bordered)
+                            .accessibilityIdentifier("search.podcast.\(result.id).open")
 
                             Button {
                                 Task { await viewModel.addPodcastEpisode(result) }
                             } label: {
-                                if viewModel.completedActionIds.contains("episode:\(result.id)") {
-                                    Label("Added", systemImage: "checkmark")
+                                if let completedLabel = viewModel.completedActionLabels["episode:\(result.id)"] {
+                                    Label(completedLabel, systemImage: "checkmark")
                                 } else if viewModel.actionInFlightIds.contains("episode:\(result.id)") {
                                     ProgressView()
                                 } else {
@@ -268,14 +311,20 @@ struct SearchView: View {
                                 }
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(viewModel.actionInFlightIds.contains("episode:\(result.id)"))
+                            .disabled(
+                                viewModel.completedActionLabels["episode:\(result.id)"] != nil
+                                    || viewModel.actionInFlightIds.contains("episode:\(result.id)")
+                            )
+                            .accessibilityIdentifier("search.podcast.\(result.id).add")
 
                             if result.feedURL != nil {
                                 Button {
                                     Task { await viewModel.subscribeToPodcast(result) }
                                 } label: {
-                                    if viewModel.completedActionIds.contains("podcast-feed:\(result.feedURL ?? "")") {
-                                        Label("Subscribed", systemImage: "checkmark")
+                                    if let completedLabel = viewModel.completedActionLabels[
+                                        "podcast-feed:\(result.feedURL ?? "")"
+                                    ] {
+                                        Label(completedLabel, systemImage: "checkmark")
                                     } else if viewModel.actionInFlightIds.contains("podcast-feed:\(result.feedURL ?? "")") {
                                         ProgressView()
                                     } else {
@@ -284,14 +333,52 @@ struct SearchView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .disabled(
-                                    viewModel.actionInFlightIds.contains("podcast-feed:\(result.feedURL ?? "")")
+                                    viewModel.completedActionLabels[
+                                        "podcast-feed:\(result.feedURL ?? "")"
+                                    ] != nil
+                                        || viewModel.actionInFlightIds.contains(
+                                            "podcast-feed:\(result.feedURL ?? "")"
+                                        )
                                 )
+                                .accessibilityIdentifier("search.podcast.\(result.id).subscribe")
                             }
+                        }
+
+                        if let actionError = viewModel.actionErrorMessages["episode:\(result.id)"]
+                            ?? result.feedURL.flatMap({
+                                viewModel.actionErrorMessages["podcast-feed:\($0)"]
+                            }) {
+                            Text(actionError)
+                                .font(.listCaption)
+                                .foregroundStyle(Color.onSurfaceSecondary)
+                                .accessibilityIdentifier("search.podcast.\(result.id).error")
                         }
                     }
                     .padding(.vertical, 4)
+                    .accessibilityIdentifier("search.podcast.\(result.id)")
                 }
             }
         }
+    }
+}
+
+private struct SearchInlineError: View {
+    let message: String
+    let accessibilityIdentifier: String
+    let retry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.circle")
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.listCaption)
+                .foregroundStyle(Color.onSurfaceSecondary)
+            Spacer(minLength: 8)
+            Button("Try Again", action: retry)
+                .buttonStyle(.bordered)
+        }
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 }

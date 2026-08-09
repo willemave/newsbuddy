@@ -15,6 +15,7 @@ struct MixedSearchFeedResult: Codable, Identifiable {
     let description: String?
     let rationale: String?
     let evidenceURL: String?
+    let isSubscribed: Bool
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -26,6 +27,7 @@ struct MixedSearchFeedResult: Codable, Identifiable {
         case description
         case rationale
         case evidenceURL = "evidence_url"
+        case isSubscribed = "is_subscribed"
     }
 
     var previewURLString: String {
@@ -42,6 +44,7 @@ struct MixedSearchFeedResult: Codable, Identifiable {
         description = response.description
         rationale = response.rationale
         evidenceURL = response.evidenceUrl
+        isSubscribed = response.isSubscribed
     }
 }
 
