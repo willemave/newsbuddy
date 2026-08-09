@@ -105,7 +105,7 @@ The app currently mounts:
 - `/api/news`
   - Short-form Fast Reads list/detail/body/discussion/read-state/conversion/audio surface backed by `news_items`.
 - `/api`
-  - Discovery, onboarding, analytics, feedback, scraper config, X and LLM integrations, agent APIs, CLI link, agent library, OpenAI transcription helpers.
+  - Onboarding, analytics, feedback, scraper config, X and LLM integrations, agent APIs, CLI link, agent library, OpenAI transcription helpers.
 
 ### 4.3 Middleware and request behavior
 
@@ -615,22 +615,7 @@ Endpoints:
 - `POST /api/briefing/narrations` (chapter manifest)
 - `GET /api/briefing/narrations/{episode_group_id}`
 
-### 8.4 Discovery
-
-Prefix: `/api/discovery/...`
-
-Endpoints:
-
-- `GET /api/discovery/suggestions`
-- `GET /api/discovery/history`
-- `GET /api/discovery/search/podcasts`
-- `POST /api/discovery/refresh`
-- `POST /api/discovery/subscribe`
-- `POST /api/discovery/add-item`
-- `POST /api/discovery/dismiss`
-- `POST /api/discovery/clear`
-
-### 8.5 Onboarding
+### 8.4 Onboarding
 
 Prefix: `/api/onboarding`
 
@@ -644,7 +629,7 @@ Endpoints:
 - `POST /api/onboarding/complete`
 - `POST /api/onboarding/tutorial-complete`
 
-### 8.6 Scraper config management
+### 8.5 Scraper config management
 
 Prefixes: `/api/scrapers` and `/api/content/scrapers`
 
@@ -656,7 +641,7 @@ Endpoints:
 - `DELETE /api/scrapers/{config_id}`
 - `POST /api/scrapers/subscribe`
 
-### 8.7 Analytics interactions and feedback
+### 8.6 Analytics interactions and feedback
 
 Prefix: `/api`
 
@@ -665,7 +650,7 @@ Endpoints:
 - `POST /api/analytics`
 - `POST /api/feedback`
 
-### 8.8 Agent / machine-facing APIs
+### 8.7 Agent / machine-facing APIs
 
 Prefix: `/api`
 
@@ -684,7 +669,7 @@ Endpoints:
 
 These are additive APIs for machine or agent flows, not a separate v2 backend.
 
-### 8.9 X integrations
+### 8.8 X integrations
 
 Prefixes:
 
@@ -700,7 +685,7 @@ X endpoints:
 
 LLM integration endpoints are mounted from `integrations.llm_router` and back user-managed provider keys.
 
-### 8.10 OpenAI helper endpoints
+### 8.9 OpenAI helper endpoints
 
 Prefix: `/api/openai`
 
@@ -709,7 +694,7 @@ Endpoints:
 - `GET /api/openai/transcriptions/health`
 - `POST /api/openai/transcriptions`
 
-### 8.11 Admin UI and logs
+### 8.10 Admin UI and logs
 
 Prefix: `/admin`
 
@@ -741,16 +726,17 @@ Defined in `app/models/contracts.py`:
 - `download_tweet_video_audio`
 - `transcribe_tweet_video`
 - `summarize`
-- `fetch_discussion`
 - `fetch_news_item_discussion`
 - `generate_image`
 - `discover_feeds`
 - `onboarding_discover`
 - `dig_deeper`
+- `chat_turn`
 - `sync_integration`
 - `generate_audio_episode`
 - `run_llm_task`
 - `briefing_refresh`
+- `delete_user_account`
 
 ### 9.2 Queue partitions
 
@@ -782,16 +768,17 @@ used by `app/services/queue.py`:
 | `download_tweet_video_audio` | `media` |
 | `transcribe_tweet_video` | `media` |
 | `summarize` | `content` |
-| `fetch_discussion` | `discussion` |
 | `fetch_news_item_discussion` | `discussion` |
 | `generate_image` | `image` |
 | `discover_feeds` | `content` |
 | `onboarding_discover` | `onboarding` |
 | `dig_deeper` | `chat` |
+| `chat_turn` | `chat` |
 | `sync_integration` | `twitter` |
 | `generate_audio_episode` | `audio_episode` |
 | `run_llm_task` | `llm` |
 | `briefing_refresh` | `llm` |
+| `delete_user_account` | `backfill` |
 
 ### 9.3 Queue semantics
 
@@ -855,16 +842,17 @@ Registered handlers:
 - download tweet video audio
 - transcribe tweet video
 - summarize
-- fetch discussion
 - fetch news-item discussion
 - generate image
 - discover feeds
 - onboarding discover
 - dig deeper
+- run durable chat turn
 - sync integration
 - generate audio episode
 - run LLM task
 - refresh briefing
+- delete user account
 
 ### 9.5 LLM task workflows
 
@@ -877,7 +865,9 @@ Learning Decks use `learning_decks` as the stable product record and point to th
 latest-successful `llm_tasks` attempts. New attempts do not create `learning_deck_runs`; API fields
 named `latest_run` remain a compatibility projection from the LLM task. Historical
 `learning_deck_runs` rows remain readable through those projections, while the drained legacy task
-handler and its dedicated worker partition have been retired.
+handler, `generate_learning_deck` service branch, and dedicated E2B session implementation have
+been retired. Historical run artifact pointers plus `sandbox_provider`/`sandbox_id` remain stored
+and renderable; all new execution requires an `llm_tasks` workspace and uses `agent_vm_sessions.py`.
 The worker handler owns terminal failure recording. Successful publication locks the stable deck row,
 commits its new artifact bundle and attempt pointers together through
 `app/services/learning_deck_publication.py`, then retires the superseded object-store bundle. Request
@@ -896,6 +886,28 @@ VM-backed agents share five direct host tools: `execute_bash`, `read_file`, `wri
 `list_files`, and `web_search`. Tool results are structured. Learning Deck output is validated
 automatically; a missing or invalid artifact gets one focused repair turn before a typed terminal
 failure.
+
+Feed-specific network access uses the same process-scoped agent VM pool. Mixed Search, contextual
+assistant discovery, onboarding suggestions, add-feed resolution, scraper-config validation,
+ingestion-time feed detection, scheduled RSS ingestion, and publisher-RSS audio lookup send every
+untrusted page/feed request through `SandboxFeedHttpService` inside the configured E2B workspace.
+The canonical `FeedDetector` requires an injected HTTP service and is constructed only by this E2B
+runtime, which rejects local/disabled VM sessions, so validators cannot silently fall back to host
+HTTP or a host-backed sandbox. Trusted fixed-provider/control-plane APIs (Exa,
+Apple/iTunes, Spotify, Podcast Index, Hacker News Firebase, and model providers) remain host-managed; their returned page
+or publisher-feed URLs are still fetched only in E2B. General chat web search remains host-managed
+and does not acquire a feed sandbox. Same-user requests reuse one sandbox with task-isolated
+workspace paths; system-owned aggregator feeds use the isolated system namespace. API and worker
+shutdown drain cached E2B sessions only after active work has stopped.
+
+Weekly discovery checkpoints a successful completed run for the current Sunday-based discovery
+window before any paid provider call. A weekly-chat projection retry therefore reuses the completed
+run instead of rebilling. Discovery persistence and mixed Search derive subscribed state from the
+current user's active canonical scraper configs, and onboarding completion ensures one canonical
+`discover_feeds` task exists for the new user. Feed URL writes and lookups share one canonical URL
+identity, and an already-subscribed request is resolved before E2B validation. Per-feed sandbox
+failures remain isolated across concurrent scrapes but increment `ScraperStats`; onboarding and
+Analyze URL backfills report an error-only result as unavailable/failed rather than completed.
 
 ### 9.6 Worker launch and drift guards
 
@@ -920,7 +932,6 @@ flowchart TD
   Process --> Media["PROCESS_PODCAST_MEDIA (podcasts)"]
   Media --> Summary
   Process --> Summary["SUMMARIZE"]
-  Summary --> Discussion["FETCH_DISCUSSION (when applicable)"]
   Summary --> Image["GENERATE_IMAGE (article/podcast)"]
   Image --> DoneImage["completed content"]
   Summary --> DoneSummary["completed or awaiting_image content"]
@@ -1171,6 +1182,11 @@ Fallbacks are defined for discovery and audio plan generation.
 
 Discovery does not directly replace the content feed. It proposes sources, aggregators, or feed subscriptions that then become normal user scraper configs or inbox content through the existing ingestion pipeline.
 
+Feed discovery is service-owned rather than an on-demand HTTP product surface. The scheduled
+workflow persists suggestions and `weekly_discovery_chat.py` projects them into a visible chat;
+onboarding has its own `/api/onboarding` discovery endpoints. Feed subscription is canonicalized
+through `/api/scrapers/subscribe`.
+
 ## 13. Chat, Deep Research, and Agent Features
 
 ### 13.1 Chat sessions
@@ -1193,6 +1209,12 @@ Capabilities:
 Chat sessions can attach to either `content_id` or `news_item_id`. The iOS client sends compact screen context, polls async message status, and can continue active sessions through `ActiveChatSessionManager`.
 
 The system prompt explicitly instructs the agent to use web search and cite sources when it does.
+
+Personal-library tools are registered once in `chat_turn_runtime.py` for both article chat and the
+contextual assistant. The canonical configured provider is E2B: each turn synchronizes the user's
+personal markdown library, hydrates an isolated sandbox, exposes bounded search/list/read tools,
+and closes the sandbox after the turn. `local` remains a deterministic development/test provider
+and `disabled` is an explicit operational rollback.
 
 ### 13.2 Deep research
 
@@ -1232,7 +1254,7 @@ Active modules:
 
 `/api/openai/transcriptions` accepts uploaded audio and returns backend-managed STT results.
 
-The iOS client uses this for onboarding voice input, chat composer dictation, quick mic flows, and tweet suggestions.
+The iOS client uses this for onboarding voice input, chat composer dictation, Knowledge new-chat input, Learning Deck focus recording, and tweet suggestions.
 
 ### 14.2 Narration flow
 
@@ -1340,11 +1362,11 @@ Primary layers:
 - `Repositories/`
   - content and read-status repository wrappers
 - `Services/`
-  - API client, auth, chat, discovery, narration, audio episodes, transcription, X integration, image cache, notifications
+  - API client, auth, chat, onboarding, narration, audio episodes, transcription, X integration, image cache, notifications
 - `ViewModels/`
   - feature-level state and pagination
 - `Views/`
-  - authenticated root, lists, detail, chat, discovery, onboarding, settings, sources, dictation/quick mic, Knowledge views
+  - authenticated root, Briefing, Knowledge, Learning, search, detail, chat, onboarding, settings, sources, and shared dictation views
 - `Shared/`
   - app chrome, state stores, shared container utilities
 
@@ -1362,7 +1384,7 @@ The client has dedicated flows for:
 - Briefing reading experience, including lens paging, source modals, live dig-deeper, and narration
 - audio episodes and narration playback
 - chat session history, async message polling, and council flows
-- discovery and onboarding, including aggregator selection and resumable voice discovery
+- onboarding, including aggregator selection and resumable voice-driven feed discovery
 - backend-managed transcription/dictation
 - settings, feedback, CLI link, X OAuth, display preferences, council personas, debug tools, and sources
 - submissions and processing status
@@ -1405,12 +1427,11 @@ Contract evolution rules live in `docs/initiatives/typed-contracts-2026-06/20-co
 
 The share extension lives in `client/newsly/ShareExtension/`.
 
-`ShareViewController.swift` currently supports five submission modes:
+`ShareViewController.swift` currently presents four outcome-based actions:
 
-- Add content
-- Create learning deck
-- Add links
-- Add feed
+- Add to Briefing
+- Add to Knowledge
+- Create Deck
 - Chat
 
 The extension:
@@ -1418,8 +1439,10 @@ The extension:
 - extracts shared URLs from extension items
 - shares auth state through the app group / shared keychain
 - submits URLs to the backend
-- lets the user choose whether the backend should summarize, create a learning deck, crawl linked pages, or subscribe to the site feed
-- supports a "Bookmark only" path that sends `save_to_knowledge_and_mark_read`
+- sends all four outcomes through `/api/share-actions`, leaving URL classification, canonicalization, and asynchronous processing to the backend
+- resolves Add to Briefing into either continuing-source subscription or individual-item ingestion
+- maps Add to Knowledge to the compatible backend `bookmark_only` mode, which saves the item and marks it read
+- maps Create Deck to `presentation`; legacy content, links, and feed modes remain backend-only for older clients and queued tasks
 - can submit a chat-start request that saves the item to Knowledge, processes it normally, and uses the typed share-sheet message as the first content-linked chat turn
 - applies platform hints for X, YouTube, podcast hosts, and other known URL shapes
 
