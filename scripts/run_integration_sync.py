@@ -19,8 +19,8 @@ if str(ROOT) not in sys.path:
 from app.core.db import get_db
 from app.core.logging import get_logger, setup_logging
 from app.core.settings import get_settings
-from app.models.db import UserIntegrationConnection
-from app.services.queue import QueueService, TaskType
+from app.models.db import User, UserIntegrationConnection
+from app.services.queue import QueueService, TaskEnqueueRequest, TaskType
 from app.services.x_integration import X_PROVIDER
 
 logger = get_logger(__name__)
@@ -43,30 +43,35 @@ def enqueue_x_sync_tasks(*, user_id: int | None = None) -> int:
 
     queue = QueueService()
 
-    enqueued = 0
     with get_db() as db:
         query = (
             db.query(UserIntegrationConnection.user_id)
+            .join(User, User.id == UserIntegrationConnection.user_id)
             .filter(UserIntegrationConnection.provider == X_PROVIDER)
             .filter(UserIntegrationConnection.is_active.is_(True))
+            .filter(User.is_active.is_(True))
             .distinct()
             .order_by(UserIntegrationConnection.user_id.asc())
         )
         if user_id is not None:
             query = query.filter(UserIntegrationConnection.user_id == user_id)
 
-        for (user_id,) in query.yield_per(200):
-            queue.enqueue(
+        requests = [
+            TaskEnqueueRequest(
                 TaskType.SYNC_INTEGRATION,
                 payload={
-                    "user_id": int(user_id),
+                    "user_id": int(resolved_user_id),
                     "provider": X_PROVIDER,
                     "trigger": "cron",
                 },
+                owner_user_id=int(resolved_user_id),
             )
-            enqueued += 1
+            for (resolved_user_id,) in query.yield_per(200)
+        ]
+        if requests:
+            queue.enqueue_many_in_session(db, requests)
 
-    return enqueued
+    return len(requests)
 
 
 def main() -> None:
