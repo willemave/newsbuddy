@@ -10,13 +10,16 @@ import SwiftUI
 struct ContentCard: View {
     let content: ContentSummary
     let dimReadState: Bool
+    let reservesThumbnailSpace: Bool
 
     init(
         content: ContentSummary,
-        dimReadState: Bool = true
+        dimReadState: Bool = true,
+        reservesThumbnailSpace: Bool = false
     ) {
         self.content = content
         self.dimReadState = dimReadState
+        self.reservesThumbnailSpace = reservesThumbnailSpace
     }
 
     private let thumbnailSize: CGFloat = RowMetrics.thumbnailSize
@@ -39,8 +42,7 @@ struct ContentCard: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            // Thumbnail only when image exists
-            if hasImage {
+            if hasImage || reservesThumbnailSpace {
                 thumbnailView
             }
 

@@ -91,7 +91,8 @@ struct ContentSummary: Codable, Identifiable, Equatable {
 
     private static let processedDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MM-dd-yyyy"
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
         formatter.timeZone = TimeZone.current
         return formatter
     }()

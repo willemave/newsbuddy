@@ -164,16 +164,6 @@ class ContentService {
         return SubmissionStatusFeed(api: response)
     }
 
-    // Backward compatibility: single content type
-    func fetchContentList(contentType: String? = nil,
-                         date: String? = nil,
-                         readFilter: String = "all",
-                         cursor: String? = nil,
-                         limit: Int = 25) async throws -> ContentListResponse {
-        let types = contentType.map { [$0] }
-        return try await fetchContentList(contentTypes: types, date: date, readFilter: readFilter, cursor: cursor, limit: limit)
-    }
-    
     func fetchContentDetail(id: Int) async throws -> ContentDetail {
         let endpoint = APIRequestDescriptor<ContentDetail>(path: APIEndpoints.contentDetail(id: id))
         return try await client.request(endpoint)
@@ -416,7 +406,7 @@ class ContentService {
                 )
             } else {
                 response = try await fetchContentList(
-                    contentType: contentType,
+                    contentTypes: [contentType],
                     readFilter: "unread",
                     cursor: cursor,
                     limit: 100  // Fetch larger batches for efficiency
