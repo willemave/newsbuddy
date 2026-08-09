@@ -1,8 +1,10 @@
 """Exa search client service for chat agent web search tool."""
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import httpx
 from exa_py import Exa
 
 from app.core.logging import get_logger
@@ -12,6 +14,45 @@ from app.services.vendor_costs import record_vendor_usage_out_of_band
 logger = get_logger(__name__)
 
 _exa_client: Exa | None = None
+
+
+class _BoundedExa(Exa):
+    """Exa SDK client whose synchronous transport has a real request deadline."""
+
+    def __init__(self, *, timeout_seconds: float, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._timeout_seconds = timeout_seconds
+
+    def request(
+        self,
+        endpoint: str,
+        data: dict[str, Any] | str | None = None,
+        method: str = "POST",
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        request_headers = {**self.headers, **(headers or {})}
+        request_kwargs: dict[str, Any] = {
+            "method": method,
+            "url": f"{self.base_url}{endpoint}",
+            "headers": request_headers,
+            "params": params,
+        }
+        if isinstance(data, str):
+            request_kwargs["content"] = data
+        elif data is not None:
+            request_kwargs["json"] = data
+
+        with httpx.Client(
+            timeout=max(0.001, self._timeout_seconds),
+            follow_redirects=True,
+        ) as client:
+            response = client.request(**request_kwargs)
+            response.raise_for_status()
+            payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Exa returned a non-object response")
+        return payload
 
 
 class ExaClientError(RuntimeError):
@@ -27,7 +68,7 @@ class ExaRequestError(ExaClientError):
 
 
 def get_exa_client() -> Exa | None:
-    """Get singleton Exa client instance.
+    """Get the singleton Exa client with the canonical HTTP timeout.
 
     Returns:
         Exa client if API key is configured, None otherwise.
@@ -42,9 +83,30 @@ def get_exa_client() -> Exa | None:
         logger.warning("Exa API key not configured, web search will be unavailable")
         return None
 
-    _exa_client = Exa(api_key=settings.exa_api_key)
+    _exa_client = _BoundedExa(
+        api_key=settings.exa_api_key,
+        timeout_seconds=float(settings.http_timeout_seconds),
+    )
     logger.info("Initialized Exa client for web search")
     return _exa_client
+
+
+def _get_request_client(request_timeout_seconds: float | None) -> Exa | None:
+    """Return the default client or one constrained by a tighter caller budget."""
+    client = get_exa_client()
+    if client is None or request_timeout_seconds is None:
+        return client
+
+    settings = get_settings()
+    default_timeout_seconds = float(settings.http_timeout_seconds)
+    if request_timeout_seconds >= default_timeout_seconds:
+        return client
+    return _BoundedExa(
+        api_key=settings.exa_api_key,
+        base_url=client.base_url,
+        user_agent=client.headers.get("User-Agent"),
+        timeout_seconds=request_timeout_seconds,
+    )
 
 
 @dataclass
@@ -166,10 +228,11 @@ def exa_search(
     exclude_domains: list[str] | None = None,
     raise_on_error: bool = False,
     telemetry: dict[str, Any] | None = None,
+    request_timeout_seconds: float | None = None,
 ) -> list[ExaSearchResult]:
     """Search the web using Exa and return results with full content.
 
-    Uses search_and_contents with:
+    Uses the current Exa search API with:
     - livecrawl="fallback" to get fresh content when cached unavailable
     - summary generation for AI-powered snippets
     - text fallback for when summary unavailable
@@ -190,7 +253,9 @@ def exa_search(
         ExaUnavailableError: When Exa is not configured and ``raise_on_error=True``.
         ExaRequestError: When the Exa API request fails and ``raise_on_error=True``.
     """
-    client = get_exa_client()
+    if request_timeout_seconds is not None and request_timeout_seconds <= 0:
+        return []
+    client = _get_request_client(request_timeout_seconds)
     if client is None:
         message = "Exa client not available"
         if raise_on_error:
@@ -239,9 +304,8 @@ def exa_search(
             f"contents={contents_opts}"
         )
 
-        # Use search_and_contents for better results
-        logger.debug("[Exa] Calling search_and_contents API...")
-        response = client.search_and_contents(query, **search_kwargs)
+        logger.debug("[Exa] Calling search API...")
+        response = client.search(query, **search_kwargs)
 
         # Log response metadata
         result_count = len(response.results) if response.results else 0
@@ -250,28 +314,28 @@ def exa_search(
         results: list[ExaSearchResult] = []
         for i, result in enumerate(response.results):
             # Log each result's available fields
-            has_summary = hasattr(result, "summary") and bool(result.summary)
-            has_text = hasattr(result, "text") and bool(result.text)
-            text_len = len(result.text) if has_text else 0
-            summary_len = len(result.summary) if has_summary else 0
+            summary = result.summary or None
+            text = result.text or None
+            text_len = len(text) if text else 0
+            summary_len = len(summary) if summary else 0
 
             logger.debug(
                 f"[Exa] Result {i + 1} | "
                 f"title='{(result.title or 'N/A')[:50]}' "
                 f"url={result.url} "
-                f"has_summary={has_summary} (len={summary_len}) "
-                f"has_text={has_text} (len={text_len}) "
+                f"has_summary={bool(summary)} (len={summary_len}) "
+                f"has_text={bool(text)} (len={text_len}) "
                 f"published={getattr(result, 'published_date', None)}"
             )
 
             # Prefer summary over raw text, fall back to text
             snippet = None
-            if has_summary:
-                snippet = result.summary
+            if summary:
+                snippet = summary
                 logger.debug(f"[Exa] Result {i + 1} | Using summary: '{snippet[:100]}...'")
-            elif has_text:
+            elif text:
                 # Clean up text: skip navigation/header cruft at the beginning
-                snippet = _extract_clean_snippet(result.text, max_characters)
+                snippet = _extract_clean_snippet(text, max_characters)
                 logger.debug(f"[Exa] Result {i + 1} | Using text (cleaned): '{snippet[:100]}...'")
             else:
                 logger.debug(f"[Exa] Result {i + 1} | No content available")
@@ -310,6 +374,38 @@ def exa_search(
         return []
 
 
+def exa_search_many(
+    queries: list[str],
+    *,
+    max_workers: int,
+    num_results: int,
+    max_characters: int = 2000,
+    exclude_domains: list[str] | None = None,
+    telemetry: dict[str, Any] | None = None,
+    request_timeout_seconds: float | None = None,
+) -> list[tuple[str, list[ExaSearchResult]]]:
+    """Run a bounded Exa batch while preserving input query order."""
+    worker_count = min(max_workers, len(queries))
+    if worker_count <= 0:
+        return []
+
+    def _search(query: str) -> tuple[str, list[ExaSearchResult]]:
+        return (
+            query,
+            exa_search(
+                query,
+                num_results=num_results,
+                max_characters=max_characters,
+                exclude_domains=exclude_domains,
+                telemetry=telemetry,
+                request_timeout_seconds=request_timeout_seconds,
+            ),
+        )
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        return list(executor.map(_search, queries))
+
+
 def exa_get_contents(
     urls: list[str],
     *,
@@ -318,20 +414,21 @@ def exa_get_contents(
     max_age_hours: int | None = None,
     raise_on_error: bool = False,
     telemetry: dict[str, Any] | None = None,
+    request_timeout_seconds: float | None = None,
 ) -> list[ExaContentResult]:
     """Fetch content for already-selected URLs via Exa's contents API."""
 
-    client = get_exa_client()
+    clean_urls = [url.strip() for url in urls if isinstance(url, str) and url.strip()]
+    if not clean_urls or (request_timeout_seconds is not None and request_timeout_seconds <= 0):
+        return []
+
+    client = _get_request_client(request_timeout_seconds)
     if client is None:
         message = "Exa client not available"
         if raise_on_error:
             logger.error(message)
             raise ExaUnavailableError(message)
         logger.warning("%s; returning empty content results", message)
-        return []
-
-    clean_urls = [url.strip() for url in urls if isinstance(url, str) and url.strip()]
-    if not clean_urls:
         return []
 
     try:

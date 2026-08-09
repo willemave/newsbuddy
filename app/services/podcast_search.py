@@ -3,75 +3,43 @@
 from __future__ import annotations
 
 import hashlib
-import re
 import threading
 import time
 from collections.abc import Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import urlparse
 
 import httpx
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.services.apple_podcasts import resolve_apple_podcast_episode
-from app.services.content_submission import normalize_url
+from app.services.apple_podcasts import extract_apple_podcast_id
 from app.services.exa_client import exa_search
+from app.services.podcast_search_results import (
+    PROVIDER_WEIGHTS,
+    PodcastEpisodeSearchHit,
+    _clean_text,
+    _iso_from_epoch_seconds,
+    _iso_from_millis,
+    _looks_like_podcast_result,
+    _nested_string,
+    _normalize_published_date,
+    _source_from_url,
+    _spotify_release_to_iso,
+    _string_or_none,
+    normalize_podcast_http_url,
+    rank_and_dedupe_hits,
+)
 from app.services.vendor_costs import record_vendor_usage_out_of_band
+from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
 
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 25
 MAX_EXA_RESULTS = 40
-PODCAST_KEYWORDS = ("podcast", "episode", "listen", "audio", "interview")
-PODCAST_HOST_HINTS = (
-    "podcasts.apple.com",
-    "spotify.com",
-    "overcast.fm",
-    "pca.st",
-    "podbean.com",
-    "buzzsprout.com",
-    "captivate.fm",
-    "transistor.fm",
-    "simplecast.com",
-    "megaphone.fm",
-    "listennotes.com",
-)
-TRACKING_QUERY_KEYS = {
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_term",
-    "utm_content",
-    "si",
-    "fbclid",
-    "gclid",
-}
-TOKEN_STOPWORDS = {
-    "the",
-    "a",
-    "an",
-    "and",
-    "or",
-    "for",
-    "to",
-    "of",
-    "in",
-    "on",
-    "at",
-    "with",
-    "podcast",
-    "episode",
-}
-PROVIDER_WEIGHTS = {
-    "listen_notes": 0.95,
-    "spotify": 0.9,
-    "apple_itunes": 0.82,
-    "podcast_index": 0.78,
-    "exa": 0.6,
-}
 PROVIDER_ORDER = (
     "listen_notes",
     "spotify",
@@ -79,23 +47,11 @@ PROVIDER_ORDER = (
     "podcast_index",
     "exa",
 )
+MAX_APPLE_FEED_LOOKUPS_PER_PROVIDER = 2
+_PROVIDER_EXECUTOR_CAPACITY = len(PROVIDER_ORDER) * 2
+_SEARCH_CACHE_MAX_ENTRIES = 256
 RequestParamScalar = str | int | float | bool | None
 RequestParams = Mapping[str, RequestParamScalar | Sequence[RequestParamScalar]]
-
-
-@dataclass(frozen=True)
-class PodcastEpisodeSearchHit:
-    """A podcast episode match from external search."""
-
-    title: str
-    episode_url: str
-    podcast_title: str | None
-    source: str | None
-    snippet: str | None
-    feed_url: str | None
-    published_at: str | None
-    provider: str
-    score: float | None = None
 
 
 @dataclass
@@ -110,16 +66,34 @@ class _SpotifyToken:
     expires_at_epoch: float
 
 
-_SEARCH_CACHE: dict[str, tuple[float, list[PodcastEpisodeSearchHit]]] = {}
+@dataclass(frozen=True)
+class _PodcastSearchCacheEntry:
+    expires_at: float
+    hits: tuple[PodcastEpisodeSearchHit, ...]
+
+
+class _PodcastSearchDeadlineExceeded(TimeoutError):
+    """Raised when the shared search deadline, rather than a provider, expires."""
+
+
+_SEARCH_CACHE: dict[str, _PodcastSearchCacheEntry] = {}
 _SEARCH_CACHE_LOCK = threading.Lock()
 _PROVIDER_STATES: dict[str, _ProviderState] = {}
 _PROVIDER_STATE_LOCK = threading.Lock()
 _SPOTIFY_TOKEN: _SpotifyToken | None = None
 _SPOTIFY_TOKEN_LOCK = threading.Lock()
+_PROVIDER_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_PROVIDER_EXECUTOR_CAPACITY,
+    thread_name_prefix="podcast-search",
+)
+_PROVIDER_ADMISSION = threading.BoundedSemaphore(_PROVIDER_EXECUTOR_CAPACITY)
 
 
 def search_podcast_episodes(
-    query: str, limit: int = DEFAULT_LIMIT
+    query: str,
+    limit: int = DEFAULT_LIMIT,
+    *,
+    deadline: float | None = None,
 ) -> list[PodcastEpisodeSearchHit]:
     """Search for podcast episodes by free-text query.
 
@@ -131,7 +105,7 @@ def search_podcast_episodes(
         Aggregated episode matches from configured providers.
     """
     cleaned_query = query.strip()
-    if len(cleaned_query) < 2:
+    if len(cleaned_query) < 2 or _deadline_expired(deadline):
         return []
 
     requested_limit = max(1, min(limit, MAX_LIMIT))
@@ -139,13 +113,58 @@ def search_podcast_episodes(
     if cached is not None:
         return cached
 
+    effective_deadline = _effective_search_deadline(deadline)
     provider_limit = max(requested_limit * 2, requested_limit)
     provider_hits: list[PodcastEpisodeSearchHit] = []
+    provider_futures: dict[str, Future[tuple[list[PodcastEpisodeSearchHit], bool]]] = {}
     for provider_name in PROVIDER_ORDER:
-        provider_hits.extend(_run_provider(provider_name, cleaned_query, provider_limit))
+        future = _submit_provider(
+            provider_name,
+            cleaned_query,
+            provider_limit,
+            deadline=effective_deadline,
+        )
+        if future is not None:
+            provider_futures[provider_name] = future
 
-    ranked_hits = _rank_and_dedupe_hits(cleaned_query, provider_hits)[:requested_limit]
-    _write_cached_results(cleaned_query, requested_limit, ranked_hits)
+    completed_all_providers = len(provider_futures) == len(PROVIDER_ORDER)
+    done, pending = wait(
+        tuple(provider_futures.values()),
+        timeout=max(0.0, effective_deadline - time.monotonic()),
+    )
+    for future in pending:
+        future.cancel()
+
+    for provider_name in PROVIDER_ORDER:
+        future = provider_futures.get(provider_name)
+        if future is None or future not in done:
+            completed_all_providers = False
+            continue
+        try:
+            hits, provider_completed = future.result()
+        except Exception as exc:  # noqa: BLE001
+            completed_all_providers = False
+            logger.exception(
+                "Podcast provider future failed unexpectedly: %s",
+                exc,
+                extra={
+                    "component": "podcast_search",
+                    "operation": "provider_future",
+                    "context_data": {"provider": provider_name},
+                },
+            )
+            continue
+        provider_hits.extend(hits)
+        completed_all_providers = completed_all_providers and provider_completed
+
+    ranked_hits = rank_and_dedupe_hits(cleaned_query, provider_hits)[:requested_limit]
+    if completed_all_providers or ranked_hits:
+        _write_cached_results(
+            cleaned_query,
+            requested_limit,
+            ranked_hits,
+            degraded=not completed_all_providers,
+        )
     return ranked_hits
 
 
@@ -156,29 +175,62 @@ def _read_cached_results(query: str, limit: int) -> list[PodcastEpisodeSearchHit
         return None
 
     cache_key = f"{query.lower()}::{limit}"
-    now_epoch = time.time()
+    now = time.monotonic()
     with _SEARCH_CACHE_LOCK:
         cached = _SEARCH_CACHE.get(cache_key)
         if not cached:
             return None
-        cached_at, cached_hits = cached
-        if (now_epoch - cached_at) > ttl:
+        if cached.expires_at <= now:
             _SEARCH_CACHE.pop(cache_key, None)
             return None
-        return list(cached_hits)
+        _SEARCH_CACHE.pop(cache_key)
+        _SEARCH_CACHE[cache_key] = cached
+        return list(cached.hits)
 
 
-def _write_cached_results(query: str, limit: int, hits: list[PodcastEpisodeSearchHit]) -> None:
+def _write_cached_results(
+    query: str,
+    limit: int,
+    hits: list[PodcastEpisodeSearchHit],
+    *,
+    degraded: bool,
+) -> None:
     settings = get_settings()
-    if settings.podcast_search_cache_ttl_seconds <= 0:
+    full_ttl = float(settings.podcast_search_cache_ttl_seconds)
+    ttl = (
+        min(full_ttl, float(settings.podcast_search_provider_timeout_seconds))
+        if degraded
+        else full_ttl
+    )
+    if ttl <= 0 or (degraded and not hits):
         return
 
     cache_key = f"{query.lower()}::{limit}"
+    now = time.monotonic()
     with _SEARCH_CACHE_LOCK:
-        _SEARCH_CACHE[cache_key] = (time.time(), list(hits))
+        for expired_key, entry in tuple(_SEARCH_CACHE.items()):
+            if entry.expires_at <= now:
+                _SEARCH_CACHE.pop(expired_key, None)
+        _SEARCH_CACHE.pop(cache_key, None)
+        while len(_SEARCH_CACHE) >= _SEARCH_CACHE_MAX_ENTRIES:
+            _SEARCH_CACHE.pop(next(iter(_SEARCH_CACHE)))
+        _SEARCH_CACHE[cache_key] = _PodcastSearchCacheEntry(
+            expires_at=now + ttl,
+            hits=tuple(hits),
+        )
 
 
-def _run_provider(provider_name: str, query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
+def _run_provider(
+    provider_name: str,
+    query: str,
+    limit: int,
+    *,
+    deadline: float | None = None,
+) -> tuple[list[PodcastEpisodeSearchHit], bool]:
+    """Return provider hits plus whether the provider completed successfully."""
+
+    if _deadline_expired(deadline):
+        return [], False
     if _is_provider_open(provider_name):
         logger.debug(
             "Skipping provider due to open circuit",
@@ -188,7 +240,7 @@ def _run_provider(provider_name: str, query: str, limit: int) -> list[PodcastEpi
                 "context_data": {"provider": provider_name},
             },
         )
-        return []
+        return [], False
 
     provider_map = {
         "listen_notes": _search_listen_notes,
@@ -199,13 +251,19 @@ def _run_provider(provider_name: str, query: str, limit: int) -> list[PodcastEpi
     }
     provider_fn = provider_map.get(provider_name)
     if not provider_fn:
-        return []
+        return [], False
 
     try:
-        hits = provider_fn(query, limit)
+        hits = provider_fn(query, limit, deadline=deadline)
+        if _deadline_expired(deadline):
+            return [], False
         _record_provider_success(provider_name)
-        return hits
+        return hits, True
+    except _PodcastSearchDeadlineExceeded:
+        return [], False
     except Exception as exc:  # noqa: BLE001
+        if _deadline_expired(deadline):
+            return [], False
         _record_provider_failure(provider_name, exc)
         logger.warning(
             "Podcast provider failed: %s",
@@ -216,7 +274,71 @@ def _run_provider(provider_name: str, query: str, limit: int) -> list[PodcastEpi
                 "context_data": {"provider": provider_name, "query": query},
             },
         )
-        return []
+        return [], False
+
+
+def _deadline_expired(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
+
+
+def _effective_search_deadline(deadline: float | None) -> float:
+    internal_deadline = time.monotonic() + max(
+        0.001,
+        float(get_settings().podcast_search_provider_timeout_seconds),
+    )
+    return internal_deadline if deadline is None else min(deadline, internal_deadline)
+
+
+def _submit_provider(
+    provider_name: str,
+    query: str,
+    limit: int,
+    *,
+    deadline: float,
+) -> Future[tuple[list[PodcastEpisodeSearchHit], bool]] | None:
+    if _deadline_expired(deadline):
+        return None
+
+    admission = _PROVIDER_ADMISSION
+    if not admission.acquire(blocking=False):
+        return None
+
+    try:
+        future = _PROVIDER_EXECUTOR.submit(
+            _run_provider,
+            provider_name,
+            query,
+            limit,
+            deadline=deadline,
+        )
+    except RuntimeError:
+        admission.release()
+        raise
+
+    def _release_admission_slot(
+        _future: Future[tuple[list[PodcastEpisodeSearchHit], bool]],
+    ) -> None:
+        admission.release()
+
+    future.add_done_callback(_release_admission_slot)
+    return future
+
+
+def _remaining_provider_timeout(deadline: float | None) -> float:
+    configured = max(0.001, float(get_settings().podcast_search_provider_timeout_seconds))
+    if deadline is None:
+        return configured
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise _PodcastSearchDeadlineExceeded("Podcast search deadline expired")
+    return min(configured, remaining)
+
+
+def _remaining_shared_deadline(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise _PodcastSearchDeadlineExceeded("Podcast search deadline expired")
+    return remaining
 
 
 def _is_provider_open(provider_name: str) -> bool:
@@ -259,79 +381,12 @@ def _record_provider_failure(provider_name: str, error: Exception) -> None:
             )
 
 
-def _rank_and_dedupe_hits(
-    query: str, hits: list[PodcastEpisodeSearchHit]
+def _search_listen_notes(
+    query: str,
+    limit: int,
+    *,
+    deadline: float | None = None,
 ) -> list[PodcastEpisodeSearchHit]:
-    query_tokens = _tokenize(query)
-    deduped: dict[str, PodcastEpisodeSearchHit] = {}
-
-    for hit in hits:
-        canonical_url = _canonicalize_episode_url(hit.episode_url)
-        if not canonical_url:
-            continue
-        computed_score = _compute_hit_score(hit, query_tokens)
-        scored_hit = PodcastEpisodeSearchHit(
-            title=hit.title,
-            episode_url=hit.episode_url,
-            podcast_title=hit.podcast_title,
-            source=hit.source,
-            snippet=hit.snippet,
-            feed_url=hit.feed_url,
-            published_at=hit.published_at,
-            provider=hit.provider,
-            score=computed_score,
-        )
-
-        existing = deduped.get(canonical_url)
-        if not existing or (existing.score or 0.0) < (scored_hit.score or 0.0):
-            deduped[canonical_url] = scored_hit
-
-    return sorted(
-        deduped.values(),
-        key=lambda item: ((item.score or 0.0), _sort_epoch(item.published_at)),
-        reverse=True,
-    )
-
-
-def _compute_hit_score(hit: PodcastEpisodeSearchHit, query_tokens: list[str]) -> float:
-    base = hit.score or PROVIDER_WEIGHTS.get(hit.provider, 0.5)
-    text = " ".join(
-        [
-            hit.title,
-            hit.podcast_title or "",
-            hit.snippet or "",
-        ]
-    ).lower()
-
-    if query_tokens:
-        matched = sum(1 for token in query_tokens if token in text)
-        base += 0.25 * (matched / len(query_tokens))
-
-    if hit.feed_url:
-        base += 0.05
-
-    if hit.published_at:
-        published = _parse_iso_dt(hit.published_at)
-        if published:
-            age_days = max(0.0, (datetime.now(UTC) - published).total_seconds() / 86_400)
-            if age_days <= 14:
-                base += 0.07
-            elif age_days <= 60:
-                base += 0.04
-            elif age_days <= 365:
-                base += 0.02
-
-    return min(base, 2.0)
-
-
-def _sort_epoch(value: str | None) -> float:
-    parsed = _parse_iso_dt(value) if value else None
-    if not parsed:
-        return 0.0
-    return parsed.timestamp()
-
-
-def _search_listen_notes(query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
     settings = get_settings()
     if not settings.listen_notes_api_key:
         return []
@@ -346,6 +401,7 @@ def _search_listen_notes(query: str, limit: int) -> list[PodcastEpisodeSearchHit
             "page_size": min(limit, 10),
         },
         headers={"X-ListenAPI-Key": settings.listen_notes_api_key},
+        deadline=deadline,
     )
 
     results = payload.get("results", [])
@@ -356,7 +412,7 @@ def _search_listen_notes(query: str, limit: int) -> list[PodcastEpisodeSearchHit
     for item in results:
         if not isinstance(item, dict):
             continue
-        episode_url = _normalize_http_url(
+        episode_url = normalize_podcast_http_url(
             _string_or_none(item.get("link")) or _string_or_none(item.get("listennotes_url"))
         )
         if not episode_url:
@@ -366,7 +422,7 @@ def _search_listen_notes(query: str, limit: int) -> list[PodcastEpisodeSearchHit
         podcast = podcast_value if isinstance(podcast_value, dict) else {}
         podcast_title = _string_or_none(podcast.get("title_original"))
         source = _string_or_none(podcast.get("publisher")) or _source_from_url(episode_url)
-        feed_url = _normalize_http_url(
+        feed_url = normalize_podcast_http_url(
             _string_or_none(item.get("rss")) or _string_or_none(podcast.get("rss"))
         )
         snippet = _clean_text(
@@ -397,12 +453,22 @@ def _search_listen_notes(query: str, limit: int) -> list[PodcastEpisodeSearchHit
     return hits
 
 
-def _search_spotify(query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
-    token = _get_spotify_token()
+def _search_spotify(
+    query: str,
+    limit: int,
+    *,
+    deadline: float | None = None,
+) -> list[PodcastEpisodeSearchHit]:
+    token = _get_spotify_token(deadline=deadline)
     if not token:
         return []
 
-    payload = _spotify_search(token=token, query=query, limit=min(limit, 20))
+    payload = _spotify_search(
+        token=token,
+        query=query,
+        limit=min(limit, 20),
+        deadline=deadline,
+    )
     if payload is None:
         return []
     episodes = payload.get("episodes")
@@ -416,7 +482,7 @@ def _search_spotify(query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        episode_url = _normalize_http_url(_nested_string(item, "external_urls", "spotify"))
+        episode_url = normalize_podcast_http_url(_nested_string(item, "external_urls", "spotify"))
         if not episode_url:
             continue
         show_value = item.get("show")
@@ -442,19 +508,27 @@ def _search_spotify(query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
     return hits
 
 
-def _spotify_search(token: str, query: str, limit: int) -> dict[str, object] | None:
+def _spotify_search(
+    token: str,
+    query: str,
+    limit: int,
+    *,
+    deadline: float | None = None,
+) -> dict[str, object] | None:
     settings = get_settings()
     params: dict[str, RequestParamScalar] = {"q": query, "type": "episode", "limit": limit}
     if settings.spotify_market:
         params["market"] = settings.spotify_market
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    timeout = settings.podcast_search_provider_timeout_seconds
+    timeout = _remaining_provider_timeout(deadline)
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         response = client.get("https://api.spotify.com/v1/search", params=params, headers=headers)
         if response.status_code == 401:
-            _clear_spotify_token()
-            refreshed = _get_spotify_token()
+            refreshed = _get_spotify_token(
+                deadline=deadline,
+                rejected_token=token,
+            )
             if not refreshed:
                 return None
             headers["Authorization"] = f"Bearer {refreshed}"
@@ -462,6 +536,7 @@ def _spotify_search(token: str, query: str, limit: int) -> dict[str, object] | N
                 "https://api.spotify.com/v1/search",
                 params=params,
                 headers=headers,
+                timeout=_remaining_provider_timeout(deadline),
             )
 
         response.raise_for_status()
@@ -481,18 +556,32 @@ def _spotify_search(token: str, query: str, limit: int) -> dict[str, object] | N
         return None
 
 
-def _get_spotify_token() -> str | None:
+def _get_spotify_token(
+    *,
+    deadline: float | None = None,
+    rejected_token: str | None = None,
+) -> str | None:
     global _SPOTIFY_TOKEN  # noqa: PLW0603
 
     settings = get_settings()
     if not settings.spotify_client_id or not settings.spotify_client_secret:
         return None
 
-    with _SPOTIFY_TOKEN_LOCK:
-        if _SPOTIFY_TOKEN and (_SPOTIFY_TOKEN.expires_at_epoch - time.time()) > 30:
+    if deadline is None:
+        acquired = _SPOTIFY_TOKEN_LOCK.acquire()
+    else:
+        acquired = _SPOTIFY_TOKEN_LOCK.acquire(timeout=_remaining_shared_deadline(deadline))
+    if not acquired:
+        raise _PodcastSearchDeadlineExceeded("Spotify token lock exceeded podcast search deadline")
+    try:
+        if (
+            _SPOTIFY_TOKEN
+            and _SPOTIFY_TOKEN.access_token != rejected_token
+            and (_SPOTIFY_TOKEN.expires_at_epoch - time.time()) > 30
+        ):
             return _SPOTIFY_TOKEN.access_token
 
-        timeout = settings.podcast_search_provider_timeout_seconds
+        timeout = _remaining_provider_timeout(deadline)
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             response = client.post(
                 "https://accounts.spotify.com/api/token",
@@ -522,15 +611,16 @@ def _get_spotify_token() -> str | None:
                 resource_count=1,
             )
             return access_token
+    finally:
+        _SPOTIFY_TOKEN_LOCK.release()
 
 
-def _clear_spotify_token() -> None:
-    global _SPOTIFY_TOKEN  # noqa: PLW0603
-    with _SPOTIFY_TOKEN_LOCK:
-        _SPOTIFY_TOKEN = None
-
-
-def _search_apple_itunes(query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
+def _search_apple_itunes(
+    query: str,
+    limit: int,
+    *,
+    deadline: float | None = None,
+) -> list[PodcastEpisodeSearchHit]:
     settings = get_settings()
     params: dict[str, RequestParamScalar] = {
         "term": query,
@@ -541,23 +631,29 @@ def _search_apple_itunes(query: str, limit: int) -> list[PodcastEpisodeSearchHit
     if settings.discovery_itunes_country:
         params["country"] = settings.discovery_itunes_country
 
-    payload = _http_get_json("https://itunes.apple.com/search", params=params)
+    payload = _http_get_json(
+        "https://itunes.apple.com/search",
+        params=params,
+        deadline=deadline,
+    )
     results = payload.get("results", [])
     if not isinstance(results, list):
         return []
 
     hits: list[PodcastEpisodeSearchHit] = []
     for index, item in enumerate(results):
+        if _deadline_expired(deadline):
+            break
         if not isinstance(item, dict):
             continue
 
-        episode_url = _normalize_http_url(_string_or_none(item.get("trackViewUrl")))
+        episode_url = normalize_podcast_http_url(_string_or_none(item.get("trackViewUrl")))
         if not episode_url:
             continue
 
-        feed_url = _normalize_http_url(_string_or_none(item.get("feedUrl")))
-        if not feed_url and index < 2:
-            feed_url = _resolve_feed_url(episode_url)
+        feed_url = normalize_podcast_http_url(_string_or_none(item.get("feedUrl")))
+        if not feed_url and index < MAX_APPLE_FEED_LOOKUPS_PER_PROVIDER:
+            feed_url = _resolve_feed_url(episode_url, deadline=deadline)
 
         hits.append(
             PodcastEpisodeSearchHit(
@@ -576,7 +672,12 @@ def _search_apple_itunes(query: str, limit: int) -> list[PodcastEpisodeSearchHit
     return hits
 
 
-def _search_podcast_index(query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
+def _search_podcast_index(
+    query: str,
+    limit: int,
+    *,
+    deadline: float | None = None,
+) -> list[PodcastEpisodeSearchHit]:
     settings = get_settings()
     if not settings.podcast_index_api_key or not settings.podcast_index_api_secret:
         return []
@@ -584,6 +685,7 @@ def _search_podcast_index(query: str, limit: int) -> list[PodcastEpisodeSearchHi
     search_payload = _podcast_index_request(
         path="/search/byterm",
         params={"q": query, "max": min(10, max(4, limit // 2))},
+        deadline=deadline,
     )
     feeds = search_payload.get("feeds", [])
     if not isinstance(feeds, list):
@@ -598,17 +700,20 @@ def _search_podcast_index(query: str, limit: int) -> list[PodcastEpisodeSearchHi
 
     hits: list[PodcastEpisodeSearchHit] = []
     for feed in feeds[:3]:
+        if _deadline_expired(deadline):
+            break
         if not isinstance(feed, dict):
             continue
         feed_id = feed.get("id")
         if feed_id is None:
             continue
         feed_title = _string_or_none(feed.get("title"))
-        feed_url = _normalize_http_url(_string_or_none(feed.get("url")))
+        feed_url = normalize_podcast_http_url(_string_or_none(feed.get("url")))
 
         episodes_payload = _podcast_index_request(
             path="/episodes/byfeedid",
             params={"id": str(feed_id), "max": min(3, limit), "fulltext": ""},
+            deadline=deadline,
         )
         items = episodes_payload.get("items", [])
         if not isinstance(items, list):
@@ -624,7 +729,7 @@ def _search_podcast_index(query: str, limit: int) -> list[PodcastEpisodeSearchHi
         for item in items:
             if not isinstance(item, dict):
                 continue
-            episode_url = _normalize_http_url(
+            episode_url = normalize_podcast_http_url(
                 _string_or_none(item.get("link")) or _string_or_none(item.get("enclosureUrl"))
             )
             if not episode_url:
@@ -647,7 +752,12 @@ def _search_podcast_index(query: str, limit: int) -> list[PodcastEpisodeSearchHi
     return hits
 
 
-def _podcast_index_request(path: str, params: RequestParams) -> dict[str, object]:
+def _podcast_index_request(
+    path: str,
+    params: RequestParams,
+    *,
+    deadline: float | None = None,
+) -> dict[str, object]:
     settings = get_settings()
     timestamp = str(int(time.time()))
     auth = hashlib.sha1(
@@ -663,22 +773,45 @@ def _podcast_index_request(path: str, params: RequestParams) -> dict[str, object
         f"https://api.podcastindex.org/api/1.0{path}",
         params=params,
         headers=headers,
+        deadline=deadline,
     )
 
 
-def _search_exa(query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
+def _search_exa(
+    query: str,
+    limit: int,
+    *,
+    deadline: float | None = None,
+) -> list[PodcastEpisodeSearchHit]:
+    if not get_settings().exa_api_key:
+        return []
     raw_results = exa_search(
         query=f"{query} podcast episode",
         num_results=min(MAX_EXA_RESULTS, max(limit, limit * 2)),
+        raise_on_error=True,
+        request_timeout_seconds=_remaining_provider_timeout(deadline),
     )
 
     hits: list[PodcastEpisodeSearchHit] = []
+    apple_feed_urls: dict[str, str | None] = {}
     for result in raw_results:
-        episode_url = _normalize_http_url(result.url)
+        if _deadline_expired(deadline):
+            break
+        episode_url = normalize_podcast_http_url(result.url)
         if not episode_url:
             continue
         if not _looks_like_podcast_result(result.title, result.snippet, episode_url):
             continue
+
+        feed_url = None
+        apple_show_id = extract_apple_podcast_id(episode_url)
+        if apple_show_id in apple_feed_urls:
+            feed_url = apple_feed_urls[apple_show_id]
+        elif (
+            apple_show_id is not None and len(apple_feed_urls) < MAX_APPLE_FEED_LOOKUPS_PER_PROVIDER
+        ):
+            feed_url = _resolve_feed_url(episode_url, deadline=deadline)
+            apple_feed_urls[apple_show_id] = feed_url
 
         hits.append(
             PodcastEpisodeSearchHit(
@@ -687,7 +820,7 @@ def _search_exa(query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
                 podcast_title=None,
                 source=_source_from_url(episode_url),
                 snippet=_clean_text(result.snippet),
-                feed_url=_resolve_feed_url(episode_url),
+                feed_url=feed_url,
                 published_at=_normalize_published_date(result.published_date),
                 provider="exa",
                 score=PROVIDER_WEIGHTS["exa"],
@@ -698,10 +831,13 @@ def _search_exa(query: str, limit: int) -> list[PodcastEpisodeSearchHit]:
 
 
 def _http_get_json(
-    url: str, params: RequestParams | None = None, headers: dict[str, str] | None = None
+    url: str,
+    params: RequestParams | None = None,
+    headers: dict[str, str] | None = None,
+    *,
+    deadline: float | None = None,
 ) -> dict[str, object]:
-    settings = get_settings()
-    timeout = settings.podcast_search_provider_timeout_seconds
+    timeout = _remaining_provider_timeout(deadline)
     request_headers = {"Accept": "application/json", "User-Agent": "newsly/1.0"}
     if headers:
         request_headers.update(headers)
@@ -737,58 +873,46 @@ def _record_podcast_usage(
     )
 
 
-def _normalize_http_url(raw_url: str | None) -> str | None:
-    if not raw_url:
-        return None
-    try:
-        return normalize_url(raw_url)
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _canonicalize_episode_url(raw_url: str) -> str | None:
-    normalized = _normalize_http_url(raw_url)
-    if not normalized:
-        return None
-    parsed = urlparse(normalized)
-    filtered_query = [
-        (k, v)
-        for k, v in parse_qsl(parsed.query, keep_blank_values=True)
-        if k.lower() not in TRACKING_QUERY_KEYS
-    ]
-    canonical = parsed._replace(
-        query=urlencode(filtered_query, doseq=True),
-        fragment="",
-    )
-    return _normalize_http_url(urlunparse(canonical))
-
-
-def _source_from_url(url: str) -> str | None:
-    host = (urlparse(url).netloc or "").lower()
-    if not host:
-        return None
-    if host.startswith("www."):
-        return host[4:]
-    return host
-
-
-def _looks_like_podcast_result(title: str | None, snippet: str | None, url: str) -> bool:
-    host = (urlparse(url).netloc or "").lower()
-    if any(host.endswith(hint) or hint in host for hint in PODCAST_HOST_HINTS):
-        return True
-
-    combined = " ".join([title or "", snippet or "", url]).lower()
-    return any(keyword in combined for keyword in PODCAST_KEYWORDS)
-
-
-def _resolve_feed_url(episode_url: str) -> str | None:
+def _resolve_feed_url(
+    episode_url: str,
+    *,
+    deadline: float | None = None,
+) -> str | None:
     parsed = urlparse(episode_url)
-    host = (parsed.netloc or "").lower()
-    if "podcasts.apple.com" not in host and "itunes.apple.com" not in host:
+    host = parsed.hostname
+    if not any(
+        is_domain_or_subdomain(host, domain)
+        for domain in ("podcasts.apple.com", "itunes.apple.com")
+    ):
         return None
 
     try:
-        resolution = resolve_apple_podcast_episode(episode_url)
+        show_id = extract_apple_podcast_id(episode_url)
+        if not show_id:
+            return None
+        params: dict[str, RequestParamScalar] = {
+            "id": show_id,
+            "entity": "podcast",
+        }
+        country = get_settings().discovery_itunes_country
+        if country:
+            params["country"] = country
+        payload = _http_get_json(
+            "https://itunes.apple.com/lookup",
+            params=params,
+            deadline=deadline,
+        )
+        results = payload.get("results", [])
+        if not isinstance(results, list):
+            return None
+        for item in results:
+            if isinstance(item, dict):
+                feed_url = normalize_podcast_http_url(_string_or_none(item.get("feedUrl")))
+                if feed_url:
+                    return feed_url
+        return None
+    except _PodcastSearchDeadlineExceeded:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Failed to resolve Apple podcast feed for search hit: %s",
@@ -800,109 +924,3 @@ def _resolve_feed_url(episode_url: str) -> str | None:
             },
         )
         return None
-    return _normalize_http_url(resolution.feed_url)
-
-
-def _tokenize(text: str) -> list[str]:
-    tokens = re.findall(r"[a-z0-9]+", text.lower())
-    return [token for token in tokens if token not in TOKEN_STOPWORDS and len(token) > 1]
-
-
-def _clean_text(text: str | None) -> str | None:
-    if not text:
-        return None
-    without_tags = re.sub(r"<[^>]+>", " ", text)
-    compact = re.sub(r"\s+", " ", without_tags).strip()
-    return compact or None
-
-
-def _string_or_none(value: object) -> str | None:
-    if isinstance(value, str):
-        cleaned = value.strip()
-        return cleaned or None
-    return None
-
-
-def _nested_string(payload: dict[str, object], *keys: str) -> str | None:
-    current: object = payload
-    for key in keys:
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    return _string_or_none(current)
-
-
-def _iso_from_millis(value: object) -> str | None:
-    if not isinstance(value, (int, float, str, bytes, bytearray)):
-        return None
-    try:
-        millis = int(value)
-    except (TypeError, ValueError):
-        return None
-    return datetime.fromtimestamp(millis / 1000, tz=UTC).isoformat().replace("+00:00", "Z")
-
-
-def _iso_from_epoch_seconds(value: object) -> str | None:
-    if not isinstance(value, (int, float, str, bytes, bytearray)):
-        return None
-    try:
-        seconds = int(value)
-    except (TypeError, ValueError):
-        return None
-    return datetime.fromtimestamp(seconds, tz=UTC).isoformat().replace("+00:00", "Z")
-
-
-def _spotify_release_to_iso(date_str: str | None, precision: str | None) -> str | None:
-    if not date_str:
-        return None
-    try:
-        if precision == "year":
-            dt = datetime.strptime(date_str, "%Y").replace(tzinfo=UTC)
-        elif precision == "month":
-            dt = datetime.strptime(date_str, "%Y-%m").replace(tzinfo=UTC)
-        else:
-            dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
-        return dt.isoformat().replace("+00:00", "Z")
-    except ValueError:
-        return _normalize_published_date(date_str)
-
-
-def _normalize_published_date(date_str: str | None) -> str | None:
-    if not date_str:
-        return None
-    value = date_str.strip()
-    if not value:
-        return None
-    try:
-        if value.endswith("Z"):
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        else:
-            parsed = datetime.fromisoformat(value)
-    except ValueError:
-        for fmt in ("%Y-%m-%d", "%Y-%m", "%Y"):
-            try:
-                parsed = datetime.strptime(value, fmt)
-                break
-            except ValueError:
-                continue
-        else:
-            return None
-
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _parse_iso_dt(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        if value.endswith("Z"):
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        else:
-            parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)

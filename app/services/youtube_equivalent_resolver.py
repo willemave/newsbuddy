@@ -20,6 +20,7 @@ from app.services.content_analyzer import AnalysisError
 from app.services.exa_client import exa_search
 from app.services.gateways.llm_gateway import get_llm_gateway
 from app.services.podcast_search import search_podcast_episodes
+from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
 
@@ -168,10 +169,10 @@ def _fetch_oembed_metadata(youtube_url: str) -> YouTubeOEmbedMetadata:
 def _normalize_youtube_watch_url(url: str) -> str:
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").lower()
-    if hostname == "youtu.be":
+    if is_domain_or_subdomain(hostname, "youtu.be"):
         video_id = parsed.path.strip("/").split("/", 1)[0]
         return f"https://www.youtube.com/watch?v={video_id}" if video_id else url
-    if "youtube.com" not in hostname:
+    if not is_domain_or_subdomain(hostname, "youtube.com"):
         return url
     if parsed.path == "/watch":
         raw_video_id = parse_qs(parsed.query).get("v", [None])[0]
@@ -304,7 +305,11 @@ def _author_bonus(author_name: str | None, candidate: _Candidate) -> float:
 
 def _host_bonus(url: str) -> float:
     hostname = (urlparse(url).hostname or "").lower()
-    return 0.08 if any(hint in hostname for hint in KNOWN_AUDIO_HOST_HINTS) else 0.0
+    return (
+        0.08
+        if any(is_domain_or_subdomain(hostname, hint) for hint in KNOWN_AUDIO_HOST_HINTS)
+        else 0.0
+    )
 
 
 def _normalize_text(value: str | None) -> str:

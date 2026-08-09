@@ -11,7 +11,8 @@ import feedparser
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.services.http import HttpService
+from app.services.http import HttpFetcher, HttpService
+from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
 
@@ -32,7 +33,12 @@ class ApplePodcastResolution:
     audio_url: str | None
 
 
-def resolve_apple_podcast_episode(url: str) -> ApplePodcastResolution:
+def resolve_apple_podcast_episode(
+    url: str,
+    *,
+    feed_http_service: HttpFetcher | None = None,
+    resolve_audio: bool = True,
+) -> ApplePodcastResolution:
     """Resolve Apple Podcasts episode metadata from a share URL.
 
     Args:
@@ -54,7 +60,20 @@ def resolve_apple_podcast_episode(url: str) -> ApplePodcastResolution:
             audio_url=None,
         )
 
-    audio_url = _resolve_episode_audio_url(feed_url, episode_title)
+    if not resolve_audio:
+        return ApplePodcastResolution(
+            feed_url=feed_url,
+            episode_title=episode_title,
+            audio_url=None,
+        )
+    if feed_http_service is None:
+        raise ValueError("Apple Podcasts RSS resolution requires sandbox HTTP")
+
+    audio_url = _resolve_episode_audio_url(
+        feed_url,
+        episode_title,
+        http_service=feed_http_service,
+    )
     return ApplePodcastResolution(
         feed_url=feed_url,
         episode_title=episode_title,
@@ -86,8 +105,8 @@ def resolve_apple_podcast_feed_url(url: str) -> str | None:
 def extract_apple_podcast_id(url: str) -> str | None:
     """Extract the podcast show id from an Apple Podcasts URL."""
     parsed = urlparse(url)
-    host = parsed.netloc.lower()
-    if not any(host.endswith(domain) for domain in APPLE_PODCAST_HOSTS):
+    host = parsed.hostname
+    if not any(is_domain_or_subdomain(host, domain) for domain in APPLE_PODCAST_HOSTS):
         return None
 
     match = APPLE_PODCAST_ID_REGEX.search(parsed.path)
@@ -109,7 +128,10 @@ def _extract_episode_id(url: str) -> str | None:
     return None
 
 
-def _lookup_feed_and_episode(show_id: str, episode_id: str | None) -> tuple[str | None, str | None]:
+def _lookup_feed_and_episode(
+    show_id: str,
+    episode_id: str | None,
+) -> tuple[str | None, str | None]:
     settings = get_settings()
     params = {
         "id": show_id,
@@ -167,9 +189,14 @@ def _lookup_podcast_feed_url(show_id: str, country: str) -> str | None:
     return None
 
 
-def _resolve_episode_audio_url(feed_url: str, episode_title: str) -> str | None:
+def _resolve_episode_audio_url(
+    feed_url: str,
+    episode_title: str,
+    *,
+    http_service: HttpFetcher,
+) -> str | None:
     try:
-        response = HTTP_SERVICE.fetch(feed_url, headers={"Accept": "application/rss+xml"})
+        response = http_service.fetch(feed_url, headers={"Accept": "application/rss+xml"})
         feed = feedparser.parse(response.text)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
