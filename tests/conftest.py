@@ -8,6 +8,7 @@ from copy import deepcopy
 from datetime import datetime
 from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -444,9 +445,14 @@ def auth_headers_factory():
 def stub_valid_feed_url(monkeypatch):
     """Accept test feed URLs without making network calls."""
 
+    @contextmanager
+    def _runtime(**_kwargs):
+        detector = SimpleNamespace(validate_feed_url=lambda url: {"feed_url": url.strip()})
+        yield SimpleNamespace(detector=detector)
+
     monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda url: {"feed_url": url.strip()},
+        "app.services.scraper_config_validation.feed_research_runtime",
+        _runtime,
     )
 
 
