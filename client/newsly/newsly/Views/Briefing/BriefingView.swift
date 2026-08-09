@@ -24,12 +24,12 @@ private enum BriefingViewAlert: Identifiable {
 
 struct BriefingView: View {
     let viewModel: BriefingViewModel
+    let scrollToTopRequest: Int
     private let narrationController: BriefingNarrationController
     /// Sources push onto the tab's navigation stack rather than opening a sheet,
     /// so the reader gets the standard back stack and edge-swipe.
     private let onOpenContent: (ContentDetailRoute) -> Void
 
-    @Environment(\.dynamicTypeSize) private var contentTextSize
     @State private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
     @State private var playbackService = NarrationPlaybackService.shared
     @State private var activeNarrationChapters: BriefingNarrationChapterSheetItem?
@@ -43,9 +43,11 @@ struct BriefingView: View {
 
     init(
         viewModel: BriefingViewModel,
+        scrollToTopRequest: Int = 0,
         onOpenContent: @escaping (ContentDetailRoute) -> Void
     ) {
         self.viewModel = viewModel
+        self.scrollToTopRequest = scrollToTopRequest
         self.narrationController = viewModel.narrationController
         self.onOpenContent = onOpenContent
     }
@@ -112,7 +114,6 @@ struct BriefingView: View {
         .screenContainer()
         .topScreenEdgeFade()
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("briefing.screen")
         .overlay {
             if let markingCategoryTitle {
                 Color.black.opacity(0.15)
@@ -186,6 +187,7 @@ struct BriefingView: View {
             if viewModel.isStartHereSelected, let firstRun = viewModel.firstRun {
                 BriefingStartHereView(
                     progress: firstRun,
+                    scrollToTopRequest: scrollToTopRequest,
                     onRefresh: viewModel.refreshIndex
                 )
                 .padding(.top, expandedChromeHeight)
@@ -200,6 +202,8 @@ struct BriefingView: View {
                                 && viewModel.selectedLensKey == lens.key,
                             readBoundaryY: readBoundaryY,
                             documentGeneration: viewModel.documentGeneration(for: lens.key),
+                            scrollToTopRequest: scrollToTopRequest,
+                            shouldScrollToTop: viewModel.selectedLensKey == lens.key,
                             error: viewModel.lensErrors[lens.key],
                             continuationError: viewModel.lensContinuationErrors[lens.key],
                             isLoadingContinuation: viewModel.lensContinuationLoadingKeys.contains(lens.key),
@@ -256,7 +260,7 @@ struct BriefingView: View {
                     .foregroundStyle(Color.statusDestructive)
                     .lineLimit(2)
                 Spacer(minLength: 8)
-                Button("Retry") {
+                Button("Try Again") {
                     Task { await viewModel.pullToRefresh() }
                 }
                 .font(.appCaption.weight(.semibold))
@@ -291,6 +295,7 @@ struct BriefingView: View {
             ) {
                 EditorialMastheadHeader(
                     title: "Briefing",
+                    titleAccessibilityIdentifier: "briefing.screen",
                     trailingAccessory: mastheadListenAccessory,
                     accessoryAlignment: .title
                 )

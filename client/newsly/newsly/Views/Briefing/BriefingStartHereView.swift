@@ -2,30 +2,34 @@ import SwiftUI
 
 struct BriefingStartHereView: View {
     let progress: APIBriefingFirstRunProgress
+    let scrollToTopRequest: Int
     let onRefresh: () async -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
 
+    private static let topAnchor = "briefing.start_here.top"
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Your sources become one briefing.")
-                    .font(.appTitle)
-                    .foregroundStyle(Color.onSurface)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 14)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Your sources become one briefing.")
+                        .font(.appTitle)
+                        .foregroundStyle(Color.onSurface)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 14)
 
-                Text("Newsbuddy reads across the sources you chose, connects different coverage of the same story, and writes the useful context into one briefing. Categories appear as patterns emerge, then keep updating as new reporting comes in.")
-                    .font(.appBody)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .lineSpacing(5)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text("Newsbuddy reads across the sources you chose, connects different coverage of the same story, and writes the useful context into one briefing. Categories appear as patterns emerge, then keep updating as new reporting comes in.")
+                        .font(.appBody)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineSpacing(5)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                Rectangle()
-                    .fill(Color.outlineVariant.opacity(0.7))
-                    .frame(height: 0.5)
-                    .padding(.vertical, 28)
+                    Rectangle()
+                        .fill(Color.outlineVariant.opacity(0.7))
+                        .frame(height: 0.5)
+                        .padding(.vertical, 28)
 
                 VStack(alignment: .leading, spacing: 16) {
                     Text(headlineText)
@@ -71,17 +75,24 @@ struct BriefingStartHereView: View {
                         .accessibilityIdentifier("briefing.start_here.ready")
                 }
 
-                Spacer(minLength: 48)
+                    Spacer(minLength: 48)
+                }
+                .id(Self.topAnchor)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.top, 30)
+                .frame(maxWidth: 680, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .opacity(appeared || reduceMotion ? 1 : 0)
+                .offset(y: appeared || reduceMotion ? 0 : 12)
             }
-            .padding(.horizontal, Spacing.appHorizontalMargin)
-            .padding(.top, 30)
-            .frame(maxWidth: 680, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .opacity(appeared || reduceMotion ? 1 : 0)
-            .offset(y: appeared || reduceMotion ? 0 : 12)
-        }
-        .refreshable {
-            await onRefresh()
+            .refreshable {
+                await onRefresh()
+            }
+            .scrollsToTopOnRequest(
+                scrollToTopRequest,
+                anchor: Self.topAnchor,
+                using: proxy
+            )
         }
         .onAppear {
             withAnimation(AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)) {

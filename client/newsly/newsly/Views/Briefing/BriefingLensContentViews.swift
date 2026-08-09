@@ -212,6 +212,8 @@ struct BriefingLensPageView: View, Equatable {
     let isReadTrackingEnabled: Bool
     let readBoundaryY: CGFloat?
     let documentGeneration: Int
+    let scrollToTopRequest: Int
+    let shouldScrollToTop: Bool
     let error: String?
     let continuationError: String?
     let isLoadingContinuation: Bool
@@ -236,6 +238,8 @@ struct BriefingLensPageView: View, Equatable {
     @State private var containerHeight: CGFloat = 0
     @State private var hasReportedFirstPassage = false
 
+    private static let topAnchor = "briefing.lens.top"
+
     // Steps only gate the discrete signals (retiring a tap-opened category
     // strip); the chrome collapse itself follows the clamped offset below.
     private static let scrollStep: CGFloat = 64
@@ -250,6 +254,8 @@ struct BriefingLensPageView: View, Equatable {
             && lhs.isReadTrackingEnabled == rhs.isReadTrackingEnabled
             && lhs.readBoundaryY == rhs.readBoundaryY
             && lhs.documentGeneration == rhs.documentGeneration
+            && lhs.scrollToTopRequest == rhs.scrollToTopRequest
+            && lhs.shouldScrollToTop == rhs.shouldScrollToTop
             && lhs.error == rhs.error
             && lhs.continuationError == rhs.continuationError
             && lhs.isLoadingContinuation == rhs.isLoadingContinuation
@@ -280,101 +286,115 @@ struct BriefingLensPageView: View, Equatable {
                 BriefingLensEmptyView(
                     lensTitle: lensTitle,
                     topContentInset: topContentInset,
+                    scrollToTopRequest: scrollToTopRequest,
+                    shouldScrollToTop: shouldScrollToTop,
                     onRefresh: onRefresh
                 )
             } else if let renderModel {
                 let firstSegmentID = renderModel.segments.first?.id
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 24) {
-                        ForEach(renderModel.segments) { segmentModel in
-                            let segment = segmentModel.segment
-                            VStack(alignment: .leading, spacing: 16) {
-                                if renderModel.timelineSeparatorSegmentIDs.contains(segment.id) {
-                                    BriefingTimelineSeparator(date: segment.createdAt)
-                                }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 24) {
+                            Color.clear
+                                .frame(height: 0)
+                                .id(Self.topAnchor)
 
-                                BriefingSegmentView(
-                                    model: segmentModel,
-                                    onOpenSource: onOpenSource,
-                                    onOpenDiscussion: onOpenDiscussion,
-                                    onDig: onDig
-                                )
-                                .onAppear {
-                                    guard segment.id == firstSegmentID,
-                                          !hasReportedFirstPassage else { return }
-                                    hasReportedFirstPassage = true
-                                    onFirstPassageVisible()
-                                }
-                                .id(segment.id)
-                                .briefingSegmentReadMarker(
-                                    isEnabled: isReadTrackingEnabled,
-                                    readBoundaryY: readBoundaryY,
-                                    onMidpointCrossed: {
-                                        onMarkSegmentSeen(segment)
+                            ForEach(renderModel.segments) { segmentModel in
+                                let segment = segmentModel.segment
+                                VStack(alignment: .leading, spacing: 16) {
+                                    if renderModel.timelineSeparatorSegmentIDs.contains(segment.id) {
+                                        BriefingTimelineSeparator(date: segment.createdAt)
                                     }
-                                )
-                            }
-                            .padding(.horizontal, Spacing.appHorizontalMargin)
-                        }
 
-                        Color.clear
-                            .frame(height: 24)
-                            .accessibilityHidden(true)
-
-                        if renderModel.hasMore || continuationError != nil {
-                            continuationStatus
+                                    BriefingSegmentView(
+                                        model: segmentModel,
+                                        onOpenSource: onOpenSource,
+                                        onOpenDiscussion: onOpenDiscussion,
+                                        onDig: onDig
+                                    )
+                                    .onAppear {
+                                        guard segment.id == firstSegmentID,
+                                              !hasReportedFirstPassage else { return }
+                                        hasReportedFirstPassage = true
+                                        onFirstPassageVisible()
+                                    }
+                                    .id(segment.id)
+                                    .briefingSegmentReadMarker(
+                                        isEnabled: isReadTrackingEnabled,
+                                        readBoundaryY: readBoundaryY,
+                                        onMidpointCrossed: {
+                                            onMarkSegmentSeen(segment)
+                                        }
+                                    )
+                                }
                                 .padding(.horizontal, Spacing.appHorizontalMargin)
-                                .padding(.bottom, 8)
+                            }
+
+                            Color.clear
+                                .frame(height: 24)
+                                .accessibilityHidden(true)
+
+                            if renderModel.hasMore || continuationError != nil {
+                                continuationStatus
+                                    .padding(.horizontal, Spacing.appHorizontalMargin)
+                                    .padding(.bottom, 8)
+                            }
                         }
+                        .padding(.top, 4)
+                        .frame(minHeight: minContentHeight, alignment: .top)
                     }
-                    .padding(.top, 4)
-                    .frame(minHeight: minContentHeight, alignment: .top)
-                }
-                .id(
-                    BriefingLensContentIdentity(
-                        lensKey: lensKey,
-                        generation: documentGeneration
+                    .scrollsToTopOnRequest(
+                        scrollToTopRequest,
+                        anchor: Self.topAnchor,
+                        using: proxy,
+                        isEnabled: shouldScrollToTop
                     )
-                )
-                .contentMargins(.top, topContentInset)
-                .contentMargins(.bottom, 40)
-                .bottomScreenEdgeFade(fadeHeight: 32)
-                .refreshable {
-                    await onRefresh()
-                }
-                .onScrollGeometryChange(for: ScrollProbe.self) { geometry in
-                    let offset = geometry.contentOffset.y + geometry.contentInsets.top
-                    // Pixel-align so the chrome never lands on sub-pixel
-                    // heights (text shimmer), then clamp to the collapse
-                    // window so steady reading streams no updates at all.
-                    let scale = max(displayScale, 1)
-                    let pixelAligned = (offset * scale).rounded() / scale
-                    return ScrollProbe(
-                        collapse: min(max(pixelAligned, 0), collapsibleChromeHeight),
-                        step: Int((offset / Self.scrollStep).rounded(.down)),
-                        containerHeight: geometry.containerSize.height
+                    .id(
+                        BriefingLensContentIdentity(
+                            lensKey: lensKey,
+                            generation: documentGeneration
+                        )
                     )
-                } action: { oldProbe, probe in
-                    if probe.step > oldProbe.step, probe.step >= 1 {
-                        onScrolledDown()
+                    .contentMargins(.top, topContentInset)
+                    .contentMargins(.bottom, 40)
+                    .bottomScreenEdgeFade(fadeHeight: 32)
+                    .refreshable {
+                        await onRefresh()
                     }
-                    chromeCollapse.setCollapse(probe.collapse, forLens: lensKey)
-                    if probe.containerHeight != containerHeight {
-                        containerHeight = probe.containerHeight
+                    .onScrollGeometryChange(for: ScrollProbe.self) { geometry in
+                        let offset = geometry.contentOffset.y + geometry.contentInsets.top
+                        // Pixel-align so the chrome never lands on sub-pixel
+                        // heights (text shimmer), then clamp to the collapse
+                        // window so steady reading streams no updates at all.
+                        let scale = max(displayScale, 1)
+                        let pixelAligned = (offset * scale).rounded() / scale
+                        return ScrollProbe(
+                            collapse: min(max(pixelAligned, 0), collapsibleChromeHeight),
+                            step: Int((offset / Self.scrollStep).rounded(.down)),
+                            containerHeight: geometry.containerSize.height
+                        )
+                    } action: { oldProbe, probe in
+                        if probe.step > oldProbe.step, probe.step >= 1 {
+                            onScrolledDown()
+                        }
+                        chromeCollapse.setCollapse(probe.collapse, forLens: lensKey)
+                        if probe.containerHeight != containerHeight {
+                            containerHeight = probe.containerHeight
+                        }
+                        let pinned = if probe.collapse >= collapsibleChromeHeight {
+                            true
+                        } else if probe.collapse <= collapsibleChromeHeight - Self.unpinSlack {
+                            false
+                        } else {
+                            isPinned
+                        }
+                        if pinned != isPinned {
+                            isPinned = pinned
+                        }
+                        // Unconditional so a recreated pager resyncs stale
+                        // view-model pinned state on its initial callback.
+                        onSetHeaderPinned(pinned)
                     }
-                    let pinned = if probe.collapse >= collapsibleChromeHeight {
-                        true
-                    } else if probe.collapse <= collapsibleChromeHeight - Self.unpinSlack {
-                        false
-                    } else {
-                        isPinned
-                    }
-                    if pinned != isPinned {
-                        isPinned = pinned
-                    }
-                    // Unconditional so a recreated pager resyncs stale
-                    // view-model pinned state on its initial callback.
-                    onSetHeaderPinned(pinned)
                 }
                 .accessibilityIdentifier("briefing.lens_page.\(lensKey)")
             } else if let error {
@@ -423,13 +443,18 @@ struct BriefingLensPageView: View, Equatable {
 private struct BriefingLensEmptyView: View {
     let lensTitle: String
     let topContentInset: CGFloat
+    let scrollToTopRequest: Int
+    let shouldScrollToTop: Bool
     let onRefresh: () async -> Void
 
+    private static let topAnchor = "briefing.lens_empty.top"
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("YOU'RE CAUGHT UP")
-                    .kicker()
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("YOU'RE CAUGHT UP")
+                        .kicker()
 
                 Text("Nothing unread here.")
                     .font(.appTitle)
@@ -448,20 +473,29 @@ private struct BriefingLensEmptyView: View {
                     .font(.appCaption)
                     .foregroundStyle(Color.onSurfaceSecondary)
                     .padding(.top, 24)
+                }
+                .id(Self.topAnchor)
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.top, 28)
+                .frame(maxWidth: 680, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
-            .padding(.horizontal, Spacing.appHorizontalMargin)
-            .padding(.top, 28)
-            .frame(maxWidth: 680, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-        }
-        .contentMargins(.top, topContentInset)
-        .contentMargins(.bottom, 40)
-        .bottomScreenEdgeFade(fadeHeight: 32)
-        .refreshable {
-            await onRefresh()
+            .contentMargins(.top, topContentInset)
+            .contentMargins(.bottom, 40)
+            .bottomScreenEdgeFade(fadeHeight: 32)
+            .refreshable {
+                await onRefresh()
+            }
+            .scrollsToTopOnRequest(
+                scrollToTopRequest,
+                anchor: Self.topAnchor,
+                using: proxy,
+                isEnabled: shouldScrollToTop
+            )
         }
         .accessibilityIdentifier("briefing.lens_empty")
     }
+
 }
 
 struct BriefingTimelineStamp: Equatable {
@@ -796,7 +830,7 @@ private struct BriefingPullquoteView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(block.text ?? "")
-                .font(.appSerifItalic(size: 20, relativeTo: .title3))
+                .font(.appSerifItalic(size: 15, relativeTo: .title3))
                 .foregroundStyle(Color.onSurface)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -831,16 +865,5 @@ private struct BriefingPullquoteView: View {
                 .frame(width: 3)
         }
         .accessibilityElement(children: .contain)
-    }
-}
-
-private func briefingPlatformName(_ platform: String) -> String {
-    switch platform.lowercased() {
-    case "hackernews":
-        return "Hacker News"
-    case "reddit":
-        return "Reddit"
-    default:
-        return platform
     }
 }

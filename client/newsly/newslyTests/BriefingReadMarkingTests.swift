@@ -1,6 +1,7 @@
 import XCTest
 @testable import newsly
 
+@MainActor
 final class BriefingReadMarkingTests: XCTestCase {
     func testPinnedReadBoundaryUsesRemainingChromeHeight() {
         XCTAssertEqual(
@@ -92,6 +93,23 @@ final class BriefingReadMarkingTests: XCTestCase {
         )
     }
 
+    func testLensPageEqualityTracksItsOwnScrollEligibility() {
+        let chromeCollapse = BriefingChromeCollapseModel()
+        let ineligiblePage = makeLensPage(
+            shouldScrollToTop: false,
+            chromeCollapse: chromeCollapse
+        )
+
+        XCTAssertEqual(
+            ineligiblePage,
+            makeLensPage(shouldScrollToTop: false, chromeCollapse: chromeCollapse)
+        )
+        XCTAssertNotEqual(
+            ineligiblePage,
+            makeLensPage(shouldScrollToTop: true, chromeCollapse: chromeCollapse)
+        )
+    }
+
     func testDocumentGenerationPolicyPreservesOnlyEqualOrAppendedIDs() {
         XCTAssertTrue(
             BriefingLensDocumentGenerationPolicy.preservesGeneration(
@@ -161,5 +179,37 @@ final class BriefingReadMarkingTests: XCTestCase {
         )
 
         XCTAssertEqual(block.briefingFallbackReadSourceKeys, ["content:1", "news:2"])
+    }
+
+    private func makeLensPage(
+        shouldScrollToTop: Bool,
+        chromeCollapse: BriefingChromeCollapseModel
+    ) -> BriefingLensPageView {
+        BriefingLensPageView(
+            lensKey: "articles",
+            lensTitle: "Articles",
+            renderModel: nil,
+            isReadTrackingEnabled: false,
+            readBoundaryY: nil,
+            documentGeneration: 1,
+            scrollToTopRequest: 2,
+            shouldScrollToTop: shouldScrollToTop,
+            error: nil,
+            continuationError: nil,
+            isLoadingContinuation: false,
+            chromeCollapse: chromeCollapse,
+            collapsibleChromeHeight: 120,
+            topContentInset: 180,
+            onOpenSource: { _ in },
+            onOpenDiscussion: { _ in },
+            onDig: { _, _ in },
+            onRefresh: {},
+            onLoad: {},
+            onRetry: {},
+            onFirstPassageVisible: {},
+            onScrolledDown: {},
+            onMarkSegmentSeen: { _ in },
+            onSetHeaderPinned: { _ in }
+        )
     }
 }

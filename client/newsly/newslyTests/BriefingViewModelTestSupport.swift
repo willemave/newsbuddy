@@ -40,10 +40,12 @@ final class MockBriefingService: BriefingServicing {
     private(set) var refreshRequestCount = 0
     var narrationManifest: BriefingNarration?
     var narrationManifests: [BriefingNarration] = []
+    var narrationManifestsByLens: [String: BriefingNarration] = [:]
     var narrationFetchResults: [Result<BriefingNarration, Error>] = []
     var narrationError: Error?
     var narrationRequestDelayNanoseconds: UInt64?
     var narrationWaitsForCancellation = false
+    var narrationRequestWaitLensKeys: Set<String> = []
     var narrationLensKeys: [String] = []
     var narrationFetchEpisodeGroupIDs: [String] = []
     private(set) var narrationCancellationCount = 0
@@ -53,6 +55,7 @@ final class MockBriefingService: BriefingServicing {
     private var refreshContinuation: CheckedContinuation<Void, Never>?
     private var markReadContinuation: CheckedContinuation<Void, Never>?
     private var latestNarration: BriefingNarration?
+    private var narrationRequestContinuations: [String: CheckedContinuation<Void, Never>] = [:]
 
     func fetchIndex(ifNoneMatch etag: String?) async throws -> BriefingIndexFetchResult {
         indexEtags.append(etag)
@@ -180,6 +183,11 @@ final class MockBriefingService: BriefingServicing {
 
     func requestNarration(lensKey: String) async throws -> BriefingNarration {
         narrationLensKeys.append(lensKey)
+        if narrationRequestWaitLensKeys.contains(lensKey) {
+            await withCheckedContinuation { continuation in
+                narrationRequestContinuations[lensKey] = continuation
+            }
+        }
         if let narrationRequestDelayNanoseconds {
             try await Task.sleep(nanoseconds: narrationRequestDelayNanoseconds)
         }
@@ -195,7 +203,9 @@ final class MockBriefingService: BriefingServicing {
             throw narrationError
         }
         let narration: BriefingNarration
-        if !narrationManifests.isEmpty {
+        if let lensNarration = narrationManifestsByLens[lensKey] {
+            narration = lensNarration
+        } else if !narrationManifests.isEmpty {
             narration = narrationManifests.removeFirst()
         } else if let narrationManifest {
             narration = narrationManifest
@@ -204,6 +214,10 @@ final class MockBriefingService: BriefingServicing {
         }
         latestNarration = narration
         return narration
+    }
+
+    func resumeNarrationRequest(lensKey: String) {
+        narrationRequestContinuations.removeValue(forKey: lensKey)?.resume()
     }
 
     func fetchNarration(episodeGroupID: String) async throws -> BriefingNarration {

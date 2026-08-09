@@ -7,7 +7,10 @@ struct BriefingEmptyStateView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                EditorialMastheadHeader(title: "Briefing")
+                EditorialMastheadHeader(
+                    title: "Briefing",
+                    titleAccessibilityIdentifier: "briefing.screen"
+                )
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text("CURRENT EDITION")
