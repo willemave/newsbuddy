@@ -16,7 +16,9 @@ from app.models.db import (
 )
 from app.models.metadata.access import metadata_view
 from app.services import knowledge as knowledge_service
-from app.services.long_form_images import enqueue_visible_long_form_image_if_needed
+from app.services.active_users import lock_active_user
+from app.services.gateways.task_queue_gateway import get_task_queue_gateway
+from app.services.long_form_images import build_visible_long_form_image_task_requests
 
 BOOKMARKS_CHANNEL = "bookmarks"
 X_PROVIDER = "x"
@@ -68,6 +70,37 @@ def reconcile_x_bookmark_destination(
     The operation is intentionally idempotent so sync and URL analysis may both
     call it regardless of which worker reaches the content first.
     """
+    result = reconcile_x_bookmark_destination_in_session(
+        db,
+        user_id=user_id,
+        bookmark_content_id=bookmark_content_id,
+        synced_items=synced_items,
+    )
+    db.commit()
+    if result.destination_content_id is not None and result.knowledge_save_created:
+        knowledge_service.sync_knowledge_markdown(
+            db,
+            user_id=user_id,
+            content_id=result.destination_content_id,
+        )
+    if result.stale_knowledge_save_removed:
+        knowledge_service.sync_knowledge_markdown(
+            db,
+            user_id=user_id,
+            content_id=bookmark_content_id,
+        )
+    return result
+
+
+def reconcile_x_bookmark_destination_in_session(
+    db: Session,
+    *,
+    user_id: int,
+    bookmark_content_id: int,
+    synced_items: Iterable[UserIntegrationSyncedItem] | None = None,
+) -> XBookmarkDestinationResult:
+    """Stage one bookmark destination repair in the caller-owned transaction."""
+
     bookmark_content = db.query(Content).filter(Content.id == bookmark_content_id).first()
     if bookmark_content is None:
         return XBookmarkDestinationResult(
@@ -75,6 +108,16 @@ def reconcile_x_bookmark_destination(
             bookmark_content_id=bookmark_content_id,
             destination_content_id=None,
             content_exists=False,
+            knowledge_save_created=False,
+            stale_knowledge_save_removed=False,
+            ledger_rows_updated=0,
+        )
+    if lock_active_user(db, user_id) is None:
+        return XBookmarkDestinationResult(
+            user_id=user_id,
+            bookmark_content_id=bookmark_content_id,
+            destination_content_id=None,
+            content_exists=True,
             knowledge_save_created=False,
             stale_knowledge_save_removed=False,
             ledger_rows_updated=0,
@@ -88,7 +131,7 @@ def reconcile_x_bookmark_destination(
         user_id,
     )
     if not destination_was_saved:
-        knowledge_service.save_to_knowledge(db, destination_id, user_id)
+        knowledge_service.save_to_knowledge_in_session(db, destination_id, user_id)
 
     effective_synced_items = (
         list(synced_items)
@@ -112,15 +155,15 @@ def reconcile_x_bookmark_destination(
         bookmark_content_id,
         user_id,
     ):
-        stale_save_removed = knowledge_service.remove_from_knowledge(
+        stale_save_removed = knowledge_service.remove_from_knowledge_in_session(
             db,
             bookmark_content_id,
             user_id,
         )
-    else:
-        db.commit()
 
-    enqueue_visible_long_form_image_if_needed(db, destination)
+    image_requests = build_visible_long_form_image_task_requests(db, [destination_id])
+    if image_requests:
+        get_task_queue_gateway().enqueue_many_in_session(db, image_requests)
     return XBookmarkDestinationResult(
         user_id=user_id,
         bookmark_content_id=bookmark_content_id,
@@ -132,13 +175,13 @@ def reconcile_x_bookmark_destination(
     )
 
 
-def reconcile_x_bookmark_destinations_for_content(
+def _synced_items_by_user(
     db: Session,
     *,
     bookmark_content_id: int,
-    fallback_user_id: int | None = None,
-) -> list[XBookmarkDestinationResult]:
-    """Reconcile every user's ledger row that currently points at one content shell."""
+    fallback_user_id: int | None,
+) -> dict[int, list[UserIntegrationSyncedItem]]:
+    """Group every ledger row pointing at one content shell by owning user."""
     rows = (
         db.query(UserIntegrationSyncedItem, UserIntegrationConnection.user_id)
         .join(
@@ -153,21 +196,53 @@ def reconcile_x_bookmark_destinations_for_content(
     synced_items_by_user_id: dict[int, list[UserIntegrationSyncedItem]] = {}
     for synced_item, row_user_id in rows:
         synced_items_by_user_id.setdefault(int(row_user_id), []).append(synced_item)
-
     if fallback_user_id is not None:
         synced_items_by_user_id.setdefault(fallback_user_id, [])
+    return synced_items_by_user_id
 
-    results: list[XBookmarkDestinationResult] = []
-    for user_id, synced_items in synced_items_by_user_id.items():
-        results.append(
-            reconcile_x_bookmark_destination(
-                db,
-                user_id=user_id,
-                bookmark_content_id=bookmark_content_id,
-                synced_items=synced_items,
-            )
+
+def reconcile_x_bookmark_destinations_for_content(
+    db: Session,
+    *,
+    bookmark_content_id: int,
+    fallback_user_id: int | None = None,
+) -> list[XBookmarkDestinationResult]:
+    """Reconcile every user's ledger row that currently points at one content shell."""
+    return [
+        reconcile_x_bookmark_destination(
+            db,
+            user_id=user_id,
+            bookmark_content_id=bookmark_content_id,
+            synced_items=synced_items,
         )
-    return results
+        for user_id, synced_items in _synced_items_by_user(
+            db,
+            bookmark_content_id=bookmark_content_id,
+            fallback_user_id=fallback_user_id,
+        ).items()
+    ]
+
+
+def reconcile_x_bookmark_destinations_for_content_in_session(
+    db: Session,
+    *,
+    bookmark_content_id: int,
+    fallback_user_id: int | None = None,
+) -> list[XBookmarkDestinationResult]:
+    """Stage all destination repairs for one bookmark shell atomically."""
+    return [
+        reconcile_x_bookmark_destination_in_session(
+            db,
+            user_id=user_id,
+            bookmark_content_id=bookmark_content_id,
+            synced_items=synced_items,
+        )
+        for user_id, synced_items in _synced_items_by_user(
+            db,
+            bookmark_content_id=bookmark_content_id,
+            fallback_user_id=fallback_user_id,
+        ).items()
+    ]
 
 
 def preview_x_bookmark_destination_reconciliation(

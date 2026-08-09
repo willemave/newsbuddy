@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 
-from app.models.db import ChatMessage, ContentStatusEntry, UserScraperConfig
+from app.models.contracts import TaskType
+from app.models.db import ContentStatusEntry, UserScraperConfig
+from tests.support.feed_subscription_test_helpers import stub_feed_validator
 
 
 def _build_completed_chat_payload(prompt: str, reply: str) -> str:
@@ -82,14 +84,14 @@ def test_onboarding_complete_seeds_configs_tasks_and_visible_content(
     enqueued_tasks: list[tuple[str, dict | None]] = []
 
     class _FakeQueueGateway:
-        def enqueue(self, task_type, payload=None, **_kwargs) -> int:
-            enqueued_tasks.append((str(task_type), payload))
-            return len(enqueued_tasks)
+        def enqueue_many_in_session(self, _db, requests) -> list[int]:
+            task_ids: list[int] = []
+            for request in requests:
+                enqueued_tasks.append((str(request.task_type), request.payload))
+                task_ids.append(len(enqueued_tasks))
+            return task_ids
 
-    monkeypatch.setattr(
-        "app.services.scraper_config_validation.FEED_VALIDATOR.validate_feed_url",
-        lambda url: {"feed_url": url},
-    )
+    stub_feed_validator(monkeypatch)
     monkeypatch.setattr(
         "app.services.onboarding.entrypoints.get_task_queue_gateway",
         lambda: _FakeQueueGateway(),
@@ -117,6 +119,10 @@ def test_onboarding_complete_seeds_configs_tasks_and_visible_content(
     assert payload["status"] == "queued"
     assert payload["has_completed_onboarding"] is True
     assert payload["inbox_count_estimate"] >= 100
+    assert (
+        TaskType.DISCOVER_FEEDS.value,
+        {"user_id": test_user.id, "trigger": "onboarding"},
+    ) in enqueued_tasks
 
     db_session.refresh(test_user)
     assert test_user.has_completed_onboarding is True
@@ -199,33 +205,27 @@ def test_list_detail_and_actions_flow_end_to_end(
 def test_chat_session_message_and_status_flow_end_to_end(
     client,
     create_sample_content,
-    db_session,
     monkeypatch,
     sample_article_long,
 ):
     """Chat flow should create a session, process a message, and expose it in status/detail APIs."""
+    from app.services.chat_turn_queue import stage_queued_chat_turn
+
     content = create_sample_content(sample_article_long)
 
-    async def _fake_process_message_async(
-        session_id: int,
-        message_id: int,
-        prompt: str,
-        source: str = "chat",
-        screen_context=None,
-    ) -> None:
-        del session_id, screen_context, source
-        db_message = db_session.query(ChatMessage).filter(ChatMessage.id == message_id).one()
+    def _stage_and_complete(db, *, context):
+        db_message = stage_queued_chat_turn(db, context=context)
         db_message.message_list = _build_completed_chat_payload(
-            prompt,
+            context.user_prompt,
             "The most important point is the operational constraint behind the rollout.",
         )
         db_message.status = "completed"
-        db_session.commit()
+        db.flush()
+        return db_message
 
-    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
     monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_message_async,
+        "app.commands.send_chat_message.stage_queued_chat_turn",
+        _stage_and_complete,
     )
 
     create_response = client.post(

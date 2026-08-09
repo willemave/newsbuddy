@@ -9,8 +9,31 @@ from app.models.db import (
 from app.services.x_bookmark_destinations import (
     list_x_bookmark_destination_content_ids,
     preview_x_bookmark_destination_reconciliation,
+    reconcile_x_bookmark_destination,
     repair_x_bookmark_destinations,
 )
+
+
+def test_reconcile_skips_inactive_user(db_session, user_factory) -> None:
+    user = user_factory(is_active=False)
+    content = Content(
+        content_type="article",
+        url="https://example.com/inactive-bookmark",
+        status="completed",
+        content_metadata={},
+    )
+    db_session.add(content)
+    db_session.commit()
+
+    result = reconcile_x_bookmark_destination(
+        db_session,
+        user_id=user.id,
+        bookmark_content_id=content.id,
+    )
+
+    assert result.destination_content_id is None
+    assert result.knowledge_save_created is False
+    assert db_session.query(ContentKnowledgeSave).count() == 0
 
 
 def test_repair_moves_save_and_ledger_to_canonical_content(db_session, test_user) -> None:

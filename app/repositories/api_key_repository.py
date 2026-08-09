@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -71,9 +71,13 @@ def find_active_api_key_by_token(db: Session, *, raw_key: str) -> UserApiKey | N
 
 
 def touch_last_used(db: Session, *, api_key_id: int) -> None:
-    """Update last-used timestamp for an API key."""
-    record = db.query(UserApiKey).filter(UserApiKey.id == api_key_id).first()
-    if record is None:
-        return
-    record.last_used_at = datetime.now(UTC)
-    db.commit()
+    """Rate-limit last-used writes while preserving useful activity telemetry."""
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    db.query(UserApiKey).filter(
+        UserApiKey.id == api_key_id,
+        (
+            UserApiKey.last_used_at.is_(None)
+            | (UserApiKey.last_used_at < now - timedelta(minutes=5))
+        ),
+    ).update({UserApiKey.last_used_at: now}, synchronize_session=False)

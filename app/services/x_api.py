@@ -20,6 +20,7 @@ from app.services.x_models import (
     XUser,
 )
 from app.services.x_oauth import revoke_oauth_token
+from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
 
@@ -833,9 +834,9 @@ def _normalize_external_url(raw_url: str) -> str | None:
     if host.startswith("www."):
         host = host[4:]
     if (
-        _is_domain_or_subdomain(host, "x.com")
-        or _is_domain_or_subdomain(host, "twitter.com")
-        or _is_domain_or_subdomain(host, "t.co")
+        is_domain_or_subdomain(host, "x.com")
+        or is_domain_or_subdomain(host, "twitter.com")
+        or is_domain_or_subdomain(host, "t.co")
     ):
         return None
 
@@ -963,9 +964,3 @@ def _extract_note_tweet_text(note_data: Any) -> str | None:
         _nested_text(note_data, "content", "richtext", "text"),
         _nested_text(note_data, "content", "rich_text", "text"),
     )
-
-
-def _is_domain_or_subdomain(host: str, domain: str) -> bool:
-    if host == domain:
-        return True
-    return host.endswith(f".{domain}")

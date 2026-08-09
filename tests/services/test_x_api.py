@@ -241,7 +241,9 @@ def test_revoke_oauth_token_uses_revoke_endpoint(monkeypatch) -> None:
     assert captured["auth"] == ("client-id", "client-secret")
 
 
-def test_fetch_tweet_by_id_records_vendor_usage(db_session, monkeypatch) -> None:
+def test_fetch_tweet_by_id_records_vendor_usage(db_session, user_factory, monkeypatch) -> None:
+    user = user_factory()
+
     @contextmanager
     def fake_get_db():
         yield db_session
@@ -262,7 +264,7 @@ def test_fetch_tweet_by_id_records_vendor_usage(db_session, monkeypatch) -> None
         telemetry={
             "feature": "x_sync",
             "operation": "x_sync.timeline.read",
-            "user_id": 11,
+            "user_id": user.id,
         },
     )
 
@@ -270,7 +272,7 @@ def test_fetch_tweet_by_id_records_vendor_usage(db_session, monkeypatch) -> None
     persisted = db_session.query(VendorUsageRecord).one()
     assert persisted.provider == "x"
     assert persisted.model == "posts.read"
-    assert persisted.user_id == 11
+    assert persisted.user_id == user.id
     assert persisted.request_count == 1
     assert persisted.resource_count == 1
     assert persisted.metadata_json["resource_ids"] == ["123"]

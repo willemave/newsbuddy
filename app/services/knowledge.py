@@ -32,7 +32,7 @@ def _sync_personal_markdown_after_knowledge_mutation(
 
 def save_to_knowledge(db: Session, content_id: int, user_id: int) -> ContentKnowledgeSave:
     """Save content to knowledge, committing the row and syncing markdown best-effort."""
-    saved = knowledge_repository.save_to_knowledge(db, content_id, user_id)
+    saved = save_to_knowledge_in_session(db, content_id, user_id)
     db.commit()
     db.refresh(saved)
     _sync_personal_markdown_after_knowledge_mutation(
@@ -43,9 +43,29 @@ def save_to_knowledge(db: Session, content_id: int, user_id: int) -> ContentKnow
     return saved
 
 
+def save_to_knowledge_in_session(
+    db: Session,
+    content_id: int,
+    user_id: int,
+) -> ContentKnowledgeSave:
+    """Save content to Knowledge without owning the caller's transaction."""
+
+    return knowledge_repository.save_to_knowledge(db, content_id, user_id)
+
+
+def sync_knowledge_markdown(db: Session, *, content_id: int, user_id: int) -> None:
+    """Run the best-effort markdown projection after a committed Knowledge save."""
+
+    _sync_personal_markdown_after_knowledge_mutation(
+        db,
+        user_id=user_id,
+        content_id=content_id,
+    )
+
+
 def remove_from_knowledge(db: Session, content_id: int, user_id: int) -> bool:
     """Remove content from knowledge, committing the row and syncing markdown best-effort."""
-    removed = knowledge_repository.remove_from_knowledge(db, content_id, user_id)
+    removed = remove_from_knowledge_in_session(db, content_id, user_id)
     db.commit()
     _sync_personal_markdown_after_knowledge_mutation(
         db,
@@ -53,6 +73,12 @@ def remove_from_knowledge(db: Session, content_id: int, user_id: int) -> bool:
         content_id=content_id,
     )
     return removed
+
+
+def remove_from_knowledge_in_session(db: Session, content_id: int, user_id: int) -> bool:
+    """Remove content from Knowledge without owning the caller's transaction."""
+
+    return knowledge_repository.remove_from_knowledge(db, content_id, user_id)
 
 
 def clear_knowledge_library(db: Session, user_id: int) -> int:
