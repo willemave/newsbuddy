@@ -23,8 +23,6 @@ File-backed feed, scraper, aggregator, YouTube, and tooling configuration used b
 | `config/podcasts.example.yml` | Example podcast feed file | Template only. |
 | `config/reddit.yml` | Default subreddit list and limits | File-backed/default-source input outside onboarding; onboarding source discovery uses searched/generated suggestions only. Runtime user subscriptions are DB-backed. |
 | `config/reddit.example.yml` | Example Reddit config | Template only. |
-| `config/techmeme.yml` | Legacy Techmeme-specific config | Backward-compatible loader support; scheduled Techmeme now comes from `aggregators.yml`. |
-| `config/twitter.yml` | Legacy Twitter list scraper config | Legacy/orphaned unless the retired list-scraper flow is reintroduced. |
 | `config/youtube.yml` | yt-dlp cookies, PoToken, throttle, and player-client options | Runtime config for YouTube processing and audio/video download paths; not a default scheduled scraper. |
 | `config/module_size_guardrails.json` | Per-file size budgets | Consumed by `scripts/check_module_size_guardrails.py`. |
 

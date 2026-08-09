@@ -3,7 +3,7 @@
 Source folder: `app/routers/api`
 
 ## Purpose
-User-facing and machine-facing JSON API modules for content, news, chat, discovery, onboarding, audio episodes, Learning Decks, integrations, feedback, stats, and OpenAI transcription.
+User-facing and machine-facing JSON API modules for content, news, chat, onboarding, audio episodes, Learning Decks, integrations, feedback, stats, and OpenAI transcription.
 
 ## Runtime behavior
 - Modules are narrow route groups; DTOs live in `app/models/api`, not in this folder.
@@ -24,7 +24,6 @@ User-facing and machine-facing JSON API modules for content, news, chat, discove
 | `content_detail.py` | Content detail, discussion, body/chat URL reads. |
 | `content_list.py` | Content list/search and podcast episode matching. |
 | `content_responses.py` | Router-facing content response builders. |
-| `discovery.py` | Discovery suggestions/history/search/refresh/subscription actions. |
 | `feedback.py` | User feedback submission. |
 | `integrations.py` | X OAuth/connection and user LLM integration endpoints. |
 | `interactions.py` | Content interaction analytics. |

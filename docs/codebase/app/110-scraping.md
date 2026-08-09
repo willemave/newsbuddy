@@ -7,7 +7,7 @@ Scheduled feed/site scrapers plus base persistence/orchestration helpers that cr
 
 ## Runtime behavior
 - `ScraperRunner` loads YAML-backed news aggregators from `config/aggregators.yml`, then adds Reddit, Substack, Podcast RSS, Atom, and discussion-comment scrapers.
-- `BaseScraper` normalizes source metadata, saves `news_items` or long-form `contents`, dedupes inserts, logs scraper stats, and enqueues follow-up tasks such as `FETCH_NEWS_ITEM_DISCUSSION`, `ENRICH_NEWS_ITEM_ARTICLE`, `PROCESS_CONTENT`, and `FETCH_DISCUSSION`.
+- `BaseScraper` normalizes source metadata, saves `news_items` or long-form `contents`, dedupes inserts, logs scraper stats, and enqueues follow-up tasks such as `FETCH_NEWS_ITEM_DISCUSSION`, `ENRICH_NEWS_ITEM_ARTICLE`, and `PROCESS_CONTENT`.
 - Scheduled scraper scripts check queue backpressure before and between scraper runs.
 - Twitter/X list scraping is retired from the scheduled runner; X sync now lives in integration services/tasks.
 - YouTube config remains shared runtime configuration for YouTube processing and audio download paths, not a default scheduled scraper.
@@ -24,8 +24,12 @@ Scheduled feed/site scrapers plus base persistence/orchestration helpers that cr
 | `podcast_unified.py` | Podcast RSS scraper. |
 | `atom_unified.py` | Atom/RSS feed scraper. |
 | `rss_helpers.py` | Shared feed-source resolution helpers. |
-| `hackernews_unified.py`, `techmeme_unified.py` | Backward-compatible shims to aggregator implementations. |
 | `youtube_config.py` | yt-dlp/cookie/PoToken/player-client config loader. |
+
+Hacker News top-story and item JSON come from its fixed Firebase provider API on the host, like
+the other trusted control-plane APIs. Linked publisher URLs are not fetched by the aggregator and
+remain subject to the owning content-processing sandbox boundary. Provider failures are isolated
+per story and surfaced in `ScraperStats` instead of appearing as a successful empty run.
 
 ## Integration points
 - File-backed config lives in `config/`; per-user subscriptions live in `user_scraper_configs`.

@@ -23,7 +23,7 @@ Concrete queue task handlers that translate normalized task envelopes into servi
 | `process_podcast_media.py` | Unified podcast download, normalization, and transcription handler. |
 | `download_tweet_video.py`, `transcribe_tweet_video.py` | Tweet video/audio media handlers with graceful degradation. |
 | `enrich_news_item_article.py`, `process_news_item.py` | Short-form news enrichment and processing handlers. |
-| `fetch_discussion.py`, `fetch_news_item_discussion.py` | Content and news-item discussion refresh/summary handlers. |
+| `fetch_news_item_discussion.py` | News-item discussion refresh/summary handler. |
 | `generate_audio_episode.py` | On-demand audio episode generation. |
 | `generate_image.py` | Long-form generated image handler. |
 | `onboarding_discover.py` | Onboarding discovery enrichment. |
