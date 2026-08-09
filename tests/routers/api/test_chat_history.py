@@ -146,7 +146,11 @@ def test_extract_messages_for_display_hides_intermediate_agent_scaffolding(db_se
     db_session.commit()
     assert session.id is not None
 
-    display_messages = extract_messages_for_display(db_session, session.id)
+    display_messages = extract_messages_for_display(
+        db_session,
+        session.id,
+        user_id=123,
+    )
 
     assert [message.role.value for message in display_messages] == ["user", "tool", "assistant"]
     assert display_messages[0].content == "Dig deeper into these news bullets."
@@ -218,7 +222,11 @@ def test_extract_messages_for_display_omits_process_summary_for_simple_turn(db_s
     db_session.commit()
     assert session.id is not None
 
-    display_messages = extract_messages_for_display(db_session, session.id)
+    display_messages = extract_messages_for_display(
+        db_session,
+        session.id,
+        user_id=123,
+    )
 
     assert [message.role.value for message in display_messages] == ["user", "assistant"]
     assert all(message.display_type.value == "message" for message in display_messages)
@@ -285,7 +293,11 @@ def test_extract_messages_for_display_sanitizes_legacy_model_facing_user_prompt(
     db_session.commit()
     assert session.id is not None
 
-    display_messages = extract_messages_for_display(db_session, session.id)
+    display_messages = extract_messages_for_display(
+        db_session,
+        session.id,
+        user_id=123,
+    )
 
     assert [message.role.value for message in display_messages] == ["user", "assistant"]
     assert display_messages[0].content == "Find my saved notes about AI chips."

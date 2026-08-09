@@ -9,6 +9,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     SystemPromptPart,
     TextPart,
+    ToolCallPart,
     UserPromptPart,
 )
 from sqlalchemy.orm import object_session
@@ -31,6 +32,7 @@ from app.services.chat_agent import (
     load_message_history,
     save_messages,
 )
+from app.services.chat_turn_queue import build_chat_turn_context
 from app.services.chat_turn_runtime import ChatUsageSnapshot
 from app.services.sandbox_runtime import (
     LocalPersonalLibrarySandboxSession,
@@ -215,18 +217,9 @@ def test_local_chat_sandbox_rejects_bash(tmp_path: Path) -> None:
 
 
 def test_build_context_prompt_parts_marks_snapshot_as_reference_material() -> None:
-    session = ChatSession(
-        user_id=123,
-        title="News chat",
-        session_type="article_brain",
-        context_snapshot="News bullets:\n- Bullet A\n- Bullet B",
-        llm_provider="anthropic",
-        llm_model="anthropic:claude-opus-4-6",
-    )
-
     parts = _build_context_prompt_parts(
         None,
-        session,
+        None,
         "News bullets:\n- Bullet A\n- Bullet B",
         "Session Context",
     )
@@ -381,8 +374,14 @@ def test_generate_initial_suggestions_persists_assistant_only_transcript(
         agent_calls.append((args, kwargs))
         return SimpleNamespace(
             output="Here are a few useful directions.",
-            all_messages=[],
-            tool_calls=[SimpleNamespace(name="search_personal_library")],
+            new_messages=lambda: [
+                ModelResponse(
+                    parts=[
+                        ToolCallPart(tool_name="search_personal_library", args={}),
+                        TextPart(content="Here are a few useful directions."),
+                    ]
+                )
+            ],
         )
 
     def _fake_build_chat_deps(_db, current_session, **_kwargs):  # noqa: ANN001
@@ -417,10 +416,11 @@ def test_generate_initial_suggestions_persists_assistant_only_transcript(
 
     assert result is not None
     assert result.output_text == "Here are a few useful directions."
-    assert [getattr(call, "name", None) for call in result.tool_calls] == [
-        "search_personal_library"
-    ]
-    display_messages = extract_messages_for_display(db_session, session_id)
+    display_messages = extract_messages_for_display(
+        db_session,
+        session_id,
+        user_id=user_id,
+    )
     assert [message.role.value for message in display_messages] == ["assistant"]
     assert display_messages[0].content == "Here are a few useful directions."
     assert "You are starting a new conversation" not in display_messages[0].content
@@ -695,8 +695,6 @@ def test_run_chat_turn_builds_deps_with_library_tools_enabled(
     async def _fake_run_in_threadpool(*_args, **_kwargs):
         return SimpleNamespace(
             output="Mocked assistant reply",
-            all_messages=[],
-            tool_calls=[],
             new_messages=lambda: [
                 ModelResponse(parts=[TextPart(content="Mocked assistant reply")])
             ],
@@ -737,13 +735,20 @@ def test_process_message_async_persists_completion_usage_and_ledger(
     message_id = int(message.id)
     usage_calls: list[tuple[int, int | None, str]] = []
 
+    turn_context = build_chat_turn_context(
+        session,
+        visible_session_id=session_id,
+        user_prompt="What changed?",
+        kind="article",
+        source="queue",
+    )
     monkeypatch.setattr(
         chat_agent,
-        "_build_chat_deps",
-        lambda _db, current_session, **_kwargs: ChatDeps(
-            session_id=int(current_session.id),
-            user_id=int(current_session.user_id),
-            content_id=current_session.content_id,
+        "_build_chat_deps_from_values",
+        lambda _db, **kwargs: ChatDeps(
+            session_id=kwargs["session_id"],
+            user_id=kwargs["user_id"],
+            content_id=kwargs["content_id"],
             has_context_snapshot=True,
             article_context="Saved context",
             context_label="Session Context",
@@ -768,13 +773,19 @@ def test_process_message_async_persists_completion_usage_and_ledger(
         ]
         return SimpleNamespace(
             output="A detached answer",
-            tool_calls=[],
             new_messages=lambda: messages,
         )
 
     monkeypatch.setattr(chat_agent, "run_in_threadpool", _fake_run_in_threadpool)
 
-    asyncio.run(chat_agent.process_message_async(session_id, message_id, "What changed?"))
+    asyncio.run(
+        chat_agent.process_message_async(
+            session_id,
+            message_id,
+            "What changed?",
+            turn_context=turn_context,
+        )
+    )
 
     db_session.expire_all()
     persisted_message = db_session.query(ChatMessage).filter_by(id=message_id).one()

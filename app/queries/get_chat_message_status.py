@@ -12,12 +12,14 @@ from app.models.api.chat import (
 from app.models.contracts import ChatMessageRole
 from app.models.db import ChatMessage, ChatSession
 from app.queries.chat_read_models import (
+    apply_feed_subscription_state,
     build_async_assistant_display_id,
     load_render_metadata,
     require_session_id,
     require_timestamp,
     resolve_message_status,
 )
+from app.services.feed_subscription import load_active_feed_urls
 
 
 def execute(
@@ -65,6 +67,12 @@ def execute(
             raise HTTPException(status_code=500, detail="Message payload missing")
         msg_list = ModelMessagesTypeAdapter.validate_json(message_list_json)
         render_metadata = load_render_metadata(db_message)
+        feed_options = render_metadata.feed_options if render_metadata else []
+        if feed_options:
+            feed_options = apply_feed_subscription_state(
+                feed_options,
+                active_feed_urls=load_active_feed_urls(db, user_id=user_id),
+            )
 
         assistant_content = None
         for model_msg in reversed(msg_list):
@@ -90,7 +98,7 @@ def execute(
                 detail="Chat message missing created_at",
             ),
             status=MessageProcessingStatusDto.COMPLETED,
-            feed_options=render_metadata.feed_options if render_metadata else [],
+            feed_options=feed_options,
             council_candidates=render_metadata.council_candidates if render_metadata else [],
             active_council_child_session_id=(
                 render_metadata.active_council_child_session_id if render_metadata else None

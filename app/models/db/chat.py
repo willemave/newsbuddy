@@ -67,6 +67,9 @@ class ChatMessage(Base):
     session_id = Column(Integer, nullable=False, index=True)  # soft ref to chat_sessions.id
     message_list = Column(Text, nullable=False)  # JSON from ModelMessagesTypeAdapter
     render_metadata = Column(JSON, nullable=True)
+    # Immutable inputs captured when an asynchronous turn is accepted. Workers
+    # read this row instead of mutable session context after queue delay.
+    processing_context = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     # Async processing fields
     status = Column(

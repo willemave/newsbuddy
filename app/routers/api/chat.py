@@ -4,7 +4,6 @@ from typing import Annotated
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     HTTPException,
     Path,
@@ -47,11 +46,7 @@ from app.queries import get_chat_message_status as get_chat_message_status_query
 from app.queries import get_chat_session as get_chat_session_query
 from app.queries import list_chat_sessions as list_chat_sessions_query
 from app.queries.chat_read_models import extract_messages_for_display
-from app.services.assistant_router import process_assistant_turn_async
-from app.services.chat_agent import (
-    generate_initial_suggestions,
-    process_message_async,
-)
+from app.services.chat_agent import generate_initial_suggestions
 from app.services.council_chat import (
     retry_council_branch,
     select_council_branch,
@@ -213,7 +208,6 @@ def delete_session(
 def send_message(
     session_id: Annotated[int, Path(..., description="Chat session ID", gt=0)],
     request: SendChatMessageRequest,
-    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> SendMessageResponse:
@@ -228,9 +222,6 @@ def send_message(
         user_id=user_id,
         session_id=session_id,
         request=request,
-        background_tasks=background_tasks,
-        process_message=process_message_async,
-        process_assistant_turn=process_assistant_turn_async,
     )
 
 
@@ -241,7 +232,6 @@ def send_message(
 )
 def create_assistant_turn(
     request: AssistantTurnRequest,
-    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db_session)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> AssistantTurnResponse:
@@ -250,8 +240,6 @@ def create_assistant_turn(
         db,
         user_id=require_user_id(current_user),
         request=request,
-        background_tasks=background_tasks,
-        process_assistant_turn=process_assistant_turn_async,
     )
 
 
@@ -429,7 +417,7 @@ async def get_initial_suggestions(
 
     session_factory = get_session_factory()
     with session_factory() as response_db:
-        messages = extract_messages_for_display(response_db, session_id)
+        messages = extract_messages_for_display(response_db, session_id, user_id=user_id)
     assistant_message = next(
         (msg for msg in reversed(messages) if msg.role == ChatMessageRole.ASSISTANT),
         None,

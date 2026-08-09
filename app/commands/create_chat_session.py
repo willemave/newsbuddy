@@ -13,10 +13,9 @@ from app.models.api.chat import CreateChatSessionRequest, CreateChatSessionRespo
 from app.models.db import ChatSession, Content
 from app.models.internal.assistant import AssistantScreenContext
 from app.queries.chat_read_models import (
-    extract_short_summary,
-    news_item_article_metadata,
     require_session_id,
     resolve_article_title,
+    resolve_news_item_title,
     resolve_session_article_presentation,
     session_to_summary,
 )
@@ -46,18 +45,12 @@ def execute(
         session_type = KNOWLEDGE_SESSION_TYPE
 
     article_title = None
-    article_url = None
-    article_summary = None
-    article_source = None
     context_snapshot: str | None = None
     if request.content_id:
         content = db.query(Content).filter(Content.id == request.content_id).first()
         if not content:
             raise HTTPException(status_code=404, detail="Content not found")
         article_title = resolve_article_title(content)
-        article_url = content.url
-        article_summary = extract_short_summary(content)
-        article_source = content.source
         context_snapshot = _build_knowledge_context_snapshot(
             db,
             user_id=user_id,
@@ -73,9 +66,7 @@ def execute(
         )
         if not news_item:
             raise HTTPException(status_code=404, detail="News item not found")
-        article_title, article_url, article_summary, article_source = news_item_article_metadata(
-            news_item
-        )
+        article_title = resolve_news_item_title(news_item)
         context_snapshot = _build_knowledge_context_snapshot(
             db,
             user_id=user_id,

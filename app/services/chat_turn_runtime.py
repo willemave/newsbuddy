@@ -7,13 +7,16 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import Lock
-from typing import cast
+from typing import Any, cast
 
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import ModelResponse, ToolCallPart
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.models.db import ChatSession
+from app.models.internal.chat_turn import ChatTurnSessionSnapshot
 from app.services.llm_models import DEFAULT_MODEL, resolve_model_provider
 from app.services.llm_task_turn_tracker import LlmTaskTurnSpec, LlmTaskTurnTracker
 from app.services.sandbox_runtime import PersonalLibrarySandboxSession
@@ -99,6 +102,28 @@ def snapshot_detached_chat_turn(
         content_id=usage_snapshot.content_id,
         news_item_id=session.news_item_id,
         session_type=usage_snapshot.session_type,
+        source=source,
+        task_id=task_id,
+    )
+
+
+def snapshot_detached_chat_turn_from_snapshot(
+    snapshot: ChatTurnSessionSnapshot,
+    *,
+    message_id: int | None,
+    source: str,
+    task_id: int | None,
+) -> DetachedChatTurn:
+    """Build detached runtime state directly from an acceptance-time snapshot."""
+    return DetachedChatTurn(
+        session_id=snapshot.effective_session_id,
+        message_id=message_id,
+        user_id=snapshot.user_id,
+        model=snapshot.model,
+        provider=snapshot.provider,
+        content_id=snapshot.content_id,
+        news_item_id=snapshot.news_item_id,
+        session_type=snapshot.session_type,
         source=source,
         task_id=task_id,
     )
@@ -223,17 +248,74 @@ def personal_library_unavailable_message(error: str | None) -> str:
     return "Personal markdown library is unavailable for this chat."
 
 
-def extract_tool_names(result: object) -> list[str]:
-    """Return the non-empty tool names reported by an agent result."""
-    tool_calls = getattr(result, "tool_calls", []) or []
-    return [
-        cast(str, name)
-        for tool_call in tool_calls
-        if (
-            name := getattr(tool_call, "name", None)
-            or getattr(tool_call, "function_name", None)
-            or getattr(tool_call, "tool_name", None)
+def register_personal_library_tools(
+    agent: Agent[Any, Any],
+    *,
+    search_name: str,
+    list_name: str,
+    read_name: str,
+) -> None:
+    """Register the shared read-only personal-library tool trio on an agent."""
+
+    @agent.tool(name=search_name)
+    def search_personal_library(
+        ctx: RunContext[Any],
+        query: str,
+        limit: int = 20,
+        glob: str = "*.md",
+    ) -> str:
+        """Search the user's sandbox-mounted personal markdown library."""
+        sandbox_session = ctx.deps.sandbox_session
+        if sandbox_session is None:
+            return personal_library_unavailable_message(ctx.deps.personal_library_error)
+        return sandbox_session.search_files(
+            query=query,
+            glob=glob,
+            limit=max(1, min(limit, 50)),
         )
+
+    @agent.tool(name=list_name)
+    def list_personal_library(
+        ctx: RunContext[Any],
+        subpath: str = "",
+        limit: int = 200,
+    ) -> str:
+        """List markdown files in the user's sandbox-mounted personal library."""
+        sandbox_session = ctx.deps.sandbox_session
+        if sandbox_session is None:
+            return personal_library_unavailable_message(ctx.deps.personal_library_error)
+        return sandbox_session.list_files(
+            subpath=subpath,
+            limit=max(1, min(limit, 500)),
+        )
+
+    @agent.tool(name=read_name)
+    def read_personal_markdown_file(
+        ctx: RunContext[Any],
+        relative_path: str,
+        max_chars: int = 12_000,
+    ) -> str:
+        """Read one markdown file from the user's sandbox-mounted personal library."""
+        sandbox_session = ctx.deps.sandbox_session
+        if sandbox_session is None:
+            return personal_library_unavailable_message(ctx.deps.personal_library_error)
+        return sandbox_session.read_file(
+            relative_path=relative_path,
+            max_chars=max(500, min(max_chars, 40_000)),
+        )
+
+
+def extract_tool_names(result: object) -> list[str]:
+    """Return tool names used by this turn from canonical new message parts."""
+    new_messages = getattr(result, "new_messages", None)
+    if not callable(new_messages):
+        return []
+    return [
+        part.tool_name
+        for message in new_messages()
+        if isinstance(message, ModelResponse)
+        for part in message.parts
+        if isinstance(part, ToolCallPart) and part.tool_name
     ]
 
 

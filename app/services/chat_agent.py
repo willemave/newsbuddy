@@ -24,6 +24,7 @@ from app.models.contracts import (
 from app.models.db import ChatMessage, ChatSession, Content
 from app.models.domain.chat_render import ChatMessageRenderMetadata
 from app.models.domain.chat_sessions import KNOWLEDGE_SESSION_TYPE
+from app.models.internal.chat_turn import ChatTurnProcessingContext, ChatTurnSessionSnapshot
 from app.services.chat_turn_runtime import (
     ChatUsageSnapshot as _ChatUsageSnapshot,
 )
@@ -49,7 +50,7 @@ from app.services.chat_turn_runtime import (
     persist_detached_turn_failure as _persist_detached_turn_failure,
 )
 from app.services.chat_turn_runtime import (
-    personal_library_unavailable_message as _personal_library_unavailable_message,
+    register_personal_library_tools as _register_personal_library_tools,
 )
 from app.services.chat_turn_runtime import (
     require_session_id as _require_session_id,
@@ -61,12 +62,12 @@ from app.services.chat_turn_runtime import (
     snapshot_detached_chat_turn as _snapshot_detached_chat_turn,
 )
 from app.services.chat_turn_runtime import (
+    snapshot_detached_chat_turn_from_snapshot as _snapshot_detached_chat_turn_from_snapshot,
+)
+from app.services.chat_turn_runtime import (
     start_detached_chat_turn as _start_detached_chat_turn,
 )
 from app.services.exa_client import exa_search, get_exa_client
-from app.services.llm_models import (  # noqa: F401 (re-export for API schemas)
-    LLMProvider as ChatModelProvider,
-)
 from app.services.llm_models import (
     build_pydantic_model,
     resolve_effective_api_key,
@@ -265,25 +266,25 @@ class ChatDeps:
     personal_library_error: str | None = None
 
 
-def _build_article_header(content: Content | None, session: ChatSession) -> list[str]:
+def _build_article_header(content: Content | None, topic: str | None) -> list[str]:
     parts: list[str] = []
     if content:
         parts.append(f"Article Title: {content.title or 'Untitled'}")
         parts.append(f"Source: {content.source or 'Unknown'}")
         parts.append(f"URL: {content.url}")
-    if session.topic:
-        parts.append(f"\nFocus Topic: {session.topic}")
+    if topic:
+        parts.append(f"\nFocus Topic: {topic}")
     return parts
 
 
 def _build_context_prompt_parts(
     content: Content | None,
-    session: ChatSession,
+    topic: str | None,
     article_context: str | None,
     context_label: str,
 ) -> list[str]:
     """Build dynamic prompt sections that expose reference context to the model."""
-    parts = _build_article_header(content, session)
+    parts = _build_article_header(content, topic)
 
     if article_context:
         parts.append(f"\n{load_prompt('chat/article#context_notice')}")
@@ -395,58 +396,12 @@ def _create_chat_agent(
             "stderr": result.stderr,
         }
 
-    @agent.tool
-    def search_personal_library(
-        ctx: RunContext[ChatDeps],
-        query: str,
-        limit: int = 20,
-        glob: str = "*.md",
-    ) -> str:
-        """Search the user's personal markdown library."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return _personal_library_unavailable_message(ctx.deps.personal_library_error)
-
-        normalized_limit = max(1, min(limit, 50))
-        return sandbox_session.search_files(
-            query=query,
-            glob=glob,
-            limit=normalized_limit,
-        )
-
-    @agent.tool
-    def list_personal_library(
-        ctx: RunContext[ChatDeps],
-        subpath: str = "",
-        limit: int = 200,
-    ) -> str:
-        """List markdown files in the user's personal markdown library."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return _personal_library_unavailable_message(ctx.deps.personal_library_error)
-
-        normalized_limit = max(1, min(limit, 500))
-        return sandbox_session.list_files(
-            subpath=subpath,
-            limit=normalized_limit,
-        )
-
-    @agent.tool
-    def read_personal_markdown_file(
-        ctx: RunContext[ChatDeps],
-        relative_path: str,
-        max_chars: int = 12_000,
-    ) -> str:
-        """Read one markdown file from the user's personal markdown library."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return _personal_library_unavailable_message(ctx.deps.personal_library_error)
-
-        normalized_max_chars = max(500, min(max_chars, 40_000))
-        return sandbox_session.read_file(
-            relative_path=relative_path,
-            max_chars=normalized_max_chars,
-        )
+    _register_personal_library_tools(
+        agent,
+        search_name="search_personal_library",
+        list_name="list_personal_library",
+        read_name="read_personal_markdown_file",
+    )
 
     @agent.tool
     def exa_web_search(
@@ -767,6 +722,9 @@ def create_processing_message(
     db: Session,
     session_id: int,
     user_prompt: str,
+    *,
+    processing_context: dict[str, object] | None = None,
+    commit: bool = True,
 ) -> ChatMessage:
     """Create a placeholder message record with processing status.
 
@@ -785,7 +743,19 @@ def create_processing_message(
 
     # Create a ModelRequest with just the user prompt
     user_message = ModelRequest(parts=[UserPromptPart(content=user_prompt)])
-    return save_messages(db, session_id, [user_message], status=MessageProcessingStatus.PROCESSING)
+    db_message = save_messages(
+        db,
+        session_id,
+        [user_message],
+        status=MessageProcessingStatus.PROCESSING,
+        commit=False,
+    )
+    db_message.processing_context = processing_context
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(db_message)
+    return db_message
 
 
 def update_message_completed(
@@ -809,9 +779,14 @@ def update_message_completed(
     Returns:
         The updated ChatMessage record.
     """
-    db_message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+    db_message = (
+        db.query(ChatMessage).filter(ChatMessage.id == message_id).with_for_update().first()
+    )
     if not db_message:
         raise ValueError(f"Message {message_id} not found")
+
+    if db_message.status != MessageProcessingStatus.PROCESSING.value:
+        return db_message
 
     message_json = _dump_messages_json(
         messages,
@@ -845,9 +820,14 @@ def update_message_failed(
     Returns:
         The updated ChatMessage record.
     """
-    db_message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+    db_message = (
+        db.query(ChatMessage).filter(ChatMessage.id == message_id).with_for_update().first()
+    )
     if not db_message:
         raise ValueError(f"Message {message_id} not found")
+
+    if db_message.status != MessageProcessingStatus.PROCESSING.value:
+        return db_message
 
     db_message.status = MessageProcessingStatus.FAILED.value
     db_message.render_metadata = None
@@ -866,8 +846,6 @@ class ChatRunResult:
 
     output_text: str
     new_messages: list[ModelMessage]
-    all_messages: list[ModelMessage]
-    tool_calls: list[object]
 
 
 def _agent_output_text(result: object) -> str:
@@ -901,24 +879,48 @@ def _build_chat_deps(
     include_library_tools: bool = True,
 ) -> ChatDeps:
     """Construct detached-safe chat dependencies for a session."""
-    session_id = _require_session_id(session)
-    user_id = _require_session_user_id(session)
+    return _build_chat_deps_from_values(
+        db,
+        session_id=_require_session_id(session),
+        user_id=_require_session_user_id(session),
+        content_id=session.content_id,
+        session_type=session.session_type,
+        topic=session.topic,
+        context_snapshot=session.context_snapshot,
+        include_full_text=include_full_text,
+        include_library_tools=include_library_tools,
+    )
+
+
+def _build_chat_deps_from_values(
+    db: Session,
+    *,
+    session_id: int,
+    user_id: int,
+    content_id: int | None,
+    session_type: str | None,
+    topic: str | None,
+    context_snapshot: str | None,
+    include_full_text: bool = False,
+    include_library_tools: bool = True,
+) -> ChatDeps:
+    """Construct detached-safe chat dependencies from explicit session fields."""
     content: Content | None = None
     article_context: str | None = None
     context_label = "Article Context"
     sandbox_session: PersonalLibrarySandboxSession | None = None
     personal_library_error: str | None = None
 
-    if session.content_id:
-        content = db.query(Content).filter(Content.id == session.content_id).first()
+    if content_id:
+        content = db.query(Content).filter(Content.id == content_id).first()
 
     use_live_content = content is not None and (
-        session.session_type == KNOWLEDGE_SESSION_TYPE or not session.context_snapshot
+        session_type == KNOWLEDGE_SESSION_TYPE or not context_snapshot
     )
     if use_live_content and content is not None:
         max_system_article_tokens = int(CONTEXT_WINDOW_TOKENS * SYSTEM_AND_ARTICLE_BUDGET_RATIO)
         system_tokens = _estimate_tokens(SYSTEM_PROMPT_TEXT)
-        header_text = "\n".join(_build_article_header(content, session))
+        header_text = "\n".join(_build_article_header(content, topic))
         header_tokens = _estimate_tokens(header_text)
         available_tokens = max(max_system_article_tokens - system_tokens - header_tokens, 0)
         article_context = build_article_context(
@@ -927,17 +929,22 @@ def _build_chat_deps(
             include_full_text=include_full_text,
             max_tokens=available_tokens,
         )
-    elif session.context_snapshot:
-        article_context = session.context_snapshot
+    elif context_snapshot:
+        article_context = context_snapshot
         context_label = "Session Context"
 
     if include_library_tools:
-        sandbox_session, personal_library_error = _build_personal_library_runtime(db, session)
+        sandbox_session, personal_library_error = _build_personal_library_runtime(
+            db,
+            session_id=session_id,
+            user_id=user_id,
+            content_id=content_id,
+        )
 
     system_context = "\n".join(
         _build_context_prompt_parts(
             content if use_live_content else None,
-            session,
+            topic,
             article_context,
             context_label,
         )
@@ -946,9 +953,9 @@ def _build_chat_deps(
     return ChatDeps(
         session_id=session_id,
         user_id=user_id,
-        content_id=session.content_id,
+        content_id=content_id,
         has_content=use_live_content,
-        has_context_snapshot=bool(session.context_snapshot),
+        has_context_snapshot=bool(context_snapshot),
         article_context=article_context,
         context_label=context_label,
         system_context=system_context,
@@ -959,11 +966,12 @@ def _build_chat_deps(
 
 def _build_personal_library_runtime(
     db: Session,
-    session: ChatSession,
+    *,
+    session_id: int,
+    user_id: int,
+    content_id: int | None,
 ) -> tuple[PersonalLibrarySandboxSession | None, str | None]:
     """Synchronize and hydrate the personal markdown library for a chat turn."""
-    session_id = _require_session_id(session)
-    user_id = _require_session_user_id(session)
     settings = get_settings()
     if settings.chat_sandbox_provider == "disabled":
         return None, None
@@ -985,7 +993,7 @@ def _build_personal_library_runtime(
                 status="degraded",
                 session_id=session_id,
                 user_id=user_id,
-                content_id=session.content_id,
+                content_id=content_id,
                 context_data={"failure_class": type(exc).__name__},
             ),
         )
@@ -1215,8 +1223,6 @@ async def run_chat_turn(
         return ChatRunResult(
             output_text=output_text,
             new_messages=new_messages,
-            all_messages=result.all_messages,
-            tool_calls=getattr(result, "tool_calls", []),
         )
     except Exception as exc:  # noqa: BLE001
         db.rollback()
@@ -1268,11 +1274,20 @@ class _ExecutedArticleChatTurn:
 
 def _prepare_article_background_turn(
     db: Session,
-    session: ChatSession,
+    session: ChatTurnSessionSnapshot,
     turn: _DetachedChatTurn,
 ) -> _PreparedArticleChatTurn:
     deps_start = perf_counter()
-    deps = _build_chat_deps(db, session, include_full_text=True)
+    deps = _build_chat_deps_from_values(
+        db,
+        session_id=session.effective_session_id,
+        user_id=session.user_id,
+        content_id=session.content_id,
+        session_type=session.session_type,
+        topic=session.topic,
+        context_snapshot=session.context_snapshot,
+        include_full_text=True,
+    )
     deps_ms = (perf_counter() - deps_start) * 1000
     logger.info(
         "Async chat context built",
@@ -1438,6 +1453,7 @@ async def process_message_async(
     *,
     source: str = "realtime",
     task_id: int | None = None,
+    turn_context: ChatTurnProcessingContext,
 ) -> None:
     """Process one article-chat message without retaining a DB session across I/O."""
     from app.core.db import get_session_factory
@@ -1469,8 +1485,11 @@ async def process_message_async(
                 logger.error("[AsyncChat:ERROR] Session %s not found", session_id)
                 return
 
-            turn = _snapshot_detached_chat_turn(
-                session,
+            session_snapshot = turn_context.session
+            if session_snapshot.effective_session_id != session_id:
+                raise ValueError("Article turn context does not match the requested session")
+            turn = _snapshot_detached_chat_turn_from_snapshot(
+                session_snapshot,
                 message_id=message_id,
                 source=source,
                 task_id=task_id,
@@ -1488,7 +1507,7 @@ async def process_message_async(
                     "model": turn.model,
                 },
             )
-            prepared = _prepare_article_background_turn(prepare_db, session, turn)
+            prepared = _prepare_article_background_turn(prepare_db, session_snapshot, turn)
             _mark_detached_chat_turn_running(
                 prepare_db,
                 turn=turn,
@@ -1658,8 +1677,6 @@ async def _execute_initial_suggestions_turn(
         chat_result=ChatRunResult(
             output_text=output_text,
             new_messages=new_messages,
-            all_messages=result.all_messages,
-            tool_calls=getattr(result, "tool_calls", []),
         ),
         tool_names=tool_names,
     )

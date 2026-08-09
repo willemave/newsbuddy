@@ -33,13 +33,14 @@ def execute(
 
     article_presentation = resolve_session_article_presentation(db, session)
 
-    messages = extract_messages_for_display(db, session_id)
+    messages = extract_messages_for_display(db, session_id, user_id=user_id)
     if session.council_mode:
         active_child_session = resolve_active_child_session(db, session)
         if active_child_session is not None:
             branch_messages = extract_messages_for_display(
                 db,
                 require_session_id(active_child_session),
+                user_id=user_id,
                 session_id_override=require_session_id(session),
                 min_message_id_exclusive=active_child_session.branch_start_message_id,
             )

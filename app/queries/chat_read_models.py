@@ -29,11 +29,13 @@ from app.models.db import (
     ContentKnowledgeSave,
     NewsItem,
 )
-from app.models.domain.chat_render import ChatMessageRenderMetadata
+from app.models.domain.chat_render import AssistantFeedOption, ChatMessageRenderMetadata
 from app.models.domain.chat_sessions import KNOWLEDGE_SESSION_TYPE
 from app.models.domain.content_display import resolve_image_urls
 from app.models.domain.content_mapper import content_to_domain
+from app.models.internal.scraper_configs import canonicalize_feed_url
 from app.services.dig_deeper import content_ids_awaiting_first_chat_turn
+from app.services.feed_subscription import load_active_feed_urls
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
 from app.utils.news_titles import resolve_news_display_title
 from app.utils.pagination import PaginationCursor
@@ -178,6 +180,37 @@ def load_render_metadata(db_message: ChatMessage) -> ChatMessageRenderMetadata |
             exc,
         )
         return None
+
+
+def require_writable_session(db: Session, *, session_id: int, user_id: int) -> ChatSession:
+    """Load and lock a chat session the user may post to, or raise the API error."""
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).with_for_update().first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this session")
+    if session.is_archived:
+        raise HTTPException(status_code=409, detail="Archived sessions cannot accept messages")
+    if session.is_hidden_from_history:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+def apply_feed_subscription_state(
+    feed_options: list[AssistantFeedOption],
+    *,
+    active_feed_urls: set[str],
+) -> list[AssistantFeedOption]:
+    """Overlay live subscription state without mutating stored chat metadata."""
+
+    return [
+        option.model_copy(
+            update={
+                "is_subscribed": canonicalize_feed_url(option.feed_url) in active_feed_urls,
+            }
+        )
+        for option in feed_options
+    ]
 
 
 def session_to_summary(
@@ -615,6 +648,7 @@ def extract_messages_for_display(
     db: Session,
     session_id: int,
     *,
+    user_id: int,
     session_id_override: int | None = None,
     min_message_id_exclusive: int | None = None,
 ) -> list[ChatMessageDto]:
@@ -630,6 +664,7 @@ def extract_messages_for_display(
 
     messages: list[ChatMessageDto] = []
     display_id = 0
+    active_feed_urls: set[str] | None = None
 
     query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
     if min_message_id_exclusive is not None:
@@ -717,6 +752,14 @@ def extract_messages_for_display(
                 )
 
             if latest_assistant_text:
+                feed_options = render_metadata.feed_options if render_metadata else []
+                if feed_options:
+                    if active_feed_urls is None:
+                        active_feed_urls = load_active_feed_urls(db, user_id=user_id)
+                    feed_options = apply_feed_subscription_state(
+                        feed_options,
+                        active_feed_urls=active_feed_urls,
+                    )
                 display_id += 1
                 messages.append(
                     ChatMessageDto(
@@ -729,7 +772,7 @@ def extract_messages_for_display(
                         display_type=ChatMessageDisplayType.MESSAGE,
                         status=status,
                         error=db_msg.error,
-                        feed_options=render_metadata.feed_options if render_metadata else [],
+                        feed_options=feed_options,
                         council_candidates=(
                             render_metadata.council_candidates if render_metadata else []
                         ),

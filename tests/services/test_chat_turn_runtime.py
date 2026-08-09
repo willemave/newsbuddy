@@ -1,5 +1,8 @@
 """Tests for shared chat turn runtime helpers."""
 
+from types import SimpleNamespace
+
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from sqlalchemy.orm import object_session
 
 from app.models.contracts import (
@@ -10,6 +13,7 @@ from app.models.contracts import (
     MessageProcessingStatus,
 )
 from app.models.db import ChatMessage, ChatSession, LlmTask
+from app.models.internal.chat_turn import ChatTurnSessionSnapshot
 from app.services import chat_turn_runtime
 from app.services.llm_models import DEFAULT_MODEL
 from app.services.llm_task_turn_tracker import LlmTaskTurnSpec
@@ -27,6 +31,104 @@ TEST_LIFECYCLE = chat_turn_runtime.DetachedChatTurnLifecycle(
     failed_note="Test turn failed",
     usage_context="test",
 )
+
+
+class _ToolRecordingAgent:
+    def __init__(self) -> None:
+        self.tools = {}
+
+    def tool(self, *, name: str):  # noqa: ANN201
+        def _register(function):  # noqa: ANN001, ANN202
+            self.tools[name] = function
+            return function
+
+        return _register
+
+
+class _LibrarySandbox:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def search_files(self, **kwargs) -> str:  # noqa: ANN003
+        self.calls.append(("search", kwargs))
+        return "search result"
+
+    def list_files(self, **kwargs) -> str:  # noqa: ANN003
+        self.calls.append(("list", kwargs))
+        return "file list"
+
+    def read_file(self, **kwargs) -> str:  # noqa: ANN003
+        self.calls.append(("read", kwargs))
+        return "file body"
+
+
+def test_extract_tool_names_uses_only_new_message_parts() -> None:
+    result = SimpleNamespace(
+        all_messages=[ModelResponse(parts=[ToolCallPart(tool_name="old_tool", args={})])],
+        new_messages=lambda: [
+            ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name="search_web", args={"query": "AI"}),
+                    TextPart(content="I found a source."),
+                    ToolCallPart(tool_name="find_feed_options", args={"url": "https://x.test"}),
+                ]
+            )
+        ],
+    )
+
+    assert chat_turn_runtime.extract_tool_names(result) == [
+        "search_web",
+        "find_feed_options",
+    ]
+
+
+def test_extract_tool_names_returns_empty_for_non_agent_result() -> None:
+    assert chat_turn_runtime.extract_tool_names(SimpleNamespace()) == []
+
+
+def test_personal_library_tool_registration_preserves_names_and_bounds() -> None:
+    agent = _ToolRecordingAgent()
+    sandbox = _LibrarySandbox()
+    chat_turn_runtime.register_personal_library_tools(
+        agent,
+        search_name="SearchMarkdownLibrary",
+        list_name="ListMarkdownLibrary",
+        read_name="ReadMarkdownFile",
+    )
+    context = SimpleNamespace(
+        deps=SimpleNamespace(sandbox_session=sandbox, personal_library_error=None)
+    )
+
+    assert set(agent.tools) == {
+        "SearchMarkdownLibrary",
+        "ListMarkdownLibrary",
+        "ReadMarkdownFile",
+    }
+    assert agent.tools["SearchMarkdownLibrary"](context, "query", limit=999) == "search result"
+    assert agent.tools["ListMarkdownLibrary"](context, limit=9999) == "file list"
+    assert agent.tools["ReadMarkdownFile"](context, "path.md", max_chars=2) == "file body"
+    assert sandbox.calls == [
+        ("search", {"query": "query", "glob": "*.md", "limit": 50}),
+        ("list", {"subpath": "", "limit": 500}),
+        ("read", {"relative_path": "path.md", "max_chars": 500}),
+    ]
+
+
+def test_personal_library_tools_share_unavailable_message() -> None:
+    agent = _ToolRecordingAgent()
+    chat_turn_runtime.register_personal_library_tools(
+        agent,
+        search_name="search",
+        list_name="list",
+        read_name="read",
+    )
+    context = SimpleNamespace(
+        deps=SimpleNamespace(sandbox_session=None, personal_library_error="E2B unavailable")
+    )
+
+    assert agent.tools["search"](context, "query") == (
+        "Personal markdown library is unavailable: E2B unavailable"
+    )
 
 
 def test_get_or_create_cached_agent_scopes_by_namespace_model_and_credential() -> None:
@@ -83,6 +185,33 @@ def test_chat_usage_snapshot_captures_validated_session_fields() -> None:
     assert snapshot.model == DEFAULT_MODEL
     assert snapshot.content_id == 99
     assert snapshot.session_type == "article"
+
+
+def test_detached_turn_builds_directly_from_queued_session_snapshot() -> None:
+    snapshot = ChatTurnSessionSnapshot(
+        user_id=42,
+        effective_session_id=7,
+        visible_session_id=7,
+        model="anthropic:claude-opus-4-6",
+        provider="anthropic",
+        content_id=99,
+        session_type="knowledge_chat",
+    )
+
+    turn = chat_turn_runtime.snapshot_detached_chat_turn_from_snapshot(
+        snapshot,
+        message_id=8,
+        source="queue",
+        task_id=73,
+    )
+
+    assert turn.session_id == 7
+    assert turn.message_id == 8
+    assert turn.user_id == 42
+    assert turn.model == "anthropic:claude-opus-4-6"
+    assert turn.provider == "anthropic"
+    assert turn.content_id == 99
+    assert turn.task_id == 73
 
 
 def test_detached_turn_primitives_close_prepare_session_and_complete_ledger(

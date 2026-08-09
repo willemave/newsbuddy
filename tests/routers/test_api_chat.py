@@ -86,6 +86,25 @@ def _create_news_item(
     return news_item
 
 
+def _queued_chat_turn(
+    db_session: Session,
+    *,
+    message_id: int,
+) -> tuple[ChatMessage, ProcessingTask, dict[str, object]]:
+    """Return the durable message, task, and immutable turn context."""
+    db_session.expire_all()
+    message = db_session.query(ChatMessage).filter(ChatMessage.id == message_id).one()
+    task = next(
+        task
+        for task in db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == TaskType.CHAT_TURN.value)
+        .all()
+        if (task.payload or {}).get("message_id") == message_id
+    )
+    assert isinstance(message.processing_context, dict)
+    return message, task, message.processing_context
+
+
 def test_create_chat_session_with_content(
     client: TestClient, db_session: Session, test_user
 ) -> None:
@@ -578,8 +597,6 @@ def test_start_council_chat_creates_hidden_child_sessions_and_hides_them_from_hi
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -662,8 +679,6 @@ def test_start_council_chat_preserves_failed_branch_candidate(
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -734,8 +749,6 @@ def test_retry_council_branch_regenerates_failed_candidate(
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -823,8 +836,6 @@ def test_start_council_chat_builds_child_context_from_linked_content(
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -884,8 +895,6 @@ def test_council_branch_selection_switches_visible_transcript_and_send_targets_a
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -908,48 +917,22 @@ def test_council_branch_selection_switches_visible_transcript_and_send_targets_a
     _seed_turn(db_session, first_child_id, "First branch follow-up", "First branch answer")
     _seed_turn(db_session, second_child_id, "Second branch follow-up", "Second branch answer")
 
-    standard_calls: list[tuple[int, int, str, str]] = []
-    assistant_calls: list[tuple[int, int, str, str]] = []
-
-    async def _fake_process_message_async(
-        session_id: int,
-        message_id: int,
-        prompt: str,
-        *,
-        source: str = "realtime",
-        task_id: int | None = None,
-    ) -> None:
-        del task_id
-        standard_calls.append((session_id, message_id, prompt, source))
-
-    async def _fake_process_assistant_turn_async(
-        session_id: int,
-        message_id: int,
-        prompt: str,
-        *,
-        screen_context,
-        source: str = "assistant",
-    ) -> None:
-        assistant_calls.append((session_id, message_id, prompt, screen_context.screen_type))
-
-    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
-    monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
-    )
-
     send_response = client.post(
         f"/api/content/chat/sessions/{parent.id}/messages",
         json={"message": "Stay on the default branch."},
     )
     assert send_response.status_code == 200
-    assert standard_calls[0] == (
-        first_child_id,
-        send_response.json()["message_id"],
-        "Stay on the default branch.",
-        "council",
+    first_message_id = send_response.json()["message_id"]
+    _, first_task, first_context = _queued_chat_turn(
+        db_session,
+        message_id=first_message_id,
     )
-    assert assistant_calls == []
+    assert first_task.owner_user_id == test_user.id
+    assert first_context["kind"] == "council"
+    assert first_context["source"] == "council"
+    assert first_context["user_prompt"] == "Stay on the default branch."
+    assert first_context["session"]["effective_session_id"] == first_child_id
+    assert first_context["session"]["visible_session_id"] == parent.id
 
     second_select_response = client.post(
         f"/api/content/chat/sessions/{parent.id}/council/select",
@@ -967,13 +950,13 @@ def test_council_branch_selection_switches_visible_transcript_and_send_targets_a
         json={"message": "Route this to the second branch."},
     )
     assert send_after_switch_response.status_code == 200
-    assert standard_calls[1] == (
-        second_child_id,
-        send_after_switch_response.json()["message_id"],
-        "Route this to the second branch.",
-        "council",
+    _, _, second_context = _queued_chat_turn(
+        db_session,
+        message_id=send_after_switch_response.json()["message_id"],
     )
-    assert assistant_calls == []
+    assert second_context["kind"] == "council"
+    assert second_context["user_prompt"] == "Route this to the second branch."
+    assert second_context["session"]["effective_session_id"] == second_child_id
 
     first_select_response = client.post(
         f"/api/content/chat/sessions/{parent.id}/council/select",
@@ -1029,8 +1012,6 @@ def test_start_council_chat_runs_branches_in_parallel(
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -1083,8 +1064,6 @@ def test_start_council_chat_after_parent_turn_begins_skips_processing_placeholde
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -1152,8 +1131,6 @@ def test_delete_chat_session_archives_council_children(
         return ChatRunResult(
             output_text=assistant_text,
             new_messages=messages,
-            all_messages=messages,
-            tool_calls=[],
         )
 
     monkeypatch.setattr("app.services.council_chat.run_chat_turn", _fake_run_chat_turn)
@@ -1559,22 +1536,6 @@ def test_create_assistant_turn_creates_session_with_screen_context(
     db_session.commit()
     db_session.refresh(content)
 
-    captured: list[tuple[int, int, str, str]] = []
-
-    async def _fake_process_assistant_turn_async(
-        session_id: int,
-        message_id: int,
-        prompt: str,
-        *,
-        screen_context,
-        source: str = "assistant",
-    ) -> None:
-        captured.append((session_id, message_id, prompt, screen_context.screen_type))
-
-    monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
-    )
     response = client.post(
         "/api/content/chat/assistant/turns",
         json={
@@ -1600,14 +1561,15 @@ def test_create_assistant_turn_creates_session_with_screen_context(
     assert payload["session"]["last_message_role"] == "user"
     assert payload["session"]["last_message_at"] is not None
     assert payload["user_message"]["content"] == "Find me more coverage like this."
-    assert captured == [
-        (
-            payload["session"]["id"],
-            payload["message_id"],
-            "Find me more coverage like this.",
-            "content_detail",
-        )
-    ]
+    _, task, turn_context = _queued_chat_turn(
+        db_session,
+        message_id=payload["message_id"],
+    )
+    assert task.owner_user_id == test_user.id
+    assert turn_context["kind"] == "assistant"
+    assert turn_context["user_prompt"] == "Find me more coverage like this."
+    assert turn_context["screen_context"]["screen_type"] == "content_detail"
+    assert turn_context["session"]["effective_session_id"] == payload["session"]["id"]
 
     session = (
         db_session.query(ChatSession).filter(ChatSession.id == payload["session"]["id"]).first()
@@ -1648,32 +1610,6 @@ def test_create_assistant_turn_with_news_item_ignores_content_id_collision(
     )
     db_session.commit()
 
-    captured: list[tuple[int, int, str, int | None, int | None]] = []
-
-    async def _fake_process_assistant_turn_async(
-        session_id: int,
-        message_id: int,
-        prompt: str,
-        *,
-        screen_context,
-        source: str = "assistant",
-    ) -> None:
-        del source
-        captured.append(
-            (
-                session_id,
-                message_id,
-                prompt,
-                screen_context.content_id,
-                screen_context.news_item_id,
-            )
-        )
-
-    monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
-    )
-
     response = client.post(
         "/api/content/chat/assistant/turns",
         json={
@@ -1693,15 +1629,12 @@ def test_create_assistant_turn_with_news_item_ignores_content_id_collision(
     assert session["content_id"] is None
     assert session["news_item_id"] == news_item.id
     assert session["article_title"] == "Assistant Correct News Story"
-    assert captured == [
-        (
-            session["id"],
-            payload["message_id"],
-            "Dig deeper into this news story.",
-            None,
-            news_item.id,
-        )
-    ]
+    _, _, turn_context = _queued_chat_turn(
+        db_session,
+        message_id=payload["message_id"],
+    )
+    assert turn_context["screen_context"]["content_id"] is None
+    assert turn_context["screen_context"]["news_item_id"] == news_item.id
 
     db_session_record = db_session.query(ChatSession).filter(ChatSession.id == session["id"]).one()
     assert db_session_record.content_id is None
@@ -1719,23 +1652,6 @@ def test_create_assistant_turn_titles_new_ad_hoc_session_from_message(
     monkeypatch,
 ) -> None:
     """Ad-hoc assistant turns should use the first message as the session title."""
-    captured: list[tuple[int, int, str, str]] = []
-
-    async def _fake_process_assistant_turn_async(
-        session_id: int,
-        message_id: int,
-        prompt: str,
-        *,
-        screen_context,
-        source: str = "assistant",
-    ) -> None:
-        del source
-        captured.append((session_id, message_id, prompt, screen_context.screen_type))
-
-    monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
-    )
     message = "Recommend a few feeds and newsletters I should add based on what I've read lately."
     expected_title = derive_chat_session_title(message)
     assert expected_title is not None
@@ -1760,14 +1676,12 @@ def test_create_assistant_turn_titles_new_ad_hoc_session_from_message(
     assert payload["session"]["last_message_preview"] == message[:200]
     assert payload["session"]["last_message_role"] == "user"
     assert payload["user_message"]["content"] == message
-    assert captured == [
-        (
-            payload["session"]["id"],
-            payload["message_id"],
-            message,
-            "knowledge_hub",
-        )
-    ]
+    _, _, turn_context = _queued_chat_turn(
+        db_session,
+        message_id=payload["message_id"],
+    )
+    assert turn_context["user_prompt"] == message
+    assert turn_context["screen_context"]["screen_type"] == "knowledge_hub"
 
     session = (
         db_session.query(ChatSession).filter(ChatSession.id == payload["session"]["id"]).first()
@@ -1785,23 +1699,6 @@ def test_create_assistant_turn_truncates_visible_content_ids(
     monkeypatch,
 ) -> None:
     """Test oversized visible-content context is truncated instead of rejected."""
-    captured: list[list[int]] = []
-
-    async def _fake_process_assistant_turn_async(
-        session_id: int,
-        message_id: int,
-        prompt: str,
-        *,
-        screen_context,
-        source: str = "assistant",
-    ) -> None:
-        del session_id, message_id, prompt, source
-        captured.append(screen_context.visible_content_ids)
-
-    monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
-    )
     response = client.post(
         "/api/content/chat/assistant/turns",
         json={
@@ -1815,7 +1712,11 @@ def test_create_assistant_turn_truncates_visible_content_ids(
     )
 
     assert response.status_code == 200
-    assert captured == [list(range(1, 13))]
+    _, _, turn_context = _queued_chat_turn(
+        db_session,
+        message_id=response.json()["message_id"],
+    )
+    assert turn_context["screen_context"]["visible_content_ids"] == list(range(1, 13))
 
 
 def test_create_assistant_turn_refreshes_existing_session_context(
@@ -1856,23 +1757,6 @@ def test_create_assistant_turn_refreshes_existing_session_context(
     db_session.commit()
     db_session.refresh(session)
 
-    captured: list[tuple[int, str]] = []
-
-    async def _fake_process_assistant_turn_async(
-        session_id: int,
-        message_id: int,
-        prompt: str,
-        *,
-        screen_context,
-        source: str = "assistant",
-    ) -> None:
-        del message_id, prompt, source
-        captured.append((session_id, screen_context.screen_type))
-
-    monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
-    )
     response = client.post(
         "/api/content/chat/assistant/turns",
         json={
@@ -1895,7 +1779,13 @@ def test_create_assistant_turn_refreshes_existing_session_context(
     assert payload["session"]["has_pending_message"] is True
     assert payload["session"]["last_message_preview"] == "Use what I'm looking at now."
     assert payload["session"]["last_message_role"] == "user"
-    assert captured == [(session.id, "content_detail")]
+    _, _, turn_context = _queued_chat_turn(
+        db_session,
+        message_id=payload["message_id"],
+    )
+    assert turn_context["session"]["effective_session_id"] == session.id
+    assert turn_context["session"]["content_id"] == new_content.id
+    assert turn_context["screen_context"]["screen_type"] == "content_detail"
 
     db_session.refresh(session)
     assert session.content_id == new_content.id
@@ -1923,27 +1813,6 @@ def test_send_message_routes_assistant_sessions_to_assistant_processor(
     db_session.commit()
     db_session.refresh(session)
 
-    assistant_calls: list[tuple[int, int, str, str]] = []
-    standard_calls: list[tuple[int, int, str]] = []
-
-    async def _fake_process_assistant_turn_async(
-        session_id: int,
-        message_id: int,
-        prompt: str,
-        *,
-        screen_context,
-        source: str = "assistant",
-    ) -> None:
-        assistant_calls.append((session_id, message_id, prompt, screen_context.screen_type))
-
-    async def _fake_process_message_async(session_id: int, message_id: int, prompt: str) -> None:
-        standard_calls.append((session_id, message_id, prompt))
-
-    monkeypatch.setattr(
-        "app.routers.api.chat.process_assistant_turn_async",
-        _fake_process_assistant_turn_async,
-    )
-    monkeypatch.setattr("app.routers.api.chat.process_message_async", _fake_process_message_async)
     response = client.post(
         f"/api/content/chat/sessions/{session.id}/messages",
         json={"message": "Add a few related feeds."},
@@ -1952,15 +1821,13 @@ def test_send_message_routes_assistant_sessions_to_assistant_processor(
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "processing"
-    assert assistant_calls == [
-        (
-            session.id,
-            payload["message_id"],
-            "Add a few related feeds.",
-            "assistant_quick",
-        )
-    ]
-    assert standard_calls == []
+    _, _, turn_context = _queued_chat_turn(
+        db_session,
+        message_id=payload["message_id"],
+    )
+    assert turn_context["kind"] == "assistant"
+    assert turn_context["user_prompt"] == "Add a few related feeds."
+    assert turn_context["screen_context"]["screen_type"] == "assistant_quick"
 
 
 def test_message_status_returns_distinct_assistant_display_id(
