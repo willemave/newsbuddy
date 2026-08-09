@@ -40,7 +40,11 @@ struct DetailChatSheet<PodcastAudioCard: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MiniSheetHeader(dismiss: onClose)
+            MiniSheetHeader(
+                title: "Chat actions",
+                titleAccessibilityIdentifier: "content.chat.sheet",
+                dismiss: onClose
+            )
 
             ScrollView {
                 VStack(spacing: 12) {
@@ -94,9 +98,6 @@ struct DetailChatSheet<PodcastAudioCard: View>: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.surfacePrimary)
-        .accessibilityLabel("Chat actions")
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("content.chat.sheet")
     }
 
     private var chatTileColumns: [GridItem] {

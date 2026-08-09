@@ -11,6 +11,7 @@ struct ChatMessageList: View {
     let timeline: [ChatTimelineItem]
     let hasMessages: Bool
     let isLoading: Bool
+    let loadErrorMessage: String?
     let errorMessage: String?
     let isStartingCouncil: Bool
     let isSending: Bool
@@ -50,7 +51,7 @@ struct ChatMessageList: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if let errorMessage, hasMessages {
+                    if let errorMessage {
                         ChatErrorBanner(
                             error: errorMessage,
                             onAddExperts: onOpenCouncilSettings,
@@ -62,9 +63,9 @@ struct ChatMessageList: View {
                         ChatLoadingView()
                             .frame(maxWidth: .infinity)
                             .padding(.top, 40)
-                    } else if let errorMessage, !hasMessages {
+                    } else if let loadErrorMessage, !hasMessages {
                         ChatLoadErrorState(
-                            error: errorMessage,
+                            error: loadErrorMessage,
                             onRetry: onRetryLoad
                         )
                         .padding()
@@ -72,6 +73,15 @@ struct ChatMessageList: View {
                         emptyTimelineState
                             .padding(.top, 40)
                     } else {
+                        if let session, let articleTitle = session.articleTitle {
+                            ArticlePreviewCard(
+                                title: articleTitle,
+                                source: session.articleSource,
+                                summary: session.articleSummary,
+                                url: session.articleUrl
+                            )
+                        }
+
                         ForEach(timeline) { item in
                             MessageRow(
                                 item: item,
@@ -272,6 +282,7 @@ private struct ChatLoadErrorState: View {
                     .overlay(Capsule().stroke(Color.chatAccent.opacity(0.24), lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("knowledge.chat_load_retry")
         }
     }
 }
@@ -282,6 +293,7 @@ private struct ChatLoadErrorState: View {
         timeline: ChatPreviewFixtures.timeline,
         hasMessages: true,
         isLoading: false,
+        loadErrorMessage: nil,
         errorMessage: nil,
         isStartingCouncil: false,
         isSending: true,

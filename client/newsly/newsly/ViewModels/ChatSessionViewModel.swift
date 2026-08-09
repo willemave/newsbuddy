@@ -35,6 +35,7 @@ final class ChatSessionViewModel {
     private(set) var timeline: [ChatTimelineItem] = []
     var isLoading = false
     var isSending = false
+    private(set) var loadErrorMessage: String?
     var errorMessage: String?
     var inputText: String = ""
     var thinkingStartedAt: Date?
@@ -167,6 +168,7 @@ final class ChatSessionViewModel {
 
         logger.debug("[ViewModel] loadSession | sessionId=\(self.sessionId)")
         isLoading = true
+        loadErrorMessage = nil
         errorMessage = nil
 
         do {
@@ -202,7 +204,7 @@ final class ChatSessionViewModel {
         } catch where isCancelledOperation(error) {
             logger.debug("[ViewModel] loadSession cancelled | sessionId=\(self.sessionId)")
         } catch {
-            errorMessage = error.localizedDescription
+            loadErrorMessage = error.localizedDescription
             logger.error("[ViewModel] loadSession failed | error=\(error.localizedDescription)")
         }
 
@@ -457,11 +459,6 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
             tasks.cancel(.send)
             needsForegroundTranscriptRefresh = true
         }
-    }
-
-    private func handOffBackgroundPollingIfNeeded() {
-        guard let processingMessageId = backgroundTrackingMessageId else { return }
-        handOffBackgroundPolling(messageId: processingMessageId)
     }
 
     private func handOffBackgroundPolling(messageId processingMessageId: Int) {

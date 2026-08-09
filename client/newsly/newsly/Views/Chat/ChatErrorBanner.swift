@@ -46,6 +46,8 @@ struct ChatErrorBanner: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss error")
+            .accessibilityIdentifier("knowledge.chat_error_dismiss")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

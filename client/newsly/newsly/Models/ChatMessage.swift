@@ -27,6 +27,7 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
     let description: String?
     let rationale: String?
     let evidenceURL: String?
+    let isSubscribed: Bool
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -38,6 +39,7 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
         case description
         case rationale
         case evidenceURL = "evidence_url"
+        case isSubscribed = "is_subscribed"
     }
 
     init(
@@ -49,7 +51,8 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
         feedFormat: String,
         description: String? = nil,
         rationale: String? = nil,
-        evidenceURL: String? = nil
+        evidenceURL: String? = nil,
+        isSubscribed: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -60,6 +63,7 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
         self.description = description
         self.rationale = rationale
         self.evidenceURL = evidenceURL
+        self.isSubscribed = isSubscribed
     }
 
     init(api response: APIAssistantFeedOption) {
@@ -72,6 +76,7 @@ struct AssistantFeedOption: Codable, Identifiable, Equatable {
         description = response.description
         rationale = response.rationale
         evidenceURL = response.evidenceUrl
+        isSubscribed = response.isSubscribed
     }
 
     var previewURLString: String {

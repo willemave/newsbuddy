@@ -78,43 +78,6 @@ struct SendChatMessageResponse: Codable {
     }
 }
 
-/// Response returned after starting a dig-deeper chat
-struct StartDigDeeperChatResponse: Codable {
-    let session: ChatSessionSummary
-    let userMessage: ChatMessage
-    let messageId: Int
-    let status: APIMessageProcessingStatus
-
-    enum CodingKeys: String, CodingKey {
-        case session
-        case userMessage = "user_message"
-        case messageId = "message_id"
-        case status
-    }
-
-    init(
-        session: ChatSessionSummary,
-        userMessage: ChatMessage,
-        messageId: Int,
-        status: APIMessageProcessingStatus
-    ) {
-        self.session = session
-        self.userMessage = userMessage
-        self.messageId = messageId
-        self.status = status
-    }
-
-    init(from decoder: Decoder) throws {
-        let response = try APIAssistantTurnResponse(from: decoder)
-        self.init(
-            session: ChatSessionSummary(api: response.session),
-            userMessage: ChatMessage(api: response.userMessage),
-            messageId: response.messageId,
-            status: response.status
-        )
-    }
-}
-
 /// Response when polling for message completion status
 struct MessageStatusResponse: Codable {
     let messageId: Int
@@ -248,33 +211,6 @@ struct RetryCouncilBranchRequest: Codable {
 
     enum CodingKeys: String, CodingKey {
         case childSessionId = "child_session_id"
-    }
-}
-
-enum AssistantActionIntent {
-    static let pickInterestingUnreadNews = "pick_interesting_unread_news"
-}
-
-enum InterestingUnreadNewsAssistantAction {
-    static let prompt = (
-        "Look at my unread fast-news items and pick the most interesting "
-        + "stories I should pay attention to."
-    )
-
-    private static let query = "most interesting unread fast-news items"
-    private static let note = (
-        "Use the unread fast-news tool result as the candidate set. "
-        + "Do not rely on currently visible rows only."
-    )
-
-    static func screenContext(screenType: String, screenTitle: String) -> AssistantScreenContext {
-        AssistantScreenContext(
-            screenType: screenType,
-            screenTitle: screenTitle,
-            query: query,
-            note: note,
-            assistantAction: AssistantActionIntent.pickInterestingUnreadNews
-        )
     }
 }
 

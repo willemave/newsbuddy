@@ -158,6 +158,7 @@ final class ChatMessageDisplayTests: XCTestCase {
         XCTAssertEqual(message.feedOptions.count, 1)
         XCTAssertEqual(message.feedOptions[0].title, "lucumr")
         XCTAssertEqual(message.feedOptions[0].feedTypeLabel, "Atom")
+        XCTAssertFalse(message.feedOptions[0].isSubscribed)
     }
 
     func testChatMessageDecodesCouncilCandidates() throws {
@@ -276,7 +277,7 @@ final class ChatMessageDisplayTests: XCTestCase {
     }
 
     @MainActor
-    func testAssistantFeedOptionActionModelMarksHttp400AsSubscribed() async {
+    func testAssistantFeedOptionActionModelUsesTypedAlreadySubscribedOutcome() async {
         let option = AssistantFeedOption(
             id: "8f7d2c42b0c1de90",
             title: "lucumr",
@@ -290,7 +291,17 @@ final class ChatMessageDisplayTests: XCTestCase {
         )
         let model = AssistantFeedOptionActionModel(
             service: MockAssistantFeedSubscriptionService(
-                result: .failure(APIError.httpError(statusCode: 400, detail: nil))
+                result: .success(
+                    ScraperConfig(
+                        id: 7,
+                        scraperType: "feed",
+                        config: [:],
+                        feedUrl: option.feedURL,
+                        isActive: true,
+                        createdAt: Date(),
+                        subscriptionOutcome: .already_subscribed
+                    )
+                )
             )
         )
 
@@ -298,12 +309,95 @@ final class ChatMessageDisplayTests: XCTestCase {
 
         XCTAssertTrue(model.isSubscribed(option))
         XCTAssertFalse(model.isSubscribing(option))
+        XCTAssertEqual(model.subscriptionLabels[option.id], "Already subscribed")
+    }
+
+    @MainActor
+    func testAssistantFeedOptionActionModelUsesReactivatedOutcome() async {
+        let option = AssistantFeedOption(
+            id: "paused-feed",
+            title: "Paused Feed",
+            siteURL: "https://example.com/",
+            feedURL: "https://example.com/paused.xml",
+            feedType: "atom",
+            feedFormat: "rss"
+        )
+        let service = MockAssistantFeedSubscriptionService(
+            result: .success(
+                ScraperConfig(
+                    id: 8,
+                    scraperType: "atom",
+                    config: [:],
+                    feedUrl: option.feedURL,
+                    isActive: true,
+                    createdAt: Date(),
+                    subscriptionOutcome: .reactivated
+                )
+            )
+        )
+        let model = AssistantFeedOptionActionModel(service: service)
+
+        await model.subscribe(option)
+
+        XCTAssertTrue(model.isSubscribed(option))
+        XCTAssertFalse(model.isSubscribing(option))
+        XCTAssertEqual(model.subscriptionLabels[option.id], "Re-enabled")
+        XCTAssertEqual(service.callCount, 1)
+    }
+
+    @MainActor
+    func testAssistantFeedOptionActionModelDoesNotTreatHttp400AsSuccess() async {
+        let option = AssistantFeedOption(
+            id: "bad-feed",
+            title: "Bad feed",
+            siteURL: "https://example.com/",
+            feedURL: "https://example.com/feed.xml",
+            feedType: "rss",
+            feedFormat: "rss",
+            description: nil,
+            rationale: nil,
+            evidenceURL: nil
+        )
+        let model = AssistantFeedOptionActionModel(
+            service: MockAssistantFeedSubscriptionService(
+                result: .failure(APIError.httpError(statusCode: 400, detail: nil))
+            )
+        )
+
+        await model.subscribe(option)
+
+        XCTAssertFalse(model.isSubscribed(option))
+        XCTAssertFalse(model.isSubscribing(option))
+    }
+
+    @MainActor
+    func testAssistantFeedOptionActionModelDoesNotResubscribeServerMarkedOption() async {
+        let option = AssistantFeedOption(
+            id: "active-feed",
+            title: "Active feed",
+            siteURL: "https://example.com/",
+            feedURL: "https://example.com/feed.xml",
+            feedType: "atom",
+            feedFormat: "rss",
+            isSubscribed: true
+        )
+        let service = MockAssistantFeedSubscriptionService(
+            result: .failure(APIError.httpError(statusCode: 500, detail: nil))
+        )
+        let model = AssistantFeedOptionActionModel(service: service)
+
+        await model.subscribe(option)
+
+        XCTAssertTrue(model.isSubscribed(option))
+        XCTAssertFalse(model.isSubscribing(option))
+        XCTAssertEqual(service.callCount, 0)
     }
 }
 
 @MainActor
 private final class MockAssistantFeedSubscriptionService: AssistantFeedSubscribing {
     let result: Result<ScraperConfig, Error>
+    private(set) var callCount = 0
 
     init(result: Result<ScraperConfig, Error>) {
         self.result = result
@@ -315,6 +409,7 @@ private final class MockAssistantFeedSubscriptionService: AssistantFeedSubscribi
         displayName: String?
     ) async throws -> ScraperConfig {
         _ = (feedURL, feedType, displayName)
+        callCount += 1
         return try result.get()
     }
 }

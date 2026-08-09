@@ -6,9 +6,6 @@
 //
 
 import Foundation
-import os.log
-
-private let logger = Logger(subsystem: "com.newsly", category: "ChatService")
 
 /// Errors specific to the chat service
 enum ChatServiceError: LocalizedError {

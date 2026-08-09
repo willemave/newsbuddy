@@ -193,6 +193,14 @@ struct ChatComposerDock: View {
         .accessibilityLabel(isRecording ? "Stop recording" : "Start recording")
         .accessibilityHint(isRecording ? "Tap to stop and send this chat message" : "Tap to dictate and send into this chat")
         .accessibilityIdentifier("knowledge.chat_mic")
+        .accessibilityValue(voiceAccessibilityValue)
+    }
+
+    private var voiceAccessibilityValue: String {
+        if isTranscribing { return "Transcribing" }
+        if isRecording { return "Recording" }
+        if isVoiceActionInFlight { return "Starting" }
+        return "Idle"
     }
 
     private var sendButton: some View {

@@ -22,6 +22,7 @@ extension ScraperConfigService: AssistantFeedSubscribing {}
 final class AssistantFeedOptionActionModel {
     private(set) var subscribedOptionIds: Set<String> = []
     private(set) var subscribingOptionIds: Set<String> = []
+    private(set) var subscriptionLabels: [String: String] = [:]
 
     @ObservationIgnored
     private let service: any AssistantFeedSubscribing
@@ -31,7 +32,7 @@ final class AssistantFeedOptionActionModel {
     }
 
     func isSubscribed(_ option: AssistantFeedOption) -> Bool {
-        subscribedOptionIds.contains(option.id)
+        option.isSubscribed || subscribedOptionIds.contains(option.id)
     }
 
     func isSubscribing(_ option: AssistantFeedOption) -> Bool {
@@ -45,22 +46,24 @@ final class AssistantFeedOptionActionModel {
         defer { subscribingOptionIds.remove(option.id) }
 
         do {
-            _ = try await service.subscribeFeed(
+            let config = try await service.subscribeFeed(
                 feedURL: option.feedURL,
                 feedType: option.feedType,
                 displayName: option.title
             )
             subscribedOptionIds.insert(option.id)
-            ToastService.shared.showSuccess("Subscribed to \(option.title)")
-        } catch let apiError as APIError {
-            if case .httpError(let statusCode, _) = apiError, statusCode == 400 {
-                subscribedOptionIds.insert(option.id)
+            if config.subscriptionOutcome == .already_subscribed {
+                subscriptionLabels[option.id] = "Already subscribed"
                 ToastService.shared.show("Already subscribed", type: .info)
-                return
+            } else if config.subscriptionOutcome == .reactivated {
+                subscriptionLabels[option.id] = "Re-enabled"
+                ToastService.shared.showSuccess("Re-enabled \(option.title)")
+            } else {
+                subscriptionLabels[option.id] = "Added"
+                ToastService.shared.showSuccess("Subscribed to \(option.title)")
             }
-            ToastService.shared.showError("Failed to subscribe: \(apiError.localizedDescription)")
         } catch {
-            ToastService.shared.showError("Failed to subscribe: \(error.localizedDescription)")
+            ToastService.shared.showError("Couldn't subscribe. Please try again.")
         }
     }
 }
@@ -137,6 +140,7 @@ private extension AssistantFeedOptionsSection {
             )
             .disabled(actionModel.isSubscribed(option) || actionModel.isSubscribing(option))
             .accessibilityLabel(addButtonAccessibilityLabel(for: option))
+            .accessibilityIdentifier("chat.feed.subscribe.\(option.id)")
 
             Button {
                 onPreview(option)
@@ -149,6 +153,7 @@ private extension AssistantFeedOptionsSection {
             }
             .buttonStyle(FeedOptionActionButtonStyle(role: .secondary))
             .accessibilityLabel("View \(option.title)")
+            .accessibilityIdentifier("chat.feed.view.\(option.id)")
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 2)
@@ -159,7 +164,8 @@ private extension AssistantFeedOptionsSection {
             return "Adding"
         }
         if actionModel.isSubscribed(option) {
-            return "Added"
+            return actionModel.subscriptionLabels[option.id]
+                ?? (option.isSubscribed ? "Already subscribed" : "Added")
         }
         return "Add"
     }
@@ -169,7 +175,9 @@ private extension AssistantFeedOptionsSection {
             return "Adding \(option.title)"
         }
         if actionModel.isSubscribed(option) {
-            return "Added \(option.title)"
+            let status = actionModel.subscriptionLabels[option.id]
+                ?? (option.isSubscribed ? "Already subscribed" : "Added")
+            return "\(status) \(option.title)"
         }
         return "Add \(option.title)"
     }

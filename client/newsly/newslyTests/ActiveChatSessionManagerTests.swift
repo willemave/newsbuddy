@@ -60,6 +60,29 @@ final class ActiveChatSessionManagerTests: XCTestCase {
         XCTAssertNil(manager.getSession(forContentId: 7))
     }
 
+    func testSupersededMessageCannotCompleteOrFailReplacementSession() {
+        let manager = ActiveChatSessionManager(startsPolling: false)
+        manager.startTracking(
+            session: Self.session(id: 42),
+            contentId: 7,
+            contentTitle: "Tracked Article",
+            messageId: 501
+        )
+        manager.startTracking(
+            session: Self.session(id: 42),
+            contentId: 7,
+            contentTitle: "Tracked Article",
+            messageId: 502
+        )
+
+        manager.handleCompletion(sessionId: 42, messageId: 501)
+        manager.handleFailure(sessionId: 42, messageId: 501, error: "Old failure")
+
+        XCTAssertEqual(manager.activeSessions[42]?.messageId, 502)
+        XCTAssertEqual(manager.activeSessions[42]?.status, .processing)
+        XCTAssertNil(manager.completedSessions[42])
+    }
+
     func testLifecycleSuspensionPausesAndResumesPollingWithoutDroppingTrackedSession() async {
         let service = PollingChatSessionService()
         let registry = ChatMessageCompletionRegistry(

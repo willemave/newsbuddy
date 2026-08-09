@@ -34,18 +34,21 @@ struct ChatSessionView: View {
     @State private var edgeBackSwipeFeedbackTrigger = 0
     private let route: ChatSessionRoute
     private let dependencies: ChatDependencies
+    private let onClose: (() -> Void)?
 
     @MainActor
     init(
         route: ChatSessionRoute,
         dependencies: ChatDependencies? = nil,
-        onShowHistory: (() -> Void)? = nil
+        onShowHistory: (() -> Void)? = nil,
+        onClose: (() -> Void)? = nil
     ) {
         let resolvedDependencies = dependencies ?? .live
         self.route = route
         self.dependencies = resolvedDependencies
         _viewModel = State(initialValue: ChatSessionViewModel(route: route, dependencies: resolvedDependencies))
         self.onShowHistory = onShowHistory
+        self.onClose = onClose
     }
 
     private var defaultCouncilPrompt: String {
@@ -61,12 +64,12 @@ struct ChatSessionView: View {
             chatHeader
             Divider()
             messageListView
+                .overlay(alignment: .leading) {
+                    edgeBackSwipeZone
+                }
         }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomDock
-            }
-            .overlay(alignment: .leading) {
-                edgeBackSwipeZone
             }
             .offset(x: edgeBackDragOffset)
             .scrollDismissesKeyboard(.interactively)
@@ -126,6 +129,7 @@ struct ChatSessionView: View {
             timeline: viewModel.timeline,
             hasMessages: !viewModel.timeline.isEmpty,
             isLoading: viewModel.isLoading,
+            loadErrorMessage: viewModel.loadErrorMessage,
             errorMessage: viewModel.errorMessage,
             isStartingCouncil: viewModel.isStartingCouncil,
             isSending: viewModel.isSending,
@@ -147,7 +151,7 @@ struct ChatSessionView: View {
     private var chatHeader: some View {
         HStack(spacing: 12) {
             FloatingBackButton(style: .surface) {
-                dismiss()
+                closeChat()
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -156,6 +160,7 @@ struct ChatSessionView: View {
                     .foregroundStyle(Color.onSurface)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .accessibilityIdentifier("chat.header")
 
                 if let session = viewModel.session ?? route.session {
                     Text(session.displaySubtitle ?? session.providerDisplayName)
@@ -170,7 +175,6 @@ struct ChatSessionView: View {
         .padding(.vertical, 8)
         .background(Color.surfacePrimary.opacity(0.98))
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("chat.header")
     }
 
     private var edgeBackSwipeZone: some View {
@@ -198,10 +202,18 @@ struct ChatSessionView: View {
                 withAnimation(AppMotion.subtle) {
                     edgeBackDragOffset = dismissWidth
                 } completion: {
-                    dismiss()
+                    closeChat()
                     edgeBackDragOffset = 0
                 }
             }
+    }
+
+    private func closeChat() {
+        if let onClose {
+            onClose()
+        } else {
+            dismiss()
+        }
     }
 
     private func presentShareSheet(for content: String) {

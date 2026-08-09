@@ -62,6 +62,8 @@ struct ArticlePreviewCard: View {
                     .multilineTextAlignment(.center)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("chat.article_context")
     }
 }
 

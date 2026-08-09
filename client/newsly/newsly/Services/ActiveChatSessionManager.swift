@@ -235,21 +235,32 @@ final class ActiveChatSessionManager {
     private func pollForCompletion(sessionId: Int, messageId: Int) async {
         do {
             _ = try await messageCompletionRegistry.waitForCompletion(messageId: messageId)
-            await handleCompletion(sessionId: sessionId)
+            handleCompletion(sessionId: sessionId, messageId: messageId)
         } catch is CancellationError {
             logger.info("Polling cancelled for session \(sessionId)")
         } catch ChatServiceError.processingFailed(let message) {
-            await handleFailure(sessionId: sessionId, error: message)
+            handleFailure(sessionId: sessionId, messageId: messageId, error: message)
         } catch ChatServiceError.timeout {
-            await handleFailure(sessionId: sessionId, error: "Request timed out")
+            handleFailure(
+                sessionId: sessionId,
+                messageId: messageId,
+                error: "Request timed out"
+            )
         } catch {
             logger.error("Polling error for session \(sessionId): \(error.localizedDescription)")
-            await handleFailure(sessionId: sessionId, error: error.localizedDescription)
+            handleFailure(
+                sessionId: sessionId,
+                messageId: messageId,
+                error: error.localizedDescription
+            )
         }
     }
 
-    private func handleCompletion(sessionId: Int) async {
-        guard var session = activeSessions[sessionId] else { return }
+    func handleCompletion(sessionId: Int, messageId: Int) {
+        guard var session = activeSessions[sessionId],
+              session.messageId == messageId else {
+            return
+        }
 
         session.status = .completed
         activeSessions.removeValue(forKey: sessionId)
@@ -266,8 +277,11 @@ final class ActiveChatSessionManager {
         )
     }
 
-    private func handleFailure(sessionId: Int, error: String) async {
-        guard var session = activeSessions[sessionId] else { return }
+    func handleFailure(sessionId: Int, messageId: Int, error: String) {
+        guard var session = activeSessions[sessionId],
+              session.messageId == messageId else {
+            return
+        }
 
         session.status = .failed(error)
         activeSessions.removeValue(forKey: sessionId)

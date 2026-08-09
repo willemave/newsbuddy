@@ -58,7 +58,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         )
 
         await viewModel.toggleVoiceRecording()
-        transcriptionService.onStateChange?(.transcribing)
+        transcriptionService.emit(.stateChange(.transcribing))
         let didEnterTranscribingState = await waitUntil { viewModel.isTranscribing }
 
         await viewModel.toggleVoiceRecording()
@@ -138,6 +138,69 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.inputText, "")
         XCTAssertFalse(viewModel.isRecording)
         XCTAssertFalse(viewModel.isTranscribing)
+        XCTAssertEqual(transcriptionService.stopCallCount, 0)
+    }
+
+    func testMaximumDurationAutoStopSendsTranscriptWithoutManualStop() async {
+        let transcriptionService = MockChatSpeechTranscriber(transcript: "Maximum transcript")
+        let chatService = makeSuccessfulVoiceSendService()
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: transcriptionService,
+                chatService: chatService
+            ),
+            initialVoiceDictationAvailable: true
+        )
+
+        await viewModel.toggleVoiceRecording()
+        await transcriptionService.simulateAutomaticStop(reason: .maximumDuration)
+
+        let didSend = await waitUntil {
+            chatService.sentMessages.map(\.message) == ["Maximum transcript"]
+        }
+        XCTAssertTrue(didSend)
+        XCTAssertFalse(viewModel.isRecording)
+        XCTAssertFalse(viewModel.isTranscribing)
+    }
+
+    func testEmptyVoiceTranscriptShowsRetryableActionError() async {
+        let transcriptionService = MockChatSpeechTranscriber(transcript: "   ")
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(transcriptionService: transcriptionService),
+            initialVoiceDictationAvailable: true
+        )
+
+        await viewModel.toggleVoiceRecording()
+        await viewModel.toggleVoiceRecording()
+
+        XCTAssertEqual(viewModel.errorMessage, "I didn't catch that. Try again.")
+        XCTAssertNil(viewModel.loadErrorMessage)
+    }
+
+    func testNoSpeechAutoStopShowsRetryableErrorWithoutSending() async {
+        let transcriptionService = MockChatSpeechTranscriber(transcript: "Ignored")
+        let chatService = makeSuccessfulVoiceSendService()
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: transcriptionService,
+                chatService: chatService
+            ),
+            initialVoiceDictationAvailable: true
+        )
+
+        await viewModel.toggleVoiceRecording()
+        await transcriptionService.simulateNoSpeechTimeout()
+        let didShowError = await waitUntil {
+            viewModel.errorMessage == "No speech detected. Try again."
+        }
+
+        XCTAssertTrue(didShowError)
+        XCTAssertFalse(viewModel.isRecording)
+        XCTAssertFalse(viewModel.isTranscribing)
+        XCTAssertEqual(chatService.sentMessages.count, 0)
         XCTAssertEqual(transcriptionService.stopCallCount, 0)
     }
 
@@ -261,6 +324,24 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertTrue(didDrainQueue)
         XCTAssertEqual(chatService.sentMessages.map(\.message), ["First", "Second", "Third"])
         XCTAssertTrue(viewModel.timeline.allSatisfy { !$0.isQueued })
+    }
+
+    func testSessionLoadFailureDoesNotMasqueradeAsAnActionFailure() async {
+        let chatService = MockChatSessionService(getSessionHandler: { _ in
+            throw ChatServiceError.timeout
+        })
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService
+            )
+        )
+
+        await viewModel.loadSession()
+
+        XCTAssertNotNil(viewModel.loadErrorMessage)
+        XCTAssertNil(viewModel.errorMessage)
     }
 
     func testQueuedSendResumesAfterForegroundWhenActiveSendFailsWhileInactive() async {
@@ -841,67 +922,89 @@ private final class MockChatSessionService: ChatSessionServicing {
 
 @MainActor
 private final class MockChatSpeechTranscriber: SpeechTranscribing {
-    var onTranscriptDelta: ((String) -> Void)?
-    var onTranscriptFinal: ((String) -> Void)?
-    var onError: ((String) -> Void)?
-    var onStateChange: ((SpeechTranscriptionState) -> Void)?
-    var onStopReason: ((SpeechStopReason) -> Void)?
-
     var isAvailable = true
-    var isRecording = false
-    var isTranscribing = false
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0
 
     private let transcript: String
+    private var activeSessionID: UUID?
+    private var continuation: AsyncStream<SpeechTranscriptionEvent>.Continuation?
 
     init(transcript: String) {
         self.transcript = transcript
     }
 
-    func start() async throws {
-        startCallCount += 1
-        isRecording = true
-        onStateChange?(.recording)
+    func makeSession(
+        deadlines: SpeechRecordingDeadlines
+    ) throws -> SpeechTranscriptionSession {
+        _ = deadlines
+        guard activeSessionID == nil else { throw VoiceDictationError.sessionBusy }
+        let sessionID = UUID()
+        let pair = AsyncStream<SpeechTranscriptionEvent>.makeStream()
+        activeSessionID = sessionID
+        continuation = pair.continuation
+        return SpeechTranscriptionSession(
+            id: sessionID,
+            events: pair.stream,
+            start: { [weak self] id in self?.start(sessionID: id) },
+            stop: { [weak self] id in
+                guard let self else { throw VoiceDictationError.noActiveSession }
+                return try self.stop(sessionID: id)
+            },
+            cancel: { [weak self] id in self?.cancel(sessionID: id) }
+        )
     }
 
-    func stop() async throws -> String {
-        stopCallCount += 1
-        isRecording = false
-        isTranscribing = true
-        onStateChange?(.transcribing)
-        onTranscriptFinal?(transcript)
-        isTranscribing = false
-        onStopReason?(.manual)
-        onStateChange?(.idle)
-        return transcript
+    func emit(_ event: SpeechTranscriptionEvent) {
+        continuation?.yield(event)
     }
 
     func simulateSilenceAutoStop() async {
-        isRecording = false
-        isTranscribing = true
-        onStateChange?(.transcribing)
-        onTranscriptFinal?(transcript)
-        isTranscribing = false
-        onStopReason?(.silenceAutoStop)
-        onStateChange?(.idle)
+        await simulateAutomaticStop(reason: .silenceAutoStop)
     }
 
-    func cancel() {
-        isRecording = false
-        isTranscribing = false
-        onStateChange?(.idle)
-        onStopReason?(.cancel)
+    func simulateAutomaticStop(reason: SpeechStopReason) async {
+        emit(.stateChange(.transcribing))
+        emit(.transcriptFinal(transcript))
+        emit(.stateChange(.idle))
+        emit(.stopReason(reason))
+        releaseSession()
+        await Task.yield()
     }
 
-    func reset() {
-        isRecording = false
-        isTranscribing = false
-        onTranscriptDelta = nil
-        onTranscriptFinal = nil
-        onError = nil
-        onStateChange = nil
-        onStopReason = nil
+    func simulateNoSpeechTimeout() async {
+        let message = "No speech detected. Try again."
+        emit(.stateChange(.failed(message)))
+        emit(.error(message))
+        emit(.stopReason(.noSpeechTimeout))
+        releaseSession()
+        await Task.yield()
+    }
+
+    private func start(sessionID: UUID) {
+        guard activeSessionID == sessionID else { return }
+        startCallCount += 1
+        emit(.stateChange(.recording))
+    }
+
+    private func stop(sessionID: UUID) throws -> String {
+        guard activeSessionID == sessionID else { throw VoiceDictationError.noActiveSession }
+        stopCallCount += 1
+        releaseSession()
+        return transcript
+    }
+
+    private func cancel(sessionID: UUID) {
+        guard activeSessionID == sessionID else { return }
+        emit(.stateChange(.idle))
+        emit(.stopReason(.cancel))
+        releaseSession()
+    }
+
+    private func releaseSession() {
+        activeSessionID = nil
+        continuation?.finish()
+        continuation = nil
     }
 }
 
