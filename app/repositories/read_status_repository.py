@@ -32,34 +32,10 @@ def mark_content_as_read(db: Session, content_id: int, user_id: int) -> ContentR
         extra=_read_status_extra("mark_content_as_read", content_id=content_id, user_id=user_id),
     )
     try:
-        read_at = datetime.now(UTC).replace(tzinfo=None)
-        stmt = (
-            postgresql_insert(ContentReadStatus)
-            .values(
-                {
-                    "user_id": user_id,
-                    "content_id": content_id,
-                    "read_at": read_at,
-                    "created_at": read_at,
-                }
-            )
-            .on_conflict_do_update(
-                index_elements=[
-                    ContentReadStatus.user_id,
-                    ContentReadStatus.content_id,
-                ],
-                set_={"read_at": read_at},
-            )
-            .returning(ContentReadStatus.id)
-        )
-        raw_read_status_id = db.execute(stmt).scalar_one()
-        if raw_read_status_id is None:
-            raise RuntimeError("Read status insert returned no id")
-        read_status_id = int(raw_read_status_id)
+        read_status = mark_content_as_read_in_session(db, content_id, user_id)
         db.commit()
-        return db.execute(
-            select(ContentReadStatus).where(ContentReadStatus.id == read_status_id)
-        ).scalar_one_or_none()
+        db.refresh(read_status)
+        return read_status
     except OperationalError as exc:
         logger.warning(
             "[READ_STATUS] Failed while marking read",
@@ -85,6 +61,42 @@ def mark_content_as_read(db: Session, content_id: int, user_id: int) -> ContentR
         )
         db.rollback()
         return None
+
+
+def mark_content_as_read_in_session(
+    db: Session,
+    content_id: int,
+    user_id: int,
+) -> ContentReadStatus:
+    """Upsert one read marker without owning the caller's transaction."""
+
+    read_at = datetime.now(UTC).replace(tzinfo=None)
+    stmt = (
+        postgresql_insert(ContentReadStatus)
+        .values(
+            {
+                "user_id": user_id,
+                "content_id": content_id,
+                "read_at": read_at,
+                "created_at": read_at,
+            }
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                ContentReadStatus.user_id,
+                ContentReadStatus.content_id,
+            ],
+            set_={"read_at": read_at},
+        )
+        .returning(ContentReadStatus.id)
+    )
+    raw_read_status_id = db.execute(stmt).scalar_one()
+    if raw_read_status_id is None:
+        raise RuntimeError("Read status insert returned no id")
+    read_status = db.get(ContentReadStatus, int(raw_read_status_id))
+    if read_status is None:
+        raise RuntimeError("Read status insert could not be reloaded")
+    return read_status
 
 
 def mark_contents_as_read(

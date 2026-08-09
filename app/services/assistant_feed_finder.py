@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlparse, urlunparse
+from time import monotonic
+from urllib.parse import urlparse
 
 from app.models.contracts import FeedFormat, FeedType
 from app.models.domain.chat_render import (
@@ -10,9 +11,16 @@ from app.models.domain.chat_render import (
     AssistantFeedOptionsResult,
     build_assistant_feed_option_id,
 )
-from app.services.exa_client import ExaContentResult, ExaSearchResult, exa_get_contents, exa_search
+from app.models.internal.scraper_configs import canonicalize_feed_url
+from app.services.agent_vm_runtime import resolve_sandbox_user_id
+from app.services.exa_client import ExaSearchResult, exa_search
 from app.services.feed_detection import FeedDetector
+from app.services.feed_research_runtime import (
+    FeedResearchDeadlineExceeded,
+    feed_research_runtime,
+)
 from app.services.feed_resolution import extract_candidate_feed_urls, resolve_feed_candidate
+from app.utils.title_utils import clean_title
 
 MAX_FEED_SEARCH_RESULTS = 8
 MAX_FEED_CONTENT_CHARACTERS = 5000
@@ -28,42 +36,60 @@ def find_feed_options(
     query: str,
     limit: int = MAX_FEED_OPTIONS,
     user_id: int | None = None,
+    execution_id: int | None = None,
+    deadline: float | None = None,
 ) -> AssistantFeedOptionsResult:
     """Find validated subscribable feed options for an assistant request."""
 
     normalized_query = query.strip()
     normalized_limit = max(1, min(limit, MAX_FEED_OPTIONS))
-    if not normalized_query:
+    if not normalized_query or _deadline_expired(deadline):
         return AssistantFeedOptionsResult(query=query, options=[])
 
+    request_timeout_seconds = None if deadline is None else max(0.0, deadline - monotonic())
     search_results = exa_search(
         normalized_query,
         num_results=min(MAX_FEED_SEARCH_RESULTS, max(normalized_limit * 3, normalized_limit)),
-        max_characters=1200,
+        max_characters=MAX_FEED_CONTENT_CHARACTERS,
         telemetry={
             "feature": "assistant_feed_finder",
             "operation": "assistant_feed_finder.search",
             "user_id": user_id,
         },
+        request_timeout_seconds=request_timeout_seconds,
     )
-    content_by_url = _content_results_by_url(search_results, user_id=user_id)
-    detector = FeedDetector(use_exa_search=True, use_llm=True)
+    if not search_results or _deadline_expired(deadline):
+        return AssistantFeedOptionsResult(query=normalized_query, options=[])
     prefer_site_discovery = _looks_like_podcast_query(normalized_query)
 
     options: list[AssistantFeedOption] = []
     seen_feed_urls: set[str] = set()
-
-    for search_result in search_results:
-        option = _build_option_from_result(
-            search_result=search_result,
-            content_result=content_by_url.get(search_result.url),
-            detector=detector,
-            seen_feed_urls=seen_feed_urls,
-            prefer_site_discovery=prefer_site_discovery,
-        )
-        if option is None:
-            continue
-        options.append(option)
+    try:
+        with feed_research_runtime(
+            user_id=resolve_sandbox_user_id(user_id),
+            execution_id=execution_id,
+            use_llm=deadline is None,
+            deadline=deadline,
+        ) as runtime:
+            for search_result in search_results:
+                if _deadline_expired(deadline):
+                    break
+                option = _build_option_from_result(
+                    search_result=search_result,
+                    detector=runtime.detector,
+                    seen_feed_urls=seen_feed_urls,
+                    prefer_site_discovery=prefer_site_discovery,
+                )
+                if option is None:
+                    continue
+                options.append(option)
+                if len(options) >= normalized_limit and (
+                    not prefer_site_discovery
+                    or any(item.feed_type == FeedType.PODCAST_RSS for item in options)
+                ):
+                    break
+    except FeedResearchDeadlineExceeded:
+        pass
 
     ranked_options = _rank_options_for_query(normalized_query, options)
     return AssistantFeedOptionsResult(
@@ -72,28 +98,13 @@ def find_feed_options(
     )
 
 
-def _content_results_by_url(
-    search_results: list[ExaSearchResult],
-    *,
-    user_id: int | None = None,
-) -> dict[str, ExaContentResult]:
-    urls = [result.url for result in search_results if result.url]
-    content_results = exa_get_contents(
-        urls,
-        max_characters=MAX_FEED_CONTENT_CHARACTERS,
-        telemetry={
-            "feature": "assistant_feed_finder",
-            "operation": "assistant_feed_finder.get_contents",
-            "user_id": user_id,
-        },
-    )
-    return {result.url: result for result in content_results if result.url}
+def _deadline_expired(deadline: float | None) -> bool:
+    return deadline is not None and monotonic() >= deadline
 
 
 def _build_option_from_result(
     *,
     search_result: ExaSearchResult,
-    content_result: ExaContentResult | None,
     detector: FeedDetector,
     seen_feed_urls: set[str],
     prefer_site_discovery: bool,
@@ -112,15 +123,7 @@ def _build_option_from_result(
         if live_option is not None:
             return live_option
 
-    page_text = "\n".join(
-        part.strip()
-        for part in (
-            content_result.text if content_result else None,
-            content_result.summary if content_result else None,
-            search_result.snippet,
-        )
-        if isinstance(part, str) and part.strip()
-    )
+    page_text = (search_result.snippet or "").strip()
 
     resolved = resolve_feed_candidate(
         detector=detector,
@@ -209,7 +212,11 @@ def _build_option(
         MAX_FEED_OPTION_DESCRIPTION_CHARACTERS,
     )
     title = _truncate_text(
-        _first_non_empty(feed_title, search_result.title, _host_label(site_url)),
+        _first_non_empty(
+            clean_title(feed_title),
+            clean_title(search_result.title),
+            _host_label(site_url),
+        ),
         MAX_FEED_OPTION_TITLE_CHARACTERS,
     )
     rationale = _truncate_text(
@@ -261,15 +268,7 @@ def _normalize_feed_url(feed_url: str) -> str | None:
     normalized = _normalize_url(feed_url)
     if normalized is None:
         return None
-
-    parsed = urlparse(normalized)
-    path = parsed.path.rstrip("/") or parsed.path
-    normalized_parts = parsed._replace(
-        scheme=parsed.scheme.lower(),
-        netloc=parsed.netloc.lower(),
-        path=path,
-    )
-    return urlunparse(normalized_parts)
+    return canonicalize_feed_url(normalized)
 
 
 def _normalize_url(url: str) -> str | None:

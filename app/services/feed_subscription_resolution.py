@@ -12,9 +12,11 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from app.constants import SELF_SUBMISSION_SOURCE
 from app.core.logging import get_logger
 from app.models.db import Content
+from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.content_submission import normalize_url
 from app.services.feed_detection import FeedDetector, detect_feeds_from_html
+from app.services.feed_research_runtime import SandboxFeedHttpService, feed_research_runtime
 from app.services.gateways.http_gateway import get_http_gateway
 from app.services.tweet_target_resolution import (
     TweetTargetResolver,
@@ -149,40 +151,49 @@ class FeedSubscriptionResolver:
         seen_candidate_urls = {candidate.url for candidate in candidates}
         candidate_index = 0
         evaluated_candidates = 0
+        submitter_id = metadata.get("submitted_by_user_id")
+        sandbox_user_id = resolve_sandbox_user_id(submitter_id)
 
-        while (
-            candidate_index < len(candidates)
-            and evaluated_candidates < MAX_FEED_SUBSCRIPTION_CANDIDATES
-        ):
-            candidate = candidates[candidate_index]
-            candidate_index += 1
-            evaluated_candidates += 1
-            detection = self._detect_candidate(
-                db=db,
-                content=content,
-                candidate=candidate,
-            )
-            fetch_status = detection.fetch_status
-            if detection.detected_feed:
-                detected_feed = detection.detected_feed
-                all_detected_feeds = detection.all_detected_feeds
-                selected_candidate = candidate
-                break
+        if candidates:
+            with feed_research_runtime(
+                user_id=sandbox_user_id,
+                execution_id=content.id,
+            ) as runtime:
+                while (
+                    candidate_index < len(candidates)
+                    and evaluated_candidates < MAX_FEED_SUBSCRIPTION_CANDIDATES
+                ):
+                    candidate = candidates[candidate_index]
+                    candidate_index += 1
+                    evaluated_candidates += 1
+                    detection = self._detect_candidate(
+                        db=db,
+                        content=content,
+                        candidate=candidate,
+                        detector=runtime.detector,
+                        http_service=runtime.http_service,
+                    )
+                    fetch_status = detection.fetch_status
+                    if detection.detected_feed:
+                        detected_feed = detection.detected_feed
+                        all_detected_feeds = detection.all_detected_feeds
+                        selected_candidate = candidate
+                        break
 
-            if not detection.html_content:
-                continue
+                    if not detection.html_content:
+                        continue
 
-            for linked_candidate in self._extract_link_candidates(
-                html_content=detection.html_content,
-                page_url=candidate.url,
-                content_id=content.id or 0,
-            ):
-                if len(candidates) >= MAX_FEED_SUBSCRIPTION_CANDIDATES:
-                    break
-                if linked_candidate.url in seen_candidate_urls:
-                    continue
-                seen_candidate_urls.add(linked_candidate.url)
-                candidates.append(linked_candidate)
+                    for linked_candidate in self._extract_link_candidates(
+                        html_content=detection.html_content,
+                        page_url=candidate.url,
+                        content_id=content.id or 0,
+                    ):
+                        if len(candidates) >= MAX_FEED_SUBSCRIPTION_CANDIDATES:
+                            break
+                        if linked_candidate.url in seen_candidate_urls:
+                            continue
+                        seen_candidate_urls.add(linked_candidate.url)
+                        candidates.append(linked_candidate)
 
         return FeedSubscriptionResolution(
             detected_feed=detected_feed,
@@ -199,9 +210,9 @@ class FeedSubscriptionResolver:
         page_title: str | None,
         *,
         db,
+        detector: FeedDetector,
         content_id: int | None = None,
     ) -> dict[str, Any] | None:
-        detector = FeedDetector(use_exa_search=False)
         validated_feed = detector.validate_feed_url(url)
         if not validated_feed:
             return None
@@ -239,6 +250,7 @@ class FeedSubscriptionResolver:
         page_title: str | None,
         db,
         content: Content,
+        detector: FeedDetector,
     ) -> dict[str, Any] | None:
         return detect_feeds_from_html(
             html_content,
@@ -247,7 +259,7 @@ class FeedSubscriptionResolver:
             source=SELF_SUBMISSION_SOURCE,
             content_type=content.content_type,
             force_detect=True,
-            use_exa_search=False,
+            detector=detector,
             db=db,
             usage_persist={
                 "feature": "feed_detection",
@@ -258,22 +270,14 @@ class FeedSubscriptionResolver:
             },
         )
 
-    def _fetch_html_for_feed_detection(self, *, url: str, content: Content) -> str | None:
-        body, _headers = get_http_gateway().fetch_content(url)
-        if isinstance(body, str):
-            return body
-        if isinstance(body, bytes):
-            return body.decode("utf-8", errors="ignore")
-        logger.warning(
-            "Fetched feed-detection candidate had unsupported body type",
-            extra={
-                "component": "sequential_task_processor",
-                "operation": "feed_detect_fetch",
-                "item_id": content.id,
-                "context_data": {"url": url, "body_type": type(body).__name__},
-            },
-        )
-        return None
+    def _fetch_html_for_feed_detection(
+        self,
+        *,
+        url: str,
+        http_service: SandboxFeedHttpService,
+    ) -> str:
+        response = http_service.fetch(url)
+        return response.content.decode("utf-8", errors="ignore")
 
     def _detect_candidate(
         self,
@@ -281,6 +285,8 @@ class FeedSubscriptionResolver:
         db,
         content: Content,
         candidate: FeedSubscriptionCandidate,
+        detector: FeedDetector,
+        http_service: SandboxFeedHttpService,
     ) -> FeedCandidateDetection:
         if candidate.detected_feed:
             return FeedCandidateDetection(
@@ -294,6 +300,7 @@ class FeedSubscriptionResolver:
             candidate.url,
             candidate.title or content.title,
             db=db,
+            detector=detector,
             content_id=content.id,
         )
         if detected_feed:
@@ -307,7 +314,7 @@ class FeedSubscriptionResolver:
         try:
             html_content = self._fetch_html_for_feed_detection(
                 url=candidate.url,
-                content=content,
+                http_service=http_service,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error(
@@ -341,6 +348,7 @@ class FeedSubscriptionResolver:
             page_title=candidate.title or content.title,
             db=db,
             content=content,
+            detector=detector,
         )
         if feed_data:
             return FeedCandidateDetection(
@@ -520,7 +528,7 @@ class FeedSubscriptionResolver:
         if host not in {"podcasts.apple.com", "itunes.apple.com", "music.apple.com"}:
             return None
         try:
-            resolution = resolve_apple_podcast_episode(url)
+            resolution = resolve_apple_podcast_episode(url, resolve_audio=False)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Apple Podcasts feed resolution failed for feed subscription: %s",

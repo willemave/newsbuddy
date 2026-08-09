@@ -1,9 +1,9 @@
-"""Tests for read_status service."""
+"""Tests for the canonical read-status repository."""
 
 from sqlalchemy.orm import Session
 
 from app.models.db import Content, User
-from app.services import read_status
+from app.repositories import read_status_repository as read_status
 
 
 def _require_id(value: int | None) -> int:

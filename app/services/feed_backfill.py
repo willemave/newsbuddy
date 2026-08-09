@@ -11,6 +11,7 @@ from app.core.db import get_db
 from app.core.logging import get_logger
 from app.models.db import Content, UserScraperConfig
 from app.models.internal.feed_backfill import FeedBackfillRequest, FeedBackfillResult
+from app.models.internal.scraper_configs import canonicalize_feed_url
 from app.scraping.atom_unified import AtomScraper
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 from app.scraping.substack_unified import SubstackScraper
@@ -70,12 +71,12 @@ def resolve_feed_config_for_content(
 
     feed_url = metadata.get("feed_url")
     if isinstance(feed_url, str) and feed_url.strip():
-        normalized_target = _normalize_feed_url(feed_url)
+        normalized_target = canonicalize_feed_url(feed_url)
         configs = _active_user_configs(db, user_id)
         matches = [
             config
             for config in configs
-            if _normalize_feed_url(_config_feed_url(config)) == normalized_target
+            if canonicalize_feed_url(_config_feed_url(config)) == normalized_target
         ]
         if len(matches) == 1:
             return matches[0]
@@ -187,18 +188,6 @@ def _resolve_limit(config: dict[str, Any], default_limit: int) -> int:
 
 def _config_feed_url(config: UserScraperConfig) -> str:
     return (config.feed_url or (config.config or {}).get("feed_url") or "").strip()
-
-
-def _normalize_feed_url(feed_url: str) -> str:
-    try:
-        parsed = urlparse(feed_url.strip())
-    except Exception:
-        return feed_url.strip().rstrip("/")
-    scheme = parsed.scheme.lower()
-    netloc = parsed.netloc.lower()
-    path = parsed.path.rstrip("/") or parsed.path
-    normalized = parsed._replace(scheme=scheme, netloc=netloc, path=path)
-    return normalized.geturl()
 
 
 def _extract_domain(feed_url: str) -> str | None:

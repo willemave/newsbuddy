@@ -3,22 +3,36 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
-from urllib.parse import urlparse, urlunparse
+from typing import Any, Literal
 
 from sqlalchemy.orm import Session
 
-from app.constants import DEFAULT_NEW_FEED_LIMIT
+from app.commands import subscribe_feed as subscribe_feed_command
 from app.core.logging import get_logger
+from app.models.api.scraper_configs import SubscribeToFeedRequest
+from app.models.contracts import FeedSubscriptionOutcome
 from app.models.db import UserScraperConfig
+from app.models.internal.scraper_configs import canonicalize_feed_url
 from app.scraping.rss_helpers import resolve_feed_source
+from app.services.active_users import lock_active_user
 from app.services.scraper_configs import (
     ALLOWED_SCRAPER_TYPES,
-    CreateUserScraperConfig,
-    create_user_scraper_config,
 )
 
 logger = get_logger(__name__)
+
+type FeedSubscriptionStatus = Literal[
+    "created",
+    "reactivated",
+    "already_exists",
+    "missing_user",
+    "missing_feed",
+    "missing_feed_url",
+    "missing_feed_type",
+    "unsupported_feed_type",
+    "inactive_user",
+    "subscription_failed",
+]
 
 
 @dataclass(frozen=True)
@@ -26,22 +40,32 @@ class FeedSubscriptionResult:
     """Outcome for creating a feed subscription."""
 
     created: bool
-    status: str
+    status: FeedSubscriptionStatus
     config_id: int | None = None
+    backfill_task_id: int | None = None
+    error_message: str | None = None
 
 
-def _normalize_feed_url_for_lookup(feed_url: str) -> str:
-    trimmed = feed_url.strip()
-    try:
-        parsed = urlparse(trimmed)
-    except Exception:
-        return trimmed.rstrip("/")
+def load_active_feed_urls(
+    db: Session,
+    *,
+    user_id: int,
+    feed_type: str | None = None,
+) -> set[str]:
+    """Return canonical URLs for one user's active feed subscriptions."""
+    query = db.query(UserScraperConfig.feed_url).filter(
+        UserScraperConfig.user_id == user_id,
+        UserScraperConfig.is_active.is_(True),
+        UserScraperConfig.feed_url.is_not(None),
+    )
+    if feed_type is not None:
+        query = query.filter(UserScraperConfig.scraper_type == feed_type)
 
-    scheme = parsed.scheme.lower()
-    netloc = parsed.netloc.lower()
-    path = parsed.path.rstrip("/") or parsed.path
-    normalized = parsed._replace(scheme=scheme, netloc=netloc, path=path)
-    return urlunparse(normalized)
+    return {
+        canonicalize_feed_url(feed_url)
+        for (feed_url,) in query.all()
+        if isinstance(feed_url, str) and feed_url.strip()
+    }
 
 
 def is_feed_already_subscribed(
@@ -54,21 +78,11 @@ def is_feed_already_subscribed(
     if not feed_url.strip():
         return False
 
-    normalized_target = _normalize_feed_url_for_lookup(feed_url)
-
-    configs = (
-        db.query(UserScraperConfig.feed_url)
-        .filter(UserScraperConfig.user_id == user_id)
-        .filter(UserScraperConfig.scraper_type == feed_type)
-        .filter(UserScraperConfig.is_active.is_(True))
-        .all()
+    return canonicalize_feed_url(feed_url) in load_active_feed_urls(
+        db,
+        user_id=user_id,
+        feed_type=feed_type,
     )
-    for (existing_url,) in configs:
-        if not existing_url:
-            continue
-        if _normalize_feed_url_for_lookup(existing_url) == normalized_target:
-            return True
-    return False
 
 
 def can_subscribe_to_feed(
@@ -91,7 +105,11 @@ def can_subscribe_to_feed(
     if feed_type not in ALLOWED_SCRAPER_TYPES:
         return False
 
-    return not is_feed_already_subscribed(db, user_id, feed_type, feed_url)
+    active_user_id = lock_active_user(db, user_id)
+    if active_user_id is None:
+        return False
+
+    return not is_feed_already_subscribed(db, active_user_id, feed_type, feed_url)
 
 
 def subscribe_to_detected_feed(
@@ -100,7 +118,7 @@ def subscribe_to_detected_feed(
     detected_feed: dict[str, Any] | None,
     *,
     display_name: str | None = None,
-) -> tuple[bool, str]:
+) -> tuple[bool, FeedSubscriptionStatus]:
     """Create a scraper config for a detected feed."""
     result = subscribe_to_detected_feed_result(
         db,
@@ -142,6 +160,9 @@ def subscribe_to_detected_feed_result(
         return FeedSubscriptionResult(created=False, status="missing_feed_type")
     if feed_type not in ALLOWED_SCRAPER_TYPES:
         return FeedSubscriptionResult(created=False, status="unsupported_feed_type")
+    active_user_id = lock_active_user(db, user_id)
+    if active_user_id is None:
+        return FeedSubscriptionResult(created=False, status="inactive_user")
     feed_title = detected_feed.get("title")
     resolved_display_name = resolve_feed_source(
         display_name,
@@ -149,18 +170,18 @@ def subscribe_to_detected_feed_result(
         feed_url,
     )
 
-    payload = CreateUserScraperConfig(
-        scraper_type=cast(Any, feed_type),
+    payload = SubscribeToFeedRequest(
+        feed_type=feed_type,
         display_name=resolved_display_name,
-        config={
-            "feed_url": feed_url.strip(),
-            "limit": DEFAULT_NEW_FEED_LIMIT,
-        },
-        is_active=True,
+        feed_url=feed_url.strip(),
     )
 
     try:
-        record = create_user_scraper_config(db, user_id, payload)
+        result = subscribe_feed_command.execute(
+            db,
+            user_id=active_user_id,
+            payload=payload,
+        )
     except ValueError as exc:
         logger.info(
             "Feed subscription skipped for user %s: %s",
@@ -172,6 +193,30 @@ def subscribe_to_detected_feed_result(
                 "context_data": {"feed_url": feed_url, "feed_type": feed_type},
             },
         )
-        return FeedSubscriptionResult(created=False, status="already_exists")
+        return FeedSubscriptionResult(
+            created=False,
+            status="subscription_failed",
+            error_message=str(exc),
+        )
 
-    return FeedSubscriptionResult(created=True, status="created", config_id=record.id)
+    if result.outcome is FeedSubscriptionOutcome.ALREADY_SUBSCRIBED:
+        return FeedSubscriptionResult(
+            created=False,
+            status="already_exists",
+            config_id=result.config.id,
+        )
+
+    if result.outcome is FeedSubscriptionOutcome.REACTIVATED:
+        return FeedSubscriptionResult(
+            created=False,
+            status="reactivated",
+            config_id=result.config.id,
+            backfill_task_id=result.backfill_task_id,
+        )
+
+    return FeedSubscriptionResult(
+        created=True,
+        status="created",
+        config_id=result.config.id,
+        backfill_task_id=result.backfill_task_id,
+    )

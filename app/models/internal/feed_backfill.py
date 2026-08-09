@@ -3,6 +3,7 @@
 from pydantic import BaseModel, Field
 
 MAX_BACKFILL_COUNT = 50
+BACKFILL_SUPPORTED_TYPES = frozenset({"substack", "atom", "podcast_rss"})
 
 
 class FeedBackfillRequest(BaseModel):

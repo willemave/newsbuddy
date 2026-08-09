@@ -1,14 +1,98 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
+from time import monotonic
+from types import SimpleNamespace
 
+import pytest
+
+from app.services import assistant_feed_finder
 from app.services.assistant_feed_finder import find_feed_options
-from app.services.exa_client import ExaContentResult, ExaSearchResult
-from app.services.feed_detection import FeedClassificationResult
+from app.services.exa_client import ExaSearchResult
+from app.services.feed_detection import FeedClassificationResult, FeedDetector
+from app.services.http import HttpService
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 SEQUOIA_TRAINING_DATA_HTML = (FIXTURES_DIR / "sequoia_training_data_podcast_links.html").read_text()
 SEQUOIA_TRAINING_DATA_FEED = "https://feeds.megaphone.fm/trainingdata"
+
+
+@pytest.fixture(autouse=True)
+def _use_host_detector_for_focused_unit_tests(monkeypatch):
+    @contextmanager
+    def _runtime(**_kwargs):
+        yield SimpleNamespace(
+            detector=FeedDetector(
+                http_service=HttpService(),
+            )
+        )
+
+    monkeypatch.setattr(assistant_feed_finder, "feed_research_runtime", _runtime)
+
+
+def test_find_feed_options_skips_sandbox_when_search_is_empty(monkeypatch) -> None:
+    monkeypatch.setattr(assistant_feed_finder, "exa_search", lambda *_args, **_kwargs: [])
+
+    def _unexpected_runtime(**_kwargs):
+        raise AssertionError("empty search should not acquire an E2B sandbox")
+
+    monkeypatch.setattr(assistant_feed_finder, "feed_research_runtime", _unexpected_runtime)
+
+    result = find_feed_options("find an obscure feed", user_id=7)
+
+    assert result.options == []
+
+
+def test_deadline_bound_feed_search_propagates_deadline_and_disables_llm(
+    monkeypatch,
+) -> None:
+    deadline = monotonic() + 10
+    runtime_calls: list[dict[str, object]] = []
+    exa_calls: list[dict[str, object]] = []
+
+    def _exa_search(*_args, **kwargs):
+        exa_calls.append(kwargs)
+        return [
+            ExaSearchResult(
+                title="Example",
+                url="https://example.com",
+                snippet="No feed candidates",
+            )
+        ]
+
+    monkeypatch.setattr(assistant_feed_finder, "exa_search", _exa_search)
+
+    @contextmanager
+    def _runtime(**kwargs):
+        runtime_calls.append(kwargs)
+        yield SimpleNamespace(
+            detector=FeedDetector(
+                http_service=HttpService(),
+                use_llm=kwargs["use_llm"],
+            )
+        )
+
+    monkeypatch.setattr(assistant_feed_finder, "feed_research_runtime", _runtime)
+
+    find_feed_options(
+        "example",
+        user_id=7,
+        execution_id=42,
+        deadline=deadline,
+    )
+
+    assert runtime_calls == [
+        {
+            "user_id": 7,
+            "execution_id": 42,
+            "use_llm": False,
+            "deadline": deadline,
+        }
+    ]
+    request_timeout = exa_calls[0]["request_timeout_seconds"]
+    assert isinstance(request_timeout, float)
+    assert 0 < request_timeout <= 10
 
 
 def test_find_feed_options_extracts_and_validates_feed_urls(monkeypatch) -> None:
@@ -18,17 +102,7 @@ def test_find_feed_options_extracts_and_validates_feed_urls(monkeypatch) -> None
             ExaSearchResult(
                 title="lucumr",
                 url="https://lucumr.pocoo.org/",
-                snippet="Armin Ronacher's weblog.",
-            )
-        ],
-    )
-    monkeypatch.setattr(
-        "app.services.assistant_feed_finder.exa_get_contents",
-        lambda urls, max_characters=5000, **_kwargs: [
-            ExaContentResult(
-                title="lucumr",
-                url="https://lucumr.pocoo.org/",
-                text="Feed URL: https://lucumr.pocoo.org/feed.atom",
+                snippet=("Armin Ronacher's weblog. Feed URL: https://lucumr.pocoo.org/feed.atom"),
             )
         ],
     )
@@ -37,7 +111,7 @@ def test_find_feed_options_extracts_and_validates_feed_urls(monkeypatch) -> None
         lambda self, url: {
             "feed_url": url,
             "feed_format": "atom",
-            "title": "lucumr",
+            "title": "lucumr &raquo;",
         },
     )
     monkeypatch.setattr(
@@ -58,7 +132,7 @@ def test_find_feed_options_extracts_and_validates_feed_urls(monkeypatch) -> None
     assert result.query == "find a blog by Armin Ronacher"
     assert len(result.options) == 1
     option = result.options[0]
-    assert option.title == "lucumr"
+    assert option.title == "lucumr »"
     assert option.feed_url == "https://lucumr.pocoo.org/feed.atom"
     assert option.feed_type == "atom"
     assert option.feed_format == "atom"
@@ -79,13 +153,6 @@ def test_find_feed_options_dedupes_normalized_feed_urls(monkeypatch) -> None:
                 url="https://example.com/about",
                 snippet="Subscribe at https://example.com/feed.xml/",
             ),
-        ],
-    )
-    monkeypatch.setattr(
-        "app.services.assistant_feed_finder.exa_get_contents",
-        lambda urls, max_characters=5000, **_kwargs: [
-            ExaContentResult(title="Primary", url=urls[0], text="https://example.com/feed.xml"),
-            ExaContentResult(title="Duplicate", url=urls[1], text="https://example.com/feed.xml/"),
         ],
     )
     monkeypatch.setattr(
@@ -122,17 +189,7 @@ def test_find_feed_options_truncates_long_option_fields(monkeypatch) -> None:
             ExaSearchResult(
                 title="A" * 500,
                 url="https://example.com/blog",
-                snippet="B" * 1200,
-            )
-        ],
-    )
-    monkeypatch.setattr(
-        "app.services.assistant_feed_finder.exa_get_contents",
-        lambda urls, max_characters=5000, **_kwargs: [
-            ExaContentResult(
-                title="ignored",
-                url=urls[0],
-                text="https://example.com/feed.xml\n" + ("C" * 5000),
+                snippet="https://example.com/feed.xml\n" + ("B" * 1200),
             )
         ],
     )
@@ -178,19 +235,10 @@ def test_find_feed_options_uses_live_youtube_detection_over_stale_exa_feed(monke
             ExaSearchResult(
                 title="Bg2 Pod",
                 url="https://www.youtube.com/@bg2pod",
-                snippet="Podcast page.",
-            )
-        ],
-    )
-    monkeypatch.setattr(
-        "app.services.assistant_feed_finder.exa_get_contents",
-        lambda urls, max_characters=5000, **_kwargs: [
-            ExaContentResult(
-                title="Bg2 Pod",
-                url=urls[0],
-                text=(
-                    "Stale indexed feed URL: "
-                    "https://www.youtube.com/feeds/videos.xml?channel_id=UC8P0dc0Zn2gf8L6tJi_k6xg"
+                snippet=(
+                    "Podcast page. Stale indexed feed URL: "
+                    "https://www.youtube.com/feeds/videos.xml?channel_id="
+                    "UC8P0dc0Zn2gf8L6tJi_k6xg"
                 ),
             )
         ],
@@ -211,21 +259,9 @@ def test_find_feed_options_uses_live_youtube_detection_over_stale_exa_feed(monke
             self.status_code = status_code
             self.headers = {"content-type": content_type}
 
-    def _fake_head(
-        self,
-        url,
-        headers=None,
-        allow_statuses=None,
-        log_client_errors=True,
-        log_exceptions=True,
-    ):
-        return _Response(url, "", content_type="text/html; charset=utf-8")
-
-    monkeypatch.setattr("app.services.http.HttpService.head", _fake_head)
-
     monkeypatch.setattr(
         "app.services.http.HttpService.fetch",
-        lambda self, url, headers=None: (
+        lambda self, url, headers=None, **_kwargs: (
             _Response(
                 url,
                 (
@@ -287,17 +323,10 @@ def test_find_feed_options_prefers_live_apple_podcast_link_over_generic_feed(
             ExaSearchResult(
                 title="Training Data",
                 url="https://sequoiacap.com/series/training-data/",
-                snippet="Training Data is a podcast by Sequoia Capital.",
-            )
-        ],
-    )
-    monkeypatch.setattr(
-        "app.services.assistant_feed_finder.exa_get_contents",
-        lambda urls, max_characters=5000, **_kwargs: [
-            ExaContentResult(
-                title="Training Data",
-                url=urls[0],
-                text="Stale generic feed: https://sequoiacap.com/feed",
+                snippet=(
+                    "Training Data is a podcast by Sequoia Capital. "
+                    "Stale generic feed: https://sequoiacap.com/feed"
+                ),
             )
         ],
     )
@@ -328,9 +357,6 @@ def test_find_feed_options_prefers_live_apple_podcast_link_over_generic_feed(
 
     fetched_urls: list[str] = []
 
-    def _fake_head(self, url, **_kwargs):  # noqa: ANN001
-        return _Response(url, "", content_type="application/rss+xml")
-
     def _fake_fetch(self, url, headers=None, **_kwargs):  # noqa: ANN001
         del headers
         fetched_urls.append(url)
@@ -357,7 +383,6 @@ def test_find_feed_options_prefers_live_apple_podcast_link_over_generic_feed(
             SEQUOIA_TRAINING_DATA_HTML,
         )
 
-    monkeypatch.setattr("app.services.http.HttpService.head", _fake_head)
     monkeypatch.setattr("app.services.http.HttpService.fetch", _fake_fetch)
 
     result = find_feed_options("Training Data Sequoia Capital podcast RSS feed", limit=1)
@@ -377,27 +402,16 @@ def test_find_feed_options_prefers_podcast_rss_for_podcast_queries(monkeypatch) 
             ExaSearchResult(
                 title="Bg2 Pod YouTube",
                 url="https://www.youtube.com/@bg2pod",
-                snippet="Follow on YouTube.",
+                snippet=(
+                    "Follow on YouTube. "
+                    "https://www.youtube.com/feeds/videos.xml?channel_id="
+                    "UC-yRDvpR99LUc5l7i7jLzew"
+                ),
             ),
             ExaSearchResult(
                 title="BG2 Pod",
                 url="https://bg2pod.com",
                 snippet="Podcast RSS: https://feeds.megaphone.fm/bg2pod",
-            ),
-        ],
-    )
-    monkeypatch.setattr(
-        "app.services.assistant_feed_finder.exa_get_contents",
-        lambda urls, max_characters=5000, **_kwargs: [
-            ExaContentResult(
-                title="Bg2 Pod YouTube",
-                url=urls[0],
-                text="https://www.youtube.com/feeds/videos.xml?channel_id=UC-yRDvpR99LUc5l7i7jLzew",
-            ),
-            ExaContentResult(
-                title="BG2 Pod",
-                url=urls[1],
-                text="https://feeds.megaphone.fm/bg2pod",
             ),
         ],
     )
@@ -409,7 +423,7 @@ def test_find_feed_options_prefers_podcast_rss_for_podcast_queries(monkeypatch) 
 
     monkeypatch.setattr(
         "app.services.http.HttpService.fetch",
-        lambda self, url, headers=None: _Response(url, "<html></html>"),
+        lambda self, url, headers=None, **_kwargs: _Response(url, "<html></html>"),
     )
     monkeypatch.setattr(
         "app.services.feed_detection.FeedDetector.detect_from_links",
