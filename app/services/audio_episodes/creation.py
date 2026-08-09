@@ -36,7 +36,7 @@ from app.services.news_feed import (
     get_visible_news_item,
     list_unread_visible_news_items,
 )
-from app.services.queue import get_queue_service
+from app.services.queue import TaskEnqueueRequest, get_queue_service
 from app.utils.news_titles import resolve_news_display_title
 
 logger = get_logger(__name__)
@@ -183,14 +183,25 @@ def list_custom_narration_episodes(
     )
 
 
-def enqueue_audio_episode_generation(audio_episode_id: int) -> int:
-    """Enqueue background generation for an audio episode."""
+def enqueue_audio_episode_generation(
+    db: Session,
+    *,
+    audio_episode_id: int,
+    user_id: int,
+) -> int:
+    """Stage owned background generation in the caller's transaction."""
 
-    task_id = get_queue_service().enqueue(
-        TaskType.GENERATE_AUDIO_EPISODE,
-        payload={"audio_episode_id": audio_episode_id},
-        dedupe_key=f"audio_episode:{audio_episode_id}",
-    )
+    task_id = get_queue_service().enqueue_many_in_session(
+        db,
+        [
+            TaskEnqueueRequest(
+                TaskType.GENERATE_AUDIO_EPISODE,
+                payload={"audio_episode_id": audio_episode_id, "user_id": user_id},
+                dedupe_key=f"audio_episode:{audio_episode_id}",
+                owner_user_id=user_id,
+            )
+        ],
+    )[0]
     logger.info(
         "Audio episode generation enqueued",
         extra={

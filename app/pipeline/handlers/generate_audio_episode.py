@@ -10,6 +10,7 @@ from app.services.audio_episodes import (
     AudioEpisodeNotFoundError,
     finalize_audio_episode_failure,
     generate_audio_episode,
+    get_user_audio_episode,
 )
 from app.services.llm_errors import is_llm_error_retryable, iter_exception_chain
 from app.services.queue import TaskType
@@ -24,22 +25,35 @@ class GenerateAudioEpisodeHandler:
     task_type = TaskType.GENERATE_AUDIO_EPISODE
 
     def handle(self, task: TaskEnvelope, context: TaskContext) -> TaskResult:
-        payload = task.payload if isinstance(task.payload, dict) else {}
-        audio_episode_id = payload.get("audio_episode_id")
-        if not audio_episode_id:
-            return TaskResult.fail("Missing audio_episode_id", retryable=False)
-
-        try:
-            audio_episode_id_int = int(audio_episode_id)
-        except (TypeError, ValueError):
-            return TaskResult.fail(
-                f"Invalid audio_episode_id: {audio_episode_id!r}",
-                retryable=False,
-            )
+        audio_episode_id = int(task.payload["audio_episode_id"])
+        user_id = int(task.payload["user_id"])
 
         with context.db_factory() as db:
+            episode = get_user_audio_episode(
+                db,
+                user_id=user_id,
+                audio_episode_id=audio_episode_id,
+            )
+            if episode is None:
+                return TaskResult.fail("Audio episode not found", retryable=False)
+            if episode.status == "completed" and episode.audio_storage_path:
+                return TaskResult.ok()
+            if task.retry_count > context.settings.queue.max_retries:
+                message = "Audio generation stopped after repeated worker interruptions"
+                finalize_audio_episode_failure(
+                    db,
+                    audio_episode_id=audio_episode_id,
+                    error=RuntimeError(message),
+                    retry_scheduled=False,
+                    expected_user_id=user_id,
+                )
+                return TaskResult.fail(message, retryable=False)
             try:
-                generate_audio_episode(db, audio_episode_id=audio_episode_id_int)
+                generate_audio_episode(
+                    db,
+                    audio_episode_id=audio_episode_id,
+                    expected_user_id=user_id,
+                )
             except Exception as exc:  # noqa: BLE001
                 result = TaskResult.fail(
                     str(exc),
@@ -52,17 +66,18 @@ class GenerateAudioEpisodeHandler:
                 )
                 finalize_audio_episode_failure(
                     db,
-                    audio_episode_id=audio_episode_id_int,
+                    audio_episode_id=audio_episode_id,
                     error=exc,
                     retry_scheduled=retry_scheduled,
+                    expected_user_id=user_id,
                 )
                 logger.exception(
                     "GENERATE_AUDIO_EPISODE_ERROR: Failed to generate audio_episode_id=%s",
-                    audio_episode_id_int,
+                    audio_episode_id,
                     extra={
                         "component": "generate_audio_episode",
                         "operation": "generate",
-                        "item_id": audio_episode_id_int,
+                        "item_id": audio_episode_id,
                         "context_data": {"error": str(exc)},
                     },
                 )

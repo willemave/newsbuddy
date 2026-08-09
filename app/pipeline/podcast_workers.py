@@ -4,10 +4,7 @@ import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import unquote, urlparse
-
-import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from urllib.parse import parse_qs, unquote, urlparse
 
 from app.core.db import get_db
 from app.core.logging import get_logger
@@ -17,13 +14,17 @@ from app.models.contracts import ContentStatus
 from app.models.db import Content
 from app.models.domain.content import ContentData
 from app.models.domain.content_mapper import content_to_domain, domain_to_content
+from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.audio_pipeline import (
     download_audio_via_ytdlp,
     transcribe_audio_file_with_metadata,
 )
 from app.services.content_bodies import sync_content_body_storage
+from app.services.feed_research_runtime import sandboxed_http_service
 from app.services.queue import TaskType, get_queue_service
+from app.services.sandbox_media_download import download_remote_media_in_sandbox
+from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -115,7 +116,7 @@ class PodcastMediaWorker:
         """Validate URL format and basic reachability."""
         try:
             parsed = urlparse(url)
-            if not parsed.scheme or not parsed.netloc:
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 logger.error(
                     "Invalid podcast URL format",
                     extra=self._log_extra(
@@ -154,8 +155,7 @@ class PodcastMediaWorker:
 
     @staticmethod
     def _is_apple_podcasts_url(url: str) -> bool:
-        host = urlparse(url).netloc.lower()
-        return host.endswith("podcasts.apple.com")
+        return is_domain_or_subdomain(urlparse(url).hostname, "podcasts.apple.com")
 
     def _extract_actual_audio_url(self, url: str) -> str:
         """
@@ -164,7 +164,7 @@ class PodcastMediaWorker:
         Some podcast platforms, like Anchor.fm, include the real audio URL as an
         encoded path segment.
         """
-        if "anchor.fm" in url and "https%3A%2F%2F" in url:
+        if is_domain_or_subdomain(urlparse(url).hostname, "anchor.fm") and "https%3A%2F%2F" in url:
             for part in url.split("/"):
                 if "https%3A%2F%2F" in part:
                     decoded_url = unquote(part)
@@ -180,105 +180,23 @@ class PodcastMediaWorker:
 
         return url
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=2, min=5, max=60),
-        retry=retry_if_exception_type(
-            (
-                httpx.ConnectError,
-                httpx.TimeoutException,
-                OSError,
-            )
-        ),
-    )
-    def _download_with_retry(self, audio_url: str, file_path: Path) -> None:
-        """Download an audio file with retry logic for transient network issues."""
-        logger.info(
-            "Podcast download attempt started",
-            extra=self._log_extra(
-                operation="download_audio",
-                status="started",
-                context_data={
-                    "audio_url": sanitize_url_for_logs(audio_url),
-                    "file_path": str(file_path),
-                },
-            ),
-        )
-
-        timeout = httpx.Timeout(
-            timeout=300.0,
-            connect=30.0,
-            read=300.0,
-            write=30.0,
-            pool=10.0,
-        )
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; NewsAggregator/1.0; Podcast Downloader)"}
-
-        with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as client:
-            try:
-                head_response = client.head(audio_url)
-                head_response.raise_for_status()
-                content_length = head_response.headers.get("content-length", "unknown")
-                logger.info(
-                    "Podcast URL validated",
-                    extra=self._log_extra(
-                        operation="validate_audio_url",
-                        status="completed",
-                        context_data={
-                            "audio_url": sanitize_url_for_logs(audio_url),
-                            "content_length": content_length,
-                        },
-                    ),
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Podcast HEAD request failed; proceeding with GET",
-                    extra=self._log_extra(
-                        operation="validate_audio_url",
-                        status="failed",
-                        context_data={
-                            "audio_url": sanitize_url_for_logs(audio_url),
-                            "failure_class": type(exc).__name__,
-                        },
-                    ),
-                )
-
-            with client.stream("GET", audio_url) as response:
-                response.raise_for_status()
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(file_path, "wb") as file:
-                    for chunk in response.iter_bytes(chunk_size=8192):
-                        file.write(chunk)
-
-        logger.info(
-            "Podcast download attempt completed",
-            extra=self._log_extra(
-                operation="download_audio",
-                status="completed",
-                context_data={
-                    "audio_url": sanitize_url_for_logs(audio_url),
-                    "file_path": str(file_path),
-                    "file_size": file_path.stat().st_size,
-                },
-            ),
-        )
-
     def _is_youtube_url(self, url: str) -> bool:
         """Check if URL is a YouTube URL."""
-        youtube_patterns = [
-            r"youtube\.com/watch\?v=",
-            r"youtu\.be/",
-            r"youtube\.com/embed/",
-            r"m\.youtube\.com/watch\?v=",
-            r"youtube\.com/v/",
-            r"youtube\.com/shorts/",
-        ]
-        return any(re.search(pattern, url) for pattern in youtube_patterns)
+        parsed = urlparse(url)
+        if is_domain_or_subdomain(parsed.hostname, "youtu.be"):
+            return bool(parsed.path.strip("/"))
+        if not is_domain_or_subdomain(parsed.hostname, "youtube.com"):
+            return False
+        if parsed.path.rstrip("/") == "/watch":
+            return bool(parse_qs(parsed.query).get("v", [None])[0])
+        return parsed.path.startswith(("/embed/", "/v/", "/shorts/"))
 
     def _extract_youtube_id(self, url: str) -> str | None:
         parsed = urlparse(url)
-        if parsed.netloc.endswith("youtu.be"):
+        if is_domain_or_subdomain(parsed.hostname, "youtu.be"):
             return parsed.path.lstrip("/") or None
+        if not is_domain_or_subdomain(parsed.hostname, "youtube.com"):
+            return None
         if "v=" in parsed.query:
             for part in parsed.query.split("&"):
                 if part.startswith("v="):
@@ -314,7 +232,14 @@ class PodcastMediaWorker:
         platform = (content.metadata.get("platform") or db_content.platform or "").lower()
         is_apple_url = self._is_apple_podcasts_url(str(content.url))
         if platform == "apple_podcasts" or is_apple_url:
-            resolution = resolve_apple_podcast_episode(str(content.url))
+            with sandboxed_http_service(
+                user_id=self._sandbox_user_id(content),
+                execution_id=content.id,
+            ) as http_service:
+                resolution = resolve_apple_podcast_episode(
+                    str(content.url),
+                    feed_http_service=http_service,
+                )
             if resolution.feed_url:
                 content.metadata.setdefault("feed_url", resolution.feed_url)
             if resolution.episode_title:
@@ -341,6 +266,10 @@ class PodcastMediaWorker:
 
         return None
 
+    @staticmethod
+    def _sandbox_user_id(content: ContentData) -> int:
+        return resolve_sandbox_user_id(content.metadata.get("submitted_by_user_id"))
+
     def _download_to_scratch(
         self,
         *,
@@ -348,6 +277,7 @@ class PodcastMediaWorker:
         title: str | None,
         audio_url: str,
         scratch_dir: Path,
+        sandbox_user_id: int,
     ) -> Path:
         scratch_dir.mkdir(parents=True, exist_ok=True)
         if self._is_youtube_url(audio_url):
@@ -360,8 +290,31 @@ class PodcastMediaWorker:
         extension = get_file_extension_from_url(resolved_audio_url)
         filename = f"{sanitize_filename(title or f'podcast_{content_id}')}{extension}"
         audio_path = scratch_dir / filename
-        self._download_with_retry(resolved_audio_url, audio_path)
-        return audio_path
+        logger.info(
+            "Podcast sandbox download started",
+            extra=self._log_extra(
+                operation="download_audio",
+                content_id=content_id,
+                status="started",
+                context_data={"audio_url": sanitize_url_for_logs(resolved_audio_url)},
+            ),
+        )
+        result = download_remote_media_in_sandbox(
+            resolved_audio_url,
+            audio_path,
+            user_id=sandbox_user_id,
+            execution_id=content_id,
+        )
+        logger.info(
+            "Podcast sandbox download completed",
+            extra=self._log_extra(
+                operation="download_audio",
+                content_id=content_id,
+                status="completed",
+                context_data={"file_path": str(result), "file_size": result.stat().st_size},
+            ),
+        )
+        return result
 
     def _normalize_audio_file(self, audio_path: Path) -> Path:
         ffmpeg_binary = shutil.which("ffmpeg")
@@ -435,6 +388,7 @@ class PodcastMediaWorker:
                         title=content.title,
                         audio_url=audio_url,
                         scratch_dir=scratch_dir,
+                        sandbox_user_id=self._sandbox_user_id(content),
                     )
                     normalized_audio_path = self._normalize_audio_file(audio_path)
                     transcript_text, detected_language = transcribe_audio_file_with_metadata(

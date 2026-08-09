@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.models.api.base import UTCDateTime
 from app.models.contracts import AudioEpisodeKind, AudioEpisodeStatus
 
-AudioEpisodeDelivery = Literal["background", "stream", "inline"]
+AudioEpisodeDelivery = Literal["background", "stream"]
 CUSTOM_NARRATION_MAX_CONTENT_IDS = 12
 
 

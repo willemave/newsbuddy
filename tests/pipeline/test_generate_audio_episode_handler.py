@@ -21,9 +21,11 @@ def test_generate_audio_episode_handler_keeps_episode_pending_for_retry(
     db_session,
     db_session_factory,
     monkeypatch,
+    user_factory,
 ) -> None:
+    user = user_factory()
     episode = AudioEpisode(
-        user_id=123,
+        user_id=user.id,
         kind=audio_episodes.FAST_NEWS_DIGEST_KIND,
         status="pending",
         title="Fast Reads Brief",
@@ -63,7 +65,7 @@ def test_generate_audio_episode_handler_keeps_episode_pending_for_retry(
     task = TaskEnvelope(
         id=1,
         task_type=TaskType.GENERATE_AUDIO_EPISODE,
-        payload={"audio_episode_id": episode.id},
+        payload={"audio_episode_id": episode.id, "user_id": user.id},
     )
 
     result = GenerateAudioEpisodeHandler().handle(task, context)
@@ -75,6 +77,198 @@ def test_generate_audio_episode_handler_keeps_episode_pending_for_retry(
     persisted = db_session.query(AudioEpisode).filter(AudioEpisode.id == episode.id).one()
     assert persisted.status == "pending"
     assert persisted.error_message == "script boom"
+
+
+def test_generate_audio_episode_reclaim_budget_exhaustion_terminalizes_without_provider(
+    db_session,
+    db_session_factory,
+    monkeypatch,
+    user_factory,
+) -> None:
+    user = user_factory()
+    episode = AudioEpisode(
+        user_id=user.id,
+        kind=audio_episodes.FAST_NEWS_DIGEST_KIND,
+        status="pending",
+        title="Fast Reads Brief",
+        input_hash="reclaim-budget",
+        source_item_ids=[1],
+        source_snapshot={"kind": audio_episodes.FAST_NEWS_DIGEST_KIND, "items": []},
+        prompt_version=audio_episodes.PROMPT_VERSION,
+    )
+    db_session.add(episode)
+    db_session.commit()
+
+    @contextmanager
+    def db_factory():
+        session = db_session_factory()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    monkeypatch.setattr(
+        scripting,
+        "generate_script",
+        lambda *_args: pytest.fail("exhausted reclaim must not call the provider"),
+    )
+    context = TaskContext(
+        queue_service=QueueService(),
+        settings=cast(Settings, SimpleNamespace(queue=SimpleNamespace(max_retries=3))),
+        llm_service=None,
+        worker_id="test-worker",
+        db_factory=db_factory,
+    )
+
+    result = GenerateAudioEpisodeHandler().handle(
+        TaskEnvelope(
+            id=2,
+            task_type=TaskType.GENERATE_AUDIO_EPISODE,
+            payload={"audio_episode_id": episode.id, "user_id": user.id},
+            retry_count=4,
+        ),
+        context,
+    )
+
+    assert result.success is False
+    assert result.retryable is False
+    db_session.expire_all()
+    persisted = db_session.get(AudioEpisode, episode.id)
+    assert persisted.status == "failed"
+    assert "worker interruptions" in persisted.error_message
+
+
+def test_generate_audio_episode_exhausted_redelivery_preserves_completed_artifact(
+    db_session,
+    db_session_factory,
+    monkeypatch,
+    user_factory,
+) -> None:
+    user = user_factory()
+    episode = AudioEpisode(
+        user_id=user.id,
+        kind=audio_episodes.FAST_NEWS_DIGEST_KIND,
+        status="completed",
+        title="Finished Brief",
+        input_hash="completed-reclaim",
+        source_item_ids=[1],
+        source_snapshot={"kind": audio_episodes.FAST_NEWS_DIGEST_KIND, "items": []},
+        prompt_version=audio_episodes.PROMPT_VERSION,
+        audio_storage_path="/tmp/already-completed.mp3",
+    )
+    db_session.add(episode)
+    db_session.commit()
+
+    @contextmanager
+    def db_factory():
+        session = db_session_factory()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    monkeypatch.setattr(
+        scripting,
+        "generate_script",
+        lambda *_args: pytest.fail("completed episode must not call the provider"),
+    )
+    context = TaskContext(
+        queue_service=QueueService(),
+        settings=cast(Settings, SimpleNamespace(queue=SimpleNamespace(max_retries=3))),
+        llm_service=None,
+        worker_id="test-worker",
+        db_factory=db_factory,
+    )
+
+    result = GenerateAudioEpisodeHandler().handle(
+        TaskEnvelope(
+            id=3,
+            owner_user_id=user.id,
+            task_type=TaskType.GENERATE_AUDIO_EPISODE,
+            payload={"audio_episode_id": episode.id, "user_id": user.id},
+            retry_count=4,
+        ),
+        context,
+    )
+
+    db_session.expire_all()
+    persisted = db_session.get(AudioEpisode, episode.id)
+    assert result.success is True
+    assert persisted.status == "completed"
+    assert persisted.audio_storage_path == "/tmp/already-completed.mp3"
+
+
+def test_generate_audio_episode_rejects_cross_user_target_without_mutating_it(
+    db_session,
+    db_session_factory,
+    monkeypatch,
+    user_factory,
+) -> None:
+    task_owner = user_factory()
+    target_owner = user_factory()
+    episode = AudioEpisode(
+        user_id=target_owner.id,
+        kind=audio_episodes.FAST_NEWS_DIGEST_KIND,
+        status="pending",
+        title="Another User's Brief",
+        input_hash="cross-user-reclaim",
+        source_item_ids=[1],
+        source_snapshot={"kind": audio_episodes.FAST_NEWS_DIGEST_KIND, "items": []},
+        prompt_version=audio_episodes.PROMPT_VERSION,
+    )
+    db_session.add(episode)
+    db_session.commit()
+
+    @contextmanager
+    def db_factory():
+        session = db_session_factory()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    monkeypatch.setattr(
+        scripting,
+        "generate_script",
+        lambda *_args: pytest.fail("cross-user episode must not call the provider"),
+    )
+    context = TaskContext(
+        queue_service=QueueService(),
+        settings=cast(Settings, SimpleNamespace(queue=SimpleNamespace(max_retries=3))),
+        llm_service=None,
+        worker_id="test-worker",
+        db_factory=db_factory,
+    )
+
+    result = GenerateAudioEpisodeHandler().handle(
+        TaskEnvelope(
+            id=4,
+            owner_user_id=task_owner.id,
+            task_type=TaskType.GENERATE_AUDIO_EPISODE,
+            payload={"audio_episode_id": episode.id, "user_id": task_owner.id},
+            retry_count=4,
+        ),
+        context,
+    )
+
+    db_session.expire_all()
+    persisted = db_session.get(AudioEpisode, episode.id)
+    assert result.success is False
+    assert result.retryable is False
+    assert persisted.status == "pending"
+    assert persisted.audio_storage_path is None
 
 
 @pytest.mark.parametrize(
@@ -110,6 +304,7 @@ def test_generate_audio_episode_handler_classifies_generation_failures(
     db_session,
     db_session_factory,
     monkeypatch,
+    user_factory,
     failure_kind: str,
     status_code: int | None,
     retry_count: int,
@@ -117,8 +312,9 @@ def test_generate_audio_episode_handler_classifies_generation_failures(
     expected_episode_status: str,
     expected_error: str,
 ) -> None:
+    user = user_factory()
     episode = AudioEpisode(
-        user_id=123,
+        user_id=user.id,
         kind=audio_episodes.FAST_NEWS_DIGEST_KIND,
         status="pending",
         title="Fast Reads Brief",
@@ -175,7 +371,7 @@ def test_generate_audio_episode_handler_classifies_generation_failures(
     task = TaskEnvelope(
         id=1,
         task_type=TaskType.GENERATE_AUDIO_EPISODE,
-        payload={"audio_episode_id": episode.id},
+        payload={"audio_episode_id": episode.id, "user_id": user.id},
         retry_count=retry_count,
     )
 

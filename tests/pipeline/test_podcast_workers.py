@@ -64,7 +64,7 @@ def test_apple_podcasts_resolution_fills_audio_url(db_session, mocker, tmp_path)
         url=apple_url,
         title=None,
         platform="apple_podcasts",
-        content_metadata={"platform": "apple_podcasts"},
+        content_metadata={"platform": "apple_podcasts", "submitted_by_user_id": 17},
     )
     db_session.add(content)
     db_session.commit()
@@ -79,13 +79,27 @@ def test_apple_podcasts_resolution_fills_audio_url(db_session, mocker, tmp_path)
         yield db_session
 
     mocker.patch("app.pipeline.podcast_workers.get_db", _get_db)
-    mocker.patch(
-        "app.pipeline.podcast_workers.resolve_apple_podcast_episode",
-        return_value=ApplePodcastResolution(
+    sandbox_http_service = object()
+    runtime_calls: list[dict[str, object]] = []
+
+    @contextmanager
+    def _feed_runtime(**kwargs):
+        runtime_calls.append(kwargs)
+        yield sandbox_http_service
+
+    def _resolve(url: str, *, feed_http_service: object) -> ApplePodcastResolution:
+        assert url == apple_url
+        assert feed_http_service is sandbox_http_service
+        return ApplePodcastResolution(
             feed_url="https://example.com/feed.xml",
             episode_title="Episode Title",
             audio_url="https://example.com/audio.mp3",
-        ),
+        )
+
+    mocker.patch("app.pipeline.podcast_workers.sandboxed_http_service", _feed_runtime)
+    mocker.patch(
+        "app.pipeline.podcast_workers.resolve_apple_podcast_episode",
+        side_effect=_resolve,
     )
 
     audio_path = tmp_path / "episode.mp3"
@@ -104,6 +118,7 @@ def test_apple_podcasts_resolution_fills_audio_url(db_session, mocker, tmp_path)
     assert metadata.get("audio_url") == "https://example.com/audio.mp3"
     assert metadata.get("feed_url") == "https://example.com/feed.xml"
     assert metadata.get("episode_title") == "Episode Title"
+    assert runtime_calls == [{"user_id": 17, "execution_id": content.id}]
 
     worker.queue_service.enqueue.assert_called_once_with(TaskType.SUMMARIZE, content_id=content.id)
 
@@ -154,4 +169,63 @@ def test_podcast_media_uses_direct_content_url_when_audio_metadata_missing(
     assert body.char_count == len("Transcript text")
     download.assert_called_once()
     assert download.call_args.kwargs["audio_url"] == audio_url
+    assert download.call_args.kwargs["sandbox_user_id"] == 0
     worker.queue_service.enqueue.assert_called_once_with(TaskType.SUMMARIZE, content_id=content.id)
+
+
+def test_non_youtube_media_download_uses_sandbox_for_link_local_url(mocker, tmp_path):
+    worker = PodcastMediaWorker()
+    audio_bytes = b"sandbox-audio"
+    host_http = mocker.patch(
+        "httpx.Client",
+        side_effect=AssertionError("untrusted media must not use host HTTP"),
+    )
+
+    def _sandbox_download(url, destination, *, user_id, execution_id):
+        assert url == "http://169.254.169.254/private.mp3"
+        assert user_id == 17
+        assert execution_id == 42
+        destination.write_bytes(audio_bytes)
+        return destination
+
+    sandbox_download = mocker.patch(
+        "app.pipeline.podcast_workers.download_remote_media_in_sandbox",
+        side_effect=_sandbox_download,
+    )
+
+    result = worker._download_to_scratch(
+        content_id=42,
+        title="Private episode",
+        audio_url="http://169.254.169.254/private.mp3",
+        scratch_dir=tmp_path,
+        sandbox_user_id=17,
+    )
+
+    assert result.read_bytes() == audio_bytes
+    sandbox_download.assert_called_once()
+    host_http.assert_not_called()
+
+
+def test_youtube_media_download_keeps_existing_ytdlp_path(mocker, tmp_path):
+    worker = PodcastMediaWorker()
+    expected = tmp_path / "youtube" / "episode.webm"
+    expected.parent.mkdir()
+    expected.write_bytes(b"youtube-audio")
+    youtube_download = mocker.patch.object(
+        worker,
+        "_download_youtube_audio",
+        return_value=expected,
+    )
+    sandbox_download = mocker.patch("app.pipeline.podcast_workers.download_remote_media_in_sandbox")
+
+    result = worker._download_to_scratch(
+        content_id=42,
+        title="YouTube episode",
+        audio_url="https://www.youtube.com/watch?v=abc123xyz",
+        scratch_dir=tmp_path,
+        sandbox_user_id=17,
+    )
+
+    assert result == expected
+    youtube_download.assert_called_once()
+    sandbox_download.assert_not_called()

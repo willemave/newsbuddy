@@ -24,10 +24,6 @@ from app.services.audio_episode_kinds import (
     NEWS_ITEM_DISCUSSION_KIND,
 )
 from app.services.audio_episodes.creation import enqueue_audio_episode_generation
-from app.services.audio_episodes.generation import (
-    finalize_audio_episode_failure,
-    generate_audio_episode,
-)
 from app.services.audio_episodes.shared import (
     PUBLIC_AUDIO_EPISODE_ERROR_MESSAGE,
     int_from_snapshot_value,
@@ -74,7 +70,7 @@ def commit_audio_episode_delivery(
     *,
     delivery: AudioEpisodeDelivery,
 ) -> AudioEpisodeResponse:
-    """Commit creation, then enqueue or explicitly run inline generation."""
+    """Atomically persist creation and owned generation work."""
 
     delivered = commit_audio_episode_deliveries(db, [episode], delivery=delivery)
     return present_audio_episode(delivered[0])
@@ -86,36 +82,24 @@ def commit_audio_episode_deliveries(
     *,
     delivery: AudioEpisodeDelivery,
 ) -> list[AudioEpisode]:
-    """Commit a batch atomically, then deliver each incomplete episode in order."""
+    """Commit episodes and their owned generation tasks in one transaction."""
     delivered = list(episodes)
     if not delivered:
         raise ValueError("At least one audio episode is required")
+    del delivery  # Both supported modes now use the same durable generation task.
 
-    db.commit()
+    db.flush()
     for episode in delivered:
-        db.refresh(episode)
-
-    for index, episode in enumerate(delivered):
         if episode.status == AudioEpisodeStatus.COMPLETED.value:
             continue
         episode_id = required_int(episode.id, "audio episode id")
-        if delivery == "background":
-            enqueue_audio_episode_generation(episode_id)
-            continue
-        if delivery != "inline":
-            continue
-        try:
-            episode = generate_audio_episode(db, audio_episode_id=episode_id)
-        except Exception as exc:
-            finalize_audio_episode_failure(
-                db,
-                audio_episode_id=episode_id,
-                error=exc,
-                retry_scheduled=False,
-            )
-            db.commit()
-            raise
-        db.commit()
+        enqueue_audio_episode_generation(
+            db,
+            audio_episode_id=episode_id,
+            user_id=required_int(episode.user_id, "audio episode user_id"),
+        )
+    db.commit()
+    for index, episode in enumerate(delivered):
         db.refresh(episode)
         delivered[index] = episode
     return delivered

@@ -41,11 +41,12 @@ def test_create_fast_news_audio_episode_enqueues_generation(
     episode = db_session.query(AudioEpisode).one()
     task = db_session.query(ProcessingTask).one()
     assert task.task_type == TaskType.GENERATE_AUDIO_EPISODE.value
-    assert task.payload == {"audio_episode_id": episode.id}
+    assert task.payload == {"audio_episode_id": episode.id, "user_id": test_user.id}
+    assert task.owner_user_id == test_user.id
     assert task.queue_name == "audio_episode"
 
 
-def test_create_fast_news_stream_delivery_does_not_enqueue_generation(
+def test_create_fast_news_stream_delivery_enqueues_durable_generation(
     client,
     db_session,
     test_user,
@@ -65,14 +66,17 @@ def test_create_fast_news_stream_delivery_does_not_enqueue_generation(
     assert payload["status"] == "pending"
     assert payload["stream_url"] == f"/api/content/audio-episodes/{payload['id']}/stream"
     assert db_session.query(AudioEpisode).count() == 1
-    assert db_session.query(ProcessingTask).count() == 0
+    task = db_session.query(ProcessingTask).one()
+    assert task.payload == {
+        "audio_episode_id": payload["id"],
+        "user_id": test_user.id,
+    }
 
 
-def test_create_fast_news_inline_delivery_generates_before_response(
+def test_create_fast_news_inline_delivery_is_rejected(
     client,
     db_session,
     test_user,
-    monkeypatch,
 ) -> None:
     create_news_item_row(
         db_session,
@@ -82,31 +86,14 @@ def test_create_fast_news_inline_delivery_generates_before_response(
         summary_text="Inline delivery should return a completed file-backed episode.",
     )
 
-    def fake_generate_audio_episode(db, *, audio_episode_id: int):
-        episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).one()
-        episode.status = "completed"
-        episode.audio_storage_path = "/tmp/audio-episode-test.mp3"
-        episode.audio_content_type = "audio/mpeg"
-        episode.duration_seconds = 90
-        return episode
-
-    monkeypatch.setattr(
-        "app.services.audio_episodes.presentation.generate_audio_episode",
-        fake_generate_audio_episode,
-    )
-
     response = client.post("/api/content/audio-episodes/fast-news?delivery=inline")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "completed"
-    assert payload["audio_url"] == f"/api/content/audio-episodes/{payload['id']}/audio"
-    assert payload["duration_seconds"] == 90
-    assert db_session.query(AudioEpisode).count() == 1
+    assert response.status_code == 422
+    assert db_session.query(AudioEpisode).count() == 0
     assert db_session.query(ProcessingTask).count() == 0
 
 
-def test_create_news_item_audio_episode_stream_delivery_does_not_enqueue_generation(
+def test_create_news_item_audio_episode_stream_delivery_enqueues_generation(
     client,
     db_session,
     test_user,
@@ -128,7 +115,11 @@ def test_create_news_item_audio_episode_stream_delivery_does_not_enqueue_generat
     assert payload["source_item_ids"] == [item.id]
     assert payload["stream_url"] == f"/api/content/audio-episodes/{payload['id']}/stream"
     assert db_session.query(AudioEpisode).count() == 1
-    assert db_session.query(ProcessingTask).count() == 0
+    task = db_session.query(ProcessingTask).one()
+    assert task.payload == {
+        "audio_episode_id": payload["id"],
+        "user_id": test_user.id,
+    }
 
 
 def test_create_custom_narration_audio_episode_enqueues_generation(
@@ -171,7 +162,8 @@ def test_create_custom_narration_audio_episode_enqueues_generation(
     episode = db_session.query(AudioEpisode).filter(AudioEpisode.kind == "custom_narration").one()
     task = db_session.query(ProcessingTask).one()
     assert task.task_type == TaskType.GENERATE_AUDIO_EPISODE.value
-    assert task.payload == {"audio_episode_id": episode.id}
+    assert task.payload == {"audio_episode_id": episode.id, "user_id": test_user.id}
+    assert task.owner_user_id == test_user.id
     assert task.queue_name == "audio_episode"
 
 
@@ -239,21 +231,8 @@ def test_custom_narration_marks_sources_read_when_audio_is_played(
     )
     create_content_status_entry_row(db_session, user=test_user, content=article)
 
-    def fake_generate_audio_episode(db, *, audio_episode_id: int):
-        episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).one()
-        episode.status = "completed"
-        episode.audio_storage_path = str(audio_path)
-        episode.audio_content_type = "audio/mpeg"
-        episode.duration_seconds = 90
-        return episode
-
-    monkeypatch.setattr(
-        "app.services.audio_episodes.presentation.generate_audio_episode",
-        fake_generate_audio_episode,
-    )
-
     response = client.post(
-        "/api/content/audio-episodes/custom-narrations?delivery=inline",
+        "/api/content/audio-episodes/custom-narrations",
         json={
             "content_ids": [article.id],
             "news_item_ids": [news_item.id],
@@ -262,11 +241,17 @@ def test_custom_narration_marks_sources_read_when_audio_is_played(
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["audio_url"] is not None
+    episode = db_session.query(AudioEpisode).filter(AudioEpisode.id == payload["id"]).one()
+    episode.status = "completed"
+    episode.audio_storage_path = str(audio_path)
+    episode.audio_content_type = "audio/mpeg"
+    episode.duration_seconds = 90
+    db_session.commit()
+    audio_url = f"/api/content/audio-episodes/{episode.id}/audio"
     assert db_session.query(ContentReadStatus).count() == 0
     assert db_session.query(NewsItemReadStatus).count() == 0
 
-    audio_response = client.get(payload["audio_url"])
+    audio_response = client.get(audio_url)
 
     assert audio_response.status_code == 200
     assert audio_response.content == b"mp3"
@@ -400,29 +385,22 @@ def test_custom_narration_playback_marks_fast_reads_but_not_long_reads_by_defaul
     )
     create_content_status_entry_row(db_session, user=test_user, content=article)
 
-    def fake_generate_audio_episode(db, *, audio_episode_id: int):
-        episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).one()
-        episode.status = "completed"
-        episode.audio_storage_path = str(audio_path)
-        episode.audio_content_type = "audio/mpeg"
-        episode.duration_seconds = 90
-        return episode
-
-    monkeypatch.setattr(
-        "app.services.audio_episodes.presentation.generate_audio_episode",
-        fake_generate_audio_episode,
-    )
-
     response = client.post(
-        "/api/content/audio-episodes/custom-narrations?delivery=inline",
+        "/api/content/audio-episodes/custom-narrations",
         json={"content_ids": [article.id], "news_item_ids": [news_item.id]},
     )
     assert response.status_code == 200
     payload = response.json()
+    episode = db_session.query(AudioEpisode).filter(AudioEpisode.id == payload["id"]).one()
+    episode.status = "completed"
+    episode.audio_storage_path = str(audio_path)
+    episode.audio_content_type = "audio/mpeg"
+    episode.duration_seconds = 90
+    db_session.commit()
     assert payload["read_on_play_content_ids"] == []
     assert payload["read_on_play_news_item_ids"] == [news_item.id]
 
-    audio_response = client.get(payload["audio_url"])
+    audio_response = client.get(f"/api/content/audio-episodes/{episode.id}/audio")
 
     assert audio_response.status_code == 200
     assert db_session.query(ContentReadStatus).count() == 0
@@ -575,7 +553,13 @@ def test_stream_audio_episode_enqueues_and_follows_generation(
 
     enqueued_ids: list[int] = []
 
-    def fake_enqueue_audio_episode_generation(audio_episode_id: int) -> int:
+    def fake_enqueue_audio_episode_generation(
+        db,
+        *,
+        audio_episode_id: int,
+        user_id: int,
+    ) -> int:
+        assert user_id == test_user.id
         enqueued_ids.append(audio_episode_id)
         return 42
 

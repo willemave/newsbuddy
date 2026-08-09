@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.db import AudioEpisode
+from app.models.db import AudioEpisode, User
 from app.services.audio_episodes.scripting import (
     estimate_duration_seconds,
     prepare_audio_episode_script,
@@ -27,12 +27,28 @@ class AudioEpisodeNotFoundError(ValueError):
     """Raised when a queued generation target no longer exists."""
 
 
-def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisode:
+def generate_audio_episode(
+    db: Session,
+    *,
+    audio_episode_id: int,
+    expected_user_id: int | None = None,
+) -> AudioEpisode:
     """Generate one persisted episode without deciding queue retry disposition."""
 
     started_at = time.perf_counter()
     episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).first()
     if episode is None:
+        raise AudioEpisodeNotFoundError(f"Audio episode {audio_episode_id} not found")
+    user_id = required_int(episode.user_id, "audio episode user_id")
+    if expected_user_id is not None and expected_user_id != user_id:
+        raise AudioEpisodeNotFoundError(f"Audio episode {audio_episode_id} not found")
+    active_user = (
+        db.query(User.id)
+        .filter(User.id == user_id, User.is_active.is_(True))
+        .with_for_update(read=True)
+        .first()
+    )
+    if active_user is None:
         raise AudioEpisodeNotFoundError(f"Audio episode {audio_episode_id} not found")
     if episode.status == "completed" and episode.audio_storage_path:
         return episode
@@ -40,12 +56,14 @@ def generate_audio_episode(db: Session, *, audio_episode_id: int) -> AudioEpisod
         return episode
 
     episode_id = required_int(episode.id, "audio episode id")
-    user_id = required_int(episode.user_id, "audio episode user_id")
     episode.status = "processing"
     episode.error_message = None
     episode.started_at = datetime.now(UTC).replace(tzinfo=None)
     episode.completed_at = None
-    db.flush()
+    # Commit the preflight so the user FOR SHARE lock and its connection are not
+    # pinned across script/TTS generation; deletion safety during generation is
+    # provided by this task's PROCESSING status deferring account purges.
+    db.commit()
 
     script_duration_ms = 0.0
     tts_duration_ms = 0.0
@@ -126,11 +144,17 @@ def finalize_audio_episode_failure(
     audio_episode_id: int,
     error: Exception,
     retry_scheduled: bool,
+    expected_user_id: int | None = None,
 ) -> None:
     """Apply the sole pending-or-failed transition after retry disposition is known."""
 
-    episode = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id).first()
+    query = db.query(AudioEpisode).filter(AudioEpisode.id == audio_episode_id)
+    if expected_user_id is not None:
+        query = query.filter(AudioEpisode.user_id == expected_user_id)
+    episode = query.first()
     if episode is None:
+        return
+    if episode.status == "completed" and episode.audio_storage_path:
         return
     episode.status = "pending" if retry_scheduled else "failed"
     episode.error_message = str(error)

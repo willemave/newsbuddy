@@ -367,8 +367,12 @@ def stream_audio_episode(
         episode.error_message = None
         episode.started_at = None
         episode.completed_at = None
+        task_id = enqueue_audio_episode_generation(
+            db,
+            audio_episode_id=audio_episode_id,
+            user_id=user_id,
+        )
         db.commit()
-        task_id = enqueue_audio_episode_generation(audio_episode_id)
         logger.info(
             "Audio episode stream enqueued background generation",
             extra={

@@ -6,8 +6,13 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.model_defaults import OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
-from app.models.contracts import ContentType
-from app.models.db import AudioEpisode, ContentKnowledgeSave, NewsItemReadStatus
+from app.models.contracts import ContentType, TaskType
+from app.models.db import (
+    AudioEpisode,
+    ContentKnowledgeSave,
+    NewsItemReadStatus,
+    ProcessingTask,
+)
 from app.services import audio_episodes as service
 from app.services.audio_episode_kinds import (
     AUDIO_EPISODE_KIND_SPECS,
@@ -449,11 +454,12 @@ def test_all_generated_audio_episode_kinds_use_deepseek_flash() -> None:
 
 def test_generate_audio_episode_persists_script_and_audio(
     db_session,
+    test_user,
     tmp_path,
     monkeypatch,
 ) -> None:
     episode = AudioEpisode(
-        user_id=123,
+        user_id=test_user.id,
         kind=service.FAST_NEWS_DIGEST_KIND,
         status="pending",
         title="Fast Reads Brief",
@@ -486,7 +492,7 @@ def test_generate_audio_episode_persists_script_and_audio(
         def synthesize_dialogue_mp3(self, *, turns, item_id=None, user_id=None):
             captured_turns.extend(turns)
             assert item_id == episode.id
-            assert user_id == 123
+            assert user_id == test_user.id
             return b"fake-mp3"
 
     monkeypatch.setattr(
@@ -526,10 +532,11 @@ def test_generate_audio_episode_persists_script_and_audio(
 
 def test_generation_failure_waits_for_caller_retry_disposition(
     db_session,
+    test_user,
     monkeypatch,
 ) -> None:
     episode = AudioEpisode(
-        user_id=123,
+        user_id=test_user.id,
         kind=service.FAST_NEWS_DIGEST_KIND,
         status="pending",
         title="Fast Reads Brief",
@@ -567,12 +574,13 @@ def test_generation_failure_waits_for_caller_retry_disposition(
     assert episode.started_at is None
 
 
-def test_inline_delivery_finalizes_generation_failure(
+def test_delivery_stages_generation_without_inline_execution(
     db_session,
+    test_user,
     monkeypatch,
 ) -> None:
     episode = AudioEpisode(
-        user_id=123,
+        user_id=test_user.id,
         kind=service.FAST_NEWS_DIGEST_KIND,
         status="pending",
         title="Fast Reads Brief",
@@ -583,19 +591,30 @@ def test_inline_delivery_finalizes_generation_failure(
     )
     db_session.add(episode)
 
-    def fail_script(_episode):
-        raise ValueError("invalid local script")
+    script_calls: list[int] = []
+    monkeypatch.setattr(
+        scripting,
+        "generate_script",
+        lambda _episode: script_calls.append(1),
+    )
 
-    monkeypatch.setattr(scripting, "generate_script", fail_script)
-
-    with pytest.raises(ValueError, match="invalid local script"):
-        service.commit_audio_episode_delivery(db_session, episode, delivery="inline")
+    response = service.commit_audio_episode_delivery(db_session, episode, delivery="inline")
 
     db_session.expire_all()
     persisted = db_session.query(AudioEpisode).filter(AudioEpisode.id == episode.id).one()
-    assert persisted.status == "failed"
-    assert persisted.error_message == "invalid local script"
-    assert persisted.completed_at is not None
+    task = (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == TaskType.GENERATE_AUDIO_EPISODE.value)
+        .one()
+    )
+    assert response.status.value == "pending"
+    assert persisted.status == "pending"
+    assert script_calls == []
+    assert task.owner_user_id == test_user.id
+    assert task.payload == {
+        "audio_episode_id": persisted.id,
+        "user_id": test_user.id,
+    }
 
 
 def test_follow_audio_episode_stream_waits_for_pending_generation(
@@ -676,6 +695,7 @@ def test_persist_audio_episode_script_keeps_natural_long_dialogue(db_session) ->
 @pytest.mark.parametrize("char_count", [24, 1_000, 18_000, 80_000])
 def test_background_briefing_narration_never_uses_llm_and_preserves_text(
     db_session,
+    test_user,
     tmp_path,
     monkeypatch,
     char_count: int,
@@ -684,7 +704,7 @@ def test_background_briefing_narration_never_uses_llm_and_preserves_text(
     text = (sentence * ((char_count // len(sentence)) + 1))[:char_count]
     assert len(text) == char_count
     episode = AudioEpisode(
-        user_id=123,
+        user_id=test_user.id,
         kind=service.BRIEFING_NARRATION_KIND,
         status="pending",
         title="Articles briefing",
