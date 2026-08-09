@@ -368,6 +368,28 @@ final class LearningDecksViewModelTests: XCTestCase {
         XCTAssertNil(service.createRequests.first?.url)
         XCTAssertEqual(service.createRequests.first?.interestsPrompt, "Focus on the tradeoffs")
     }
+
+    func testCreatedDeckIsNotDroppedByRefreshThatStartedBeforeCreation() async {
+        let existing = makeLearningDeck(id: 1, runStatus: .completed)
+        let created = makeLearningDeck(id: 2, runStatus: .completed)
+        let service = MockLearningDeckService(
+            listedDeckResponses: [[existing], [existing]],
+            createResult: created
+        )
+        let viewModel = LearningDecksViewModel(service: service)
+        await viewModel.load()
+
+        service.pauseNextListResponse()
+        let refreshTask = Task { await viewModel.load() }
+        let didPause = await waitUntil { service.listResponsePaused }
+        XCTAssertTrue(didPause)
+
+        _ = await viewModel.createDeck(contentId: 77)
+        service.resumeListResponse()
+        await refreshTask.value
+
+        XCTAssertEqual(viewModel.decks.map(\.id), [2, 1])
+    }
 }
 
 private enum LearningDeckTestError: LocalizedError {
@@ -392,7 +414,7 @@ private final class MockLearningDeckService: LearningDeckServicing {
         let interestsPrompt: String?
     }
 
-    private let listedDecks: [LearningDeck]
+    private var listedDeckResponses: [[LearningDeck]]
     private var fetchResults: [Result<LearningDeck, Error>]
     private let createResult: LearningDeck?
     private var viewerURLs: [URL]
@@ -401,15 +423,23 @@ private final class MockLearningDeckService: LearningDeckServicing {
     private(set) var fetchCallCount = 0
     private(set) var viewerCallCount = 0
     private(set) var createRequests: [CreateRequest] = []
+    private let listStateLock = NSLock()
+    private var shouldPauseNextList = false
+    private var shouldKeepListPaused = false
+
+    var listResponsePaused: Bool {
+        listStateLock.withLock { shouldKeepListPaused }
+    }
 
     init(
         listedDecks: [LearningDeck] = [],
+        listedDeckResponses: [[LearningDeck]]? = nil,
         fetchResults: [Result<LearningDeck, Error>] = [],
         createResult: LearningDeck? = nil,
         viewerURLs: [URL] = [],
         viewerError: Error? = nil
     ) {
-        self.listedDecks = listedDecks
+        self.listedDeckResponses = listedDeckResponses ?? [listedDecks]
         self.fetchResults = fetchResults
         self.createResult = createResult
         self.viewerURLs = viewerURLs
@@ -417,7 +447,27 @@ private final class MockLearningDeckService: LearningDeckServicing {
     }
 
     func listDecks() async throws -> LearningDeckListResponse {
-        LearningDeckListResponse(decks: listedDecks)
+        let shouldPause = listStateLock.withLock {
+            let result = shouldPauseNextList
+            shouldPauseNextList = false
+            shouldKeepListPaused = result
+            return result
+        }
+        while shouldPause, listStateLock.withLock({ shouldKeepListPaused }) {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        let decks = listedDeckResponses.count == 1
+            ? listedDeckResponses[0]
+            : listedDeckResponses.removeFirst()
+        return LearningDeckListResponse(decks: decks)
+    }
+
+    func pauseNextListResponse() {
+        listStateLock.withLock { shouldPauseNextList = true }
+    }
+
+    func resumeListResponse() {
+        listStateLock.withLock { shouldKeepListPaused = false }
     }
 
     func fetchDeck(id: Int) async throws -> LearningDeck {

@@ -3,9 +3,11 @@
 //  newsly
 //
 
+import Foundation
 import SwiftUI
 
 struct LearningView: View {
+    let scrollToTopRequest: Int
     let onSelectSession: (ChatSessionRoute) -> Void
     let chatTransitionNamespace: Namespace.ID?
     let contentTextSize: DynamicTypeSize
@@ -17,8 +19,13 @@ struct LearningView: View {
     @State private var settings = AppSettings.shared
     @State private var composerText = ""
     @State private var deckReaderDestination: LearningDeckReaderDestination?
+    @State private var timeline: [LearningTimelineItem] = []
     @FocusState private var isComposerFocused: Bool
+
+    private static let topAnchor = "learning.top"
+
     init(
+        scrollToTopRequest: Int = 0,
         onSelectSession: @escaping (ChatSessionRoute) -> Void,
         onOpenMore: (() -> Void)? = nil,
         viewModel: LearningHubViewModel,
@@ -26,6 +33,7 @@ struct LearningView: View {
         contentTextSize: DynamicTypeSize,
         chatTransitionNamespace: Namespace.ID? = nil
     ) {
+        self.scrollToTopRequest = scrollToTopRequest
         self.onSelectSession = onSelectSession
         self.onOpenMore = onOpenMore
         self.viewModel = viewModel
@@ -46,38 +54,50 @@ struct LearningView: View {
         composerText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var timeline: [LearningTimelineItem] {
-        LearningTimelineItem.merged(
-            chats: viewModel.sessions,
-            decks: decks.decks,
-            narrations: narrations.episodes
+    private var timelineRevision: LearningTimelineRevision {
+        LearningTimelineRevision(
+            chats: viewModel.timelineRevision,
+            decks: decks.timelineRevision,
+            narrations: narrations.timelineRevision
         )
     }
 
     var body: some View {
-        List {
-            EditorialMastheadHeader(
-                title: "Learning",
-                trailingAccessory: onOpenMore.map { action in
-                    AnyView(moreMenuButton(action))
-                }
-            )
-            .appListRow()
-
-            composer
-                .padding(.bottom, 24)
+        ScrollViewReader { proxy in
+            List {
+                EditorialMastheadHeader(
+                    title: "Learning",
+                    titleAccessibilityIdentifier: "learning.screen",
+                    trailingAccessory: onOpenMore.map { action in
+                        AnyView(moreMenuButton(action))
+                    }
+                )
                 .appListRow()
+                .id(Self.topAnchor)
 
-            timelineContent
+                composer
+                    .padding(.bottom, 24)
+                    .appListRow()
+
+                learningErrors
+                timelineContent
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .contentMargins(.bottom, 32, for: .scrollContent)
+            .environment(\.defaultMinListRowHeight, 1)
+            .onPaginationThresholdReached {
+                await viewModel.loadMoreSessions()
+            }
+            .refreshable { await loadLearningScreen() }
+            .topScreenEdgeFade()
+            .bottomScreenEdgeFade()
+            .scrollsToTopOnRequest(
+                scrollToTopRequest,
+                anchor: Self.topAnchor,
+                using: proxy
+            )
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.bottom, 32, for: .scrollContent)
-        .environment(\.defaultMinListRowHeight, 1)
-        .accessibilityIdentifier("learning.screen")
-        .refreshable { await loadLearningScreen() }
-        .topScreenEdgeFade()
-        .bottomScreenEdgeFade()
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
@@ -97,12 +117,18 @@ struct LearningView: View {
         .task(id: viewModel.hasActiveChatWork) {
             await viewModel.pollActiveChatWork()
         }
+        .onChange(of: timelineRevision, initial: true) { _, _ in
+            rebuildTimeline()
+        }
         .onChange(of: viewModel.completedVoiceRoute) { _, route in
             guard let route else { return }
             viewModel.clearCompletedVoiceRoute()
             onSelectSession(route)
         }
-        .onDisappear { viewModel.cancelVoiceRecording() }
+        .onDisappear {
+            viewModel.cancelVoiceRecording()
+            narrations.cancelPolling()
+        }
     }
 
     private var composer: some View {
@@ -167,8 +193,67 @@ struct LearningView: View {
     }
 
     @ViewBuilder
+    private var learningErrors: some View {
+        if viewModel.loadErrorMessage != nil {
+            LearningInlineError(
+                message: "Chats couldn't be loaded.",
+                actionTitle: "Try Again",
+                accessibilityIdentifier: "learning.error.chats.load",
+                action: { Task { await viewModel.loadLearning() } }
+            )
+            .appListRow()
+        }
+        if let message = viewModel.errorMessage {
+            LearningInlineError(
+                message: message,
+                actionTitle: "Dismiss",
+                accessibilityIdentifier: "learning.error.chats.action",
+                action: viewModel.clearError
+            )
+            .appListRow()
+        }
+        if decks.loadErrorMessage != nil {
+            LearningInlineError(
+                message: "Learning Decks couldn't be loaded.",
+                actionTitle: "Try Again",
+                accessibilityIdentifier: "learning.error.decks.load",
+                action: { Task { await decks.load() } }
+            )
+            .appListRow()
+        }
+        if let message = decks.errorMessage {
+            LearningInlineError(
+                message: message,
+                actionTitle: "Dismiss",
+                accessibilityIdentifier: "learning.error.decks.action",
+                action: decks.clearError
+            )
+            .appListRow()
+        }
+        if narrations.loadErrorMessage != nil {
+            LearningInlineError(
+                message: "Narrations couldn't be loaded.",
+                actionTitle: "Try Again",
+                accessibilityIdentifier: "learning.error.narrations.load",
+                action: { Task { await narrations.load() } }
+            )
+            .appListRow()
+        }
+        if let message = narrations.errorMessage {
+            LearningInlineError(
+                message: message,
+                actionTitle: "Dismiss",
+                accessibilityIdentifier: "learning.error.narrations.action",
+                action: narrations.clearError
+            )
+            .appListRow()
+        }
+    }
+
+    @ViewBuilder
     private var timelineContent: some View {
-        if viewModel.isLoading && timeline.isEmpty {
+        let items = timeline
+        if viewModel.isLoading && items.isEmpty {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
                 Text("Loading learning activity")
@@ -178,11 +263,11 @@ struct LearningView: View {
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 20)
             .appListRow()
-        } else if timeline.isEmpty {
+        } else if items.isEmpty {
             EmptyStateView(
                 icon: "sparkles",
                 title: "Start learning",
-                subtitle: "Chats, Learning Decks, and narrations will appear together here."
+                subtitle: "Ask a question, create a Learning Deck, or build a narration to begin."
             )
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.vertical, 28)
@@ -190,8 +275,23 @@ struct LearningView: View {
         } else {
             // Flat list, no day dividers: with roughly one entry per day the rules
             // outnumbered the content. Each row carries its own date under the icon.
-            ForEach(timeline) { item in
+            ForEach(items) { item in
                 timelineRow(item)
+            }
+
+            if viewModel.isLoadingMore {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .accessibilityIdentifier("learning.pagination.loading")
+                    .appListRow()
+            } else if viewModel.hasLoadMoreError {
+                Button("Try loading more again") {
+                    Task { await viewModel.loadMoreSessions() }
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("learning.pagination.retry")
+                .appListRow()
             }
         }
     }
@@ -199,15 +299,22 @@ struct LearningView: View {
     @ViewBuilder
     private func timelineRow(_ item: LearningTimelineItem) -> some View {
         switch item {
-        case .chat(let session):
+        case .chat(let session, let preview):
             Button {
                 onSelectSession(ChatSessionRoute(session: session))
             } label: {
-                LearningChatRow(session: session, activityDate: item.activityDate)
+                LearningChatRow(
+                    session: session,
+                    activityDate: item.activityDate,
+                    preview: preview
+                )
             }
             .buttonStyle(.plain)
             .matchedContentZoomSource(id: session.id, namespace: chatTransitionNamespace)
             .accessibilityIdentifier("learning.chat.\(session.id)")
+            .accessibilityValue(
+                session.isPreparingChat || session.isProcessing ? "Preparing" : ""
+            )
             .appListRow()
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button(role: .destructive) {
@@ -224,6 +331,7 @@ struct LearningView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("learning.deck.\(deck.id)")
+            .accessibilityValue(deck.hasActiveLatestRun ? deck.statusLabel : "")
             .appListRow()
             .contextMenu {
                 Button {
@@ -249,7 +357,13 @@ struct LearningView: View {
             }
         case .narration(let episode):
             Button {
-                Task { await narrations.handleTap(episode) }
+                Task {
+                    if episode.isFailed {
+                        await narrations.retry(episode)
+                    } else {
+                        await narrations.handleTap(episode)
+                    }
+                }
             } label: {
                 LearningNarrationRow(
                     episode: episode,
@@ -282,12 +396,22 @@ struct LearningView: View {
         let message = trimmedComposerText
         guard !message.isEmpty else { return }
         isComposerFocused = false
-        composerText = ""
         Task {
             if let route = await viewModel.startChat(message: message) {
+                composerText = ""
                 onSelectSession(route)
+            } else {
+                isComposerFocused = true
             }
         }
+    }
+
+    private func rebuildTimeline() {
+        timeline = LearningTimelineItem.merged(
+            chats: viewModel.sessions,
+            decks: decks.decks,
+            narrations: narrations.episodes
+        )
     }
 
     @MainActor
@@ -308,31 +432,17 @@ struct LearningView: View {
         async let narrationLoad: Void = narrations.load()
         async let deckLoad: Void = decks.load()
         _ = await (chatLoad, narrationLoad, deckLoad)
+        // The three initial requests can finish before SwiftUI has installed the
+        // revision observer. Project their completed state explicitly so a fast
+        // response cannot leave the timeline displaying its initial empty value.
+        rebuildTimeline()
     }
 }
 
 private struct LearningChatRow: View {
     let session: ChatSessionSummary
     let activityDate: Date
-
-    private var preview: String? {
-        if let lastMessagePreview = session.lastMessagePreview?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !lastMessagePreview.isEmpty {
-            return previewText(lastMessagePreview)
-        }
-        if let articleSummary = session.articleSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !articleSummary.isEmpty {
-            return "About: \(previewText(articleSummary))"
-        }
-        return session.displaySubtitle.map(previewText)
-    }
-
-    private func previewText(_ markdown: String) -> String {
-        ShareContent.plainText(fromMarkdown: markdown)
-            .replacingOccurrences(of: #"(?m)^\s{0,3}(#{1,6}(\s+|$)|>\s+|[-*+]\s+|\d+\.\s+)"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    let preview: String?
 
     private var isPreparing: Bool {
         session.isPreparingChat || session.isProcessing
@@ -354,6 +464,12 @@ private struct LearningChatRow: View {
                 .foregroundStyle(Color.onSurfaceTertiary)
         }
     }
+}
+
+private struct LearningTimelineRevision: Equatable {
+    let chats: Int
+    let decks: Int
+    let narrations: Int
 }
 
 private struct LearningDeckTimelineRow: View {
@@ -391,13 +507,42 @@ private struct LearningNarrationRow: View {
             title: episode.title,
             subtitle: subtitle
         ) {
-            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+            Image(
+                systemName: episode.isFailed
+                    ? "arrow.clockwise"
+                    : (isPlaying ? "pause.fill" : "play.fill")
+            )
                 .font(.appSymbol(size: 11, weight: .semibold))
                 .foregroundStyle(Color.brandPrimary)
                 .frame(width: 30, height: 30)
                 .background(Color.surfaceSecondary)
                 .clipShape(Circle())
         }
+    }
+}
+
+private struct LearningInlineError: View {
+    let message: String
+    let actionTitle: String
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.circle")
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .accessibilityHidden(true)
+            Text(message)
+                .font(.terracottaBodyMedium)
+                .foregroundStyle(Color.onSurfaceSecondary)
+            Spacer(minLength: 8)
+            Button(actionTitle, action: action)
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("\(accessibilityIdentifier).action")
+        }
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .padding(.vertical, 10)
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 }
 
@@ -490,7 +635,7 @@ private struct LearningArtwork: View {
                     .padding(2.5)
                     .background(Color.surfacePrimary, in: Circle())
                     .offset(x: 3, y: -3)
-                    .accessibilityIdentifier(busyAccessibilityIdentifier ?? "")
+                    .accessibilityIdentifier(ifPresent: busyAccessibilityIdentifier)
             }
         }
     }

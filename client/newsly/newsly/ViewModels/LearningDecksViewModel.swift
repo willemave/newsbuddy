@@ -10,13 +10,27 @@ private enum LearningDecksTaskKey: Hashable {
     case deckPolling(Int)
 }
 
+private enum LearningDeckMutation {
+    case upsert(LearningDeck)
+    case remove
+}
+
+private struct VersionedLearningDeckMutation {
+    let revision: Int
+    let mutation: LearningDeckMutation
+}
+
 @MainActor
 @Observable
 final class LearningDecksViewModel {
-    private(set) var decks: [LearningDeck] = []
+    private(set) var decks: [LearningDeck] = [] {
+        didSet { timelineRevision &+= 1 }
+    }
+    private(set) var timelineRevision = 0
     private(set) var isLoading = false
     private(set) var isCreating = false
     private(set) var busyDeckIDs: Set<Int> = []
+    private(set) var loadErrorMessage: String?
     var errorMessage: String?
 
     @ObservationIgnored
@@ -25,6 +39,10 @@ final class LearningDecksViewModel {
     private let tasks = TaskBag<LearningDecksTaskKey>()
     @ObservationIgnored
     private let statusRegistry: LearningDeckStatusRegistry
+    @ObservationIgnored
+    private var mutationRevision = 0
+    @ObservationIgnored
+    private var deckMutations: [Int: VersionedLearningDeckMutation] = [:]
 
     init(
         service: any LearningDeckServicing,
@@ -48,19 +66,28 @@ final class LearningDecksViewModel {
 
     func load() async {
         guard !isLoading else { return }
+        let requestStartRevision = mutationRevision
         isLoading = true
+        loadErrorMessage = nil
         defer { isLoading = false }
 
         do {
             let response = try await service.listDecks()
-            decks = response.decks
-            response.decks.forEach(startPollingIfNeeded)
-            errorMessage = nil
+            guard !Task.isCancelled else { return }
+            decks = reconcileLoadedDecks(
+                response.decks,
+                requestStartRevision: requestStartRevision
+            )
+            decks.forEach(startPollingIfNeeded)
         } catch where isNetworkCancellation(error) {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            loadErrorMessage = error.localizedDescription
         }
+    }
+
+    func clearError() {
+        errorMessage = nil
     }
 
     func createDeck(
@@ -195,8 +222,7 @@ final class LearningDecksViewModel {
             do {
                 try await service.deleteDeck(deckId: deck.id)
                 await statusRegistry.invalidate(deckId: deck.id)
-                tasks.cancel(.deckPolling(deck.id))
-                decks.removeAll { $0.id == deck.id }
+                removeDeck(id: deck.id)
                 errorMessage = nil
             } catch where isNetworkCancellation(error) {
                 return
@@ -207,6 +233,7 @@ final class LearningDecksViewModel {
     }
 
     private func upsert(_ deck: LearningDeck, startsPolling: Bool = true) {
+        recordMutation(.upsert(deck), for: deck.id)
         if let index = decks.firstIndex(where: { $0.id == deck.id }) {
             decks[index] = deck
         } else {
@@ -215,6 +242,49 @@ final class LearningDecksViewModel {
         if startsPolling {
             startPollingIfNeeded(deck)
         }
+    }
+
+    private func removeDeck(id: Int) {
+        recordMutation(.remove, for: id)
+        tasks.cancel(.deckPolling(id))
+        decks.removeAll { $0.id == id }
+    }
+
+    private func recordMutation(_ mutation: LearningDeckMutation, for deckID: Int) {
+        mutationRevision &+= 1
+        deckMutations[deckID] = VersionedLearningDeckMutation(
+            revision: mutationRevision,
+            mutation: mutation
+        )
+    }
+
+    private func reconcileLoadedDecks(
+        _ loadedDecks: [LearningDeck],
+        requestStartRevision: Int
+    ) -> [LearningDeck] {
+        var reconciled = loadedDecks
+        let loadedDeckIDs = Set(loadedDecks.map(\.id))
+        let mutations = deckMutations.sorted { $0.value.revision < $1.value.revision }
+
+        for (deckID, versionedMutation) in mutations {
+            switch versionedMutation.mutation {
+            case .upsert(let deck):
+                if versionedMutation.revision <= requestStartRevision,
+                   loadedDeckIDs.contains(deckID) {
+                    deckMutations.removeValue(forKey: deckID)
+                    continue
+                }
+                reconciled.removeAll { $0.id == deckID }
+                reconciled.insert(deck, at: 0)
+            case .remove:
+                reconciled.removeAll { $0.id == deckID }
+                if versionedMutation.revision <= requestStartRevision,
+                   !loadedDeckIDs.contains(deckID) {
+                    deckMutations.removeValue(forKey: deckID)
+                }
+            }
+        }
+        return reconciled
     }
 
     private func withDeckBusy<T>(

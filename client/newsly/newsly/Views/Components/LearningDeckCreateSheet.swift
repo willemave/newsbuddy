@@ -110,6 +110,7 @@ struct LearningDeckCreateSheet: View {
                                 : "Tap to dictate what this Learning Deck should focus on"
                         )
                         .accessibilityIdentifier("learning_deck.focus_mic")
+                        .accessibilityValue(focusRecorder.state.accessibilityValue)
                     }
 
                     ZStack(alignment: .topLeading) {

@@ -30,23 +30,31 @@ extension ChatService: LearningHubChatServicing {}
 @MainActor
 @Observable
 final class LearningHubViewModel {
-    var sessions: [ChatSessionSummary] = []
+    private struct LocallyCreatedSession {
+        let revision: Int
+        let session: ChatSessionSummary
+    }
+
+    var sessions: [ChatSessionSummary] = [] {
+        didSet { timelineRevision &+= 1 }
+    }
+    private(set) var timelineRevision = 0
     var isLoading = false
     var isLoadingMore = false
     var hasMoreSessions = false
     var isCreatingSession = false
+    private(set) var loadErrorMessage: String?
     var errorMessage: String?
     var hasLoadMoreError = false
     private(set) var voiceDictationAvailable = false
     private(set) var isVoiceRecording = false
     private(set) var isVoiceTranscribing = false
     private(set) var isVoiceActionInFlight = false
+    private(set) var voiceState: SpeechTranscriptionState = .idle
     private(set) var completedVoiceRoute: ChatSessionRoute?
 
     @ObservationIgnored
     private let chatService: any LearningHubChatServicing
-    @ObservationIgnored
-    private let transcriptionService: any SpeechTranscribing
     @ObservationIgnored
     private let voiceCoordinator: VoiceDictationCoordinator
     @ObservationIgnored
@@ -58,13 +66,15 @@ final class LearningHubViewModel {
     @ObservationIgnored
     private var pendingVoiceTranscript: String?
     @ObservationIgnored
-    private var hasConfiguredVoiceCallbacks = false
-    @ObservationIgnored
     private var deletingSessionIDs: Set<Int> = []
     @ObservationIgnored
     private var deletedSessionIDs: Set<Int> = []
     @ObservationIgnored
     private var inFlightSessionListRequestCount = 0
+    @ObservationIgnored
+    private var sessionMutationRevision = 0
+    @ObservationIgnored
+    private var locallyCreatedSessions: [Int: LocallyCreatedSession] = [:]
     @ObservationIgnored
     private let activeChatPollIntervalNanoseconds: UInt64
 
@@ -81,7 +91,6 @@ final class LearningHubViewModel {
     ) {
         let resolvedTranscriptionService = transcriptionService ?? SpeechTranscriberFactory.makeVoiceDictationTranscriber()
         self.chatService = chatService
-        self.transcriptionService = resolvedTranscriptionService
         self.voiceCoordinator = VoiceDictationCoordinator(transcriber: resolvedTranscriptionService)
         self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
         self.voiceDictationAvailable = initialVoiceDictationAvailable
@@ -90,6 +99,7 @@ final class LearningHubViewModel {
 
     func loadLearning() async {
         guard !isLoading else { return }
+        let requestStartRevision = sessionMutationRevision
         isLoading = true
         beginSessionListRequest()
         defer {
@@ -97,7 +107,7 @@ final class LearningHubViewModel {
             finishSessionListRequest()
         }
 
-        errorMessage = nil
+        loadErrorMessage = nil
         hasLoadMoreError = false
 
         do {
@@ -107,7 +117,10 @@ final class LearningHubViewModel {
                 limit: historyPageLimit,
                 cursor: nil
             )
-            sessions = visibleSessions(response.sessions)
+            sessions = reconcileInitialSessions(
+                response.sessions,
+                requestStartRevision: requestStartRevision
+            )
             nextCursor = response.meta.nextCursor
             hasMoreSessions = response.meta.hasMore
         } catch where isNetworkCancellation(error) {
@@ -115,8 +128,12 @@ final class LearningHubViewModel {
         } catch {
             nextCursor = nil
             hasMoreSessions = false
-            errorMessage = error.localizedDescription
+            loadErrorMessage = error.localizedDescription
         }
+    }
+
+    func clearError() {
+        errorMessage = nil
     }
 
     func pollActiveChatWork() async {
@@ -178,6 +195,7 @@ final class LearningHubViewModel {
         do {
             try await chatService.deleteSession(sessionId: session.id)
             deletedSessionIDs.insert(session.id)
+            locallyCreatedSessions.removeValue(forKey: session.id)
             sessions.removeAll { $0.id == session.id }
             discardSettledDeletionTombstones()
         } catch where isNetworkCancellation(error) {
@@ -188,7 +206,7 @@ final class LearningHubViewModel {
     }
 
     func checkAndRefreshVoiceDictation() async {
-        if transcriptionService.isAvailable {
+        if voiceCoordinator.isAvailable {
             voiceDictationAvailable = true
             return
         }
@@ -211,13 +229,12 @@ final class LearningHubViewModel {
     }
 
     func cancelVoiceRecording() {
-        guard hasConfiguredVoiceCallbacks || isVoiceRecording || isVoiceTranscribing || pendingVoiceTranscript != nil else {
+        guard voiceCoordinator.hasActiveSession || isVoiceRecording || isVoiceTranscribing || pendingVoiceTranscript != nil else {
             return
         }
-        voiceCoordinator.stopListening()
-        transcriptionService.reset()
-        hasConfiguredVoiceCallbacks = false
+        voiceCoordinator.cancel()
         pendingVoiceTranscript = nil
+        voiceState = .idle
         isVoiceRecording = false
         isVoiceTranscribing = false
         isVoiceActionInFlight = false
@@ -274,8 +291,33 @@ final class LearningHubViewModel {
 
     private func prependSession(_ session: ChatSessionSummary) {
         deletedSessionIDs.remove(session.id)
+        sessionMutationRevision &+= 1
+        locallyCreatedSessions[session.id] = LocallyCreatedSession(
+            revision: sessionMutationRevision,
+            session: session
+        )
         sessions.removeAll { $0.id == session.id }
         sessions.insert(session, at: 0)
+    }
+
+    private func reconcileInitialSessions(
+        _ loadedSessions: [ChatSessionSummary],
+        requestStartRevision: Int
+    ) -> [ChatSessionSummary] {
+        var reconciled = visibleSessions(loadedSessions)
+        let loadedSessionIDs = Set(reconciled.map(\.id))
+
+        for local in locallyCreatedSessions.values.sorted(by: { $0.revision < $1.revision }) {
+            if local.revision <= requestStartRevision,
+               loadedSessionIDs.contains(local.session.id) {
+                locallyCreatedSessions.removeValue(forKey: local.session.id)
+                continue
+            }
+
+            reconciled.removeAll { $0.id == local.session.id }
+            reconciled.insert(local.session, at: 0)
+        }
+        return reconciled
     }
 
     private func visibleSessions(
@@ -307,20 +349,28 @@ final class LearningHubViewModel {
             return
         }
 
-        configureTranscriptionCallbacks()
         pendingVoiceTranscript = nil
         errorMessage = nil
         isVoiceActionInFlight = true
         defer { isVoiceActionInFlight = false }
 
         do {
-            try await transcriptionService.start()
-            isVoiceRecording = true
-            isVoiceTranscribing = false
+            try await voiceCoordinator.start(
+                onTranscriptFinal: { [weak self] transcript in
+                    self?.pendingVoiceTranscript = transcript
+                },
+                onError: { [weak self] message in
+                    self?.applyVoiceFailure(message)
+                },
+                onStateChange: { [weak self] state in
+                    self?.applyVoiceState(state)
+                },
+                onStopReason: { [weak self] reason in
+                    await self?.handleVoiceStopReason(reason)
+                }
+            )
         } catch {
-            errorMessage = error.localizedDescription
-            isVoiceRecording = false
-            isVoiceTranscribing = false
+            applyVoiceFailure(error.localizedDescription)
         }
     }
 
@@ -330,8 +380,12 @@ final class LearningHubViewModel {
         defer { isVoiceActionInFlight = false }
 
         do {
-            let transcript = try await transcriptionService.stop()
+            voiceState = .transcribing
+            isVoiceRecording = false
+            isVoiceTranscribing = true
+            let transcript = try await voiceCoordinator.stop()
             pendingVoiceTranscript = nil
+            voiceState = .idle
             isVoiceRecording = false
             isVoiceTranscribing = false
             return await submitVoiceTranscript(transcript)
@@ -354,42 +408,57 @@ final class LearningHubViewModel {
         return await startAssistantTurn(message: trimmedTranscript)
     }
 
-    private func configureTranscriptionCallbacks() {
-        hasConfiguredVoiceCallbacks = true
-        voiceCoordinator.listen(
-            onTranscriptFinal: { [weak self] transcript in
-                self?.pendingVoiceTranscript = transcript
-            },
-            onError: { [weak self] message in
-                self?.errorMessage = message
-                self?.pendingVoiceTranscript = nil
-                self?.isVoiceRecording = false
-                self?.isVoiceTranscribing = false
-                self?.isVoiceActionInFlight = false
-            },
-            onStopReason: { [weak self] reason in
-                guard let self else { return }
-                switch reason {
-                case .manual:
-                    return
-                case .silenceAutoStop:
-                    let transcript = self.pendingVoiceTranscript ?? ""
-                    self.pendingVoiceTranscript = nil
-                    self.isVoiceRecording = false
-                    self.isVoiceTranscribing = false
-                    self.isVoiceActionInFlight = true
-                    let route = await self.submitVoiceTranscript(transcript)
-                    self.isVoiceActionInFlight = false
-                    if let route {
-                        self.completedVoiceRoute = route
-                    }
-                case .cancel, .failure:
-                    self.pendingVoiceTranscript = nil
-                    self.isVoiceRecording = false
-                    self.isVoiceTranscribing = false
-                    self.isVoiceActionInFlight = false
-                }
+    private func applyVoiceState(_ state: SpeechTranscriptionState) {
+        voiceState = state
+        switch state {
+        case .idle, .starting:
+            isVoiceRecording = false
+            isVoiceTranscribing = false
+        case .recording:
+            isVoiceRecording = true
+            isVoiceTranscribing = false
+        case .transcribing:
+            isVoiceRecording = false
+            isVoiceTranscribing = true
+        case .failed(let message):
+            applyVoiceFailure(message)
+        }
+    }
+
+    private func applyVoiceFailure(_ message: String) {
+        voiceState = .failed(message)
+        errorMessage = message
+        pendingVoiceTranscript = nil
+        isVoiceRecording = false
+        isVoiceTranscribing = false
+        isVoiceActionInFlight = false
+    }
+
+    private func handleVoiceStopReason(_ reason: SpeechStopReason) async {
+        switch reason {
+        case .manual:
+            return
+        case .silenceAutoStop, .maximumDuration:
+            let transcript = pendingVoiceTranscript ?? ""
+            pendingVoiceTranscript = nil
+            isVoiceRecording = false
+            isVoiceTranscribing = false
+            isVoiceActionInFlight = true
+            let route = await submitVoiceTranscript(transcript)
+            isVoiceActionInFlight = false
+            if let route {
+                completedVoiceRoute = route
             }
-        )
+        case .noSpeechTimeout:
+            applyVoiceFailure("No speech detected. Try again.")
+        case .cancel:
+            pendingVoiceTranscript = nil
+            voiceState = .idle
+            isVoiceRecording = false
+            isVoiceTranscribing = false
+            isVoiceActionInFlight = false
+        case .failure:
+            isVoiceActionInFlight = false
+        }
     }
 }

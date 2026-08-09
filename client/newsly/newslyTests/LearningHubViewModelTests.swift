@@ -30,7 +30,7 @@ final class LearningHubViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isVoiceTranscribing)
 
         viewModel.cancelVoiceRecording()
-        XCTAssertEqual(transcriptionService.resetCallCount, 1)
+        XCTAssertEqual(transcriptionService.resetCallCount, 0)
     }
 
     func testVoiceSilenceAutoStopPublishesCompletedRoute() async {
@@ -53,6 +53,102 @@ final class LearningHubViewModelTests: XCTestCase {
         XCTAssertEqual(transcriptionService.stopCallCount, 0)
         XCTAssertFalse(viewModel.isVoiceRecording)
         XCTAssertFalse(viewModel.isVoiceTranscribing)
+    }
+
+    func testVoiceMaximumDurationPublishesCompletedRoute() async {
+        let transcriptionService = MockLearningSpeechTranscriber(transcript: "Summarize the day")
+        let chatService = MockLearningHubChatService(
+            turnResponses: [.success(makeAssistantTurnResponse(sessionId: 93))]
+        )
+        let viewModel = LearningHubViewModel(
+            chatService: chatService,
+            transcriptionService: transcriptionService,
+            initialVoiceDictationAvailable: true
+        )
+
+        _ = await viewModel.toggleVoiceRecording()
+        await transcriptionService.simulateAutomaticStop(reason: .maximumDuration)
+        for _ in 0..<100 where viewModel.completedVoiceRoute == nil {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(viewModel.completedVoiceRoute?.sessionId, 93)
+        XCTAssertEqual(chatService.receivedMessages, ["Summarize the day"])
+    }
+
+    func testVoiceNoSpeechFailureCanRestartRecording() async {
+        let transcriptionService = MockLearningSpeechTranscriber(transcript: "Try again")
+        let viewModel = LearningHubViewModel(
+            chatService: MockLearningHubChatService(turnResponses: []),
+            transcriptionService: transcriptionService,
+            initialVoiceDictationAvailable: true
+        )
+
+        _ = await viewModel.toggleVoiceRecording()
+        await transcriptionService.simulateNoSpeechTimeout()
+        for _ in 0..<100 where viewModel.errorMessage == nil {
+            await Task.yield()
+        }
+        for _ in 0..<100 where transcriptionService.hasActiveSession {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(viewModel.errorMessage, "No speech detected. Try again.")
+        _ = await viewModel.toggleVoiceRecording()
+        XCTAssertTrue(viewModel.isVoiceRecording)
+        XCTAssertNil(viewModel.errorMessage)
+        viewModel.cancelVoiceRecording()
+    }
+
+    func testEmptyVoiceTranscriptShowsRetryableErrorWithoutCreatingChat() async {
+        let transcriptionService = MockLearningSpeechTranscriber(transcript: "  ")
+        let chatService = MockLearningHubChatService(turnResponses: [])
+        let viewModel = LearningHubViewModel(
+            chatService: chatService,
+            transcriptionService: transcriptionService,
+            initialVoiceDictationAvailable: true
+        )
+
+        _ = await viewModel.toggleVoiceRecording()
+        let route = await viewModel.toggleVoiceRecording()
+
+        XCTAssertNil(route)
+        XCTAssertEqual(viewModel.errorMessage, "I didn't catch that. Try again.")
+        XCTAssertTrue(chatService.receivedMessages.isEmpty)
+    }
+
+    func testVoiceStartAndTranscriptionFailuresReleaseForRetry() async {
+        let startFailure = MockLearningSpeechTranscriber(
+            transcript: "unused",
+            startError: VoiceDictationError.recordingFailed
+        )
+        let startViewModel = LearningHubViewModel(
+            chatService: MockLearningHubChatService(turnResponses: []),
+            transcriptionService: startFailure,
+            initialVoiceDictationAvailable: true
+        )
+
+        _ = await startViewModel.toggleVoiceRecording()
+        XCTAssertEqual(startViewModel.errorMessage, "Failed to record audio.")
+        XCTAssertFalse(startViewModel.isVoiceRecording)
+
+        let transcriptionFailure = MockLearningSpeechTranscriber(
+            transcript: "unused",
+            stopError: VoiceDictationError.transcriptionFailed("scripted failure")
+        )
+        let stopViewModel = LearningHubViewModel(
+            chatService: MockLearningHubChatService(turnResponses: []),
+            transcriptionService: transcriptionFailure,
+            initialVoiceDictationAvailable: true
+        )
+
+        _ = await stopViewModel.toggleVoiceRecording()
+        _ = await stopViewModel.toggleVoiceRecording()
+        XCTAssertEqual(
+            stopViewModel.errorMessage,
+            "Transcription failed: scripted failure"
+        )
+        XCTAssertFalse(stopViewModel.isVoiceTranscribing)
     }
 
     func testCancelVoiceRecordingResetsTranscriberAndState() async {
@@ -330,6 +426,45 @@ final class LearningHubViewModelTests: XCTestCase {
         XCTAssertEqual(chatService.deletedSessionIDs, [1])
     }
 
+    func testCreatedChatIsNotDroppedByRefreshThatStartedBeforeCreation() async {
+        let existingSession = makeSession(id: 1)
+        let chatService = MockLearningHubChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: [existingSession],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+                .success(
+                    makeSessionListResponse(
+                        sessions: [existingSession],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+            ],
+            turnResponses: [.success(makeAssistantTurnResponse(sessionId: 91))]
+        )
+        let viewModel = LearningHubViewModel(chatService: chatService)
+        await viewModel.loadLearning()
+
+        chatService.pauseNextPageResponse()
+        let refreshTask = Task { await viewModel.loadLearning() }
+        defer {
+            refreshTask.cancel()
+            chatService.resumePageResponse()
+        }
+        await chatService.waitForPageResponsePause()
+
+        _ = await viewModel.startChat(message: "What changed?")
+        chatService.resumePageResponse()
+        await refreshTask.value
+
+        XCTAssertEqual(viewModel.sessions.map(\.id), [91, 1])
+    }
+
     private func makeAssistantTurnResponse(sessionId: Int) -> AssistantTurnResponse {
         AssistantTurnResponse(
             session: makeSession(id: sessionId),
@@ -393,64 +528,112 @@ final class LearningHubViewModelTests: XCTestCase {
 
 @MainActor
 private final class MockLearningSpeechTranscriber: SpeechTranscribing {
-    var onTranscriptDelta: ((String) -> Void)?
-    var onTranscriptFinal: ((String) -> Void)?
-    var onError: ((String) -> Void)?
-    var onStateChange: ((SpeechTranscriptionState) -> Void)?
-    var onStopReason: ((SpeechStopReason) -> Void)?
-
     var isAvailable = true
-    var isRecording = false
-    var isTranscribing = false
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0
     private(set) var resetCallCount = 0
 
     private let transcript: String
+    private let startError: Error?
+    private let stopError: Error?
+    private var activeSessionID: UUID?
+    private var continuation: AsyncStream<SpeechTranscriptionEvent>.Continuation?
 
-    init(transcript: String) {
+    var hasActiveSession: Bool { activeSessionID != nil }
+
+    init(
+        transcript: String,
+        startError: Error? = nil,
+        stopError: Error? = nil
+    ) {
         self.transcript = transcript
+        self.startError = startError
+        self.stopError = stopError
     }
 
-    func start() async throws {
-        startCallCount += 1
-        isRecording = true
-        isTranscribing = false
-        onStateChange?(.recording)
-    }
-
-    func stop() async throws -> String {
-        stopCallCount += 1
-        isRecording = false
-        isTranscribing = true
-        onStateChange?(.transcribing)
-        onTranscriptFinal?(transcript)
-        isTranscribing = false
-        onStopReason?(.manual)
-        onStateChange?(.idle)
-        return transcript
+    func makeSession(
+        deadlines: SpeechRecordingDeadlines
+    ) throws -> SpeechTranscriptionSession {
+        _ = deadlines
+        guard activeSessionID == nil else { throw VoiceDictationError.sessionBusy }
+        let sessionID = UUID()
+        let pair = AsyncStream<SpeechTranscriptionEvent>.makeStream()
+        activeSessionID = sessionID
+        continuation = pair.continuation
+        return SpeechTranscriptionSession(
+            id: sessionID,
+            events: pair.stream,
+            start: { [weak self] id in
+                guard let self else { throw VoiceDictationError.noActiveSession }
+                try self.start(sessionID: id)
+            },
+            stop: { [weak self] id in
+                guard let self else { throw VoiceDictationError.noActiveSession }
+                return try self.stop(sessionID: id)
+            },
+            cancel: { [weak self] id in self?.cancel(sessionID: id) }
+        )
     }
 
     func simulateSilenceAutoStop() async {
-        isRecording = false
-        isTranscribing = true
-        onStateChange?(.transcribing)
-        onTranscriptFinal?(transcript)
-        isTranscribing = false
-        onStopReason?(.silenceAutoStop)
-        onStateChange?(.idle)
+        await simulateAutomaticStop(reason: .silenceAutoStop)
     }
 
-    func cancel() {
-        reset()
-        onStopReason?(.cancel)
+    func simulateAutomaticStop(reason: SpeechStopReason) async {
+        emit(.stateChange(.transcribing))
+        emit(.transcriptFinal(transcript))
+        emit(.stateChange(.idle))
+        emit(.stopReason(reason))
+        releaseSession()
+        await Task.yield()
     }
 
-    func reset() {
+    func simulateNoSpeechTimeout() async {
+        let message = "No speech detected. Try again."
+        emit(.stateChange(.failed(message)))
+        emit(.error(message))
+        emit(.stopReason(.noSpeechTimeout))
+        releaseSession()
+        await Task.yield()
+    }
+
+    private func start(sessionID: UUID) throws {
+        guard activeSessionID == sessionID else { throw VoiceDictationError.noActiveSession }
+        startCallCount += 1
+        if let startError {
+            releaseSession()
+            throw startError
+        }
+        emit(.stateChange(.recording))
+    }
+
+    private func stop(sessionID: UUID) throws -> String {
+        guard activeSessionID == sessionID else { throw VoiceDictationError.noActiveSession }
+        stopCallCount += 1
+        if let stopError {
+            releaseSession()
+            throw stopError
+        }
+        releaseSession()
+        return transcript
+    }
+
+    private func cancel(sessionID: UUID) {
+        guard activeSessionID == sessionID else { return }
         resetCallCount += 1
-        isRecording = false
-        isTranscribing = false
-        onStateChange?(.idle)
+        emit(.stateChange(.idle))
+        emit(.stopReason(.cancel))
+        releaseSession()
+    }
+
+    private func emit(_ event: SpeechTranscriptionEvent) {
+        continuation?.yield(event)
+    }
+
+    private func releaseSession() {
+        activeSessionID = nil
+        continuation?.finish()
+        continuation = nil
     }
 }
 

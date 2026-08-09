@@ -30,6 +30,26 @@ final class LearningTimelineItemTests: XCTestCase {
         XCTAssertEqual(Set(items.map(\.id)), ["chat-7", "deck-7", "narration-7"])
     }
 
+    func testMergePrecomputesSingleLineChatPreview() {
+        let items = LearningTimelineItem.merged(
+            chats: [
+                makeSession(
+                    id: 8,
+                    activityDate: now,
+                    lastMessagePreview: "## **Signal**\n- First point\n- Second point"
+                )
+            ],
+            decks: [],
+            narrations: []
+        )
+
+        guard case .chat(let session, let preview) = items.first else {
+            return XCTFail("Expected a chat timeline item")
+        }
+        XCTAssertEqual(session.id, 8)
+        XCTAssertEqual(preview, "Signal First point Second point")
+    }
+
     func testMergeKeepsSuccessfulSourcesWhenChatSourceFails() async {
         let chatViewModel = LearningHubViewModel(chatService: FailingLearningTimelineChatService())
         await chatViewModel.loadLearning()
@@ -40,7 +60,7 @@ final class LearningTimelineItemTests: XCTestCase {
             narrations: [makeNarration(id: 5, activityDate: now.addingTimeInterval(-60))]
         )
 
-        XCTAssertNotNil(chatViewModel.errorMessage)
+        XCTAssertNotNil(chatViewModel.loadErrorMessage)
         XCTAssertEqual(items.map(\.id), ["deck-4", "narration-5"])
     }
 
@@ -55,7 +75,11 @@ final class LearningTimelineItemTests: XCTestCase {
         XCTAssertEqual(deck.timelineSubtitle, "Interactive lesson")
     }
 
-    private func makeSession(id: Int, activityDate: Date) -> ChatSessionSummary {
+    private func makeSession(
+        id: Int,
+        activityDate: Date,
+        lastMessagePreview: String? = nil
+    ) -> ChatSessionSummary {
         ChatSessionSummary(
             id: id,
             contentId: nil,
@@ -74,7 +98,7 @@ final class LearningTimelineItemTests: XCTestCase {
             hasPendingMessage: false,
             isSavedToKnowledge: false,
             hasMessages: true,
-            lastMessagePreview: nil,
+            lastMessagePreview: lastMessagePreview,
             lastMessageRole: nil
         )
     }
