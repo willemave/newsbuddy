@@ -131,8 +131,15 @@ struct FeedSourcesView: View {
             Text(error)
                 .font(.appCaption)
                 .foregroundStyle(Color.onSurfaceSecondary)
+            Spacer(minLength: 8)
+            Button("Try Again") {
+                Task { await viewModel.loadConfigsWithDeferredStats() }
+            }
+            .font(.appCaption.weight(.semibold))
+            .accessibilityIdentifier("feed_sources.error.retry")
         }
         .padding()
+        .accessibilityIdentifier("feed_sources.error")
     }
 
     // MARK: - Add Source Sheet

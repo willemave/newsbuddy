@@ -58,11 +58,16 @@ extension APIScraperConfigStatsResponse {
 
     var cadenceSummary: String? {
         guard let averageIntervalHours else { return nil }
-        if averageIntervalHours < 24 {
-            return String(format: "Usually every %.0f hr", averageIntervalHours)
+        if averageIntervalHours < 1 {
+            let minutes = max(Int((averageIntervalHours * 60).rounded()), 1)
+            return "Usually every \(minutes) minute\(minutes == 1 ? "" : "s")"
         }
-        let days = averageIntervalHours / 24
-        return String(format: "Usually every %.1f d", days)
+        if averageIntervalHours < 36 {
+            let hours = max(Int(averageIntervalHours.rounded()), 1)
+            return "Usually every \(hours) hour\(hours == 1 ? "" : "s")"
+        }
+        let days = max(Int((averageIntervalHours / 24).rounded()), 1)
+        return "Usually every \(days) day\(days == 1 ? "" : "s")"
     }
 
     var hasVisibleStats: Bool {

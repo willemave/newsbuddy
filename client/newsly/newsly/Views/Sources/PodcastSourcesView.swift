@@ -126,8 +126,15 @@ struct PodcastSourcesView: View {
             Text(error)
                 .font(.appCaption)
                 .foregroundStyle(Color.onSurfaceSecondary)
+            Spacer(minLength: 8)
+            Button("Try Again") {
+                Task { await viewModel.loadConfigsWithDeferredStats() }
+            }
+            .font(.appCaption.weight(.semibold))
+            .accessibilityIdentifier("podcast_sources.error.retry")
         }
         .padding()
+        .accessibilityIdentifier("podcast_sources.error")
     }
 
     // MARK: - Add Source Sheet
