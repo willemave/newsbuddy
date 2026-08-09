@@ -31,7 +31,6 @@ from app.routers.api import (
     agent,
     audio_episodes,
     briefing,
-    discovery,
     feedback,
     integrations,
     interactions,
@@ -43,6 +42,7 @@ from app.routers.api import (
     scraper_configs,
     share_actions,
 )
+from app.services.agent_vm_sessions import close_process_agent_vm_sessions
 from app.utils.image_urls import IMAGE_VERSION_QUERY_PARAM
 
 # Initialize
@@ -145,7 +145,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger.info("Starting up...")
     init_db()
     logger.info("Database initialized")
-    yield
+    try:
+        yield
+    finally:
+        close_process_agent_vm_sessions()
 
 
 # Create app
@@ -486,7 +489,6 @@ app.include_router(briefing.router, prefix="/api")
 app.include_router(interactions.router, prefix="/api")
 app.include_router(feedback.router, prefix="/api")
 app.include_router(scraper_configs.router, prefix="/api")
-app.include_router(discovery.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
 app.include_router(integrations.router, prefix="/api")
 app.include_router(integrations.llm_router, prefix="/api")

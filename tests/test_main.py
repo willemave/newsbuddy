@@ -1,8 +1,27 @@
 """Tests for application middleware behaviour."""
 
+import asyncio
 from pathlib import Path
 
 import app.main as main_module
+
+
+def test_lifespan_releases_agent_vm_resources(monkeypatch) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(main_module, "init_db", lambda: events.append("init"))
+    monkeypatch.setattr(
+        main_module,
+        "close_process_agent_vm_sessions",
+        lambda: events.append("close"),
+    )
+
+    async def _run_lifespan() -> None:
+        async with main_module.lifespan(main_module.app):
+            events.append("running")
+
+    asyncio.run(_run_lifespan())
+
+    assert events == ["init", "running", "close"]
 
 
 def test_request_id_is_returned(client) -> None:
@@ -10,6 +29,12 @@ def test_request_id_is_returned(client) -> None:
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"]
+
+
+def test_retired_discovery_http_surface_is_not_mounted(client) -> None:
+    response = client.get("/api/discovery/suggestions")
+
+    assert response.status_code == 404
 
 
 def test_request_id_is_propagated(client) -> None:
