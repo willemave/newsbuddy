@@ -113,47 +113,54 @@ extension Color {
     static var sectionDelimiter: Color { Color.onSurfaceTertiary }
 
     // Onboarding and ambient illustration roles.
-    // Keep this independent from reader palettes so the first-run flow stays colorful.
+    // Aligned with the reader palette (charcoal/slate + single amber accent).
+    // Separate tokens remain because onboarding paints ambient washes the
+    // reader UI never uses.
     static var onboardingSurface: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.047, green: 0.059, blue: 0.078, alpha: 1.0)  // #0c0f14
-                : UIColor(red: 0.973, green: 0.980, blue: 0.988, alpha: 1.0)  // #f8fafc
+                ? UIColor(red: 0.075, green: 0.082, blue: 0.098, alpha: 1.0)  // #131519
+                : UIColor(red: 0.957, green: 0.961, blue: 0.969, alpha: 1.0)  // #f4f5f7
         })
     }
     static var onboardingText: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.886, green: 0.910, blue: 0.941, alpha: 1.0)  // #e2e8f0
-                : UIColor(red: 0.200, green: 0.255, blue: 0.333, alpha: 1.0)  // #334155
+                ? UIColor(red: 0.898, green: 0.906, blue: 0.925, alpha: 1.0)  // #e5e7ec
+                : UIColor(red: 0.106, green: 0.118, blue: 0.141, alpha: 1.0)  // #1b1e24
         })
     }
     static var onboardingSelectionAccent: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.165, green: 0.478, blue: 0.322, alpha: 1.0)  // #2a7a52
-                : UIColor(red: 0.400, green: 0.820, blue: 0.640, alpha: 1.0)  // #66d1a3
-        })
+        Color.brandPrimary
     }
+    // Ambient wash ramp: amber, bronze, cream — one hue at three intensities.
     static var onboardingAmbientPrimary: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.227, green: 0.353, blue: 0.549, alpha: 1.0)  // #3a5a8c
-                : UIColor(red: 0.580, green: 0.680, blue: 0.820, alpha: 1.0)  // #94add1
+                ? UIColor(red: 0.369, green: 0.282, blue: 0.125, alpha: 1.0)  // #5e4820
+                : UIColor(red: 0.902, green: 0.773, blue: 0.518, alpha: 1.0)  // #e6c584
         })
     }
     static var onboardingAmbientTertiary: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.549, green: 0.290, blue: 0.259, alpha: 1.0)  // #8c4a42
-                : UIColor(red: 0.960, green: 0.620, blue: 0.580, alpha: 1.0)  // #f59e94
+                ? UIColor(red: 0.478, green: 0.361, blue: 0.141, alpha: 1.0)  // #7a5c24
+                : UIColor(red: 0.831, green: 0.659, blue: 0.384, alpha: 1.0)  // #d4a862
         })
     }
     static var onboardingAmbientQuaternary: Color {
         Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.165, green: 0.416, blue: 0.612, alpha: 1.0)  // #2a6a9c
-                : UIColor(red: 0.500, green: 0.780, blue: 0.960, alpha: 1.0)  // #80c7f5
+                ? UIColor(red: 0.235, green: 0.196, blue: 0.133, alpha: 1.0)  // #3c3222
+                : UIColor(red: 0.925, green: 0.875, blue: 0.765, alpha: 1.0)  // #ecdfc3
+        })
+    }
+    // Muted echo of the mascot's purple — the one cool note in the ambient wash.
+    static var onboardingAmbientMascot: Color {
+        Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.271, green: 0.216, blue: 0.427, alpha: 1.0)  // #45376d
+                : UIColor(red: 0.812, green: 0.753, blue: 0.929, alpha: 1.0)  // #cfc0ed
         })
     }
 }
@@ -331,14 +338,6 @@ enum CornerRadius {
     static let nestedControl: CGFloat = 8
 }
 
-// MARK: - Card Metrics
-
-enum CardMetrics {
-    static let cardCornerRadius: CGFloat = CornerRadius.card
-    static let cardSpacing: CGFloat = 20
-    static let textOverlapOffset: CGFloat = -40
-}
-
 // MARK: - Text Size
 
 enum AppTextSize: Int, CaseIterable {
@@ -456,6 +455,7 @@ enum AppMotion {
     static let loadingBubblePulse = Animation.easeInOut(duration: 0.5).repeatForever(autoreverses: true)
     static let chatStatusPulse = Animation.easeInOut(duration: 1.5).repeatForever(autoreverses: true)
     static let chatIllustrationPulse = Animation.easeInOut(duration: 2.0).repeatForever(autoreverses: true)
+    static let landingFloat = Animation.easeInOut(duration: 6).repeatForever(autoreverses: true)
     static let laneShimmer = Animation.linear(duration: 1.6).repeatForever(autoreverses: false)
     static let lanePulse = Animation.easeOut(duration: 1.4).repeatForever(autoreverses: false)
 
@@ -508,7 +508,13 @@ struct ShadowStyle {
 
     static let onboardingMic = ShadowStyle(
         primary: ShadowLayer(color: Color.onboardingText.opacity(0.14), radius: 12, x: 10, y: 10),
-        secondary: ShadowLayer(color: .white.opacity(0.35), radius: 16, x: -8, y: -8)
+        // Specular counter-light: visible in light mode, faint on dark charcoal.
+        secondary: ShadowLayer(
+            color: Color(UIColor { tc in
+                UIColor.white.withAlphaComponent(tc.userInterfaceStyle == .dark ? 0.06 : 0.35)
+            }),
+            radius: 16, x: -8, y: -8
+        )
     )
 
     static func titleGlow(_ color: Color) -> ShadowStyle {
@@ -548,6 +554,15 @@ extension Text {
 // MARK: - View Modifiers
 
 extension View {
+    @ViewBuilder
+    func accessibilityIdentifier(ifPresent identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
+        }
+    }
+
     /// Apply standard row padding and minimum height for a given row family.
     func appRow(_ family: AppRowFamily = .regular) -> some View {
         self
@@ -581,13 +596,6 @@ extension View {
         self.background(Color.surfacePrimary)
     }
 
-    /// Pull generated artwork toward the palette. Saved-item thumbnails arrive in
-    /// whatever colors the generator picked — often heavily saturated — and at list
-    /// size they read as noise beside the type rather than as content.
-    func listThumbnailTreatment() -> some View {
-        saturation(0.55)
-    }
-
     /// Fade scrolled content out under the status bar instead of letting it collide
     /// with the clock and Dynamic Island. Solid over the status bar, then a short fade.
     /// Screens with full-bleed artwork under the status bar drive `opacity` from scroll
@@ -616,12 +624,16 @@ extension View {
 
     /// Uses the app's serif title treatment even when SwiftUI's navigation-bar
     /// appearance proxy has not yet been applied to a newly-created stack.
-    func appNavigationTitle(_ title: String) -> some View {
+    func appNavigationTitle(
+        _ title: String,
+        accessibilityIdentifier: String? = nil
+    ) -> some View {
         navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(title)
+                        .accessibilityIdentifier(ifPresent: accessibilityIdentifier)
                         .font(.appHeadline)
                         .foregroundStyle(Color.onSurface)
                 }

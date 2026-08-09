@@ -188,7 +188,8 @@ def test_content_text_size_reaches_briefing_detail_and_chat() -> None:
     for snippet in required_snippets:
         assert snippet in content_routes
 
-    assert "BriefingView(viewModel: viewModel" in root_tabs
+    assert "BriefingView(" in root_tabs
+    assert "viewModel: viewModel" in root_tabs
     assert ".dynamicTypeSize(contentTextSize)" in root_tabs
     assert content_routes.count(".dynamicTypeSize(contentTextSize)") >= 3
     assert "AppTextSize(index: settings.appTextSizeIndex)" not in history_view
@@ -285,25 +286,51 @@ def test_primary_scroll_surfaces_use_top_edge_fade() -> None:
     assert offenders == []
 
 
-def test_cached_async_image_fades_use_motion_tokens() -> None:
+def test_cached_async_image_assignments_do_not_animate() -> None:
     source = (VIEWS_ROOT / "Components/CachedAsyncImage.swift").read_text()
     components_docs = (REPO_ROOT / "docs/codebase/client/81-views-components.md").read_text()
 
-    assert "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" in source
-    assert source.count("AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle)") == 2
+    assert "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" not in source
+    assert "withAnimation" not in source
+    assert ".animation(" not in source
     assert ".easeIn(duration:" not in source
     assert ".easeOut(duration:" not in source
     assert "CachedAsyncImage" in components_docs
-    assert "image fades use `AppMotion.subtle`" in components_docs
+    assert "assigns cached and downloaded images without implicit fades" in components_docs
 
 
-def test_knowledge_ready_content_projection_is_computed_once_per_render() -> None:
-    source = (VIEWS_ROOT / "KnowledgeView.swift").read_text()
+def test_knowledge_ready_content_projection_is_owned_by_view_model() -> None:
+    view_source = (VIEWS_ROOT / "KnowledgeView.swift").read_text()
+    model_source = (APP_ROOT / "ViewModels/ContentListViewModel.swift").read_text()
 
-    projection = "let readyContentIDs = viewModel.contents.compactMap"
-    assert source.count(projection) == 2
-    assert source.index(projection) < source.index("ForEach(viewModel.contents)")
-    assert "private var readyContentIDs" not in source
+    assert view_source.count("let contents = viewModel.contents") == 2
+    assert view_source.count("ForEach(contents)") == 2
+    assert view_source.count("allContentIds: viewModel.readyContentIDs") == 2
+    assert "let allContentIds: [Int]" not in view_source
+    assert "let onOpen: () -> Void" in view_source
+    assert "compactMap" not in view_source
+    assert "private(set) var readyContentIDs: [Int] = []" in model_source
+    assert "private func refreshReadyContentIDs()" in model_source
+
+
+def test_learning_timeline_projection_stays_out_of_render_path() -> None:
+    view_source = (VIEWS_ROOT / "LearningView.swift").read_text()
+    item_source = (APP_ROOT / "Models/LearningTimelineItem.swift").read_text()
+    model_sources = [
+        APP_ROOT / "ViewModels/LearningHubViewModel.swift",
+        APP_ROOT / "ViewModels/LearningDecksViewModel.swift",
+        APP_ROOT / "ViewModels/CustomNarrationLibraryViewModel.swift",
+    ]
+
+    assert "@State private var timeline: [LearningTimelineItem] = []" in view_source
+    assert ".onChange(of: timelineRevision, initial: true)" in view_source
+    assert view_source.count("rebuildTimeline()") == 3
+    assert view_source.count("LearningTimelineItem.merged(") == 1
+    assert "private var preview: String?" not in view_source
+    assert "ShareContent.plainText" not in view_source
+    assert "preview: LearningChatPreview.make(for: session)" in item_source
+    for path in model_sources:
+        assert "didSet { timelineRevision &+= 1 }" in path.read_text()
 
 
 def test_chat_messages_use_single_parameterized_bubble_surface() -> None:
@@ -514,13 +541,24 @@ def test_decorative_symbol_effects_respect_reduce_motion() -> None:
 
 def test_landing_title_animation_respects_reduce_motion() -> None:
     source = (VIEWS_ROOT / "LandingView.swift").read_text()
+    tokens = DESIGN_TOKENS.read_text()
     views_docs = (REPO_ROOT / "docs/codebase/client/80-views.md").read_text()
 
     assert "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" in source
     assert "if reduceMotion" in source
     assert "staticTitleSection" in source
     assert "animatedTitleSection" in source
-    assert "TimelineView(.animation(minimumInterval: 1.0 / 30.0))" in source
-    assert "titleContent(yOffset: 0, glowColor: .onboardingAmbientPrimary)" in source
+    assert "AppMotion.landingFloat" in source
+    assert "static let landingFloat = Animation.easeInOut(duration: 6)" in tokens
+    assert "repeatForever(autoreverses: true)" in tokens
+    assert "TimelineView" not in source
+    assert "titleContent(yOffset: 0, glowColor: WatercolorBackground.titleGlow)" in source
     assert "LandingView" in views_docs
     assert "Reduce Motion" in views_docs
+
+
+def test_watercolor_background_avoids_display_rate_redraws() -> None:
+    source = (VIEWS_ROOT / "Shared/WatercolorBackground.swift").read_text()
+
+    assert "TimelineView(.animation(minimumInterval: 1.0 / 8.0))" in source
+    assert "1.0 / 30.0" not in source

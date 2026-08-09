@@ -8,6 +8,7 @@ import SwiftUI
 struct LandingView: View {
     @Environment(AuthenticationViewModel.self) private var authViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var animatedTitleOffset: CGFloat = -3
     #if DEBUG && targetEnvironment(simulator)
     @State private var showingDebugMenu = false
     @State private var tapCount = 0
@@ -33,7 +34,6 @@ struct LandingView: View {
                 bottomCard
             }
         }
-        .accessibilityIdentifier("auth.landing.screen")
         #if DEBUG && targetEnvironment(simulator)
         .sheet(isPresented: $showingDebugMenu) {
             DebugMenuView()
@@ -54,16 +54,20 @@ struct LandingView: View {
     }
 
     private var staticTitleSection: some View {
-        titleContent(yOffset: 0, glowColor: .onboardingAmbientPrimary)
+        titleContent(yOffset: 0, glowColor: WatercolorBackground.titleGlow)
     }
 
     private var animatedTitleSection: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let yOffset = WatercolorBackground.titleOscillation(time: t)
-            let glowColor = WatercolorBackground.titleGlowColor(time: t)
-
-            titleContent(yOffset: yOffset, glowColor: glowColor)
+        titleContent(
+            yOffset: animatedTitleOffset,
+            glowColor: WatercolorBackground.titleGlow
+        )
+        .animation(
+            AppMotion.landingFloat,
+            value: animatedTitleOffset
+        )
+        .onAppear {
+            animatedTitleOffset = 3
         }
     }
 
@@ -85,6 +89,7 @@ struct LandingView: View {
                     .font(.watercolorDisplay)
                     .foregroundColor(.onboardingText)
                     .appShadow(.titleGlow(glowColor))
+                    .accessibilityIdentifier("auth.landing.screen")
 
                 Text("Your cuddly news companion.\nQuiet clarity in a noisy world.")
                     .font(.watercolorSubtitle)

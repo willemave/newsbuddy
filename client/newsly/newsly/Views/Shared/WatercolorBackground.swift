@@ -21,7 +21,7 @@ struct WatercolorBackground: View {
     // MARK: - Animated
 
     private var animatedBackground: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 8.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             Canvas { context, size in
                 // Base fill
@@ -70,7 +70,7 @@ struct WatercolorBackground: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [Color.onboardingSelectionAccent.opacity(0.4), .clear],
+                            colors: [Color.onboardingAmbientMascot.opacity(0.4), .clear],
                             center: .center, startRadius: 0, endRadius: r
                         )
                     )
@@ -98,11 +98,12 @@ struct WatercolorBackground: View {
         let cy = size.height / 2
         let e = min(1, max(0, energy))
 
+        // Amber tonal ramp plus one muted mascot-purple blob for depth.
         let blobs: [(color: Color, baseRadius: CGFloat, xPhase: Double, yPhase: Double, baseSpeed: Double, drift: Double)] = [
-            (.onboardingAmbientPrimary,     220, 0,    0,    0.18, 100),
-            (.onboardingAmbientTertiary, 190, 1.8,  2.5,  0.22, 120),
-            (.onboardingSelectionAccent,   180, 3.2,  1.2,  0.20, 110),
-            (.onboardingAmbientQuaternary,       200, 4.8,  3.8,  0.25, 130),
+            (.onboardingAmbientPrimary, 220, 0, 0, 0.18, 100),
+            (.onboardingAmbientTertiary, 190, 1.8, 2.5, 0.22, 120),
+            (.onboardingAmbientMascot, 180, 3.2, 1.2, 0.20, 110),
+            (.onboardingAmbientQuaternary, 200, 4.8, 3.8, 0.25, 130),
         ]
 
         for blob in blobs {
@@ -132,26 +133,6 @@ struct WatercolorBackground: View {
         }
     }
 
-    // MARK: - Title Oscillation
-
-    /// Returns a subtle vertical offset (~+/-3pt) synced with blob 0's sine phase.
-    static func titleOscillation(time: Double) -> CGFloat {
-        CGFloat(sin(time * 0.18) * 3.0)
-    }
-
-    /// Returns a shadow color that cycles through the blob palette over time.
-    static func titleGlowColor(time: Double) -> Color {
-        // Cycle through 4 colors smoothly using sine phases
-        let blue = (sin(time * 0.12) + 1) / 2       // 0..1
-        let peach = (sin(time * 0.15 + 1.8) + 1) / 2
-        let green = (sin(time * 0.13 + 3.2) + 1) / 2
-        let sky = (sin(time * 0.17 + 4.8) + 1) / 2
-
-        // Pick the dominant color
-        let maxVal = max(blue, peach, green, sky)
-        if maxVal == blue { return .onboardingAmbientPrimary }
-        if maxVal == peach { return .onboardingAmbientTertiary }
-        if maxVal == green { return .onboardingSelectionAccent }
-        return .onboardingAmbientQuaternary
-    }
+    /// Warm title halo. Single-accent palette: one steady amber, no hue cycling.
+    static let titleGlow: Color = .onboardingAmbientTertiary
 }
