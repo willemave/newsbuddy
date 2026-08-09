@@ -15,13 +15,13 @@ private let chatVoiceLogger = Logger(
 @MainActor
 @Observable
 final class ChatVoiceInputController {
-    private(set) var isRecording = false
-    private(set) var isTranscribing = false
     private(set) var isAvailable: Bool
     private(set) var isActionInFlight = false
+    private(set) var state: SpeechTranscriptionState = .idle
 
-    @ObservationIgnored
-    private let transcriptionService: any SpeechTranscribing
+    var isRecording: Bool { state == .recording }
+    var isTranscribing: Bool { state == .transcribing }
+
     @ObservationIgnored
     private let voiceCoordinator: VoiceDictationCoordinator
     @ObservationIgnored
@@ -41,9 +41,9 @@ final class ChatVoiceInputController {
     @ObservationIgnored
     private var hasSubmittedTranscript = false
     @ObservationIgnored
-    private var recordingStartedAt: Date?
+    private var hasReportedTerminalError = false
     @ObservationIgnored
-    private var isListeningForTranscriptionEvents = false
+    private var recordingStartedAt: Date?
 
     init(
         transcriptionService: any SpeechTranscribing,
@@ -53,7 +53,6 @@ final class ChatVoiceInputController {
         setBackendAvailability: @escaping (Bool) -> Void,
         initiallyAvailable: Bool
     ) {
-        self.transcriptionService = transcriptionService
         self.voiceCoordinator = VoiceDictationCoordinator(transcriber: transcriptionService)
         self.authService = authService
         self.tokenStore = tokenStore
@@ -71,7 +70,7 @@ final class ChatVoiceInputController {
     }
 
     func checkAndRefreshAvailability() async {
-        if transcriptionService.isAvailable {
+        if voiceCoordinator.isAvailable {
             isAvailable = true
             return
         }
@@ -94,6 +93,7 @@ final class ChatVoiceInputController {
         guard !isRecording, !isTranscribing else { return }
         let startedAt = Date()
         hasSubmittedTranscript = false
+        hasReportedTerminalError = false
         pendingTranscript = nil
 
         if !isAvailable {
@@ -104,16 +104,30 @@ final class ChatVoiceInputController {
                 "Voice recording unavailable | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
             )
             resetCaptureState()
-            reportError("Microphone is unavailable right now. Try again in a moment.")
+            reportTerminalError("Microphone is unavailable right now. Try again in a moment.")
             return
         }
 
-        ensureTranscriptionCallbacks()
         recordingStartedAt = Date()
         chatVoiceLogger.info("Starting voice recording")
         do {
-            try await transcriptionService.start()
-            isRecording = true
+            try await voiceCoordinator.start(
+                onTranscriptFinal: { [weak self] transcript in
+                    self?.pendingTranscript = transcript
+                },
+                onError: { [weak self] message in
+                    guard let self else { return }
+                    self.resetCaptureState(state: .failed(message))
+                    self.isActionInFlight = false
+                    self.reportTerminalError(message)
+                },
+                onStateChange: { [weak self] state in
+                    self?.apply(state)
+                },
+                onStopReason: { [weak self] reason in
+                    await self?.handle(reason)
+                }
+            )
             chatVoiceLogger.info(
                 "Voice recording started | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
             )
@@ -122,7 +136,7 @@ final class ChatVoiceInputController {
                 "Voice recording start failed | elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000)) error=\(error.localizedDescription, privacy: .public)"
             )
             resetCaptureState()
-            reportError(error.localizedDescription)
+            reportTerminalError(error.localizedDescription)
         }
     }
 
@@ -134,7 +148,8 @@ final class ChatVoiceInputController {
         )
 
         do {
-            let transcript = try await transcriptionService.stop()
+            state = .transcribing
+            let transcript = try await voiceCoordinator.stop()
             chatVoiceLogger.info(
                 "Transcription complete | length=\(transcript.count) elapsedMs=\(Int(Date().timeIntervalSince(startedAt) * 1000))"
             )
@@ -163,8 +178,7 @@ final class ChatVoiceInputController {
     }
 
     func reset() {
-        transcriptionService.reset()
-        stopListeningForTranscriptionEvents()
+        voiceCoordinator.cancel()
         isActionInFlight = false
         resetCaptureState()
     }
@@ -179,61 +193,28 @@ final class ChatVoiceInputController {
         return false
     }
 
-    private func ensureTranscriptionCallbacks() {
-        guard !isListeningForTranscriptionEvents else { return }
-
-        voiceCoordinator.listen(
-            onTranscriptFinal: { [weak self] transcript in
-                self?.pendingTranscript = transcript
-            },
-            onError: { [weak self] message in
-                guard let self else { return }
-                self.resetCaptureState()
-                self.isActionInFlight = false
-                self.reportError(message)
-            },
-            onStateChange: { [weak self] state in
-                self?.apply(state)
-            },
-            onStopReason: { [weak self] reason in
-                await self?.handle(reason)
-            }
-        )
-        isListeningForTranscriptionEvents = true
-    }
-
-    private func stopListeningForTranscriptionEvents() {
-        guard isListeningForTranscriptionEvents else { return }
-        voiceCoordinator.stopListening()
-        isListeningForTranscriptionEvents = false
-    }
-
     private func apply(_ state: SpeechTranscriptionState) {
-        switch state {
-        case .idle:
-            isRecording = false
-            isTranscribing = false
-        case .recording:
-            isRecording = true
-            isTranscribing = false
-        case .transcribing:
-            isRecording = false
-            isTranscribing = true
-        }
+        self.state = state
     }
 
     private func handle(_ reason: SpeechStopReason) async {
         switch reason {
         case .manual:
             return
-        case .silenceAutoStop:
+        case .silenceAutoStop, .maximumDuration:
             let transcript = pendingTranscript ?? ""
             resetCaptureState()
             isActionInFlight = true
             await submit(transcript)
             isActionInFlight = false
-        case .cancel, .failure:
+        case .noSpeechTimeout:
+            resetCaptureState(state: .failed("No speech detected. Try again."))
+            reportTerminalError("No speech detected. Try again.")
+            isActionInFlight = false
+        case .cancel:
             resetCaptureState()
+            isActionInFlight = false
+        case .failure:
             isActionInFlight = false
         }
     }
@@ -250,14 +231,19 @@ final class ChatVoiceInputController {
         await onTranscriptReady?(trimmedTranscript)
     }
 
-    private func resetCaptureState() {
-        isRecording = false
-        isTranscribing = false
+    private func resetCaptureState(state: SpeechTranscriptionState = .idle) {
+        self.state = state
         pendingTranscript = nil
         recordingStartedAt = nil
     }
 
     private func reportError(_ message: String) {
         errorHandler?(message)
+    }
+
+    private func reportTerminalError(_ message: String) {
+        guard !hasReportedTerminalError else { return }
+        hasReportedTerminalError = true
+        reportError(message)
     }
 }

@@ -93,9 +93,11 @@ def test_content_narration_tts_records_vendor_usage(
     monkeypatch,
     db_session,
     vendor_usage_db,
+    user_factory,
 ) -> None:
     """Content narration TTS should persist one ElevenLabs usage row."""
     del vendor_usage_db
+    user = user_factory()
 
     monkeypatch.setattr(narration_tts, "ElevenLabs", _fake_elevenlabs([]))
     monkeypatch.setattr(narration_tts, "VoiceSettings", FakeVoiceSettings)
@@ -110,7 +112,7 @@ def test_content_narration_tts_records_vendor_usage(
     audio = narration_tts.get_content_narration_tts_service().synthesize_mp3(
         text="Hello world",
         item_id=42,
-        user_id=7,
+        user_id=user.id,
     )
 
     assert audio == b"Hello world"
@@ -118,7 +120,7 @@ def test_content_narration_tts_records_vendor_usage(
     assert row.provider == "elevenlabs"
     assert row.model == "eleven_flash_v2_5"
     assert row.feature == "narration_tts"
-    assert row.user_id == 7
+    assert row.user_id == user.id
     assert row.request_count == 1
     assert row.resource_count == len("Hello world")
     assert row.metadata_json["target_id"] == 42

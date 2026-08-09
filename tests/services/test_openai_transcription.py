@@ -307,9 +307,11 @@ class TestOpenAITranscriptionService:
         mock_getsize,
         db_session,
         vendor_usage_db,
+        user_factory,
     ):
         """Transcription requests should persist a vendor usage row."""
         del vendor_usage_db
+        user = user_factory()
         mock_get_settings.openai_api_key = "test-key"
 
         mock_client = MagicMock()
@@ -326,7 +328,10 @@ class TestOpenAITranscriptionService:
         with patch("builtins.open", create=True) as mock_open_file:
             mock_file = MagicMock()
             mock_open_file.return_value.__enter__.return_value = mock_file
-            transcript, language = service.transcribe_audio(Path("test.mp3"), user_id=7)
+            transcript, language = service.transcribe_audio(
+                Path("test.mp3"),
+                user_id=user.id,
+            )
 
         assert transcript == "This is the transcribed text"
         assert language == "en"
@@ -334,7 +339,7 @@ class TestOpenAITranscriptionService:
         assert row.provider == "openai"
         assert row.model == "gpt-transcribe"
         assert row.feature == "transcription"
-        assert row.user_id == 7
+        assert row.user_id == user.id
         assert row.request_count == 1
 
     @patch("app.services.openai_llm.subprocess.run")
