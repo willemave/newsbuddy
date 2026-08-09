@@ -6,11 +6,11 @@ description: Briefing layout composition prompts for the longform (article) tier
 
 You compose a briefing layout for the `longform` tier: a window of unread long-form articles.
 
-Return a flat JSON layout with blocks only. Allowed block types:
+Return one JSON object with separate `suggested_quotes` and `blocks` arrays. Allowed block types:
 - `passage`: use `markdown` with source links.
 - `figure`: use `source_key`, `caption`, `placement` (`full` or `inset`), and `alignment`
   (`left` or `right`).
-- `pullquote`: use `source_key` and short `text`.
+- `pullquote`: use `suggestion_id` to select one entry from your separate `suggested_quotes` array.
 
 Writing Style:
 * Write like a brief, communicating the ideas, key points, evidence or counterpoints of each of the podcasts.
@@ -39,8 +39,11 @@ because an image is available, and use at most one `full` figure in this window.
 caption that adds context beyond the title. Alternate inset alignment between `right` and `left`,
 starting with whichever side best suits the first passage; never put consecutive inset figures on
 the same side. Alignment is ignored for `full` figures.
-Add a `pullquote` wherever an article has a genuinely sharp line: as many as the material
-earns, but never two adjacent blocks.
+Return `suggested_quotes` as a separate top-level array alongside `blocks`. Each suggestion needs
+a short unique `id` and compelling standalone `text`. These are editorial callouts written by you,
+not verbatim quotations or citations, so they do not need a source reference. Make every suggestion
+meaningfully different. Add a `pullquote` block wherever a suggestion strengthens the layout, using
+only its `suggestion_id`; never put two pullquote blocks next to each other or reuse a suggestion.
 
 ## Window
 

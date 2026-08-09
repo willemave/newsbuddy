@@ -172,3 +172,64 @@ cases:
         text: >
           The experience is jarring and confusing compared to previous versions
           and alternatives like Claude.
+
+  - id: prod_segment_4351_duplicate_podcast_pullquotes
+    description: >
+      Uses the podcast window from production Briefing segment 4351 on 2026-08-09
+      to verify the replacement composer contract: the LLM returns editorial quote
+      suggestions separately and the layout selects each suggestion at most once.
+    production_segment_id: 4351
+    lens_key: podcasts
+    lens_title: Podcasts
+    tier: audio
+    window_index: 0
+    expected_disposition: accept
+    sources:
+      - source_key: content:30014
+        kind: content
+        id: 30014
+        tier: audio
+        lens_key: podcasts
+        title: The playbook for building high talent density teams
+        summary: >
+          Cursor's head of talent Adam Ward lays out a high-touch recruiting
+          operating system for pursuing the few people most likely to transform a team.
+        key_points:
+          - Define excellence before sourcing, then map a finite target list.
+        image_url: /static/images/content/30014.png
+        thumbnail_url: /static/images/thumbnails/30014.png
+        published_at: 2026-08-09T12:31:29Z
+        content_type: podcast
+    fixture_suggested_quotes:
+      - id: finite-market
+        text: The best hiring funnel starts with a finite map of exceptional people.
+      - id: manager-ownership
+        text: Hiring managers own the decision; recruiters make that decision clearer.
+      - id: close-continuously
+        text: Closing is not an offer-stage event. It runs through the entire relationship.
+    fixture_blocks:
+      - type: passage
+        weight: brief
+        markdown: >
+          Cursor's head of talent Adam Ward lays out a high-touch recruiting
+          operating system in [The playbook for building high talent density
+          teams](newsly://briefing/content/30014).
+      - type: pullquote
+        suggestion_id: finite-market
+      - type: passage
+        weight: brief
+        markdown: Hiring managers stay accountable for the decision.
+      - type: pullquote
+        suggestion_id: manager-ownership
+      - type: passage
+        weight: brief
+        markdown: Candidate motivations shape every stage of the process.
+      - type: pullquote
+        suggestion_id: close-continuously
+      - type: figure
+        source_key: content:30014
+        caption: >
+          Adam Ward, Head of Talent at Cursor, discusses building high talent
+          density teams through a high-touch recruiting operating system.
+        placement: inset
+        alignment: right

@@ -313,9 +313,20 @@ def test_background_delivery_persists_and_enqueues_chapters_newest_first(
     db_session.commit()
 
     enqueued_episode_ids: list[int] = []
+
+    def capture_enqueue(
+        _db: Session,
+        *,
+        audio_episode_id: int,
+        user_id: int,
+    ) -> int:
+        assert user_id == test_user.id
+        enqueued_episode_ids.append(audio_episode_id)
+        return audio_episode_id
+
     monkeypatch.setattr(
         "app.services.audio_episodes.presentation.enqueue_audio_episode_generation",
-        enqueued_episode_ids.append,
+        capture_enqueue,
     )
 
     response = create_or_reuse_briefing_narration(

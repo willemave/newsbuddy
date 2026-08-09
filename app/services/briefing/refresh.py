@@ -8,13 +8,12 @@ from math import ceil
 from time import perf_counter
 from typing import Literal
 
-from sqlalchemy import func, or_, text
-from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
-from app.models.contracts import TaskQueue, TaskStatus, TaskType
+from app.models.contracts import TaskStatus, TaskType
 from app.models.db import (
     BriefingLens,
     BriefingPendingSource,
@@ -22,7 +21,6 @@ from app.models.db import (
     BriefingState,
     ProcessingTask,
 )
-from app.pipeline.task_specs import get_task_spec
 from app.services.briefing import compaction, window_composition
 from app.services.briefing.composer import generate_layout_with_llm, plan_windows
 from app.services.briefing.eligibility import is_briefing_enabled_for_user
@@ -42,9 +40,10 @@ from app.services.briefing.sources import (
     sources_for_keys,
 )
 from app.services.briefing.taxonomy import apply_taxonomy_if_needed
+from app.services.gateways.task_queue_gateway import get_task_queue_gateway
+from app.services.queue import TaskEnqueueRequest
 
 RefreshMode = Literal["append", "sweep", "full"]
-ACTIVE_DEDUPE_WHERE = text("dedupe_key IS NOT NULL AND status IN ('pending', 'processing')")
 logger = get_logger(__name__)
 
 
@@ -134,32 +133,31 @@ def enqueue_briefing_refresh_task(
 ) -> bool:
     """Enqueue a delayed refresh task using the same active dedupe constraint as QueueService."""
 
-    payload = get_task_spec(TaskType.BRIEFING_REFRESH).normalize_payload(
-        {"user_id": user_id, "mode": mode}
-    )
     available_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=max(delay_seconds, 0))
     dedupe_key = _refresh_dedupe_key(user_id=user_id, mode=mode)
-    inserted = db.execute(
-        postgresql_insert(ProcessingTask)
-        .values(
-            task_type=TaskType.BRIEFING_REFRESH.value,
-            payload=payload,
-            status=TaskStatus.PENDING.value,
-            queue_name=TaskQueue.LLM.value,
-            available_at=available_at,
-            dedupe_key=dedupe_key,
-        )
-        .on_conflict_do_nothing(
-            index_elements=[ProcessingTask.dedupe_key],
-            index_where=ACTIVE_DEDUPE_WHERE,
-        )
-        .returning(ProcessingTask.id)
-    ).scalar_one_or_none()
-    if inserted is not None:
+    existing_task_id = (
+        db.query(ProcessingTask.id)
+        .filter(ProcessingTask.dedupe_key == dedupe_key)
+        .filter(ProcessingTask.status.in_((TaskStatus.PENDING.value, TaskStatus.PROCESSING.value)))
+        .scalar()
+    )
+    task_id = get_task_queue_gateway().enqueue_many_in_session(
+        db,
+        [
+            TaskEnqueueRequest(
+                task_type=TaskType.BRIEFING_REFRESH,
+                payload={"user_id": user_id, "mode": mode},
+                dedupe_key=dedupe_key,
+                owner_user_id=user_id,
+                available_at=available_at,
+            )
+        ],
+    )[0]
+    if existing_task_id is None:
         return True
     updated = (
         db.query(ProcessingTask)
-        .filter(ProcessingTask.dedupe_key == dedupe_key)
+        .filter(ProcessingTask.id == task_id)
         .filter(ProcessingTask.status == TaskStatus.PENDING.value)
         .filter(
             or_(

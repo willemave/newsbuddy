@@ -18,7 +18,6 @@ from app.services.briefing.layout_models import (
     ComposerLayout,
     FigureBlock,
     PassageBlock,
-    PullquoteBlock,
 )
 from app.services.briefing.layout_policy import (
     BriefingLayoutAssessment,
@@ -40,7 +39,7 @@ from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
 
-PROMPT_VERSION = "briefing-v4"
+PROMPT_VERSION = "briefing-v5"
 MAX_COMPOSE_ATTEMPTS = 4
 LAYOUT_PROMPTS_BY_TIER = {
     "audio": "briefing/layout_audio",
@@ -446,15 +445,6 @@ def deterministic_layout(
                 alignment=BriefingFigureAlignment.RIGHT,
             )
         )
-    pullquote_source = next((source for source in sources if source.key_points), None)
-    if pullquote_source is not None:
-        blocks.append(
-            PullquoteBlock(
-                type="pullquote",
-                source_key=pullquote_source.source_key,
-                text=pullquote_source.key_points[0],
-            )
-        )
     return ComposerLayout(blocks=blocks)
 
 
@@ -555,7 +545,7 @@ def generate_layout_with_llm(
     )
     usage = extract_usage_from_result(result)
     return (
-        [block.model_dump(mode="json", exclude_none=True) for block in result.output.blocks],
+        result.output.resolved_blocks(),
         usage,
     )
 
@@ -595,7 +585,7 @@ def _compose_window_with_openrouter(
         user_id=user_id,
     )
     return (
-        [block.model_dump(mode="json", exclude_none=True) for block in layout.blocks],
+        layout.resolved_blocks(),
         usage,
     )
 
@@ -609,7 +599,11 @@ def _parse_composer_layout_json(content: str) -> ComposerLayout:
         if blocks is None:
             blocks = payload.get("layout")
         if isinstance(blocks, list):
-            payload = {"blocks": [_coerce_composer_block(block) for block in blocks]}
+            payload = {
+                **payload,
+                "blocks": [_coerce_composer_block(block) for block in blocks],
+            }
+            payload.pop("layout", None)
     return ComposerLayout.model_validate(payload)
 
 
@@ -621,9 +615,7 @@ def _coerce_composer_block(block: Any) -> Any:
     _recover_weight_payload(coerced)
     block_type = str(coerced.get("type") or "").strip().lower()
     if isinstance(content, str) and content.strip():
-        if block_type == "pullquote" and not coerced.get("text"):
-            coerced["text"] = content
-        elif block_type == "figure" and not coerced.get("caption"):
+        if block_type == "figure" and not coerced.get("caption"):
             coerced["caption"] = content
         elif not coerced.get("markdown"):
             coerced["markdown"] = content
@@ -648,9 +640,7 @@ def _recover_weight_payload(block: dict[str, Any]) -> None:
         return
 
     block_type = str(block.get("type") or "").strip().lower()
-    if block_type == "pullquote":
-        block["text"] = raw_weight.strip()
-    elif block_type == "figure":
+    if block_type == "figure":
         block["caption"] = raw_weight.strip()
     else:
         block["markdown"] = raw_weight.strip()

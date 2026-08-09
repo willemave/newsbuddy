@@ -59,6 +59,31 @@ def test_duplicate_news_coverage_repair_fixture_is_contract_invalid() -> None:
     assert report.gate_satisfied is True
 
 
+def test_podcast_fixture_resolves_separate_llm_quote_suggestions() -> None:
+    suite = briefing_eval.load_briefing_eval_suite(briefing_eval.DEFAULT_BRIEFING_EVAL_DATASET)
+
+    report = briefing_eval.run_briefing_eval_suite(
+        suite,
+        case_id="prod_segment_4351_duplicate_podcast_pullquotes",
+    )
+
+    result = report.results[0]
+    assert result.production_segment_id == 4351
+    assert result.expectation_met is True
+    assert result.raw_assessment is not None
+    assert result.raw_assessment.disposition == BriefingLayoutDisposition.ACCEPT
+    assert result.final_assessment is not None
+    assert result.final_assessment.disposition == BriefingLayoutDisposition.ACCEPT
+    assert [block["text"] for block in result.final_blocks if block["type"] == "pullquote"] == [
+        "The best hiring funnel starts with a finite map of exceptional people.",
+        "Hiring managers own the decision; recruiters make that decision clearer.",
+        "Closing is not an offer-stage event. It runs through the entire relationship.",
+    ]
+    assert result.layout_valid is True
+    assert result.gate_satisfied is True
+    assert report.gate_satisfied is True
+
+
 def test_layout_assessment_allows_normal_inside_real_source_backed_prose() -> None:
     assessment = assess_briefing_layout(
         [

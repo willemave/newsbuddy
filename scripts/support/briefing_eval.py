@@ -17,6 +17,7 @@ from app.services.briefing.composer import (
     news_layout_contract_issues,
     process_generated_layout,
 )
+from app.services.briefing.layout_models import ComposerLayout
 from app.services.briefing.layout_policy import (
     BriefingLayoutAssessment,
     BriefingLayoutDisposition,
@@ -65,6 +66,7 @@ class BriefingEvalCase(BaseModel):
     tier: Literal["audio", "longform", "news"]
     window_index: int = Field(default=0, ge=0)
     sources: list[BriefingEvalSource] = Field(min_length=1)
+    fixture_suggested_quotes: list[dict[str, str]] = Field(default_factory=list)
     fixture_blocks: list[dict[str, Any]] = Field(min_length=1)
     expected_disposition: BriefingLayoutDisposition
     expected_low_signal_values: list[str] = Field(default_factory=list)
@@ -211,8 +213,16 @@ def run_briefing_eval_case(
             if case.tier == "news"
             else settings.briefing_max_figures_deep
         )
+        fixture_blocks = [dict(block) for block in case.fixture_blocks]
+        if case.fixture_suggested_quotes:
+            fixture_blocks = ComposerLayout.model_validate(
+                {
+                    "suggested_quotes": case.fixture_suggested_quotes,
+                    "blocks": fixture_blocks,
+                }
+            ).resolved_blocks()
         processed = process_generated_layout(
-            [dict(block) for block in case.fixture_blocks],
+            fixture_blocks,
             sources=sources,
             figure_budget=figure_budget,
             ensure_source_figures=case.tier != "news",

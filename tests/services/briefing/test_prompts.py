@@ -36,6 +36,9 @@ def test_deep_tier_prompts_demand_substantive_treatment(tier: str) -> None:
     )
 
     assert "`figure`" in system_prompt
+    assert "`suggested_quotes` as a separate top-level array" in system_prompt
+    assert "not verbatim quotations or citations" in system_prompt
+    assert "using only its `suggestion_id`" in " ".join(system_prompt.split())
     assert "target 3-5 sentences" in user_prompt
 
 

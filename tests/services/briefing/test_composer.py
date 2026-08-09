@@ -401,6 +401,7 @@ def test_deterministic_deep_layout_starts_with_source_content() -> None:
     assert segment.narration_text.startswith("A useful article")
     assert "opens with" not in segment.narration_text
     assert "unread source" not in segment.narration_text
+    assert not any(block["type"] == "pullquote" for block in segment.blocks)
 
 
 @pytest.mark.parametrize(
@@ -565,13 +566,16 @@ def test_parse_composer_layout_json_accepts_supported_wrappers(content: str) -> 
     assert layout.blocks[0].markdown == "A useful brief."
 
 
-def test_parse_composer_layout_json_coerces_legacy_content_fields() -> None:
+def test_parse_composer_layout_json_resolves_separate_quote_suggestions() -> None:
     layout = _parse_composer_layout_json(
         """
         {
+          "suggested_quotes": [
+            {"id": "q1", "text": "A sharp editorial callout."}
+          ],
           "blocks": [
             {"type": "passage", "content": "A useful brief."},
-            {"type": "pullquote", "source_key": "content:1", "content": "A quote."},
+            {"type": "pullquote", "suggestion_id": "q1"},
             {
               "type": "figure",
               "source_key": "content:1",
@@ -588,8 +592,47 @@ def test_parse_composer_layout_json_coerces_legacy_content_fields() -> None:
     assert isinstance(pullquote, PullquoteBlock)
     assert isinstance(figure, FigureBlock)
     assert passage.markdown == "A useful brief."
-    assert pullquote.text == "A quote."
+    assert pullquote.suggestion_id == "q1"
     assert figure.caption == "A caption."
+    assert layout.resolved_blocks()[1] == {
+        "type": "pullquote",
+        "text": "A sharp editorial callout.",
+    }
+
+
+@pytest.mark.parametrize(
+    ("blocks", "message"),
+    [
+        (
+            [
+                {"type": "pullquote", "suggestion_id": "missing"},
+                {"type": "passage", "markdown": "A useful brief."},
+            ],
+            "unknown suggestion IDs",
+        ),
+        (
+            [
+                {"type": "pullquote", "suggestion_id": "q1"},
+                {"type": "passage", "markdown": "A useful brief."},
+                {"type": "pullquote", "suggestion_id": "q1"},
+            ],
+            "selected at most once",
+        ),
+    ],
+)
+def test_parse_composer_layout_json_rejects_invalid_quote_selection(
+    blocks: list[dict[str, str]],
+    message: str,
+) -> None:
+    content = json.dumps(
+        {
+            "suggested_quotes": [{"id": "q1", "text": "A sharp editorial callout."}],
+            "blocks": blocks,
+        }
+    )
+
+    with pytest.raises(ValidationError, match=message):
+        _parse_composer_layout_json(content)
 
 
 def test_parse_composer_layout_json_recovers_weight_dumped_prose() -> None:
