@@ -16,6 +16,7 @@ enum MastheadAccessoryAlignment {
 
 struct EditorialMastheadHeader: View {
     let title: String
+    var titleAccessibilityIdentifier: String? = nil
     var subtitle: String? = nil
     var date: Date = AppClock.now
     var showsDate = true
@@ -43,6 +44,7 @@ struct EditorialMastheadHeader: View {
 
                 HStack(alignment: .center, spacing: 12) {
                     Text(title)
+                        .accessibilityIdentifier(ifPresent: titleAccessibilityIdentifier)
                         .font(.terracottaDisplayLarge)
                         .foregroundStyle(Color.onSurface)
                         .frame(maxWidth: .infinity, alignment: .leading)

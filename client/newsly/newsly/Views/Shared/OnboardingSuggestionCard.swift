@@ -2,7 +2,7 @@
 //  OnboardingSuggestionCard.swift
 //  newsly
 //
-//  Extracted from OnboardingFlowView for reuse in DiscoveryPersonalizeSheet.
+//  Shared onboarding source-suggestion card.
 //
 
 import SwiftUI

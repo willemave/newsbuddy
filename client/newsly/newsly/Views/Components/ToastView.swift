@@ -38,6 +38,7 @@ struct ToastModifier: ViewModifier {
 
             if let toast = toastService.currentToast {
                 ToastView(toast: toast)
+                    .allowsHitTesting(false)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .animation(AppMotion.panel, value: toastService.currentToast?.id)
                     .padding(.top, 8)

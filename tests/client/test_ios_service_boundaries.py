@@ -48,6 +48,38 @@ def test_share_extension_compiles_only_its_minimal_transport_boundary() -> None:
     assert "APIClient.shared" not in share_controller_source
 
 
+def test_share_extension_exposes_four_recoverable_outcome_actions() -> None:
+    source = (REPO_ROOT / "client/newsly/ShareExtension/ShareViewController.swift").read_text()
+
+    assert 'case addToBriefing = "add_to_briefing"' in source
+    assert 'case addToKnowledge = "add_to_knowledge"' in source
+    assert 'case createDeck = "create_deck"' in source
+    assert "case chat" in source
+    assert "case addLinks" not in source
+    assert "case addFeed" not in source
+    assert "ToggleRowView" not in source
+    assert 'return "add_to_briefing"' in source
+    assert 'return "bookmark_only"' in source
+    assert 'return "presentation"' in source
+    assert 'return "chat"' in source
+    assert 'accessibilityIdentifier = "share.title"' in source
+    assert 'accessibilityIdentifier = "share.chat.prompt"' in source
+    assert 'accessibilityIdentifier = "share.submit"' in source
+    assert 'accessibilityIdentifier = "share.cancel"' in source
+    assert "extensionContext?.cancelRequest(withError: ShareError.userCancelled)" in source
+    assert '"share.action.\\(mode.rawValue)"' in source
+    assert 'title: "Try Again"' in source
+    assert 'title: "Open Newsbuddy"' in source
+    assert 'title: "Open Newsbuddy manually"' in source
+    assert 'title: "Copy Link & Close"' in source
+    assert "let canEditSubmission = submissionState.canBeginSubmission" in source
+    assert "guard submissionState.canBeginSubmission else { return }" in source
+    assert "optionViews.values.forEach { $0.isEnabled = canEditSubmission }" in source
+    assert "chatPromptTextView.isEditable = canEditSubmission" in source
+    assert "guard hasRequiredSubmissionInput else" in source
+    assert "&& !submissionState.isSubmitting" not in source
+
+
 def test_auth_refresh_is_split_from_keychain_storage() -> None:
     keychain_source = (SERVICES_ROOT / "KeychainManager.swift").read_text()
     auth_error_source = (SERVICES_ROOT / "AuthError.swift").read_text()
@@ -74,9 +106,6 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     ).read_text()
     onboarding_view_model_source = (
         REPO_ROOT / "client/newsly/newsly/ViewModels/OnboardingViewModel.swift"
-    ).read_text()
-    discovery_personalize_view_model_source = (
-        REPO_ROOT / "client/newsly/newsly/ViewModels/DiscoveryPersonalizeViewModel.swift"
     ).read_text()
     learning_decks_view_model_source = (
         REPO_ROOT / "client/newsly/newsly/ViewModels/LearningDecksViewModel.swift"
@@ -189,8 +218,6 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "ToastService.shared" not in custom_narration_library_view_model_source
     assert "OnboardingService.shared" not in onboarding_view_model_source
     assert "OnboardingStateStore.shared" not in onboarding_view_model_source
-    assert "OnboardingService.shared" not in discovery_personalize_view_model_source
-    assert "OnboardingStateStore.shared" not in discovery_personalize_view_model_source
     assert "LearningDeckService.shared" not in learning_decks_view_model_source
     assert "ChatService.shared" not in learning_deck_reader_view_model_source
     assert "LearningDeckService.shared" not in learning_deck_reader_view_model_source
@@ -250,7 +277,7 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "static func makeCustomNarrationLibraryViewModel(" in app_chrome_source
     assert "static func makeSubmissionStatusViewModel(" in app_chrome_source
     assert "static func makeOnboardingViewModel(user: User)" in app_chrome_source
-    assert "static func makeDiscoveryPersonalizeViewModel(userId: Int)" in app_chrome_source
+    assert "makeDiscoveryPersonalizeViewModel" not in app_chrome_source
     assert "static func makeLearningDecksViewModel()" in app_chrome_source
     assert "static func makeLearningDeckReaderViewModel(" in app_chrome_source
     assert "static func makeLearningDeckFocusRecorder()" in app_chrome_source
@@ -274,10 +301,7 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert (
         "Narration-library and submission-status view models are factory-wired" in view_model_docs
     )
-    assert (
-        "onboarding, discovery personalization, and Learning Deck view models are factory-wired"
-        in view_model_docs
-    )
+    assert "Onboarding and Learning Deck view models are factory-wired" in view_model_docs
     assert (
         "ChatSessionViewModel and TweetSuggestionsViewModel receive auth, token, "
         "and transcription availability dependencies" in view_model_docs

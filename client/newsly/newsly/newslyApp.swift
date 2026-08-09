@@ -65,6 +65,12 @@ struct newslyApp: App {
             settings.serverHost = debugLogin.serverHost
             settings.serverPort = debugLogin.serverPort
             settings.useHTTPS = debugLogin.useHTTPS
+            if let appGroupID = SharedContainer.appGroupId,
+               let sharedDefaults = UserDefaults(suiteName: appGroupID) {
+                sharedDefaults.set(debugLogin.serverHost, forKey: ServerConfigurationDefaults.hostKey)
+                sharedDefaults.set(debugLogin.serverPort, forKey: ServerConfigurationDefaults.portKey)
+                sharedDefaults.set(debugLogin.useHTTPS, forKey: ServerConfigurationDefaults.useHTTPSKey)
+            }
             authViewModel.startDebugSession(userID: debugLogin.userID)
             return
         }

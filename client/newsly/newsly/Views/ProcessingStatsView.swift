@@ -36,6 +36,25 @@ struct ProcessingStatsView: View {
                 Text("Counts include articles and podcasts.")
             }
 
+            if let error = sourcesViewModel.errorMessage {
+                Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.circle")
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                            .accessibilityHidden(true)
+                        Text(error)
+                            .font(.appCaption)
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                        Spacer(minLength: 8)
+                        Button("Try Again") {
+                            Task { await sourcesViewModel.loadConfigsWithDeferredStats() }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .accessibilityIdentifier("processing_stats.sources_error")
+                }
+            }
+
             if !articleSources.isEmpty || !podcastSources.isEmpty {
                 Section {
                     if let articlePrediction = nextExpectedSummary(for: articleSources, title: "Articles") {
@@ -228,7 +247,7 @@ struct ProcessingStatsView: View {
         }
 
         let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
+        formatter.unitsStyle = .full
         let relative = formatter.localizedString(for: earliest, relativeTo: Date())
         let dueSources = predictions.filter { $0.nextExpectedDate == earliest }.count
         let sourceCount = max(dueSources, 1)

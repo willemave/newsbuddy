@@ -48,7 +48,7 @@ struct RecentlyReadView: View {
                                 allContentIds: contentIds,
                                 navigationSurface: .recentlyRead
                             )) {
-                                ContentCard(content: content)
+                                ContentCard(content: content, reservesThumbnailSpace: true)
                             }
                             .buttonStyle(.plain)
                             .appListRow()

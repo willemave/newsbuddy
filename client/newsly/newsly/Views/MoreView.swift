@@ -5,6 +5,14 @@
 
 import SwiftUI
 
+private enum MoreRoute: Hashable {
+    case search
+    case recentlyRead
+    case submissions
+    case processing
+    case settings
+}
+
 struct MoreView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -28,6 +36,7 @@ struct MoreView: View {
         VStack(spacing: 0) {
             EditorialMastheadHeader(
                 title: "More",
+                titleAccessibilityIdentifier: "more.screen",
                 showsDate: false,
                 trailingAccessory: showsDismissButton ? AnyView(dismissButton) : nil
             )
@@ -35,25 +44,20 @@ struct MoreView: View {
             List {
                 Section {
                     menuRow(
-                        destination: SearchView(
-                            readStateCache: readStateCache,
-                            viewModel: RootDependencyFactory.makeSearchViewModel()
-                        ),
+                        route: .search,
                         icon: "magnifyingglass",
                         title: "Search",
                         accessibilityIdentifier: "more.search"
                     )
 
                     menuRow(
-                        destination: RecentlyReadView(readStateCache: readStateCache),
+                        route: .recentlyRead,
                         icon: "clock",
                         title: "Recently Read",
                         accessibilityIdentifier: "more.recently_read"
                     )
 
-                    NavigationLink {
-                        SubmissionsView(viewModel: submissionsViewModel)
-                    } label: {
+                    NavigationLink(value: MoreRoute.submissions) {
                         HStack(spacing: 16) {
                             minimalIcon("tray.and.arrow.up")
                             Text("Submissions")
@@ -65,10 +69,9 @@ struct MoreView: View {
                         }
                         .frame(minHeight: RowMetrics.compactHeight)
                     }
+                    .accessibilityIdentifier("more.submissions")
 
-                    NavigationLink {
-                        ProcessingStatsView()
-                    } label: {
+                    NavigationLink(value: MoreRoute.processing) {
                         HStack(spacing: 16) {
                             minimalIcon("clock.arrow.circlepath")
                             Text("Processing")
@@ -84,7 +87,7 @@ struct MoreView: View {
 
                 Section {
                     menuRow(
-                        destination: SettingsView(),
+                        route: .settings,
                         icon: "gearshape",
                         title: "Settings",
                         accessibilityIdentifier: "more.settings"
@@ -100,8 +103,8 @@ struct MoreView: View {
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(for: MoreRoute.self, destination: moreDestination)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("more.screen")
         .task {
             await submissionsViewModel.load()
             await badgeStatsStore.refreshStats()
@@ -124,15 +127,13 @@ struct MoreView: View {
         .accessibilityIdentifier("more.close")
     }
 
-    private func menuRow<D: View>(
-        destination: D,
+    private func menuRow(
+        route: MoreRoute,
         icon: String,
         title: String,
         accessibilityIdentifier: String
     ) -> some View {
-        NavigationLink {
-            destination
-        } label: {
+        NavigationLink(value: route) {
             HStack(spacing: 16) {
                 minimalIcon(icon)
                 Text(title)
@@ -141,6 +142,25 @@ struct MoreView: View {
             .frame(minHeight: RowMetrics.compactHeight)
         }
         .accessibilityIdentifier(accessibilityIdentifier)
+    }
+
+    @ViewBuilder
+    private func moreDestination(for route: MoreRoute) -> some View {
+        switch route {
+        case .search:
+            SearchView(
+                readStateCache: readStateCache,
+                viewModel: RootDependencyFactory.makeSearchViewModel()
+            )
+        case .recentlyRead:
+            RecentlyReadView(readStateCache: readStateCache)
+        case .submissions:
+            SubmissionsView(viewModel: submissionsViewModel)
+        case .processing:
+            ProcessingStatsView()
+        case .settings:
+            SettingsView()
+        }
     }
 
     private func minimalIcon(_ name: String) -> some View {

@@ -30,6 +30,7 @@ struct FloatingBackButton: View {
         .buttonStyle(.plain)
         .textSelection(.disabled)
         .accessibilityLabel("Back")
+        .accessibilityIdentifier("navigation.back")
     }
 
     private var foregroundStyle: Color {

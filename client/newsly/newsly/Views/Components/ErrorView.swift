@@ -14,7 +14,7 @@ struct ErrorView: View {
     var body: some View {
         StateView(
             role: .error(message: message),
-            actionTitle: retryAction == nil ? nil : "Retry",
+            actionTitle: retryAction == nil ? nil : "Try Again",
             action: retryAction
         )
     }

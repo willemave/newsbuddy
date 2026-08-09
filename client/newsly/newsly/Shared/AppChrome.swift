@@ -321,15 +321,6 @@ enum RootDependencyFactory {
         )
     }
 
-    static func makeDiscoveryPersonalizeViewModel(userId: Int) -> DiscoveryPersonalizeViewModel {
-        DiscoveryPersonalizeViewModel(
-            userId: userId,
-            service: OnboardingService.shared,
-            dictationService: SpeechTranscriberFactory.makeVoiceDictationTranscriber(),
-            onboardingStateStore: OnboardingStateStore.shared
-        )
-    }
-
     static func makeLearningDecksViewModel() -> LearningDecksViewModel {
         LearningDecksViewModel(
             service: LearningDeckService.shared,
@@ -367,7 +358,7 @@ enum RootDependencyFactory {
         TweetSuggestionsViewModel(
             contentService: ContentService.shared,
             twitterService: TwitterShareService.shared,
-            transcriptionService: VoiceDictationService.shared,
+            transcriptionService: SpeechTranscriberFactory.makeVoiceDictationTranscriber(),
             authService: AuthenticationService.shared,
             tokenStore: KeychainManager.shared,
             refreshTranscriptionAvailability: {

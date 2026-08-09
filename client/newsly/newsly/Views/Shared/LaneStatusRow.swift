@@ -2,7 +2,7 @@
 //  LaneStatusRow.swift
 //  newsly
 //
-//  Extracted from OnboardingFlowView for reuse in DiscoveryPersonalizeSheet.
+//  Shared onboarding discovery-lane progress row.
 //
 
 import SwiftUI
