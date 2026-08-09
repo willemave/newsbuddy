@@ -160,7 +160,7 @@ class TestSearchAPI:
         del search_seeded_content
         monkeypatch.setattr(
             "app.queries.search_mixed.find_feed_options",
-            lambda query, limit: AssistantFeedOptionsResult(
+            lambda query, limit, **_kwargs: AssistantFeedOptionsResult(
                 query=query,
                 options=[
                     AssistantFeedOption(
@@ -179,7 +179,7 @@ class TestSearchAPI:
         )
         monkeypatch.setattr(
             "app.queries.search_mixed.search_podcast_episodes",
-            lambda query, limit: [
+            lambda query, limit, **_kwargs: [
                 type(
                     "PodcastHit",
                     (),
