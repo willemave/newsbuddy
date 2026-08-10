@@ -33,7 +33,7 @@ This plan supersedes none of them; overlaps are noted inline.
    whitelist must shrink, never grow, during this initiative.
 4. **Docs stay honest.** When scripts or admin commands are removed, update
    `docs/library/operations/command-index.md` (already stale — see WP1.4) and any
-   `docs/codebase/` page that referenced them.
+   reference documentation that mentioned them.
 5. **Migrations** (dropped columns, NOT NULL changes) ride Alembic as usual; column drops ship
    one release after the code stops writing them.
 6. Items marked **DECIDE** need Willem's call before the containing package starts. They are

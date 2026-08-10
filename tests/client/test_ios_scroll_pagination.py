@@ -35,12 +35,3 @@ def test_secondary_lists_do_not_paginate_from_last_row_on_appear() -> None:
     assert "Task { await viewModel.loadMoreContent() }" not in recently_read_source
     assert "submission.id == viewModel.submissions.last?.id" not in submissions_source
     assert "Task { await viewModel.loadMore() }" not in submissions_source
-
-
-def test_scroll_pagination_is_documented() -> None:
-    views_docs = (REPO_ROOT / "docs/codebase/client/80-views.md").read_text()
-    shared_docs = (REPO_ROOT / "docs/codebase/client/84-views-shared.md").read_text()
-
-    assert "onPaginationThresholdReached" in views_docs
-    assert "`PaginationScrollTrigger`" in shared_docs
-    assert "`PaginationScrollTrigger.swift`" in shared_docs

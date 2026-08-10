@@ -1,8 +1,8 @@
 # iOS Coding Guidelines
 
 These conventions apply to the SwiftUI app and share extension under
-`client/newsly`. Keep feature-specific architecture notes in
-`docs/codebase/client/`; use this file for durable Swift patterns.
+`client/newsly`. Keep durable product behavior in `docs/laws/`, system design in
+`docs/architecture.md`, and Swift implementation patterns in this file.
 
 ## State And Observation
 

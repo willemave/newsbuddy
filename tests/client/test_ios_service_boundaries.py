@@ -7,7 +7,6 @@ SERVICES_ROOT = REPO_ROOT / "client/newsly/newsly/Services"
 def test_network_services_use_timeout_session_and_single_auth_decoder_setup() -> None:
     api_client_source = (SERVICES_ROOT / "APIClient.swift").read_text()
     auth_source = (SERVICES_ROOT / "AuthenticationService.swift").read_text()
-    services_docs = (REPO_ROOT / "docs/codebase/client/50-services.md").read_text()
 
     assert "static let newslyDefault: URLSession" in api_client_source
     assert "configuration.timeoutIntervalForRequest = 30" in api_client_source
@@ -19,7 +18,6 @@ def test_network_services_use_timeout_session_and_single_auth_decoder_setup() ->
     assert "private enum AuthenticationResponseDecoder" in auth_source
     assert auth_source.count("JSONDecoder()") == 1
     assert auth_source.count("dateDecodingStrategy = .iso8601") == 1
-    assert "single ISO-8601 auth response decoder factory" in services_docs
 
 
 def test_share_extension_compiles_only_its_minimal_transport_boundary() -> None:
@@ -148,8 +146,6 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     ).read_text()
     app_chrome_source = (REPO_ROOT / "client/newsly/newsly/Shared/AppChrome.swift").read_text()
     badge_stats_source = (SERVICES_ROOT / "BadgeStatsStore.swift").read_text()
-    services_docs = (REPO_ROOT / "docs/codebase/client/50-services.md").read_text()
-    view_model_docs = (REPO_ROOT / "docs/codebase/client/70-view-models.md").read_text()
 
     assert "final class KeychainManager" in keychain_source
     assert "protocol AuthTokenStore" in keychain_source
@@ -284,31 +280,6 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "static func makeTweetSuggestionsViewModel()" in app_chrome_source
     assert "[Notification.Name.authDidLogOut, .authenticationRequired]" in badge_stats_source
 
-    assert "`AuthError.swift`" in services_docs
-    assert "`TokenRefreshService.swift`" in services_docs
-    assert "locked token access-group storage" in services_docs
-    assert "AuthenticationViewModel` is its direct observer" in services_docs
-    assert "AuthenticationViewModel` takes auth and token-store dependencies" in view_model_docs
-    assert "ContentListViewModel` takes its content-list service" in view_model_docs
-    assert (
-        "ContentDetailViewModel` takes content, detected-feed, and toast dependencies"
-        in view_model_docs
-    )
-    assert (
-        "detail-local coordinators take chat, discussion, audio, navigation, and toast dependencies"
-        in view_model_docs
-    )
-    assert (
-        "Narration-library and submission-status view models are factory-wired" in view_model_docs
-    )
-    assert "Onboarding and Learning Deck view models are factory-wired" in view_model_docs
-    assert (
-        "ChatSessionViewModel and TweetSuggestionsViewModel receive auth, token, "
-        "and transcription availability dependencies" in view_model_docs
-    )
-    assert "ScraperSettingsViewModel` takes its source-settings service" in view_model_docs
-    assert "chat history and auth are factory-injected" in view_model_docs
-
 
 def test_view_models_do_not_read_service_singletons_directly() -> None:
     view_models_root = REPO_ROOT / "client/newsly/newsly/ViewModels"
@@ -327,16 +298,13 @@ def test_view_models_do_not_read_service_singletons_directly() -> None:
             offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}: {line.strip()}")
 
     guidelines = (REPO_ROOT / "docs/coding-guidelines-ios.md").read_text()
-    view_model_docs = (REPO_ROOT / "docs/codebase/client/70-view-models.md").read_text()
 
     assert offenders == []
     assert "Prefer injected dependencies in `init` over hidden singleton lookups" in guidelines
-    assert "live singleton wiring lives in `RootDependencyFactory`" in view_model_docs
 
 
 def test_image_cache_has_periodic_cleanup_and_error_logging() -> None:
     image_cache_source = (SERVICES_ROOT / "ImageCacheService.swift").read_text()
-    services_docs = (REPO_ROOT / "docs/codebase/client/50-services.md").read_text()
 
     assert "private let imageCacheLogger = Logger(" in image_cache_source
     assert "diskCleanupInterval" in image_cache_source
@@ -350,7 +318,6 @@ def test_image_cache_has_periodic_cleanup_and_error_logging() -> None:
     assert "Failed to download image" in image_cache_source
     assert "inFlightDataDownloads" in image_cache_source
     assert "maximumConcurrentDownloads: Int = 4" in image_cache_source
-    assert "throttled disk cleanup" in services_docs
 
 
 def test_active_chat_polling_is_lifecycle_gated() -> None:
@@ -359,7 +326,6 @@ def test_active_chat_polling_is_lifecycle_gated() -> None:
     active_chat_tests = (
         REPO_ROOT / "client/newsly/newslyTests/ActiveChatSessionManagerTests.swift"
     ).read_text()
-    services_docs = (REPO_ROOT / "docs/codebase/client/50-services.md").read_text()
 
     assert "private var isPollingSuspended = false" in active_chat_source
     assert "func setPollingSuspended(_ isSuspended: Bool)" in active_chat_source
@@ -370,7 +336,6 @@ def test_active_chat_polling_is_lifecycle_gated() -> None:
         "testLifecycleSuspensionPausesAndResumesPollingWithoutDroppingTrackedSession"
         in active_chat_tests
     )
-    assert "lifecycle-gated active-session polling" in services_docs
 
 
 def test_badge_stats_store_owns_counts_and_scene_phase_gated_refresh() -> None:
@@ -379,8 +344,6 @@ def test_badge_stats_store_owns_counts_and_scene_phase_gated_refresh() -> None:
     badge_store_tests = (
         REPO_ROOT / "client/newsly/newslyTests/BadgeStatsStoreTests.swift"
     ).read_text()
-    root_docs = (REPO_ROOT / "docs/codebase/client/20-app-target-root.md").read_text()
-    services_docs = (REPO_ROOT / "docs/codebase/client/50-services.md").read_text()
 
     assert "@Observable\nfinal class BadgeStatsStore" in badge_store_source
     assert "private var refreshTask: Task<Void, Never>?" in badge_store_source
@@ -400,15 +363,11 @@ def test_badge_stats_store_owns_counts_and_scene_phase_gated_refresh() -> None:
     assert "testBackgroundSuspendsAndForegroundRefreshes" in badge_store_tests
     assert "testAuthenticationResetClearsCountsAndScheduledRefresh" in badge_store_tests
 
-    assert "badge stats retries" in root_docs
-    assert "`BadgeStatsStore` owns rendered long-form unread and processing counts" in services_docs
-
 
 def test_e2e_route_injection_is_consolidated_at_root() -> None:
     app_root = REPO_ROOT / "client/newsly/newsly"
     injector_source = (app_root / "E2ERouteInjector.swift").read_text()
     content_view_source = (app_root / "ContentView.swift").read_text()
-    root_docs = (REPO_ROOT / "docs/codebase/client/20-app-target-root.md").read_text()
 
     assert "final class E2ERouteInjector" in injector_source
     assert "private var hasAppliedOpenChatRoute = false" in injector_source
@@ -446,8 +405,6 @@ def test_e2e_route_injection_is_consolidated_at_root() -> None:
     assert "E2ETestLaunch.open" not in content_view_source
     assert "newslyE2EOpen" not in content_view_source
 
-    assert "only app-shell reader for launch-time E2E content/chat routes" in root_docs
-
 
 def test_share_extension_uses_shared_brand_style() -> None:
     share_controller_source = (
@@ -457,7 +414,6 @@ def test_share_extension_uses_shared_brand_style() -> None:
         REPO_ROOT / "client/newsly/newsly/Shared/ShareExtensionStyle.swift"
     ).read_text()
     project_source = (REPO_ROOT / "client/newsly/newsly.xcodeproj/project.pbxproj").read_text()
-    share_extension_docs = (REPO_ROOT / "docs/codebase/client/90-share-extension.md").read_text()
 
     assert "fileprivate extension UIColor" not in share_controller_source
     assert "ShareExtensionTypography" not in share_controller_source
@@ -478,8 +434,6 @@ def test_share_extension_uses_shared_brand_style() -> None:
         REPO_ROOT
         / "client/newsly/ShareExtension/Assets.xcassets/ShareBrandPrimary.colorset/Contents.json"
     ).exists()
-    assert "`newsly/Shared/ShareExtensionStyle.swift`" in share_extension_docs
-    assert "`ReaderPalette.brandPrimary`" in share_extension_docs
 
 
 def test_voice_dictation_haptics_live_in_swiftui_mic_button() -> None:
@@ -487,8 +441,6 @@ def test_voice_dictation_haptics_live_in_swiftui_mic_button() -> None:
     mic_button_source = (
         REPO_ROOT / "client/newsly/newsly/Views/Components/TapToTalkMicButton.swift"
     ).read_text()
-    components_docs = (REPO_ROOT / "docs/codebase/client/81-views-components.md").read_text()
-    services_docs = (REPO_ROOT / "docs/codebase/client/50-services.md").read_text()
 
     assert "UIImpactFeedbackGenerator" not in voice_service_source
     assert "UINotificationFeedbackGenerator" not in voice_service_source
@@ -498,6 +450,3 @@ def test_voice_dictation_haptics_live_in_swiftui_mic_button() -> None:
     assert "let isTranscribing: Bool" in mic_button_source
     assert ".sensoryFeedback(.impact(weight: .light), trigger: isRecording)" in mic_button_source
     assert ".sensoryFeedback(.success, trigger: isTranscribing)" in mic_button_source
-
-    assert "mic haptics are SwiftUI `.sensoryFeedback`" in services_docs
-    assert "`TapToTalkMicButton` owns shared voice haptics" in components_docs

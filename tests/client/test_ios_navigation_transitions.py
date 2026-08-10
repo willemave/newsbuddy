@@ -13,7 +13,6 @@ def test_phase5_zoom_transitions_pair_matched_sources_with_destinations() -> Non
     chat_history_source = (VIEWS_ROOT / "ChatSessionHistoryView.swift").read_text()
     detail_source = (VIEWS_ROOT / "ContentDetailView.swift").read_text()
     detail_action_bar_source = (VIEWS_ROOT / "Components/DetailActionBar.swift").read_text()
-    views_docs = (REPO_ROOT / "docs/codebase/client/80-views.md").read_text()
 
     assert "func matchedContentZoomSource" in helper_source
     assert "matchedTransitionSource(id: id, in: namespace)" in helper_source
@@ -55,5 +54,3 @@ def test_phase5_zoom_transitions_pair_matched_sources_with_destinations() -> Non
         ".contentZoomNavigationTransition(id: content.id, namespace: readerTransitionNamespace)"
         in detail_source
     )
-
-    assert "Learning chat rows and article-reader entrypoints" in views_docs

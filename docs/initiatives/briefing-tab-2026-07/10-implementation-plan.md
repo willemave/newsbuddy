@@ -592,7 +592,7 @@ regenerate contracts when `app/models/api/*` or `contracts.py` change and verify
 - [ ] Kill switches verified: user removed from `briefing_enabled_user_ids` → hooks/sweep no-op;
       client toggle back to Classic restores old tabs exactly.
 - [ ] Docs: `docs/architecture.md` briefing subsection (data model + queue flow),
-      `docs/codebase/` entries for `app/services/briefing/` and the iOS Briefing folder; update
+      the relevant Briefing laws and architecture notes; update
       `docs/initiatives/README.md` status.
 - Acceptance: full checklist walkthrough on fresh local DB + simulator; production deploy plan
   (run migration, set `briefing_enabled_user_ids=[1]`, sweep bootstrap, watch

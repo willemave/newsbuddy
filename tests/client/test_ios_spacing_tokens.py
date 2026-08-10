@@ -288,15 +288,12 @@ def test_primary_scroll_surfaces_use_top_edge_fade() -> None:
 
 def test_cached_async_image_assignments_do_not_animate() -> None:
     source = (VIEWS_ROOT / "Components/CachedAsyncImage.swift").read_text()
-    components_docs = (REPO_ROOT / "docs/codebase/client/81-views-components.md").read_text()
 
     assert "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" not in source
     assert "withAnimation" not in source
     assert ".animation(" not in source
     assert ".easeIn(duration:" not in source
     assert ".easeOut(duration:" not in source
-    assert "CachedAsyncImage" in components_docs
-    assert "assigns cached and downloaded images without implicit fades" in components_docs
 
 
 def test_knowledge_ready_content_projection_is_owned_by_view_model() -> None:
@@ -337,7 +334,6 @@ def test_chat_messages_use_single_parameterized_bubble_surface() -> None:
     chat_root = VIEWS_ROOT / "Chat"
     message_bubble = (chat_root / "MessageBubble.swift").read_text()
     message_list = (chat_root / "ChatMessageList.swift").read_text()
-    chat_docs = (REPO_ROOT / "docs/codebase/client/87-views-chat.md").read_text()
 
     assert not (chat_root / "UserMessageBubble.swift").exists()
     assert not (chat_root / "AssistantMessageBubble.swift").exists()
@@ -352,7 +348,6 @@ def test_chat_messages_use_single_parameterized_bubble_surface() -> None:
     assert ".animation(messageAnimation, value: isSending)" in message_list
     assert ".defaultScrollAnchor(.bottom)" in message_list
     assert ".topScreenEdgeFade()" not in message_list
-    assert "parameterized user/assistant bubble presentation" in chat_docs
 
 
 def test_ios_timing_hacks_use_completion_or_task_boundaries() -> None:
@@ -387,7 +382,6 @@ def test_swipe_snapback_uses_motion_tokens() -> None:
 
 def test_shared_pressable_button_style_uses_press_motion_token() -> None:
     source = (VIEWS_ROOT / "Shared/PressableButtonStyle.swift").read_text()
-    shared_docs = (REPO_ROOT / "docs/codebase/client/84-views-shared.md").read_text()
     pressed_scale = re.compile(r"\.scaleEffect\(configuration\.isPressed[^\n]*\)")
     offenders: list[str] = []
 
@@ -400,8 +394,6 @@ def test_shared_pressable_button_style_uses_press_motion_token() -> None:
     assert ".animation(AppMotion.press, value: configuration.isPressed)" in source
     assert ".spring(" not in source
     assert offenders == []
-    assert "PressableButtonStyle" in shared_docs
-    assert "AppMotion.press" in shared_docs
 
 
 def test_shared_controls_use_motion_tokens_for_common_state_animation() -> None:
@@ -457,8 +449,6 @@ def test_long_running_pulse_views_respect_reduce_motion() -> None:
         VIEWS_ROOT / "Onboarding/OnboardingMicButton.swift",
         VIEWS_ROOT / "Onboarding/OnboardingLoadingStep.swift",
     ]
-    chat_docs = (REPO_ROOT / "docs/codebase/client/87-views-chat.md").read_text()
-    onboarding_docs = (REPO_ROOT / "docs/codebase/client/82-views-onboarding.md").read_text()
     design_tokens = DESIGN_TOKENS.read_text()
 
     for token in (
@@ -483,26 +473,17 @@ def test_long_running_pulse_views_respect_reduce_motion() -> None:
         assert "reduceMotion ? nil" in source or "guard !reduceMotion else { return }" in source
         assert ".onChange(of: reduceMotion)" in source
 
-    assert "Chat loading, recording, and activity pulses respect Reduce Motion" in chat_docs
-    assert (
-        "breathing pulses remain local presentation effects with reduce-motion handling"
-        in onboarding_docs
-    )
-
 
 def test_onboarding_loading_reveal_respects_reduce_motion_and_motion_tokens() -> None:
     loading_source = (VIEWS_ROOT / "Onboarding/OnboardingLoadingStep.swift").read_text()
-    onboarding_docs = (REPO_ROOT / "docs/codebase/client/82-views-onboarding.md").read_text()
 
     assert "laneEntranceAnimation(index: index)" in loading_source
     assert "AppMotion.respectingReduceMotion(" in loading_source
     assert "AppMotion.emphasized.delay(Double(index) * 0.06)" in loading_source
-    assert "loading-step reveal" in onboarding_docs
 
 
 def test_lane_status_progress_is_solid_and_activity_respects_reduce_motion() -> None:
     source = (VIEWS_ROOT / "Shared/LaneStatusRow.swift").read_text()
-    shared_docs = (REPO_ROOT / "docs/codebase/client/84-views-shared.md").read_text()
 
     assert "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" in source
     assert "AppMotion.respectingReduceMotion(reduceMotion, AppMotion.panel)" in source
@@ -511,14 +492,11 @@ def test_lane_status_progress_is_solid_and_activity_respects_reduce_motion() -> 
     assert ".fill(Color.statusProcessing.opacity(0.9))" in source
     assert "LinearGradient" not in source
     assert "shimmerPhase" not in source
-    assert "LaneStatusRow" in shared_docs
-    assert "Reduce Motion" in shared_docs
 
 
 def test_decorative_symbol_effects_respect_reduce_motion() -> None:
     detail_action_bar = (VIEWS_ROOT / "Components/DetailActionBar.swift").read_text()
     tweet_suggestions = (VIEWS_ROOT / "Components/TweetSuggestionsSheet.swift").read_text()
-    components_docs = (REPO_ROOT / "docs/codebase/client/81-views-components.md").read_text()
 
     assert (
         "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" in detail_action_bar
@@ -535,14 +513,11 @@ def test_decorative_symbol_effects_respect_reduce_motion() -> None:
         ".symbolEffect(.pulse, isActive: viewModel.isRecording && !reduceMotion)"
         in tweet_suggestions
     )
-    assert "decorative symbol effects" in components_docs
-    assert "Reduce Motion" in components_docs
 
 
 def test_landing_title_animation_respects_reduce_motion() -> None:
     source = (VIEWS_ROOT / "LandingView.swift").read_text()
     tokens = DESIGN_TOKENS.read_text()
-    views_docs = (REPO_ROOT / "docs/codebase/client/80-views.md").read_text()
 
     assert "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" in source
     assert "if reduceMotion" in source
@@ -553,8 +528,6 @@ def test_landing_title_animation_respects_reduce_motion() -> None:
     assert "repeatForever(autoreverses: true)" in tokens
     assert "TimelineView" not in source
     assert "titleContent(yOffset: 0, glowColor: WatercolorBackground.titleGlow)" in source
-    assert "LandingView" in views_docs
-    assert "Reduce Motion" in views_docs
 
 
 def test_watercolor_background_avoids_display_rate_redraws() -> None:

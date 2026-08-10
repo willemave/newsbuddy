@@ -1,6 +1,6 @@
 # iOS Modernization & Polish — 2026-07
 
-Comprehensive plan to simplify the Newsly iOS app, make it more idiomatic Swift, improve performance, and level up navigation animations and fine details. Produced from six parallel deep-dives (app shell/navigation, content detail, feeds/lists, state/DI, services, design system/motion) cross-checked against the June review (`docs/codebase/ios-review-2026-06-08/`) and re-verified greps.
+Comprehensive plan to simplify the Newsly iOS app, make it more idiomatic Swift, improve performance, and level up navigation animations and fine details. Produced from six parallel deep-dives (app shell/navigation, content detail, feeds/lists, state/DI, services, design system/motion), cross-checked against the historical June review, and re-verified with source searches.
 
 ## Goal
 

@@ -47,17 +47,14 @@ def test_legacy_observation_wrappers_are_limited_to_briefing_surface() -> None:
             if token in source:
                 offenders.append(f"{path.relative_to(REPO_ROOT)} still contains {token}")
 
-    docs = (REPO_ROOT / "docs/codebase/client/70-view-models.md").read_text()
     guidelines = (REPO_ROOT / "docs/coding-guidelines-ios.md").read_text()
 
     assert offenders == []
-    assert "Briefing remains on the legacy `ObservableObject` path" in docs
     assert "Use `@Observable` for new view models and UI-facing stores" in guidelines
 
 
 def test_learning_decks_polling_uses_task_bag() -> None:
     source = (VIEW_MODELS_ROOT / "LearningDecksViewModel.swift").read_text()
-    docs = (REPO_ROOT / "docs/codebase/client/70-view-models.md").read_text()
 
     assert "case deckPolling(Int)" in source
     assert "private let tasks = TaskBag<LearningDecksTaskKey>()" in source
@@ -65,7 +62,6 @@ def test_learning_decks_polling_uses_task_bag() -> None:
     assert "tasks.cancel(.deckPolling(deck.id))" in source
     assert "Task { [weak self]" not in source
     assert "pollingDeckIDs" not in source
-    assert "Learning Deck polling uses `TaskBag`" in docs
 
 
 def test_read_status_repository_exposes_async_methods_directly() -> None:
@@ -80,7 +76,6 @@ def test_read_status_repository_exposes_async_methods_directly() -> None:
 
 def test_voice_dictation_view_models_use_event_coordinator() -> None:
     chat_session_source = (VIEW_MODELS_ROOT / "ChatSessionViewModel.swift").read_text()
-    docs = (REPO_ROOT / "docs/codebase/client/70-view-models.md").read_text()
 
     expected_coordinator_users = [
         VIEW_MODELS_ROOT / "ChatVoiceInputController.swift",
@@ -107,8 +102,6 @@ def test_voice_dictation_view_models_use_event_coordinator() -> None:
         source = path.read_text()
         for token in direct_callback_tokens:
             assert token not in source, f"{path.relative_to(REPO_ROOT)} directly assigns {token}"
-
-    assert "voice dictation events are consumed through `VoiceDictationCoordinator`" in docs
 
 
 def test_chat_route_queue_is_acknowledged_only_after_root_presentation() -> None:

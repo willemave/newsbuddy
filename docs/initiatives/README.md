@@ -5,7 +5,7 @@ Change-oriented docs that used to live under `docs/plans/`, `docs/specs/`, and `
 ## Layout
 - Each initiative gets its own folder.
 - Filenames use sortable prefixes such as `10-design.md`, `20-plan.md`, and `30-summary.md`.
-- Stable shipped-behavior docs should stay in `docs/library/features/`, not here.
+- Canonical shipped behavior belongs in `docs/laws/`; supporting feature notes may live in `docs/library/features/`.
 
 ## Current initiatives
 - `agentic-feed-discovery/`

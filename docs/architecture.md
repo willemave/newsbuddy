@@ -4,7 +4,7 @@
 
 **Last Reviewed:** 2026-05-19
 **Repository Root:** `news_app/`
-**Use:** Cross-boundary architecture reference. For folder inventories, use `docs/codebase/`.
+**Use:** Cross-boundary architecture reference. For canonical product behavior, use `docs/laws/`.
 **Primary Runtime:** Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, pydantic-ai
 **Primary Clients:** SwiftUI iOS app, iOS Share Extension, Jinja admin UI, machine-facing agent/CLI APIs
 **Storage:** PostgreSQL for local/staging/production, plus local or S3-compatible content-body storage
@@ -14,8 +14,8 @@
 
 - `docs/architecture.md`
   - This file. It explains system boundaries, runtime flows, package responsibilities, data model, APIs, workers, and operational constraints.
-- `docs/codebase/`
-  - Codex-generated folder-by-folder reference for `app/`, `cli/`, and `client/`, plus a small `config/` support section.
+- `docs/laws/`
+  - Canonical, implementation-independent product behavior and invariants.
 - `docs/library/`
   - Durable operational, deployment, integration, and feature docs.
 - `docs/initiatives/`
@@ -1568,7 +1568,6 @@ The previous API slot remains running as an immediate rollback target. Productio
 - `scripts/generate_agent_cli_artifacts.sh`
 - `scripts/regenerate_public_contracts.sh`
 - `scripts/check_public_contracts.sh`
-- `docs/generate_codebase_docs.sh`
 - `docs/generate_architecture.sh`
 - `scripts/update-docs-from-commit.sh`
 

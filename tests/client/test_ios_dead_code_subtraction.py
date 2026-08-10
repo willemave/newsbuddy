@@ -92,21 +92,6 @@ def test_phase1_deleted_ios_dead_code_files_stay_removed() -> None:
     assert offenders == []
 
 
-def test_active_client_docs_do_not_reference_deleted_ios_files() -> None:
-    deleted_filenames = {
-        Path(relative_path).name for relative_path in [*DELETED_IOS_PATHS, *DELETED_FONT_PATHS]
-    }
-    offenders: list[str] = []
-
-    for path in sorted((REPO_ROOT / "docs/codebase/client").glob("*.md")):
-        source = path.read_text()
-        for filename in sorted(deleted_filenames):
-            if filename in source:
-                offenders.append(f"{path.relative_to(REPO_ROOT)} references {filename}")
-
-    assert offenders == []
-
-
 def test_phase2_deleted_ios_symbols_stay_removed() -> None:
     content_list_source = (
         REPO_ROOT / "client/newsly/newsly/ViewModels/ContentListViewModel.swift"

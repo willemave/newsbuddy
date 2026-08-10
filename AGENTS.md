@@ -2,7 +2,7 @@
 
 Start with this file. Open [docs/architecture.md](docs/architecture.md) only when a task crosses package boundaries, changes data/API contracts, touches workers/queues, or needs system-level context.
 
-Use [docs/codebase/](docs/codebase/) only for the specific folder or surface you are modifying.
+Use [docs/laws/](docs/laws/) for canonical product behavior and invariants. Update the relevant law whenever intended behavior changes.
 
 Use [docs/coding-guidelines.md](docs/coding-guidelines.md) for local code patterns, test expectations, and common commands.
 
@@ -17,6 +17,7 @@ This file stays minimal and only captures repo-specific working rules.
 - Prefer durable designs aligned with the intended architecture. Remove obsolete internal paths instead of adding fallbacks or compatibility layers. When an active external contract or staged migration requires compatibility, define the canonical owner and removal condition.
 - Keep `docs/log.md` current while implementing. Record concise, dated entries with the branch, scope, decisions, validation, and unfinished work; preserve unrelated entries.
 - Keep durable architecture notes in `docs/architecture.md`; keep this file limited to agent operating rules and routing.
+- Keep `docs/laws/` behavioral rather than structural: state what must remain true, not which files currently implement it.
 
 ## Working Shape
 
