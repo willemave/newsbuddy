@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.models.api.share_actions import ShareActionAgentResult, ShareActionCreateRequest
 from app.models.contracts import (
+    ContentStatus,
+    ContentType,
     LlmTaskActionStatus,
     LlmTaskApprovalPolicy,
     LlmTaskMode,
@@ -759,6 +761,93 @@ def test_run_share_action_presentation_marks_learning_deck_submission(
     action = db_session.query(LlmTaskAction).filter_by(llm_task_id=response.task_id).one()
     assert action.action_result["learning_deck_id"] == deck.id
     assert action.action_result["content_id"] == content.id
+
+
+def test_run_share_action_presentation_reuses_prepared_x_content_across_url_variants(
+    db_session,
+    test_user,
+) -> None:
+    shared_url = "https://x.com/sstolinski/status/1950241632167473582?s=12"
+    action_url = "https://x.com/sstolinski/status/1950241632167473582"
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(
+            url=shared_url,
+            mode=LlmTaskMode.PRESENTATION,
+            interests_prompt="Focus on the architecture.",
+        ),
+    )
+
+    def run_agent(_db: Session, task: LlmTask) -> ShareActionAgentRunResult:
+        input_json = task.input_json
+        assert isinstance(input_json, dict)
+        prepared_id = input_json["knowledge_content_id"]
+        assert isinstance(prepared_id, int)
+        prepared = _db.query(Content).filter_by(id=prepared_id).one()
+        prepared.url = "https://opencode.ai/v2"
+        prepared.source_url = shared_url
+        prepared.content_type = ContentType.ARTICLE.value
+        prepared.status = ContentStatus.COMPLETED.value
+        prepared.title = "OpenCode v2"
+        prepared.content_metadata = {"content": "Prepared canonical article body."}
+        _db.commit()
+        return _fake_agent_result(
+            _agent_result(
+                action="presentation",
+                primary_url=action_url,
+                title="OpenCode v2",
+                confidence=0.9,
+            )
+        )(_db, task)
+
+    run_share_action_task(
+        db_session,
+        llm_task_id=response.task_id,
+        agent_runner=run_agent,
+    )
+
+    prepared = db_session.query(Content).one()
+    deck = db_session.query(LearningDeck).one()
+    learning_deck_task = db_session.query(LlmTask).filter_by(task_kind="learning_deck").one()
+    action = db_session.query(LlmTaskAction).filter_by(llm_task_id=response.task_id).one()
+    assert deck.source_content_id == prepared.id
+    assert deck.source_identity == f"content:{prepared.id}"
+    assert learning_deck_task.input_json["source"]["source_content_id"] == prepared.id
+    assert action.action_result["content_id"] == prepared.id
+
+
+def test_run_share_action_presentation_keeps_distinct_agent_selected_source(
+    db_session,
+    test_user,
+) -> None:
+    shared_url = "https://example.com/shared-source"
+    selected_url = "https://example.com/selected-source"
+    response = create_share_action(
+        db_session,
+        current_user=test_user,
+        payload=_share_request(url=shared_url, mode=LlmTaskMode.PRESENTATION),
+    )
+
+    run_share_action_task(
+        db_session,
+        llm_task_id=response.task_id,
+        agent_runner=_fake_agent_result(
+            _agent_result(
+                action="presentation",
+                primary_url=selected_url,
+                title="Selected source",
+                confidence=0.9,
+            )
+        ),
+    )
+
+    deck = db_session.query(LearningDeck).one()
+    prepared = db_session.query(Content).filter_by(url=shared_url).one()
+    selected = db_session.query(Content).filter_by(url=selected_url).one()
+    assert prepared.id != selected.id
+    assert deck.source_content_id == selected.id
+    assert deck.source_identity == f"content:{selected.id}"
 
 
 def test_run_share_action_waits_for_approval_when_policy_requires_it(

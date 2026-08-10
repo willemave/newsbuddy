@@ -16,6 +16,7 @@ from app.commands.convert_news_to_article import (
 from app.models.api.submissions import SubmitContentRequest
 from app.models.contracts import ContentStatus, LearningDeckSourceKind
 from app.models.db import Content, LearningDeck, User
+from app.models.metadata.access import metadata_view
 from app.repositories.content_detail_repository import get_visible_content
 from app.services.content_bodies import get_content_body_resolver
 from app.services.github_urls import GitHubFileUrl, parse_github_file_url
@@ -25,6 +26,7 @@ from app.services.learning_deck_common import (
     LearningDeckSourceNotReady,
     require_int_value,
     require_user_id,
+    utcnow,
 )
 from app.services.news_feed import get_visible_news_item
 from app.utils.news_titles import get_news_article_title
@@ -183,6 +185,102 @@ def content_learning_deck_source(content: Content) -> LearningDeckSource:
     )
 
 
+def resolve_canonical_learning_deck_content(db: Session, content: Content) -> Content:
+    """Follow persisted canonical-content redirects for a deck source."""
+    current = content
+    visited_ids: set[int] = set()
+    while True:
+        current_id = require_int_value(current.id, "Content id")
+        if current_id in visited_ids:
+            return current
+        visited_ids.add(current_id)
+
+        raw_canonical_id = metadata_view(current.content_metadata).processing_flag(
+            "canonical_content_id"
+        )
+        try:
+            canonical_id = int(raw_canonical_id)
+        except (TypeError, ValueError):
+            return current
+        if canonical_id <= 0 or canonical_id in visited_ids:
+            return current
+
+        canonical = db.query(Content).filter(Content.id == canonical_id).first()
+        if canonical is None:
+            return current
+        current = canonical
+
+
+def rebind_learning_deck_to_canonical_content(
+    db: Session,
+    *,
+    deck: LearningDeck,
+    content: Content,
+) -> Content:
+    """Point a deck at the canonical content row selected by ingestion."""
+    canonical = resolve_canonical_learning_deck_content(db, content)
+    original_content_id = require_int_value(content.id, "Content id")
+    canonical_content_id = require_int_value(canonical.id, "Canonical content id")
+    if canonical_content_id == original_content_id:
+        return canonical
+
+    source = content_learning_deck_source(canonical)
+    identity_owner = (
+        db.query(LearningDeck.id)
+        .filter(
+            LearningDeck.user_id == deck.user_id,
+            LearningDeck.source_identity == source.source_identity,
+            LearningDeck.deleted_at.is_(None),
+            LearningDeck.id != deck.id,
+        )
+        .first()
+    )
+    if identity_owner is None:
+        deck.source_identity = source.source_identity
+    deck.source_content_id = canonical_content_id
+    deck.source_url = source.source_url
+    deck.source_title = source.source_title
+    source_metadata = dict(source.source_metadata)
+    existing_metadata = deck.source_metadata if isinstance(deck.source_metadata, dict) else {}
+    submission = existing_metadata.get("submission")
+    if isinstance(submission, dict):
+        source_metadata["submission"] = dict(submission)
+    deck.source_metadata = source_metadata
+    if not usable_learning_deck_title(deck.title):
+        deck.title = source.source_title
+    deck.updated_at = utcnow()
+    db.flush()
+    return canonical
+
+
+def persisted_learning_deck_source(db: Session, deck: LearningDeck) -> LearningDeckSource:
+    """Rebuild a generation source from current persisted deck state."""
+    if deck.source_kind == LearningDeckSourceKind.CONTENT.value:
+        if not deck.source_content_id:
+            raise LearningDeckError("Learning Deck content source not found", status_code=404)
+        content = db.query(Content).filter(Content.id == deck.source_content_id).first()
+        if content is None:
+            raise LearningDeckError("Content source not found", status_code=404)
+        rebind_learning_deck_to_canonical_content(db, deck=deck, content=content)
+    try:
+        source_kind = LearningDeckSourceKind(str(deck.source_kind))
+    except ValueError as exc:
+        raise LearningDeckError(
+            f"Unsupported Learning Deck source kind: {deck.source_kind}",
+            status_code=409,
+        ) from exc
+    return LearningDeckSource(
+        source_kind=source_kind,
+        source_identity=str(deck.source_identity),
+        source_url=deck.source_url,
+        source_content_id=deck.source_content_id,
+        source_title=deck.source_title or deck.title or "Learning Deck",
+        source_metadata=(
+            dict(deck.source_metadata) if isinstance(deck.source_metadata, dict) else {}
+        ),
+    )
+
+
 def build_content_source_snapshot_for_deck(
     db: Session,
     *,
@@ -194,6 +292,7 @@ def build_content_source_snapshot_for_deck(
     content = db.query(Content).filter(Content.id == deck.source_content_id).first()
     if content is None:
         raise LearningDeckError("Content source not found", status_code=404)
+    content = rebind_learning_deck_to_canonical_content(db, deck=deck, content=content)
     body_text = get_content_body_resolver().resolve_text(db, content=content)
     if not body_text or not body_text.strip():
         if content.status != ContentStatus.COMPLETED.value:

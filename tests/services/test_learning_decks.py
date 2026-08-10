@@ -24,6 +24,7 @@ from app.services.learning_decks import (
     get_deck_by_valid_share_token,
     normalize_github_repository_source,
     present_learning_deck,
+    retry_learning_deck,
 )
 from tests.support.builders import create_content_status_entry_row
 
@@ -283,6 +284,129 @@ def test_create_learning_deck_reuses_source_identity_for_rerun(
     assert db_session.query(LearningDeckRun).count() == 0
     assert db_session.query(LlmTask).filter_by(subject_id=first.id).count() == 2
     assert second.latest_successful_task_id == first_task.id
+
+
+def test_retry_learning_deck_enqueues_new_attempt_and_is_idempotent_while_active(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = _create_visible_article(db_session, test_user, content_factory)
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=content.id,
+        interests_prompt="Original focus",
+    )
+    successful_task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    successful_task.status = LlmTaskStatus.COMPLETED.value
+    deck.latest_successful_task_id = successful_task.id
+    deck.deck_object_key = "learning/test/index.html"
+    db_session.commit()
+
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=content.id,
+        interests_prompt="Retry focus",
+    )
+    failed_task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    failed_task.status = LlmTaskStatus.FAILED.value
+    failed_task.workflow_state = LlmWorkflowState.FAILED.value
+    db_session.commit()
+
+    retried = retry_learning_deck(
+        db_session,
+        user_id=_required_id(test_user.id),
+        deck_id=_required_id(deck.id),
+    )
+    retry_task = db_session.query(LlmTask).filter_by(id=retried.latest_task_id).one()
+
+    assert retry_task.id not in {successful_task.id, failed_task.id}
+    assert retry_task.status == LlmTaskStatus.QUEUED.value
+    assert retry_task.input_json["interests_prompt"] == "Retry focus"
+    assert retry_task.input_json["retry_of_attempt_id"] == failed_task.id
+    assert retried.latest_successful_task_id == successful_task.id
+    assert retried.deck_object_key == "learning/test/index.html"
+
+    repeated = retry_learning_deck(
+        db_session,
+        user_id=_required_id(test_user.id),
+        deck_id=_required_id(deck.id),
+    )
+
+    assert repeated.latest_task_id == retry_task.id
+    assert db_session.query(LlmTask).filter_by(subject_id=deck.id).count() == 3
+
+
+def test_retry_learning_deck_rebinds_skipped_source_to_canonical_content(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    canonical = _create_visible_article(db_session, test_user, content_factory)
+    skipped = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Duplicate shell",
+        content_metadata={"content": "Temporary duplicate body."},
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=skipped)
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=skipped.id,
+        interests_prompt="Preserve this focus",
+    )
+    failed_task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    failed_task.status = LlmTaskStatus.FAILED.value
+    failed_task.workflow_state = LlmWorkflowState.FAILED.value
+    skipped.status = ContentStatus.SKIPPED.value
+    skipped.content_metadata = {"canonical_content_id": canonical.id}
+    db_session.commit()
+
+    retried = retry_learning_deck(
+        db_session,
+        user_id=_required_id(test_user.id),
+        deck_id=_required_id(deck.id),
+    )
+    retry_task = db_session.query(LlmTask).filter_by(id=retried.latest_task_id).one()
+
+    assert retried.source_content_id == canonical.id
+    assert retried.source_identity == f"content:{canonical.id}"
+    assert retry_task.input_json["source"]["source_content_id"] == canonical.id
+    assert retry_task.input_json["source"]["source_identity"] == f"content:{canonical.id}"
+    assert retry_task.input_json["interests_prompt"] == "Preserve this focus"
+
+
+def test_retry_learning_deck_rejects_nonfailed_latest_attempts(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = _create_visible_article(db_session, test_user, content_factory)
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=content.id,
+    )
+    task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+
+    with pytest.raises(ValueError, match="does not have a failed attempt"):
+        retry_learning_deck(
+            db_session,
+            user_id=_required_id(test_user.id),
+            deck_id=_required_id(deck.id),
+        )
+
+    task.status = LlmTaskStatus.COMPLETED.value
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="does not have a failed attempt"):
+        retry_learning_deck(
+            db_session,
+            user_id=_required_id(test_user.id),
+            deck_id=_required_id(deck.id),
+        )
 
 
 def test_create_learning_deck_enforces_one_active_run_per_user(

@@ -144,6 +144,47 @@ def test_learning_deck_llm_task_uses_source_body_before_artwork_finishes(
     assert captured_source["body_text"] == "A sufficiently detailed source body."
 
 
+def test_learning_deck_llm_task_follows_canonical_content_redirect(
+    db_session,
+    test_user,
+    content_factory,
+    monkeypatch,
+) -> None:
+    duplicate, deck, task = _create_task(db_session, test_user, content_factory)
+    canonical = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Canonical source",
+        content_metadata={"content": "Canonical source body for the generated deck."},
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=canonical)
+    duplicate.status = ContentStatus.SKIPPED.value
+    duplicate.content_metadata = {"canonical_content_id": canonical.id}
+    db_session.commit()
+    captured_source: dict[str, object] = {}
+
+    def run_agent(**kwargs):
+        captured_source.update(kwargs["source_snapshot"])
+        return _agent_result()
+
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation.store_learning_deck_artifact",
+        lambda **_kwargs: _stored_artifact(),
+    )
+
+    result = run_learning_deck_task(
+        db_session,
+        llm_task_id=task.id,
+        agent_runner=run_agent,
+    )
+
+    db_session.refresh(deck)
+    assert result.status == LlmTaskStatus.COMPLETED.value
+    assert captured_source["source_content_id"] == canonical.id
+    assert captured_source["body_text"] == "Canonical source body for the generated deck."
+    assert deck.source_content_id == canonical.id
+    assert deck.source_identity == f"content:{canonical.id}"
+
+
 @pytest.mark.parametrize(
     "error_type",
     ["agent_execution_failed", "artifact_contract_failed"],
@@ -225,8 +266,12 @@ def test_learning_deck_llm_task_publishes_and_drives_api_projection(
     assert response.latest_run.id == task.id
     assert response.latest_run.interests_prompt == "Focus on topology"
     assert response.viewer_available is True
-    assert result.output_json["browser_validation"] == agent_result.browser_validation
-    assert result.artifact_manifest["browser_validation"] == agent_result.browser_validation
+    output_json = result.output_json
+    artifact_manifest = result.artifact_manifest
+    assert isinstance(output_json, dict)
+    assert isinstance(artifact_manifest, dict)
+    assert output_json["browser_validation"] == agent_result.browser_validation
+    assert artifact_manifest["browser_validation"] == agent_result.browser_validation
 
 
 def test_learning_deck_llm_task_retires_previous_artifact_bundle(

@@ -555,3 +555,23 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** All 170 Briefing service and production-eval tests passed; focused mypy passed; touched Python Ruff and formatting checks passed; the unchanged 25% iOS font reduction retained its successful full Simulator build; `git diff --check` passed.
 - **Remaining:** Production segment `4351` remains immutable until retired/refreshed. No production mutation or deployment was performed.
 - **Commits:** Uncommitted.
+
+### 2026-08-09 — `main` — Replace generated codebase docs with product laws
+
+- **Status:** Complete.
+- **Scope:** Documentation routing, generated repository maps, and canonical cross-product behavior.
+- **Decisions:** Preserve architecture, coding guidance, operations, and historical initiative material; remove the generated folder-by-folder documentation and its generator; make laws normative, concise, implementation-independent, and testable.
+- **Changes:** Added a laws index and focused laws for accounts, content, Briefing, Knowledge/Learning, chat, sharing/sources, audio/voice, and processing/reliability; removed the generated reference tree and generator; redirected current documentation guidance; and decoupled source-boundary tests from generated documentation copy.
+- **Validation:** All 55 affected iOS source-boundary tests passed; touched-test Ruff passed; the architecture guard passed 753 files, 23 ratchets, and 137 tests; public contracts were current; all laws links resolved; deleted documentation had no live references; `git diff --check` passed.
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
+### 2026-08-09 — `main` — Repair Learning Deck source handoff and retry
+
+- **Status:** Complete for the diagnosed Share Action failure and reader retry path.
+- **Scope:** Share Action presentation handoff, canonical content recovery, Learning Deck retry API, iOS reader failure actions, public contracts, and focused regression coverage.
+- **Decisions:** Reuse the Share Action's prepared Knowledge content only when the selected URL identifies the same source; preserve genuinely different agent-selected sources. Treat `canonical_content_id` as the durable redirect for duplicate shells. Retry only failed or cancelled attempts on the same stable deck, retain any prior successful artifact, and make repeat taps idempotent only while that explicit retry is active. Keep generation retry, status reconnection, and WebView reload as separate client actions.
+- **Changes:** Added trusted prepared-source deck creation, X-status URL identity matching, canonical source rebinding before generation, `POST /api/learning/decks/{deck_id}/retry`, retry-attempt provenance, the iOS retry service/state flow with double-tap protection, direct WebView reload, stable retry accessibility identifiers, and the regenerated OpenAPI contract.
+- **Validation:** Ruff passed all touched Python files. All 63 focused Share Action, Learning Deck service/generation, and router tests passed. All 12 focused native Learning Deck reader/status tests passed on the iOS 26.3.1 iPhone 17 Pro simulator, including generation retry, double-tap idempotence, status reconnection, and existing reader lifecycle coverage. Public contract drift check and `git diff --check` passed.
+- **Remaining:** No production data repair, deployment, commit, or push was performed.
+- **Commits:** Uncommitted.

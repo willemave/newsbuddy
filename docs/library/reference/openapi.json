@@ -14717,6 +14717,55 @@
         ]
       }
     },
+    "/api/learning/decks/{deck_id}/retry": {
+      "post": {
+        "description": "Start a new generation attempt for an owned deck that failed.",
+        "operationId": "retryLearningDeck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deck_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Deck Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearningDeckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retry a failed Learning Deck",
+        "tags": [
+          "learning"
+        ]
+      }
+    },
     "/api/learning/decks/{deck_id}/share": {
       "delete": {
         "description": "Disable public sharing for a Learning Deck.",

@@ -69,6 +69,11 @@ struct LearningDeckSlideContext: Equatable {
     }
 }
 
+enum LearningDeckViewerFailureKind: Equatable {
+    case generation
+    case viewerResolution
+}
+
 @MainActor
 @Observable
 final class LearningDeckReaderViewModel {
@@ -84,9 +89,27 @@ final class LearningDeckReaderViewModel {
     // being generated and has no viewer URL yet.
     var resolvedViewerURL: URL?
     var isResolvingViewer = false
-    var viewerResolutionFailed = false
+    var viewerFailureKind: LearningDeckViewerFailureKind?
+    var isRetryingGeneration = false
     var generationStatusLabel = "Preparing your deck"
     var generationNote: String?
+
+    var viewerResolutionFailed: Bool {
+        viewerFailureKind != nil
+    }
+
+    var canRetryGeneration: Bool {
+        viewerFailureKind == .generation
+    }
+
+    var viewerFailureActionTitle: String {
+        switch viewerFailureKind {
+        case .generation:
+            return isRetryingGeneration ? "Trying again…" : "Try again"
+        case .viewerResolution, .none:
+            return "Reconnect"
+        }
+    }
 
     private let deck: LearningDeck
     private let chatService: LearningDeckReaderChatServicing
@@ -144,21 +167,62 @@ final class LearningDeckReaderViewModel {
     }
 
     func retryViewerResolution() {
+        guard !isRetryingGeneration else { return }
         tasks.cancel(.viewer)
         resolvedViewerURL = nil
         startViewerResolution()
     }
 
+    func retryAfterViewerFailure() {
+        guard let viewerFailureKind, !isRetryingGeneration else { return }
+        switch viewerFailureKind {
+        case .generation:
+            startGenerationRetry()
+        case .viewerResolution:
+            retryViewerResolution()
+        }
+    }
+
     func cancelViewerResolution() {
         tasks.cancel(.viewer)
         isResolvingViewer = false
+        isRetryingGeneration = false
     }
 
     private func startViewerResolution() {
         isResolvingViewer = true
-        viewerResolutionFailed = false
+        viewerFailureKind = nil
         tasks.runReplacing(.viewer) { [weak self] in
             await self?.resolveViewerLoop()
+        }
+    }
+
+    private func startGenerationRetry() {
+        guard !isRetryingGeneration else { return }
+        isRetryingGeneration = true
+        tasks.runReplacing(.viewer) { [weak self] in
+            await self?.retryGenerationAndResolveViewer()
+        }
+    }
+
+    private func retryGenerationAndResolveViewer() async {
+        do {
+            let retried = try await deckService.retryDeck(deckId: deck.id)
+            try Task.checkCancellation()
+            await deckStatusRegistry.invalidate(deckId: deck.id)
+            applyGenerationStatus(retried)
+            viewerFailureKind = nil
+            isRetryingGeneration = false
+            isResolvingViewer = true
+            await resolveViewerLoop()
+        } catch where isNetworkCancellation(error) {
+            isRetryingGeneration = false
+            isResolvingViewer = false
+        } catch {
+            isRetryingGeneration = false
+            isResolvingViewer = false
+            viewerFailureKind = .generation
+            generationNote = error.localizedDescription
         }
     }
 
@@ -177,29 +241,38 @@ final class LearningDeckReaderViewModel {
             if latest.viewerAvailable {
                 resolvedViewerURL = try await deckService.viewerURL(deckId: latest.id)
                 isResolvingViewer = false
-                viewerResolutionFailed = false
+                viewerFailureKind = nil
             } else {
                 isResolvingViewer = false
-                viewerResolutionFailed = true
+                viewerFailureKind = generationFailed(latest) ? .generation : .viewerResolution
             }
         } catch where isNetworkCancellation(error) {
             isResolvingViewer = false
         } catch LearningDeckStatusRegistryError.timeout {
             isResolvingViewer = false
-            viewerResolutionFailed = false
+            viewerFailureKind = nil
             generationStatusLabel = "Taking longer than expected"
             generationNote = "Your deck is still being prepared."
         } catch {
             isResolvingViewer = false
-            viewerResolutionFailed = true
+            viewerFailureKind = .viewerResolution
             generationNote = error.localizedDescription
         }
     }
 
     private func applyGenerationStatus(_ latest: LearningDeck) {
         generationStatusLabel = latest.statusLabel
-        if let note = nonEmptyTrimmed(latest.latestNote) {
-            generationNote = note
+        generationNote = nonEmptyTrimmed(latest.latestNote)
+    }
+
+    private func generationFailed(_ latest: LearningDeck) -> Bool {
+        guard let status = latest.latestRun?.status ?? latest.status else { return false }
+        switch status {
+        case .failed, .cancelled:
+            return true
+        case .queued, .preparing, .generating, .validating, .publishing,
+             .completed, .ready, .unknown:
+            return false
         }
     }
 

@@ -52,6 +52,7 @@ from app.services.learning_deck_hosting import (
 from app.services.learning_deck_sources import (
     learning_deck_display_title,
     normalize_github_repository_source,
+    persisted_learning_deck_source,
     resolve_learning_deck_create_source,
     usable_learning_deck_title,
 )
@@ -83,6 +84,7 @@ __all__ = [
     "append_learning_deck_timeline",
     "build_private_learning_deck_token",
     "create_or_rerun_learning_deck",
+    "create_or_rerun_learning_deck_from_source",
     "decode_private_learning_deck_token",
     "delete_learning_deck",
     "disable_learning_deck_share",
@@ -97,6 +99,7 @@ __all__ = [
     "read_learning_deck_asset_object",
     "read_learning_deck_source_notes_object",
     "read_learning_deck_viewer_object",
+    "retry_learning_deck",
 ]
 
 
@@ -135,7 +138,6 @@ def create_or_rerun_learning_deck(
     share_action_task_id: int | None = None,
 ) -> LearningDeck:
     """Create or rerun a Learning Deck and enqueue generation in one transaction."""
-    user_id = require_user_id(current_user)
     source = resolve_learning_deck_create_source(
         db,
         current_user=current_user,
@@ -143,6 +145,27 @@ def create_or_rerun_learning_deck(
         news_item_id=news_item_id,
         url=url,
     )
+    return create_or_rerun_learning_deck_from_source(
+        db,
+        current_user=current_user,
+        source=source,
+        interests_prompt=interests_prompt,
+        submitted_via=submitted_via,
+        share_action_task_id=share_action_task_id,
+    )
+
+
+def create_or_rerun_learning_deck_from_source(
+    db: Session,
+    *,
+    current_user: User,
+    source: LearningDeckSource,
+    interests_prompt: str | None = None,
+    submitted_via: str | None = None,
+    share_action_task_id: int | None = None,
+) -> LearningDeck:
+    """Create or rerun a deck from a source already resolved by a trusted workflow."""
+    user_id = require_user_id(current_user)
     source = _with_submission_metadata(
         source,
         submitted_via=submitted_via,
@@ -151,45 +174,89 @@ def create_or_rerun_learning_deck(
 
     try:
         deck = _get_or_create_deck(db, user_id=user_id, source=source)
-        active_task = _active_learning_deck_task(db, user_id=user_id)
-        if active_task is not None:
-            if active_task.subject_id == deck.id:
-                db.commit()
-                db.refresh(deck)
-                return deck
-            db.rollback()
-            raise LearningDeckError("A Learning Deck is already generating", status_code=409)
-        llm_task = create_llm_task(
+        return _enqueue_learning_deck_attempt(
             db,
+            deck=deck,
+            source=source,
             user_id=user_id,
-            task_kind=LlmTaskKind.LEARNING_DECK,
-            mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
-            workflow_key="learning_deck.presentation.v1",
-            subject_id=require_int_value(deck.id, "Learning Deck id"),
-            approval_policy={"default": LlmTaskApprovalPolicy.AUTO_APPLY.value},
-            allowed_actions=["create_learning_deck"],
-            tool_policy={"execute_bash": True, "web_search": True, "files": "read_write"},
-            prompt_pack="learning_deck.presentation",
-            input_json={
-                "deck_id": require_int_value(deck.id, "Learning Deck id"),
-                "source": {
-                    "source_kind": source.source_kind.value,
-                    "source_identity": source.source_identity,
-                    "source_url": source.source_url,
-                    "source_content_id": source.source_content_id,
-                    "source_title": source.source_title,
-                    "source_metadata": source.source_metadata,
-                },
-                "interests_prompt": clean_optional_text(interests_prompt),
-            },
+            interests_prompt=interests_prompt,
         )
-        llm_task_id = require_int_value(llm_task.id, "LLM task id")
-        deck.latest_task_id = llm_task_id
-        deck.updated_at = utcnow()
-        _enqueue_llm_task(db, llm_task_id=llm_task_id, user_id=user_id)
-        db.commit()
-        db.refresh(deck)
-        return deck
+    except IntegrityError as exc:
+        db.rollback()
+        if _is_active_task_integrity_error(exc):
+            raise LearningDeckError(
+                "A Learning Deck is already generating",
+                status_code=409,
+            ) from exc
+        raise
+
+
+def retry_learning_deck(db: Session, *, user_id: int, deck_id: int) -> LearningDeck:
+    """Create a new attempt for an owned deck whose latest attempt is terminal."""
+    deck = (
+        db.query(LearningDeck)
+        .filter(
+            LearningDeck.id == deck_id,
+            LearningDeck.user_id == user_id,
+            LearningDeck.deleted_at.is_(None),
+        )
+        .with_for_update()
+        .first()
+    )
+    if deck is None:
+        raise LearningDeckError("Learning Deck not found", status_code=404)
+
+    active_task = _active_learning_deck_task(db, user_id=user_id)
+    if active_task is not None:
+        active_input = active_task.input_json if isinstance(active_task.input_json, dict) else {}
+        if active_task.subject_id == deck.id and isinstance(
+            active_input.get("retry_of_attempt_id"), int
+        ):
+            db.commit()
+            db.refresh(deck)
+            return deck
+        db.rollback()
+        message = (
+            "Learning Deck does not have a failed attempt"
+            if active_task.subject_id == deck.id
+            else "A Learning Deck is already generating"
+        )
+        raise LearningDeckError(message, status_code=409)
+
+    latest_task = _latest_task_for_deck(db, deck)
+    latest_run = None if latest_task is not None else _latest_run_for_deck(db, deck)
+    latest_status = (
+        latest_task.status if latest_task is not None else getattr(latest_run, "status", None)
+    )
+    if latest_status not in {
+        LlmTaskStatus.FAILED.value,
+        LlmTaskStatus.CANCELLED.value,
+    }:
+        raise LearningDeckError("Learning Deck does not have a failed attempt", status_code=409)
+
+    interests_prompt = (
+        clean_optional_text(
+            (latest_task.input_json if isinstance(latest_task.input_json, dict) else {}).get(
+                "interests_prompt"
+            )
+        )
+        if latest_task is not None
+        else clean_optional_text(getattr(latest_run, "interests_prompt", None))
+    )
+    source = persisted_learning_deck_source(db, deck)
+    retry_of_attempt_id = require_int_value(
+        latest_task.id if latest_task is not None else getattr(latest_run, "id", None),
+        "Learning Deck attempt id",
+    )
+    try:
+        return _enqueue_learning_deck_attempt(
+            db,
+            deck=deck,
+            source=source,
+            user_id=user_id,
+            interests_prompt=interests_prompt,
+            retry_of_attempt_id=retry_of_attempt_id,
+        )
     except IntegrityError as exc:
         db.rollback()
         if _is_active_task_integrity_error(exc):
@@ -354,6 +421,21 @@ def _get_or_create_deck(
         )
         .first()
     )
+    if (
+        deck is None
+        and source.source_kind == LearningDeckSourceKind.CONTENT
+        and source.source_content_id is not None
+    ):
+        deck = (
+            db.query(LearningDeck)
+            .filter(
+                LearningDeck.user_id == user_id,
+                LearningDeck.source_content_id == source.source_content_id,
+                LearningDeck.deleted_at.is_(None),
+            )
+            .order_by(desc(LearningDeck.updated_at), desc(LearningDeck.id))
+            .first()
+        )
     if deck is None:
         deck = LearningDeck(
             user_id=user_id,
@@ -372,6 +454,7 @@ def _get_or_create_deck(
         return deck
 
     deck.source_kind = source.source_kind.value
+    deck.source_identity = source.source_identity
     deck.source_url = source.source_url
     deck.source_content_id = source.source_content_id
     deck.source_title = source.source_title
@@ -398,6 +481,61 @@ def _merged_source_metadata(
     if isinstance(existing_submission, dict):
         metadata["submission"] = dict(existing_submission)
     return metadata
+
+
+def _enqueue_learning_deck_attempt(
+    db: Session,
+    *,
+    deck: LearningDeck,
+    source: LearningDeckSource,
+    user_id: int,
+    interests_prompt: str | None,
+    retry_of_attempt_id: int | None = None,
+) -> LearningDeck:
+    active_task = _active_learning_deck_task(db, user_id=user_id)
+    if active_task is not None:
+        if active_task.subject_id == deck.id:
+            db.commit()
+            db.refresh(deck)
+            return deck
+        db.rollback()
+        raise LearningDeckError("A Learning Deck is already generating", status_code=409)
+
+    input_json: dict[str, Any] = {
+        "deck_id": require_int_value(deck.id, "Learning Deck id"),
+        "source": {
+            "source_kind": source.source_kind.value,
+            "source_identity": source.source_identity,
+            "source_url": source.source_url,
+            "source_content_id": source.source_content_id,
+            "source_title": source.source_title,
+            "source_metadata": source.source_metadata,
+        },
+        "interests_prompt": clean_optional_text(interests_prompt),
+    }
+    if retry_of_attempt_id is not None:
+        input_json["retry_of_attempt_id"] = retry_of_attempt_id
+
+    llm_task = create_llm_task(
+        db,
+        user_id=user_id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+        subject_id=require_int_value(deck.id, "Learning Deck id"),
+        approval_policy={"default": LlmTaskApprovalPolicy.AUTO_APPLY.value},
+        allowed_actions=["create_learning_deck"],
+        tool_policy={"execute_bash": True, "web_search": True, "files": "read_write"},
+        prompt_pack="learning_deck.presentation",
+        input_json=input_json,
+    )
+    llm_task_id = require_int_value(llm_task.id, "LLM task id")
+    deck.latest_task_id = llm_task_id
+    deck.updated_at = utcnow()
+    _enqueue_llm_task(db, llm_task_id=llm_task_id, user_id=user_id)
+    db.commit()
+    db.refresh(deck)
+    return deck
 
 
 def _enqueue_llm_task(db: Session, *, llm_task_id: int, user_id: int) -> int:

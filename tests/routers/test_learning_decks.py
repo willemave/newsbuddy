@@ -48,6 +48,55 @@ def test_create_learning_deck_endpoint_enqueues_generation(
     assert task.queue_name == "llm"
 
 
+def test_retry_learning_deck_endpoint_starts_one_new_attempt(
+    client,
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = _create_visible_article(db_session, test_user, content_factory)
+    create_response = client.post("/api/learning/decks", json={"content_id": content.id})
+    deck_id = create_response.json()["id"]
+    deck = db_session.query(LearningDeck).filter_by(id=deck_id).one()
+    failed_task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    failed_task.status = "failed"
+    failed_task.workflow_state = "failed"
+    db_session.commit()
+
+    response = client.post(f"/api/learning/decks/{deck_id}/retry")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["id"] == deck_id
+    assert payload["status"] == "queued"
+    retry_task_id = payload["latest_run"]["id"]
+    assert retry_task_id != failed_task.id
+
+    repeated = client.post(f"/api/learning/decks/{deck_id}/retry")
+
+    assert repeated.status_code == 202
+    assert repeated.json()["latest_run"]["id"] == retry_task_id
+    assert db_session.query(LlmTask).filter_by(subject_id=deck_id).count() == 2
+
+
+def test_retry_learning_deck_endpoint_requires_owned_failed_deck(
+    client,
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = _create_visible_article(db_session, test_user, content_factory)
+    create_response = client.post("/api/learning/decks", json={"content_id": content.id})
+    deck_id = create_response.json()["id"]
+    deck = db_session.query(LearningDeck).filter_by(id=deck_id).one()
+    task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    task.status = "completed"
+    db_session.commit()
+
+    assert client.post(f"/api/learning/decks/{deck_id}/retry").status_code == 409
+    assert client.post("/api/learning/decks/999999/retry").status_code == 404
+
+
 def test_create_learning_deck_from_url_saves_to_knowledge_and_skips_unread_long_read(
     client,
     db_session,

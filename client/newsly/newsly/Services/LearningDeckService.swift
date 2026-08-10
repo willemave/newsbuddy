@@ -108,6 +108,7 @@ protocol LearningDeckServicing: LearningDeckStatusFetching {
         url: String?,
         interestsPrompt: String?
     ) async throws -> LearningDeck
+    func retryDeck(deckId: Int) async throws -> LearningDeck
     func viewerURL(deckId: Int) async throws -> URL
     func sourceNotesURL(deckId: Int) async throws -> URL
     func enableShare(deckId: Int) async throws -> LearningDeckShareResponse
@@ -157,6 +158,14 @@ final class LearningDeckService {
             APIEndpoints.learningDecks,
             method: "POST",
             body: body
+        )
+        return LearningDeck(apiResponse: response)
+    }
+
+    func retryDeck(deckId: Int) async throws -> LearningDeck {
+        let response: APILearningDeckResponse = try await client.request(
+            APIEndpoints.learningDeckRetry(id: deckId),
+            method: "POST"
         )
         return LearningDeck(apiResponse: response)
     }

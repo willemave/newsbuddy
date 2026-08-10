@@ -278,10 +278,54 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
         XCTAssertTrue(stoppedPolling)
         XCTAssertEqual(service.fetchCallCount, 1)
         XCTAssertEqual(service.viewerCallCount, 1)
+        XCTAssertFalse(viewModel.canRetryGeneration)
         XCTAssertEqual(
             viewModel.generationNote,
             LearningDeckURLValidationError.insecureRemoteURL.localizedDescription
         )
+
+        viewModel.retryAfterViewerFailure()
+
+        let retriedViewerURL = await waitUntil { service.viewerCallCount == 2 }
+        XCTAssertTrue(retriedViewerURL)
+        XCTAssertEqual(service.retryCallCount, 0)
+    }
+
+    func testFailedGenerationRetryCreatesOneAttemptAndResolvesViewer() async {
+        let failed = makeLearningDeck(runStatus: .failed)
+        let retried = makeLearningDeck(runStatus: .queued, runId: 2)
+        let completed = makeLearningDeck(
+            viewerAvailable: true,
+            latestSuccessfulRunId: 2,
+            runStatus: .completed,
+            runId: 2
+        )
+        let expectedURL = URL(string: "https://example.com/retried-deck")!
+        let service = MockLearningDeckService(
+            fetchResults: [.success(failed), .success(completed)],
+            retryResults: [.success(retried)],
+            viewerURLs: [expectedURL]
+        )
+        let viewModel = makeReaderViewModel(
+            deck: makeLearningDeck(runStatus: .preparing),
+            service: service
+        )
+
+        viewModel.prepareViewer(initialURL: nil)
+
+        let showedGenerationFailure = await waitUntil {
+            viewModel.viewerResolutionFailed && viewModel.canRetryGeneration
+        }
+        XCTAssertTrue(showedGenerationFailure)
+
+        viewModel.retryAfterViewerFailure()
+        viewModel.retryAfterViewerFailure()
+
+        let resolved = await waitUntil { viewModel.resolvedViewerURL == expectedURL }
+        XCTAssertTrue(resolved)
+        XCTAssertEqual(service.retryCallCount, 1)
+        XCTAssertFalse(viewModel.viewerResolutionFailed)
+        XCTAssertFalse(viewModel.isRetryingGeneration)
     }
 
     private func makeReaderViewModel(
@@ -417,10 +461,12 @@ private final class MockLearningDeckService: LearningDeckServicing {
     private var listedDeckResponses: [[LearningDeck]]
     private var fetchResults: [Result<LearningDeck, Error>]
     private let createResult: LearningDeck?
+    private var retryResults: [Result<LearningDeck, Error>]
     private var viewerURLs: [URL]
     private let viewerError: Error?
 
     private(set) var fetchCallCount = 0
+    private(set) var retryCallCount = 0
     private(set) var viewerCallCount = 0
     private(set) var createRequests: [CreateRequest] = []
     private let listStateLock = NSLock()
@@ -436,12 +482,14 @@ private final class MockLearningDeckService: LearningDeckServicing {
         listedDeckResponses: [[LearningDeck]]? = nil,
         fetchResults: [Result<LearningDeck, Error>] = [],
         createResult: LearningDeck? = nil,
+        retryResults: [Result<LearningDeck, Error>] = [],
         viewerURLs: [URL] = [],
         viewerError: Error? = nil
     ) {
         self.listedDeckResponses = listedDeckResponses ?? [listedDecks]
         self.fetchResults = fetchResults
         self.createResult = createResult
+        self.retryResults = retryResults
         self.viewerURLs = viewerURLs
         self.viewerError = viewerError
     }
@@ -497,6 +545,15 @@ private final class MockLearningDeckService: LearningDeckServicing {
             throw LearningDeckTestError.unimplemented
         }
         return createResult
+    }
+
+    func retryDeck(deckId: Int) async throws -> LearningDeck {
+        retryCallCount += 1
+        guard !retryResults.isEmpty else {
+            throw LearningDeckTestError.unimplemented
+        }
+        let result = retryResults.count == 1 ? retryResults[0] : retryResults.removeFirst()
+        return try result.get()
     }
 
     func viewerURL(deckId: Int) async throws -> URL {

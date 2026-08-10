@@ -30,7 +30,15 @@ from app.models.db import Content, LlmTask, LlmTaskAction, User
 from app.services.content_submission import normalize_url
 from app.services.dig_deeper import get_or_create_dig_deeper_session
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
-from app.services.learning_decks import create_or_rerun_learning_deck
+from app.services.learning_deck_sources import (
+    content_learning_deck_source,
+    resolve_canonical_learning_deck_content,
+)
+from app.services.learning_decks import (
+    create_or_rerun_learning_deck,
+    create_or_rerun_learning_deck_from_source,
+    normalize_github_repository_source,
+)
 from app.services.llm_tasks import (
     LlmTaskError,
     create_llm_task,
@@ -63,6 +71,7 @@ from app.services.share_action_workflows import (
     share_action_idempotency_key,
     share_action_workflow_for_mode,
 )
+from app.services.twitter_share import extract_tweet_id
 
 ShareActionAgentRunner = Callable[[Session, LlmTask], ShareActionAgentRunResult]
 
@@ -583,14 +592,32 @@ def _apply_create_learning_deck_action(
             save_to_knowledge_and_mark_read=True,
         )
         content_id = content_result.content_id
-    deck = create_or_rerun_learning_deck(
-        db,
-        current_user=user,
-        url=action_input.source_url,
-        interests_prompt=_clean_optional_text(action_input.interests_prompt),
-        submitted_via="share_action",
-        share_action_task_id=require_llm_task_id(task),
+    prepared_content = (
+        None
+        if normalize_github_repository_source(action_input.source_url) is not None
+        else _prepared_content_for_url(db, task=task, url=action_input.source_url)
     )
+    if prepared_content is not None:
+        canonical_content = resolve_canonical_learning_deck_content(db, prepared_content)
+        content_id = _require_content_id(canonical_content)
+        deck = create_or_rerun_learning_deck_from_source(
+            db,
+            current_user=user,
+            source=content_learning_deck_source(canonical_content),
+            interests_prompt=_clean_optional_text(action_input.interests_prompt),
+            submitted_via="share_action",
+            share_action_task_id=require_llm_task_id(task),
+        )
+    else:
+        deck = create_or_rerun_learning_deck(
+            db,
+            current_user=user,
+            url=action_input.source_url,
+            interests_prompt=_clean_optional_text(action_input.interests_prompt),
+            submitted_via="share_action",
+            share_action_task_id=require_llm_task_id(task),
+        )
+        content_id = deck.source_content_id or content_id
     return {
         "learning_deck_id": deck.id,
         "source_url": action_input.source_url,
@@ -604,9 +631,26 @@ def _prepared_content_for_url(db: Session, *, task: LlmTask, url: str) -> Conten
     source_url = _clean_optional_text(input_json.get("url"))
     if content_id is None or source_url is None:
         return None
-    if normalize_url(source_url) != normalize_url(url):
+    content = db.query(Content).filter(Content.id == content_id).first()
+    if content is None:
         return None
-    return db.query(Content).filter(Content.id == content_id).first()
+    candidates = (source_url, content.source_url, content.url)
+    if not any(_urls_identify_same_source(candidate, url) for candidate in candidates):
+        return None
+    return content
+
+
+def _urls_identify_same_source(first: str | None, second: str | None) -> bool:
+    if not first or not second:
+        return False
+    first_tweet_id = extract_tweet_id(first)
+    second_tweet_id = extract_tweet_id(second)
+    if first_tweet_id or second_tweet_id:
+        return first_tweet_id is not None and first_tweet_id == second_tweet_id
+    try:
+        return normalize_url(first).rstrip("/") == normalize_url(second).rstrip("/")
+    except ValueError:
+        return False
 
 
 def _enrich_prepared_content(content: Content, action_input: ContentActionInput) -> None:

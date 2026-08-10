@@ -872,6 +872,9 @@ The worker handler owns terminal failure recording. Successful publication locks
 commits its new artifact bundle and attempt pointers together through
 `app/services/learning_deck_publication.py`, then retires the superseded object-store bundle. Request
 paths read the canonical ledger and do not reconcile queue failures as a side effect.
+An explicit deck retry accepts only a failed or cancelled latest attempt, creates a new `llm_tasks`
+attempt on the same stable deck, and is idempotent while that retry is active. The last successful
+artifact pointers remain authoritative until a replacement publishes successfully.
 
 Source preparation uses queue deferral rather than failure retry: a deferred task returns to
 `pending`, preserves its retry count, clears stale errors, and waits until `available_at`. Content-
@@ -881,6 +884,10 @@ The existing bounded deferral loop resumes generation when the source becomes re
 spending the task's retry budget. Terminal content/prerequisite failures and sources with no active
 preparation path fail explicitly. Before publishing, the workflow renews and verifies queue
 ownership.
+Share Action deck handoffs reuse the content row prepared for Knowledge when the agent-selected URL
+still identifies that source. If ingestion later marks that row as a duplicate through
+`canonical_content_id`, deck preparation follows the canonical row and updates its persisted source
+pointer before classifying the source as terminal.
 
 VM-backed agents share five direct host tools: `execute_bash`, `read_file`, `write_file`,
 `list_files`, and `web_search`. Tool results are structured. Learning Deck output is validated

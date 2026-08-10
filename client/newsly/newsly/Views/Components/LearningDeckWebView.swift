@@ -62,6 +62,11 @@ final class LearningDeckReaderWebController {
         )
     }
 
+    func reload() {
+        markLoading()
+        webView?.reload()
+    }
+
     func toggleOverview() { evaluate("if (window.Reveal && Reveal.toggleOverview) { Reveal.toggleOverview(); }") }
 
     private func evaluate(_ javascript: String) {

@@ -167,6 +167,9 @@ enum APIEndpoints {
     static func learningDeck(id: Int) -> String {
         return "/api/learning/decks/\(id)"
     }
+    static func learningDeckRetry(id: Int) -> String {
+        return "/api/learning/decks/\(id)/retry"
+    }
     static func learningDeckViewerURL(id: Int) -> String {
         return "/api/learning/decks/\(id)/viewer-url"
     }

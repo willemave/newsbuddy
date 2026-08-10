@@ -34,6 +34,7 @@ from app.services.learning_deck_publication import commit_learning_deck_artifact
 from app.services.learning_deck_sources import (
     build_content_source_snapshot_for_deck,
     build_github_source_snapshot_for_deck,
+    rebind_learning_deck_to_canonical_content,
 )
 from app.services.llm_tasks import (
     LlmTaskError,
@@ -318,6 +319,8 @@ def _source_terminal_error(
     content = db.query(Content).filter(Content.id == content_id).first()
     if content is None:
         return "source_not_found", "Source content no longer exists"
+    content = rebind_learning_deck_to_canonical_content(db, deck=deck, content=content)
+    content_id = require_int_value(content.id, "Content id")
     if content.status in {ContentStatus.FAILED.value, ContentStatus.SKIPPED.value}:
         return "source_processing_failed", "Source content processing failed"
 

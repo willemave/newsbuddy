@@ -34,6 +34,7 @@ from app.services.learning_decks import (
     read_learning_deck_asset_object,
     read_learning_deck_source_notes_object,
     read_learning_deck_viewer_object,
+    retry_learning_deck,
 )
 
 router = APIRouter(prefix="/learning", tags=["learning"])
@@ -96,6 +97,29 @@ def get_deck(
     deck = get_learning_deck(db, user_id=require_user_id(current_user), deck_id=deck_id)
     if deck is None:
         raise HTTPException(status_code=404, detail="Learning Deck not found")
+    return present_learning_deck(db, deck)
+
+
+@router.post(
+    "/decks/{deck_id}/retry",
+    response_model=LearningDeckResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Retry a failed Learning Deck",
+)
+def retry_deck(
+    deck_id: Annotated[int, Path(..., gt=0)],
+    db: Annotated[Session, Depends(get_db_session)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> LearningDeckResponse:
+    """Start a new generation attempt for an owned deck that failed."""
+    try:
+        deck = retry_learning_deck(
+            db,
+            user_id=require_user_id(current_user),
+            deck_id=deck_id,
+        )
+    except LearningDeckError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     return present_learning_deck(db, deck)
 
 

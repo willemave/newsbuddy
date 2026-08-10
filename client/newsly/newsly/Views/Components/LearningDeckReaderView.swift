@@ -166,7 +166,12 @@ struct LearningDeckReaderView: View {
                 .font(.terracottaBodySmall)
                 .foregroundStyle(Color.onSurfaceSecondary)
                 .multilineTextAlignment(.center)
-            pillButton("Try again") { viewModel.retryViewerResolution() }
+            pillButton(
+                "Reload",
+                accessibilityIdentifier: "learning_deck.reader.reload_viewer"
+            ) {
+                webController.reload()
+            }
                 .padding(.top, 4)
         }
         .padding(.horizontal, 32)
@@ -188,7 +193,15 @@ struct LearningDeckReaderView: View {
                 Text(viewModel.generationNote ?? "That deck didn't come together.")
                     .font(.terracottaBodySmall)
                     .foregroundStyle(Color.onSurfaceSecondary)
-                pillButton("Try again") { viewModel.retryViewerResolution() }
+                pillButton(
+                    viewModel.viewerFailureActionTitle,
+                    isEnabled: !viewModel.isRetryingGeneration,
+                    accessibilityIdentifier: viewModel.canRetryGeneration
+                        ? "learning_deck.reader.retry_generation"
+                        : "learning_deck.reader.reconnect"
+                ) {
+                    viewModel.retryAfterViewerFailure()
+                }
                     .padding(.top, 4)
             } else {
                 ProgressView()
@@ -321,7 +334,12 @@ struct LearningDeckReaderView: View {
         .accessibilityLabel("Slide \(progress.current) of \(progress.total)")
     }
 
-    private func pillButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func pillButton(
+        _ title: String,
+        isEnabled: Bool = true,
+        accessibilityIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.terracottaBodyMedium.weight(.semibold))
@@ -332,6 +350,9 @@ struct LearningDeckReaderView: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(PressableButtonStyle())
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.6)
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     // MARK: - Derived state
