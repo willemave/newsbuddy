@@ -99,22 +99,18 @@ cases:
         caption: normal
         placement: inset
 
-  - id: prod_segment_1089_duplicate_news_coverage_repair
+  - id: prod_segment_1089_duplicate_news_missing_coverage
     description: >
       Replays the unlinked lead passage and pullquote that produced the repeated
       M.G. Siegler story in production Briefing segment 1089 on 2026-07-10.
-      Generic coverage repair appended linked summaries for both sources, so the
-      news-tier contract must reject the resulting multi-block layout.
+      The response omitted linked coverage for both sources, so the layout must
+      be retried instead of appending deterministic source summaries.
     production_segment_id: 1089
     lens_key: news-ai-in-practice
     lens_title: AI in Practice
     tier: news
     window_index: 1
-    expected_disposition: repair
-    expected_contract_issues:
-      - news_requires_one_passage
-    expected_warnings:
-      - coverage_repair:2
+    expected_disposition: retry
     sources:
       - source_key: news:19257
         kind: news

@@ -252,7 +252,7 @@ def assess_briefing_layout(
     missing_source_keys = source_keys - covered_source_keys
     if missing_source_keys:
         issues.append("missing_source_coverage:" + ",".join(sorted(missing_source_keys)))
-        repair_required = True
+        retry_required = True
     if not has_usable_passage:
         issues.append("missing_usable_passage")
         retry_required = True

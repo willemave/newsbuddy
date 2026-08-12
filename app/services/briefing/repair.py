@@ -144,18 +144,6 @@ def repair_layout(
                 warnings.append("passage_text_field_recovered")
         repaired.append(block)
 
-    missing_source_keys = set(assessment.coverage.missing_source_keys)
-    missing = [source for source in sources if source.source_key in missing_source_keys]
-    if missing:
-        repaired.append(
-            {
-                "type": "passage",
-                "weight": "brief",
-                "markdown": " ".join(_deterministic_source_sentence(source) for source in missing),
-            }
-        )
-        warnings.append(f"coverage_repair:{len(missing)}")
-
     if ensure_source_figures and repaired:
         backfilled = _backfill_source_figures(
             repaired,
@@ -242,12 +230,6 @@ def _figure_insert_index(blocks: list[dict[str, Any]], *, source_key: str) -> in
             insert_at += 1
         return insert_at
     return len(blocks)
-
-
-def _deterministic_source_sentence(source: BriefingSource) -> str:
-    url_kind = "content" if source.kind == "content" else "news"
-    sentence = source.summary or (source.key_points[0] if source.key_points else "is ready to read")
-    return f"[{source.title}](newsly://briefing/{url_kind}/{source.id}) {sentence}"
 
 
 def _replace_em_dashes(text: str) -> str:

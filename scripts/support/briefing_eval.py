@@ -174,7 +174,6 @@ def run_briefing_eval_case(
                 lens_title=case.lens_title,
                 tier=case.tier,
                 window_index=case.window_index,
-                use_llm=True,
                 settings=live_settings,
             )
             usage = None
@@ -228,7 +227,9 @@ def run_briefing_eval_case(
             ensure_source_figures=case.tier != "news",
         )
         contract_issues = (
-            news_layout_contract_issues(processed, sources=sources) if case.tier == "news" else []
+            news_layout_contract_issues(processed, sources=sources)
+            if case.tier == "news" and processed.normalized is not None
+            else []
         )
         expected_low_signal_values = set(case.expected_low_signal_values)
         expectation_met = (

@@ -49,7 +49,11 @@ from app.services.onboarding.internal_models import (
 from app.services.tweet_suggestions import TweetSuggestionData, TweetSuggestionsResult
 from tests.support.feed_subscription_test_helpers import stub_feed_validator
 
-pytestmark = [pytest.mark.integration, pytest.mark.ios_e2e]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.ios_e2e,
+    pytest.mark.usefixtures("stub_briefing_layout_generator"),
+]
 
 
 def _personalized_onboarding_plan() -> _AudioPlanOutput:

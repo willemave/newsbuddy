@@ -10,7 +10,11 @@ from app.services.briefing.presentation import get_briefing_lens
 from app.services.briefing.refresh import run_briefing_refresh
 from app.services.briefing.source_keys import build_source_key
 
-pytestmark = [pytest.mark.integration, pytest.mark.ios_e2e]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.ios_e2e,
+    pytest.mark.usefixtures("stub_briefing_layout_generator"),
+]
 
 
 def test_briefing_routes_article_and_podcast_fixtures_to_their_lenses(

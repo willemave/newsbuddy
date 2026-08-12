@@ -29,6 +29,8 @@ from app.services.briefing.presentation import (
 from app.services.briefing.refresh import run_briefing_refresh
 from app.services.exa_client import ExaSearchResult
 
+pytestmark = pytest.mark.usefixtures("stub_briefing_layout_generator")
+
 
 def test_briefing_index_honors_etag(
     client: TestClient,

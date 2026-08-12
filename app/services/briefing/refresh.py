@@ -22,7 +22,7 @@ from app.models.db import (
     ProcessingTask,
 )
 from app.services.briefing import compaction, window_composition
-from app.services.briefing.composer import generate_layout_with_llm, plan_windows
+from app.services.briefing.composer import LayoutGenerator, generate_layout_with_llm, plan_windows
 from app.services.briefing.eligibility import is_briefing_enabled_for_user
 from app.services.briefing.first_run import bump_first_edition_revision
 from app.services.briefing.lenses import (
@@ -178,6 +178,7 @@ def run_briefing_refresh(
     task_id: int | None = None,
     use_llm: bool = True,
     settings: Settings | None = None,
+    layout_generator: LayoutGenerator | None = None,
 ) -> BriefingRefreshResult:
     """Refresh one user's Briefing without holding a DB transaction during composition."""
 
@@ -269,7 +270,7 @@ def run_briefing_refresh(
         db.commit()
 
         compaction_windows = [window for plan in prepared_compactions for window in plan.windows]
-        layout_generator = (
+        resolved_layout_generator = layout_generator or (
             partial(
                 generate_layout_with_llm,
                 structured_output_requester=structured_output_requester,
@@ -283,9 +284,8 @@ def run_briefing_refresh(
             compaction_windows,
             user_id=user_id,
             task_id=task_id,
-            use_llm=use_llm,
             settings=settings,
-            layout_generator=layout_generator,
+            layout_generator=resolved_layout_generator,
         )
         composition_ms = round((perf_counter() - composition_started_at) * 1000, 2)
 

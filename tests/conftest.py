@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
@@ -34,6 +35,43 @@ from tests.support.builders import (
     create_user_row,
 )
 from tests.support.fixture_files import load_json_fixture
+
+
+@pytest.fixture
+def stub_briefing_layout_generator(monkeypatch):
+    """Replace Briefing model I/O with valid model-shaped output in orchestration tests."""
+
+    def _generate(sources, **kwargs):  # noqa: ANN001
+        source_sentences = []
+        for source in sources:
+            url_kind = "content" if source.kind == "content" else "news"
+            summary = source.summary or (
+                source.key_points[0] if source.key_points else "is ready to read"
+            )
+            source_sentences.append(
+                f"[{source.title}](newsly://briefing/{url_kind}/{source.id}) {summary}"
+            )
+        if kwargs.get("tier") == "news":
+            clauses = [
+                re.sub(r"[.!?]+(?=\s|$)", ",", sentence).strip(" ,;")
+                for sentence in source_sentences
+            ]
+            markdown = "; ".join(clauses) + "."
+        else:
+            markdown = " ".join(source_sentences)
+        return [
+            {
+                "type": "passage",
+                "weight": "feature",
+                "markdown": markdown,
+            }
+        ], None
+
+    monkeypatch.setattr(
+        "app.services.briefing.composer.generate_layout_with_llm",
+        _generate,
+    )
+    return _generate
 
 
 @pytest.fixture

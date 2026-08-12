@@ -17,6 +17,8 @@ from app.services.briefing.first_run import start_first_edition
 from app.services.briefing.presentation import get_briefing_index
 from app.services.briefing.refresh import enqueue_ready_source, run_briefing_refresh
 
+pytestmark = pytest.mark.usefixtures("stub_briefing_layout_generator")
+
 
 def test_ready_sources_pull_the_debounced_refresh_forward_at_three(
     db_session: Session,

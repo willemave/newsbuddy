@@ -10,7 +10,6 @@ from app.services.briefing.composer import (
     MAX_COMPOSE_ATTEMPTS,
     BriefingCompositionError,
     BriefingCompositionInvalidOutput,
-    _news_clause,
     _parse_composer_layout_json,
     _source_payload,
     compose_window,
@@ -77,30 +76,24 @@ def test_plan_windows_keeps_non_news_sources_in_separate_segments(tier: str) -> 
     assert windows == [[0], [1], [2], [3], [4]]
 
 
-def test_compose_window_falls_back_after_llm_unavailable() -> None:
+def test_compose_window_raises_after_llm_unavailable() -> None:
     attempts: list[int] = []
 
     def fail_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
         attempts.append(1)
         raise TimeoutError("model stalled")
 
-    segment = compose_window(
-        [_source()],
-        lens_key="articles",
-        lens_title="Articles",
-        tier="longform",
-        window_index=1,
-        use_llm=True,
-        layout_generator=fail_llm,
-    )
+    with pytest.raises(BriefingCompositionError, match="composition failed"):
+        compose_window(
+            [_source()],
+            lens_key="articles",
+            lens_title="Articles",
+            tier="longform",
+            window_index=1,
+            layout_generator=fail_llm,
+        )
 
     assert len(attempts) == MAX_COMPOSE_ATTEMPTS
-    assert segment.model == "deterministic"
-    assert "llm_error_retry:1" in segment.warnings
-    assert "llm_unavailable_fallback:TimeoutError" in segment.warnings
-    assert segment.final_assessment is not None
-    assert segment.final_assessment.disposition == BriefingLayoutDisposition.ACCEPT
-    assert segment.blocks
 
 
 def test_compose_window_raises_after_non_availability_errors() -> None:
@@ -117,19 +110,18 @@ def test_compose_window_raises_after_non_availability_errors() -> None:
             lens_title="Articles",
             tier="longform",
             window_index=1,
-            use_llm=True,
             layout_generator=fail_llm,
         )
 
     assert len(attempts) == MAX_COMPOSE_ATTEMPTS
 
 
-def test_layout_policy_repairs_auxiliary_debris_and_missing_coverage() -> None:
+def test_layout_policy_repairs_auxiliary_debris() -> None:
     blocks = [
         *WELL_FORMED_BLOCKS,
         {"type": "pullquote", "source_key": "content:1", "text": "normal"},
     ]
-    sources = [_source(), _source(content_id=2)]
+    sources = [_source()]
 
     processed = process_generated_layout(
         blocks,
@@ -140,12 +132,10 @@ def test_layout_policy_repairs_auxiliary_debris_and_missing_coverage() -> None:
 
     assert processed.raw_assessment.disposition == BriefingLayoutDisposition.REPAIR
     assert "low_signal_pullquote:1" in processed.raw_assessment.issues
-    assert processed.raw_assessment.coverage.missing_source_keys == ["content:2"]
     assert processed.accepted is True
     assert processed.final_assessment is not None
     assert processed.final_assessment.disposition == BriefingLayoutDisposition.ACCEPT
     assert "low_signal_pullquote_dropped" in processed.warnings
-    assert "coverage_repair:1" in processed.warnings
 
 
 @pytest.mark.parametrize(
@@ -210,7 +200,6 @@ def test_compose_window_retries_policy_failure_once() -> None:
         lens_title="Articles",
         tier="longform",
         window_index=1,
-        use_llm=True,
         layout_generator=fake_llm,
     )
 
@@ -233,7 +222,6 @@ def test_compose_window_retries_production_scalar_dump() -> None:
         lens_title="Articles",
         tier="longform",
         window_index=1,
-        use_llm=True,
         layout_generator=fake_llm,
     )
 
@@ -242,12 +230,23 @@ def test_compose_window_retries_production_scalar_dump() -> None:
     assert "normal" not in segment.narration_text.casefold()
 
 
-def test_compose_window_repairs_missing_coverage_without_retry() -> None:
+def test_compose_window_retries_missing_coverage() -> None:
     attempts: list[int] = []
 
     def fake_llm(*_args, **_kwargs):  # noqa: ANN002, ANN003
         attempts.append(1)
-        return WELL_FORMED_BLOCKS, None
+        if len(attempts) == 1:
+            return WELL_FORMED_BLOCKS, None
+        return [
+            {
+                "type": "passage",
+                "weight": "feature",
+                "markdown": (
+                    "[A useful article](newsly://briefing/content/1) explains the thesis. "
+                    "[Another article](newsly://briefing/content/2) adds evidence."
+                ),
+            }
+        ], None
 
     segment = compose_window(
         [_source(), _source(content_id=2)],
@@ -255,13 +254,11 @@ def test_compose_window_repairs_missing_coverage_without_retry() -> None:
         lens_title="Articles",
         tier="longform",
         window_index=1,
-        use_llm=True,
         layout_generator=fake_llm,
     )
 
-    assert len(attempts) == 1
-    assert "layout_policy_repair" in segment.warnings
-    assert "coverage_repair:1" in segment.warnings
+    assert len(attempts) == 2
+    assert "llm_layout_policy_retry:1" in segment.warnings
     assert segment.final_assessment is not None
     assert segment.final_assessment.layout_valid is True
 
@@ -291,19 +288,17 @@ def test_news_compose_retries_until_links_share_one_paragraph() -> None:
         lens_title="Test News",
         tier="news",
         window_index=1,
-        use_llm=True,
         layout_generator=fake_llm,
     )
 
     assert len(attempts) == 2
     assert segment.model != "deterministic"
     assert "llm_layout_policy_retry:1" in segment.warnings
-    assert "coverage_repair:1" not in segment.warnings
     assert len(segment.blocks) == 1
     assert len(segment.blocks[0]["paragraphs"]) == 1
 
 
-def test_news_compose_falls_back_cleanly_after_contract_failures() -> None:
+def test_news_compose_raises_after_contract_failures() -> None:
     attempts: list[int] = []
     sources = [_news_source(1), _news_source(2)]
 
@@ -317,30 +312,20 @@ def test_news_compose_falls_back_cleanly_after_contract_failures() -> None:
             }
         ], None
 
-    segment = compose_window(
-        sources,
-        lens_key="news-test",
-        lens_title="Test News",
-        tier="news",
-        window_index=1,
-        use_llm=True,
-        layout_generator=invalid_news_layout,
-    )
+    with pytest.raises(BriefingCompositionInvalidOutput, match="failed policy"):
+        compose_window(
+            sources,
+            lens_key="news-test",
+            lens_title="Test News",
+            tier="news",
+            window_index=1,
+            layout_generator=invalid_news_layout,
+        )
 
     assert len(attempts) == MAX_COMPOSE_ATTEMPTS
-    assert segment.model == "deterministic"
-    assert "news_layout_contract_fallback" in segment.warnings
-    assert not any(warning.startswith("coverage_repair:") for warning in segment.warnings)
-    assert len(segment.blocks) == 1
-    paragraphs = segment.blocks[0]["paragraphs"]
-    assert len(paragraphs) == 1
-    linked_keys = [
-        run["source_key"] for run in paragraphs[0]["runs"] if run["kind"] == "source_link"
-    ]
-    assert linked_keys == ["news:1", "news:2"]
 
 
-def test_news_compose_falls_back_cleanly_when_json_stays_invalid() -> None:
+def test_news_compose_raises_when_json_stays_invalid() -> None:
     attempts: list[int] = []
     sources = [_news_source(1), _news_source(2)]
 
@@ -348,76 +333,17 @@ def test_news_compose_falls_back_cleanly_when_json_stays_invalid() -> None:
         attempts.append(1)
         raise json.JSONDecodeError("Unterminated string", '{"blocks":[{"type":"passage"', 21)
 
-    segment = compose_window(
-        sources,
-        lens_key="news-test",
-        lens_title="Test News",
-        tier="news",
-        window_index=1,
-        use_llm=True,
-        layout_generator=invalid_json,
-    )
+    with pytest.raises(BriefingCompositionInvalidOutput, match="invalid layout JSON"):
+        compose_window(
+            sources,
+            lens_key="news-test",
+            lens_title="Test News",
+            tier="news",
+            window_index=1,
+            layout_generator=invalid_json,
+        )
 
     assert len(attempts) == MAX_COMPOSE_ATTEMPTS
-    assert segment.model == "deterministic"
-    assert "news_invalid_layout_fallback" in segment.warnings
-    assert len(segment.blocks) == 1
-    assert len(segment.blocks[0]["paragraphs"]) == 1
-
-
-def test_deterministic_news_layout_remains_one_paragraph_at_max_batch() -> None:
-    segment = compose_window(
-        [_news_source(index) for index in range(1, 5)],
-        lens_key="news-test",
-        lens_title="Test News",
-        tier="news",
-        window_index=1,
-        use_llm=False,
-    )
-
-    assert len(segment.blocks) == 1
-    paragraphs = segment.blocks[0]["paragraphs"]
-    assert len(paragraphs) == 1
-    linked_keys = [
-        run["source_key"] for run in paragraphs[0]["runs"] if run["kind"] == "source_link"
-    ]
-    assert linked_keys == [f"news:{index}" for index in range(1, 5)]
-    assert segment.narration_text.count(";") == 3
-    assert "News summary 1; News item 2" in segment.narration_text
-    assert "opens with" not in segment.narration_text
-    assert "unread sources" not in segment.narration_text
-
-
-def test_deterministic_deep_layout_starts_with_source_content() -> None:
-    segment = compose_window(
-        [_source()],
-        lens_key="articles",
-        lens_title="Engineering & Infrastructure",
-        tier="longform",
-        window_index=1,
-        use_llm=False,
-    )
-
-    assert segment.narration_text.startswith("A useful article")
-    assert "opens with" not in segment.narration_text
-    assert "unread source" not in segment.narration_text
-    assert not any(block["type"] == "pullquote" for block in segment.blocks)
-
-
-@pytest.mark.parametrize(
-    ("sentence", "expected"),
-    [
-        ("First. Second.", "First, Second"),
-        ("Question?", "Question"),
-        ("Bang!", "Bang"),
-        ("Plain.", "Plain"),
-    ],
-)
-def test_news_clause_preserves_internal_normalization_without_terminal_punctuation(
-    sentence: str,
-    expected: str,
-) -> None:
-    assert _news_clause(sentence) == expected
 
 
 def test_compose_window_repairs_unknown_optional_figure_without_retry() -> None:
@@ -441,7 +367,6 @@ def test_compose_window_repairs_unknown_optional_figure_without_retry() -> None:
         lens_title="Articles",
         tier="longform",
         window_index=1,
-        use_llm=True,
         layout_generator=fake_llm,
     )
 
@@ -464,7 +389,6 @@ def test_compose_window_raises_when_policy_failure_persists() -> None:
             lens_title="Articles",
             tier="longform",
             window_index=1,
-            use_llm=True,
             layout_generator=malformed_layout,
         )
 
@@ -495,7 +419,6 @@ def test_compose_window_retries_when_repaired_layout_still_invalid(
             lens_title="Articles",
             tier="longform",
             window_index=1,
-            use_llm=True,
             layout_generator=fake_llm,
         )
 
@@ -542,7 +465,6 @@ def test_compose_window_raises_when_layout_json_stays_invalid() -> None:
             lens_title="Articles",
             tier="longform",
             window_index=1,
-            use_llm=True,
             layout_generator=invalid_json,
         )
 

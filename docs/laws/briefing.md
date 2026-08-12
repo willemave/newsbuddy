@@ -20,7 +20,8 @@ B9. Briefing validators are private and user-scoped; an unchanged representation
 
 B10. Paging a lens at one fixed version yields the same ordered segments, sources, read flags, and summary as the complete lens.
 
-B11. Refresh appends and coalesces work; a failed refresh leaves the last usable edition intact.
+B11. Refresh appends and coalesces work; publication requires successful LLM composition, and a
+failed refresh publishes no deterministic substitute and leaves the last usable edition intact.
 
 B12. Local snapshots are cold-start caches, never authority, and stale readable content remains visible during recoverable refresh failures.
 

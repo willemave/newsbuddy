@@ -76,21 +76,17 @@ def test_backfill_skips_sources_without_images_and_respects_budget() -> None:
     assert "figure_backfill:2" in result.warnings
 
 
-def test_backfill_uses_coverage_repair_passage_for_uncited_sources() -> None:
+def test_missing_source_coverage_requires_regeneration() -> None:
     sources = [_source(1), _source(2)]
     blocks = [_passage("[First](newsly://briefing/content/1) stands alone.")]
 
-    result = repair_layout(
-        blocks,
-        sources=sources,
-        figure_budget=12,
-        ensure_source_figures=True,
-    )
-
-    types = [block["type"] for block in result.blocks]
-    assert types == ["passage", "figure", "passage", "figure"]
-    assert result.blocks[3]["source_key"] == "content:2"
-    assert "coverage_repair:1" in result.warnings
+    with pytest.raises(BriefingLayoutRepairError, match="requires regeneration"):
+        repair_layout(
+            blocks,
+            sources=sources,
+            figure_budget=12,
+            ensure_source_figures=True,
+        )
 
 
 def test_layout_with_no_usable_passage_is_not_repaired() -> None:

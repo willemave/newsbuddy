@@ -12,13 +12,7 @@ from pydantic_ai.agent import AgentRunResult
 
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
-from app.models.contracts import BriefingFigureAlignment, BriefingFigurePlacement
-from app.services.briefing.layout_models import (
-    ComposerBlock,
-    ComposerLayout,
-    FigureBlock,
-    PassageBlock,
-)
+from app.services.briefing.layout_models import ComposerLayout
 from app.services.briefing.layout_policy import (
     BriefingLayoutAssessment,
     BriefingLayoutDisposition,
@@ -34,7 +28,6 @@ from app.services.briefing.openrouter import (
 from app.services.briefing.repair import repair_layout
 from app.services.briefing.sources import BriefingSource
 from app.services.llm_agents import get_basic_agent
-from app.services.llm_errors import is_llm_unavailable_error
 from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
@@ -139,7 +132,6 @@ def compose_window(
     window_index: int,
     task_id: int | None = None,
     user_id: int | None = None,
-    use_llm: bool = True,
     settings: Settings | None = None,
     layout_generator: LayoutGenerator | None = None,
 ) -> ComposedSegment:
@@ -156,117 +148,21 @@ def compose_window(
         settings.briefing_max_figures_news if tier == "news" else settings.briefing_max_figures_deep
     )
 
-    if use_llm:
-        fallback_reason: str | None = None
-        for attempt in range(1, MAX_COMPOSE_ATTEMPTS + 1):
-            generation_attempts = attempt
-            try:
-                llm_blocks, usage = layout_generator(
-                    sources,
-                    lens_title=lens_title,
-                    tier=tier,
-                    model_spec=model_spec,
-                    timeout_seconds=settings.briefing_llm_timeout_seconds,
-                    task_id=task_id,
-                    user_id=user_id,
-                )
-            except (json.JSONDecodeError, ValidationError) as exc:
-                logger.warning(
-                    "Briefing LLM returned invalid layout JSON",
-                    extra={
-                        "component": "briefing",
-                        "operation": "compose_window",
-                        "task_id": task_id,
-                        "item_id": user_id,
-                        "context_data": {
-                            "lens_key": lens_key,
-                            "tier": tier,
-                            "window_index": window_index,
-                            "attempt": attempt,
-                            "error_type": type(exc).__name__,
-                            "error": str(exc),
-                        },
-                    },
-                )
-                if attempt >= MAX_COMPOSE_ATTEMPTS:
-                    if tier == "news":
-                        fallback_reason = "news_invalid_layout_fallback"
-                        break
-                    raise BriefingCompositionInvalidOutput(
-                        "Briefing LLM returned invalid layout JSON after retries"
-                    ) from exc
-                warnings.append(f"llm_invalid_layout_retry:{attempt}")
-                continue
-            except BriefingCompositionInvalidOutput as exc:
-                logger.warning(
-                    "Briefing LLM returned invalid layout output",
-                    extra={
-                        "component": "briefing",
-                        "operation": "compose_window",
-                        "task_id": task_id,
-                        "item_id": user_id,
-                        "context_data": {
-                            "lens_key": lens_key,
-                            "tier": tier,
-                            "window_index": window_index,
-                            "attempt": attempt,
-                            "error_type": type(exc).__name__,
-                            "error": str(exc),
-                        },
-                    },
-                )
-                if attempt >= MAX_COMPOSE_ATTEMPTS:
-                    if tier == "news":
-                        fallback_reason = "news_invalid_layout_fallback"
-                        break
-                    raise
-                warnings.append(f"llm_invalid_output_retry:{attempt}")
-                continue
-            except Exception as exc:
-                logger.warning(
-                    "Briefing LLM composition failed; retrying or falling back",
-                    extra={
-                        "component": "briefing",
-                        "operation": "compose_window",
-                        "task_id": task_id,
-                        "item_id": user_id,
-                        "context_data": {
-                            "lens_key": lens_key,
-                            "tier": tier,
-                            "window_index": window_index,
-                            "source_count": len(sources),
-                            "error_type": type(exc).__name__,
-                            "error": str(exc),
-                        },
-                    },
-                    exc_info=True,
-                )
-                if attempt >= MAX_COMPOSE_ATTEMPTS:
-                    if is_llm_unavailable_error(exc):
-                        fallback_reason = f"llm_unavailable_fallback:{type(exc).__name__}"
-                        break
-                    raise BriefingCompositionError(
-                        "Briefing LLM composition failed after retries"
-                    ) from exc
-                warnings.append(f"llm_error_retry:{attempt}")
-                continue
-            candidate = process_generated_layout(
-                llm_blocks,
-                sources=sources,
-                figure_budget=figure_budget,
-                ensure_source_figures=tier != "news",
+    for attempt in range(1, MAX_COMPOSE_ATTEMPTS + 1):
+        generation_attempts = attempt
+        try:
+            llm_blocks, usage = layout_generator(
+                sources,
+                lens_title=lens_title,
+                tier=tier,
+                model_spec=model_spec,
+                timeout_seconds=settings.briefing_llm_timeout_seconds,
+                task_id=task_id,
+                user_id=user_id,
             )
-            news_contract_issues = (
-                news_layout_contract_issues(candidate, sources=sources) if tier == "news" else []
-            )
-            if candidate.accepted and not news_contract_issues:
-                processed = candidate
-                if usage:
-                    input_tokens = usage.get("input_tokens")
-                    output_tokens = usage.get("output_tokens")
-                break
+        except (json.JSONDecodeError, ValidationError) as exc:
             logger.warning(
-                "Briefing LLM layout policy requested a fresh generation",
+                "Briefing LLM returned invalid layout JSON",
                 extra={
                     "component": "briefing",
                     "operation": "compose_window",
@@ -277,28 +173,20 @@ def compose_window(
                         "tier": tier,
                         "window_index": window_index,
                         "attempt": attempt,
-                        "raw_disposition": candidate.raw_assessment.disposition.value,
-                        "raw_issues": candidate.raw_assessment.issues,
-                        "final_issues": (
-                            candidate.final_assessment.issues
-                            if candidate.final_assessment is not None
-                            else []
-                        ),
-                        "news_contract_issues": news_contract_issues,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
                     },
                 },
             )
             if attempt >= MAX_COMPOSE_ATTEMPTS:
-                if tier == "news":
-                    fallback_reason = "news_layout_contract_fallback"
-                    break
                 raise BriefingCompositionInvalidOutput(
-                    "Briefing LLM layout failed policy after retries"
-                )
-            warnings.append(f"llm_layout_policy_retry:{attempt}")
-        if fallback_reason is not None:
+                    "Briefing LLM returned invalid layout JSON after retries"
+                ) from exc
+            warnings.append(f"llm_invalid_layout_retry:{attempt}")
+            continue
+        except BriefingCompositionInvalidOutput as exc:
             logger.warning(
-                "Briefing LLM composition fell back to deterministic layout",
+                "Briefing LLM returned invalid layout output",
                 extra={
                     "component": "briefing",
                     "operation": "compose_window",
@@ -308,31 +196,84 @@ def compose_window(
                         "lens_key": lens_key,
                         "tier": tier,
                         "window_index": window_index,
-                        "fallback_reason": fallback_reason,
+                        "attempt": attempt,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
                     },
                 },
             )
-            model_spec = "deterministic"
-            warnings.append(fallback_reason)
-            processed = process_generated_layout(
-                deterministic_layout(sources, lens_title=lens_title, tier=tier).model_dump(
-                    mode="json"
-                )["blocks"],
-                sources=sources,
-                figure_budget=figure_budget,
-                ensure_source_figures=tier != "news",
+            if attempt >= MAX_COMPOSE_ATTEMPTS:
+                raise
+            warnings.append(f"llm_invalid_output_retry:{attempt}")
+            continue
+        except Exception as exc:
+            logger.warning(
+                "Briefing LLM composition failed; retrying",
+                extra={
+                    "component": "briefing",
+                    "operation": "compose_window",
+                    "task_id": task_id,
+                    "item_id": user_id,
+                    "context_data": {
+                        "lens_key": lens_key,
+                        "tier": tier,
+                        "window_index": window_index,
+                        "source_count": len(sources),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                },
+                exc_info=True,
             )
-    else:
-        model_spec = "deterministic"
-        processed = process_generated_layout(
-            deterministic_layout(sources, lens_title=lens_title, tier=tier).model_dump(mode="json")[
-                "blocks"
-            ],
+            if attempt >= MAX_COMPOSE_ATTEMPTS:
+                raise BriefingCompositionError(
+                    "Briefing LLM composition failed after retries"
+                ) from exc
+            warnings.append(f"llm_error_retry:{attempt}")
+            continue
+        candidate = process_generated_layout(
+            llm_blocks,
             sources=sources,
             figure_budget=figure_budget,
             ensure_source_figures=tier != "news",
         )
-
+        news_contract_issues = (
+            news_layout_contract_issues(candidate, sources=sources) if tier == "news" else []
+        )
+        if candidate.accepted and not news_contract_issues:
+            processed = candidate
+            if usage:
+                input_tokens = usage.get("input_tokens")
+                output_tokens = usage.get("output_tokens")
+            break
+        logger.warning(
+            "Briefing LLM layout policy requested a fresh generation",
+            extra={
+                "component": "briefing",
+                "operation": "compose_window",
+                "task_id": task_id,
+                "item_id": user_id,
+                "context_data": {
+                    "lens_key": lens_key,
+                    "tier": tier,
+                    "window_index": window_index,
+                    "attempt": attempt,
+                    "raw_disposition": candidate.raw_assessment.disposition.value,
+                    "raw_issues": candidate.raw_assessment.issues,
+                    "final_issues": (
+                        candidate.final_assessment.issues
+                        if candidate.final_assessment is not None
+                        else []
+                    ),
+                    "news_contract_issues": news_contract_issues,
+                },
+            },
+        )
+        if attempt >= MAX_COMPOSE_ATTEMPTS:
+            raise BriefingCompositionInvalidOutput(
+                "Briefing LLM layout failed policy after retries"
+            )
+        warnings.append(f"llm_layout_policy_retry:{attempt}")
     if processed is None or not processed.accepted or processed.normalized is None:
         raise BriefingCompositionInvalidOutput(
             "Briefing composition did not produce a policy-valid normalized layout"
@@ -414,44 +355,6 @@ def process_generated_layout(
     )
 
 
-def deterministic_layout(
-    sources: list[BriefingSource],
-    *,
-    lens_title: str,
-    tier: str,
-) -> ComposerLayout:
-    sentences = [_source_sentence(source) for source in sources]
-    if tier == "news":
-        clauses = [_news_clause(sentence) for sentence in sentences]
-        markdown = "; ".join(clauses) + "."
-        return ComposerLayout(
-            blocks=[PassageBlock(type="passage", markdown=markdown, weight="feature")]
-        )
-    markdown = " ".join(sentences)
-    blocks: list[ComposerBlock] = [
-        PassageBlock(type="passage", markdown=markdown, weight="feature")
-    ]
-    first_image = next(
-        (source for source in sources if source.image_url or source.thumbnail_url), None
-    )
-    if first_image is not None:
-        blocks.append(
-            FigureBlock(
-                type="figure",
-                source_key=first_image.source_key,
-                caption=first_image.title,
-                # Inset figures float inside the adjacent passage on the client.
-                placement=BriefingFigurePlacement.INSET,
-                alignment=BriefingFigureAlignment.RIGHT,
-            )
-        )
-    return ComposerLayout(blocks=blocks)
-
-
-def _news_clause(sentence: str) -> str:
-    return re.sub(r"[.!?]+(?=\s|$)", ",", sentence).strip(" ,;")
-
-
 def news_layout_contract_issues(
     processed: ProcessedLayout,
     *,
@@ -488,12 +391,6 @@ def news_layout_contract_issues(
     if Counter(linked_keys) != Counter(source.source_key for source in sources):
         return ["news_requires_each_source_linked_once"]
     return []
-
-
-def _source_sentence(source: BriefingSource) -> str:
-    url_kind = "content" if source.kind == "content" else "news"
-    summary = source.summary or (source.key_points[0] if source.key_points else "is ready to read")
-    return f"[{source.title}](newsly://briefing/{url_kind}/{source.id}) {summary}"
 
 
 def generate_layout_with_llm(

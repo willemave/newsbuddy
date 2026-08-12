@@ -26,6 +26,8 @@ from app.services.briefing.refresh import (
     run_briefing_refresh,
 )
 
+pytestmark = pytest.mark.usefixtures("stub_briefing_layout_generator")
+
 
 def test_full_refresh_builds_segments_and_schedules_sweep(
     db_session: Session,

@@ -44,7 +44,6 @@ def _compose_window[WindowT: CompositionWindow](
     *,
     user_id: int,
     task_id: int | None,
-    use_llm: bool,
     settings: Settings,
     layout_generator: LayoutGenerator | None,
 ) -> ComposedWindow[WindowT]:
@@ -56,7 +55,6 @@ def _compose_window[WindowT: CompositionWindow](
         window_index=window.window_index,
         task_id=task_id,
         user_id=user_id,
-        use_llm=use_llm,
         settings=settings,
         layout_generator=layout_generator,
     )
@@ -68,7 +66,6 @@ def compose_windows[WindowT: CompositionWindow](
     *,
     user_id: int,
     task_id: int | None,
-    use_llm: bool,
     settings: Settings,
     layout_generator: LayoutGenerator | None = None,
 ) -> list[ComposedWindow[WindowT]]:
@@ -77,7 +74,6 @@ def compose_windows[WindowT: CompositionWindow](
             window,
             user_id=user_id,
             task_id=task_id,
-            use_llm=use_llm,
             settings=settings,
             layout_generator=layout_generator,
         )
@@ -100,7 +96,6 @@ def compose_window_groups[
     *,
     user_id: int,
     task_id: int | None,
-    use_llm: bool,
     settings: Settings,
     layout_generator: LayoutGenerator | None = None,
 ) -> tuple[list[ComposedWindow[FirstWindowT]], list[ComposedWindow[SecondWindowT]]]:
@@ -112,7 +107,6 @@ def compose_window_groups[
                 first_windows,
                 user_id=user_id,
                 task_id=task_id,
-                use_llm=use_llm,
                 settings=settings,
                 layout_generator=layout_generator,
             ),
@@ -120,7 +114,6 @@ def compose_window_groups[
                 second_windows,
                 user_id=user_id,
                 task_id=task_id,
-                use_llm=use_llm,
                 settings=settings,
                 layout_generator=layout_generator,
             ),
@@ -133,7 +126,6 @@ def compose_window_groups[
                 window,
                 user_id=user_id,
                 task_id=task_id,
-                use_llm=use_llm,
                 settings=settings,
                 layout_generator=layout_generator,
             )
@@ -145,7 +137,6 @@ def compose_window_groups[
                 window,
                 user_id=user_id,
                 task_id=task_id,
-                use_llm=use_llm,
                 settings=settings,
                 layout_generator=layout_generator,
             )

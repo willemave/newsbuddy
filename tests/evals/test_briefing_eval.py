@@ -36,24 +36,23 @@ def test_production_scalar_dump_fixture_meets_expectation_but_is_invalid() -> No
     assert report.gate_satisfied is True
 
 
-def test_duplicate_news_coverage_repair_fixture_is_contract_invalid() -> None:
+def test_duplicate_news_missing_coverage_fixture_requires_retry() -> None:
     suite = briefing_eval.load_briefing_eval_suite(briefing_eval.DEFAULT_BRIEFING_EVAL_DATASET)
 
     report = briefing_eval.run_briefing_eval_suite(
         suite,
-        case_id="prod_segment_1089_duplicate_news_coverage_repair",
+        case_id="prod_segment_1089_duplicate_news_missing_coverage",
     )
 
     result = report.results[0]
     assert result.production_segment_id == 1089
     assert result.expectation_met is True
     assert result.raw_assessment is not None
-    assert result.raw_assessment.disposition == BriefingLayoutDisposition.REPAIR
+    assert result.raw_assessment.disposition == BriefingLayoutDisposition.RETRY
     assert result.raw_assessment.coverage.missing_source_keys == ["news:19257", "news:19264"]
-    assert result.final_assessment is not None
-    assert result.final_assessment.disposition == BriefingLayoutDisposition.ACCEPT
-    assert result.contract_issues == ["news_requires_one_passage"]
-    assert "coverage_repair:2" in result.warnings
+    assert result.final_assessment is None
+    assert result.contract_issues == []
+    assert result.warnings == []
     assert result.layout_valid is False
     assert result.gate_satisfied is True
     assert report.gate_satisfied is True

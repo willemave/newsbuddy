@@ -93,7 +93,6 @@ def test_parallel_compose_uses_context_managed_executor(monkeypatch) -> None:
         windows,
         user_id=1,
         task_id=99,
-        use_llm=True,
         settings=settings,
     )
 
@@ -145,7 +144,6 @@ def test_grouped_compose_submits_append_and_compaction_before_waiting(monkeypatc
         second,
         user_id=1,
         task_id=99,
-        use_llm=True,
         settings=settings,
     )
 
@@ -171,7 +169,7 @@ def _fake_compose_window(sources, **_kwargs):  # noqa: ANN001, ANN003
         markdown_raw=source.title,
         narration_text=source.title,
         status="active",
-        model="deterministic",
+        model="test-llm",
         prompt_version="test",
         input_tokens=None,
         output_tokens=None,

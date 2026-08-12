@@ -9,6 +9,8 @@ from app.models.db import BriefingLens, BriefingSegment, BriefingState
 from app.models.db.users import User
 from app.services.briefing.refresh import run_briefing_refresh
 
+pytestmark = pytest.mark.usefixtures("stub_briefing_layout_generator")
+
 
 def test_fragmentation_metrics_report_achievable_floor_and_duplicates(monkeypatch) -> None:
     settings = get_settings()
