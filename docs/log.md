@@ -575,3 +575,33 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** Ruff passed all touched Python files. All 63 focused Share Action, Learning Deck service/generation, and router tests passed. All 12 focused native Learning Deck reader/status tests passed on the iOS 26.3.1 iPhone 17 Pro simulator, including generation retry, double-tap idempotence, status reconnection, and existing reader lifecycle coverage. Public contract drift check and `git diff --check` passed.
 - **Remaining:** No production data repair, deployment, commit, or push was performed.
 - **Commits:** Uncommitted.
+
+### 2026-08-10 — `main` — Require LLM-authored Briefing segments
+
+- **Status:** Complete locally.
+- **Scope:** Briefing composition failure behavior and its canonical product law.
+- **Decisions:** Never publish deterministic fallback prose when LLM composition is unavailable, malformed, or policy-invalid; fail the refresh set after its existing retries and preserve the last usable edition.
+- **Changes:** Removed automatic deterministic fallback publication from every LLM Briefing composition failure path, removed deterministic prose repair for missing source coverage, and replaced orchestration tests' non-LLM publication shortcut with an injected model-output fixture.
+- **Validation:** All 187 Briefing service, production-eval, and Briefing API tests passed; focused mypy passed for all changed production modules; Ruff formatting and lint passed all changed Python files; `git diff --check` passed.
+- **Remaining:** Existing immutable deterministic production segments remain until separately retired or regenerated. No production mutation, deployment, commit, or push was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-10 — `main` — Make Agent-VM artifact paths canonical
+
+- **Status:** Complete locally.
+- **Scope:** Shared local/E2B file-path resolution, agent file tools, Learning Deck artifact validation and repair, and focused regression coverage.
+- **Decisions:** Make agent-facing file paths workspace-relative; normalize echoed absolute paths only when they identify the current task workspace; reject traversal and foreign absolute paths visibly; preserve local physical symlink containment; keep provider paths in internal diagnostics and contract-relative paths in prompts and user-facing failures.
+- **Changes:** Added the shared resolver and typed path failure, aligned both VM providers and file-tool results, made Learning Deck missing-file reports structured and path-safe, added explicit workspace-relative prompt guidance, and reproduced task `55` with an absolute repair write that now converges on the canonical artifact.
+- **Validation:** All 214 affected Agent-VM, feed-research, media, Share Action, and Learning Deck tests passed; 4 prompt/module-guard tests passed; the 752-file/23-ratchet module guard and 137-test architecture guard passed with public contracts current. Ruff passed all touched Python files, focused mypy passed all 5 changed production modules, and `git diff --check` passed.
+- **Remaining:** Deploy before retrying production deck `14`; no production retry, deployment, commit, or push performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-10 — `main` — Consolidate content Knowledge actions
+
+- **Status:** Complete locally.
+- **Scope:** The iOS content-detail action bar, Knowledge action sheet, chat/council/Learning Deck handoffs, stable accessibility identifiers, Maestro flows, and dark-mode visual baselines.
+- **Decisions:** Reuse the Knowledge tab's `books.vertical.fill` icon for the action hub; offer exactly Start Chat, Ask a Council, and Create Learning Deck; keep narration as its own direct audio action; remove the duplicate standalone deck action and obsolete podcast/deep-dive sheet choices.
+- **Changes:** Replaced the Chat actions sheet with a compact two-tile-plus-row Knowledge actions sheet, routed all three destinations through the existing coordinators and sheet handoff, removed dead detail-only deep-dive/research paths, and updated affected E2E flows and snapshots.
+- **Validation:** All 37 focused iOS source-contract tests passed; Ruff passed all touched Python harness files; the generic iOS Simulator build succeeded; four focused dark-mode Maestro scenarios passed for the visual baseline, Start Chat, Council, and Learning Deck paths; `git diff --check` passed.
+- **Remaining:** None. No commit, push, deployment, or production mutation was performed.
+- **Commits:** Uncommitted.
