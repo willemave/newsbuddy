@@ -29,7 +29,9 @@ from app.services.agent_vm_runtime import (
     AgentVmError,
     AgentVmFileSizeLimitExceeded,
     AgentVmLease,
+    AgentVmPathError,
     AgentVmSession,
+    resolve_workspace_relative_path,
 )
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 
@@ -61,6 +63,7 @@ class LocalAgentVmSession(AgentVmSession):
 
     vm_namespace: str
     namespace_root: Path
+    workspace_posix_root: PurePosixPath
     workspace_root: Path
     shared_root: Path
     lease: AgentVmLease
@@ -139,11 +142,18 @@ class LocalAgentVmSession(AgentVmSession):
     def close(self) -> None:
         return
 
+    def resolve_relative_path(self, path: str) -> str:
+        return resolve_workspace_relative_path(
+            path,
+            workspace_root=self.workspace_posix_root,
+        ).as_posix()
+
     def _resolve_workspace_path(self, path: str) -> Path:
         workspace_root = self.workspace_root.resolve()
-        candidate = (workspace_root / path.strip().lstrip("/")).resolve()
+        relative_path = PurePosixPath(self.resolve_relative_path(path))
+        candidate = workspace_root.joinpath(*relative_path.parts).resolve()
         if candidate != workspace_root and workspace_root not in candidate.parents:
-            raise AgentVmError("VM path must stay inside the task workspace")
+            raise AgentVmPathError("VM path must stay inside the task workspace")
         return candidate
 
 
@@ -177,6 +187,7 @@ class E2BAgentVmSession(AgentVmSession):
         self._cache_key = _e2b_cache_key(vm_namespace, settings.llm_task_sandbox_template)
         self.vm_namespace = vm_namespace
         self._workdir = PurePosixPath(workspace_path)
+        self.workspace_posix_root = self._workdir
         self._shared_workdir = PurePosixPath(shared_workspace_path)
         self._deadline = deadline
         self._max_output_chars = settings.llm_task_sandbox_max_output_chars
@@ -351,13 +362,15 @@ class E2BAgentVmSession(AgentVmSession):
             self._closed = True
         _release_e2b_sandbox_lease(self._cache_key, self._sandbox)
 
+    def resolve_relative_path(self, path: str) -> str:
+        return resolve_workspace_relative_path(
+            path,
+            workspace_root=self.workspace_posix_root,
+        ).as_posix()
+
     def _resolve_workspace_path(self, path: str) -> str:
-        candidate = PurePosixPath(path.strip() or ".")
-        if candidate.is_absolute():
-            candidate = PurePosixPath(str(candidate).lstrip("/"))
-        if ".." in candidate.parts:
-            raise AgentVmError("VM path must stay inside the task workspace")
-        return (self._workdir / candidate).as_posix()
+        relative_path = PurePosixPath(self.resolve_relative_path(path))
+        return (self.workspace_posix_root / relative_path).as_posix()
 
     def _run_raw_command(
         self,
@@ -480,6 +493,7 @@ def _create_local_agent_vm_session(
     return LocalAgentVmSession(
         vm_namespace=vm_namespace,
         namespace_root=namespace_root,
+        workspace_posix_root=PurePosixPath(workspace_path),
         workspace_root=workspace_root,
         shared_root=shared_root,
         lease=AgentVmLease(

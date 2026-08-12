@@ -890,9 +890,12 @@ still identifies that source. If ingestion later marks that row as a duplicate t
 pointer before classifying the source as terminal.
 
 VM-backed agents share five direct host tools: `execute_bash`, `read_file`, `write_file`,
-`list_files`, and `web_search`. Tool results are structured. Learning Deck output is validated
-automatically; a missing or invalid artifact gets one focused repair turn before a typed terminal
-failure.
+`list_files`, and `web_search`. File tools share one workspace-relative path contract across local
+and E2B providers: an echoed absolute path is accepted only when it identifies the current task
+workspace, while traversal and foreign absolute paths fail visibly. Tool results are structured.
+Learning Deck output is validated automatically; a missing or invalid artifact gets one focused
+repair turn before a typed terminal failure, and validation guidance names only contract-relative
+paths.
 
 Feed-specific network access uses the same process-scoped agent VM pool. Mixed Search, contextual
 assistant discovery, onboarding suggestions, add-feed resolution, scraper-config validation,

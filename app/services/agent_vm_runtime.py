@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any
 
 SYSTEM_USER_ID = 0
@@ -26,6 +27,35 @@ class AgentVmDeadlineExceeded(AgentVmError):
 
 class AgentVmFileSizeLimitExceeded(AgentVmError):
     """Raised when a VM file operation exceeds its explicit byte limit."""
+
+
+class AgentVmPathError(AgentVmError):
+    """Raised when an agent-facing path violates the task workspace contract."""
+
+
+_WORKSPACE_PATH_ERROR = (
+    "VM path is outside the task workspace. Address files with workspace-relative paths."
+)
+
+
+def resolve_workspace_relative_path(
+    path: str,
+    *,
+    workspace_root: PurePosixPath,
+) -> PurePosixPath:
+    """Resolve an agent path to one canonical workspace-relative POSIX path."""
+    if not workspace_root.is_absolute() or ".." in workspace_root.parts:
+        raise AgentVmError(f"Invalid VM workspace root: {workspace_root}")
+
+    candidate = PurePosixPath(path.strip() or ".")
+    if ".." in candidate.parts:
+        raise AgentVmPathError(_WORKSPACE_PATH_ERROR)
+    if not candidate.is_absolute():
+        return candidate
+    try:
+        return candidate.relative_to(workspace_root)
+    except ValueError as exc:
+        raise AgentVmPathError(_WORKSPACE_PATH_ERROR) from exc
 
 
 @dataclass(frozen=True)
@@ -56,6 +86,11 @@ class AgentVmSession(ABC):
     provider: str
     sandbox_id: str | None
     lease: AgentVmLease
+    workspace_posix_root: PurePosixPath
+
+    @abstractmethod
+    def resolve_relative_path(self, path: str) -> str:
+        """Return the canonical workspace-relative form of an agent path."""
 
     @abstractmethod
     def execute_bash(

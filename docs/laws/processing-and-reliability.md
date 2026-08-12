@@ -29,3 +29,5 @@ P13. Public API and generated client contracts change together, and active exter
 P14. Untrusted pages, feeds, files, and remote media are processed within bounded isolation and cannot execute arbitrary work on the application host.
 
 P15. Operator repairs are explicit, scoped, and auditable; a liveness health check alone is never proof that workers, queues, and providers are healthy.
+
+P16. A VM-backed agent attempt owns one task workspace and addresses files through workspace-relative paths; tools, validation, and repair resolve those paths identically, reject paths outside that workspace visibly, and never expose provider-internal paths in user-facing failures.

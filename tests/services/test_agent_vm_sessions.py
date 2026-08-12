@@ -50,6 +50,41 @@ def test_local_agent_vm_session_reports_process_namespace_reuse(monkeypatch) -> 
     assert second.lease.reused is True
 
 
+def test_local_agent_vm_session_normalizes_workspace_absolute_paths_and_blocks_escape(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_task_sandbox_provider", "local")
+    workspace_path = "/tmp/newsly/tasks/55"
+    session = create_agent_vm_session(
+        user_id=1,
+        llm_task_id=55,
+        vm_namespace=f"test:{uuid4()}",
+        workspace_path=workspace_path,
+        shared_workspace_path="/tmp/newsly/users/1/shared",
+        feature="test",
+    )
+
+    session.write_file(f"{workspace_path}/output/source-notes.md", "notes")
+
+    assert session.read_file("output/source-notes.md") == "notes"
+    assert session.resolve_relative_path(f"{workspace_path}/output/source-notes.md") == (
+        "output/source-notes.md"
+    )
+    with pytest.raises(agent_vm_sessions.AgentVmPathError, match="workspace-relative paths"):
+        session.write_file("/etc/passwd", "blocked")
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    assert isinstance(session, agent_vm_sessions.LocalAgentVmSession)
+    (session.workspace_root / "escape").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(agent_vm_sessions.AgentVmPathError, match="inside the task workspace"):
+        session.write_file("escape/payload.txt", "blocked")
+
+    session.close()
+
+
 class _FakeE2BCommands:
     def __init__(self, sandbox: _FakeE2BSandbox) -> None:
         self.sandbox = sandbox
@@ -552,10 +587,40 @@ def test_e2b_session_deadline_bounds_create_bootstrap_and_file_read(monkeypatch)
     session.write_file("payload.bin", "payload")
     assert session.read_file_bytes("payload.bin") == b"payload"
     assert len(sandbox.files.read_timeouts) == 1
-    assert 0 < sandbox.files.read_timeouts[0] <= 1
+    read_timeout = sandbox.files.read_timeouts[0]
+    assert read_timeout is not None
+    assert 0 < read_timeout <= 1
     assert sandbox.files.stream_idle_timeouts == sandbox.files.read_timeouts
     assert sandbox.files.last_stream is not None
     assert sandbox.files.last_stream.closed is True
+    session.close()
+
+
+def test_e2b_session_normalizes_workspace_absolute_paths_and_blocks_escape(monkeypatch) -> None:
+    _install_fake_e2b(monkeypatch)
+    _configure_e2b(monkeypatch)
+    workspace_path = "/tmp/newsly/tasks/55"
+    session = create_agent_vm_session(
+        user_id=1,
+        llm_task_id=55,
+        vm_namespace=f"test:{uuid4()}",
+        workspace_path=workspace_path,
+        shared_workspace_path="/tmp/newsly/users/1/shared",
+        feature="test",
+    )
+    sandbox = _FakeE2BSandbox.created[0]
+
+    session.write_file(f"{workspace_path}/output/source-notes.md", "notes")
+
+    assert session.read_file("output/source-notes.md") == "notes"
+    assert sandbox.files.files == {f"{workspace_path}/output/source-notes.md": "notes"}
+    assert session.resolve_relative_path(f"{workspace_path}/output/source-notes.md") == (
+        "output/source-notes.md"
+    )
+    with pytest.raises(agent_vm_sessions.AgentVmPathError, match="workspace-relative paths"):
+        session.write_file("/etc/passwd", "blocked")
+    assert f"{workspace_path}/etc/passwd" not in sandbox.files.files
+
     session.close()
 
 

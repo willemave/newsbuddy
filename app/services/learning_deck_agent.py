@@ -219,11 +219,11 @@ def run_learning_deck_agent(
             _append_agent_log_event(
                 agent_log_events,
                 "artifact_validation_failed",
-                {"error": str(first_error), "failure_class": type(first_error).__name__},
+                _artifact_error_log_payload(first_error),
             )
             try:
                 repair_result = agent.run_sync(
-                    _artifact_repair_prompt(first_error),
+                    _artifact_repair_prompt(first_error, sandbox),
                     deps=LearningDeckAgentDeps(
                         sandbox=sandbox,
                         user_id=user_id,
@@ -257,7 +257,7 @@ def run_learning_deck_agent(
                 _append_agent_log_event(
                     agent_log_events,
                     "artifact_repair_failed",
-                    {"error": str(repair_error), "failure_class": type(repair_error).__name__},
+                    _artifact_error_log_payload(repair_error),
                 )
                 raise LearningDeckAgentExecutionError(
                     str(repair_error),
@@ -305,17 +305,34 @@ def _read_and_validate_required_artifacts(
     sandbox: AgentVmSession,
 ) -> tuple[str, str, dict[str, Any]]:
     settings = get_settings()
-    try:
-        index_html = sandbox.read_file(
-            OUTPUT_INDEX_HTML,
-            max_bytes=settings.learning_deck_max_index_html_bytes,
+    required_files = (
+        (OUTPUT_INDEX_HTML, settings.learning_deck_max_index_html_bytes),
+        (OUTPUT_SOURCE_NOTES, settings.learning_deck_max_source_notes_bytes),
+    )
+    artifacts: dict[str, str] = {}
+    missing: list[str] = []
+    backend_errors: list[dict[str, str]] = []
+    for path, max_bytes in required_files:
+        try:
+            artifacts[path] = sandbox.read_file(path, max_bytes=max_bytes)
+        except Exception as exc:  # noqa: BLE001
+            missing.append(path)
+            backend_errors.append(
+                {
+                    "path": path,
+                    "error": str(exc),
+                    "failure_class": type(exc).__name__,
+                }
+            )
+    if missing:
+        raise LearningDeckArtifactError(
+            f"Required output file is missing: {', '.join(missing)}",
+            report={"missing": missing},
+            backend_errors=backend_errors,
         )
-        source_notes_md = sandbox.read_file(
-            OUTPUT_SOURCE_NOTES,
-            max_bytes=settings.learning_deck_max_source_notes_bytes,
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise LearningDeckArtifactError(f"Required output file is missing: {exc}") from exc
+
+    index_html = artifacts[OUTPUT_INDEX_HTML]
+    source_notes_md = artifacts[OUTPUT_SOURCE_NOTES]
     validate_learning_deck_artifact(
         index_html=index_html,
         source_notes_md=source_notes_md,
@@ -572,13 +589,36 @@ def _append_browser_validation_event(
     _append_agent_log_event(agent_log_events, event_type, browser_validation)
 
 
-def _artifact_repair_prompt(error: Exception) -> str:
+def _artifact_repair_prompt(error: Exception, sandbox: AgentVmSession) -> str:
+    if isinstance(error, LearningDeckArtifactError):
+        report = error.report or {"validation_error": str(error)}
+    else:
+        report = {"validation_error": "Generated artifact validation failed unexpectedly"}
+    try:
+        output_files = sandbox.list_files("output")[:50]
+    except Exception:  # noqa: BLE001
+        output_files = []
     return (
         "The generated artifact did not satisfy the output contract. Fix only the output files "
         "in the existing workspace, then verify them. You must create output/index.html and "
-        "output/source-notes.md. Do not restart the research. Validation error: "
-        f"{error}"
+        "output/source-notes.md. All file paths are relative to the workspace root; never use "
+        "absolute paths. Do not restart the research. "
+        f"Validation report: {json.dumps(report, sort_keys=True)}. "
+        f"Current output files: {json.dumps(output_files)}."
     )
+
+
+def _artifact_error_log_payload(error: Exception) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "error": str(error),
+        "failure_class": type(error).__name__,
+    }
+    if isinstance(error, LearningDeckArtifactError):
+        if error.report:
+            payload["report"] = error.report
+        if error.backend_errors:
+            payload["backend_errors"] = error.backend_errors
+    return payload
 
 
 def _create_configured_sandbox(

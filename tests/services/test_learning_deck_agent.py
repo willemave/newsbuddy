@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -9,7 +10,10 @@ import pytest
 from app.models.contracts import LlmTaskKind, LlmTaskMode
 from app.models.db import VendorUsageRecord
 from app.services import learning_deck_agent
-from app.services.agent_vm_runtime import AgentVmDeadlineExceeded
+from app.services.agent_vm_runtime import (
+    AgentVmDeadlineExceeded,
+    resolve_workspace_relative_path,
+)
 from app.services.learning_deck_agent import LearningDeckAgentExecutionError
 from app.services.llm_tasks import create_llm_task
 
@@ -164,6 +168,84 @@ class _RepairingAgent(_FakeAgent):
             )
             sandbox.write_file(
                 learning_deck_agent.OUTPUT_SOURCE_NOTES,
+                "# Sources\n\n- Primary source.",
+            )
+        return _FakeAgentResult()
+
+
+class _Task55Sandbox:
+    provider = "local"
+    sandbox_id = "task-55-sandbox"
+    workspace_posix_root = PurePosixPath("/tmp/newsly/tasks/55")
+
+    def __init__(self) -> None:
+        self.files: dict[str, str] = {}
+        self.closed = False
+        self.commands: list[str] = []
+        self.lease = SimpleNamespace(
+            capabilities={"playwright": False, "chromium": False},
+        )
+
+    def resolve_relative_path(self, path: str) -> str:
+        return resolve_workspace_relative_path(
+            path,
+            workspace_root=self.workspace_posix_root,
+        ).as_posix()
+
+    def execute_bash(
+        self,
+        command: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> SimpleNamespace:
+        del timeout_seconds
+        self.commands.append(command)
+        return SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+    def write_file(self, path: str, text: str) -> None:
+        self.files[self.resolve_relative_path(path)] = text
+
+    def read_file(self, path: str, *, max_bytes: int | None = None) -> str:
+        resolved_path = self.resolve_relative_path(path)
+        try:
+            text = self.files[resolved_path]
+        except KeyError as exc:
+            absolute_path = self.workspace_posix_root / PurePosixPath(resolved_path)
+            raise FileNotFoundError(f"path '{absolute_path}' does not exist") from exc
+        if max_bytes is not None and len(text.encode("utf-8")) > max_bytes:
+            raise ValueError("file is too large")
+        return text
+
+    def read_file_bytes(self, path: str, *, max_bytes: int | None = None) -> bytes:
+        return self.read_file(path, max_bytes=max_bytes).encode("utf-8")
+
+    def list_files(self, path: str = ".") -> list[str]:
+        resolved_path = self.resolve_relative_path(path)
+        prefix = "" if resolved_path == "." else f"{resolved_path.rstrip('/')}/"
+        return sorted(candidate for candidate in self.files if candidate.startswith(prefix))
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _Task55RepairAgent(_FakeAgent):
+    calls = 0
+    prompts: list[str] = []
+
+    def run_sync(self, prompt: str, *_args: Any, **kwargs: Any) -> _FakeAgentResult:
+        type(self).calls += 1
+        type(self).prompts.append(prompt)
+        sandbox = kwargs["deps"].sandbox
+        if type(self).calls == 1:
+            sandbox.write_file(
+                learning_deck_agent.OUTPUT_INDEX_HTML,
+                "<html><style>.reveal .slides section { color: #eee; background: #111; "
+                "padding: 2rem; }</style><div class='reveal'><div class='slides'>"
+                "<section>Deck</section></div></div></html>",
+            )
+        else:
+            sandbox.write_file(
+                "/tmp/newsly/tasks/55/output/source-notes.md",
                 "# Sources\n\n- Primary source.",
             )
         return _FakeAgentResult()
@@ -512,6 +594,56 @@ def test_learning_deck_agent_repairs_missing_required_artifacts_once(
     assert any(
         event["event_type"] == "artifact_validation_failed" for event in result.agent_log_events
     )
+
+
+def test_learning_deck_agent_task_55_absolute_repair_path_converges(
+    test_user,
+    vendor_usage_db,
+    monkeypatch,
+) -> None:
+    del vendor_usage_db
+    sandbox = _Task55Sandbox()
+    _Task55RepairAgent.calls = 0
+    _Task55RepairAgent.prompts = []
+    monkeypatch.setattr(learning_deck_agent, "Agent", _Task55RepairAgent)
+    monkeypatch.setattr(
+        learning_deck_agent,
+        "build_pydantic_model",
+        lambda _model_spec: (object(), {}),
+    )
+    monkeypatch.setattr(learning_deck_agent, "resolve_model_provider", lambda _model_spec: "openai")
+
+    result = learning_deck_agent.run_learning_deck_agent(
+        source_snapshot={"source_kind": "content", "source_title": "Source"},
+        interests_prompt=None,
+        user_id=test_user.id,
+        run_id=55,
+        sandbox_factory=lambda _user_id, _run_id: cast(Any, sandbox),
+    )
+
+    assert _Task55RepairAgent.calls == 2
+    assert result.source_notes_md == "# Sources\n\n- Primary source."
+    assert sandbox.files["output/source-notes.md"] == result.source_notes_md
+    assert not any(path.startswith("tmp/newsly/tasks/55") for path in sandbox.files)
+    repair_prompt = _Task55RepairAgent.prompts[1]
+    assert "All file paths are relative to the workspace root" in repair_prompt
+    assert '"missing": ["output/source-notes.md"]' in repair_prompt
+    assert 'Current output files: ["output/index.html"]' in repair_prompt
+    assert "/tmp/newsly" not in repair_prompt
+    validation_event = next(
+        event
+        for event in result.agent_log_events
+        if event["event_type"] == "artifact_validation_failed"
+    )
+    assert validation_event["payload"]["error"] == (
+        "Required output file is missing: output/source-notes.md"
+    )
+    assert validation_event["payload"]["report"] == {"missing": ["output/source-notes.md"]}
+    assert (
+        "/tmp/newsly/tasks/55/output/source-notes.md"
+        in (validation_event["payload"]["backend_errors"][0]["error"])
+    )
+    assert sandbox.closed is True
 
 
 def test_learning_deck_agent_reports_typed_failure_when_repair_does_not_create_outputs(

@@ -44,6 +44,17 @@ JSONL_CONTENT_TYPE = "application/x-ndjson; charset=utf-8"
 class LearningDeckArtifactError(ValueError):
     """Raised when a generated artifact cannot be accepted for hosting."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        report: dict[str, Any] | None = None,
+        backend_errors: list[dict[str, str]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.report = dict(report or {})
+        self.backend_errors = list(backend_errors or [])
+
 
 @dataclass(frozen=True)
 class StoredLearningDeckArtifact:
@@ -94,7 +105,10 @@ def validate_learning_deck_artifact(
     )
 
     if errors:
-        raise LearningDeckArtifactError("; ".join(errors))
+        raise LearningDeckArtifactError(
+            "; ".join(errors),
+            report={"invalid": errors},
+        )
 
 
 def render_source_notes_html(source_notes_md: str, *, title: str) -> str:

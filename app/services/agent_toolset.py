@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic_ai import Agent, RunContext
 
-from app.services.agent_vm_runtime import AgentVmSession
+from app.services.agent_vm_runtime import AgentVmPathError, AgentVmSession
 from app.services.exa_client import exa_search
 
 
@@ -127,9 +127,27 @@ def register_agent_vm_tools(
         @agent.tool
         def write_file(ctx: RunContext[Any], path: str, text: str) -> dict[str, Any]:
             """Write a UTF-8 file below the VM workspace."""
-            session_getter(ctx.deps).write_file(path, text)
-            log_event(ctx.deps, "write_file", {"path": path, "chars": len(text)})
-            return {"ok": True, "path": path, "chars": len(text)}
+            session = session_getter(ctx.deps)
+            try:
+                resolved_path = session.resolve_relative_path(path)
+                session.write_file(resolved_path, text)
+            except AgentVmPathError as exc:
+                log_event(
+                    ctx.deps,
+                    "write_file_failed",
+                    {
+                        "requested_path": path,
+                        "error": str(exc),
+                        "failure_class": type(exc).__name__,
+                    },
+                )
+                return {"ok": False, "error": str(exc)}
+            log_event(
+                ctx.deps,
+                "write_file",
+                {"path": resolved_path, "requested_path": path, "chars": len(text)},
+            )
+            return {"ok": True, "path": resolved_path, "chars": len(text)}
 
     if tool_policy.read_file:
 
@@ -141,27 +159,68 @@ def register_agent_vm_tools(
         ) -> dict[str, Any]:
             """Read a UTF-8 file below the VM workspace."""
             bounded_max_bytes = _bounded_read_limit(max_bytes, config.max_read_bytes)
+            session = session_getter(ctx.deps)
+            resolved_path = path
             try:
-                text = session_getter(ctx.deps).read_file(path, max_bytes=bounded_max_bytes)
-            except Exception as exc:  # noqa: BLE001
-                message = f"File not found or unreadable: {path}"
+                resolved_path = session.resolve_relative_path(path)
+                text = session.read_file(resolved_path, max_bytes=bounded_max_bytes)
+            except AgentVmPathError as exc:
                 log_event(
                     ctx.deps,
                     "read_file_failed",
-                    {"path": path, "error": str(exc), "failure_class": type(exc).__name__},
+                    {
+                        "requested_path": path,
+                        "error": str(exc),
+                        "failure_class": type(exc).__name__,
+                    },
                 )
-                return {"ok": False, "path": path, "error": message}
-            log_event(ctx.deps, "read_file", {"path": path, "chars": len(text)})
-            return {"ok": True, "path": path, "text": text}
+                return {"ok": False, "error": str(exc)}
+            except Exception as exc:  # noqa: BLE001
+                message = f"File not found or unreadable: {resolved_path}"
+                log_event(
+                    ctx.deps,
+                    "read_file_failed",
+                    {
+                        "path": resolved_path,
+                        "requested_path": path,
+                        "error": str(exc),
+                        "failure_class": type(exc).__name__,
+                    },
+                )
+                return {"ok": False, "path": resolved_path, "error": message}
+            log_event(
+                ctx.deps,
+                "read_file",
+                {"path": resolved_path, "requested_path": path, "chars": len(text)},
+            )
+            return {"ok": True, "path": resolved_path, "text": text}
 
     if tool_policy.list_files:
 
         @agent.tool
         def list_files(ctx: RunContext[Any], path: str = ".") -> dict[str, Any]:
             """List files below a VM workspace path."""
-            files = session_getter(ctx.deps).list_files(path)
-            log_event(ctx.deps, "list_files", {"path": path, "files": files})
-            return {"ok": True, "path": path, "files": files}
+            session = session_getter(ctx.deps)
+            try:
+                resolved_path = session.resolve_relative_path(path)
+                files = session.list_files(resolved_path)
+            except AgentVmPathError as exc:
+                log_event(
+                    ctx.deps,
+                    "list_files_failed",
+                    {
+                        "requested_path": path,
+                        "error": str(exc),
+                        "failure_class": type(exc).__name__,
+                    },
+                )
+                return {"ok": False, "error": str(exc)}
+            log_event(
+                ctx.deps,
+                "list_files",
+                {"path": resolved_path, "requested_path": path, "files": files},
+            )
+            return {"ok": True, "path": resolved_path, "files": files}
 
     if tool_policy.web_search:
 

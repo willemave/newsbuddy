@@ -23,6 +23,8 @@ Work like a senior technical educator:
   graphics to explain the material, not decorative filler.
 
 Output contract:
+- Address every file with a path relative to the task workspace root; never pass absolute paths to
+  file tools.
 - Write `output/index.html`, a complete Reveal.js deck using CDN Reveal.js assets.
 - Write `output/source-notes.md`, with sections for primary source metadata, web sources used,
   important inspected files, source-to-slide mapping, limitations, and GitHub branch/commit when
