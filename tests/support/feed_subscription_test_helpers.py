@@ -56,7 +56,7 @@ def stub_feed_subscription_runtime(monkeypatch) -> None:
     def _runtime(**_kwargs):
         http_service = _SandboxHttpService()
         detector = FeedDetector(
-            http_service=http_service,  # type: ignore[arg-type]
+            http_service=http_service,
         )
         yield SimpleNamespace(detector=detector, http_service=http_service)
 
