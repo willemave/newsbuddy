@@ -252,7 +252,7 @@ def test_content_detail_sheets_use_single_model_destination() -> None:
     assert "case learningDeckCreate" in presentation_source
     assert "@State private var activeSheet: DetailSheetDestination?" in detail_source
     assert ".sheet(item: $activeSheet" in detail_source
-    assert "activeSheet = .learningDeckCreate" in detail_source
+    assert "pendingSheetDestination = .learningDeckCreate" in detail_source
     assert ".sheet(isPresented: $showLearningDeckCreateSheet)" not in detail_source
     assert "showLearningDeckCreateSheet" not in detail_source
 
@@ -403,7 +403,7 @@ def test_shared_controls_use_motion_tokens_for_common_state_animation() -> None:
         VIEWS_ROOT / "Components/LearningDeckChatComposer.swift",
         VIEWS_ROOT / "Components/LearningDeckChatPanel.swift",
         VIEWS_ROOT / "Components/ToastView.swift",
-        VIEWS_ROOT / "Components/DetailChatSheet.swift",
+        VIEWS_ROOT / "Components/DetailKnowledgeActionsSheet.swift",
         VIEWS_ROOT / "Components/MiniSheetComponents.swift",
         VIEWS_ROOT / "Chat/MessageBubble.swift",
         VIEWS_ROOT / "ChatSessionView.swift",
@@ -495,19 +495,10 @@ def test_lane_status_progress_is_solid_and_activity_respects_reduce_motion() -> 
 
 
 def test_decorative_symbol_effects_respect_reduce_motion() -> None:
-    detail_action_bar = (VIEWS_ROOT / "Components/DetailActionBar.swift").read_text()
     tweet_suggestions = (VIEWS_ROOT / "Components/TweetSuggestionsSheet.swift").read_text()
 
     assert (
-        "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" in detail_action_bar
-    )
-    assert (
         "@Environment(\\.accessibilityReduceMotion) private var reduceMotion" in tweet_suggestions
-    )
-    assert "if reduceMotion" in detail_action_bar
-    assert ".symbolEffect(.bounce, value: learningDeckHintBounce)" in detail_action_bar
-    assert (
-        ".symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)" in detail_action_bar
     )
     assert (
         ".symbolEffect(.pulse, isActive: viewModel.isRecording && !reduceMotion)"

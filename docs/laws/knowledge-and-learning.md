@@ -29,3 +29,5 @@ K13. Private deck links are short-lived; public sharing is explicit, stable whil
 K14. Deleting a deck cancels active generation, revokes access, and removes its owned artifacts.
 
 K15. Deck chat keeps the deck visible and carries the deck's own identity instead of pretending it is an article chat.
+
+K16. Content detail groups chat, council, and Learning Deck creation as Knowledge actions; narration remains a separate audio action.

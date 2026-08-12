@@ -6,8 +6,6 @@
 import SwiftUI
 
 struct DetailActionBar: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     let content: ContentDetail
     let overlaid: Bool
     let externalURL: URL?
@@ -18,10 +16,6 @@ struct DetailActionBar: View {
     let isPodcastAudioLoading: Bool
     let isPodcastAudioActive: Bool
     let podcastAudioAccessibilityLabel: String
-    let isStartingChat: Bool
-    @Binding var showLearningDeckHint: Bool
-    @Binding var hasSeenLearningDeckHint: Bool
-    @Binding var learningDeckHintBounce: Bool
     let onOpenExternal: (URL) -> Void
     let onShare: () -> Void
     let readerTransitionNamespace: Namespace.ID?
@@ -31,8 +25,7 @@ struct DetailActionBar: View {
     let onToggleKnowledgeSave: () -> Void
     let onPodcastAudio: () -> Void
     let onPodcastAudioSpeed: (NarrationPlaybackSpeedOption) -> Void
-    let onCreateLearningDeck: () -> Void
-    let onDeepDive: () -> Void
+    let onOpenKnowledgeActions: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -117,59 +110,16 @@ struct DetailActionBar: View {
                 .accessibilityIdentifier("content.action.podcast_audio")
             }
 
-            Button(action: onCreateLearningDeck) {
-                learningDeckActionIcon
+            Button(action: onOpenKnowledgeActions) {
+                actionIcon("books.vertical.fill")
             }
             .detailActionBarSegment()
-            .accessibilityIdentifier("content.action.learning_deck")
-            .accessibilityLabel("Create Learning Deck")
-            .popover(isPresented: $showLearningDeckHint) {
-                LearningDeckEntryHint()
-                    .presentationCompactAdaptation(.popover)
-            }
-            .task {
-                guard !E2ETestLaunch.isEnabled else { return }
-                guard !hasSeenLearningDeckHint else { return }
-                try? await Task.sleep(nanoseconds: 600_000_000)
-                guard !Task.isCancelled else { return }
-                hasSeenLearningDeckHint = true
-                learningDeckHintBounce.toggle()
-                showLearningDeckHint = true
-            }
-
-            Button(action: onDeepDive) {
-                if isStartingChat {
-                    deepDiveStartingIcon
-                } else {
-                    actionIcon("bubble.left.and.text.bubble.right")
-                }
-            }
-            .detailActionBarSegment()
-            .accessibilityIdentifier("content.action.deep_dive")
-            .accessibilityLabel("Start deep dive")
+            .accessibilityIdentifier("content.action.knowledge_actions")
+            .accessibilityLabel("Knowledge actions")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 44)
         .textSelection(.disabled)
-    }
-
-    @ViewBuilder
-    private var learningDeckActionIcon: some View {
-        if reduceMotion {
-            actionIcon("rectangle.on.rectangle")
-        } else {
-            actionIcon("rectangle.on.rectangle")
-                .symbolEffect(.bounce, value: learningDeckHintBounce)
-        }
-    }
-
-    private var deepDiveStartingIcon: some View {
-        Image(systemName: "bubble.left.and.text.bubble.right")
-            .font(.appSymbol(size: 20, weight: .regular))
-            .foregroundColor(overlaid ? .white : .readerBodyText)
-            .appShadow(overlaid ? .overlayText : .none)
-            .frame(width: 44, height: 44)
-            .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
     }
 
     @ViewBuilder

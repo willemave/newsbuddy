@@ -64,27 +64,3 @@ struct LearningDeckContentCreateSheet: View {
         )
     }
 }
-
-/// One-shot coachmark popover shown the first time the Learning Deck entry point
-/// appears in the article action bar.
-struct LearningDeckEntryHint: View {
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "rectangle.on.rectangle")
-                .font(.appSymbol(size: 18, weight: .semibold))
-                .foregroundStyle(Color.brandPrimary)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Learning Deck")
-                    .font(.terracottaBodyMedium.weight(.semibold))
-                    .foregroundStyle(Color.onSurface)
-                Text("Turn this into a deck you can flip through and chat with.")
-                    .font(.terracottaBodySmall)
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(14)
-        .frame(width: 264)
-    }
-}

@@ -9,7 +9,7 @@ enum DetailSheetDestination: String, Identifiable {
     case share
     case download
     case tweet
-    case chat
+    case knowledgeActions
     case learningDeckCreate
 
     var id: String { rawValue }

@@ -37,9 +37,6 @@ struct ContentDetailView: View {
     @State private var activeReaderContent: ContentDetail?
     @State private var activeBrowserDestination: BrowserDestination?
     @State private var activeLearningDeckReader: LearningDeckReaderDestination?
-    @AppStorage("hasSeenLearningDeckHint") private var hasSeenLearningDeckHint = false
-    @State private var showLearningDeckHint = false
-    @State private var learningDeckHintBounce = false
     @State private var discussionCoordinator: DiscussionSummaryCoordinator
     @State private var pendingScrollTarget: ContentDetailScrollTarget?
     @State private var detailScrollOffsetY: CGFloat = 0
@@ -302,10 +299,10 @@ struct ContentDetailView: View {
                     TweetSuggestionsSheet(contentId: content.id)
                 }
 
-            case .chat:
+            case .knowledgeActions:
                 if let content = viewModel.content {
-                    chatSheet(content: content)
-                        .presentationDetents([.medium, .large])
+                    knowledgeActionsSheet(content: content)
+                        .presentationDetents([.height(320), .large])
                         .presentationDragIndicator(.hidden)
                         .presentationCornerRadius(24)
                 }
@@ -363,27 +360,6 @@ struct ContentDetailView: View {
             )
             .ignoresSafeArea()
         }
-    }
-
-    @ViewBuilder
-    private func audioPromptCard(for content: ContentDetail) -> some View {
-        PodcastAudioPromptCard(
-            isLoading: podcastAudioController.isLoading(for: content),
-            isActive: podcastAudioController.isActive(for: content),
-            statusText: podcastAudioController.statusText(for: content),
-            accessibilityLabel: podcastAudioController.accessibilityLabel(for: content),
-            onTap: {
-                Task { await handlePodcastAudio(for: content) }
-            },
-            onSelectPlaybackSpeed: { option in
-                Task {
-                    await handlePodcastAudio(
-                        for: content,
-                        rate: option.rate
-                    )
-                }
-            }
-        )
     }
 
     private func podcastPlaybackControls(for content: ContentDetail) -> some View {
@@ -531,10 +507,6 @@ struct ContentDetailView: View {
             isPodcastAudioLoading: podcastAudioController.isLoading(for: content),
             isPodcastAudioActive: podcastAudioController.isActive(for: content),
             podcastAudioAccessibilityLabel: podcastAudioController.accessibilityLabel(for: content),
-            isStartingChat: chatCoordinator.isStartingChat,
-            showLearningDeckHint: $showLearningDeckHint,
-            hasSeenLearningDeckHint: $hasSeenLearningDeckHint,
-            learningDeckHintBounce: $learningDeckHintBounce,
             onOpenExternal: openInAppBrowser,
             onShare: { activeSheet = .share },
             readerTransitionNamespace: readerTransitionNamespace,
@@ -561,8 +533,10 @@ struct ContentDetailView: View {
                     )
                 }
             },
-            onCreateLearningDeck: { activeSheet = .learningDeckCreate },
-            onDeepDive: { handleDeepDive(for: content) }
+            onOpenKnowledgeActions: {
+                chatCoordinator.chatError = nil
+                activeSheet = .knowledgeActions
+            }
         )
     }
 
@@ -612,21 +586,20 @@ struct ContentDetailView: View {
         )
     }
 
-    // MARK: - AI Chat Sheet
+    // MARK: - Knowledge Actions Sheet
     @ViewBuilder
-    private func chatSheet(content: ContentDetail) -> some View {
-        DetailChatSheet(
-            chatError: chatCoordinator.chatError,
-            isStartingChat: chatCoordinator.isStartingChat,
-            showsPodcastAudioCard: podcastAudioController.supportsAudio(for: content),
+    private func knowledgeActionsSheet(content: ContentDetail) -> some View {
+        DetailKnowledgeActionsSheet(
+            actionError: chatCoordinator.chatError,
+            isStartingAction: chatCoordinator.isStartingChat,
             onClose: { activeSheet = nil },
             onStartChat: { startChat(for: content) },
-            onDigDeeper: { startDeepDive(for: content) },
-            onCouncilChat: { startCouncil(for: content) },
-            onDeepResearch: { startDeepResearch(for: content) }
-        ) {
-            audioPromptCard(for: content)
-        }
+            onAskCouncil: { startCouncil(for: content) },
+            onCreateLearningDeck: {
+                pendingSheetDestination = .learningDeckCreate
+                activeSheet = nil
+            }
+        )
     }
 
     private func openActiveChatSession(
@@ -638,31 +611,9 @@ struct ContentDetailView: View {
         )
     }
 
-    private func handleDeepDive(for content: ContentDetail) {
-        if let activeSession = chatCoordinator.activeSession(for: content) {
-            openActiveChatSession(activeSession, content: content)
-        } else {
-            chatCoordinator.chatError = nil
-            activeSheet = .chat
-        }
-    }
-
     private func startChat(for content: ContentDetail) {
         Task {
-            let route = await chatCoordinator.startChat(
-                content: content,
-                visibleContentIds: allContentIds
-            )
-            openGlobalChat(route)
-        }
-    }
-
-    private func startDeepDive(for content: ContentDetail) {
-        Task {
-            let route = await chatCoordinator.startDeepDive(
-                content: content,
-                visibleContentIds: allContentIds
-            )
+            let route = await chatCoordinator.startChat(content: content)
             openGlobalChat(route)
         }
     }
@@ -670,13 +621,6 @@ struct ContentDetailView: View {
     private func startCouncil(for content: ContentDetail) {
         Task {
             let route = await chatCoordinator.startCouncil(content: content)
-            openGlobalChat(route)
-        }
-    }
-
-    private func startDeepResearch(for content: ContentDetail) {
-        Task {
-            let route = await chatCoordinator.startDeepResearch(content: content)
             openGlobalChat(route)
         }
     }

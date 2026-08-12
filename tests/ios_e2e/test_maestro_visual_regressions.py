@@ -47,7 +47,7 @@ BASELINE_FILES = {
         "detail-article.png",
         "modal-share.png",
         "modal-download.png",
-        "modal-chat.png",
+        "modal-knowledge-actions.png",
         "modal-learning-deck.png",
     ],
     "visual_comments_summary": [
@@ -506,7 +506,7 @@ def test_content_detail_modals_match_visual_baselines(
     sample_article_long,
     db_session,
 ) -> None:
-    """Article detail action sheets should stay compact and visually stable."""
+    """Article detail and Knowledge action sheets should stay visually stable."""
     _prepare_baselines("visual_content_modals")
     content = create_sample_content(sample_article_long)
     content = _apply_article_visual_timestamps(db_session, content)

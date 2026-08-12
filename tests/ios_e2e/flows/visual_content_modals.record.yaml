@@ -46,18 +46,24 @@ appId: "${APP_ID}"
     id: content.sheet.close
 - waitForAnimationToEnd
 - tapOn:
-    id: content.action.deep_dive
+    id: content.action.knowledge_actions
 - extendedWaitUntil:
     visible:
-      id: content.chat.sheet
+      id: content.knowledge_actions.sheet
     timeout: 8000
 - takeScreenshot:
-    path: "${BASELINE_DIR}/modal-chat"
+    path: "${BASELINE_DIR}/modal-knowledge-actions"
 - tapOn:
     id: content.sheet.close
 - waitForAnimationToEnd
 - tapOn:
-    id: content.action.learning_deck
+    id: content.action.knowledge_actions
+- extendedWaitUntil:
+    visible:
+      id: content.knowledge_actions.sheet
+    timeout: 8000
+- tapOn:
+    id: content.knowledge_actions.learning_deck
 - extendedWaitUntil:
     visible:
       id: learning_deck.create.sheet

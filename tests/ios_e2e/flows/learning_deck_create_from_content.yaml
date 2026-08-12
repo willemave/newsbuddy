@@ -19,7 +19,13 @@ appId: "${APP_ID}"
       id: content.detail.screen
     timeout: 15000
 - tapOn:
-    id: content.action.learning_deck
+    id: content.action.knowledge_actions
+- extendedWaitUntil:
+    visible:
+      id: content.knowledge_actions.sheet
+    timeout: 8000
+- tapOn:
+    id: content.knowledge_actions.learning_deck
 - extendedWaitUntil:
     visible:
       id: learning_deck.create.sheet

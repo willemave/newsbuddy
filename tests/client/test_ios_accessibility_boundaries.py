@@ -142,9 +142,9 @@ def test_more_search_and_voice_flows_use_stable_interaction_ids() -> None:
         "more.search",
         "search.input",
         "content.detail.screen",
-        "content.action.deep_dive",
-        "content.chat.sheet",
-        "content.chat.start",
+        "content.action.knowledge_actions",
+        "content.knowledge_actions.sheet",
+        "content.knowledge_actions.start_chat",
         "knowledge.chat_input",
     ]:
         assert f"id: {identifier}" in more_search_source
@@ -162,7 +162,9 @@ def test_more_search_and_voice_flows_use_stable_interaction_ids() -> None:
 
     learning_source = LEARNING_FOCUS_FLOW.read_text()
     for identifier in [
-        "content.action.learning_deck",
+        "content.action.knowledge_actions",
+        "content.knowledge_actions.sheet",
+        "content.knowledge_actions.learning_deck",
         "learning_deck.create.sheet",
         "learning_deck.focus_mic",
         "learning_deck.focus_recording",
@@ -174,14 +176,14 @@ def test_more_search_and_voice_flows_use_stable_interaction_ids() -> None:
 
 def test_detail_sheet_ids_live_on_title_and_action_leaves() -> None:
     header_source = (VIEWS_ROOT / "Components" / "MiniSheetComponents.swift").read_text()
-    chat_source = (VIEWS_ROOT / "Components" / "DetailChatSheet.swift").read_text()
+    knowledge_source = (VIEWS_ROOT / "Components" / "DetailKnowledgeActionsSheet.swift").read_text()
     mini_sheet_source = (VIEWS_ROOT / "Components" / "DetailMiniSheets.swift").read_text()
 
     assert "titleAccessibilityIdentifier: String" in header_source
     assert ".accessibilityIdentifier(titleAccessibilityIdentifier)" in header_source
 
     for source, screen_identifier in [
-        (chat_source, "content.chat.sheet"),
+        (knowledge_source, "content.knowledge_actions.sheet"),
         (mini_sheet_source, "content.share.sheet"),
         (mini_sheet_source, "content.download.sheet"),
     ]:
@@ -189,10 +191,9 @@ def test_detail_sheet_ids_live_on_title_and_action_leaves() -> None:
         assert f'.accessibilityIdentifier("{screen_identifier}")' not in source
 
     for identifier in [
-        "content.chat.start",
-        "content.chat.dig_deeper",
-        "content.chat.council",
-        "content.chat.deep_research",
+        "content.knowledge_actions.start_chat",
+        "content.knowledge_actions.council",
+        "content.knowledge_actions.learning_deck",
         "content.share.title_link",
         "content.share.key_points",
         "content.share.full_content",
@@ -202,4 +203,7 @@ def test_detail_sheet_ids_live_on_title_and_action_leaves() -> None:
         "content.download.10",
         "content.download.20",
     ]:
-        assert f'"{identifier}"' in chat_source + mini_sheet_source
+        assert f'"{identifier}"' in knowledge_source + mini_sheet_source
+
+    for removed_option in ["Dig deeper", "Deep Research", "Podcast overview"]:
+        assert removed_option not in knowledge_source

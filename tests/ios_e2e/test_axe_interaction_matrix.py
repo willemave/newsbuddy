@@ -531,6 +531,7 @@ def test_share_extension_modes_reach_live_api_and_queue(
     )
     assert task.status == LlmTaskStatus.QUEUED.value
     assert task.workflow_state == LlmWorkflowState.QUEUED.value
+    assert task.input_json is not None
     assert task.input_json["chat_initial_message"] == chat_initial_message
 
     queued_tasks = [
@@ -696,27 +697,30 @@ def test_chat_feed_discovery_round_trips_through_knowledge(
             ids=(
                 "content.detail.screen",
                 f"content.detail.title.{content.id}",
-                "content.action.deep_dive",
+                "content.action.knowledge_actions",
             ),
             texts=(content.title,),
-            enabled_ids=("content.action.deep_dive",),
+            enabled_ids=("content.action.knowledge_actions",),
         ),
     )
     axe_runner.tap_id(
-        "content.action.deep_dive",
-        name="knowledge_chat_actions",
+        "content.action.knowledge_actions",
+        name="knowledge_actions",
         expectation=AxeStateExpectation(
-            ids=("content.chat.sheet", "content.chat.start"),
-            enabled_ids=("content.chat.start",),
+            ids=(
+                "content.knowledge_actions.sheet",
+                "content.knowledge_actions.start_chat",
+            ),
+            enabled_ids=("content.knowledge_actions.start_chat",),
         ),
     )
     axe_runner.tap_id(
-        "content.chat.start",
+        "content.knowledge_actions.start_chat",
         name="knowledge_chat_handoff",
         timeout_seconds=20,
         expectation=AxeStateExpectation(
             ids=("knowledge.chat_input", "knowledge.chat_mic"),
-            absent_ids=("content.chat.sheet", "content.detail.screen"),
+            absent_ids=("content.knowledge_actions.sheet", "content.detail.screen"),
             enabled_ids=("knowledge.chat_input", "knowledge.chat_mic"),
         ),
     )
@@ -765,13 +769,24 @@ def test_knowledge_learning_deck_voice_focus_reaches_processing_projection(
             },
         ),
         expectation=AxeStateExpectation(
-            ids=("content.detail.screen", "content.action.learning_deck"),
+            ids=("content.detail.screen", "content.action.knowledge_actions"),
             texts=(content.title,),
         ),
         timeout_seconds=20,
     )
     axe_runner.tap_id(
-        "content.action.learning_deck",
+        "content.action.knowledge_actions",
+        name="knowledge_actions",
+        expectation=AxeStateExpectation(
+            ids=(
+                "content.knowledge_actions.sheet",
+                "content.knowledge_actions.learning_deck",
+            ),
+            enabled_ids=("content.knowledge_actions.learning_deck",),
+        ),
+    )
+    axe_runner.tap_id(
+        "content.knowledge_actions.learning_deck",
         name="learning_deck_create_sheet",
         expectation=AxeStateExpectation(
             ids=(

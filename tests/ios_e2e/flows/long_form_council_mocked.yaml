@@ -18,19 +18,17 @@ appId: "${APP_ID}"
     visible:
       id: content.detail.screen
     timeout: 15000
-# Stale-label fix: the deep-dive options sheet header changed from "AI Chat" to
-# the option labels "Start chat" / "Council Chat" (see ContentDetailView chat sheet).
 # Wait for the summary to render so the action toolbar is interactive before tapping.
 - assertVisible:
     text: Notable Quotes
 - tapOn:
-    id: content.action.deep_dive
+    id: content.action.knowledge_actions
 - extendedWaitUntil:
     visible:
-      text: Start chat
+      id: content.knowledge_actions.sheet
     timeout: 15000
 - tapOn:
-    text: Council Chat
+    id: content.knowledge_actions.council
 - assertVisible:
     text: Initial mocked assistant reply.
 - assertVisible:
