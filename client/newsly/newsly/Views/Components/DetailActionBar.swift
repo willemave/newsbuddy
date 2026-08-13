@@ -111,7 +111,7 @@ struct DetailActionBar: View {
             }
 
             Button(action: onOpenKnowledgeActions) {
-                actionIcon("books.vertical.fill")
+                actionIcon("sparkles")
             }
             .detailActionBarSegment()
             .accessibilityIdentifier("content.action.knowledge_actions")

@@ -605,3 +605,13 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** All 37 focused iOS source-contract tests passed; Ruff passed all touched Python harness files; the generic iOS Simulator build succeeded; four focused dark-mode Maestro scenarios passed for the visual baseline, Start Chat, Council, and Learning Deck paths; `git diff --check` passed.
 - **Remaining:** None. No commit, push, deployment, or production mutation was performed.
 - **Commits:** Uncommitted.
+
+### 2026-08-11 — `main` — Align the detail action hub with Learning
+
+- **Status:** Complete locally.
+- **Scope:** The far-right content-detail action icon and its focused source-contract coverage.
+- **Decisions:** Use the app's canonical Learning `sparkles` symbol while preserving the existing action, layout, and accessibility contract.
+- **Changes:** Replaced the Knowledge books symbol on the action hub with the Learning sparkle symbol and added a focused regression assertion.
+- **Validation:** Focused source-contract test passed; `git diff --check` passed.
+- **Remaining:** None. No commit, push, deployment, or production mutation was performed.
+- **Commits:** Uncommitted.

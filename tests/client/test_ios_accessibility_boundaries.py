@@ -207,3 +207,13 @@ def test_detail_sheet_ids_live_on_title_and_action_leaves() -> None:
 
     for removed_option in ["Dig deeper", "Deep Research", "Podcast overview"]:
         assert removed_option not in knowledge_source
+
+
+def test_detail_learning_actions_use_the_learning_icon() -> None:
+    action_bar_source = (VIEWS_ROOT / "Components" / "DetailActionBar.swift").read_text()
+    learning_action_source = action_bar_source.split(
+        "Button(action: onOpenKnowledgeActions)", maxsplit=1
+    )[1].split('.accessibilityIdentifier("content.action.knowledge_actions")', maxsplit=1)[0]
+
+    assert 'actionIcon("sparkles")' in learning_action_source
+    assert 'actionIcon("books.vertical.fill")' not in learning_action_source
