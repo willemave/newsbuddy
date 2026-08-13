@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from app.core.model_defaults import OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+from app.core.model_defaults import CHEAP_MODEL_SPEC
 from app.models.contracts import LlmTaskKind, LlmTaskMode
 from app.services import share_action_agent
 from app.services.agent_vm_runtime import AgentVmDeadlineExceeded, AgentVmSession
@@ -68,7 +68,7 @@ class _FakeSandbox:
         self.closed = True
 
 
-def test_share_action_agent_uses_flash_v4_vm_task_model(
+def test_share_action_agent_uses_cheap_vm_task_model(
     db_session,
     test_user,
     vendor_usage_db,
@@ -99,9 +99,9 @@ def test_share_action_agent_uses_flash_v4_vm_task_model(
         sandbox_factory=lambda _task: cast(AgentVmSession, _FakeSandbox()),
     )
 
-    assert result.model_name == OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
-    assert result.model_provider == "openrouter"
-    assert captured_model_specs == [OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC]
+    assert result.model_name == CHEAP_MODEL_SPEC
+    assert result.model_provider == "openai"
+    assert captured_model_specs == [CHEAP_MODEL_SPEC]
 
 
 def test_share_action_agent_passes_overall_deadline_to_generic_vm_session(

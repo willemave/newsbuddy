@@ -974,7 +974,7 @@ struct APITweetSuggestionsResponse: Codable {
         contentId: Int,
         creativity: Int,
         length: APITweetLength,
-        model: String = "openrouter:deepseek/deepseek-v4-flash",
+        model: String = "openai:gpt-5.6-luna",
         suggestions: [APITweetSuggestion]
     ) {
         self.contentId = contentId

@@ -1041,9 +1041,9 @@ Tweet video processing reuses the same audio primitives:
 Current defaults:
 
 - news
-  - `openrouter:deepseek/deepseek-v4-flash`
+  - `openai:gpt-5.6-luna`
 - discussion summaries
-  - `openrouter:deepseek/deepseek-v4-flash`
+  - `openai:gpt-5.6-luna`
 - articles
   - `openai:gpt-5.6-luna`
 - podcasts

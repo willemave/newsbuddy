@@ -22,7 +22,6 @@ from sqlalchemy.engine import make_url
 from app.core.model_defaults import (
     CHEAP_MODEL_SPEC,
     IMAGE_GENERATION_MODEL_NAME,
-    OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
     PDF_EXTRACTION_MODEL_NAME,
     SMART_MODEL_SPEC,
 )
@@ -291,7 +290,7 @@ class Settings(BaseSettings):
 
     # Briefing tab
     briefing_enabled_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=lambda: [1])
-    briefing_model: str = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+    briefing_model: str = CHEAP_MODEL_SPEC
     briefing_masthead_title: str = "The Unread Times"
     briefing_category_similarity: float = Field(default=0.55, ge=0.0, le=1.0)
     briefing_category_cluster_similarity: float = Field(default=0.62, ge=0.0, le=1.0)
@@ -465,8 +464,8 @@ class Settings(BaseSettings):
     chat_sandbox_allow_internet_access: bool = True
     chat_sandbox_library_root: str = "/tmp/newsly/personal_markdown"
     chat_sandbox_max_output_chars: int = Field(default=12_000, ge=1_000, le=100_000)
-    learning_deck_model: str = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
-    llm_task_model: str = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+    learning_deck_model: str = CHEAP_MODEL_SPEC
+    llm_task_model: str = CHEAP_MODEL_SPEC
     llm_task_sandbox_provider: Literal["disabled", "local", "e2b"] = "e2b"
     llm_task_sandbox_e2b_api_key: str | None = Field(
         default=None,

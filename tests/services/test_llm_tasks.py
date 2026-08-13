@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.model_defaults import OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+from app.core.model_defaults import CHEAP_MODEL_SPEC
 from app.core.settings import get_settings
 from app.models.contracts import (
     LlmTaskActionStatus,
@@ -24,11 +24,16 @@ from app.services.llm_tasks import (
 )
 
 
-def test_vm_task_models_default_to_deepseek_flash_v4() -> None:
+def test_fast_llm_defaults_use_luna() -> None:
     settings = get_settings()
 
-    assert settings.llm_task_model == OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
-    assert settings.learning_deck_model == OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+    assert CHEAP_MODEL_SPEC == "openai:gpt-5.6-luna"
+    assert settings.news_group_model == CHEAP_MODEL_SPEC
+    assert settings.news_header_model == CHEAP_MODEL_SPEC
+    assert settings.briefing_model == CHEAP_MODEL_SPEC
+    assert settings.discovery_candidate_model == CHEAP_MODEL_SPEC
+    assert settings.llm_task_model == CHEAP_MODEL_SPEC
+    assert settings.learning_deck_model == CHEAP_MODEL_SPEC
 
 
 def test_build_llm_task_paths_uses_configured_sandbox_root(monkeypatch) -> None:

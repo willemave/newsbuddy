@@ -7,6 +7,7 @@ from pydantic import HttpUrl, TypeAdapter
 from pydantic_ai import PromptedOutput
 
 from app.constants import TWEET_MODELS
+from app.core.settings import get_settings
 from app.models.contracts import ContentStatus, ContentType
 from app.models.domain.content import ContentData
 from app.services.tweet_suggestions import (
@@ -21,13 +22,18 @@ def _url(value: str) -> HttpUrl:
     return TypeAdapter(HttpUrl).validate_python(value)
 
 
+@pytest.fixture
+def openai_api_key(monkeypatch):
+    settings = get_settings().model_copy(update={"openai_api_key": "test-openai-key"})
+    monkeypatch.setattr("app.services.llm_models.get_settings", lambda: settings)
+
+
 class TestTweetSuggestionService:
     """Integration tests for the TweetSuggestionService."""
 
     @patch("app.services.tweet_suggestions.Agent.run_sync")
-    def test_generate_suggestions_success(self, mock_run_sync, monkeypatch) -> None:
+    def test_generate_suggestions_success(self, mock_run_sync, openai_api_key) -> None:
         """Successfully generate tweet suggestions."""
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
         mock_payload = TweetSuggestionsPayload(
             suggestions=[
                 TweetSuggestionLLM(id=1, text="Great article!", style_label="a"),
@@ -70,9 +76,8 @@ class TestTweetSuggestionService:
         assert result.suggestions[0].text == "Great article!"
 
     @patch("app.services.tweet_suggestions.Agent.run_sync")
-    def test_generate_suggestions_podcast_supported(self, mock_run_sync, monkeypatch) -> None:
+    def test_generate_suggestions_podcast_supported(self, mock_run_sync, openai_api_key) -> None:
         """Podcasts are supported for tweet suggestions."""
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
         mock_payload = TweetSuggestionsPayload(
             suggestions=[
                 TweetSuggestionLLM(id=1, text="Podcast insight 1", style_label="a"),
@@ -125,10 +130,9 @@ class TestTweetSuggestionService:
 
     @patch("app.services.tweet_suggestions.Agent.run_sync")
     def test_generate_suggestions_accepts_raw_json_text_output(
-        self, mock_run_sync, monkeypatch
+        self, mock_run_sync, openai_api_key
     ) -> None:
         """Prompted model output can be parsed from raw JSON text."""
-        monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
         mock_result = MagicMock()
         mock_result.output = """
         ```json
@@ -156,7 +160,7 @@ class TestTweetSuggestionService:
         content.metadata = {}
 
         service = TweetSuggestionService()
-        result = service.generate_suggestions(content, creativity=5, llm_provider="openrouter")
+        result = service.generate_suggestions(content, creativity=5, llm_provider="openai")
 
         assert result is not None
         assert len(result.suggestions) == 3

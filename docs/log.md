@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-13 — `agent/use-luna-for-fast-llm-defaults` — Route fast LLM defaults to Luna
+
+- **Status:** Complete
+- **Scope:** Shared cheap-model routing, Briefing, agent VM tasks, Learning Decks, generated audio scripts, public contracts, and current architecture documentation.
+- **Decisions:** Keep DeepSeek Flash available as an explicit OpenRouter model and eval target, but move product features that consume the shared cheap/default tier to `openai:gpt-5.6-luna`.
+- **Changes:** Updated the canonical cheap model and replaced direct DeepSeek feature defaults with that shared tier; aligned focused tests, model-dependent fixtures, generated public contracts, and current architecture documentation.
+- **Validation:** `pytest tests/ -q`; focused model-default and provider-routing tests; `ruff check .`; public contract regeneration/check; `git diff --check`.
+- **Remaining:** None.
+- **Commits:** Included in this branch tip.
+
 ### 2026-08-08 — `main` — Verify the real Share Extension surface and reconcile client architecture docs
 
 - **Status:** Complete

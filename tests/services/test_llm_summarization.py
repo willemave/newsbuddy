@@ -148,8 +148,8 @@ def test_content_summarizer_resolves_default_models(monkeypatch: pytest.MonkeyPa
     summarizer = llm_summarization.ContentSummarizer(_model_resolver=fake_resolve)
     summarizer.summarize("body", content_type=ContentType.NEWS)
 
-    assert captured_resolves == [("openrouter", "deepseek/deepseek-v4-flash")]
-    assert captured_model_specs == ["openrouter:deepseek/deepseek-v4-flash"]
+    assert captured_resolves == [("openai", "gpt-5.6-luna")]
+    assert captured_model_specs == ["openai:gpt-5.6-luna"]
 
 
 def test_content_summarizer_uses_luna_for_articles(

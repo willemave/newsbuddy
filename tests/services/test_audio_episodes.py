@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.core.model_defaults import OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+from app.core.model_defaults import CHEAP_MODEL_SPEC
 from app.models.contracts import ContentType, TaskType
 from app.models.db import (
     AudioEpisode,
@@ -293,7 +293,7 @@ def test_create_custom_narration_episode_rejects_invalid_ids(db_session, test_us
     assert "positive" in str(exc_info.value.detail)
 
 
-def test_custom_narration_prompt_uses_deepseek_flash_and_bounded_excerpts(
+def test_custom_narration_prompt_uses_default_model_and_bounded_excerpts(
     monkeypatch,
 ) -> None:
     full_text = "Opening. " + ("Long source paragraph. " * 1_000) + "CLOSING_MARKER."
@@ -439,7 +439,7 @@ def test_generate_script_accepts_natural_long_provider_turn(monkeypatch) -> None
     assert generated.turns[0].text == "x" * 3_501
 
 
-def test_all_generated_audio_episode_kinds_use_deepseek_flash() -> None:
+def test_all_generated_audio_episode_kinds_use_cheap_model_default() -> None:
     generated_specs = [
         spec
         for spec in AUDIO_EPISODE_KIND_SPECS.values()
@@ -447,9 +447,7 @@ def test_all_generated_audio_episode_kinds_use_deepseek_flash() -> None:
     ]
 
     assert generated_specs
-    assert {spec.default_model for spec in generated_specs} == {
-        OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
-    }
+    assert {spec.default_model for spec in generated_specs} == {CHEAP_MODEL_SPEC}
 
 
 def test_generate_audio_episode_persists_script_and_audio(

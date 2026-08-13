@@ -20,7 +20,9 @@ def _disable_fixture_images(monkeypatch) -> None:
     monkeypatch.setattr(dev_user, "_remove_generated_images", lambda _content_ids: None)
 
 
-def test_showcase_profile_is_idempotent(db_session: Session, monkeypatch) -> None:
+def test_showcase_profile_is_idempotent(
+    db_session: Session, monkeypatch, stub_briefing_layout_generator
+) -> None:
     _disable_fixture_images(monkeypatch)
 
     first = dev_user.setup_showcase_user(db_session, briefing_mode="deterministic")
