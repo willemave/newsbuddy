@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from app.core.model_defaults import OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+from app.core.model_defaults import CHEAP_MODEL_SPEC
 from app.services.audio_episode_errors import AudioEpisodeInputError
 from app.services.custom_narrations import (
     CUSTOM_NARRATION_KIND,
@@ -21,7 +21,7 @@ CONTENT_COUNCIL_DISCUSSION_KIND: Literal["content_council_discussion"] = (
 )
 NEWS_ITEM_DISCUSSION_KIND: Literal["news_item_discussion"] = "news_item_discussion"
 BRIEFING_NARRATION_KIND: Literal["briefing_narration"] = "briefing_narration"
-AUDIO_EPISODE_MODEL = OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC
+AUDIO_EPISODE_MODEL = CHEAP_MODEL_SPEC
 CUSTOM_NARRATION_MODEL = AUDIO_EPISODE_MODEL
 AudioEpisodeScriptMode = Literal["generated_dialogue", "preauthored"]
 

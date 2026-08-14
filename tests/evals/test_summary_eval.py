@@ -308,5 +308,5 @@ def test_resolve_generation_model_spec_uses_real_app_defaults() -> None:
     )
     assert (
         summary_eval._resolve_generation_model_spec(case=news_case, defaults=defaults)
-        == "openrouter:deepseek/deepseek-v4-flash"
+        == "openai:gpt-5.6-luna"
     )
