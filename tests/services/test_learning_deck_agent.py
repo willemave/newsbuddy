@@ -9,13 +9,54 @@ import pytest
 
 from app.models.contracts import LlmTaskKind, LlmTaskMode
 from app.models.db import VendorUsageRecord
-from app.services import learning_deck_agent
+from app.services import learning_deck_agent, learning_deck_browser_validation
 from app.services.agent_vm_runtime import (
     AgentVmDeadlineExceeded,
     resolve_workspace_relative_path,
 )
 from app.services.learning_deck_agent import LearningDeckAgentExecutionError
+from app.services.learning_deck_theme import DECK_THEME_STYLE_ID
 from app.services.llm_tasks import create_llm_task
+
+
+def _valid_deck_html(body: str = "Deck") -> str:
+    return (
+        "<html><head><meta name='newsly-deck-layout' content='responsive-v2'>"
+        "<style>.reveal .slides section { color: #eee; background: #111; "
+        "padding: 2rem; }</style><body><div class='reveal'><div class='slides'>"
+        f"<section>{body}</section></div></div></body></html>"
+    )
+
+
+def _browser_validation_outcome() -> dict[str, Any]:
+    orientation_common = {
+        "slides_checked": 2,
+        "overflow_slides": [],
+        "vertical_occupancy": {"minimum": 0.4, "maximum": 0.8},
+    }
+    return {
+        "status": "passed",
+        "validator": "playwright_chromium",
+        "responsive_layout": "responsive-v2",
+        "reveal_ready": True,
+        "current_slide_exists": True,
+        "slide_count": 2,
+        "navigation": "next_previous_round_trip",
+        "initial_indices": {"h": 0, "v": 0, "f": -1},
+        "next_indices": {"h": 1, "v": 0, "f": -1},
+        "previous_indices": {"h": 0, "v": 0, "f": -1},
+        "relevant_asset_loads": 2,
+        "portrait": {
+            "viewport": {"width": 390, "height": 844},
+            "canvas": {"width": 720, "height": 1280},
+            **orientation_common,
+        },
+        "landscape": {
+            "viewport": {"width": 844, "height": 390},
+            "canvas": {"width": 1280, "height": 720},
+            **orientation_common,
+        },
+    }
 
 
 class _FakeAgentResult:
@@ -63,22 +104,12 @@ class _FakeSandbox:
         del timeout_seconds
         self.commands.append(_command)
         if "require('playwright')" in _command:
-            outcome = {
-                "status": "passed",
-                "validator": "playwright_chromium",
-                "viewport": {"width": 390, "height": 844},
-                "reveal_ready": True,
-                "current_slide_exists": True,
-                "slide_count": 2,
-                "navigation": "next_previous_round_trip",
-                "initial_indices": {"h": 0, "v": 0, "f": -1},
-                "next_indices": {"h": 1, "v": 0, "f": -1},
-                "previous_indices": {"h": 0, "v": 0, "f": -1},
-                "relevant_asset_loads": 2,
-            }
             return SimpleNamespace(
                 exit_code=0,
-                stdout=(learning_deck_agent.BROWSER_VALIDATION_RESULT_PREFIX + json.dumps(outcome)),
+                stdout=(
+                    learning_deck_browser_validation.BROWSER_VALIDATION_RESULT_PREFIX
+                    + json.dumps(_browser_validation_outcome())
+                ),
                 stderr="",
             )
         return SimpleNamespace(exit_code=0, stdout="", stderr="")
@@ -97,11 +128,7 @@ class _FakeSandbox:
     def read_file(self, path: str, *, max_bytes: int | None = None) -> str:
         del max_bytes
         if path == learning_deck_agent.OUTPUT_INDEX_HTML:
-            return (
-                "<html><style>.reveal .slides section { color: #eee; background: #111; "
-                "padding: 2rem; }</style><body><div class='reveal'><div class='slides'>"
-                "<section>Deck</section></div></div></body></html>"
-            )
+            return _valid_deck_html()
         if path == learning_deck_agent.OUTPUT_SOURCE_NOTES:
             return "# Source Notes\n\n## Sources\n\n- Primary source."
         if path == learning_deck_agent.OUTPUT_SOURCE_METADATA:
@@ -162,9 +189,7 @@ class _RepairingAgent(_FakeAgent):
             sandbox = kwargs["deps"].sandbox
             sandbox.write_file(
                 learning_deck_agent.OUTPUT_INDEX_HTML,
-                "<html><style>.reveal .slides section { color: #eee; background: #111; "
-                "padding: 2rem; }</style><div class='reveal'><div class='slides'>"
-                "<section>Repaired</section></div></div></html>",
+                _valid_deck_html("Repaired"),
             )
             sandbox.write_file(
                 learning_deck_agent.OUTPUT_SOURCE_NOTES,
@@ -239,9 +264,7 @@ class _Task55RepairAgent(_FakeAgent):
         if type(self).calls == 1:
             sandbox.write_file(
                 learning_deck_agent.OUTPUT_INDEX_HTML,
-                "<html><style>.reveal .slides section { color: #eee; background: #111; "
-                "padding: 2rem; }</style><div class='reveal'><div class='slides'>"
-                "<section>Deck</section></div></div></html>",
+                _valid_deck_html(),
             )
         else:
             sandbox.write_file(
@@ -469,27 +492,25 @@ def test_learning_deck_agent_records_browser_validation_skip_without_blocking_ge
 def test_learning_deck_browser_validation_runs_when_capabilities_are_present() -> None:
     sandbox = _FakeSandbox()
 
-    result = learning_deck_agent._validate_artifact_in_browser(cast(Any, sandbox))
+    result = learning_deck_agent._validate_artifact_in_browser(
+        cast(Any, sandbox),
+        index_html=_valid_deck_html(),
+    )
 
-    assert result == {
-        "status": "passed",
-        "validator": "playwright_chromium",
-        "viewport": {"width": 390, "height": 844},
-        "reveal_ready": True,
-        "current_slide_exists": True,
-        "slide_count": 2,
-        "navigation": "next_previous_round_trip",
-        "initial_indices": {"h": 0, "v": 0, "f": -1},
-        "next_indices": {"h": 1, "v": 0, "f": -1},
-        "previous_indices": {"h": 0, "v": 0, "f": -1},
-        "relevant_asset_loads": 2,
-    }
-    assert len(sandbox.commands) == 1
-    browser_command = sandbox.commands[0]
+    assert result == _browser_validation_outcome()
+    browser_command = next(
+        command for command in sandbox.commands if "require('playwright')" in command
+    )
     assert "require('playwright')" in browser_command
-    assert "width: 390, height: 844" in browser_command
+    assert '"viewport":{"width":390,"height":844}' in browser_command
     assert "window.Reveal.isReady()" in browser_command
     assert "window.Reveal.getCurrentSlide()" in browser_command
+    assert "newsly-deck-layout" in browser_command
+    assert '"canvas":{"width":720,"height":1280}' in browser_command
+    assert '"viewport":{"width":844,"height":390}' in browser_command
+    assert '"canvas":{"width":1280,"height":720}' in browser_command
+    assert "inspectOrientation" in browser_command
+    assert "overflow_slides" in browser_command
     assert "window.Reveal.next()" in browser_command
     assert "window.Reveal.prev()" in browser_command
     assert "single_slide_stable" in browser_command
@@ -497,14 +518,22 @@ def test_learning_deck_browser_validation_runs_when_capabilities_are_present() -
     assert "page.on('pageerror'" in browser_command
     assert "page.on('requestfailed'" in browser_command
     assert "response.status() >= 400" in browser_command
+    viewer_html = sandbox.files[learning_deck_browser_validation.VALIDATION_VIEWER_PATH]
+    assert f'id="{DECK_THEME_STYLE_ID}"' in viewer_html
+    assert "isResponsiveDeck = true" in viewer_html
 
 
 def test_browser_validation_tracks_all_deck_resource_failures() -> None:
     sandbox = _FakeSandbox()
 
-    learning_deck_agent._validate_artifact_in_browser(cast(Any, sandbox))
+    learning_deck_agent._validate_artifact_in_browser(
+        cast(Any, sandbox),
+        index_html=_valid_deck_html(),
+    )
 
-    browser_command = sandbox.commands[0]
+    browser_command = next(
+        command for command in sandbox.commands if "require('playwright')" in command
+    )
     assert "resourceType === 'script'" not in browser_command
     assert "resourceType === 'stylesheet'" not in browser_command
     assert "['data:', 'blob:', 'about:']" in browser_command
@@ -516,7 +545,10 @@ def test_browser_validation_tracks_all_deck_resource_failures() -> None:
 def test_browser_validation_returns_actionable_skip_for_missing_capabilities() -> None:
     sandbox = _MissingBrowserCapabilitiesSandbox()
 
-    result = learning_deck_agent._validate_artifact_in_browser(cast(Any, sandbox))
+    result = learning_deck_agent._validate_artifact_in_browser(
+        cast(Any, sandbox),
+        index_html=_valid_deck_html(),
+    )
 
     assert result == {
         "status": "skipped",
@@ -534,9 +566,12 @@ def test_learning_deck_browser_validation_rejects_render_failures_when_available
         learning_deck_agent.LearningDeckArtifactError,
         match="Browser validation failed: ReferenceError: broken deck",
     ):
-        learning_deck_agent._validate_artifact_in_browser(cast(Any, sandbox))
+        learning_deck_agent._validate_artifact_in_browser(
+            cast(Any, sandbox),
+            index_html=_valid_deck_html(),
+        )
 
-    assert len(sandbox.commands) == 1
+    assert sum("require('playwright')" in command for command in sandbox.commands) == 1
 
 
 @pytest.mark.parametrize(
@@ -544,15 +579,17 @@ def test_learning_deck_browser_validation_rejects_render_failures_when_available
     [
         ("", "did not report a structured outcome"),
         (
-            learning_deck_agent.BROWSER_VALIDATION_RESULT_PREFIX + "{broken",
+            learning_deck_browser_validation.BROWSER_VALIDATION_RESULT_PREFIX + "{broken",
             "reported malformed JSON",
         ),
         (
-            learning_deck_agent.BROWSER_VALIDATION_RESULT_PREFIX + '{"status":"failed"}',
+            learning_deck_browser_validation.BROWSER_VALIDATION_RESULT_PREFIX
+            + '{"status":"failed"}',
             "did not report a passing outcome",
         ),
         (
-            learning_deck_agent.BROWSER_VALIDATION_RESULT_PREFIX + '{"status":"passed"}',
+            learning_deck_browser_validation.BROWSER_VALIDATION_RESULT_PREFIX
+            + '{"status":"passed"}',
             "reported an incomplete passing outcome",
         ),
     ],
@@ -562,6 +599,18 @@ def test_browser_validation_rejects_invalid_structured_outcomes(
     expected_error: str,
 ) -> None:
     with pytest.raises(learning_deck_agent.LearningDeckArtifactError, match=expected_error):
+        learning_deck_agent._parse_browser_validation_outcome(stdout)
+
+
+def test_browser_validation_rejects_reported_slide_overflow() -> None:
+    outcome = _browser_validation_outcome()
+    outcome["portrait"]["overflow_slides"] = ["intro: bottom"]
+    stdout = learning_deck_browser_validation.BROWSER_VALIDATION_RESULT_PREFIX + json.dumps(outcome)
+
+    with pytest.raises(
+        learning_deck_agent.LearningDeckArtifactError,
+        match="reported an incomplete passing outcome",
+    ):
         learning_deck_agent._parse_browser_validation_outcome(stdout)
 
 

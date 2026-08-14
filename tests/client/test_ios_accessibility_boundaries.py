@@ -217,3 +217,20 @@ def test_detail_learning_actions_use_the_learning_icon() -> None:
 
     assert 'actionIcon("sparkles")' in learning_action_source
     assert 'actionIcon("books.vertical.fill")' not in learning_action_source
+
+
+def test_learning_deck_portrait_chat_is_a_collapsible_flyover() -> None:
+    reader_source = (VIEWS_ROOT / "Components" / "LearningDeckReaderView.swift").read_text()
+    panel_source = (VIEWS_ROOT / "Components" / "LearningDeckChatPanel.swift").read_text()
+    portrait_flyover = reader_source.split("private func portraitChatFlyover", maxsplit=1)[1].split(
+        "private func deckRegion", maxsplit=1
+    )[0]
+
+    assert "isPortraitChatExpanded = false" in reader_source
+    assert "LearningDeckChatFlyover(" in portrait_flyover
+    assert "isExpanded: $isPortraitChatExpanded" in portrait_flyover
+    assert "LearningDeckChatFlyover(" in portrait_flyover
+    assert 'accessibilityIdentifier("learning_deck.chat.peek")' in panel_source
+    assert 'accessibilityIdentifier("learning_deck.chat.collapse")' in panel_source
+    assert "isPeekable" not in panel_source
+    assert "accessibilityExpandedChatHeight" in reader_source

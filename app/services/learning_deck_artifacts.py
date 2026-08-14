@@ -20,6 +20,7 @@ from app.services.gateways.object_storage_gateway import (
     ObjectStorageGateway,
     get_object_storage_gateway,
 )
+from app.services.learning_deck_layout import RESPONSIVE_LEARNING_DECK_LAYOUT
 
 ALLOWED_EXTERNAL_SCRIPT_PACKAGES = frozenset(
     {
@@ -86,6 +87,11 @@ def validate_learning_deck_artifact(
         errors.append("source-notes.md exceeds configured size limit")
     if "<section" not in index_html.lower() or "reveal" not in index_html.lower():
         errors.append("index.html does not look like a Reveal.js deck")
+    if not has_responsive_learning_deck_layout(index_html):
+        errors.append(
+            "index.html must declare the "
+            f"{RESPONSIVE_LEARNING_DECK_LAYOUT.version} Learning Deck layout metadata"
+        )
     if re.search(r"\son[a-z]+\s*=", index_html, flags=re.IGNORECASE):
         errors.append("index.html contains inline event-handler attributes")
     if not _has_custom_visual_style(index_html):
@@ -109,6 +115,30 @@ def validate_learning_deck_artifact(
             "; ".join(errors),
             report={"invalid": errors},
         )
+
+
+def has_responsive_learning_deck_layout(index_html: str) -> bool:
+    """Return whether a deck opts into the responsive viewer layout contract."""
+    meta_tags = re.findall(r"<meta\b[^>]*>", index_html, flags=re.IGNORECASE)
+    for tag in meta_tags:
+        name_match = re.search(
+            r"\bname\s*=\s*(['\"])(.*?)\1",
+            tag,
+            flags=re.IGNORECASE,
+        )
+        content_match = re.search(
+            r"\bcontent\s*=\s*(['\"])(.*?)\1",
+            tag,
+            flags=re.IGNORECASE,
+        )
+        if (
+            name_match is not None
+            and content_match is not None
+            and name_match.group(2).strip().lower() == RESPONSIVE_LEARNING_DECK_LAYOUT.meta_name
+            and content_match.group(2).strip().lower() == RESPONSIVE_LEARNING_DECK_LAYOUT.version
+        ):
+            return True
+    return False
 
 
 def render_source_notes_html(source_notes_md: str, *, title: str) -> str:

@@ -31,3 +31,5 @@ K14. Deleting a deck cancels active generation, revokes access, and removes its 
 K15. Deck chat keeps the deck visible and carries the deck's own identity instead of pretending it is an article chat.
 
 K16. Content detail groups chat, council, and Learning Deck creation as Knowledge actions; narration remains a separate audio action.
+
+K17. Newly generated Learning Decks use the available phone canvas as a reading surface; deck chat remains a secondary, collapsible layer and does not permanently reduce the deck viewport. Historical decks remain viewable with their legacy fit until regenerated.

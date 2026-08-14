@@ -37,6 +37,7 @@ def _required_id(value: int | None) -> int:
 def test_learning_deck_host_wrapper_uses_only_reveal_navigation() -> None:
     html = b"""<!doctype html>
 <html>
+<head><meta name="newsly-deck-layout" content="responsive-v2"></head>
 <body>
 <div class="reveal"><div class="slides"><section>Deck</section></div></div>
 <script>Reveal.initialize({ width: 1280, height: 720 });</script>
@@ -49,8 +50,8 @@ def test_learning_deck_host_wrapper_uses_only_reveal_navigation() -> None:
     assert "newsly-learning-deck-portrait" in wrapped
     assert "visualViewport" in wrapped
     assert "width: 390, height: 720" not in wrapped
-    assert "width: 1280" in wrapped
-    assert "canvasHeight = isPhoneSized ? (isPortrait ? 960 : 860) : 720" in wrapped
+    assert '"portrait":{"width":720,"height":1280,"margin":0.005}' in wrapped
+    assert "isResponsiveDeck = true" in wrapped
     assert "controls: true" in wrapped
     assert "progress: false" in wrapped
     assert "data-newsly-learning-deck-prev" not in wrapped

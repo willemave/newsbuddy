@@ -7,9 +7,11 @@ import SwiftUI
 import UIKit
 
 private enum LearningDeckReaderLayout {
-    static let compactChatHeight: CGFloat = 300
-    static let regularChatHeight: CGFloat = 340
-    static let maxChatHeight: CGFloat = 400
+    static let compactExpandedChatHeight: CGFloat = 230
+    static let regularExpandedChatHeight: CGFloat = 280
+    static let accessibilityExpandedChatHeight: CGFloat = 340
+    static let flyoverHorizontalInset: CGFloat = 12
+    static let flyoverBottomInset: CGFloat = 8
     static let landscapeHorizontalSafeReserve: CGFloat = 76
 }
 
@@ -18,6 +20,7 @@ struct LearningDeckReaderView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: LearningDeckReaderViewModel
     @State private var webController = LearningDeckReaderWebController()
+    @State private var isPortraitChatExpanded = false
     @State private var showLandscapeChat = false
 
     let deck: LearningDeck
@@ -66,10 +69,7 @@ struct LearningDeckReaderView: View {
         }
         .sheet(isPresented: $showLandscapeChat) {
             LearningDeckChatPanel(
-                deck: deck,
-                viewModel: viewModel,
-                isExpanded: .constant(true),
-                isPeekable: false
+                viewModel: viewModel
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
@@ -86,7 +86,7 @@ struct LearningDeckReaderView: View {
             ? max(geometry.safeAreaInsets.trailing, LearningDeckReaderLayout.landscapeHorizontalSafeReserve)
             : 0
 
-        return VStack(spacing: 0) {
+        return ZStack(alignment: .bottom) {
             deckRegion(url: url, isLandscape: isLandscape)
                 .padding(.leading, landscapeLeadingInset)
                 .padding(.trailing, landscapeTrailingInset)
@@ -95,20 +95,37 @@ struct LearningDeckReaderView: View {
                 .ignoresSafeArea(.keyboard, edges: .bottom)
 
             if !isLandscape {
-                Divider()
-                    .overlay(Color.outlineVariant.opacity(0.22))
-
-                LearningDeckChatPanel(
-                    deck: deck,
-                    viewModel: viewModel,
-                    isExpanded: .constant(true),
-                    isPeekable: false
-                )
-                .frame(height: chatHeight(for: geometry.size))
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                portraitChatFlyover(geometry: geometry)
             }
         }
+        .animation(AppMotion.subtle, value: isPortraitChatExpanded)
         .animation(AppMotion.subtle, value: isLandscape)
+    }
+
+    private func portraitChatFlyover(geometry: GeometryProxy) -> some View {
+        LearningDeckChatFlyover(
+            viewModel: viewModel,
+            isExpanded: $isPortraitChatExpanded
+        )
+        .frame(
+            height: isPortraitChatExpanded
+                ? expandedChatHeight(for: geometry.size)
+                : nil
+        )
+        .clipShape(
+            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+                .stroke(Color.outlineVariant.opacity(0.3), lineWidth: 0.5)
+        }
+        .appShadow(.floating)
+        .padding(.horizontal, LearningDeckReaderLayout.flyoverHorizontalInset)
+        .padding(
+            .bottom,
+            max(geometry.safeAreaInsets.bottom, LearningDeckReaderLayout.flyoverBottomInset)
+        )
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private func deckRegion(url: URL, isLandscape: Bool) -> some View {
@@ -381,14 +398,17 @@ struct LearningDeckReaderView: View {
         return label
     }
 
-    private func chatHeight(for size: CGSize) -> CGFloat {
-        let preferred = size.height < 760
-            ? LearningDeckReaderLayout.compactChatHeight
-            : LearningDeckReaderLayout.regularChatHeight
-        let cap = dynamicTypeSize.isAccessibilitySize
-            ? size.height * 0.62
-            : min(LearningDeckReaderLayout.maxChatHeight, size.height * 0.46)
-        return min(max(preferred, size.height * 0.34), cap)
+    private func expandedChatHeight(for size: CGSize) -> CGFloat {
+        let isAccessibilitySize = dynamicTypeSize.isAccessibilitySize
+        let preferred = if isAccessibilitySize {
+            LearningDeckReaderLayout.accessibilityExpandedChatHeight
+        } else if size.height < 760 {
+            LearningDeckReaderLayout.compactExpandedChatHeight
+        } else {
+            LearningDeckReaderLayout.regularExpandedChatHeight
+        }
+        let maximumFraction = isAccessibilitySize ? 0.58 : 0.42
+        return min(preferred, size.height * maximumFraction)
     }
 
     private var closeButtonTopPadding: CGFloat {

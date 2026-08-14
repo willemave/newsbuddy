@@ -26,6 +26,7 @@ Output contract:
 - Address every file with a path relative to the task workspace root; never pass absolute paths to
   file tools.
 - Write `output/index.html`, a complete Reveal.js deck using CDN Reveal.js assets.
+- Put `$responsive_layout_meta_tag` in the document `<head>`.
 - Write `output/source-notes.md`, with sections for primary source metadata, web sources used,
   important inspected files, source-to-slide mapping, limitations, and GitHub branch/commit when
   applicable.
@@ -109,8 +110,9 @@ Build the deck like a strong technical conference talk, not a default Reveal exp
   ablation matrices, comparison-to-prior-work tables, limitation maps, and assumption diagrams.
 - For articles and podcasts: include chronology, actor maps, claim/evidence maps, causal chains,
   tradeoff matrices, and implication trees.
-- Keep diagrams legible at 16:9 landscape phone size. Use fewer, clearer nodes instead of sprawling
-  maps; split complex systems across progressive slides or vertical stacks.
+- Keep diagrams legible on both a $portrait_canvas portrait canvas and a $landscape_canvas landscape canvas.
+  Use fewer, clearer nodes instead of sprawling maps; split complex systems across progressive
+  slides rather than shrinking them.
 - Use Reveal fragments only to reveal layers of a diagram, equation, source excerpt, or argument.
   Do not animate every bullet by default.
 
@@ -158,10 +160,19 @@ Build the deck like a strong technical conference talk, not a default Reveal exp
   `r-stretch` for large diagrams/media/code panes, and `r-stack` for layered visual comparisons.
 - Set `scrollActivationWidth: null` in `Reveal.initialize(...)` so phone-width viewers stay in
   slide mode and previous/next controls work.
-- Design for a polished 16:9 landscape deck first. Phone portrait may show the same landscape deck
-  scaled to fit; only add portrait-specific responsive CSS when it preserves presentation quality.
-- Keep slide content within safe bounds on mobile landscape and desktop. Avoid text, diagrams, SVGs,
-  tables, or code blocks that spill past the slide.
+- Treat iPhone portrait as a primary Learning Deck surface, not a scaled landscape fallback. Author
+  one semantic composition that supports a $portrait_canvas portrait canvas and a $landscape_canvas landscape
+  canvas. In portrait, reflow wide rows and split layouts into vertical sequences; enlarge teaching
+  objects instead of preserving their landscape width.
+- On ordinary teaching slides, use roughly 70–85% of the usable portrait height. Do not concentrate
+  all content in the upper third. Keep titles to at most three lines, give the main diagram, table,
+  excerpt, or argument most of the remaining height, and reserve the bottom 72px for viewer controls
+  and the collapsed chat flyover.
+- Avoid fixed positioning and fixed-width structures that cannot reflow. Add portrait-specific CSS
+  for every custom diagram. If a complex slide cannot remain readable in both orientations, split it
+  into additional slides instead of shrinking it.
+- Keep slide content within safe bounds on portrait phone, mobile landscape, and desktop. Avoid text,
+  diagrams, SVGs, tables, or code blocks that spill past the slide.
 - Provide visible previous/next affordance through Reveal controls or clear slide navigation
   styling.
 - Use speaker-friendly slide titles, but make slides visually scannable without narration.
@@ -169,10 +180,11 @@ Build the deck like a strong technical conference talk, not a default Reveal exp
 - Use `data-background-*`, auto-animate, and speaker notes sparingly. They should clarify a
   relationship or presentation beat, not compensate for weak slide structure.
 
-Before finishing, inspect `output/index.html` in a browser or with screenshot tooling. Check every
-slide for overflow, unreadable contrast, dead images/assets, broken next/previous navigation,
-missing citations, and source-notes mappings. Reject your own work if it still looks like a generic
-AI-generated deck.
+Before finishing, inspect every slide at 390 × 844 portrait and 844 × 390 landscape in a browser or
+with screenshot tooling. Check for overflow, unreadably small text, excessive unused vertical space,
+dead images/assets, broken next/previous navigation, missing citations, and source-notes mappings.
+Reject your own work if it still looks like a generic AI-generated deck or a landscape deck merely
+scaled down in portrait.
 <!-- /prompt-section -->
 
 ## User
@@ -190,11 +202,12 @@ $github_guidance
 
 Before finishing, verify:
 1. output/index.html exists and contains a Reveal.js slide structure.
-2. output/source-notes.md exists and has source sections.
-3. Source notes map important claims/slides back to sources.
-4. output/index.html follows the design brief: Daylight house classes, source-specific graphics,
+2. output/index.html declares `$responsive_layout_meta_tag`.
+3. output/source-notes.md exists and has source sections.
+4. Source notes map important claims/slides back to sources.
+5. output/index.html follows the design brief: Daylight house classes, source-specific graphics,
    varied slide layouts, and no default Reveal/AI-template styling.
-5. Any React/JSX, TypeScript, or Node authoring work has been compiled so the hosted deck uses only
+6. Any React/JSX, TypeScript, or Node authoring work has been compiled so the hosted deck uses only
    valid browser HTML/CSS/JS, local assets, and allowed presentation CDN scripts.
 
 Return a short completion summary only after the files are written.

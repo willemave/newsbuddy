@@ -11,6 +11,7 @@ from app.services.learning_deck_artifacts import (
 VALID_INDEX_HTML = """<!doctype html>
 <html>
 <head>
+  <meta name="newsly-deck-layout" content="responsive-v2">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js/dist/reveal.css">
   <style>
     :root { --deck-bg: #11110f; --deck-accent: #c77d3a; }
@@ -42,6 +43,16 @@ def test_validate_learning_deck_artifact_accepts_reveal_deck() -> None:
         index_html=VALID_INDEX_HTML,
         source_notes_md=VALID_SOURCE_NOTES,
     )
+
+
+def test_validate_learning_deck_artifact_requires_responsive_layout_metadata() -> None:
+    html = VALID_INDEX_HTML.replace(
+        '  <meta name="newsly-deck-layout" content="responsive-v2">\n',
+        "",
+    )
+
+    with pytest.raises(LearningDeckArtifactError, match="responsive-v2"):
+        validate_learning_deck_artifact(index_html=html, source_notes_md=VALID_SOURCE_NOTES)
 
 
 def test_validate_learning_deck_artifact_accepts_linked_local_theme() -> None:

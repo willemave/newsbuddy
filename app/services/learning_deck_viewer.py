@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import re
+from functools import cache
+
+from app.services.learning_deck_artifacts import has_responsive_learning_deck_layout
+from app.services.learning_deck_layout import learning_deck_viewer_profiles_json
 
 NAVIGATION_CONTROLS_MARKER = "data-newsly-learning-deck-controls"
 REVEAL_SLIDE_MODE_PATCH_MARKER = "__newslySlideModePatched"
@@ -18,7 +22,9 @@ def with_learning_deck_navigation_controls(data: bytes) -> bytes:
         return data
 
     html = with_reveal_slide_mode_patch(html)
-    injected_html = learning_deck_navigation_controls_html()
+    injected_html = learning_deck_navigation_controls_html(
+        responsive_layout=has_responsive_learning_deck_layout(html)
+    )
     match = re.search(r"</body\s*>", html, flags=re.IGNORECASE)
     if match is None:
         return f"{html}\n{injected_html}".encode()
@@ -44,8 +50,11 @@ def with_reveal_slide_mode_patch(html: str) -> str:
     return re.sub(r"\bReveal\.initialize\s*\(", patch + "Reveal.initialize(", html, count=1)
 
 
-def learning_deck_navigation_controls_html() -> str:
+@cache
+def learning_deck_navigation_controls_html(*, responsive_layout: bool = False) -> str:
     """Return the hosted viewer shell CSS and JS."""
+    responsive_layout_js = str(responsive_layout).lower()
+    layout_profiles_js = learning_deck_viewer_profiles_json()
     return (
         _house_deck_theme_html()
         + f"""<style {NAVIGATION_CONTROLS_MARKER}="style">
@@ -124,6 +133,9 @@ def learning_deck_navigation_controls_html() -> str:
     top: max(24px, calc(100dvh - 178px));
     bottom: auto;
   }}
+  html.newsly-learning-deck-responsive.newsly-learning-deck-portrait .reveal .controls {{
+    bottom: 92px !important;
+  }}
   html.newsly-learning-deck-landscape .newsly-learning-deck-controls {{
     right: calc(env(safe-area-inset-right, 0px) + 12px);
     bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
@@ -165,6 +177,8 @@ def learning_deck_navigation_controls_html() -> str:
 </div>
 <script {NAVIGATION_CONTROLS_MARKER}="script">
 (function () {{
+  var isResponsiveDeck = {responsive_layout_js};
+  var layoutProfiles = {layout_profiles_js};
   var fullscreenButton = document.querySelector("[data-newsly-learning-deck-fullscreen]");
   if (!fullscreenButton) return;
   var lastFullscreenActivationAt = 0;
@@ -268,22 +282,29 @@ def learning_deck_navigation_controls_html() -> str:
   }});
 
   withReveal(function (reveal) {{
-    function viewportSize() {{
-      var viewport = window.visualViewport;
-      return {{
-        width: viewport && viewport.width ? viewport.width : window.innerWidth,
-        height: viewport && viewport.height ? viewport.height : window.innerHeight
-      }};
+    function isPortraitOrientation() {{
+      if (typeof window.matchMedia === "function") {{
+        return window.matchMedia("(orientation: portrait)").matches;
+      }}
+      return window.innerHeight >= window.innerWidth;
     }}
 
     function fitConfig() {{
-      var size = viewportSize();
-      var screenWidth = window.screen && window.screen.width ? window.screen.width : size.width;
-      var screenHeight = window.screen && window.screen.height ? window.screen.height : size.height;
+      var screenWidth = window.screen && window.screen.width
+        ? window.screen.width
+        : window.innerWidth;
+      var screenHeight = window.screen && window.screen.height
+        ? window.screen.height
+        : window.innerHeight;
       var smallestScreenSide = Math.min(screenWidth, screenHeight);
-      var isPortrait = size.height > size.width;
-      var isPhoneSized = Math.min(size.width, size.height, smallestScreenSide) < 700;
-      var canvasHeight = isPhoneSized ? (isPortrait ? 960 : 860) : 720;
+      var isPortrait = isPortraitOrientation();
+      var isPhoneSized = smallestScreenSide < layoutProfiles.phoneBreakpoint;
+      var phoneProfile = isResponsiveDeck
+        ? layoutProfiles.responsive
+        : layoutProfiles.legacy;
+      var canvas = isPhoneSized
+        ? phoneProfile[isPortrait ? "portrait" : "landscape"]
+        : layoutProfiles.desktop;
       document.documentElement.classList.toggle(
         "newsly-learning-deck-portrait",
         isPhoneSized && isPortrait
@@ -292,22 +313,14 @@ def learning_deck_navigation_controls_html() -> str:
         "newsly-learning-deck-landscape",
         isPhoneSized && !isPortrait
       );
-      if (isPhoneSized) {{
-        return {{
-          width: 1280,
-          height: canvasHeight,
-          margin: isPortrait ? 0.005 : 0.012,
-          center: false,
-          minScale: 0.05,
-          maxScale: 3,
-          view: "slide",
-          scrollActivationWidth: null
-        }};
-      }}
+      document.documentElement.classList.toggle(
+        "newsly-learning-deck-responsive",
+        isResponsiveDeck
+      );
       return {{
-        width: 1280,
-        height: 720,
-        margin: 0.025,
+        width: canvas.width,
+        height: canvas.height,
+        margin: canvas.margin,
         center: false,
         minScale: 0.05,
         maxScale: 3,
@@ -331,7 +344,15 @@ def learning_deck_navigation_controls_html() -> str:
       }}
       syncFullscreenButton();
     }}
-    relayoutDeck = applyFit;
+    var fitAnimationFrame = null;
+    function scheduleFit() {{
+      if (fitAnimationFrame !== null) return;
+      fitAnimationFrame = window.requestAnimationFrame(function () {{
+        fitAnimationFrame = null;
+        applyFit();
+      }});
+    }}
+    relayoutDeck = scheduleFit;
 
     if (typeof reveal.configure === "function") {{
       reveal.configure({{
@@ -344,16 +365,15 @@ def learning_deck_navigation_controls_html() -> str:
       }});
     }}
     if (typeof reveal.on === "function") {{
-      reveal.on("ready", applyFit);
-      reveal.on("slidechanged", applyFit);
+      reveal.on("ready", scheduleFit);
+      reveal.on("slidechanged", scheduleFit);
     }}
-    applyFit();
-    window.requestAnimationFrame(applyFit);
-    window.setTimeout(applyFit, 250);
-    window.setTimeout(applyFit, 1000);
-    window.addEventListener("resize", applyFit);
+    scheduleFit();
+    window.setTimeout(scheduleFit, 250);
+    window.setTimeout(scheduleFit, 1000);
+    window.addEventListener("resize", scheduleFit);
     if (window.visualViewport) {{
-      window.visualViewport.addEventListener("resize", applyFit);
+      window.visualViewport.addEventListener("resize", scheduleFit);
     }}
   }});
 }}());

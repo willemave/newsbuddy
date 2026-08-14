@@ -37,6 +37,12 @@ from app.models.db import (
 from app.services.briefing.presentation import get_briefing_lens
 from app.services.briefing.refresh import run_briefing_refresh
 from app.services.chat_agent import ChatRunResult, save_messages
+from app.services.gateways.object_storage_gateway import LocalObjectStorageGateway
+from app.services.learning_deck_artifacts import (
+    render_source_notes_html,
+    store_learning_deck_artifact,
+)
+from app.services.learning_deck_publication import commit_learning_deck_artifact_promotion
 from app.services.llm_tasks import create_llm_task
 from app.services.onboarding import run_audio_discovery
 from app.services.onboarding.internal_models import (
@@ -300,6 +306,91 @@ def test_learning_tab_long_press_regenerates_deck_with_existing_focus(
     assert len(tasks) == 2
     assert tasks[-1].status == LlmTaskStatus.QUEUED.value
     assert tasks[-1].input_json["interests_prompt"] == "Focus on the existing tradeoffs"
+
+
+def test_learning_deck_reader_chat_flyover_preserves_portrait_deck_space(
+    run_ios_flow,
+    create_sample_content,
+    sample_article_long,
+    test_user,
+    db_session,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    content = create_sample_content(sample_article_long)
+    deck = LearningDeck(
+        user_id=test_user.id,
+        source_kind="content",
+        source_identity=f"content:{content.id}",
+        source_url=content.source_url or content.url,
+        source_content_id=content.id,
+        source_title=content.title,
+        source_metadata={"content_type": content.content_type},
+        title="Portrait-native Learning Deck",
+        artifact_object_keys=[],
+        share_enabled=False,
+    )
+    db_session.add(deck)
+    db_session.flush()
+    task = create_llm_task(
+        db_session,
+        user_id=test_user.id,
+        task_kind=LlmTaskKind.LEARNING_DECK,
+        mode=LlmTaskMode.LEARNING_DECK_PRESENTATION,
+        workflow_key="learning_deck.presentation.v1",
+        subject_id=deck.id,
+        input_json={"deck_id": deck.id},
+        status=LlmTaskStatus.COMPLETED,
+        workflow_state=LlmWorkflowState.COMPLETED,
+    )
+    deck_id = deck.id
+    task_id = task.id
+    assert deck_id is not None
+    assert task_id is not None
+    gateway = LocalObjectStorageGateway(tmp_path / "learning-deck-objects")
+    monkeypatch.setattr(
+        "app.services.learning_deck_artifacts.get_object_storage_gateway",
+        lambda: gateway,
+    )
+    index_html = """<!doctype html>
+<html><head>
+<meta name="newsly-deck-layout" content="responsive-v2">
+<style>.reveal .slides section { color: #171717; background: #faf9f6; }</style>
+</head><body><div class="reveal"><div class="slides">
+<section><h1>Portrait-native deck</h1><p>The deck remains visible behind chat.</p></section>
+<section><h2>Second slide</h2><p>Rotation preserves the reader controls.</p></section>
+</div></div><script>
+window.Reveal = {
+  initialize() {},
+  isReady() { return true; },
+  getCurrentSlide() { return document.querySelector('section'); }
+};
+Reveal.initialize({ hash: true });
+</script></body></html>"""
+    source_notes = "# Sources\n\n- [Fixture source](https://example.com/source)"
+    artifact = store_learning_deck_artifact(
+        user_id=test_user.id,
+        deck_id=deck_id,
+        run_id=task_id,
+        index_html=index_html,
+        source_notes_md=source_notes,
+        source_notes_html=render_source_notes_html(
+            source_notes,
+            title=deck.title or "Portrait-native Learning Deck",
+        ),
+        gateway=gateway,
+    )
+    commit_learning_deck_artifact_promotion(
+        db_session,
+        deck,
+        artifact=artifact,
+        latest_task_id=task_id,
+    )
+
+    run_ios_flow(
+        "learning_deck_reader_portrait_chat.yaml",
+        extra_env={"DECK_ID": str(deck_id)},
+    )
 
 
 def test_more_search_detail_chat_handoff_dismisses_sheet_and_shows_chat(

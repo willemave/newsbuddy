@@ -15,6 +15,7 @@ from app.services.learning_deck_viewer import (
 
 _SAMPLE_DECK = (
     b"<!doctype html><html><head>"
+    b'<meta name="newsly-deck-layout" content="responsive-v2">'
     b'<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js/dist/reveal.css">'
     b"<style>.reveal { color: red; }</style></head><body>"
     b'<div class="reveal"><div class="slides">'
@@ -32,6 +33,8 @@ def test_theme_uses_daylight_palette_and_type() -> None:
     assert "Spline Sans" in DECK_THEME_CSS
     assert "#000000" not in DECK_THEME_CSS  # never pure black
     assert "linear-gradient" not in DECK_THEME_CSS
+    assert ".reveal .slides section:not(.stack)" in DECK_THEME_CSS
+    assert ".reveal .slide-frame" in DECK_THEME_CSS
 
 
 def test_design_guide_documents_house_classes() -> None:
@@ -56,14 +59,20 @@ def test_generation_prompt_documents_rich_react_diagram_authoring() -> None:
     assert "r-fit-text" in LEARNING_DECK_DESIGN_BRIEF
     assert "r-stretch" in LEARNING_DECK_DESIGN_BRIEF
     assert "stable, human-readable `id` attributes" in LEARNING_DECK_DESIGN_BRIEF
+    assert "720 × 1280 portrait canvas" in LEARNING_DECK_DESIGN_BRIEF
+    assert 'name="newsly-deck-layout" content="responsive-v2"' in LEARNING_DECK_SYSTEM_PROMPT
 
 
 def test_viewer_markup_carries_theme_and_uses_reveal_navigation() -> None:
-    markup = learning_deck_navigation_controls_html()
+    markup = learning_deck_navigation_controls_html(responsive_layout=True)
     assert f'id="{DECK_THEME_STYLE_ID}"' in markup
     assert "Space+Grotesk" in markup  # Google Fonts link present
-    assert "width: 1280" in markup  # landscape canvas width
-    assert "canvasHeight = isPhoneSized ? (isPortrait ? 960 : 860) : 720" in markup
+    assert "isResponsiveDeck = true" in markup
+    assert '"portrait":{"width":720,"height":1280,"margin":0.005}' in markup
+    assert '"landscape":{"width":1280,"height":720,"margin":0.012}' in markup
+    assert 'window.matchMedia("(orientation: portrait)")' in markup
+    assert "visualViewport.height" not in markup
+    assert "newsly-learning-deck-responsive" in markup
     assert "data-newsly-learning-deck-fullscreen" in markup
     assert "data-newsly-learning-deck-prev" not in markup
     assert "data-newsly-learning-deck-next" not in markup
@@ -72,7 +81,8 @@ def test_viewer_markup_carries_theme_and_uses_reveal_navigation() -> None:
     assert "scrollActivationWidth: null" in markup  # keep Reveal 5 in slide mode on phones
     assert 'view: "slide"' in markup
     assert "minScale: 0.05" in markup and "maxScale: 3" in markup
-    assert "{{" not in markup and "}}" not in markup  # f-string fully rendered
+    assert 'window.addEventListener("resize", scheduleFit)' in markup
+    assert 'reveal.on("slidechanged", scheduleFit)' in markup
     assert "backdrop-filter" not in markup  # glassmorphism removed
 
 
@@ -81,9 +91,21 @@ def test_augmented_deck_injects_theme_once_and_is_idempotent() -> None:
     assert f'id="{DECK_THEME_STYLE_ID}"' in augmented
     assert augmented.count(f'id="{DECK_THEME_STYLE_ID}"') == 1
     assert "__newslySlideModePatched" in augmented
+    assert "isResponsiveDeck = true" in augmented
     assert augmented.index(DECK_THEME_STYLE_ID) < augmented.lower().index("</body>")
     again = with_learning_deck_navigation_controls(augmented.encode()).decode()
     assert again == augmented
+
+
+def test_unmarked_stored_deck_keeps_legacy_viewer_fit() -> None:
+    legacy_deck = _SAMPLE_DECK.replace(
+        b'<meta name="newsly-deck-layout" content="responsive-v2">',
+        b"",
+    )
+
+    augmented = with_learning_deck_navigation_controls(legacy_deck).decode()
+
+    assert "isResponsiveDeck = false" in augmented
 
 
 def test_augmented_deck_has_no_inline_event_handlers() -> None:

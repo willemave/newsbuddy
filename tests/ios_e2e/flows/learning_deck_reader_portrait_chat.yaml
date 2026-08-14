@@ -1,0 +1,43 @@
+appId: "${APP_ID}"
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+    arguments:
+      newslyE2EEnabled: true
+      newslyE2EAutoLogin: true
+      newslyE2EServerHost: "${SERVER_HOST}"
+      newslyE2EServerPort: "${SERVER_PORT}"
+      newslyE2EUseHTTPS: false
+      newslyE2EUserId: "${USER_ID}"
+      newslyE2ECompleteOnboarding: true
+      newslyE2ECompleteTutorial: true
+- tapOn:
+    id: tab.learning
+- extendedWaitUntil:
+    visible:
+      id: learning.deck.${DECK_ID}
+    timeout: 15000
+- tapOn:
+    id: learning.deck.${DECK_ID}
+- extendedWaitUntil:
+    visible:
+      id: learning_deck.reader.webview
+    timeout: 15000
+- assertVisible:
+    id: learning_deck.chat.peek
+- tapOn:
+    id: learning_deck.chat.peek
+- assertVisible:
+    id: learning_deck.chat.collapse
+- tapOn:
+    id: learning_deck.chat.collapse
+- assertVisible:
+    id: learning_deck.chat.peek
+- setOrientation: LANDSCAPE_LEFT
+- assertNotVisible:
+    id: learning_deck.chat.peek
+- assertVisible: Open chat
+- setOrientation: PORTRAIT
+- assertVisible:
+    id: learning_deck.chat.peek

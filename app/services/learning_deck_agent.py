@@ -31,10 +31,15 @@ from app.services.learning_deck_artifacts import (
     guess_learning_deck_content_type,
     validate_learning_deck_artifact,
 )
+from app.services.learning_deck_browser_validation import (
+    parse_browser_validation_outcome,
+    validate_learning_deck_in_browser,
+)
+from app.services.learning_deck_layout import learning_deck_prompt_values
 from app.services.learning_deck_theme import DECK_DESIGN_GUIDE
 from app.services.llm_models import build_pydantic_model, resolve_model_provider
 from app.services.llm_tasks import require_llm_task_id
-from app.services.prompt_library import load_prompt, render_prompt
+from app.services.prompt_library import render_prompt
 from app.services.vendor_usage import record_model_usage
 
 logger = get_logger(__name__)
@@ -44,7 +49,6 @@ OUTPUT_SOURCE_NOTES = "output/source-notes.md"
 OUTPUT_SOURCE_METADATA = "output/source-metadata.json"
 OUTPUT_ASSET_DIR = "output/assets"
 INPUT_DESIGN_BRIEF = "input/deck-design-brief.md"
-BROWSER_VALIDATION_RESULT_PREFIX = "NEWSLY_BROWSER_VALIDATION="
 
 
 @dataclass(frozen=True)
@@ -95,9 +99,17 @@ class LearningDeckAgentDeps:
 LearningDeckSandboxFactory = Callable[[int, int], AgentVmSession]
 
 
-LEARNING_DECK_SYSTEM_PROMPT = load_prompt("learning_decks/agent#system")
+LEARNING_DECK_SYSTEM_PROMPT = render_prompt(
+    "learning_decks/agent#system",
+    **learning_deck_prompt_values(),
+)
 LEARNING_DECK_DESIGN_BRIEF = (
-    load_prompt("learning_decks/agent#design_brief") + "\n\n" + DECK_DESIGN_GUIDE
+    render_prompt(
+        "learning_decks/agent#design_brief",
+        **learning_deck_prompt_values(),
+    )
+    + "\n\n"
+    + DECK_DESIGN_GUIDE
 )
 
 
@@ -337,247 +349,20 @@ def _read_and_validate_required_artifacts(
         index_html=index_html,
         source_notes_md=source_notes_md,
     )
-    browser_validation = _validate_artifact_in_browser(sandbox)
+    browser_validation = _validate_artifact_in_browser(sandbox, index_html=index_html)
     return index_html, source_notes_md, browser_validation
 
 
-def _validate_artifact_in_browser(sandbox: AgentVmSession) -> dict[str, Any]:
-    unavailable = _browser_validation_unavailable(sandbox)
-    if unavailable is not None:
-        return unavailable
-    command = r"""node - <<'NODE'
-const { chromium } = require('playwright');
-(async () => {
-  let browser;
-  try {
-    browser = await chromium.launch({ headless: true });
-    const viewport = { width: 390, height: 844 };
-    const page = await browser.newPage({ viewport });
-    page.setDefaultTimeout(10000);
-    page.setDefaultNavigationTimeout(15000);
-
-    const deckUrl = 'file://' + process.cwd() + '/output/index.html';
-    const pageErrors = [];
-    const failedRequests = [];
-    const failedResponses = [];
-    const relevantLoads = new Set();
-    const isRelevantRequest = request => {
-      const url = request.url();
-      const isSyntheticUrl = ['data:', 'blob:', 'about:'].some(
-        scheme => url.startsWith(scheme)
-      );
-      const isMainDeckDocument = request.isNavigationRequest() &&
-        request.frame() === page.mainFrame() && url === deckUrl;
-      return !isSyntheticUrl && !isMainDeckDocument;
-    };
-
-    page.on('pageerror', error => pageErrors.push(String(error)));
-    page.on('requestfailed', request => {
-      if (!isRelevantRequest(request)) return;
-      failedRequests.push({
-        url: request.url(),
-        resource_type: request.resourceType(),
-        error: request.failure()?.errorText || 'unknown request failure',
-      });
-    });
-    page.on('response', response => {
-      const request = response.request();
-      if (!isRelevantRequest(request)) return;
-      relevantLoads.add(response.url());
-      if (response.status() >= 400) {
-        failedResponses.push({
-          url: response.url(),
-          resource_type: request.resourceType(),
-          status: response.status(),
-        });
-      }
-    });
-
-    await page.goto(deckUrl, { waitUntil: 'load' });
-    await page.waitForFunction(() => Boolean(
-      window.Reveal &&
-      typeof window.Reveal.isReady === 'function' &&
-      window.Reveal.isReady()
-    ));
-    await page.waitForFunction(() => Boolean(
-      window.Reveal &&
-      typeof window.Reveal.getCurrentSlide === 'function' &&
-      window.Reveal.getCurrentSlide()
-    ));
-
-    const readDeckState = () => page.evaluate(() => {
-      const reveal = window.Reveal;
-      const currentSlide = reveal.getCurrentSlide();
-      const indices = reveal.getIndices();
-      return {
-        current_slide_exists: Boolean(currentSlide),
-        indices: { h: indices.h, v: indices.v, f: indices.f ?? -1 },
-        slide_count: reveal.getTotalSlides(),
-      };
-    });
-    const sameIndices = (left, right) =>
-      left.h === right.h && left.v === right.v && left.f === right.f;
-
-    await page.evaluate(() => window.Reveal.slide(0, 0, -1));
-    await page.waitForFunction(() => {
-      const indices = window.Reveal.getIndices();
-      return indices.h === 0 && indices.v === 0;
-    });
-    const initial = await readDeckState();
-    if (!initial.current_slide_exists || initial.slide_count < 1) {
-      throw new Error(JSON.stringify({ reason: 'current slide unavailable', initial }));
-    }
-
-    await page.evaluate(() => window.Reveal.next());
-    let afterNext;
-    let afterPrevious;
-    let navigation;
-    if (initial.slide_count === 1) {
-      await page.waitForTimeout(100);
-      afterNext = await readDeckState();
-      await page.evaluate(() => window.Reveal.prev());
-      if (sameIndices(initial.indices, afterNext.indices)) {
-        await page.waitForTimeout(100);
-        afterPrevious = await readDeckState();
-        if (!sameIndices(initial.indices, afterPrevious.indices)) {
-          throw new Error(JSON.stringify({
-            reason: 'single-slide navigation was not stable',
-            initial,
-            afterNext,
-            afterPrevious,
-          }));
-        }
-        navigation = 'single_slide_stable';
-      } else {
-        await page.waitForFunction(expected => {
-          const current = window.Reveal.getIndices();
-          return current.h === expected.h && current.v === expected.v &&
-            (current.f ?? -1) === expected.f;
-        }, initial.indices);
-        afterPrevious = await readDeckState();
-        navigation = 'single_slide_fragment_round_trip';
-      }
-    } else {
-      await page.waitForFunction(previous => {
-        const current = window.Reveal.getIndices();
-        const fragment = current.f ?? -1;
-        return current.h !== previous.h || current.v !== previous.v ||
-          fragment !== previous.f;
-      }, initial.indices);
-      afterNext = await readDeckState();
-      await page.evaluate(() => window.Reveal.prev());
-      await page.waitForFunction(expected => {
-        const current = window.Reveal.getIndices();
-        return current.h === expected.h && current.v === expected.v &&
-          (current.f ?? -1) === expected.f;
-      }, initial.indices);
-      afterPrevious = await readDeckState();
-      navigation = 'next_previous_round_trip';
-    }
-
-    await page.waitForTimeout(250);
-    if (pageErrors.length || failedRequests.length || failedResponses.length) {
-      throw new Error(JSON.stringify({
-        reason: 'browser runtime or asset load failure',
-        page_errors: pageErrors,
-        failed_requests: failedRequests,
-        failed_responses: failedResponses,
-      }));
-    }
-
-    const outcome = {
-      status: 'passed',
-      validator: 'playwright_chromium',
-      viewport,
-      reveal_ready: true,
-      current_slide_exists: initial.current_slide_exists,
-      slide_count: initial.slide_count,
-      navigation,
-      initial_indices: initial.indices,
-      next_indices: afterNext.indices,
-      previous_indices: afterPrevious.indices,
-      relevant_asset_loads: relevantLoads.size,
-    };
-    console.log('NEWSLY_BROWSER_VALIDATION=' + JSON.stringify(outcome));
-  } finally {
-    if (browser) await browser.close();
-  }
-})().catch(error => { console.error(error); process.exit(1); });
-NODE"""
-    result = sandbox.execute_bash(command, timeout_seconds=30)
-    if result.exit_code != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or "unknown browser error"
-        raise LearningDeckArtifactError(f"Browser validation failed: {detail}")
-    return _parse_browser_validation_outcome(result.stdout)
+def _validate_artifact_in_browser(
+    sandbox: AgentVmSession,
+    *,
+    index_html: str,
+) -> dict[str, Any]:
+    return validate_learning_deck_in_browser(sandbox, index_html=index_html)
 
 
 def _parse_browser_validation_outcome(stdout: str) -> dict[str, Any]:
-    payload = next(
-        (
-            line.removeprefix(BROWSER_VALIDATION_RESULT_PREFIX)
-            for line in reversed(stdout.splitlines())
-            if line.startswith(BROWSER_VALIDATION_RESULT_PREFIX)
-        ),
-        None,
-    )
-    if payload is None:
-        raise LearningDeckArtifactError(
-            "Browser validation failed: validator did not report a structured outcome"
-        )
-    try:
-        outcome = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        raise LearningDeckArtifactError(
-            "Browser validation failed: validator reported malformed JSON"
-        ) from exc
-    if not isinstance(outcome, dict) or outcome.get("status") != "passed":
-        raise LearningDeckArtifactError(
-            "Browser validation failed: validator did not report a passing outcome"
-        )
-    slide_count = outcome.get("slide_count")
-    if (
-        outcome.get("validator") != "playwright_chromium"
-        or outcome.get("viewport") != {"width": 390, "height": 844}
-        or outcome.get("reveal_ready") is not True
-        or outcome.get("current_slide_exists") is not True
-        or not isinstance(slide_count, int)
-        or isinstance(slide_count, bool)
-        or slide_count < 1
-        or outcome.get("navigation")
-        not in {
-            "next_previous_round_trip",
-            "single_slide_fragment_round_trip",
-            "single_slide_stable",
-        }
-    ):
-        raise LearningDeckArtifactError(
-            "Browser validation failed: validator reported an incomplete passing outcome"
-        )
-    return outcome
-
-
-def _browser_validation_unavailable(sandbox: AgentVmSession) -> dict[str, Any] | None:
-    capabilities = getattr(getattr(sandbox, "lease", None), "capabilities", None)
-    if not isinstance(capabilities, dict):
-        return {
-            "status": "skipped",
-            "reason": "sandbox_capabilities_not_reported",
-            "missing_capabilities": ["chromium", "playwright"],
-        }
-    missing = sorted(
-        capability for capability in ("chromium", "playwright") if not capabilities.get(capability)
-    )
-    if not missing:
-        return None
-    result: dict[str, Any] = {
-        "status": "skipped",
-        "reason": "sandbox_browser_capabilities_unavailable",
-        "missing_capabilities": missing,
-    }
-    detail = capabilities.get("browser_validation_error")
-    if detail:
-        result["capability_error"] = str(detail)[:1000]
-    return result
+    return parse_browser_validation_outcome(stdout)
 
 
 def _append_browser_validation_event(
@@ -673,6 +458,7 @@ def _build_agent_prompt(source_snapshot: dict[str, Any], interests_prompt: str |
     interests = interests_prompt.strip() if interests_prompt else "No additional interests given."
     return render_prompt(
         "learning_decks/agent#user",
+        **learning_deck_prompt_values(),
         source_title=source_title,
         source_kind=source_kind,
         interests=interests,

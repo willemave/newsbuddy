@@ -6,29 +6,27 @@
 import SwiftUI
 import UIKit
 
-struct LearningDeckChatPanel: View {
-    let deck: LearningDeck
+struct LearningDeckChatFlyover: View {
     @Bindable var viewModel: LearningDeckReaderViewModel
     @Binding var isExpanded: Bool
-    let isPeekable: Bool
-
-    @State private var feedOptionActionModel = AssistantFeedOptionActionModel()
 
     var body: some View {
         Group {
-            if isPeekable && !isExpanded {
-                peekBar
+            if isExpanded {
+                LearningDeckChatPanel(
+                    viewModel: viewModel,
+                    onCollapse: { isExpanded = false }
+                )
             } else {
-                expandedPanel
+                peekBar
             }
         }
-        .background(.ultraThinMaterial)
+        .background(Color.surfacePrimary.opacity(0.98))
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color.outlineVariant.opacity(0.24))
                 .frame(height: 0.5)
         }
-        .scrollDismissesKeyboard(.interactively)
     }
 
     private var peekBar: some View {
@@ -52,11 +50,12 @@ struct LearningDeckChatPanel: View {
 
                     Spacer()
 
-                    if let label = slideLabel {
-                        slidePill(label)
+                    if let label = learningDeckSlideLabel(for: viewModel.currentSlideContext) {
+                        LearningDeckChatSlidePill(label: label)
                     }
                 }
                 .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.bottom, 10)
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -64,6 +63,32 @@ struct LearningDeckChatPanel: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Open deck chat")
         .accessibilityIdentifier("learning_deck.chat.peek")
+    }
+}
+
+struct LearningDeckChatPanel: View {
+    @Bindable var viewModel: LearningDeckReaderViewModel
+    let onCollapse: (() -> Void)?
+
+    @State private var feedOptionActionModel = AssistantFeedOptionActionModel()
+
+    init(
+        viewModel: LearningDeckReaderViewModel,
+        onCollapse: (() -> Void)? = nil
+    ) {
+        self.viewModel = viewModel
+        self.onCollapse = onCollapse
+    }
+
+    var body: some View {
+        expandedPanel
+            .background(Color.surfacePrimary.opacity(0.98))
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color.outlineVariant.opacity(0.24))
+                    .frame(height: 0.5)
+            }
+            .scrollDismissesKeyboard(.interactively)
     }
 
     private var expandedPanel: some View {
@@ -91,14 +116,12 @@ struct LearningDeckChatPanel: View {
 
             Spacer()
 
-            if let label = slideLabel {
-                slidePill(label)
+            if let label = learningDeckSlideLabel(for: viewModel.currentSlideContext) {
+                LearningDeckChatSlidePill(label: label)
             }
 
-            if isPeekable {
-                Button {
-                    isExpanded = false
-                } label: {
+            if let onCollapse {
+                Button(action: onCollapse) {
                     Image(systemName: "chevron.down")
                         .font(.appSymbol(size: 13, weight: .semibold))
                         .foregroundStyle(Color.onSurfaceSecondary)
@@ -113,17 +136,6 @@ struct LearningDeckChatPanel: View {
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 10)
         .padding(.bottom, 8)
-        .accessibilityIdentifier("learning_deck.chat.header")
-    }
-
-    private func slidePill(_ label: String) -> some View {
-        Text(label)
-            .font(.terracottaBodySmall)
-            .foregroundStyle(Color.onSurfaceSecondary)
-            .lineLimit(1)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .learningDeckReaderCapsuleSurface(tint: Color.surfaceSecondary, isEnabled: false)
     }
 
     private var transcript: some View {
@@ -181,13 +193,8 @@ struct LearningDeckChatPanel: View {
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(deck.displayTitle)
-                .font(.terracottaBodyMedium.weight(.semibold))
-                .foregroundStyle(Color.onSurface)
-                .lineLimit(2)
-
-            Text("Curious about this slide? Tap one, or ask me anything.")
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ask for an explanation, example, or implication.")
                 .font(.terracottaBodySmall)
                 .foregroundStyle(Color.onSurfaceSecondary)
 
@@ -200,11 +207,6 @@ struct LearningDeckChatPanel: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(
-            Color.surfacePrimary.opacity(0.5),
-            in: RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
-        )
         .accessibilityIdentifier("learning_deck.chat.empty")
     }
 
@@ -233,21 +235,6 @@ struct LearningDeckChatPanel: View {
         return prompts
     }
 
-    private var slideLabel: String? {
-        let context = viewModel.currentSlideContext
-        guard context.horizontalIndex != nil || context.verticalIndex != nil else {
-            return nil
-        }
-        let horizontal = (context.horizontalIndex ?? 0) + 1
-        if let total = context.totalSlides, total > 0 {
-            return "Slide \(min(horizontal, total)) / \(total)"
-        }
-        if let vertical = context.verticalIndex, vertical > 0 {
-            return "Slide \(horizontal).\(vertical + 1)"
-        }
-        return "Slide \(horizontal)"
-    }
-
     private func scrollToBottom<ID: Hashable>(_ target: ID, proxy: ScrollViewProxy) {
         withAnimation(AppMotion.subtle) {
             proxy.scrollTo(target, anchor: .bottom)
@@ -258,6 +245,34 @@ struct LearningDeckChatPanel: View {
             }
         }
     }
+}
+
+private struct LearningDeckChatSlidePill: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.terracottaBodySmall)
+            .foregroundStyle(Color.onSurfaceSecondary)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .learningDeckReaderCapsuleSurface(tint: Color.surfaceSecondary, isEnabled: false)
+    }
+}
+
+private func learningDeckSlideLabel(for context: LearningDeckSlideContext) -> String? {
+    guard context.horizontalIndex != nil || context.verticalIndex != nil else {
+        return nil
+    }
+    let horizontal = (context.horizontalIndex ?? 0) + 1
+    if let total = context.totalSlides, total > 0 {
+        return "Slide \(min(horizontal, total)) / \(total)"
+    }
+    if let vertical = context.verticalIndex, vertical > 0 {
+        return "Slide \(horizontal).\(vertical + 1)"
+    }
+    return "Slide \(horizontal)"
 }
 
 private struct LearningDeckChatErrorRow: View {

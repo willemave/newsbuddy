@@ -318,7 +318,7 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ### 2026-08-06 — `main` — Scroll active root tab to top on reselection
 
-- **Status:** In progress.
+- **Status:** Complete locally.
 - **Scope:** iOS compact root-tab selection and the Briefing, Knowledge, and Learning scroll containers.
 - **Decisions:** Treat only a tap on the already-selected compact tab as a scroll request; preserve ordinary tab switching and target only the active Briefing lens.
 - **Changes:** Routed per-tab request counters from the app shell into each root scroll container and added reduced-motion-aware animated jumps to stable top anchors.
@@ -624,4 +624,42 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Replaced the Knowledge books symbol on the action hub with the Learning sparkle symbol and added a focused regression assertion.
 - **Validation:** Focused source-contract test passed; `git diff --check` passed.
 - **Remaining:** None. No commit, push, deployment, or production mutation was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-13 — `main` — Make Learning Decks portrait-native
+
+- **Status:** Complete locally.
+- **Scope:** Learning Deck generation prompt, artifact contract, hosted Reveal viewer/theme, portrait iOS reader, and deck-chat presentation.
+- **Decisions:** Treat iPhone portrait as a primary 720 × 1280 composition while retaining 1280 × 720 landscape; opt new artifacts into the responsive viewer with explicit metadata and keep unmarked stored decks on the legacy canvas. Present portrait chat as a collapsed flyover so it does not permanently resize the deck WebView.
+- **Changes:** Added the responsive generation/layout contract and validation marker, responsive house-theme rules, marker-aware viewer fitting, and a compact portrait chat flyover with a smaller expanded detent and condensed empty state.
+- **Validation:** All 110 focused Learning Deck backend, router, prompt/theme, iOS layout/accessibility contract, and task-generation tests passed. Focused mypy passed for all four changed backend modules; Ruff format and lint passed; the 752-file/23-ratchet module guard, 137-test architecture guard, and public-contract check passed. The iOS app built successfully on the iOS 26.5 regression simulator, and all 3 focused `LearningDeckReaderViewModelTests` passed. `git diff --check` passed.
+- **Remaining:** Existing stored decks retain the legacy canvas until separately regenerated. No commit, push, deployment, production mutation, or deck regeneration performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-13 — `main` — Clean up portrait-native Learning Deck changes
+
+- **Status:** Complete locally.
+- **Scope:** Behavior-preserving cleanup of the uncommitted portrait generation, hosted viewer, and focused test changes.
+- **Changes:** Reused the canonical responsive-layout marker in Python validation, consolidated repeated valid-deck fixtures, corrected stale landscape-only documentation, clarified viewer fit naming and branches, cached the two viewer variants, and coalesced duplicate Reveal relayout requests.
+- **Validation:** All 60 focused Learning Deck service, viewer, artifact, smoke, route, and iOS accessibility-contract tests passed. Ruff format and lint passed, focused mypy passed for all four affected backend modules, and `git diff --check` passed.
+- **Remaining:** The browser validation gate remains unchanged; broader validation redesign is outside this cleanup. No commit, push, deployment, production mutation, or deck regeneration performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-13 — `main` — Second-pass Learning Deck cleanup
+
+- **Status:** Complete locally.
+- **Scope:** A second behavior-preserving audit of the uncommitted portrait-native Learning Deck diff.
+- **Changes:** Consolidated duplicate portrait/landscape Reveal canvas setup in the browser validator, clarified the dual-orientation layout contract, and retained all existing relayout triggers while coalescing same-frame requests.
+- **Validation:** All 60 focused Learning Deck and iOS accessibility-contract tests passed. Ruff format and lint passed, focused mypy passed for all four affected backend modules, and `git diff --check` passed.
+- **Remaining:** No additional high-confidence cleanup remains in the reviewed surface. No commit, push, deployment, production mutation, or deck regeneration performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-13 — `main` — Resolve Learning Deck structural review findings
+
+- **Status:** Complete locally.
+- **Scope:** Responsive generation ownership, hosted-viewer validation, portrait chat state, and executable iPhone regression coverage.
+- **Decisions:** Keep one typed layout profile as the owner of prompt, artifact, viewer, and validation dimensions; validate the exact hosted HTML across every slide and both phone orientations; use device orientation rather than keyboard-sensitive visual-viewport geometry; and model portrait flyover and sheet chat as separate presentations of one mode-free chat panel.
+- **Changes:** Extracted the canonical layout profile and hosted Playwright validator, replaced the agent's embedded browser script, measured per-slide overflow and occupancy in portrait and landscape, made responsive versus legacy viewer fitting declarative, moved flyover expansion state into its presentation wrapper, and added a deterministic completed-deck Maestro scenario. Removed parent accessibility identifiers that masked the flyover's peek and collapse controls.
+- **Validation:** All 62 focused Learning Deck backend and iOS source-contract tests passed; Ruff and focused mypy passed; the 754-file/23-ratchet module guard, all 137 architecture tests, and public-contract check passed. The browser validator's generated JavaScript passed `node --check`. The iOS app built successfully, all 3 focused `LearningDeckReaderViewModelTests` passed, and the new portrait-chat Maestro scenario passed on the iOS 26.5 iPhone 17 Pro simulator.
+- **Remaining:** The hosted Playwright validator was covered by typed outcome and command-generation tests but was not run in a real browser-capable Agent VM during this local pass. No commit, push, deployment, production mutation, or deck regeneration performed.
 - **Commits:** Uncommitted.

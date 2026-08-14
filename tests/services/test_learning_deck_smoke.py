@@ -182,6 +182,7 @@ def _index_html(title: str) -> str:
     return f"""<!doctype html>
 <html>
 <head>
+  <meta name="newsly-deck-layout" content="responsive-v2">
   <style>
     :root {{ --deck-bg: #11110f; --deck-accent: #c77d3a; }}
     .reveal {{ background: var(--deck-bg); color: #f4f0e8; }}
