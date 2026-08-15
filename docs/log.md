@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-15 — `main` — Learning Deck share instructions
+
+- **Status:** Complete.
+- **Scope:** Share Extension Create Deck UI, Share Action handoff, Learning Deck VM prompt, focused contracts, and product laws.
+- **Decisions:** Reuse the persisted `interests_prompt` field for compatibility while presenting it as general user instructions; explicit user text outranks intermediate agent output.
+- **Changes:** Added an optional instructions editor for Create Deck and taught the VM prompt to honor capture, comparison, and investigation requests with source notes.
+- **Validation:** Ruff and formatting passed; 93 focused backend/client tests passed, including 11 iOS boundary tests; ShareExtension/main-app Xcode Simulator build passed. Manual AXe inspection on iPhone 17 Pro verified selection, editing, keyboard/accessory reachability, and visual layout. The focused AXe live submission reached the request and recoverable error path, but its ephemeral `127.0.0.1` server was unreachable from the extension process, so no live DB row was asserted in that run.
+- **Remaining:** None for implementation; the local extension-to-ephemeral-server harness connection remains an environment limitation if that exact live E2E proof is required later.
+- **Commits:** Uncommitted.
+
 ### 2026-08-13 — `agent/use-luna-for-fast-llm-defaults` — Route fast LLM defaults to Luna
 
 - **Status:** Complete

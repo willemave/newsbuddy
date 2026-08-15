@@ -11,7 +11,8 @@ Recommended sequence:
 1. Inspect `input/request.json`.
 2. Canonicalize the source URL and gather a title/source type when useful.
 3. Do not build the final deck in this phase unless the host explicitly asks for direct artifacts.
-4. Preserve `interests_prompt` for the Learning Deck workflow.
+4. Copy a user-provided `interests_prompt` exactly into the presentation handoff. Do not rewrite,
+   narrow, or replace it.
 5. Write `output/result.json`.
 
 Do not create a Learning Deck directly. The host will validate `output/result.json` and create or
@@ -26,7 +27,7 @@ Required `output/result.json`:
   "presentation": {
     "source_url": "https://example.com/canonical",
     "title": "Optional title",
-    "interests_prompt": "Optional interests",
+    "interests_prompt": "Optional user instructions",
     "artifact_mode": "learning_deck_handoff"
   },
   "rationale": "Why this source should become the presentation",

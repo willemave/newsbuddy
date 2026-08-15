@@ -727,6 +727,7 @@ def test_run_share_action_presentation_marks_learning_deck_submission(
                 action="presentation",
                 primary_url=blob_url,
                 title="DSpark paper",
+                presentation={"interests_prompt": "Agent-generated replacement."},
                 confidence=0.9,
             )
         ),
@@ -747,6 +748,7 @@ def test_run_share_action_presentation_marks_learning_deck_submission(
         "share_action_task_id": response.task_id,
     }
     learning_deck_task = db_session.query(LlmTask).filter_by(task_kind="learning_deck").one()
+    assert learning_deck_task.input_json["interests_prompt"] == "Focus on proof strategy."
     source_snapshot = learning_deck_task.input_json["source"]
     assert source_snapshot["source_kind"] == "github_repo"
     assert source_snapshot["source_content_id"] is None

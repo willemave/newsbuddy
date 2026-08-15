@@ -306,6 +306,7 @@ def test_learning_deck_agent_persists_vendor_usage_row(
 
     assert result.model_provider == "openai"
     assert sandbox.closed is True
+    assert sandbox.files["input/interests.txt"] == "Focus on systems"
     row = (
         db_session.query(VendorUsageRecord)
         .filter(VendorUsageRecord.feature == "learning_deck_generation")
@@ -324,6 +325,24 @@ def test_learning_deck_agent_persists_vendor_usage_row(
         "source_identity": "content:77",
         "source_content_id": 77,
     }
+
+
+def test_learning_deck_agent_prompt_treats_focus_as_authoritative_instructions() -> None:
+    prompt = learning_deck_agent._build_agent_prompt(
+        {
+            "source_kind": "content",
+            "source_title": "Research source",
+        },
+        "Compare the studies and investigate conflicting results.",
+    )
+
+    normalized_prompt = " ".join(prompt.split())
+    assert (
+        "User instructions: Compare the studies and investigate conflicting results."
+        in normalized_prompt
+    )
+    assert "Treat the user instructions as authoritative additions" in normalized_prompt
+    assert "Keep source notes and citations for any additional investigation" in normalized_prompt
 
 
 def test_learning_deck_agent_uses_generic_vm_session_when_llm_task_exists(

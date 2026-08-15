@@ -27,3 +27,5 @@ S12. Global aggregator items appear only for users who selected that aggregator;
 S13. X connections are per-user, sync bookmarks incrementally, retain checkpoint and provenance data, and never consume a success checkpoint on failure.
 
 S14. Disconnecting or invalidating an integration removes usable credentials and reports reauthorization when required.
+
+S15. Create Deck may include optional user instructions; those instructions remain attached to the generation attempt, survive deferred execution and retry, and reach the deck builder without an intermediate agent rewriting them.

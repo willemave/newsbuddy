@@ -48,7 +48,7 @@ class ShareActionCreateRequest(BaseModel):
     interests_prompt: str | None = Field(
         None,
         max_length=4000,
-        description="Optional presentation interests prompt",
+        description="Optional user instructions for Learning Deck generation",
     )
     approval_policy: dict[str, LlmTaskApprovalPolicy] | None = Field(
         None,

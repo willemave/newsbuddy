@@ -62,6 +62,9 @@ def test_share_extension_exposes_four_recoverable_outcome_actions() -> None:
     assert 'return "chat"' in source
     assert 'accessibilityIdentifier = "share.title"' in source
     assert 'accessibilityIdentifier = "share.chat.prompt"' in source
+    assert 'accessibilityIdentifier = "share.deck.instructions"' in source
+    assert 'case interestsPrompt = "interests_prompt"' in source
+    assert "shareOutcomeMode == .createDeck && !deckInstructions.isEmpty" in source
     assert 'accessibilityIdentifier = "share.submit"' in source
     assert 'accessibilityIdentifier = "share.cancel"' in source
     assert "extensionContext?.cancelRequest(withError: ShareError.userCancelled)" in source
@@ -73,6 +76,7 @@ def test_share_extension_exposes_four_recoverable_outcome_actions() -> None:
     assert "let canEditSubmission = submissionState.canBeginSubmission" in source
     assert "guard submissionState.canBeginSubmission else { return }" in source
     assert "optionViews.values.forEach { $0.isEnabled = canEditSubmission }" in source
+    assert "deckInstructionsTextView.isEditable = canEditSubmission" in source
     assert "chatPromptTextView.isEditable = canEditSubmission" in source
     assert "guard hasRequiredSubmissionInput else" in source
     assert "&& !submissionState.isSubmitting" not in source

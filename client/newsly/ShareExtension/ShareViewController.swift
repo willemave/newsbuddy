@@ -53,15 +53,34 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     private let titleLabel = UILabel()
     private let urlStatusLabel = UILabel()
     private let optionsStack = UIStackView()
+    private let deckInstructionsStack = UIStackView()
+    private let deckInstructionsLabel = UILabel()
+    private let deckInstructionsHelpLabel = UILabel()
+    private let deckInstructionsTextView = UITextView()
     private let chatPromptStack = UIStackView()
     private let chatPromptLabel = UILabel()
     private let chatPromptTextView = UITextView()
     private let submitButton = UIButton(type: .system)
     private let cancelButton = UIButton(type: .system)
     private let keyboardSubmitButton = UIBarButtonItem(title: "Start chat", style: .plain, target: nil, action: nil)
+    private lazy var keyboardAccessoryView: UIToolbar = {
+        let toolbar = UIToolbar()
+        toolbar.sizeToFit()
+        keyboardSubmitButton.target = self
+        keyboardSubmitButton.action = #selector(handleSubmitTapped)
+        toolbar.items = [
+            UIBarButtonItem(systemItem: .flexibleSpace),
+            keyboardSubmitButton,
+        ]
+        return toolbar
+    }()
 
     private var chatInitialMessage: String {
         chatPromptTextView.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var deckInstructions: String {
+        deckInstructionsTextView.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var hasRequiredSubmissionInput: Bool {
@@ -79,6 +98,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
         configureLayout()
         configureOptions()
+        configureDeckInstructions()
         configureChatPrompt()
         configureSubmitButton()
         registerKeyboardObservers()
@@ -141,6 +161,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         contentStack.addArrangedSubview(titleLabel)
         contentStack.addArrangedSubview(urlStatusLabel)
         contentStack.addArrangedSubview(optionsStack)
+        contentStack.addArrangedSubview(deckInstructionsStack)
         contentStack.addArrangedSubview(chatPromptStack)
         contentStack.addArrangedSubview(submitButton)
         contentStack.addArrangedSubview(cancelButton)
@@ -178,6 +199,42 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         }
     }
 
+    private func configureDeckInstructions() {
+        deckInstructionsStack.axis = .vertical
+        deckInstructionsStack.spacing = 8
+        deckInstructionsStack.alignment = .fill
+        deckInstructionsStack.isHidden = true
+
+        deckInstructionsLabel.text = "Further instructions (optional)"
+        deckInstructionsLabel.font = ShareExtensionStyle.font(textStyle: .subheadline, weight: .medium)
+        deckInstructionsLabel.adjustsFontForContentSizeCategory = true
+        deckInstructionsLabel.textColor = .label
+
+        deckInstructionsHelpLabel.text = "Tell the deck builder what else to capture, compare, or investigate."
+        deckInstructionsHelpLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
+        deckInstructionsHelpLabel.adjustsFontForContentSizeCategory = true
+        deckInstructionsHelpLabel.textColor = .secondaryLabel
+        deckInstructionsHelpLabel.numberOfLines = 0
+
+        deckInstructionsTextView.delegate = self
+        deckInstructionsTextView.font = ShareExtensionStyle.font(textStyle: .body)
+        deckInstructionsTextView.adjustsFontForContentSizeCategory = true
+        deckInstructionsTextView.backgroundColor = .secondarySystemBackground
+        deckInstructionsTextView.layer.cornerRadius = 10
+        deckInstructionsTextView.layer.borderWidth = 1
+        deckInstructionsTextView.layer.borderColor = UIColor.separator.cgColor
+        deckInstructionsTextView.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
+        deckInstructionsTextView.heightAnchor.constraint(equalToConstant: 104).isActive = true
+        deckInstructionsTextView.inputAccessoryView = keyboardAccessoryView
+        deckInstructionsTextView.accessibilityLabel = "Further deck instructions"
+        deckInstructionsTextView.accessibilityHint = "Optional instructions for what the deck builder should capture or investigate"
+        deckInstructionsTextView.accessibilityIdentifier = "share.deck.instructions"
+
+        deckInstructionsStack.addArrangedSubview(deckInstructionsLabel)
+        deckInstructionsStack.addArrangedSubview(deckInstructionsHelpLabel)
+        deckInstructionsStack.addArrangedSubview(deckInstructionsTextView)
+    }
+
     private func configureChatPrompt() {
         chatPromptStack.axis = .vertical
         chatPromptStack.spacing = 8
@@ -198,25 +255,13 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         chatPromptTextView.layer.borderColor = UIColor.separator.cgColor
         chatPromptTextView.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
         chatPromptTextView.heightAnchor.constraint(equalToConstant: 104).isActive = true
-        chatPromptTextView.inputAccessoryView = makeChatKeyboardAccessory()
+        chatPromptTextView.inputAccessoryView = keyboardAccessoryView
         chatPromptTextView.accessibilityLabel = "First chat message"
         chatPromptTextView.accessibilityHint = "Required before starting the chat"
         chatPromptTextView.accessibilityIdentifier = "share.chat.prompt"
 
         chatPromptStack.addArrangedSubview(chatPromptLabel)
         chatPromptStack.addArrangedSubview(chatPromptTextView)
-    }
-
-    private func makeChatKeyboardAccessory() -> UIToolbar {
-        let toolbar = UIToolbar()
-        toolbar.sizeToFit()
-        keyboardSubmitButton.target = self
-        keyboardSubmitButton.action = #selector(handleSubmitTapped)
-        toolbar.items = [
-            UIBarButtonItem(systemItem: .flexibleSpace),
-            keyboardSubmitButton,
-        ]
-        return toolbar
     }
 
     private func configureSubmitButton() {
@@ -240,7 +285,11 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         optionViews.forEach { mode, view in
             view.isSelected = (mode == shareOutcomeMode)
         }
+        deckInstructionsStack.isHidden = shareOutcomeMode != .createDeck
         chatPromptStack.isHidden = shareOutcomeMode != .chat
+        if shareOutcomeMode != .createDeck && deckInstructionsTextView.isFirstResponder {
+            deckInstructionsTextView.resignFirstResponder()
+        }
         if shareOutcomeMode != .chat && chatPromptTextView.isFirstResponder {
             chatPromptTextView.resignFirstResponder()
         }
@@ -251,6 +300,8 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     private func updateSubmitState() {
         let canEditSubmission = submissionState.canBeginSubmission
         optionViews.values.forEach { $0.isEnabled = canEditSubmission }
+        deckInstructionsTextView.isEditable = canEditSubmission
+        deckInstructionsTextView.isSelectable = canEditSubmission
         chatPromptTextView.isEditable = canEditSubmission
         chatPromptTextView.isSelectable = canEditSubmission
         let isSubmittable = sharedURL != nil
@@ -275,6 +326,16 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         updateSubmitState()
     }
 
+    func textView(
+        _ textView: UITextView,
+        shouldChangeTextIn range: NSRange,
+        replacementText text: String
+    ) -> Bool {
+        guard textView === deckInstructionsTextView else { return true }
+        guard let currentRange = Range(range, in: textView.text) else { return false }
+        return textView.text.replacingCharacters(in: currentRange, with: text).count <= 4000
+    }
+
     @objc private func handleSubmitTapped() {
         guard submissionState.canBeginSubmission else { return }
         guard hasRequiredSubmissionInput else {
@@ -286,6 +347,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             return
         }
 
+        deckInstructionsTextView.resignFirstResponder()
         chatPromptTextView.resignFirstResponder()
         updateSubmitButtonTitle()
         updateSubmitState()
@@ -438,7 +500,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     }
 
     @objc private func handleKeyboardFrameWillChange(_ notification: Notification) {
-        guard shareOutcomeMode == .chat else { return }
+        guard shareOutcomeMode == .chat || shareOutcomeMode == .createDeck else { return }
 
         let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? TimeInterval
             ?? 0.25
@@ -448,15 +510,30 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
             options: [.beginFromCurrentState, .curveEaseInOut]
         ) {
             self.view.layoutIfNeeded()
-            self.scrollChatPromptIntoView(animated: false)
+            self.scrollActivePromptIntoView(animated: false)
         }
     }
 
     private func scrollChatPromptIntoView(animated: Bool) {
         guard shareOutcomeMode == .chat, !chatPromptStack.isHidden else { return }
 
+        scrollPromptIntoView(chatPromptStack, animated: animated)
+    }
+
+    private func scrollActivePromptIntoView(animated: Bool) {
+        switch shareOutcomeMode {
+        case .createDeck where !deckInstructionsStack.isHidden:
+            scrollPromptIntoView(deckInstructionsStack, animated: animated)
+        case .chat where !chatPromptStack.isHidden:
+            scrollPromptIntoView(chatPromptStack, animated: animated)
+        default:
+            break
+        }
+    }
+
+    private func scrollPromptIntoView(_ promptStack: UIStackView, animated: Bool) {
         view.layoutIfNeeded()
-        let promptFrame = chatPromptStack.convert(chatPromptStack.bounds, to: scrollView)
+        let promptFrame = promptStack.convert(promptStack.bounds, to: scrollView)
         let submitFrame = submitButton.convert(submitButton.bounds, to: scrollView)
         scrollView.scrollRectToVisible(promptFrame.union(submitFrame).insetBy(dx: 0, dy: -16), animated: animated)
     }
@@ -467,7 +544,10 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         let payload = ShareActionRequest(
             url: url.absoluteString,
             mode: shareActionMode(),
-            chatInitialMessage: shareOutcomeMode == .chat ? chatInitialMessage : nil
+            chatInitialMessage: shareOutcomeMode == .chat ? chatInitialMessage : nil,
+            interestsPrompt: shareOutcomeMode == .createDeck && !deckInstructions.isEmpty
+                ? deckInstructions
+                : nil
         )
         let requestBody = try JSONEncoder().encode(payload)
 
@@ -590,11 +670,13 @@ private struct ShareActionRequest: Encodable {
     let url: String
     let mode: String
     let chatInitialMessage: String?
+    let interestsPrompt: String?
 
     enum CodingKeys: String, CodingKey {
         case url
         case mode
         case chatInitialMessage = "chat_initial_message"
+        case interestsPrompt = "interests_prompt"
     }
 }
 

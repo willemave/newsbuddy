@@ -222,6 +222,7 @@ def _build_learning_deck_input(
     result: ShareActionAgentResult,
 ) -> LearningDeckActionInput:
     presentation = result.presentation
+    user_interests_prompt = _input_interests_prompt(task)
     return LearningDeckActionInput(
         source_url=(
             presentation.source_url
@@ -230,9 +231,11 @@ def _build_learning_deck_input(
         ),
         title=presentation.title if presentation else result.title,
         interests_prompt=(
-            presentation.interests_prompt
-            if presentation and presentation.interests_prompt
-            else _input_interests_prompt(task)
+            user_interests_prompt
+            if user_interests_prompt is not None
+            else presentation.interests_prompt
+            if presentation
+            else None
         ),
     )
 

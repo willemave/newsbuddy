@@ -389,6 +389,7 @@ def test_settings_has_no_dead_end(
         "action_point",
         "submit_label",
         "chat_initial_message",
+        "deck_instructions",
     ),
     [
         pytest.param(
@@ -397,6 +398,7 @@ def test_settings_has_no_dead_end(
             "Add to Briefing",
             (200.0, 220.0),
             "Add to Briefing",
+            None,
             None,
             id="add-to-briefing",
         ),
@@ -407,6 +409,7 @@ def test_settings_has_no_dead_end(
             (200.0, 300.0),
             "Add to Knowledge",
             None,
+            None,
             id="add-to-knowledge",
         ),
         pytest.param(
@@ -416,6 +419,7 @@ def test_settings_has_no_dead_end(
             (200.0, 390.0),
             "Create deck",
             None,
+            "Capture the funding timeline and investigate conflicting claims.",
             id="create-deck",
         ),
         pytest.param(
@@ -425,6 +429,7 @@ def test_settings_has_no_dead_end(
             (200.0, 450.0),
             "Start chat",
             "Find more reporting like this",
+            None,
             id="chat",
         ),
     ],
@@ -436,6 +441,7 @@ def test_share_extension_modes_reach_live_api_and_queue(
     action_point,
     submit_label,
     chat_initial_message,
+    deck_instructions,
     axe_runner,
     live_server,
     test_user,
@@ -502,6 +508,47 @@ def test_share_extension_modes_reach_live_api_and_queue(
             ),
             timeout_seconds=5,
         )
+    elif mode == LlmTaskMode.PRESENTATION:
+        axe_runner.tap_point(
+            *action_point,
+            name=f"{path_name}_selected",
+            inspection_point=(200, 610),
+            expectation=AxeStateExpectation(
+                ids=("share.deck.instructions",),
+                enabled_ids=("share.deck.instructions",),
+            ),
+        )
+        axe_runner.tap_point(
+            200,
+            610,
+            name=f"{path_name}_instructions_focused",
+            inspection_point=(200, 610),
+            expectation=AxeStateExpectation(
+                ids=("share.deck.instructions",),
+                enabled_ids=("share.deck.instructions",),
+            ),
+        )
+        axe_runner.type_text(
+            deck_instructions,
+            name=f"{path_name}_instructions_typed",
+            inspection_point=(200, 610),
+            expectation=AxeStateExpectation(
+                ids=("share.deck.instructions",),
+                id_values={"share.deck.instructions": deck_instructions},
+            ),
+        )
+        submit_point = (200.0, 695.0)
+        axe_runner.capture_point_until(
+            name=f"{path_name}_submit_ready",
+            x=submit_point[0],
+            y=submit_point[1],
+            expectation=AxeStateExpectation(
+                ids=("share.submit",),
+                texts=(submit_label,),
+                enabled_ids=("share.submit",),
+            ),
+            timeout_seconds=5,
+        )
     else:
         submit_point = (200.0, 520.0)
         axe_runner.tap_point(
@@ -533,6 +580,7 @@ def test_share_extension_modes_reach_live_api_and_queue(
     assert task.workflow_state == LlmWorkflowState.QUEUED.value
     assert task.input_json is not None
     assert task.input_json["chat_initial_message"] == chat_initial_message
+    assert task.input_json["interests_prompt"] == deck_instructions
 
     queued_tasks = [
         queued

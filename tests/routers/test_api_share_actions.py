@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -51,6 +53,27 @@ def test_create_share_action_endpoint_accepts_add_to_briefing(
     task = db_session.query(LlmTask).filter_by(id=payload["task_id"]).one()
     assert task.allowed_actions == ["add_to_briefing"]
     assert task.prompt_pack == "share_action.add_to_briefing"
+
+
+def test_create_share_action_endpoint_persists_deck_instructions(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    response = client.post(
+        "/api/share-actions",
+        json={
+            "url": "https://example.com/research",
+            "mode": "presentation",
+            "interests_prompt": "Compare the studies and investigate conflicting results.",
+        },
+    )
+
+    assert response.status_code == 202
+    task = db_session.query(LlmTask).filter_by(id=response.json()["task_id"]).one()
+    input_json = cast(dict[str, Any], task.input_json)
+    assert input_json["interests_prompt"] == (
+        "Compare the studies and investigate conflicting results."
+    )
 
 
 def test_get_share_action_endpoint(client: TestClient, db_session: Session, test_user) -> None:

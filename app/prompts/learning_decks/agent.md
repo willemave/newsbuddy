@@ -195,10 +195,15 @@ Primary source: $source_title
 Source kind: $source_kind
 Source snapshot file: input/source-snapshot.json
 Source text file, when present: input/source.txt
-Interests file: input/interests.txt
+User instructions file: input/interests.txt
 Design brief: input/deck-design-brief.md
-User interests: $interests
+User instructions: $interests
 $github_guidance
+
+Treat the user instructions as authoritative additions to the deck brief. They may ask you to
+capture specific information, compare claims, or investigate beyond the primary source using the
+available research tools. Do not silently narrow or discard them. Keep source notes and citations
+for any additional investigation.
 
 Before finishing, verify:
 1. output/index.html exists and contains a Reveal.js slide structure.

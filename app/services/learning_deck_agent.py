@@ -455,7 +455,9 @@ def _prepare_sandbox_inputs(
 def _build_agent_prompt(source_snapshot: dict[str, Any], interests_prompt: str | None) -> str:
     source_kind = source_snapshot.get("source_kind")
     source_title = source_snapshot.get("source_title") or source_snapshot.get("source_url")
-    interests = interests_prompt.strip() if interests_prompt else "No additional interests given."
+    interests = (
+        interests_prompt.strip() if interests_prompt else "No additional instructions given."
+    )
     return render_prompt(
         "learning_decks/agent#user",
         **learning_deck_prompt_values(),
