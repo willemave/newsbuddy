@@ -42,7 +42,7 @@ struct DetailActionBar: View {
             }
 
             Button(action: onShare) {
-                actionIcon("square.and.arrow.up")
+                actionIcon("square.and.arrow.up", verticalOffset: -1)
             }
             .detailActionBarSegment()
             .accessibilityIdentifier("content.action.share")
@@ -123,11 +123,16 @@ struct DetailActionBar: View {
     }
 
     @ViewBuilder
-    private func actionIcon(_ icon: String, color: Color = .readerBodyText) -> some View {
+    private func actionIcon(
+        _ icon: String,
+        color: Color = .readerBodyText,
+        verticalOffset: CGFloat = 0
+    ) -> some View {
         Image(systemName: icon)
             .font(.appSymbol(size: 20, weight: .regular))
             .foregroundColor(overlaid ? .white : color)
             .appShadow(overlaid ? .overlayText : .none)
+            .offset(y: verticalOffset)
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
     }
