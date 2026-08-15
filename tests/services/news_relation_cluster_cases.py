@@ -6,6 +6,15 @@ from __future__ import annotations
 
 PRODUCTION_CLUSTER_CASES = [
     {
+        "case_id": "prod_2026_08_11_chloe_bakalar_departure",
+        "label": "OpenAI ethics head Chloé Bakalar departure",
+        "titles": [
+            "OpenAI's head of ethics Chloé Bakalar departs after less than a year",
+            "OpenAI's Only Ethicist Chloé Bakalar Reportedly Left in July, Not Replaced",
+            "OpenAI 伦理主管 Chloé Bakalar 离职",
+        ],
+    },
+    {
         "case_id": "batch_008_c1",
         "label": "Anthropic Fable 5 export controls lifted",
         "titles": [
