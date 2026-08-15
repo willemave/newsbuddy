@@ -320,7 +320,6 @@ extension UIFont {
 }
 
 enum ReaderContentStyle {
-    static let bodyTextOpacity: CGFloat = 1.0
     static let bodyFontWeight: Font.Weight = .regular
     static let uiBodyFontWeight: UIFont.Weight = .regular
     static let bodyFontSize: CGFloat = 15
@@ -719,9 +718,10 @@ extension UIColor {
     }
     static var appReaderBodyText: UIColor {
         UIColor { traitCollection in
-            appOnSurface
-                .resolvedColor(with: traitCollection)
-                .withAlphaComponent(ReaderContentStyle.bodyTextOpacity)
+            if traitCollection.userInterfaceStyle == .dark {
+                return UIColor(red: 0.914, green: 0.922, blue: 0.937, alpha: 1.0)  // #e9ebef
+            }
+            return appOnSurface.resolvedColor(with: traitCollection)
         }
     }
     static var appOnSurfaceSecondary: UIColor {
