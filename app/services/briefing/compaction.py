@@ -19,6 +19,8 @@ from app.services.briefing.window_composition import ComposedWindow
 
 logger = get_logger(__name__)
 
+_MIN_NEWS_COMPACTION_SOURCES = 2
+
 
 @dataclass(frozen=True)
 class CompactionDonor:
@@ -148,7 +150,7 @@ def prepare_compactions(
         if not donors:
             continue
         source_keys = _ordered_unread_source_keys(donors, read_keys=read_keys)
-        if str(lens.tier) == "news" and len(source_keys) < settings.briefing_window_min:
+        if str(lens.tier) == "news" and len(source_keys) < _MIN_NEWS_COMPACTION_SOURCES:
             continue
         prepared_donors.append((lens, donors, source_keys))
         for source_key in source_keys:
@@ -338,7 +340,7 @@ def _compaction_donors(
     small = [
         segment for segment in segments if 0 < len(set(segment.source_keys or []) - read_keys) <= 2
     ]
-    return small if len(small) >= 3 else []
+    return small if len(small) >= _MIN_NEWS_COMPACTION_SOURCES else []
 
 
 def _ordered_unread_source_keys(

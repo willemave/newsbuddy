@@ -49,6 +49,68 @@ def test_fragmentation_metrics_handle_zero_sources() -> None:
     assert metrics.excess_fragmentation == 2
 
 
+def test_release_path_compacts_two_singleton_news_segments(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
+    items = [
+        news_item_factory(
+            visibility_scope="user",
+            owner_user_id=user_id,
+            article_title=f"Singleton news story {index}",
+            summary_title=f"Singleton news story {index}",
+        )
+        for index in range(2)
+    ]
+    lens = BriefingLens(
+        user_id=user_id,
+        key="news-software",
+        tier="news",
+        title="Software",
+        deck="Software news.",
+        position=1,
+    )
+    db_session.add(lens)
+    db_session.flush()
+    db_session.add_all(
+        [
+            BriefingSegment(
+                lens_id=lens.id,
+                user_id=user_id,
+                blocks=[],
+                source_keys=[f"news:{item.id}"],
+                status="active",
+                model="test",
+                prompt_version="test",
+            )
+            for item in items
+        ]
+    )
+    db_session.commit()
+
+    result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="sweep",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+
+    active = _active_segments(db_session, user_id=user_id)
+    assert result.compacted_segments == 2
+    assert len(active) == 1
+    assert set(active[0].source_keys or []) == {f"news:{item.id}" for item in items}
+    assert "compaction_segment" in (active[0].warnings or [])
+
+
 def test_release_path_splits_multi_source_article_segments_without_loss(
     db_session: Session,
     test_user: User,
