@@ -43,6 +43,7 @@ DECK_THEME_CSS = """
   --accent: #1f6f5c;
   --accent-strong: #16513f;
   --accent-soft: rgba(31, 111, 92, 0.10);
+  --selection-bg: rgba(31, 111, 92, 0.26);
   --line: rgba(27, 27, 26, 0.12);
   --line-strong: rgba(27, 27, 26, 0.24);
   --code-bg: #15201c;
@@ -76,6 +77,7 @@ DECK_THEME_CSS = """
   --accent: #54b89e;
   --accent-strong: #7fcdb6;
   --accent-soft: rgba(84, 184, 158, 0.14);
+  --selection-bg: rgba(84, 184, 158, 0.32);
   --line: rgba(236, 239, 234, 0.14);
   --line-strong: rgba(236, 239, 234, 0.28);
   --code-bg: #0c100e;
@@ -93,7 +95,10 @@ html, body, .reveal-viewport, .reveal { background: var(--paper); }
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-.reveal ::selection { background: var(--accent-soft); }
+.reveal ::selection {
+  background: var(--selection-bg);
+  color: var(--ink);
+}
 
 .reveal .slides { text-align: left; }
 .reveal .slides section { padding: 42px 64px; }

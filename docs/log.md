@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-15 — `main` — Refine Learning Deck reader controls
+
+- **Status:** Complete.
+- **Scope:** Portrait deck-chat flyover, hosted Reveal viewer selection and fullscreen chrome, focused tests, Maestro flow, and Learning product law.
+- **Decisions:** Keep tap-to-open while adding the expected upward-swipe affordance; make selection visibly emerald without changing deck typography; remove the redundant nested web fullscreen mode while retaining Reveal slide navigation.
+- **Changes:** Increased the collapsed chat flyover height, added a vertical swipe recognizer with focused native coverage, strengthened light/dark selection colors, removed the fullscreen button and its JavaScript, and changed the portrait-chat Maestro path to open by swipe.
+- **Validation:** Ruff and formatting passed; 23 focused Python viewer/theme tests passed; 5 focused native Learning Deck tests passed on the iOS 26.5 iPhone 17 Pro Simulator; the app built and launched successfully; `git diff --check` passed. The focused Maestro scenario was discovered but skipped because Maestro is not installed locally.
+- **Remaining:** Run the updated focused Maestro scenario when Maestro is available for direct end-to-end gesture and screenshot proof.
+- **Commits:** This commit.
+
 ### 2026-08-15 — `main` — Learning Deck share instructions
 
 - **Status:** Complete.

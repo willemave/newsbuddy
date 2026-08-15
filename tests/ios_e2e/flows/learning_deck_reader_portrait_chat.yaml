@@ -26,8 +26,10 @@ appId: "${APP_ID}"
     timeout: 15000
 - assertVisible:
     id: learning_deck.chat.peek
-- tapOn:
-    id: learning_deck.chat.peek
+- swipe:
+    start: 50%, 92%
+    end: 50%, 70%
+    duration: 400
 - assertVisible:
     id: learning_deck.chat.collapse
 - tapOn:

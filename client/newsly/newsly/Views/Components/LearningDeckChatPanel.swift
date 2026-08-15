@@ -6,6 +6,12 @@
 import SwiftUI
 import UIKit
 
+enum LearningDeckChatFlyoverInteraction {
+    static func shouldExpand(for translation: CGSize) -> Bool {
+        translation.height <= -24 && abs(translation.height) > abs(translation.width)
+    }
+}
+
 struct LearningDeckChatFlyover: View {
     @Bindable var viewModel: LearningDeckReaderViewModel
     @Binding var isExpanded: Bool
@@ -37,7 +43,7 @@ struct LearningDeckChatFlyover: View {
                 Capsule()
                     .fill(Color.outlineVariant.opacity(0.45))
                     .frame(width: 36, height: 5)
-                    .padding(.top, 8)
+                    .padding(.top, 10)
 
                 HStack(spacing: 8) {
                     Image(systemName: "bubble.left.and.text.bubble.right")
@@ -55,12 +61,22 @@ struct LearningDeckChatFlyover: View {
                     }
                 }
                 .padding(.horizontal, Spacing.appHorizontalMargin)
-                .padding(.bottom, 10)
+                .padding(.bottom, 14)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 72)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    if LearningDeckChatFlyoverInteraction.shouldExpand(
+                        for: value.translation
+                    ) {
+                        isExpanded = true
+                    }
+                }
+        )
         .accessibilityLabel("Open deck chat")
         .accessibilityIdentifier("learning_deck.chat.peek")
     }

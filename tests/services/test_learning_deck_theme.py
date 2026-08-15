@@ -35,6 +35,8 @@ def test_theme_uses_daylight_palette_and_type() -> None:
     assert "linear-gradient" not in DECK_THEME_CSS
     assert ".reveal .slides section:not(.stack)" in DECK_THEME_CSS
     assert ".reveal .slide-frame" in DECK_THEME_CSS
+    assert "background: var(--selection-bg)" in DECK_THEME_CSS
+    assert "color: var(--ink)" in DECK_THEME_CSS
 
 
 def test_design_guide_documents_house_classes() -> None:
@@ -73,7 +75,7 @@ def test_viewer_markup_carries_theme_and_uses_reveal_navigation() -> None:
     assert 'window.matchMedia("(orientation: portrait)")' in markup
     assert "visualViewport.height" not in markup
     assert "newsly-learning-deck-responsive" in markup
-    assert "data-newsly-learning-deck-fullscreen" in markup
+    assert "data-newsly-learning-deck-fullscreen" not in markup
     assert "data-newsly-learning-deck-prev" not in markup
     assert "data-newsly-learning-deck-next" not in markup
     assert "controls: true" in markup

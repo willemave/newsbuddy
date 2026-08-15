@@ -87,68 +87,8 @@ def learning_deck_navigation_controls_html(*, responsive_layout: bool = False) -
     max-width: 100%;
     height: auto;
   }}
-  .newsly-learning-deck-controls {{
-    position: fixed;
-    right: 22px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 108px);
-    z-index: 2147483647;
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    pointer-events: auto;
-  }}
-  .newsly-learning-deck-controls button {{
-    width: 46px;
-    height: 46px;
-    border: 1px solid var(--line-strong, rgba(27, 27, 26, 0.24));
-    border-radius: 999px;
-    background: var(--paper, #fbfaf8);
-    color: var(--ink, #1b1b1a);
-    box-shadow: 0 14px 34px -24px rgba(27, 27, 26, 0.65);
-    font-family: "Spline Sans", system-ui, sans-serif;
-    font-size: 24px;
-    line-height: 1;
-    font-weight: 500;
-    display: grid;
-    place-items: center;
-    cursor: pointer;
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
-    transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
-  }}
-  .newsly-learning-deck-controls button:hover {{
-    border-color: var(--accent, #1f6f5c);
-    color: var(--accent, #1f6f5c);
-  }}
-  .newsly-learning-deck-controls button:active {{
-    transform: translateY(1px);
-  }}
-  .newsly-learning-deck-controls button.is-unavailable {{
-    opacity: 0.35;
-  }}
-  html.newsly-learning-deck-portrait .newsly-learning-deck-controls {{
-    right: calc(env(safe-area-inset-right, 0px) + 14px);
-    top: max(24px, calc(100dvh - 178px));
-    bottom: auto;
-  }}
   html.newsly-learning-deck-responsive.newsly-learning-deck-portrait .reveal .controls {{
     bottom: 92px !important;
-  }}
-  html.newsly-learning-deck-landscape .newsly-learning-deck-controls {{
-    right: calc(env(safe-area-inset-right, 0px) + 12px);
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
-    gap: 6px;
-  }}
-  html.newsly-learning-deck-landscape .newsly-learning-deck-controls button {{
-    width: 40px;
-    height: 40px;
-    font-size: 24px;
-  }}
-  html.newsly-learning-deck-landscape
-    .newsly-learning-deck-controls button[data-newsly-learning-deck-fullscreen] {{
-    font-size: 18px;
   }}
   html.newsly-learning-deck-landscape .reveal .slides section {{
     padding: 30px 48px !important;
@@ -163,26 +103,11 @@ def learning_deck_navigation_controls_html(*, responsive_layout: bool = False) -
     margin-bottom: 14px !important;
     padding-bottom: 10px !important;
   }}
-  .newsly-learning-deck-controls button[data-newsly-learning-deck-fullscreen] {{
-    font-size: 20px;
-  }}
-  /* Deck navigation buttons follow the house light theme above. */
 </style>
-<div class="newsly-learning-deck-controls" {NAVIGATION_CONTROLS_MARKER}="controls">
-  <button
-    type="button"
-    data-newsly-learning-deck-fullscreen
-    aria-label="Toggle fullscreen"
-  >&#x26F6;</button>
-</div>
 <script {NAVIGATION_CONTROLS_MARKER}="script">
 (function () {{
   var isResponsiveDeck = {responsive_layout_js};
   var layoutProfiles = {layout_profiles_js};
-  var fullscreenButton = document.querySelector("[data-newsly-learning-deck-fullscreen]");
-  if (!fullscreenButton) return;
-  var lastFullscreenActivationAt = 0;
-  var relayoutDeck = function () {{}};
 
   function withReveal(callback) {{
     if (window.Reveal && typeof window.Reveal.configure === "function") {{
@@ -191,95 +116,6 @@ def learning_deck_navigation_controls_html(*, responsive_layout: bool = False) -
     }}
     window.setTimeout(function () {{ withReveal(callback); }}, 150);
   }}
-
-  function setButtonAvailability(button, isAvailable) {{
-    button.classList.toggle("is-unavailable", !isAvailable);
-    button.setAttribute("aria-disabled", isAvailable ? "false" : "true");
-  }}
-
-  function fullscreenElement() {{
-    return document.fullscreenElement || document.webkitFullscreenElement || null;
-  }}
-
-  function fullscreenEnabled() {{
-    return Boolean(
-      document.fullscreenEnabled ||
-      document.webkitFullscreenEnabled ||
-      document.documentElement.requestFullscreen ||
-      document.documentElement.webkitRequestFullscreen
-    );
-  }}
-
-  function syncFullscreenButton() {{
-    var enabled = fullscreenEnabled();
-    var active = Boolean(fullscreenElement());
-    setButtonAvailability(fullscreenButton, enabled);
-    fullscreenButton.setAttribute("aria-pressed", active ? "true" : "false");
-    fullscreenButton.setAttribute(
-      "aria-label",
-      active ? "Exit fullscreen" : "Enter fullscreen"
-    );
-  }}
-
-  function requestFullscreen() {{
-    var target = document.documentElement;
-    if (target.requestFullscreen) {{
-      return target.requestFullscreen();
-    }}
-    if (target.webkitRequestFullscreen) {{
-      return target.webkitRequestFullscreen();
-    }}
-    return null;
-  }}
-
-  function exitFullscreen() {{
-    if (document.exitFullscreen) {{
-      return document.exitFullscreen();
-    }}
-    if (document.webkitExitFullscreen) {{
-      return document.webkitExitFullscreen();
-    }}
-    return null;
-  }}
-
-  function toggleFullscreen(event) {{
-    if (event) {{
-      event.preventDefault();
-      event.stopPropagation();
-    }}
-    var now = Date.now();
-    if (now - lastFullscreenActivationAt < 500) return;
-    lastFullscreenActivationAt = now;
-    if (!fullscreenEnabled()) {{
-      syncFullscreenButton();
-      return;
-    }}
-    var result = fullscreenElement() ? exitFullscreen() : requestFullscreen();
-    if (result && typeof result.catch === "function") {{
-      result.catch(function () {{ syncFullscreenButton(); }});
-    }}
-    window.setTimeout(function () {{
-      syncFullscreenButton();
-      relayoutDeck();
-    }}, 150);
-  }}
-
-  function bindFullscreen(button) {{
-    button.addEventListener("pointerdown", toggleFullscreen);
-    button.addEventListener("touchstart", toggleFullscreen, {{ passive: false }});
-    button.addEventListener("click", toggleFullscreen);
-  }}
-
-  bindFullscreen(fullscreenButton);
-  syncFullscreenButton();
-  document.addEventListener("fullscreenchange", function () {{
-    syncFullscreenButton();
-    relayoutDeck();
-  }});
-  document.addEventListener("webkitfullscreenchange", function () {{
-    syncFullscreenButton();
-    relayoutDeck();
-  }});
 
   withReveal(function (reveal) {{
     function isPortraitOrientation() {{
@@ -342,7 +178,6 @@ def learning_deck_navigation_controls_html(*, responsive_layout: bool = False) -
       if (typeof reveal.layout === "function") {{
         reveal.layout();
       }}
-      syncFullscreenButton();
     }}
     var fitAnimationFrame = null;
     function scheduleFit() {{
@@ -352,8 +187,6 @@ def learning_deck_navigation_controls_html(*, responsive_layout: bool = False) -
         applyFit();
       }});
     }}
-    relayoutDeck = scheduleFit;
-
     if (typeof reveal.configure === "function") {{
       reveal.configure({{
         controls: true,
