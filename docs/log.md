@@ -663,3 +663,43 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** All 62 focused Learning Deck backend and iOS source-contract tests passed; Ruff and focused mypy passed; the 754-file/23-ratchet module guard, all 137 architecture tests, and public-contract check passed. The browser validator's generated JavaScript passed `node --check`. The iOS app built successfully, all 3 focused `LearningDeckReaderViewModelTests` passed, and the new portrait-chat Maestro scenario passed on the iOS 26.5 iPhone 17 Pro simulator.
 - **Remaining:** The hosted Playwright validator was covered by typed outcome and command-generation tests but was not run in a real browser-capable Agent VM during this local pass. No commit, push, deployment, production mutation, or deck regeneration performed.
 - **Commits:** Uncommitted.
+
+### 2026-08-14 — `main` — Compact sparse News Briefing entries sooner
+
+- **Status:** Complete locally.
+- **Scope:** News Briefing compaction threshold and focused regression coverage.
+- **Decisions:** Preserve the 25-minute freshness deadline for low-volume news, but allow two small News segments to be recomposed together instead of waiting for three so consecutive single-link entries converge sooner.
+- **Changes:** Lowered the minimum News compaction donor/source count from three to two and added a production-shaped release-path test covering two singleton segments becoming one two-source segment.
+- **Validation:** All 158 backend Briefing service tests passed; Ruff format and lint passed for the touched Python files; `git diff --check` passed.
+- **Remaining:** No production mutation, deployment, commit, or push was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-14 — `main` — Optically align content-detail action icons
+
+- **Status:** Complete locally.
+- **Scope:** Content-detail action-bar symbol alignment only.
+- **Decisions:** Preserve the common 44-point centered tap targets and correct only the SF Symbol whose visible artwork sits low in its intrinsic canvas.
+- **Changes:** Raised the Share symbol by one point while leaving the already-centered external, reader, Knowledge, narration, and Learning actions unchanged.
+- **Validation:** The iOS app built successfully for the iOS 26.5 iPhone 17 Pro simulator, all 9 focused accessibility/navigation source-contract tests passed, the deterministic dark-mode content-detail Maestro visual flow passed, and `git diff --check` passed.
+- **Remaining:** No commit, push, deployment, or production mutation performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-14 — `main` — Reproduce missed Chloé Bakalar news clustering
+
+- **Status:** Investigation complete; no production behavior change.
+- **Scope:** Production evidence for three unmerged Chloé Bakalar stories in the AI & Society Briefing lens, plus a curated title-clustering eval case.
+- **Decisions:** Keep the current thresholds unchanged: the real embedding matcher clusters the three production titles when they are candidates. Treat the pre-semantic 150-row candidate cap as the reproduced failure seam; a larger static cap would only defer the same ingestion-burst failure.
+- **Changes:** Added the three production primary titles to the curated news-relation eval corpus.
+- **Validation:** Production showed three singleton news rows and three separately published lens segments; all processing tasks completed without errors. There were 202 newer ready global rows created before the second item and 151 before the third, while the production cap is 150. A rollback-only local reproduction with 151 filler candidates produced three singleton clusters and `candidate_count=150` / `prefilter_empty` traces; the adjacent-title real-embedding eval passed with F1 1.000. All 102 focused news-relation tests, Ruff, and `git diff --check` passed.
+- **Remaining:** Design a bounded retrieval change that performs exact/lexical candidate narrowing before the final semantic cap, then add a production-shaped regression proving burst gaps do not hide same-story candidates. No commit, push, deployment, or production mutation performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-14 — `main` — Brighten dark reader body text
+
+- **Status:** Complete locally.
+- **Scope:** Main reader body text in dark mode only.
+- **Decisions:** Keep headings, metadata, navigation, the dark surface, and light mode unchanged; use the subtle option from a four-state Simulator sweep.
+- **Changes:** Lifted the dedicated dark reader-body color from `#E5E7EC` to `#E9EBEF`.
+- **Validation:** Compared current, subtle, medium, and high treatments against the same seeded Briefing screen on the iOS 26.5 iPhone 17 Pro simulator; both focused palette tests passed, the final app build succeeded, and the selected treatment was recaptured in the same seeded screen.
+- **Remaining:** No commit, push, deployment, or production mutation performed.
+- **Commits:** Uncommitted.
