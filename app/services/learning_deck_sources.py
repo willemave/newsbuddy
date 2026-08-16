@@ -6,6 +6,7 @@ from hashlib import sha256
 from typing import Any
 from urllib.parse import urlparse
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.commands import ingest_content as ingest_content_command
@@ -14,10 +15,17 @@ from app.commands.convert_news_to_article import (
     ensure_article_saved_to_knowledge,
 )
 from app.models.api.submissions import SubmitContentRequest
-from app.models.contracts import ContentStatus, LearningDeckSourceKind
-from app.models.db import Content, LearningDeck, User
+from app.models.contracts import (
+    ContentStatus,
+    ContentType,
+    LearningDeckSourceKind,
+    TaskStatus,
+    TaskType,
+)
+from app.models.db import Content, LearningDeck, ProcessingTask, User
 from app.models.metadata.access import metadata_view
 from app.repositories.content_detail_repository import get_visible_content
+from app.services.canonical_content_state import finalize_canonical_user_state
 from app.services.content_bodies import get_content_body_resolver
 from app.services.github_urls import GitHubFileUrl, parse_github_file_url
 from app.services.learning_deck_common import (
@@ -29,6 +37,7 @@ from app.services.learning_deck_common import (
     utcnow,
 )
 from app.services.news_feed import get_visible_news_item
+from app.services.twitter_share import extract_tweet_id
 from app.utils.news_titles import get_news_article_title
 from app.utils.title_utils import clean_title, resolve_title_candidate
 from app.utils.url_utils import is_http_url, normalize_http_url
@@ -201,7 +210,7 @@ def resolve_canonical_learning_deck_content(db: Session, content: Content) -> Co
         try:
             canonical_id = int(raw_canonical_id)
         except (TypeError, ValueError):
-            return current
+            return _find_ready_unrecorded_duplicate(db, current) or current
         if canonical_id <= 0 or canonical_id in visited_ids:
             return current
 
@@ -209,6 +218,56 @@ def resolve_canonical_learning_deck_content(db: Session, content: Content) -> Co
         if canonical is None:
             return current
         current = canonical
+
+
+def _find_ready_unrecorded_duplicate(db: Session, content: Content) -> Content | None:
+    """Recover a ready duplicate when the redirect write itself rolled back."""
+    if content.content_type != ContentType.UNKNOWN.value:
+        return None
+    content_id = require_int_value(content.id, "Content id")
+    latest_analysis_status = (
+        db.query(ProcessingTask.status)
+        .filter(
+            ProcessingTask.content_id == content_id,
+            ProcessingTask.task_type == TaskType.ANALYZE_URL.value,
+        )
+        .order_by(ProcessingTask.id.desc())
+        .limit(1)
+        .scalar()
+    )
+    if latest_analysis_status != TaskStatus.FAILED.value:
+        return None
+
+    source_urls = [value for value in (content.url, content.source_url) if isinstance(value, str)]
+    tweet_ids = {tweet_id for value in source_urls if (tweet_id := extract_tweet_id(value))}
+    query = (
+        db.query(Content)
+        .filter(Content.id != content_id)
+        .filter(Content.content_type != ContentType.UNKNOWN.value)
+        .filter(
+            Content.status.in_([ContentStatus.COMPLETED.value, ContentStatus.AWAITING_IMAGE.value])
+        )
+    )
+    if tweet_ids:
+        query = query.filter(
+            or_(
+                *[
+                    column.contains(tweet_id)
+                    for tweet_id in sorted(tweet_ids)
+                    for column in (Content.url, Content.source_url)
+                ]
+            )
+        )
+    else:
+        query = query.filter(Content.url.in_(source_urls))
+
+    for candidate in query.order_by(Content.id).all():
+        if not tweet_ids:
+            return candidate
+        candidate_urls = (candidate.url, candidate.source_url)
+        if any(extract_tweet_id(str(value)) in tweet_ids for value in candidate_urls if value):
+            return candidate
+    return None
 
 
 def rebind_learning_deck_to_canonical_content(
@@ -224,6 +283,11 @@ def rebind_learning_deck_to_canonical_content(
     if canonical_content_id == original_content_id:
         return canonical
 
+    finalize_canonical_user_state(
+        db,
+        loser_content_id=original_content_id,
+        winner_content_id=canonical_content_id,
+    )
     source = content_learning_deck_source(canonical)
     identity_owner = (
         db.query(LearningDeck.id)

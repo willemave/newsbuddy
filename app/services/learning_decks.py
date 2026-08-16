@@ -378,7 +378,7 @@ def present_learning_deck_run(run: LearningDeckRun) -> LearningDeckRunResponse:
             for entry in (run.timeline or [])
             if isinstance(entry, dict)
         ],
-        error_message=run.error_message,
+        error_message=_public_learning_deck_error_message(None, run.error_message),
         started_at=run.started_at,
         completed_at=run.completed_at,
         created_at=require_datetime_value(run.created_at, "Learning Deck run created_at"),
@@ -601,12 +601,33 @@ def _present_learning_deck_task(task: LlmTask) -> LearningDeckRunResponse:
         status=LearningDeckRunStatus(_learning_deck_status_for_task_status(str(task.status))),
         interests_prompt=clean_optional_text(input_json.get("interests_prompt")),
         timeline=timeline,
-        error_message=task.error_message,
+        error_message=_public_learning_deck_error_message(task.error_type, task.error_message),
         started_at=task.started_at,
         completed_at=task.completed_at,
         created_at=require_datetime_value(task.created_at, "LLM task created_at"),
         updated_at=task.updated_at,
     )
+
+
+def _public_learning_deck_error_message(
+    error_type: str | None,
+    error_message: str | None,
+) -> str | None:
+    if not error_message:
+        return None
+    public_errors = {
+        "source_not_found": "Source content no longer exists",
+        "source_processing_failed": "Source content processing failed. Please try again.",
+        "source_text_unavailable": "Source content does not have readable text",
+        "source_pipeline_stalled": "Source content is still being prepared. Please try again.",
+    }
+    mapped = public_errors.get(error_type) if error_type is not None else None
+    if mapped is not None:
+        return mapped
+    lowered = error_message.lower()
+    if any(marker in lowered for marker in ("[sql:", "sqlalchemy", "psycopg", "unique constraint")):
+        return "Learning Deck generation failed. Please try again."
+    return error_message
 
 
 def _learning_deck_status_for_task_status(status: str) -> str:

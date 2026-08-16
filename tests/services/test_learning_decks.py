@@ -10,9 +10,16 @@ from app.models.contracts import (
     LlmTaskMode,
     LlmTaskStatus,
     LlmWorkflowState,
+    TaskStatus,
     TaskType,
 )
-from app.models.db import LearningDeck, LearningDeckRun, LlmTask, ProcessingTask
+from app.models.db import (
+    ContentKnowledgeSave,
+    LearningDeck,
+    LearningDeckRun,
+    LlmTask,
+    ProcessingTask,
+)
 from app.services.learning_deck_viewer import with_learning_deck_navigation_controls
 from app.services.learning_decks import (
     build_private_learning_deck_token,
@@ -209,6 +216,32 @@ def test_present_learning_deck_repairs_stale_url_title_from_source_metadata(
     assert response.source_title == response.title
 
 
+def test_present_learning_deck_hides_source_pipeline_internals(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    content = _create_visible_article(db_session, test_user, content_factory)
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=content.id,
+    )
+    task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    task.status = LlmTaskStatus.FAILED.value
+    task.workflow_state = LlmWorkflowState.FAILED.value
+    task.error_type = "source_processing_failed"
+    task.error_message = "(psycopg.errors.UniqueViolation) [SQL: UPDATE contents ...]"
+    db_session.commit()
+
+    response = present_learning_deck(db_session, deck)
+
+    assert response.latest_run is not None
+    assert response.latest_run.error_message == (
+        "Source content processing failed. Please try again."
+    )
+
+
 def test_present_learning_deck_keeps_completed_legacy_run_renderable(
     db_session,
     test_user,
@@ -255,6 +288,42 @@ def test_present_learning_deck_keeps_completed_legacy_run_renderable(
     assert response.latest_run.status.value == "completed"
     assert run.sandbox_provider == "e2b"
     assert run.sandbox_id == "legacy-sandbox"
+
+
+def test_present_legacy_learning_deck_run_hides_database_error(
+    db_session,
+    test_user,
+) -> None:
+    deck = LearningDeck(
+        user_id=test_user.id,
+        source_kind=LearningDeckSourceKind.GITHUB_REPO.value,
+        source_identity="github:example/failed-legacy",
+        source_url="https://github.com/example/failed-legacy",
+        source_title="Failed legacy deck",
+        source_metadata={},
+        title="Failed legacy deck",
+    )
+    db_session.add(deck)
+    db_session.flush()
+    run = LearningDeckRun(
+        deck_id=deck.id,
+        user_id=test_user.id,
+        status="failed",
+        source_snapshot={},
+        timeline=[],
+        error_message="(psycopg.errors.UniqueViolation) [SQL: UPDATE contents ...]",
+    )
+    db_session.add(run)
+    db_session.flush()
+    deck.latest_run_id = run.id
+    db_session.commit()
+
+    response = present_learning_deck(db_session, deck)
+
+    assert response.latest_run is not None
+    assert response.latest_run.error_message == (
+        "Learning Deck generation failed. Please try again."
+    )
 
 
 def test_create_learning_deck_reuses_source_identity_for_rerun(
@@ -377,6 +446,112 @@ def test_retry_learning_deck_rebinds_skipped_source_to_canonical_content(
     assert retry_task.input_json["source"]["source_content_id"] == canonical.id
     assert retry_task.input_json["source"]["source_identity"] == f"content:{canonical.id}"
     assert retry_task.input_json["interests_prompt"] == "Preserve this focus"
+
+
+def test_retry_learning_deck_recovers_x_duplicate_when_redirect_write_rolled_back(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    canonical = content_factory(
+        content_type=ContentType.ARTICLE,
+        url="https://x.com/i/status/2088361241928732705",
+        source_url="https://x.com/i/status/2088361241928732705",
+        title="Why model routing must be in the harness",
+        content_metadata={"content": "Ready canonical X article body."},
+    )
+    skipped = content_factory(
+        content_type=ContentType.ARTICLE,
+        url="https://x.com/author/status/2088361241928732705?s=12",
+        source_url="https://x.com/author/status/2088361241928732705?s=12",
+        title="Duplicate shell",
+        content_metadata={"content": "Temporary duplicate body."},
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=skipped)
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=skipped.id,
+        interests_prompt="Preserve this focus",
+    )
+    failed_task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    failed_task.status = LlmTaskStatus.FAILED.value
+    failed_task.workflow_state = LlmWorkflowState.FAILED.value
+    skipped.content_type = ContentType.UNKNOWN.value
+    skipped.status = ContentStatus.NEW.value
+    skipped.content_metadata = {}
+    source_task = ProcessingTask(
+        task_type=TaskType.ANALYZE_URL.value,
+        content_id=skipped.id,
+        status=TaskStatus.FAILED.value,
+        error_message="Canonical classification collided",
+    )
+    db_session.add(source_task)
+    db_session.commit()
+
+    retried = retry_learning_deck(
+        db_session,
+        user_id=_required_id(test_user.id),
+        deck_id=_required_id(deck.id),
+    )
+    retry_task = db_session.query(LlmTask).filter_by(id=retried.latest_task_id).one()
+
+    assert retried.source_content_id == canonical.id
+    assert retried.source_identity == f"content:{canonical.id}"
+    assert retry_task.input_json["source"]["source_content_id"] == canonical.id
+    assert retry_task.input_json["interests_prompt"] == "Preserve this focus"
+
+
+def test_retry_learning_deck_does_not_rebind_healthy_same_url_source(
+    db_session,
+    test_user,
+    content_factory,
+) -> None:
+    shared_url = "https://example.com/healthy-deck-source"
+    older_sibling = content_factory(
+        content_type=ContentType.PODCAST,
+        url=shared_url,
+        title="Older podcast sibling",
+        content_metadata={"transcript": "Podcast transcript."},
+    )
+    healthy_source = content_factory(
+        content_type=ContentType.ARTICLE,
+        url=shared_url,
+        title="Healthy article source",
+        content_metadata={"content": "Healthy article body."},
+    )
+    create_content_status_entry_row(db_session, user=test_user, content=healthy_source)
+    db_session.add(ContentKnowledgeSave(user_id=test_user.id, content_id=healthy_source.id))
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=healthy_source.id,
+    )
+    failed_task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    failed_task.status = LlmTaskStatus.FAILED.value
+    failed_task.workflow_state = LlmWorkflowState.FAILED.value
+    db_session.commit()
+
+    retried = retry_learning_deck(
+        db_session,
+        user_id=_required_id(test_user.id),
+        deck_id=_required_id(deck.id),
+    )
+
+    assert retried.source_content_id == healthy_source.id
+    assert retried.source_identity == f"content:{healthy_source.id}"
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=test_user.id, content_id=healthy_source.id)
+        .one_or_none()
+        is not None
+    )
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=test_user.id, content_id=older_sibling.id)
+        .one_or_none()
+        is None
+    )
 
 
 def test_retry_learning_deck_rejects_nonfailed_latest_attempts(

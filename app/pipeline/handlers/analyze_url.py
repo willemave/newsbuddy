@@ -22,6 +22,7 @@ from app.pipeline.workflows.analyze_url_workflow import AnalyzeUrlWorkflow
 from app.services.active_users import lock_active_user
 from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.apple_podcasts import ApplePodcastResolution, resolve_apple_podcast_episode
+from app.services.canonical_content_state import finalize_canonical_user_state
 from app.services.content_analyzer import AnalysisError
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.feed_research_runtime import sandboxed_http_service
@@ -483,33 +484,45 @@ class TweetResolutionFlow:
             content.source_url = tweet_url
 
         primary_external_url = resolution.selected_article_url
-        existing_target: Content | None = None
+        original_url = str(content.url)
         target_content_type, target_platform = self._resolve_target_type(
             resolved_url=primary_external_url,
         )
-        content.content_type = target_content_type
         content.platform = target_platform or "twitter"
-        if primary_external_url:
-            existing_target = (
-                db.query(Content)
+        target_url = primary_external_url or tweet_url
+        existing_target = (
+            db.query(Content)
+            .filter(
+                Content.id != content.id,
+                Content.url == target_url,
+                Content.content_type == target_content_type,
+            )
+            .first()
+        )
+        if existing_target is not None:
+            _mark_canonical_analysis_duplicate(
+                db,
+                content=content,
+                metadata=metadata,
+                existing_target=existing_target,
+            )
+            original_url_type_owner = (
+                db.query(Content.id)
                 .filter(
-                    Content.url == primary_external_url,
+                    Content.id != content.id,
+                    Content.url == original_url,
                     Content.content_type == target_content_type,
                 )
                 .first()
             )
-            if existing_target:
-                metadata["canonical_content_id"] = existing_target.id
-                content.url = tweet_url
-                content.status = ContentStatus.SKIPPED.value
-                content.error_message = "Canonical URL conflicts with existing content"
-                content.processed_at = datetime.now(UTC)
-            else:
-                content.url = primary_external_url
+            if original_url_type_owner is None:
+                content.content_type = target_content_type
         else:
-            content.url = tweet_url
-            if not tweet.article_text and not tweet.note_tweet_text:
-                metadata = update_processing_state(metadata, tweet_only=True)
+            content.content_type = target_content_type
+            content.url = target_url
+
+        if primary_external_url is None and not tweet.article_text and not tweet.note_tweet_text:
+            metadata = update_processing_state(metadata, tweet_only=True)
 
         content.content_metadata = refresh_merge_content_metadata(
             db,
@@ -553,6 +566,7 @@ class UrlAnalysisFlow:
         """Perform URL analysis with pattern matching or LLM analysis."""
         base_metadata = normalize_metadata_shape(metadata)
         metadata = dict(base_metadata)
+        original_content_type = str(content.content_type)
         platform_hint = metadata.get("platform_hint")
         if not isinstance(platform_hint, str):
             platform_hint = None
@@ -589,6 +603,12 @@ class UrlAnalysisFlow:
                 metadata.setdefault("video_url", url)
                 metadata.setdefault("youtube_video", True)
 
+            _rebind_analysis_duplicate(
+                db,
+                content=content,
+                metadata=metadata,
+                original_content_type=original_content_type,
+            )
             content.content_metadata = refresh_merge_content_metadata(
                 db,
                 content_id=content.id,
@@ -671,6 +691,13 @@ class UrlAnalysisFlow:
                 content.platform,
             )
 
+        _rebind_analysis_duplicate(
+            db,
+            content=content,
+            metadata=metadata,
+            original_content_type=original_content_type,
+        )
+
         content.content_metadata = refresh_merge_content_metadata(
             db,
             content_id=content.id,
@@ -679,6 +706,57 @@ class UrlAnalysisFlow:
         )
         db.flush()
         return result if not isinstance(result, AnalysisError) else None
+
+
+def _rebind_analysis_duplicate(
+    db,
+    *,
+    content: Content,
+    metadata: dict[str, Any],
+    original_content_type: str,
+) -> None:
+    """Turn a classification collision into a canonical content redirect."""
+    with db.no_autoflush:
+        existing_target = (
+            db.query(Content)
+            .filter(
+                Content.id != content.id,
+                Content.url == content.url,
+                Content.content_type == content.content_type,
+            )
+            .first()
+        )
+    if existing_target is None:
+        return
+
+    content.content_type = original_content_type
+    _mark_canonical_analysis_duplicate(
+        db,
+        content=content,
+        metadata=metadata,
+        existing_target=existing_target,
+    )
+
+
+def _mark_canonical_analysis_duplicate(
+    db,
+    *,
+    content: Content,
+    metadata: dict[str, Any],
+    existing_target: Content,
+) -> None:
+    """Persist one analysis-time canonical redirect and its user overlays."""
+    content_id = _require_content_id(content)
+    existing_target_id = _require_content_id(existing_target)
+    metadata["canonical_content_id"] = existing_target_id
+    content.status = ContentStatus.SKIPPED.value
+    content.error_message = "Canonical URL conflicts with existing content"
+    content.processed_at = datetime.now(UTC)
+    finalize_canonical_user_state(
+        db,
+        loser_content_id=content_id,
+        winner_content_id=existing_target_id,
+    )
 
 
 class InstructionLinkFanout:

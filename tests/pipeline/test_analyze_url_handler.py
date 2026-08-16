@@ -79,6 +79,11 @@ def _assert_process_content_enqueued(
     assert requests[0].content_id == content_id
 
 
+def _require_id(value: int | None) -> int:
+    assert value is not None
+    return value
+
+
 def test_pattern_analysis_rolls_back_when_process_enqueue_fails(db_session) -> None:
     content = Content(
         content_type=ContentType.UNKNOWN.value,
@@ -89,7 +94,7 @@ def test_pattern_analysis_rolls_back_when_process_enqueue_fails(db_session) -> N
     )
     db_session.add(content)
     db_session.commit()
-    content_id = int(content.id)
+    content_id = _require_id(content.id)
     queue_gateway = Mock()
     queue_gateway.enqueue_many_in_session.side_effect = RuntimeError("queue unavailable")
 
@@ -111,6 +116,60 @@ def test_pattern_analysis_rolls_back_when_process_enqueue_fails(db_session) -> N
     assert persisted.content_metadata == {}
 
 
+def test_pattern_analysis_rebinds_type_collision_without_integrity_error(db_session) -> None:
+    canonical = Content(
+        content_type=ContentType.PODCAST.value,
+        url="https://youtu.be/already-classified",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={"content": "Existing article."},
+    )
+    duplicate = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://youtu.be/already-classified",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "submitted_by_user_id": 1,
+            "submitted_via": "learning_deck",
+        },
+    )
+    db_session.add_all([canonical, duplicate])
+    db_session.flush()
+    db_session.add(ContentKnowledgeSave(user_id=1, content_id=duplicate.id))
+    db_session.commit()
+    queue_gateway = Mock()
+
+    result = AnalyzeUrlHandler().handle(
+        TaskEnvelope(
+            id=11,
+            task_type=TaskType.ANALYZE_URL,
+            content_id=duplicate.id,
+            payload={"content_id": duplicate.id},
+        ),
+        _build_context(db_session, queue_gateway),
+    )
+
+    db_session.refresh(duplicate)
+    assert result.success is True
+    assert duplicate.content_type == ContentType.UNKNOWN.value
+    assert duplicate.status == ContentStatus.SKIPPED.value
+    assert _metadata(duplicate.content_metadata)["canonical_content_id"] == canonical.id
+    queue_gateway.enqueue_many_in_session.assert_not_called()
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=1, content_id=duplicate.id)
+        .one_or_none()
+        is None
+    )
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=1, content_id=canonical.id)
+        .one_or_none()
+        is not None
+    )
+
+
 def test_apple_podcast_pattern_resolution_uses_feed_sandbox_runtime(
     db_session,
     monkeypatch,
@@ -128,7 +187,7 @@ def test_apple_podcast_pattern_resolution_uses_feed_sandbox_runtime(
     )
     db_session.add(content)
     db_session.commit()
-    content_id = int(content.id)
+    content_id = _require_id(content.id)
     sandbox_http_service = object()
     runtime_calls: list[dict[str, object]] = []
 
@@ -211,7 +270,7 @@ def test_tweet_resolution_rolls_back_when_process_enqueue_fails(db_session) -> N
     )
     db_session.add(content)
     db_session.commit()
-    content_id = int(content.id)
+    content_id = _require_id(content.id)
     queue_gateway = Mock()
     queue_gateway.enqueue_many_in_session.side_effect = RuntimeError("queue unavailable")
 
@@ -252,15 +311,31 @@ def test_instruction_fanout_rolls_back_when_process_enqueue_fails(
     )
     db_session.add(content)
     db_session.commit()
-    content_id = int(content.id)
+    content_id = _require_id(content.id)
 
     analysis_output = ContentAnalysisOutput(
         analysis=ContentAnalysisResult(
             content_type="article",
             original_url=source_url,
+            media_url=None,
+            media_format=None,
+            title=None,
+            description=None,
+            duration_seconds=None,
             platform="web",
         ),
-        instruction=InstructionResult(links=[InstructionLink(url=child_url)]),
+        instruction=InstructionResult(
+            text=None,
+            links=[
+                InstructionLink(
+                    url=child_url,
+                    title=None,
+                    context=None,
+                    platform=None,
+                    source=None,
+                )
+            ],
+        ),
     )
     llm_gateway = Mock()
     llm_gateway.analyze_url.return_value = analysis_output
@@ -559,14 +634,14 @@ def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
         connection_id=connection.id,
         channel="bookmarks",
         external_item_id="123456789",
-        content_id=bookmark_shell.id,
+        content_id=_require_id(bookmark_shell.id),
         item_url="https://x.com/i/status/123456789",
     )
     second_synced_item = UserIntegrationSyncedItem(
         connection_id=second_connection.id,
         channel="bookmarks",
         external_item_id="123456789",
-        content_id=bookmark_shell.id,
+        content_id=_require_id(bookmark_shell.id),
         item_url="https://x.com/i/status/123456789",
     )
     db_session.add_all([synced_item, second_synced_item])
@@ -602,7 +677,7 @@ def test_tweet_bookmark_reuses_existing_article_when_primary_url_already_exists(
     task = TaskEnvelope(
         id=105,
         task_type=TaskType.ANALYZE_URL,
-        content_id=bookmark_shell.id,
+        content_id=_require_id(bookmark_shell.id),
         payload={"content_id": bookmark_shell.id},
     )
 
@@ -702,7 +777,7 @@ def test_tweet_bookmark_uses_sync_snapshot_before_fetching_x_again(
     task = TaskEnvelope(
         id=1051,
         task_type=TaskType.ANALYZE_URL,
-        content_id=bookmark_shell.id,
+        content_id=_require_id(bookmark_shell.id),
         payload={"content_id": bookmark_shell.id},
     )
 
@@ -716,7 +791,7 @@ def test_tweet_bookmark_uses_sync_snapshot_before_fetching_x_again(
     _assert_process_content_enqueued(
         queue_gateway,
         db_session=db_session,
-        content_id=bookmark_shell.id,
+        content_id=_require_id(bookmark_shell.id),
     )
 
 
@@ -810,7 +885,7 @@ def test_tweet_bookmark_uses_included_snapshot_for_linked_tweet_resolution(
     _assert_process_content_enqueued(
         queue_gateway,
         db_session=db_session,
-        content_id=bookmark_shell.id,
+        content_id=_require_id(bookmark_shell.id),
     )
 
 
@@ -903,7 +978,7 @@ def test_tweet_bookmark_records_native_x_article_metadata(
     _assert_process_content_enqueued(
         queue_gateway,
         db_session=db_session,
-        content_id=bookmark_shell.id,
+        content_id=_require_id(bookmark_shell.id),
     )
 
 
@@ -990,7 +1065,7 @@ def test_tweet_bookmark_resolves_linked_podcast_as_long_form_podcast(
     _assert_process_content_enqueued(
         queue_gateway,
         db_session=db_session,
-        content_id=bookmark_shell.id,
+        content_id=_require_id(bookmark_shell.id),
     )
 
 
@@ -1037,7 +1112,7 @@ def test_tweet_share_uses_root_article_url_without_fanout(db_session, monkeypatc
     task = TaskEnvelope(
         id=107,
         task_type=TaskType.ANALYZE_URL,
-        content_id=content.id,
+        content_id=_require_id(content.id),
         payload={"content_id": content.id},
     )
 
@@ -1056,7 +1131,7 @@ def test_tweet_share_uses_root_article_url_without_fanout(db_session, monkeypatc
     _assert_process_content_enqueued(
         queue_gateway,
         db_session=db_session,
-        content_id=content.id,
+        content_id=_require_id(content.id),
     )
 
 
@@ -1296,6 +1371,91 @@ def test_tweet_share_falls_back_to_tweet_only_when_no_article_found(
     assert metadata["tweet_resolution_source"] == "tweet_only"
     assert metadata["tweet_thread_lookup_status"] == "not_attempted"
     assert metadata["tweet_only"] is True
+
+
+def test_tweet_share_rebinds_canonical_tweet_duplicate_without_integrity_error(
+    db_session,
+    monkeypatch,
+) -> None:
+    canonical = Content(
+        content_type=ContentType.ARTICLE.value,
+        url="https://x.com/i/status/123456789",
+        source_url="https://x.com/i/status/123456789",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.COMPLETED.value,
+        content_metadata={"content": "Existing native X article."},
+    )
+    duplicate = Content(
+        content_type=ContentType.UNKNOWN.value,
+        url="https://x.com/willem/status/123456789?s=12",
+        source_url="https://x.com/willem/status/123456789?s=12",
+        source=SELF_SUBMISSION_SOURCE,
+        status=ContentStatus.NEW.value,
+        content_metadata={
+            "source": SELF_SUBMISSION_SOURCE,
+            "submitted_by_user_id": 1,
+            "submitted_via": "share_action",
+        },
+    )
+    db_session.add_all([canonical, duplicate])
+    db_session.flush()
+    db_session.add(ContentKnowledgeSave(user_id=1, content_id=duplicate.id))
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.fetch_tweet_by_id",
+        lambda **_kwargs: XTweetFetchResult(
+            success=True,
+            tweet=XTweet(
+                id="123456789",
+                text="Native X article",
+                author_username="willem",
+                author_name="Willem",
+                created_at="2026-08-15T16:00:00Z",
+                article_title="Native X article",
+                article_text="Existing native X article.",
+                external_urls=[],
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.handlers.analyze_url.get_x_user_access_token",
+        lambda *_args, **_kwargs: None,
+    )
+
+    queue_gateway = Mock()
+    task = TaskEnvelope(
+        id=113,
+        task_type=TaskType.ANALYZE_URL,
+        content_id=duplicate.id,
+        payload={"content_id": duplicate.id},
+    )
+
+    result = AnalyzeUrlHandler().handle(
+        task,
+        _build_context(db_session, queue_gateway=queue_gateway),
+    )
+
+    db_session.refresh(duplicate)
+    metadata = _metadata(duplicate.content_metadata)
+    assert result.success is True
+    assert duplicate.content_type == ContentType.ARTICLE.value
+    assert duplicate.status == ContentStatus.SKIPPED.value
+    assert duplicate.url == "https://x.com/willem/status/123456789?s=12"
+    assert metadata["canonical_content_id"] == canonical.id
+    assert queue_gateway.enqueue_many_in_session.call_count == 0
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=1, content_id=duplicate.id)
+        .one_or_none()
+        is None
+    )
+    assert (
+        db_session.query(ContentKnowledgeSave)
+        .filter_by(user_id=1, content_id=canonical.id)
+        .one_or_none()
+        is not None
+    )
 
 
 def test_tweet_share_uses_user_timeline_for_older_threads(db_session, monkeypatch) -> None:
