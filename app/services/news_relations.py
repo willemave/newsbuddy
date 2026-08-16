@@ -12,8 +12,11 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
 from app.models.db import NewsItem
+from app.repositories.news_relation_repository import (
+    list_exact_relation_candidates,
+    list_ranked_relation_candidates,
+)
 from app.services.news_embeddings import encode_news_texts
 from app.services.news_reranker import rerank_news_documents
 from app.utils.news_titles import (
@@ -401,7 +404,9 @@ def _normalized_source(item: NewsItem) -> str | None:
 def _semantic_prefilter_candidates(
     item: NewsItem,
     candidates: list[NewsItem],
-) -> tuple[list[NewsItem], dict[int, set[str]], set[str]]:
+    *,
+    item_tokens: set[str],
+) -> tuple[list[NewsItem], dict[int, set[str]]]:
     """Narrow semantic matching to title-adjacent candidates.
 
     The runtime worker cannot afford to embed every recent ready representative
@@ -409,9 +414,8 @@ def _semantic_prefilter_candidates(
     only keep candidates that share at least one normalized title token with the
     item and then rank that shortlist by lexical overlap plus source/domain cues.
     """
-    item_tokens = match_tokens(item)
     if not item_tokens:
-        return [], {}, item_tokens
+        return [], {}
 
     item_domain = _normalized_domain(item)
     item_source = _normalized_source(item)
@@ -436,7 +440,7 @@ def _semantic_prefilter_candidates(
         )
 
     if not ranked:
-        return [], {}, item_tokens
+        return [], {}
 
     ranked.sort(key=lambda entry: entry[:4], reverse=True)
     selected = ranked[:SEMANTIC_PREFILTER_MAX_CANDIDATES]
@@ -444,7 +448,7 @@ def _semantic_prefilter_candidates(
     selected_tokens: dict[int, set[str]] = {}
     for *_prefix, candidate, tokens in selected:
         selected_tokens[_require_news_item_id(candidate)] = tokens
-    return selected_candidates, selected_tokens, item_tokens
+    return selected_candidates, selected_tokens
 
 
 def _combine_view_scores(*, view_scores: dict[str, list[float | None]]) -> list[float]:
@@ -672,25 +676,44 @@ def find_related_representatives(
     More than one entry means the item bridges clusters that should merge.
     """
     settings = get_settings()
-    query = (
-        db.query(NewsItem)
-        .filter(NewsItem.status == NewsItemStatus.READY.value)
-        .filter(NewsItem.representative_news_item_id.is_(None))
-        .filter(NewsItem.id != item.id)
-        .filter(NewsItem.visibility_scope == item.visibility_scope)
-    )
-    if item.visibility_scope == NewsItemVisibilityScope.USER.value:
-        query = query.filter(NewsItem.owner_user_id == item.owner_user_id)
-    else:
-        query = query.filter(NewsItem.owner_user_id.is_(None))
-
     lookback_floor = _utcnow_naive() - timedelta(days=settings.news_list_related_lookback_days)
-    query = query.filter(NewsItem.ingested_at >= lookback_floor)
 
-    candidates = (
-        query.order_by(NewsItem.ingested_at.desc(), NewsItem.id.desc())
-        .limit(settings.news_list_max_related_candidates)
-        .all()
+    exact_key = exact_relation_key(item)
+    if exact_key is not None:
+        exact_candidates = list_exact_relation_candidates(
+            db,
+            item=item,
+            lookback_floor=lookback_floor,
+            exact_key=exact_key,
+        )
+        accepted_exact = [
+            candidate
+            for candidate in exact_candidates
+            if exact_relation_key(candidate) == exact_key
+        ]
+        if accepted_exact:
+            exact_trace: dict[str, Any] | None = None
+            if _decision_trace_sink is not None:
+                exact_trace = {
+                    "item_id": _require_news_item_id(item),
+                    "item_title": _relation_primary_title(item),
+                    "candidate_count": len(exact_candidates),
+                    "path": "exact",
+                    "decisions": [],
+                    "accepted_ids": [
+                        _require_news_item_id(candidate) for candidate in accepted_exact
+                    ],
+                }
+            _emit_decision_trace(exact_trace)
+            return accepted_exact
+
+    item_tokens = match_tokens(item)
+    candidates = list_ranked_relation_candidates(
+        db,
+        item=item,
+        lookback_floor=lookback_floor,
+        item_tokens=item_tokens,
+        limit=settings.news_list_max_related_candidates,
     )
     trace: dict[str, Any] | None = None
     if _decision_trace_sink is not None:
@@ -706,19 +729,10 @@ def find_related_representatives(
         _emit_decision_trace(trace)
         return []
 
-    exact_key = exact_relation_key(item)
-    if exact_key is not None:
-        for candidate in candidates:
-            if exact_relation_key(candidate) == exact_key:
-                if trace is not None:
-                    trace["path"] = "exact"
-                    trace["accepted_ids"] = [_require_news_item_id(candidate)]
-                    _emit_decision_trace(trace)
-                return [candidate]
-
-    semantic_candidates, candidate_tokens_by_id, item_tokens = _semantic_prefilter_candidates(
+    semantic_candidates, candidate_tokens_by_id = _semantic_prefilter_candidates(
         item,
         candidates,
+        item_tokens=item_tokens,
     )
     if not semantic_candidates:
         if trace is not None:
@@ -872,12 +886,20 @@ def reconcile_news_item_relation(
     representative = accepted[0]
     representative_id = _require_news_item_id(representative)
     representative_titles = _cluster_related_titles(representative)
+    representative_exact_key = exact_relation_key(representative)
     merged_ids: list[int] = []
     for other in accepted[1:]:
         # The new item matching both clusters is evidence they cover the same
         # story; fold the smaller match into the best one unless their titles
         # disagree on a distinctive detail.
-        if distinctive_details_conflict(representative_titles, _cluster_related_titles(other)):
+        exact_match = (
+            representative_exact_key is not None
+            and exact_relation_key(other) == representative_exact_key
+        )
+        if not exact_match and distinctive_details_conflict(
+            representative_titles,
+            _cluster_related_titles(other),
+        ):
             continue
         other_id = _require_news_item_id(other)
         for member in list_cluster_members(db, representative_id=other_id):

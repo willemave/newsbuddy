@@ -12,6 +12,15 @@ from sqlalchemy.orm import Session
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
 from app.models.db import Content, NewsItem, NewsItemReadStatus, UserScraperConfig
 from app.repositories.content_feed_query import apply_sort_timestamp_cursor, build_user_feed_query
+from app.repositories.news_search_expressions import (
+    news_article_domain_expression,
+    news_article_title_expression,
+    news_cluster_titles_expression,
+    news_search_document_expression,
+    news_source_label_expression,
+    news_summary_text_expression,
+    news_summary_title_expression,
+)
 
 SUBSCRIPTION_QUERY_STOPWORDS = {
     "a",
@@ -283,80 +292,23 @@ def _visible_news_item_query(
     )
 
 
-def _news_summary_title_expr():
-    return func.coalesce(cast(NewsItem.raw_metadata["summary"]["title"].as_string(), String), "")
-
-
-def _news_article_title_expr():
-    return func.coalesce(cast(NewsItem.raw_metadata["article"]["title"].as_string(), String), "")
-
-
-def _news_cluster_titles_expr():
-    return func.coalesce(
-        cast(NewsItem.raw_metadata["cluster"]["related_titles"].as_string(), String),
-        "",
-    )
-
-
-def _news_summary_text_expr():
-    return func.coalesce(cast(NewsItem.summary_text, String), "")
-
-
-def _news_source_label_expr():
-    return func.coalesce(cast(NewsItem.source_label, String), "")
-
-
-def _news_article_domain_expr():
-    return func.coalesce(cast(NewsItem.article_domain, String), "")
-
-
-def _news_provenance_text_expr():
-    return (
-        _news_source_label_expr()
-        + literal(" ")
-        + _news_article_domain_expr()
-        + literal(" ")
-        + _news_cluster_titles_expr()
-    )
-
-
 def _apply_postgres_news_search(query, query_text: str, *, context: dict[str, Any]):
     normalized = " ".join(query_text.split()).strip()
     if not normalized:
         return query
 
-    summary_title_vector = func.setweight(
-        func.to_tsvector("english", _news_summary_title_expr()),
-        literal_column("'A'"),
-    )
-    article_title_vector = func.setweight(
-        func.to_tsvector("english", _news_article_title_expr()),
-        literal_column("'B'"),
-    )
-    summary_text_vector = func.setweight(
-        func.to_tsvector("english", _news_summary_text_expr()),
-        literal_column("'C'"),
-    )
-    provenance_vector = func.setweight(
-        func.to_tsvector("english", _news_provenance_text_expr()),
-        literal_column("'D'"),
-    )
-    search_document = (
-        summary_title_vector.op("||")(article_title_vector)
-        .op("||")(summary_text_vector)
-        .op("||")(provenance_vector)
-    )
+    search_document = news_search_document_expression()
 
     search_query = func.websearch_to_tsquery("english", normalized)
     search_rank = func.ts_rank_cd(search_document, search_query)
-    summary_title_match = _news_summary_title_expr().bool_op("OPERATOR(public.%)")(normalized)
-    article_title_match = _news_article_title_expr().bool_op("OPERATOR(public.%)")(normalized)
+    summary_title_match = news_summary_title_expression().bool_op("OPERATOR(public.%)")(normalized)
+    article_title_match = news_article_title_expression().bool_op("OPERATOR(public.%)")(normalized)
     trigram_rank = func.greatest(
-        func.public.word_similarity(normalized, _news_summary_title_expr()),
-        func.public.word_similarity(normalized, _news_article_title_expr()),
-        func.public.word_similarity(normalized, _news_source_label_expr()),
-        func.public.word_similarity(normalized, _news_article_domain_expr()),
-        func.public.word_similarity(normalized, _news_cluster_titles_expr()),
+        func.public.word_similarity(normalized, news_summary_title_expression()),
+        func.public.word_similarity(normalized, news_article_title_expression()),
+        func.public.word_similarity(normalized, news_source_label_expression()),
+        func.public.word_similarity(normalized, news_article_domain_expression()),
+        func.public.word_similarity(normalized, news_cluster_titles_expression()),
     )
     combined_filter = or_(
         search_document.op("@@")(search_query),
@@ -376,12 +328,12 @@ def _apply_generic_news_search(query, query_text: str, *, context: dict[str, Any
 
     token_filters = [
         or_(
-            func.lower(_news_summary_title_expr()).like(f"%{token}%"),
-            func.lower(_news_article_title_expr()).like(f"%{token}%"),
-            func.lower(_news_summary_text_expr()).like(f"%{token}%"),
-            func.lower(_news_source_label_expr()).like(f"%{token}%"),
-            func.lower(_news_article_domain_expr()).like(f"%{token}%"),
-            func.lower(_news_cluster_titles_expr()).like(f"%{token}%"),
+            func.lower(news_summary_title_expression()).like(f"%{token}%"),
+            func.lower(news_article_title_expression()).like(f"%{token}%"),
+            func.lower(news_summary_text_expression()).like(f"%{token}%"),
+            func.lower(news_source_label_expression()).like(f"%{token}%"),
+            func.lower(news_article_domain_expression()).like(f"%{token}%"),
+            func.lower(news_cluster_titles_expression()).like(f"%{token}%"),
         )
         for token in tokens
     ]

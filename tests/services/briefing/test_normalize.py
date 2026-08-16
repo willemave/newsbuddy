@@ -99,6 +99,23 @@ def test_normalize_layout_accepts_legacy_news_scheme_source_links() -> None:
     assert any(run["text"] == "Story" and run["source_key"] == "news:8" for run in runs)
 
 
+def test_normalize_layout_does_not_split_sentence_on_period_inside_source_link() -> None:
+    markdown = (
+        "The first item sets the context. "
+        "[U.S. sports laws inflate values](newsly://briefing/news/8) adds evidence. "
+        "The third item completes the comparison."
+    )
+
+    layout = normalize_layout(
+        [{"type": "passage", "markdown": markdown}],
+        source_keys={"news:8"},
+    )
+
+    paragraphs = layout.blocks[0]["paragraphs"]
+    assert len(paragraphs) == 1
+    assert any(run["source_key"] == "news:8" for run in paragraphs[0]["runs"])
+
+
 def test_normalize_layout_preserves_full_figure_placement() -> None:
     layout = normalize_layout(
         [

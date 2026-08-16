@@ -750,7 +750,6 @@ PRODUCTION_CLUSTER_CASES = [
             "Meta Reports Q4 and Full-Year 2025 Results; Investors Watch Ad Trends and AI Spending",
             "Meta’s Reality Labs posts $6.02B Q4 operating loss as cumulative losses near $80B",
             "Meta projects 2026 capex of $115B–$135B, outpacing analysts' $110.6B estimate",
-            "Microsoft Q2: Revenue $81.3B, net income surges 60% as Cloud and Azure fuel AI-driven growth",
         ],
     },
     {

@@ -161,13 +161,31 @@ def _paragraphs_from_markdown(
 
 
 def _sentence_groups(text: str) -> list[str]:
-    sentences = [sentence.strip() for sentence in SENTENCE_RE.split(text) if sentence.strip()]
+    sentences = _split_sentences_outside_source_links(text)
     if len(sentences) <= 3:
         return [text.strip()]
     groups: list[str] = []
     for index in range(0, len(sentences), 3):
         groups.append(" ".join(sentences[index : index + 3]))
     return groups
+
+
+def _split_sentences_outside_source_links(text: str) -> list[str]:
+    link_spans = [(match.start(), match.end()) for match in LINK_RE.finditer(text)]
+    sentences: list[str] = []
+    start = 0
+    for boundary in SENTENCE_RE.finditer(text):
+        punctuation_index = boundary.start() - 1
+        if any(link_start <= punctuation_index < link_end for link_start, link_end in link_spans):
+            continue
+        sentence = text[start : boundary.start()].strip()
+        if sentence:
+            sentences.append(sentence)
+        start = boundary.end()
+    final_sentence = text[start:].strip()
+    if final_sentence:
+        sentences.append(final_sentence)
+    return sentences
 
 
 def _runs_from_markdown(

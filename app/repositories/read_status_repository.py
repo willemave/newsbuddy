@@ -10,7 +10,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
-from app.models.db import ContentReadStatus
+from app.models.db import Content, ContentReadStatus
 
 logger = get_logger(__name__)
 
@@ -110,29 +110,7 @@ def mark_contents_as_read(
         return 0, []
 
     try:
-        timestamp = datetime.now(UTC).replace(tzinfo=None)
-        stmt = (
-            postgresql_insert(ContentReadStatus)
-            .values(
-                [
-                    {
-                        "user_id": user_id,
-                        "content_id": content_id,
-                        "read_at": timestamp,
-                        "created_at": timestamp,
-                    }
-                    for content_id in sorted(unique_ids)
-                ]
-            )
-            .on_conflict_do_update(
-                index_elements=[
-                    ContentReadStatus.user_id,
-                    ContentReadStatus.content_id,
-                ],
-                set_={"read_at": timestamp},
-            )
-        )
-        db.execute(stmt)
+        _upsert_contents_as_read(db, content_ids=unique_ids, user_id=user_id)
         db.commit()
         return len(unique_ids), []
     except OperationalError as exc:
@@ -150,6 +128,61 @@ def mark_contents_as_read(
         )
         db.rollback()
         return 0, sorted(unique_ids)
+
+
+def mark_contents_as_read_in_session(
+    db: Session,
+    content_ids: Iterable[int],
+    user_id: int,
+) -> tuple[int, list[int]]:
+    """Upsert a batch of read markers without owning the caller's transaction."""
+
+    unique_ids = {content_id for content_id in content_ids if content_id is not None}
+    if not unique_ids:
+        return 0, []
+
+    existing_ids = {
+        int(content_id)
+        for content_id in db.execute(select(Content.id).where(Content.id.in_(unique_ids))).scalars()
+        if content_id is not None
+    }
+    failed_ids = sorted(unique_ids - existing_ids)
+    if not existing_ids:
+        return 0, failed_ids
+
+    _upsert_contents_as_read(db, content_ids=existing_ids, user_id=user_id)
+    return len(existing_ids), failed_ids
+
+
+def _upsert_contents_as_read(
+    db: Session,
+    *,
+    content_ids: set[int],
+    user_id: int,
+) -> None:
+    timestamp = datetime.now(UTC).replace(tzinfo=None)
+    stmt = (
+        postgresql_insert(ContentReadStatus)
+        .values(
+            [
+                {
+                    "user_id": user_id,
+                    "content_id": content_id,
+                    "read_at": timestamp,
+                    "created_at": timestamp,
+                }
+                for content_id in sorted(content_ids)
+            ]
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                ContentReadStatus.user_id,
+                ContentReadStatus.content_id,
+            ],
+            set_={"read_at": timestamp},
+        )
+    )
+    db.execute(stmt)
 
 
 def get_read_content_ids(db: Session, user_id: int) -> list[int]:

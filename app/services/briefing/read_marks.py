@@ -20,6 +20,7 @@ from app.repositories import read_status_repository
 from app.services.briefing.eligibility import briefing_enabled_user_ids
 from app.services.briefing.source_keys import build_source_key, parse_source_key
 from app.services.briefing.sources import read_source_keys_for
+from app.services.briefing.state import lock_briefing_state
 
 logger = get_logger(__name__)
 
@@ -37,6 +38,7 @@ def mark_briefing_lens_read(
     user_id: int,
     lens_key: str,
 ) -> BriefingReadMarkResult | None:
+    state = lock_briefing_state(db, user_id=user_id)
     lens_id = db.execute(
         select(BriefingLens.id).where(
             BriefingLens.user_id == user_id,
@@ -67,10 +69,11 @@ def mark_briefing_lens_read(
         parsed = parse_source_key(source_key)
         if source_key not in read_keys or (parsed is not None and parsed.kind == "news"):
             source_keys_to_mark.append(source_key)
-    return mark_briefing_sources_read(
+    return _mark_briefing_sources_read_locked(
         db,
         user_id=user_id,
         source_keys=source_keys_to_mark,
+        state=state,
     )
 
 
@@ -79,6 +82,22 @@ def mark_briefing_sources_read(
     *,
     user_id: int,
     source_keys: list[str],
+) -> BriefingReadMarkResult:
+    state = lock_briefing_state(db, user_id=user_id)
+    return _mark_briefing_sources_read_locked(
+        db,
+        user_id=user_id,
+        source_keys=source_keys,
+        state=state,
+    )
+
+
+def _mark_briefing_sources_read_locked(
+    db: Session,
+    *,
+    user_id: int,
+    source_keys: list[str],
+    state: BriefingState,
 ) -> BriefingReadMarkResult:
     parsed = [parse_source_key(key) for key in source_keys]
     content_ids = sorted({key.source_id for key in parsed if key and key.kind == "content"})
@@ -89,10 +108,12 @@ def mark_briefing_sources_read(
         # commands.mark_read.bulk_mark_read rejects the whole batch on unknown ids;
         # scroll-driven briefing batches must tolerate stale keys, so mark via the
         # repository and log the failures instead.
-        content_marked, failed_content_ids = read_status_repository.mark_contents_as_read(
-            db,
-            content_ids,
-            user_id,
+        content_marked, failed_content_ids = (
+            read_status_repository.mark_contents_as_read_in_session(
+                db,
+                content_ids,
+                user_id,
+            )
         )
         marked += content_marked
         if failed_content_ids:
@@ -107,8 +128,7 @@ def mark_briefing_sources_read(
             news_item_ids=news_ids,
         )
 
-    retired = retire_read_segments(db, user_id=user_id)
-    state = _state_for_update(db, user_id=user_id)
+    retired = _retire_read_segments_locked(db, user_id=user_id)
     version = int(state.version or 0)
     if marked or retired:
         version += 1
@@ -221,7 +241,7 @@ def _briefing_owned_news_item_ids(
     }
 
 
-def retire_read_segments(db: Session, *, user_id: int) -> int:
+def _retire_read_segments_locked(db: Session, *, user_id: int) -> int:
     segments = (
         db.query(BriefingSegment)
         .options(
@@ -276,21 +296,7 @@ def bump_briefing_version_for_news_item(
         return False
 
     for user_id in sorted(enabled_user_ids):
-        state = _state_for_update(db, user_id=user_id)
+        state = lock_briefing_state(db, user_id=user_id)
         state.version = int(state.version or 0) + 1
     db.flush()
     return True
-
-
-def _state_for_update(db: Session, *, user_id: int) -> BriefingState:
-    state = db.query(BriefingState).filter(BriefingState.user_id == user_id).first()
-    if state is None:
-        state = BriefingState(
-            user_id=user_id,
-            version=0,
-            masthead_title="The Unread Times",
-            masthead_deck="A fresh edition will appear as unread sources arrive.",
-        )
-        db.add(state)
-        db.flush()
-    return state

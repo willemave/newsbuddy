@@ -6,6 +6,7 @@ from app.models.db import NewsItemDiscussion, NewsItemReadStatus
 from app.services.briefing.sources import (
     BRIEFING_CONTEXT_MAX_CHARS,
     _truncate_discussion_overview,
+    eligible_unread_sources_for_keys,
     list_unread_longform_sources,
     read_source_keys,
     read_source_keys_for,
@@ -122,7 +123,7 @@ def test_read_source_keys_for_treats_representative_read_as_duplicate_read(
     }.issubset(read_source_keys(db_session, user_id=test_user.id))
 
 
-def test_sources_for_keys_can_reject_news_that_became_duplicates(
+def test_eligible_unread_sources_reject_news_that_became_duplicates(
     db_session: Session,
     test_user,
     news_item_factory,
@@ -144,11 +145,70 @@ def test_sources_for_keys_can_reject_news_that_became_duplicates(
         user_id=test_user.id,
         source_keys=[source_key],
     )
-    current_sources = sources_for_keys(
+    current_sources = eligible_unread_sources_for_keys(
         db_session,
         user_id=test_user.id,
         source_keys=[source_key],
-        require_current_news_representative=True,
+    )
+
+    assert source_key in historical_sources
+    assert source_key not in current_sources
+
+
+def test_eligible_unread_sources_reject_content_that_left_the_inbox(
+    db_session: Session,
+    test_user,
+    content_factory,
+    status_entry_factory,
+) -> None:
+    assert test_user.id is not None
+    article = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Archived article",
+    )
+    status_entry_factory(user=test_user, content=article, status="archived")
+    source_key = f"content:{article.id}"
+
+    historical_sources = sources_for_keys(
+        db_session,
+        user_id=test_user.id,
+        source_keys=[source_key],
+    )
+    current_sources = eligible_unread_sources_for_keys(
+        db_session,
+        user_id=test_user.id,
+        source_keys=[source_key],
+    )
+
+    assert source_key in historical_sources
+    assert source_key not in current_sources
+
+
+def test_eligible_unread_sources_reject_read_content(
+    db_session: Session,
+    test_user,
+    content_factory,
+    status_entry_factory,
+    read_status_factory,
+) -> None:
+    assert test_user.id is not None
+    article = content_factory(
+        content_type=ContentType.ARTICLE,
+        title="Read article",
+    )
+    status_entry_factory(user=test_user, content=article, status="inbox")
+    read_status_factory(user=test_user, content=article)
+    source_key = f"content:{article.id}"
+
+    historical_sources = sources_for_keys(
+        db_session,
+        user_id=test_user.id,
+        source_keys=[source_key],
+    )
+    current_sources = eligible_unread_sources_for_keys(
+        db_session,
+        user_id=test_user.id,
+        source_keys=[source_key],
     )
 
     assert source_key in historical_sources

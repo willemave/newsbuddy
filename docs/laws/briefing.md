@@ -12,7 +12,7 @@ B5. Article and podcast segments cover one source each; news segments may combin
 
 B6. Lens names and ordering are stable for a representation, and lens counts describe active unread source coverage rather than the raw backlog.
 
-B7. Every eligible source admitted to an edition remains reachable exactly once after duplicate reconciliation; refresh and compaction never drop unread coverage.
+B7. Every source admitted to an edition remains reachable exactly once while it remains eligible after duplicate reconciliation; refresh and compaction never drop eligible unread coverage.
 
 B8. One global version identifies one user's complete visible Briefing representation; every visible mutation bumps it.
 
@@ -20,8 +20,9 @@ B9. Briefing validators are private and user-scoped; an unchanged representation
 
 B10. Paging a lens at one fixed version yields the same ordered segments, sources, read flags, and summary as the complete lens.
 
-B11. Refresh appends and coalesces work; publication requires successful LLM composition, and a
-failed refresh publishes no deterministic substitute and leaves the last usable edition intact.
+B11. Refresh appends and coalesces work; publication requires successful LLM composition plus an
+unchanged version, pending-source ownership, and eligible unread source set. A failed or stale
+refresh publishes no deterministic substitute and leaves the last usable edition intact.
 
 B12. Local snapshots are cold-start caches, never authority, and stale readable content remains visible during recoverable refresh failures.
 

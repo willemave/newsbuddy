@@ -58,6 +58,26 @@ def test_duplicate_news_missing_coverage_fixture_requires_retry() -> None:
     assert report.gate_satisfied is True
 
 
+def test_sparse_production_news_window_fixture_requires_one_complete_passage() -> None:
+    suite = briefing_eval.load_briefing_eval_suite(briefing_eval.DEFAULT_BRIEFING_EVAL_DATASET)
+
+    report = briefing_eval.run_briefing_eval_suite(
+        suite,
+        case_id="prod_2026_08_14_sparse_news_compaction_window",
+    )
+
+    result = report.results[0]
+    assert result.expectation_met is True
+    assert result.raw_assessment is not None
+    assert result.raw_assessment.disposition == BriefingLayoutDisposition.ACCEPT
+    assert result.raw_assessment.coverage.missing_source_keys == []
+    assert result.contract_issues == []
+    assert result.layout_valid is True
+    assert len(result.final_blocks) == 1
+    assert result.gate_satisfied is True
+    assert report.gate_satisfied is True
+
+
 def test_podcast_fixture_resolves_separate_llm_quote_suggestions() -> None:
     suite = briefing_eval.load_briefing_eval_suite(briefing_eval.DEFAULT_BRIEFING_EVAL_DATASET)
 

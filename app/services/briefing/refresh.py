@@ -18,7 +18,6 @@ from app.models.db import (
     BriefingLens,
     BriefingPendingSource,
     BriefingSegment,
-    BriefingState,
     ProcessingTask,
 )
 from app.services.briefing import compaction, window_composition
@@ -32,13 +31,18 @@ from app.services.briefing.lenses import (
     retire_idle_lenses,
 )
 from app.services.briefing.openrouter import BriefingOpenRouterClient
-from app.services.briefing.segments import build_briefing_segment
+from app.services.briefing.publication import (
+    AppendWindow,
+    PublicationPlan,
+    publish_composed_plan,
+)
 from app.services.briefing.sources import (
     BriefingSource,
+    eligible_unread_sources_for_keys,
     list_bootstrap_sources,
     read_source_keys,
-    sources_for_keys,
 )
+from app.services.briefing.state import ensure_briefing_state
 from app.services.briefing.taxonomy import apply_taxonomy_if_needed
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.queue import TaskEnqueueRequest
@@ -56,33 +60,6 @@ class BriefingRefreshResult:
     compacted_segments: int
     pending_added: int
     sweep_enqueued: bool
-
-
-@dataclass(frozen=True)
-class _PreparedWindow:
-    lens_id: int
-    lens_key: str
-    lens_title: str
-    tier: str
-    window_index: int
-    pending_row_ids: tuple[int, ...]
-    sources: tuple[BriefingSource, ...]
-
-
-def ensure_state(db: Session, *, user_id: int, settings: Settings | None = None) -> BriefingState:
-    settings = settings or get_settings()
-    state = db.query(BriefingState).filter(BriefingState.user_id == user_id).first()
-    if state is not None:
-        return state
-    state = BriefingState(
-        user_id=user_id,
-        version=0,
-        masthead_title=settings.briefing_masthead_title,
-        masthead_deck="A fresh edition will appear as unread sources arrive.",
-    )
-    db.add(state)
-    db.flush()
-    return state
 
 
 def enqueue_ready_source(
@@ -183,7 +160,7 @@ def run_briefing_refresh(
     """Refresh one user's Briefing without holding a DB transaction during composition."""
 
     settings = settings or get_settings()
-    state = ensure_state(db, user_id=user_id, settings=settings)
+    state = ensure_briefing_state(db, user_id=user_id, settings=settings)
     version = int(state.version or 0)
     if not is_briefing_enabled_for_user(db, user_id=user_id, settings=settings):
         return BriefingRefreshResult(user_id, version, 0, 0, 0, 0, False)
@@ -203,7 +180,6 @@ def run_briefing_refresh(
         return _finish_empty_append_refresh(
             db,
             user_id=user_id,
-            version=version,
             pending_added=pending_added,
             settings=settings,
         )
@@ -252,6 +228,9 @@ def run_briefing_refresh(
         )
         if taxonomized:
             db.flush()
+        planning_version = int(
+            ensure_briefing_state(db, user_id=user_id, settings=settings).version or 0
+        )
         prepared_windows = _plan_ready_windows(db, user_id=user_id, mode=mode, settings=settings)
         prepared_compactions = (
             []
@@ -261,6 +240,11 @@ def run_briefing_refresh(
                 user_id=user_id,
                 settings=settings,
             )
+        )
+        publication_plan = PublicationPlan(
+            starting_version=planning_version,
+            append_windows=tuple(prepared_windows),
+            compaction_plans=tuple(prepared_compactions),
         )
         first_run_progress_changed = mode != "full" and bool(
             pending_added or assigned or taxonomized or prepared_windows
@@ -289,26 +273,21 @@ def run_briefing_refresh(
         )
         composition_ms = round((perf_counter() - composition_started_at) * 1000, 2)
 
-    state = ensure_state(db, user_id=user_id, settings=settings)
-    version = int(state.version or 0)
-    if mode == "full":
-        db.query(BriefingSegment).filter(BriefingSegment.user_id == user_id).filter(
-            BriefingSegment.status.in_(("active", "degraded"))
-        ).update({BriefingSegment.status: "compacted"}, synchronize_session=False)
-    append_persistence_started_at = perf_counter()
-    appended = _persist_composed_windows(db, user_id=user_id, composed_windows=composed_windows)
-    append_persistence_ms = round((perf_counter() - append_persistence_started_at) * 1000, 2)
-    compaction_persistence_started_at = perf_counter()
-    compacted = compaction.persist_compactions(
+    publication_started_at = perf_counter()
+    publication = publish_composed_plan(
         db,
         user_id=user_id,
-        plans=prepared_compactions,
-        composed_windows=composed_compactions,
+        plan=publication_plan,
+        composed_append_windows=composed_windows,
+        composed_compaction_windows=composed_compactions,
+        replace_existing=mode == "full",
+        settings=settings,
     )
-    compaction_persistence_ms = round(
-        (perf_counter() - compaction_persistence_started_at) * 1000,
-        2,
-    )
+    publication_ms = round((perf_counter() - publication_started_at) * 1000, 2)
+    state = publication.state
+    version = int(state.version or 0)
+    appended = publication.appended_segments
+    compacted = publication.compacted_segments
     logger.info(
         "Briefing refresh composition and publication measured",
         extra={
@@ -318,17 +297,18 @@ def run_briefing_refresh(
             "task_id": task_id,
             "context_data": {
                 "append_window_count": len(prepared_windows),
-                "append_persistence_ms": append_persistence_ms,
                 "compaction_window_count": len(composed_compactions),
-                "compaction_persistence_ms": compaction_persistence_ms,
                 "composition_ms": composition_ms,
+                "publication_ms": publication_ms,
+                "publication_stale": publication.stale,
+                "append_publication_stale": publication.append_stale,
             },
         },
     )
     retired = _retire_finished_segments(db, user_id=user_id, settings=settings)
     retired += retire_idle_lenses(db, user_id=user_id, idle_days=settings.briefing_lens_idle_days)
     state.last_sweep_at = datetime.now(UTC).replace(tzinfo=None)
-    mutated = bool(appended or retired or compacted or taxonomized)
+    mutated = bool(appended or retired or compacted or assigned or taxonomized)
     if appended:
         state.last_append_at = datetime.now(UTC).replace(tzinfo=None)
         state.masthead_deck = _masthead_deck(db, user_id=user_id)
@@ -358,17 +338,16 @@ def _finish_empty_append_refresh(
     db: Session,
     *,
     user_id: int,
-    version: int,
     pending_added: int,
     settings: Settings,
 ) -> BriefingRefreshResult:
-    state = ensure_state(db, user_id=user_id, settings=settings)
+    state = ensure_briefing_state(db, user_id=user_id, settings=settings)
     state.last_sweep_at = datetime.now(UTC).replace(tzinfo=None)
     sweep_enqueued = _schedule_next_sweep(db, user_id=user_id, settings=settings)
     db.flush()
     return BriefingRefreshResult(
         user_id=user_id,
-        version=version,
+        version=int(state.version or 0),
         appended_segments=0,
         retired_segments=0,
         compacted_segments=0,
@@ -540,8 +519,8 @@ def _plan_ready_windows(
     user_id: int,
     mode: RefreshMode,
     settings: Settings,
-) -> list[_PreparedWindow]:
-    windows: list[_PreparedWindow] = []
+) -> list[AppendWindow]:
+    windows: list[AppendWindow] = []
     lenses = (
         db.query(BriefingLens)
         .filter(BriefingLens.user_id == user_id, BriefingLens.status == "active")
@@ -549,7 +528,10 @@ def _plan_ready_windows(
         .all()
     )
     now = datetime.now(UTC).replace(tzinfo=None)
-    pending_by_lens_key: dict[str, list[BriefingPendingSource]] = {}
+    pending_by_lens_key: dict[
+        str,
+        list[tuple[BriefingPendingSource, BriefingSource]],
+    ] = {}
     if lenses:
         pending_rows = (
             db.query(BriefingPendingSource)
@@ -562,18 +544,28 @@ def _plan_ready_windows(
             )
             .all()
         )
-        for row in pending_rows:
+        pending_with_keys = [(row, f"{row.source_kind}:{row.source_id}") for row in pending_rows]
+        source_keys = list(dict.fromkeys(key for _row, key in pending_with_keys))
+        source_map = eligible_unread_sources_for_keys(
+            db,
+            user_id=user_id,
+            source_keys=source_keys,
+        )
+        for row, key in pending_with_keys:
+            source = source_map.get(key)
+            if source is None:
+                db.delete(row)
+                continue
             if row.lens_key is not None:
-                pending_by_lens_key.setdefault(str(row.lens_key), []).append(row)
+                pending_by_lens_key.setdefault(str(row.lens_key), []).append((row, source))
 
-    ready_lenses: list[tuple[BriefingLens, list[BriefingPendingSource], list[str]]] = []
-    source_keys: list[str] = []
     for lens in lenses:
         if lens.id is None:
             continue
-        pending_rows = pending_by_lens_key.get(str(lens.key), [])
-        if not pending_rows:
+        pending_sources = pending_by_lens_key.get(str(lens.key), [])
+        if not pending_sources:
             continue
+        pending_rows = [row for row, _source in pending_sources]
         if not _pending_rows_are_ready(
             pending_rows,
             tier=str(lens.tier),
@@ -582,34 +574,15 @@ def _plan_ready_windows(
             now=now,
         ):
             continue
-        lens_source_keys = [f"{row.source_kind}:{row.source_id}" for row in pending_rows]
-        ready_lenses.append((lens, pending_rows, lens_source_keys))
-        source_keys.extend(lens_source_keys)
-
-    source_map = sources_for_keys(
-        db,
-        user_id=user_id,
-        source_keys=list(dict.fromkeys(source_keys)),
-        require_current_news_representative=True,
-    )
-    for lens, pending_rows, lens_source_keys in ready_lenses:
-        assert lens.id is not None
-        for row, key in zip(pending_rows, lens_source_keys, strict=True):
-            if key not in source_map:
-                db.delete(row)
         source_rows = [
-            (int(row.id), source_map[key])
-            for row, key in zip(pending_rows, lens_source_keys, strict=True)
-            if row.id is not None and key in source_map
+            (int(row.id), source) for row, source in pending_sources if row.id is not None
         ]
-        if not source_rows:
-            continue
         planned_windows = plan_windows(source_rows, tier=str(lens.tier), settings=settings)
         if mode != "full":
             planned_windows = planned_windows[:1]
         for window_index, window_rows in enumerate(planned_windows, start=1):
             windows.append(
-                _PreparedWindow(
+                AppendWindow(
                     lens_id=int(lens.id),
                     lens_key=str(lens.key),
                     lens_title=str(lens.title),
@@ -620,32 +593,6 @@ def _plan_ready_windows(
                 )
             )
     return windows
-
-
-def _persist_composed_windows(
-    db: Session,
-    *,
-    user_id: int,
-    composed_windows: list[window_composition.ComposedWindow[_PreparedWindow]],
-) -> int:
-    pending_row_ids: list[int] = []
-    for composed in composed_windows:
-        prepared = composed.prepared
-        segment = composed.segment
-        db.add(
-            build_briefing_segment(
-                lens_id=prepared.lens_id,
-                user_id=user_id,
-                segment=segment,
-                source_keys=[source.source_key for source in prepared.sources],
-            )
-        )
-        pending_row_ids.extend(prepared.pending_row_ids)
-    if pending_row_ids:
-        db.query(BriefingPendingSource).filter(
-            BriefingPendingSource.id.in_(pending_row_ids)
-        ).delete(synchronize_session=False)
-    return len(composed_windows)
 
 
 def _retire_finished_segments(db: Session, *, user_id: int, settings: Settings) -> int:

@@ -19,7 +19,7 @@ from app.services.briefing.openrouter import (
     request_openrouter_json_schema,
     strip_json_code_fence,
 )
-from app.services.briefing.sources import BriefingSource, sources_for_keys
+from app.services.briefing.sources import BriefingSource, eligible_unread_sources_for_keys
 from app.services.llm_agents import get_basic_agent
 from app.services.news_embeddings import encode_texts_with_embedding_model
 from app.services.prompt_library import render_prompt
@@ -121,11 +121,10 @@ def assign_pending_lenses(
     )
     if not pending:
         return 0
-    source_map = sources_for_keys(
+    source_map = eligible_unread_sources_for_keys(
         db,
         user_id=user_id,
         source_keys=[f"{row.source_kind}:{row.source_id}" for row in pending],
-        require_current_news_representative=True,
     )
     changed = 0
     unassigned_news: list[tuple[BriefingPendingSource, BriefingSource]] = []

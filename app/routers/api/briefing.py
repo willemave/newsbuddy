@@ -41,7 +41,8 @@ from app.services.briefing.read_marks import (
     mark_briefing_lens_read,
     mark_briefing_sources_read,
 )
-from app.services.briefing.refresh import enqueue_briefing_refresh_task, ensure_state
+from app.services.briefing.refresh import enqueue_briefing_refresh_task
+from app.services.briefing.state import ensure_briefing_state
 
 router = APIRouter(tags=["briefing"])
 
@@ -176,7 +177,7 @@ def refresh(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> BriefingRefreshResponse:
     user_id = require_user_id(current_user)
-    state = ensure_state(db, user_id=user_id)
+    state = ensure_briefing_state(db, user_id=user_id)
     enqueued = enqueue_briefing_refresh_task(db, user_id=user_id, mode="append", delay_seconds=0)
     return BriefingRefreshResponse(enqueued=enqueued, version=int(state.version or 0))
 

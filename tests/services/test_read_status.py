@@ -84,6 +84,27 @@ class TestMarkContentsAsRead:
         assert marked_count == 0
         assert failed_ids == []
 
+    def test_in_session_variant_leaves_commit_with_caller(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_content: Content,
+    ) -> None:
+        content_id = _require_id(test_content.id)
+        user_id = _require_id(test_user.id)
+
+        marked_count, failed_ids = read_status.mark_contents_as_read_in_session(
+            db_session,
+            [content_id],
+            user_id,
+        )
+
+        assert marked_count == 1
+        assert failed_ids == []
+        assert read_status.is_content_read(db_session, content_id, user_id)
+        db_session.rollback()
+        assert not read_status.is_content_read(db_session, content_id, user_id)
+
     def test_mark_contents_as_read_multiple(
         self,
         db_session: Session,

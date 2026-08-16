@@ -219,13 +219,11 @@ def sources_for_keys(
     user_id: int,
     source_keys: list[str],
     include_briefing_context: bool = True,
-    require_current_news_representative: bool = False,
 ) -> dict[str, BriefingSource]:
-    """Resolve source keys, optionally enforcing current feed eligibility for news.
+    """Resolve user-visible source keys for historical Briefing presentation.
 
     Historical Briefing segments keep immutable source keys, so presentation must
-    still resolve a row that later became a duplicate. Pending composition opts
-    into the stricter representative-only behavior instead.
+    still resolve a row that later became read, archived, or a duplicate.
     """
     parsed = [parse_source_key(key) for key in source_keys]
     content_ids = [key.source_id for key in parsed if key and key.kind == "content"]
@@ -233,7 +231,7 @@ def sources_for_keys(
 
     found: dict[str, BriefingSource] = {}
     if content_ids:
-        content_rows = (
+        content_query = (
             db.query(Content)
             .options(
                 load_only(
@@ -250,9 +248,8 @@ def sources_for_keys(
             .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
             .filter(ContentStatusEntry.user_id == user_id)
             .filter(Content.id.in_(content_ids))
-            .all()
         )
-        for content_row in content_rows:
+        for content_row in content_query.all():
             source = _source_from_content(
                 content_row,
                 include_briefing_context=include_briefing_context,
@@ -281,18 +278,94 @@ def sources_for_keys(
             .filter(NewsItem.id.in_(news_ids))
             .filter(visible)
         )
-        if require_current_news_representative:
-            news_query = news_query.filter(
-                NewsItem.status == NewsItemStatus.READY.value,
-                NewsItem.representative_news_item_id.is_(None),
-            )
         news_rows = news_query.all()
-        discussions_by_news_id = _briefing_discussions_for_news_ids(db, news_ids=news_ids)
+        discussions_by_news_id = _briefing_discussions_for_news_ids(
+            db,
+            news_ids=[int(row.id) for row in news_rows if row.id is not None],
+        )
         for news_row in news_rows:
             source = _source_from_news_item(news_row)
             source = replace(source, discussion=discussions_by_news_id.get(int(news_row.id or 0)))
             found[source.source_key] = source
     return found
+
+
+def eligible_unread_source_keys_for(
+    db: Session,
+    *,
+    user_id: int,
+    source_keys: list[str],
+) -> set[str]:
+    """Return requested source keys that satisfy the complete Briefing eligibility law."""
+
+    parsed = [parse_source_key(key) for key in source_keys]
+    content_ids = sorted({key.source_id for key in parsed if key and key.kind == "content"})
+    news_ids = sorted({key.source_id for key in parsed if key and key.kind == "news"})
+
+    eligible: set[str] = set()
+    if content_ids:
+        eligible_content_ids = db.execute(
+            select(Content.id)
+            .join(ContentStatusEntry, ContentStatusEntry.content_id == Content.id)
+            .where(
+                ContentStatusEntry.user_id == user_id,
+                ContentStatusEntry.status == "inbox",
+                Content.id.in_(content_ids),
+                Content.status == ContentStatus.COMPLETED.value,
+                _briefing_longform_classification_clause(),
+            )
+        ).scalars()
+        eligible.update(
+            build_source_key("content", int(content_id))
+            for content_id in eligible_content_ids
+            if content_id is not None
+        )
+
+    if news_ids:
+        visible = build_visible_news_item_filter(db, user_id=user_id)
+        eligible_news_ids = db.execute(
+            select(NewsItem.id).where(
+                NewsItem.id.in_(news_ids),
+                NewsItem.status == NewsItemStatus.READY.value,
+                NewsItem.representative_news_item_id.is_(None),
+                visible,
+            )
+        ).scalars()
+        eligible.update(
+            build_source_key("news", int(news_id))
+            for news_id in eligible_news_ids
+            if news_id is not None
+        )
+
+    read_keys = read_source_keys_for(
+        db,
+        user_id=user_id,
+        source_keys=list(eligible),
+    )
+    return eligible - read_keys
+
+
+def eligible_unread_sources_for_keys(
+    db: Session,
+    *,
+    user_id: int,
+    source_keys: list[str],
+    include_briefing_context: bool = True,
+) -> dict[str, BriefingSource]:
+    """Hydrate the requested sources that are currently eligible and unread."""
+
+    eligible_keys = eligible_unread_source_keys_for(
+        db,
+        user_id=user_id,
+        source_keys=source_keys,
+    )
+    ordered_eligible_keys = [key for key in source_keys if key in eligible_keys]
+    return sources_for_keys(
+        db,
+        user_id=user_id,
+        source_keys=ordered_eligible_keys,
+        include_briefing_context=include_briefing_context,
+    )
 
 
 def _briefing_discussions_for_news_ids(

@@ -203,6 +203,10 @@ Implementation seams now live alongside the layers that use them:
 
 - `app/repositories/search_repository.py`
   - PostgreSQL full-text and trigram-backed search helpers for content and news queries
+- `app/repositories/news_search_expressions.py`
+  - canonical News search documents whose SQL shape matches the functional GIN indexes
+- `app/repositories/news_relation_repository.py`
+  - indexed exact-key and title-ranked candidate retrieval before bounded semantic relation scoring
 - `app/core/api_keys.py`
   - API key formatting, generation, hashing, and verification helpers
 
@@ -388,6 +392,12 @@ Visible Fast Reads are ready representative `news_items` filtered by one of:
 - global aggregator/topic rows that match the user's selected source configs
 
 Read state for Fast Reads is stored in `news_item_read_status`, not `content_read_status`.
+
+Relation reconciliation first resolves every representative with the same normalized story, item,
+or platform/external key, then ranks title-adjacent representatives across the configured lookback.
+Only that bounded shortlist reaches embedding and reranking. Hash expression indexes own exact URL
+keys, and a title-only GIN document owns lexical candidate retrieval; the final semantic and
+distinctive-detail gates remain in `app/services/news_relations.py`.
 
 ### 7.3 Content model
 
@@ -602,6 +612,12 @@ Prefix: `/api/briefing`
 The Briefing API exposes the user's unread edition: an ETag-backed index, lazy lens payloads,
 batched read marks, manual refresh, live dig-deeper, and audio narration creation. It is mounted
 under `/api` and uses the same bearer auth/current-user dependency as the content and news APIs.
+
+Refresh planning and LLM composition run without a long database lock. Publication then locks the
+user's `briefing_states` row and atomically rechecks the planned version, pending-row ownership, and
+complete eligible-unread source set before changing segments. Briefing read marking uses the same
+state-row lock, giving publication and those reads one serial order while leaving stale work pending
+for a later sweep instead of publishing it.
 
 Endpoints:
 

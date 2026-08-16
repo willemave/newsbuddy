@@ -24,8 +24,8 @@ from app.models.api.briefing import (
 from app.models.contracts import BriefingTier
 from app.models.db import BriefingLens, BriefingPendingSource, BriefingSegment, BriefingState
 from app.services.briefing.first_run import get_first_run_progress, get_first_run_validator
-from app.services.briefing.refresh import ensure_state
 from app.services.briefing.sources import read_source_keys_for, sources_for_keys
+from app.services.briefing.state import ensure_briefing_state
 
 logger = get_logger(__name__)
 
@@ -119,7 +119,7 @@ def get_briefing_index_validator(db: Session, *, user_id: int) -> BriefingIndexV
 
 def get_briefing_index(db: Session, *, user_id: int) -> BriefingIndexResponse:
     started_at = perf_counter()
-    state = ensure_state(db, user_id=user_id)
+    state = ensure_briefing_state(db, user_id=user_id)
     lens_query_started_at = perf_counter()
     lenses = (
         db.query(BriefingLens)
@@ -234,7 +234,7 @@ def get_briefing_lens(
     assert lens.id is not None
     lens_id = lens.id
     state_query_started_at = perf_counter()
-    state = ensure_state(db, user_id=user_id)
+    state = ensure_briefing_state(db, user_id=user_id)
     state_query_ms = _elapsed_ms(state_query_started_at)
     is_paged = limit is not None or cursor is not None
     next_cursor: str | None = None

@@ -16,6 +16,7 @@ from app.models.db import (
 )
 from app.models.db.users import User
 from app.services.briefing import refresh as refresh_service
+from app.services.briefing import window_composition as window_composition_service
 from app.services.briefing.read_marks import (
     bump_briefing_version_for_news_item,
     mark_briefing_sources_read,
@@ -809,6 +810,208 @@ def test_unassigned_news_waits_for_target_then_flushes_at_25_minute_deadline(
     assert segment.source_keys == [f"news:{item.id}"]
 
 
+def test_plan_ready_news_windows_excludes_read_pending_before_freshness_gate(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_window_min", 3)
+    monkeypatch.setattr(settings, "briefing_pending_max_age_seconds", 1500)
+    assert test_user.id is not None
+    user_id = test_user.id
+    lens = _create_lens(db_session, user_id=user_id, key="news-read-race")
+    items = [
+        news_item_factory(
+            visibility_scope="user",
+            owner_user_id=user_id,
+            article_title=f"Pending story {index}",
+            summary_title=f"Pending story {index}",
+        )
+        for index in range(3)
+    ]
+    pending_rows = [
+        BriefingPendingSource(
+            user_id=user_id,
+            source_kind="news",
+            source_id=item.id,
+            lens_key=lens.key,
+        )
+        for item in items
+    ]
+    db_session.add_all(
+        [
+            *pending_rows,
+            NewsItemReadStatus(user_id=user_id, news_item_id=items[0].id),
+        ]
+    )
+    db_session.commit()
+
+    windows = refresh_service._plan_ready_windows(
+        db_session,
+        user_id=user_id,
+        mode="sweep",
+        settings=settings,
+    )
+    db_session.flush()
+
+    assert windows == []
+    remaining_source_ids = {
+        _require_id(row.source_id)
+        for row in db_session.query(BriefingPendingSource).filter_by(user_id=user_id).all()
+    }
+    assert remaining_source_ids == {int(item.id) for item in items[1:]}
+
+
+@pytest.mark.parametrize("mutation", ["read", "version"])
+def test_append_publication_aborts_when_plan_changes_during_composition(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
+    monkeypatch.setattr(settings, "briefing_window_min", 3)
+    lens = _create_lens(db_session, user_id=user_id, key=f"news-stale-{mutation}")
+    items = [
+        news_item_factory(
+            visibility_scope="user",
+            owner_user_id=user_id,
+            article_title=f"Stale publication story {index}",
+            summary_title=f"Stale publication story {index}",
+        )
+        for index in range(3)
+    ]
+    db_session.add_all(
+        [
+            BriefingPendingSource(
+                user_id=user_id,
+                source_kind="news",
+                source_id=item.id,
+                lens_key=lens.key,
+            )
+            for item in items
+        ]
+    )
+    db_session.commit()
+    original_compose = window_composition_service.compose_window_groups
+
+    def compose_after_state_change(*args, **kwargs):
+        composed = original_compose(*args, **kwargs)
+        if mutation == "read":
+            db_session.add(NewsItemReadStatus(user_id=user_id, news_item_id=items[0].id))
+        else:
+            state = db_session.query(BriefingState).filter_by(user_id=user_id).one()
+            state.version = int(state.version or 0) + 1
+        db_session.commit()
+        return composed
+
+    monkeypatch.setattr(
+        window_composition_service,
+        "compose_window_groups",
+        compose_after_state_change,
+    )
+
+    result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="sweep",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert result.appended_segments == 0
+    assert db_session.query(BriefingSegment).filter_by(user_id=user_id).count() == 0
+    assert db_session.query(BriefingPendingSource).filter_by(user_id=user_id).count() == 3
+
+
+def test_competing_refresh_publishes_pending_window_only_once(
+    db_session: Session,
+    test_user: User,
+    news_item_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = get_settings()
+    assert test_user.id is not None
+    user_id = test_user.id
+    monkeypatch.setattr(settings, "briefing_enabled_user_ids", [user_id])
+    monkeypatch.setattr(settings, "briefing_taxonomy_planner_enabled", False)
+    monkeypatch.setattr(settings, "briefing_window_min", 3)
+    lens = _create_lens(db_session, user_id=user_id, key="news-competing-refresh")
+    items = [
+        news_item_factory(
+            visibility_scope="user",
+            owner_user_id=user_id,
+            article_title=f"Competing refresh story {index}",
+            summary_title=f"Competing refresh story {index}",
+        )
+        for index in range(3)
+    ]
+    db_session.add_all(
+        [
+            BriefingPendingSource(
+                user_id=user_id,
+                source_kind="news",
+                source_id=item.id,
+                lens_key=lens.key,
+            )
+            for item in items
+        ]
+    )
+    db_session.commit()
+    original_compose = window_composition_service.compose_window_groups
+    competitor_ran = False
+
+    def compose_before_competing_refresh(*args, **kwargs):
+        nonlocal competitor_ran
+        composed = original_compose(*args, **kwargs)
+        if competitor_ran:
+            return composed
+        competitor_ran = True
+        monkeypatch.setattr(
+            window_composition_service,
+            "compose_window_groups",
+            original_compose,
+        )
+        competitor = run_briefing_refresh(
+            db_session,
+            user_id=user_id,
+            mode="sweep",
+            use_llm=False,
+            settings=settings,
+        )
+        db_session.commit()
+        assert competitor.appended_segments == 1
+        return composed
+
+    monkeypatch.setattr(
+        window_composition_service,
+        "compose_window_groups",
+        compose_before_competing_refresh,
+    )
+
+    result = run_briefing_refresh(
+        db_session,
+        user_id=user_id,
+        mode="append",
+        use_llm=False,
+        settings=settings,
+    )
+    db_session.commit()
+
+    assert competitor_ran is True
+    assert result.appended_segments == 0
+    assert db_session.query(BriefingSegment).filter_by(user_id=user_id).count() == 1
+    assert db_session.query(BriefingPendingSource).filter_by(user_id=user_id).count() == 0
+
+
 def _create_unread_article(
     content_factory,
     status_entry_factory,
@@ -829,6 +1032,11 @@ def _create_unread_article(
     )
     status_entry_factory(user=user, content=content, status="inbox")
     return content
+
+
+def _require_id(value: int | None) -> int:
+    assert value is not None
+    return value
 
 
 def _create_lens(db_session: Session, *, user_id: int, key: str) -> BriefingLens:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import numpy as np
@@ -1004,3 +1004,172 @@ def test_reconcile_news_item_relation_caps_semantic_prefilter_candidates(
 
     assert call_lengths
     assert max(call_lengths) == SEMANTIC_PREFILTER_MAX_CANDIDATES + 1
+
+
+def test_reconcile_news_item_relation_ranks_older_title_match_before_candidate_cap(
+    db_session,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "news_list_max_related_candidates", 2)
+
+    def encode_matching_bakalar(texts: list[str]) -> np.ndarray:
+        rows = [[1.0, 0.0]]
+        rows.extend(
+            [1.0, 0.0] if "bakalar" in text.casefold() else [0.0, 1.0] for text in texts[1:]
+        )
+        return np.array(rows, dtype=float)
+
+    monkeypatch.setattr(
+        "app.services.news_relations.encode_news_texts",
+        encode_matching_bakalar,
+    )
+    now = datetime.now(UTC).replace(tzinfo=None)
+    representative = _news_item(
+        db_session,
+        ingest_key="bakalar-older-representative",
+        source_external_id="950",
+        title="OpenAI's head of ethics Chloé Bakalar departs after less than a year",
+        story_url="https://example.com/bakalar-original",
+    )
+    representative.ingested_at = now - timedelta(hours=2)
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(representative.id))
+
+    for index in range(3):
+        _news_item(
+            db_session,
+            ingest_key=f"newer-openai-distractor-{index}",
+            source_external_id=f"96{index}",
+            title=f"OpenAI announces unrelated product update {index}",
+            story_url=f"https://example.com/openai-distractor-{index}",
+        )
+
+    related = _news_item(
+        db_session,
+        ingest_key="bakalar-related-after-cap",
+        source_external_id="970",
+        title="OpenAI's Only Ethicist Chloé Bakalar Reportedly Left in July, Not Replaced",
+        story_url="https://example.com/bakalar-follow-up",
+    )
+
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(related.id))
+    db_session.commit()
+
+    db_session.refresh(related)
+    assert related.representative_news_item_id == representative.id
+
+
+def test_reconcile_news_item_relation_checks_exact_url_before_candidate_cap(
+    db_session,
+    monkeypatch,
+) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "news_list_max_related_candidates", 1)
+    monkeypatch.setattr(
+        "app.services.news_relations.encode_news_texts",
+        lambda _texts: pytest.fail("exact matches before the cap must bypass embeddings"),
+    )
+    representative = _news_item(
+        db_session,
+        ingest_key="exact-before-cap-representative",
+        source_external_id="980",
+        title="Original wire headline",
+        story_url="https://example.com/exact-before-cap",
+    )
+    representative.ingested_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=2)
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(representative.id))
+    _news_item(
+        db_session,
+        ingest_key="exact-before-cap-distractor",
+        source_external_id="981",
+        title="Completely unrelated newer headline",
+        story_url="https://example.com/exact-before-cap-distractor",
+    )
+    duplicate = _news_item(
+        db_session,
+        ingest_key="exact-before-cap-duplicate",
+        source_external_id="982",
+        title="Syndicated headline with different wording",
+        story_url="https://example.com/exact-before-cap",
+    )
+
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(duplicate.id))
+    db_session.commit()
+
+    db_session.refresh(duplicate)
+    assert duplicate.representative_news_item_id == representative.id
+
+
+def test_reconcile_news_item_relation_checks_scheme_equivalent_exact_url(
+    db_session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.news_relations.encode_news_texts",
+        lambda _texts: pytest.fail("scheme-equivalent exact matches must bypass embeddings"),
+    )
+    representative = _news_item(
+        db_session,
+        ingest_key="scheme-variant-representative",
+        source_external_id="990",
+        title="Original wire headline",
+        story_url="http://example.com/scheme-variant",
+    )
+    representative.canonical_story_url = None
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(representative.id))
+    duplicate = _news_item(
+        db_session,
+        ingest_key="scheme-variant-duplicate",
+        source_external_id="991",
+        title="Syndicated report with unrelated wording",
+        story_url="https://example.com/scheme-variant",
+    )
+
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(duplicate.id))
+    db_session.commit()
+
+    db_session.refresh(duplicate)
+    assert duplicate.representative_news_item_id == representative.id
+
+
+def test_reconcile_news_item_relation_converges_all_exact_representatives(
+    db_session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.news_relations.encode_news_texts",
+        lambda _texts: pytest.fail("exact cluster convergence must bypass embeddings"),
+    )
+    shared_url = "https://example.com/split-exact-clusters"
+    first = _news_item(
+        db_session,
+        ingest_key="split-exact-first",
+        source_external_id="992",
+        title="Wire report describes the GPT-5.3 rollout",
+        story_url=shared_url,
+    )
+    second = _news_item(
+        db_session,
+        ingest_key="split-exact-second",
+        source_external_id="993",
+        title="Syndicated coverage calls this the GPT-6.0 launch",
+        story_url=shared_url,
+    )
+    bridge = _news_item(
+        db_session,
+        ingest_key="split-exact-bridge",
+        source_external_id="994",
+        title="A third headline for the same wire URL",
+        story_url=shared_url,
+    )
+
+    reconcile_news_item_relation(db_session, news_item_id=_require_id(bridge.id))
+    db_session.commit()
+
+    db_session.refresh(first)
+    db_session.refresh(second)
+    db_session.refresh(bridge)
+    assert second.representative_news_item_id is None
+    assert first.representative_news_item_id == second.id
+    assert bridge.representative_news_item_id == second.id
+    assert second.cluster_size == 3

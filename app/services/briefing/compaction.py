@@ -7,19 +7,18 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings import Settings
-from app.models.db import BriefingLens, BriefingSegment, BriefingState
+from app.models.db import BriefingLens, BriefingSegment
 from app.services.briefing.composer import plan_windows
 from app.services.briefing.segments import build_briefing_segment
 from app.services.briefing.sources import (
     BriefingSource,
+    eligible_unread_source_keys_for,
+    eligible_unread_sources_for_keys,
     read_source_keys,
-    sources_for_keys,
 )
 from app.services.briefing.window_composition import ComposedWindow
 
 logger = get_logger(__name__)
-
-_MIN_NEWS_COMPACTION_SOURCES = 2
 
 
 @dataclass(frozen=True)
@@ -41,9 +40,9 @@ class CompactionWindow:
 @dataclass(frozen=True)
 class CompactionPlan:
     lens_id: int
-    starting_version: int
     donors: tuple[CompactionDonor, ...]
     unread_source_keys: tuple[str, ...]
+    replacement_source_keys: tuple[str, ...]
     windows: tuple[CompactionWindow, ...]
 
 
@@ -85,7 +84,6 @@ def prepare_compactions(
     settings: Settings,
 ) -> list[CompactionPlan]:
     read_keys = read_source_keys(db, user_id=user_id)
-    starting_version = _state_version(db, user_id=user_id)
     plans: list[CompactionPlan] = []
     lenses = (
         db.query(BriefingLens)
@@ -111,17 +109,35 @@ def prepare_compactions(
             if segment.lens_id is not None:
                 segments_by_lens_id[int(segment.lens_id)].append(segment)
 
-    prepared_donors: list[tuple[BriefingLens, list[BriefingSegment], list[str]]] = []
-    all_source_keys: list[str] = []
-    seen_source_keys: set[str] = set()
+    all_source_keys = _ordered_unread_source_keys(
+        [segment for segments in segments_by_lens_id.values() for segment in segments],
+        read_keys=read_keys,
+    )
+    eligible_source_keys = eligible_unread_source_keys_for(
+        db,
+        user_id=user_id,
+        source_keys=all_source_keys,
+    )
     for lens in lenses:
         if lens.id is None:
             continue
         segments = segments_by_lens_id[int(lens.id)]
+        eligible_source_groups: list[list[str]] = []
+        unavailable_source_keys: set[str] = set()
+        repair_donors: list[BriefingSegment] = []
+        for segment in segments:
+            unread_keys = _segment_unread_source_keys(segment, read_keys=read_keys)
+            eligible_keys = [key for key in unread_keys if key in eligible_source_keys]
+            unavailable_keys = [key for key in unread_keys if key not in eligible_source_keys]
+            if eligible_keys:
+                eligible_source_groups.append(eligible_keys)
+            if unavailable_keys:
+                unavailable_source_keys.update(unavailable_keys)
+                repair_donors.append(segment)
         fragmentation = briefing_fragmentation_metrics(
-            [list(segment.source_keys or []) for segment in segments],
+            eligible_source_groups,
             tier=str(lens.tier),
-            read_keys=read_keys,
+            read_keys=set(),
             settings=settings,
         )
         logger.info(
@@ -139,50 +155,39 @@ def prepare_compactions(
                         fragmentation.minimum_required_segment_count
                     ),
                     "excess_fragmentation": fragmentation.excess_fragmentation,
+                    "unavailable_source_count": len(unavailable_source_keys),
                 },
             },
         )
-        donors = _compaction_donors(
+        regular_donors = _compaction_donors(
             segments,
             read_keys=read_keys,
             tier=str(lens.tier),
         )
+        candidate_ids = {
+            int(segment.id)
+            for segment in (*repair_donors, *regular_donors)
+            if segment.id is not None
+        }
+        donors = [
+            segment
+            for segment in segments
+            if segment.id is not None and int(segment.id) in candidate_ids
+        ]
         if not donors:
             continue
-        source_keys = _ordered_unread_source_keys(donors, read_keys=read_keys)
-        if str(lens.tier) == "news" and len(source_keys) < _MIN_NEWS_COMPACTION_SOURCES:
-            continue
-        prepared_donors.append((lens, donors, source_keys))
-        for source_key in source_keys:
-            if source_key not in seen_source_keys:
-                seen_source_keys.add(source_key)
-                all_source_keys.append(source_key)
-
-    source_map = sources_for_keys(db, user_id=user_id, source_keys=all_source_keys)
-    for lens, donors, source_keys in prepared_donors:
-        assert lens.id is not None
-        lens_id = lens.id
-        missing_source_keys = set(source_keys) - set(source_map)
-        if missing_source_keys:
-            logger.warning(
-                "Briefing compaction skipped because donor sources could not be resolved",
-                extra={
-                    "component": "briefing",
-                    "operation": "prepare_compaction",
-                    "item_id": user_id,
-                    "context_data": {
-                        "lens_key": str(lens.key),
-                        "donor_count": len(donors),
-                        "source_count": len(source_keys),
-                        "resolved_source_count": len(source_keys) - len(missing_source_keys),
-                    },
-                },
-            )
-            continue
-        sources = [source_map[key] for key in source_keys]
+        donor_source_keys = _ordered_unread_source_keys(donors, read_keys=read_keys)
+        replacement_source_keys = [key for key in donor_source_keys if key in eligible_source_keys]
+        source_map = eligible_unread_sources_for_keys(
+            db,
+            user_id=user_id,
+            source_keys=replacement_source_keys,
+        )
+        replacement_source_keys = [key for key in replacement_source_keys if key in source_map]
+        sources = [source_map[key] for key in replacement_source_keys]
         windows = tuple(
             CompactionWindow(
-                lens_id=lens_id,
+                lens_id=int(lens.id),
                 lens_key=str(lens.key),
                 lens_title=str(lens.title),
                 tier=str(lens.tier),
@@ -194,10 +199,11 @@ def prepare_compactions(
                 start=1,
             )
         )
+        if str(lens.tier) == "news" and not repair_donors and len(windows) >= len(donors):
+            continue
         plans.append(
             CompactionPlan(
-                lens_id=lens_id,
-                starting_version=starting_version,
+                lens_id=int(lens.id),
                 donors=tuple(
                     CompactionDonor(
                         segment_id=int(segment.id),
@@ -206,7 +212,8 @@ def prepare_compactions(
                     for segment in donors
                     if segment.id is not None
                 ),
-                unread_source_keys=tuple(source_keys),
+                unread_source_keys=tuple(donor_source_keys),
+                replacement_source_keys=tuple(replacement_source_keys),
                 windows=windows,
             )
         )
@@ -226,28 +233,13 @@ def persist_compactions(
 
     compacted = 0
     current_read_keys = read_source_keys(db, user_id=user_id)
-    current_version = _state_version(db, user_id=user_id)
     for plan in plans:
-        if current_version != plan.starting_version:
-            logger.info(
-                "Briefing compaction plan version became stale",
-                extra={
-                    "component": "briefing",
-                    "operation": "persist_compaction",
-                    "item_id": user_id,
-                    "context_data": {
-                        "lens_id": plan.lens_id,
-                        "starting_version": plan.starting_version,
-                        "current_version": current_version,
-                    },
-                },
-            )
-            continue
         donor_ids = [donor.segment_id for donor in plan.donors]
         donors = (
             db.query(BriefingSegment)
             .filter(BriefingSegment.id.in_(donor_ids))
             .order_by(BriefingSegment.created_at.desc(), BriefingSegment.id.desc())
+            .with_for_update()
             .all()
         )
         expected_by_id = {donor.segment_id: donor for donor in plan.donors}
@@ -270,11 +262,34 @@ def persist_compactions(
                 },
             )
             continue
+        current_eligible_keys = eligible_unread_source_keys_for(
+            db,
+            user_id=user_id,
+            source_keys=unread_keys,
+        )
+        current_replacement_source_keys = tuple(
+            key for key in unread_keys if key in current_eligible_keys
+        )
+        if current_replacement_source_keys != plan.replacement_source_keys:
+            logger.info(
+                "Briefing compaction source eligibility became stale",
+                extra={
+                    "component": "briefing",
+                    "operation": "persist_compaction",
+                    "item_id": user_id,
+                    "context_data": {
+                        "lens_id": plan.lens_id,
+                        "planned_replacement_source_count": len(plan.replacement_source_keys),
+                        "current_replacement_source_count": len(current_replacement_source_keys),
+                    },
+                },
+            )
+            continue
         lens_windows = composed_by_lens.get(plan.lens_id, [])
         replacement_keys = {
             source.source_key for window in lens_windows for source in window.prepared.sources
         }
-        if replacement_keys != set(plan.unread_source_keys) or len(lens_windows) != len(
+        if replacement_keys != set(plan.replacement_source_keys) or len(lens_windows) != len(
             plan.windows
         ):
             logger.error(
@@ -285,7 +300,7 @@ def persist_compactions(
                     "item_id": user_id,
                     "context_data": {
                         "lens_id": plan.lens_id,
-                        "source_count": len(plan.unread_source_keys),
+                        "source_count": len(plan.replacement_source_keys),
                         "replacement_source_count": len(replacement_keys),
                     },
                 },
@@ -315,7 +330,9 @@ def persist_compactions(
                     "lens_id": plan.lens_id,
                     "donor_count": len(donors),
                     "replacement_count": len(lens_windows),
-                    "source_count": len(plan.unread_source_keys),
+                    "source_count": len(plan.replacement_source_keys),
+                    "unavailable_source_count": len(plan.unread_source_keys)
+                    - len(plan.replacement_source_keys),
                     "coverage_complete": True,
                 },
             },
@@ -337,10 +354,19 @@ def _compaction_donors(
                 donors.append(segment)
         return donors
 
-    small = [
+    return [
         segment for segment in segments if 0 < len(set(segment.source_keys or []) - read_keys) <= 2
     ]
-    return small if len(small) >= _MIN_NEWS_COMPACTION_SOURCES else []
+
+
+def _segment_unread_source_keys(
+    segment: BriefingSegment,
+    *,
+    read_keys: set[str],
+) -> list[str]:
+    return [
+        str(raw_key) for raw_key in (segment.source_keys or []) if str(raw_key) not in read_keys
+    ]
 
 
 def _ordered_unread_source_keys(
@@ -351,15 +377,9 @@ def _ordered_unread_source_keys(
     ordered: list[str] = []
     seen: set[str] = set()
     for donor in donors:
-        for raw_key in donor.source_keys or []:
-            key = str(raw_key)
-            if key in read_keys or key in seen:
+        for key in _segment_unread_source_keys(donor, read_keys=read_keys):
+            if key in seen:
                 continue
             seen.add(key)
             ordered.append(key)
     return ordered
-
-
-def _state_version(db: Session, *, user_id: int) -> int:
-    state = db.query(BriefingState).filter(BriefingState.user_id == user_id).one_or_none()
-    return int(state.version or 0) if state is not None else 0
