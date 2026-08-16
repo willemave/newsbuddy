@@ -168,6 +168,20 @@ extension BriefingViewModel {
         }
     }
 
+    func resumeSelectedLensLoadOnReactivation(key: String) {
+        if tasks.isRunning(.lens(key)) {
+            tasks.cancel(.lens(key))
+            mutateLensState(key) { state in
+                state.loadPhase = .idle
+                state.failure = nil
+            }
+            BriefingPerformance.logger.info(
+                "Replacing in-flight selected Lens load after activation | key=\(key, privacy: .public)"
+            )
+        }
+        loadLensIfNeeded(key: key)
+    }
+
     func retryLens(key: String) {
         tasks.cancel(.lens(key))
         loadLensIfNeeded(key: key)

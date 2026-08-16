@@ -74,7 +74,7 @@ final class BriefingIndexSynchronizer {
         guard active else {
             tasks.cancelAll()
             loadMode = nil
-            if refreshPhase == .requesting || refreshPhase == .waitingForVersion {
+            if refreshPhase != .idle {
                 refreshPhase = .idle
             }
             return
@@ -202,7 +202,7 @@ final class BriefingIndexSynchronizer {
             return
         }
 
-        tasks.runReplacing(.refreshPoll) { [weak self] in
+        tasks.runReplacing(.refreshPoll) { [weak self] token in
             guard let self else { return }
             var pollCount = 0
             for delay in refreshPollDelays {
@@ -211,7 +211,7 @@ final class BriefingIndexSynchronizer {
                     try await Task.sleep(nanoseconds: delay + jitter)
                     pollCount += 1
                     let result = try await service.fetchIndex(ifNoneMatch: etag)
-                    try Task.checkCancellation()
+                    guard tasks.isCurrent(token), !Task.isCancelled else { return }
                     guard case .value(let response, _) = result else {
                         continue
                     }
@@ -224,6 +224,7 @@ final class BriefingIndexSynchronizer {
                     refreshPhase = .idle
                     return
                 } catch where isNetworkCancellation(error) {
+                    guard tasks.isCurrent(token) else { return }
                     briefingIndexLogger.info(
                         "Refresh poll cancelled | polls=\(pollCount, privacy: .public)"
                     )
@@ -232,6 +233,7 @@ final class BriefingIndexSynchronizer {
                     }
                     return
                 } catch {
+                    guard tasks.isCurrent(token), !Task.isCancelled else { return }
                     briefingIndexLogger.error(
                         "Refresh poll failed | polls=\(pollCount, privacy: .public) error=\(error.localizedDescription, privacy: .private)"
                     )
@@ -239,6 +241,7 @@ final class BriefingIndexSynchronizer {
                     return
                 }
             }
+            guard tasks.isCurrent(token), !Task.isCancelled else { return }
             if refreshPhase == .waitingForVersion {
                 briefingIndexLogger.info(
                     "Refresh poll deadline reached | polls=\(pollCount, privacy: .public) baseline_version=\(baselineVersion, privacy: .public)"

@@ -100,6 +100,27 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         XCTAssertNotNil(viewModel.selectedLens)
     }
 
+    func testDeactivationClearsFailedRefreshPhase() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(lenses: [makeLensSummary(key: "today")]), etag: "etag-1")
+        ]
+        service.lensResponses["today"] = makeLens(key: "today")
+        service.refreshError = URLError(.notConnectedToInternet)
+        let viewModel = BriefingViewModel(service: service)
+        viewModel.setActive(true)
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+
+        await viewModel.pullToRefresh()
+        guard case .failed = viewModel.refreshPhase else {
+            return XCTFail("Expected the refresh to fail before deactivation")
+        }
+
+        viewModel.setActive(false)
+
+        XCTAssertEqual(viewModel.refreshPhase, .idle)
+    }
+
     func testDuplicateManualRefreshDoesNotDuplicatePost() async {
         let service = MockBriefingService()
         service.indexResults = [
@@ -168,5 +189,32 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         XCTAssertEqual(viewModel.refreshPhase, .idle)
         XCTAssertEqual(service.refreshRequestCount, 1)
         XCTAssertEqual(service.indexEtags, [nil])
+    }
+
+    func testDeactivationDuringRefreshPollCannotPublishLateFailure() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]),
+                etag: "etag-1"
+            )
+        ]
+        service.lensResponses["today"] = makeLens(key: "today", version: 1)
+        service.fetchIndexWaitRequestIndices = [1]
+        service.fetchIndexErrorsByRequestIndex[1] = URLError(.networkConnectionLost)
+        let viewModel = BriefingViewModel(
+            service: service,
+            refreshPollDelays: [1_000_000]
+        )
+        viewModel.setActive(true)
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+
+        await viewModel.pullToRefresh()
+        await waitForBriefingCondition { service.indexEtags.count == 2 }
+        viewModel.setActive(false)
+        service.resumeIndexRequest(at: 1)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(viewModel.refreshPhase, .idle)
     }
 }

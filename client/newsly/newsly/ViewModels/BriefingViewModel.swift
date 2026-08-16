@@ -198,6 +198,7 @@ final class BriefingViewModel {
         allowsNeighborPrefetch = active
         if active, let selectedLensKey {
             protectLens(selectedLensKey)
+            resumeSelectedLensLoadOnReactivation(key: selectedLensKey)
         }
         indexSynchronizer.setActive(active) { [weak self] in
             await self?.loadIndexIfNeeded()

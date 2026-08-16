@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-15 — `main` — Prevent stale Briefing retries after reopen
+
+- **Status:** Complete.
+- **Scope:** Briefing iOS lifecycle state, selected-lens pagination, refresh polling, focused native regressions, and the Briefing product law.
+- **Decisions:** Preserve selected-lens hydration while the app is merely inactive, but replace it if it is still unfinished when the app becomes active again. Treat deactivation as the boundary that clears action-level refresh failures, and require every asynchronous poll result to still own its task generation before changing UI state.
+- **Changes:** Restart unfinished selected-lens work from its preserved cursor on reactivation, clear non-idle refresh phases on deactivation, reject late results from cancelled refresh polls, and add deterministic request suspension/error controls plus three lifecycle regressions.
+- **Validation:** All three regressions failed against the prior implementation and passed after the fix; the selected-lens regression also passed while index validation was deliberately blocked. Seventy-four focused Briefing lifecycle, navigation, retention, and read-state tests passed on the iOS 26.4.1 iPhone 17 Pro Simulator. The final tree built, installed, and launched successfully through XcodeBuildMCP, and `git diff --check` passed.
+- **Remaining:** None for implementation. The available Simulator is logged out, so a direct visual reopen check of the authenticated Briefing surface still requires a signed-in runtime.
+- **Commits:** Uncommitted.
+
 ### 2026-08-15 — `main` — Refine Learning Deck reader controls
 
 - **Status:** Complete.

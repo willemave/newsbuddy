@@ -15,11 +15,15 @@ final class MockBriefingService: BriefingServicing {
     var indexErrors: [Error?] = []
     var indexEtags: [String?] = []
     var fetchIndexDelayNanoseconds: UInt64?
+    var fetchIndexWaitRequestIndices: Set<Int> = []
+    var fetchIndexErrorsByRequestIndex: [Int: Error] = [:]
     var lensResponses: [String: APIBriefingLensResponse] = [:]
     var lensPageResponses: [String: [APIBriefingLensResponse]] = [:]
     var fetchLensDelayNanoseconds: UInt64?
     var fetchLensDelaysNanoseconds: [UInt64] = []
     var fetchLensErrors: [Error?] = []
+    var fetchLensWaitRequestIndices: Set<Int> = []
+    var fetchLensErrorsByRequestIndex: [Int: Error] = [:]
     var fetchLensKeys: [String] = []
     var fetchLensRequests: [LensFetch] = []
     var markReadCalls: [[String]] = []
@@ -54,14 +58,25 @@ final class MockBriefingService: BriefingServicing {
 
     private var refreshContinuation: CheckedContinuation<Void, Never>?
     private var markReadContinuation: CheckedContinuation<Void, Never>?
+    private var fetchIndexContinuations: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var fetchLensContinuations: [Int: CheckedContinuation<Void, Never>] = [:]
     private var latestNarration: BriefingNarration?
     private var narrationRequestContinuations: [String: CheckedContinuation<Void, Never>] = [:]
 
     func fetchIndex(ifNoneMatch etag: String?) async throws -> BriefingIndexFetchResult {
+        let requestIndex = indexEtags.count
         indexEtags.append(etag)
         events.append("fetchIndex:\(etag ?? "nil")")
+        if fetchIndexWaitRequestIndices.contains(requestIndex) {
+            await withCheckedContinuation { continuation in
+                fetchIndexContinuations[requestIndex] = continuation
+            }
+        }
         if let fetchIndexDelayNanoseconds {
             try? await Task.sleep(nanoseconds: fetchIndexDelayNanoseconds)
+        }
+        if let requestError = fetchIndexErrorsByRequestIndex.removeValue(forKey: requestIndex) {
+            throw requestError
         }
         let queuedError = indexErrors.isEmpty ? nil : indexErrors.removeFirst()
         if let queuedError {
@@ -81,14 +96,23 @@ final class MockBriefingService: BriefingServicing {
         limit: Int?,
         cursor: String?
     ) async throws -> APIBriefingLensResponse {
+        let requestIndex = fetchLensRequests.count
         fetchLensKeys.append(key)
         fetchLensRequests.append(LensFetch(key: key, limit: limit, cursor: cursor))
         events.append("fetchLens:\(key)")
+        if fetchLensWaitRequestIndices.contains(requestIndex) {
+            await withCheckedContinuation { continuation in
+                fetchLensContinuations[requestIndex] = continuation
+            }
+        }
         let delay = fetchLensDelaysNanoseconds.isEmpty
             ? fetchLensDelayNanoseconds
             : fetchLensDelaysNanoseconds.removeFirst()
         if let delay, delay > 0 {
             try? await Task.sleep(nanoseconds: delay)
+        }
+        if let requestError = fetchLensErrorsByRequestIndex.removeValue(forKey: requestIndex) {
+            throw requestError
         }
         let error = fetchLensErrors.isEmpty ? nil : fetchLensErrors.removeFirst()
         if let error {
@@ -155,6 +179,14 @@ final class MockBriefingService: BriefingServicing {
     func resumeRefreshRequest() {
         refreshContinuation?.resume()
         refreshContinuation = nil
+    }
+
+    func resumeIndexRequest(at requestIndex: Int) {
+        fetchIndexContinuations.removeValue(forKey: requestIndex)?.resume()
+    }
+
+    func resumeLensRequest(at requestIndex: Int) {
+        fetchLensContinuations.removeValue(forKey: requestIndex)?.resume()
     }
 
     func resumeMarkRead() {

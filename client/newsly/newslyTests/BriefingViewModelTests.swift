@@ -42,6 +42,57 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.lenses["later"])
     }
 
+    func testReactivationReplacesInFlightSelectedLensRequestBeforeItCanPublishFailure() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(lenses: [makeLensSummary(key: "today", segmentCount: 2)]),
+                etag: "etag-1"
+            ),
+            .notModified
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(
+                key: "today",
+                segments: [makeSegment(id: 10, sourceKeys: ["content:1"])],
+                nextCursor: "today-page-2",
+                hasMore: true
+            ),
+            makeLens(
+                key: "today",
+                segments: [makeSegment(id: 9, sourceKeys: ["news:2"])]
+            )
+        ]
+        service.fetchLensWaitRequestIndices = [1]
+        service.fetchLensErrorsByRequestIndex[1] = URLError(.networkConnectionLost)
+        service.fetchIndexWaitRequestIndices = [1]
+        let viewModel = BriefingViewModel(
+            service: service,
+            indexFreshnessInterval: 0
+        )
+
+        viewModel.setActive(true)
+        await waitForBriefingCondition { service.fetchLensRequests.count == 2 }
+        XCTAssertEqual(viewModel.selectedLens?.segments.map(\.id), [10])
+
+        viewModel.setActive(false)
+        viewModel.setActive(true)
+        await waitForBriefingCondition {
+            service.fetchLensRequests.count == 3
+                && viewModel.selectedLens?.segments.map(\.id) == [10, 9]
+        }
+        service.resumeLensRequest(at: 1)
+        service.resumeIndexRequest(at: 1)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(
+            service.fetchLensRequests.map(\.cursor),
+            [nil, "today-page-2", "today-page-2"]
+        )
+        XCTAssertNil(viewModel.lensErrors["today"])
+        XCTAssertNil(viewModel.lensContinuationErrors["today"])
+    }
+
     func testFirstRunLoadsStartHereWithoutAReadableCategory() async {
         let service = MockBriefingService()
         service.indexResults = [

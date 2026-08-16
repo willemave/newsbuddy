@@ -41,3 +41,5 @@ B18. Pullquotes are editorial callouts, not attributed verbatim quotations.
 B19. Dig Deeper uses the reader's selected passage and only user-visible supporting material.
 
 B20. First-run progress is durable and incremental; one unavailable source cannot block later sources or remove categories already ready to read.
+
+B21. Briefing shows retry state only for work owned by the current active session; deactivation clears prior action failures, and reopening safely restarts unfinished lens work without hiding readable content.
