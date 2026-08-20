@@ -1,31 +1,25 @@
 # Sharing and Sources Laws
 
-S1. The Share Extension exposes four outcomes: Add to Briefing, Add to Knowledge, Create Deck, and Chat.
+S1. The Share Extension exposes four outcomes named Add to Briefing, Add to Knowledge, Create Deck, and Chat.
 
-S2. Share acceptance means durable asynchronous work was queued; it does not promise that the final item is already visible.
+S2. Share acceptance records durable queued work, while final visibility follows completion.
 
-S3. Every shared URL is canonicalized before the requested outcome is applied.
+S3. Every shared URL is canonicalized before its outcome runs, and retrying the same outcome cannot create duplicate content or work.
 
-S4. Add to Briefing resolves a continuing publication to a supported feed and an individual article or episode to direct content.
+S4. Add to Briefing resolves a continuing publication to a supported feed and an individual article or episode to direct content. A valid item may replace failed feed discovery, while an arbitrary homepage cannot.
 
-S5. Feed discovery may fall back to a valid individual item, but it never ingests an arbitrary homepage merely to avoid a clear unsupported result.
+S5. A subscription controls future fetched items. The shared page requires its own ingestion outcome.
 
-S6. Subscribing to a feed affects future fetched items and does not imply that the currently shared page was ingested.
+S6. Add to Knowledge saves the submitted item and marks that item read.
 
-S7. Add to Knowledge saves the item and marks that submitted item read so it does not also enter Briefing as unread.
+S7. Create Deck and Chat use the shared item as source material without creating ordinary unread content. Deck instructions survive queueing and retry without being rewritten.
 
-S8. Create Deck and Chat treat the shared item as source material for their requested outcome, not as an ordinary unread submission.
+S8. Generated actions must match the chosen mode, and approval-required actions wait for explicit approval.
 
-S9. Retrying the same share outcome is idempotent and cannot create duplicate content, subscriptions, decks, chats, or jobs.
+S9. Source subscriptions and aggregator selections belong to one user and control future visibility without rewriting history.
 
-S10. A generated action must match the user's chosen mode; approval-required actions wait for explicit approval before changing product state.
+S10. Global aggregator items appear only for users who selected that aggregator, and user-scoped sources never enter the global pool.
 
-S11. Source subscriptions and aggregator selections are per-user and control future visibility without rewriting historical content.
+S11. X connections belong to one user, sync incrementally, preserve provenance, and advance their checkpoint only after success.
 
-S12. Global aggregator items appear only for users who selected that aggregator; user-scoped sources such as Reddit never leak into the global pool.
-
-S13. X connections are per-user, sync bookmarks incrementally, retain checkpoint and provenance data, and never consume a success checkpoint on failure.
-
-S14. Disconnecting or invalidating an integration removes usable credentials and reports reauthorization when required.
-
-S15. Create Deck may include optional user instructions; those instructions remain attached to the generation attempt, survive deferred execution and retry, and reach the deck builder without an intermediate agent rewriting them.
+S12. Disconnecting or invalidating an integration removes usable credentials and reports when reauthorization is required.

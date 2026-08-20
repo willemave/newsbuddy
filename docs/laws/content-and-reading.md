@@ -1,31 +1,25 @@
 # Content and Reading Laws
 
-C1. Every incoming URL is validated, canonicalized, and deduplicated before new product state is created.
+C1. Every incoming URL is validated, canonicalized, and deduplicated before product state is created. Unsupported or unsafe schemes create nothing.
 
 C2. Repeating a submission reuses existing content and active work unless new user input requires additional processing.
 
-C3. Unsupported or unsafe URL schemes fail without creating content, subscriptions, or jobs.
+C3. A user may read an item only through their visible inbox, saved library, owned source stream, or an explicitly shared global stream.
 
-C4. A user may read an item only when it is in that user's visible inbox, saved library, owned source stream, or explicitly shared global stream.
+C4. Short-form news and long-form content keep distinct identities even when they describe the same story.
 
-C5. Short-form news and long-form content keep distinct identities even when they refer to the same story.
+C5. A readable summary makes long-form content usable. Missing optional artwork or enrichment cannot hide it.
 
-C6. A readable summary is the long-form usability boundary; missing optional artwork must not hide otherwise readable content.
+C6. Fast Reads use canonical titles and publication time, suppress duplicates, and respect user visibility. Converting one to an article preserves attribution and saves the article to Knowledge.
 
-C7. Fast Reads prefer canonical titles and publication time, suppress duplicate members, and never expose another user's scoped items.
+C7. Read state and Knowledge state are per-user, independent, and idempotent unless an explicit action changes both.
 
-C8. Converting a visible Fast Read to an article reuses available source text, preserves attribution, and saves the resulting article to Knowledge.
+C8. Saved items remain readable after they leave the inbox.
 
-C9. Read state and Knowledge state are per-user, independent, and idempotent unless an explicit composite action changes both.
+C9. Recently Read reflects the user's own read events.
 
-C10. Saving an item keeps its detail and body accessible after it leaves the inbox.
+C10. Search returns only user-visible material and remains useful when an optional external source fails.
 
-C11. Recently Read reflects actual per-user read events, not global content activity.
+C11. Discussions, links, images, and other enrichment may improve an item without changing its canonical identity.
 
-C12. Search returns only user-visible material and degrades gracefully when an optional external search source fails.
-
-C13. Discussions, related links, images, and other enrichment may improve an item but never redefine its canonical identity.
-
-C14. Processing and failure states are truthful: incomplete work is never presented as completed content.
-
-C15. Every displayed item retains enough canonical URL, platform, author, and source metadata to trace it back to its origin.
+C12. Processing state remains truthful, and every displayed item retains enough provenance to trace its origin.

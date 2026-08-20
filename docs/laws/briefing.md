@@ -1,45 +1,31 @@
 # Briefing Laws
 
-B1. Briefing is a per-user, continuously updated reading edition, not a static global feed.
+B1. Briefing is a per-user, continuously updated reading edition.
 
-B2. Eligible sources are completed, unread, non-skipped, user-visible articles, podcasts, and news.
+B2. Eligible sources are completed, unread, non-skipped articles, podcasts, and news that the authenticated user can open directly.
 
-B3. Briefing never reveals a source the authenticated user could not open directly.
+B3. A source key is the canonical unit of coverage, citation, and read state.
 
-B4. A source key is the canonical unit of coverage, citation, and read state.
+B4. Article and podcast segments cover one source each, while news segments may combine several sources into a compact roundup.
 
-B5. Article and podcast segments cover one source each; news segments may combine several sources into one compact roundup.
+B5. Lens names and order remain stable within one representation, and counts describe active unread source coverage.
 
-B6. Lens names and ordering are stable for a representation, and lens counts describe active unread source coverage rather than the raw backlog.
+B6. Every admitted source remains reachable exactly once while eligible. Duplicate reconciliation, refresh, and compaction preserve that coverage.
 
-B7. Every source admitted to an edition remains reachable exactly once while it remains eligible after duplicate reconciliation; refresh and compaction never drop eligible unread coverage.
+B7. One user-scoped version identifies the complete visible Briefing. Every visible mutation changes it, and an unchanged private validator may return `304 Not Modified`.
 
-B8. One global version identifies one user's complete visible Briefing representation; every visible mutation bumps it.
+B8. Paging at one fixed version returns the same ordered segments, sources, read flags, and summary as the complete lens.
 
-B9. Briefing validators are private and user-scoped; an unchanged representation may return `304 Not Modified` without becoming an error.
+B9. Refreshes may coalesce, but publication requires successful composition and unchanged version, source ownership, and eligibility. Failed or stale work leaves the last usable edition intact.
 
-B10. Paging a lens at one fixed version yields the same ordered segments, sources, read flags, and summary as the complete lens.
+B10. Server state remains authoritative. Local snapshots support cold starts, and recoverable failures, retries, or reopening preserve readable content while unfinished work resumes safely.
 
-B11. Refresh appends and coalesces work; publication requires successful LLM composition plus an
-unchanged version, pending-source ownership, and eligible unread source set. A failed or stale
-refresh publishes no deterministic substitute and leaves the last usable edition intact.
+B11. A segment becomes read only after it was visible and the reader passes its midpoint. Initial offscreen geometry never marks it read.
 
-B12. Local snapshots are cold-start caches, never authority, and stale readable content remains visible during recoverable refresh failures.
+B12. Reading a segment marks its full source batch once, and the segment retires when every source is read. Marking a lens read covers every active source and canonical duplicate representative.
 
-B13. A segment becomes read only after it was visible and the reader passes its midpoint; initial offscreen geometry never marks it read.
+B13. Read-only styling preserves scroll position. Replacing the ordered document resets the lens to the top without interrupting the readable view during refresh.
 
-B14. Reading a segment marks its full source-key batch once, and a segment retires only when all of its sources are read.
+B14. Links, figures, discussions, and citations resolve to sources owned by their segment, while invalid references are repaired or rejected before publication. Pullquotes are editorial callouts and never claim to be source quotations, while Dig Deeper uses the selected passage with user-visible support.
 
-B15. Marking a lens read covers every active source in that lens, including canonical representatives of duplicates.
-
-B16. Read-only styling changes preserve scroll position; replacing the ordered document resets the lens to the top without interrupting the old readable view mid-refresh.
-
-B17. Every source link, figure, discussion, and citation resolves to a source owned by that segment; unknown references are repaired or rejected before publication.
-
-B18. Pullquotes are editorial callouts, not attributed verbatim quotations.
-
-B19. Dig Deeper uses the reader's selected passage and only user-visible supporting material.
-
-B20. First-run progress is durable and incremental; one unavailable source cannot block later sources or remove categories already ready to read.
-
-B21. Briefing shows retry state only for work owned by the current active session; deactivation clears prior action failures, and reopening safely restarts unfinished lens work without hiding readable content.
+B15. First-run progress is durable and incremental. One unavailable source cannot block later sources or remove categories already ready to read.

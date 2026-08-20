@@ -37,6 +37,26 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** None for implementation. The available Simulator is logged out, so a direct visual reopen check of the authenticated Briefing surface still requires a signed-in runtime.
 - **Commits:** Uncommitted.
 
+### 2026-08-20 — `main` — Decouple configured feed ingestion from E2B
+
+- **Status:** Complete locally.
+- **Scope:** Scheduled RSS, Atom, Substack, podcast, fixed aggregator, and pipeline-time publisher RSS retrieval.
+- **Changes:** Routed steady-state configured-source downloads through the shared bounded application HTTP client while retaining E2B for new-feed discovery and validation. Updated the processing law, architecture contract, and focused transport tests.
+- **Decisions:** Treat sandboxing as a discovery boundary rather than a prerequisite for routine ingestion; keep downloaded feed/page bytes as inert parser input and preserve per-source error isolation.
+- **Validation:** All 53 focused configured-feed, aggregator, publisher-RSS, and podcast-worker tests passed; all 104 focused E2B discovery/validation tests passed; the 137-test architecture guard and 759-file module-size guard passed; touched-file Ruff lint, format, and MyPy passed; `git diff --check` passed. A live normal-process Techmeme fetch parsed 15 entries with no feedparser error and did not acquire E2B.
+- **Remaining:** Production will retain the old E2B-coupled ingestion path until this repository change is deployed. No commit, push, deployment, or production mutation requested.
+- **Commits:** Uncommitted.
+
+### 2026-08-20 — `main` — Consolidate behavioral laws
+
+- **Status:** Complete locally.
+- **Scope:** The eight canonical product-law areas and their documentation index.
+- **Changes:** Reduced 126 rules to 96 by merging overlapping invariants and removing implementation-level UI, provider, and lifecycle detail. Added a standing target of 10 to 20 laws per area.
+- **Decisions:** Preserve user-visible outcomes, ownership, durability, safety, and recovery guarantees. Keep architecture, provider names, and narrow interaction mechanics in their owning documentation.
+- **Validation:** Confirmed 96 sequential laws with 10 to 15 in every area, all index links resolve, and no implementation files, provider names, banned contrast patterns, or stale individual-law references remain. The 759-file module-size guard, all 137 architecture tests, public-contract check, and `git diff --check` passed.
+- **Remaining:** No commit, push, deployment, or production mutation requested.
+- **Commits:** Uncommitted.
+
 ### 2026-08-15 — `main` — Refine Learning Deck reader controls
 
 - **Status:** Complete.
@@ -753,3 +773,43 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** The focused Chloé real-embedding eval passed at F1 1.0; Luna and the previous DeepSeek model each composed the three production sources into one valid passage in the earlier model comparison. The corrected cross-company earnings negative retained precision 1.0 but exposed pre-existing within-company under-clustering at recall 0.333, so no global similarity threshold was changed without a full calibration. All 8 frozen Briefing evals and 190 focused Briefing/relation/search/read/assistant-search tests passed. Ruff, formatting, focused MyPy, module-size guardrails, and diff checks passed. The migration upgraded, downgraded, and upgraded locally; forced PostgreSQL plans used the title relation GIN, canonical News search GIN, and exact-story hash indexes. The initial max-effort Fable review's requested law and exact-URL corrections were applied; the final rerun was blocked by Claude Code's session limit after roughly fifteen minutes with no result.
 - **Remaining:** Recalibrate the existing within-company earnings recall case only with a full positive/negative threshold sweep; it is not caused by candidate retrieval and was not weakened ad hoc here. No commit, push, deployment, or production mutation performed.
 - **Commits:** Uncommitted.
+
+### 2026-08-17 — `main` — Stream durable chat partials and focus Learning Deck chat
+
+- **Status:** Complete.
+- **Scope:** Shared queued chat execution, contextual-assistant capabilities, Exa routing, async status contracts, and Learning Deck chat presentation.
+- **Changes:** Added per-turn contextual-assistant tool filtering, explicit Exa routing for current/external deck questions, lazy personal-library sandbox startup, richer deck/source grounding, one shared detached chat executor, exact lease plus attempt-generation terminal fences, durable cumulative partial snapshots, partial status DTOs and generated contracts, coalesced iOS partial reconciliation, and peek/compact/focused deck chat states with a three-quarter-height option. Deep research and the older queued dig-deeper entry point now use the same lease/generation fence. Cleanup extracted the pure capability policy, made queue lease and generation inputs mandatory, checked generation before terminal idempotency, isolated advisory snapshot failures from canonical turns, bounded dig-deeper reclaim retries, fixed Learning Deck route precedence, removed dead result/prompt plumbing, and made client partial replacement and scrolling linear per update.
+- **Decisions:** Keep `chat_messages` as the canonical final transcript and treat partial text as advisory; stream only confirmed final-response text rather than tool planning; reuse the existing Exa client and existing queue/task layers instead of adding a variance service or another delivery transport; preserve the one-minute no-progress polling budget while active cursor progress uses a 500 ms cadence; start E2B only for turns that select personal-library tools.
+- **Validation:** The initial 210 focused backend chat, assistant, deep-research, dig-deeper, queue, task-handler, and API tests passed; the final cleanup reran 164 focused backend tests successfully. Targeted MyPy, Ruff, and formatting passed; the 759-file/23-ratchet architecture guard, all 137 architecture tests, public-contract regeneration check, and `git diff --check` passed. The migration upgraded, downgraded, and upgraded locally, and the database and migration graph both report `20260817_01` at head. The iOS app built, installed, and launched on the iOS 26.5 Newsly Regression simulator, and all 36 focused polling, full-chat, deck view-model, and flyover tests passed.
+- **Remaining:** The Simulator is at the unauthenticated Apple login screen, so the real Learning Deck flyover could not be navigated for authenticated visual interaction QA; runtime logs showed only the simulator runtime's duplicate WebCore/WebKit accessibility-class warning. No commit, push, deployment, or production mutation requested.
+- **Commits:** Uncommitted.
+
+### 2026-08-20 — `main` — Close feed, chat ownership, and streaming review gaps
+
+- **Status:** Complete locally.
+- **Scope:** Strict-review remediation for assistant capability routing, configured-source downloads, queued provider ownership, Deep Research retries, chat runtime boundaries, and Learning Deck transcript position.
+- **Decisions:** Keep new-feed discovery and validation in E2B, while routine accepted-source downloads use the normal host pipeline with public-network redirect checks and a hard response limit. Treat contextual routing as primary guidance rather than an exclusive schema choice except in explicitly constrained product modes. Renew the exact queue lease immediately before paid provider work, and make a Deep Research provider response a durable resumable identity.
+- **Changes:** Preserved the normal host ingestion path while adding bounded streaming downloads and redirect/private-address rejection; kept normal assistant capabilities available for compound search-and-action turns; split advisory partial streaming and exact-lease queue orchestration out of `chat_turn_runtime.py`; fenced provider submission; persisted and reused Deep Research response IDs; and stopped Learning Deck partial updates from pulling readers back to the bottom after they scroll upward. Updated the concise laws and architecture notes without increasing any law area beyond its 10–20-law budget.
+- **Validation:** All 225 focused backend feed, assistant, chat, queue, pipeline, and API tests passed. Ruff passed across `app`, `tests`, and migrations; focused MyPy passed for 15 production modules; the module guard, all 137 architecture tests, and public-contract check passed. Migration `20260820_01` upgraded, downgraded, and upgraded successfully. The iOS app built, installed, and launched on the iOS 26.5 Newsly Regression simulator, and all 36 focused polling, full-chat, deck view-model, and flyover tests passed.
+- **Remaining:** The simulator is at the unauthenticated Apple login screen, so the real Learning Deck flyover could not be exercised visually while a response streamed. No commit, push, deployment, or production mutation was requested or performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-20 — `main` — Clean up feed and queued-chat review fixes
+
+- **Status:** Complete locally.
+- **Scope:** Behavior-preserving cleanup of the configured-feed HTTP boundary, contextual assistant routing, Deep Research retry state, and the adjacent Learning Deck/law changes.
+- **Decisions:** Dispatch accepted-source downloads only to the public unicast addresses that were actually validated, preserve the original Host and TLS identity, bypass environment proxies, and close each pinned connection so virtual hosts cannot share an IP-keyed pooled connection. Leave the queued-turn extraction and view-specific near-bottom tracking separate because each already has clear ownership.
+- **Changes:** Pinned every bounded download and redirect hop to its validated address, rejected multicast targets, preserved the canonical response URL, collapsed duplicate small-talk matching, and removed pass-through aliases, predeclared optional state, and an unreachable Deep Research condition. The Learning Deck behavior and concise laws required no further edits.
+- **Validation:** All 112 focused feed, HTTP, assistant-routing, Deep Research, queue-streaming, and pipeline tests passed. Ruff lint/format, `git diff --check`, and focused MyPy over 17 production modules passed. The module guard checked 761 files with 23 ratchets, all 137 architecture tests passed, and public contracts remained current. A live `https://example.com/` canary returned HTTP 200 through the pinned-address path with the original response URL.
+- **Remaining:** The existing provider-submit-to-response-ID commit window cannot be made atomic across the external provider and PostgreSQL; the persisted response ID prevents repeat submissions after that durable point. No iOS source changed in this cleanup, so the prior native build/test result was not rerun. No commit, push, deployment, or production mutation was requested or performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-20 — `main` — Record feed, chat, and law updates
+
+- **Status:** Complete.
+- **Scope:** Configured-feed transport, durable queued chat, concise behavioral laws, and architecture notes.
+- **Decisions:** Keep feed, chat, and documentation changes in topical commits; leave the separate Briefing viewport-threshold work uncommitted.
+- **Changes:** Recorded routine configured-source ingestion outside E2B in `922d838d`, durable streamed chat with exact lease fencing in `cedd2e59`, and the consolidated 10–20-law areas plus matching architecture boundaries in this documentation commit.
+- **Validation:** Both implementation commits passed their staged-file Ruff, format, MyPy, and module-size hooks. The final chat fixture pass added 119 focused passing backend tests; the existing high-confidence Vulture advisory baseline remains unchanged.
+- **Remaining:** Deploy separately when requested. The independent Briefing read-threshold implementation and its documentation remain local.
+- **Commits:** `922d838d`, `cedd2e59`, and this commit.

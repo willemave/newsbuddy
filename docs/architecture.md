@@ -452,9 +452,11 @@ Chat is server-stored, not client-authoritative.
   - one logical conversation, optionally attached to `content_id` or `news_item_id`
 - `chat_messages`
   - serialized pydantic-ai message arrays plus render metadata
+  - nullable cumulative `partial_text` plus attempt `stream_generation`, `stream_revision`, and update timestamp for advisory in-flight display
 - async message state
   - `processing`, `completed`, `failed`
-  - the iOS client polls status for async message completion
+  - the status endpoint returns a stable-ID partial assistant DTO only while processing; completed message arrays remain canonical
+  - the iOS client polls one coalesced sequence, applies newer partial cursors in place, and resets its idle polling budget while the stream advances
 
 ### 7.6 Schema evolution
 
@@ -835,6 +837,19 @@ identity stays in the processor and can only be renewed through the bound `TaskC
 Heartbeat database failures are retried within the current lease window, and ownership loss blocks
 finalization of that attempt.
 
+Article chat, contextual-assistant chat, and the dig-deeper adapter share detached state and ledger
+helpers in `app/services/chat_turn_runtime.py`, exact-lease provider orchestration in
+`app/services/queued_chat_turn.py`, and advisory snapshots in
+`app/services/chat_partial_stream.py`. A queue retry installs a monotonic stream generation. After
+preparation and immediately before provider submission, the owner renews the exact claim; it renews
+again before terminal persistence, where the message row checks the same generation. Superseded
+work cannot incur new provider cost or overwrite the newer message attempt, and its attempt ledger
+is cancelled.
+
+Deep Research retains its provider-specific lifecycle while using the same lease and generation
+fences. Its OpenAI response ID is stored on the processing message before polling, so a reclaimed
+worker resumes the existing provider run rather than submitting it again.
+
 Responsibilities:
 
 - poll one queue partition
@@ -913,18 +928,24 @@ Learning Deck output is validated automatically; a missing or invalid artifact g
 repair turn before a typed terminal failure, and validation guidance names only contract-relative
 paths.
 
-Feed-specific network access uses the same process-scoped agent VM pool. Mixed Search, contextual
-assistant discovery, onboarding suggestions, add-feed resolution, scraper-config validation,
-ingestion-time feed detection, scheduled RSS ingestion, and publisher-RSS audio lookup send every
-untrusted page/feed request through `SandboxFeedHttpService` inside the configured E2B workspace.
-The canonical `FeedDetector` requires an injected HTTP service and is constructed only by this E2B
-runtime, which rejects local/disabled VM sessions, so validators cannot silently fall back to host
-HTTP or a host-backed sandbox. Trusted fixed-provider/control-plane APIs (Exa,
-Apple/iTunes, Spotify, Podcast Index, Hacker News Firebase, and model providers) remain host-managed; their returned page
-or publisher-feed URLs are still fetched only in E2B. General chat web search remains host-managed
-and does not acquire a feed sandbox. Same-user requests reuse one sandbox with task-isolated
-workspace paths; system-owned aggregator feeds use the isolated system namespace. API and worker
-shutdown drain cached E2B sessions only after active work has stopped.
+New-feed discovery uses the same process-scoped agent VM pool. Mixed Search, contextual assistant
+discovery, onboarding suggestions, add-feed resolution, scraper-config validation, and
+ingestion-time feed detection send untrusted candidate probes through `SandboxFeedHttpService`
+inside the configured E2B workspace. The canonical `FeedDetector` requires an injected HTTP service
+and is constructed only by this E2B runtime, which rejects local/disabled VM sessions, so discovery
+and validation cannot silently fall back to host HTTP or a host-backed sandbox.
+
+Once a feed or fixed aggregator source is configured, steady-state ingestion uses the shared
+application HTTP client with a hard decoded-body limit, public-unicast resolution pinned to the
+dispatched address, environment-proxy bypass, bounded redirects, and validation of every redirect
+target. Scheduled RSS, Atom, Substack, podcast, and fixed HTML
+aggregator downloads therefore do not acquire an E2B session. Pipeline-time publisher RSS lookup
+uses the same bounded host path, while discovery-time publisher-feed validation remains sandboxed. Trusted
+fixed-provider/control-plane APIs (Exa, Apple/iTunes, Spotify, Podcast Index, Hacker News Firebase,
+and model providers) also remain host-managed. General chat web search remains host-managed and does
+not acquire a feed sandbox. Same-user discovery requests reuse one sandbox with task-isolated
+workspace paths, and API and worker shutdown drain cached E2B sessions only after active work has
+stopped.
 
 Weekly discovery checkpoints a successful completed run for the current Sunday-based discovery
 window before any paid provider call. A weekly-chat projection retry therefore reuses the completed
@@ -932,8 +953,9 @@ run instead of rebilling. Discovery persistence and mixed Search derive subscrib
 current user's active canonical scraper configs, and onboarding completion ensures one canonical
 `discover_feeds` task exists for the new user. Feed URL writes and lookups share one canonical URL
 identity, and an already-subscribed request is resolved before E2B validation. Per-feed sandbox
-failures remain isolated across concurrent scrapes but increment `ScraperStats`; onboarding and
-Analyze URL backfills report an error-only result as unavailable/failed rather than completed.
+failures remain isolated during discovery. Per-source HTTP failures remain isolated across
+concurrent steady-state scrapes and increment `ScraperStats`; onboarding and Analyze URL backfills
+report an error-only result as unavailable/failed rather than completed.
 
 ### 9.6 Worker launch and drift guards
 
@@ -1234,13 +1256,28 @@ Capabilities:
 
 Chat sessions can attach to either `content_id` or `news_item_id`. The iOS client sends compact screen context, polls async message status, and can continue active sessions through `ActiveChatSessionManager`.
 
-The system prompt explicitly instructs the agent to use web search and cite sources when it does.
+Article chat exposes the canonical `exa_web_search` tool. The contextual assistant exposes the same
+Exa client as `search_web` and resolves a pure per-turn profile in
+`app/services/assistant_turn_routing.py` before the model call. Ordinary routes use the profile as
+primary guidance while retaining the normal host capability set, so compound turns can search and
+then act. Explicit product modes remain narrow: small talk and grounded Learning Deck explanations
+send no tools, Deck requests for current or external information send only Exa, and frozen weekly
+discovery actions send only the matching mutation.
 
 Personal-library tools are registered once in `chat_turn_runtime.py` for both article chat and the
-contextual assistant. The canonical configured provider is E2B: each turn synchronizes the user's
-personal markdown library, hydrates an isolated sandbox, exposes bounded search/list/read tools,
-and closes the sandbox after the turn. `local` remains a deterministic development/test provider
-and `disabled` is an explicit operational rollback.
+contextual assistant. The canonical configured provider is E2B: turns whose capability profile
+selects personal-library tools synchronize the user's markdown library, hydrate an isolated sandbox,
+expose bounded search/list/read tools, and close the sandbox afterward. Other contextual turns do
+not start E2B. `local` remains a deterministic development/test provider and `disabled` is an
+explicit operational rollback.
+
+Pydantic-ai event handlers persist only text belonging to a confirmed final text response, never
+intermediate tool-planning text. The polling API projects those cumulative snapshots onto the same
+assistant display key used by terminal and session-detail responses. Both full chat and the Learning
+Deck flyover update that row in place and label it as still working. Streaming follows the bottom
+only while the reader remains near it; scrolling upward preserves the transcript position. Portrait
+deck chat has peek, compact, and approximately three-quarter-screen focused states; landscape sheets
+expose medium, three-quarter, and large detents.
 
 ### 13.2 Deep research
 
@@ -1253,6 +1290,7 @@ Characteristics:
 - web search + code interpreter tools enabled
 - response polling every 2 seconds
 - 10 minute default timeout window
+- durable response IDs reused across worker retries
 
 ### 13.3 Agent-facing APIs
 

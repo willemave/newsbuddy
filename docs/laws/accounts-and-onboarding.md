@@ -1,6 +1,6 @@
 # Accounts and Onboarding Laws
 
-A1. Private product data is always scoped to the authenticated user; matching numeric IDs never grant cross-user access.
+A1. Private product data belongs to the authenticated user. Matching numeric IDs never grant cross-user access, and device caches are cleared when the account changes.
 
 A2. Apple sign-in is the production identity boundary; debug users are development-only.
 
@@ -8,18 +8,14 @@ A3. Refresh tokens rotate once, and a consumed token cannot mint another session
 
 A4. Account deletion requires fresh authorization and deactivates the account only after durable cleanup work has been accepted.
 
-A5. API keys, provider tokens, and user-managed model keys are revocable secrets: they are encrypted at rest, never returned in full, and never written to logs.
+A5. API keys, provider tokens, and user-managed model keys are encrypted, revocable secrets. They are never returned in full or written to logs.
 
-A6. Device caches and snapshots are keyed by user and are invalidated on sign-out or account change.
+A6. Onboarding suggestions remain proposals until the user confirms them.
 
-A7. Onboarding suggestions are proposals; no source becomes active until the user confirms it.
+A7. Completing onboarding validates and saves the full selection atomically, then queues the initial source work.
 
-A8. Completing onboarding validates and persists the full selection atomically, then queues the initial source work.
+A8. Onboarding failures never leave half-applied selections or report false completion. Progress from independent successful sources remains durable.
 
-A9. A failed onboarding dependency must not leave half-applied source selections or pretend completion.
+A9. Onboarding leads into the real Briefing, where usable sources and categories may appear incrementally.
 
-A10. One unavailable source does not erase successful onboarding progress or block the remaining sources.
-
-A11. Onboarding finishes in the real Briefing experience, where first-run progress and usable categories may appear incrementally.
-
-A12. Server-owned product preferences travel with the account; purely visual preferences may remain device-local.
+A10. Product preferences travel with the account, while purely visual preferences may remain on the device.

@@ -2,28 +2,22 @@
 
 CH1. Every chat is a durable, user-owned session that may be ad hoc or explicitly grounded in content, news, a deck, or screen context.
 
-CH2. Accepting a send persists the user message and queues its assistant turn atomically; enqueue failure leaves no zombie message or session.
+CH2. Accepting a send saves the user message and queues its assistant turn atomically. Once accepted, navigation or backgrounding cannot lose the turn.
 
-CH3. Once the server acknowledges a turn, navigation or backgrounding must not lose it; the client reconciles the durable result on return.
+CH3. Closed, archived, failed, or otherwise unwritable sessions reject new sends.
 
-CH4. A closed, archived, failed, or otherwise unwritable session rejects new sends instead of creating ambiguous state.
+CH4. Context resolves through its exact typed identity. Coincidental numeric IDs never change the target.
 
-CH5. Context always resolves through the exact typed identity; a coincidental content or news numeric ID never changes the target.
+CH5. Session history is user-scoped and stably paged. Archived sessions and internal council branches stay hidden, and archiving a council leaves source content and Knowledge saves intact.
 
-CH6. Session history is user-scoped, stably paged, and hides archived sessions and internal council branches while keeping visible work-in-progress sessions.
+CH6. The visible transcript contains user and assistant output without model scaffolding or tool chatter. In-flight assistant text is a durable advisory snapshot under the final row identity until terminal state replaces it.
 
-CH7. Archiving a council parent archives its children but does not delete source content or Knowledge saves.
+CH7. Stable timeline identity prevents polling from duplicating or replacing the wrong row. Sends follow the bottom, while unrelated updates preserve the reader's position.
 
-CH8. The visible transcript contains meaningful user and assistant output, not model-facing scaffolding or internal tool chatter.
+CH8. Cancellation remains distinct from failure, recoverable errors preserve the transcript, and dictated prompts follow the same durable send path as typed prompts.
 
-CH9. Timeline identity distinguishes durable display rows from asynchronous backing-message IDs so polling cannot duplicate or replace the wrong row.
+CH9. Council branches run independently, retain failed candidates for inspection, support targeted retry, and route later sends to the selected branch.
 
-CH10. A user send follows the bottom; unrelated incoming updates preserve the reader's position and offer a deliberate jump to the latest message.
+CH10. Opening global chat dismisses covering presentations and installs one visible route.
 
-CH11. Cancellation is not a chat failure, and recoverable errors preserve the transcript with a clear retry path.
-
-CH12. Typed and dictated prompts enter the same send path and produce the same durable session semantics.
-
-CH13. Council branches run independently, retain failed candidates for inspection, allow targeted retry, and route later sends to the selected branch.
-
-CH14. Opening global chat dismisses any covering detail or Briefing presentation and installs one visible route.
+CH11. Learning Deck chat stays grounded in the deck and its sources, remains secondary to reading, and searches the web only for an explicit current, external, or verification request.

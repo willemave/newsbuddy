@@ -1,35 +1,23 @@
 # Knowledge and Learning Laws
 
-K1. Knowledge is the authenticated user's durable saved library.
+K1. Knowledge is the authenticated user's durable saved library. Saving twice creates one save, and removing it leaves read state, chats, and source content intact.
 
-K2. Saving the same item twice creates one save; removing it removes only that save, not its read state, chats, or source content.
+K2. Saved items remain searchable, pageable, and readable after they leave the inbox.
 
-K3. Saved items remain searchable, pageable, and readable even when they are no longer inbox-visible.
+K3. A normal save leaves read state unchanged. Actions that save and mark read must say so explicitly.
 
-K4. A normal Knowledge save does not silently change read state; workflows that save and mark read must say so explicitly.
+K4. Knowledge preserves source provenance and remains authoritative over best-effort Markdown or other exported copies.
 
-K5. Knowledge preserves provenance, including whether an item came from an explicit save or an external bookmark sync.
+K5. Learning combines chats, Learning Decks, and narrations in one reverse-chronological stream. Failure in one activity type cannot erase the others.
 
-K6. Markdown and other exported library projections are best-effort copies, never the authority for a save.
+K6. A Learning Deck keeps one explicit source identity, its notes, and its attribution. A URL submitted for a deck becomes saved source material and stays out of unread Briefing.
 
-K7. Learning presents chats, Learning Decks, and narrations as one reverse-chronological activity stream.
+K7. At most one deck generation is active per user, and rerunning the same source reuses its deck identity.
 
-K8. A failure loading one Learning activity type does not erase the other activity types already available.
+K8. A deck becomes viewable after a successful artifact exists. A failed rerun cannot invalidate an earlier successful artifact.
 
-K9. A Learning Deck has one explicit source identity and retains source notes and attribution with the generated artifact.
+K9. Private deck links expire. Public sharing is explicit and remains available only while enabled.
 
-K10. A URL submitted specifically for a deck becomes saved source material, not a new unread Briefing item.
+K10. Deleting a deck cancels active generation, revokes access, and removes artifacts owned by that deck.
 
-K11. At most one deck generation is active per user; rerunning the same source reuses its deck identity.
-
-K12. A deck is viewable only after a successful artifact exists, and a failed rerun does not invalidate an earlier successful artifact.
-
-K13. Private deck links are short-lived; public sharing is explicit, stable while enabled, and revoked immediately when disabled.
-
-K14. Deleting a deck cancels active generation, revokes access, and removes its owned artifacts.
-
-K15. Deck chat keeps the deck visible and carries the deck's own identity instead of pretending it is an article chat.
-
-K16. Content detail groups chat, council, and Learning Deck creation as Knowledge actions; narration remains a separate audio action.
-
-K17. Newly generated Learning Decks use the available phone canvas as a reading surface; deck chat remains a secondary, collapsible layer and does not permanently reduce the deck viewport. The collapsed chat opens by tap or upward swipe, selected deck text remains legible, and the embedded viewer does not add a second fullscreen mode. Historical decks remain viewable with their legacy fit until regenerated.
+K11. Deck chat keeps the deck visible, uses the deck's identity, and remains secondary to the reading surface.
