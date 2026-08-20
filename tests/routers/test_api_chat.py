@@ -5,6 +5,7 @@ import base64
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,7 +91,7 @@ def _queued_chat_turn(
     db_session: Session,
     *,
     message_id: int,
-) -> tuple[ChatMessage, ProcessingTask, dict[str, object]]:
+) -> tuple[ChatMessage, ProcessingTask, dict[str, Any]]:
     """Return the durable message, task, and immutable turn context."""
     db_session.expire_all()
     message = db_session.query(ChatMessage).filter(ChatMessage.id == message_id).one()
@@ -1910,6 +1911,9 @@ def test_message_status_returns_distinct_assistant_display_id(
             ]
         },
         status="completed",
+        partial_text="Stale partial text",
+        stream_generation=2,
+        stream_revision=5,
     )
     db_session.add(db_message)
     db_session.commit()
@@ -1927,3 +1931,48 @@ def test_message_status_returns_distinct_assistant_display_id(
     assert payload["assistant_message"]["role"] == "assistant"
     assert "AI Infrastructure Update" in payload["assistant_message"]["content"]
     assert payload["assistant_message"]["feed_options"][0]["title"] == "lucumr"
+    assert payload["partial_assistant_message"] is None
+    assert payload["stream_generation"] is None
+    assert payload["stream_revision"] is None
+
+
+def test_message_status_returns_retry_fenced_partial_assistant_snapshot(
+    client: TestClient,
+    db_session: Session,
+    test_user,
+) -> None:
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Streaming assistant",
+        session_type="assistant_quick",
+        llm_model="openai:gpt-5.6-terra",
+        llm_provider="openai",
+    )
+    db_session.add(session)
+    db_session.flush()
+    db_message = ChatMessage(
+        session_id=session.id,
+        message_list="[]",
+        status=MessageProcessingStatus.PROCESSING.value,
+        partial_text="A durable partial answer",
+        stream_generation=2,
+        stream_revision=4,
+        stream_updated_at=datetime.now(UTC),
+    )
+    db_session.add(db_message)
+    db_session.commit()
+
+    response = client.get(f"/api/content/chat/messages/{db_message.id}/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    partial = payload["partial_assistant_message"]
+    assert payload["status"] == "processing"
+    assert payload["assistant_message"] is None
+    assert payload["stream_generation"] == 2
+    assert payload["stream_revision"] == 4
+    assert partial["source_message_id"] == db_message.id
+    assert partial["display_key"] == f"server|{db_message.id}|assistant|message"
+    assert partial["role"] == "assistant"
+    assert partial["status"] == "processing"
+    assert partial["content"] == "A durable partial answer"

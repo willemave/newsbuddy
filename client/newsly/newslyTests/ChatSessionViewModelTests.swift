@@ -326,6 +326,103 @@ final class ChatSessionViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.timeline.allSatisfy { !$0.isQueued })
     }
 
+    func testStreamingPartialIsReplacedInPlaceByFinalAssistantMessage() async {
+        let finalGate = AsyncGate()
+        let userMessage = Self.message(
+            id: 101,
+            role: .user,
+            content: "Explain this",
+            status: .processing
+        )
+        let partialMessage = ChatMessage(
+            id: -501,
+            sourceMessageId: 501,
+            role: .assistant,
+            timestamp: Date(),
+            content: "A partial explanation",
+            status: .processing
+        )
+        let finalMessage = ChatMessage(
+            id: -501,
+            sourceMessageId: 501,
+            role: .assistant,
+            timestamp: Date(),
+            content: "The complete explanation",
+            status: .completed
+        )
+        var statusCallCount = 0
+        var didComplete = false
+        let chatService = MockChatSessionService(
+            getSessionHandler: { _ in
+                ChatSessionDetail(
+                    session: Self.session(),
+                    messages: didComplete ? [userMessage, finalMessage] : [userMessage]
+                )
+            },
+            sendMessageHandler: { sessionId, _ in
+                SendChatMessageResponse(
+                    sessionId: sessionId,
+                    userMessage: userMessage,
+                    messageId: 501,
+                    status: .processing
+                )
+            },
+            messageStatusHandler: { messageId in
+                statusCallCount += 1
+                if statusCallCount == 1 {
+                    return MessageStatusResponse(
+                        messageId: messageId,
+                        status: .processing,
+                        partialAssistantMessage: partialMessage,
+                        streamGeneration: 0,
+                        streamRevision: 1
+                    )
+                }
+                await finalGate.wait()
+                didComplete = true
+                return MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: finalMessage
+                )
+            }
+        )
+        let registry = ChatMessageCompletionRegistry(
+            fetchStatus: { try await chatService.getMessageStatus(messageId: $0) },
+            policy: ChatMessageCompletionPollingPolicy(
+                delaysNanoseconds: [0, 0],
+                progressDelayNanoseconds: 0,
+                absoluteMaximumRequestCount: 4
+            ),
+            sleep: { _ in }
+        )
+        let viewModel = ChatSessionViewModel(
+            route: ChatSessionRoute(sessionId: 42),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService,
+                messageCompletionRegistry: registry
+            )
+        )
+
+        let sendTask = Task { await viewModel.sendMessage(text: "Explain this") }
+        let didShowPartial = await waitUntil {
+            viewModel.timeline.contains { $0.message.content == "A partial explanation" }
+        }
+
+        XCTAssertTrue(didShowPartial)
+        XCTAssertTrue(viewModel.hasVisiblePartialResponse)
+        XCTAssertEqual(viewModel.timeline.filter { $0.message.isAssistant }.count, 1)
+
+        await finalGate.open()
+        await sendTask.value
+
+        let assistantRows = viewModel.timeline.filter { $0.message.isAssistant }
+        XCTAssertEqual(assistantRows.count, 1)
+        XCTAssertEqual(assistantRows.first?.message.content, "The complete explanation")
+        XCTAssertFalse(viewModel.hasVisiblePartialResponse)
+    }
+
     func testSessionLoadFailureDoesNotMasqueradeAsAnActionFailure() async {
         let chatService = MockChatSessionService(getSessionHandler: { _ in
             throw ChatServiceError.timeout

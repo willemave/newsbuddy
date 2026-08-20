@@ -83,12 +83,18 @@ struct MessageStatusResponse: Codable {
     let messageId: Int
     let status: APIMessageProcessingStatus
     let assistantMessage: ChatMessage?
+    let partialAssistantMessage: ChatMessage?
+    let streamGeneration: Int?
+    let streamRevision: Int?
     let error: String?
 
     enum CodingKeys: String, CodingKey {
         case messageId = "message_id"
         case status
         case assistantMessage = "assistant_message"
+        case partialAssistantMessage = "partial_assistant_message"
+        case streamGeneration = "stream_generation"
+        case streamRevision = "stream_revision"
         case error
     }
 
@@ -96,11 +102,17 @@ struct MessageStatusResponse: Codable {
         messageId: Int,
         status: APIMessageProcessingStatus,
         assistantMessage: ChatMessage? = nil,
+        partialAssistantMessage: ChatMessage? = nil,
+        streamGeneration: Int? = nil,
+        streamRevision: Int? = nil,
         error: String? = nil
     ) {
         self.messageId = messageId
         self.status = status
         self.assistantMessage = assistantMessage
+        self.partialAssistantMessage = partialAssistantMessage
+        self.streamGeneration = streamGeneration
+        self.streamRevision = streamRevision
         self.error = error
     }
 
@@ -110,6 +122,9 @@ struct MessageStatusResponse: Codable {
             messageId: response.messageId,
             status: response.status,
             assistantMessage: response.assistantMessage.map(ChatMessage.init(api:)),
+            partialAssistantMessage: response.partialAssistantMessage.map(ChatMessage.init(api:)),
+            streamGeneration: response.streamGeneration,
+            streamRevision: response.streamRevision,
             error: response.error
         )
     }
@@ -216,6 +231,7 @@ struct RetryCouncilBranchRequest: Codable {
 
 struct AssistantScreenContext: Codable, Equatable {
     private static let maxVisibleContentIds = 15
+    private static let maxNoteLength = 1_500
 
     let screenType: String
     let screenTitle: String?
@@ -248,7 +264,7 @@ struct AssistantScreenContext: Codable, Equatable {
         self.visibleNewsItemIds = Array(visibleNewsItemIds.prefix(Self.maxVisibleContentIds))
         self.selectedTopic = selectedTopic
         self.query = query
-        self.note = note
+        self.note = note.map { String($0.prefix(Self.maxNoteLength)) }
         self.assistantAction = assistantAction
     }
 

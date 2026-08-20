@@ -160,6 +160,77 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.timeline.allSatisfy { !$0.isQueued })
     }
 
+    func testPartialAssistantRowIsReplacedInPlaceByFinalResponse() async {
+        let finalGate = AsyncGate()
+        let attempts = AsyncCounter()
+        let chatService = MockLearningDeckReaderChatService(
+            createAssistantTurnHandler: { message, _, _ in
+                Self.assistantTurnResponse(message: message)
+            },
+            messageStatusHandler: { messageId in
+                let attempt = await attempts.next()
+                if attempt == 1 {
+                    return MessageStatusResponse(
+                        messageId: messageId,
+                        status: .processing,
+                        partialAssistantMessage: ChatMessage(
+                            id: 1_501,
+                            sourceMessageId: messageId,
+                            role: .assistant,
+                            timestamp: Date(),
+                            content: "Draft from the slide",
+                            status: .processing
+                        ),
+                        streamGeneration: 0,
+                        streamRevision: 1
+                    )
+                }
+                await finalGate.wait()
+                return MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: ChatMessage(
+                        id: 1_501,
+                        sourceMessageId: messageId,
+                        role: .assistant,
+                        timestamp: Date(),
+                        content: "Final answer from the slide",
+                        status: .completed
+                    )
+                )
+            }
+        )
+        let registry = ChatMessageCompletionRegistry(
+            statusService: chatService,
+            sleep: { _ in }
+        )
+        let viewModel = LearningDeckReaderViewModel(
+            deck: Self.deck(),
+            chatService: chatService,
+            messageCompletionRegistry: registry,
+            deckService: LearningDeckService.shared
+        )
+
+        viewModel.performSendMessage(text: "Explain this")
+        let showedPartial = await waitUntil {
+            viewModel.timeline.contains { $0.message.content == "Draft from the slide" }
+        }
+
+        XCTAssertTrue(showedPartial)
+        XCTAssertTrue(viewModel.hasVisiblePartialResponse)
+        XCTAssertEqual(viewModel.timeline.filter { $0.message.isAssistant }.count, 1)
+
+        await finalGate.open()
+        let showedFinal = await waitUntil {
+            viewModel.timeline.contains { $0.message.content == "Final answer from the slide" }
+                && !viewModel.isSending
+        }
+
+        XCTAssertTrue(showedFinal)
+        XCTAssertFalse(viewModel.hasVisiblePartialResponse)
+        XCTAssertEqual(viewModel.timeline.filter { $0.message.isAssistant }.count, 1)
+    }
+
     private static func deck() -> LearningDeck {
         LearningDeck(
             id: 1,
@@ -302,5 +373,14 @@ private actor AsyncGate {
         for continuation in continuations {
             continuation.resume()
         }
+    }
+}
+
+private actor AsyncCounter {
+    private var value = 0
+
+    func next() -> Int {
+        value += 1
+        return value
     }
 }

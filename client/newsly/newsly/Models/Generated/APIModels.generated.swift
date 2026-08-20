@@ -1508,17 +1508,26 @@ struct APIMessageStatusResponse: Codable {
     let messageId: Int
     let status: APIMessageProcessingStatus
     let assistantMessage: APIChatMessage?
+    let partialAssistantMessage: APIChatMessage?
+    let streamGeneration: Int?
+    let streamRevision: Int?
     let error: String?
 
     init(
         messageId: Int,
         status: APIMessageProcessingStatus,
         assistantMessage: APIChatMessage? = nil,
+        partialAssistantMessage: APIChatMessage? = nil,
+        streamGeneration: Int? = nil,
+        streamRevision: Int? = nil,
         error: String? = nil
     ) {
         self.messageId = messageId
         self.status = status
         self.assistantMessage = assistantMessage
+        self.partialAssistantMessage = partialAssistantMessage
+        self.streamGeneration = streamGeneration
+        self.streamRevision = streamRevision
         self.error = error
     }
 
@@ -1526,6 +1535,9 @@ struct APIMessageStatusResponse: Codable {
         case messageId = "message_id"
         case status = "status"
         case assistantMessage = "assistant_message"
+        case partialAssistantMessage = "partial_assistant_message"
+        case streamGeneration = "stream_generation"
+        case streamRevision = "stream_revision"
         case error = "error"
     }
 
@@ -1534,6 +1546,9 @@ struct APIMessageStatusResponse: Codable {
         messageId = try container.decode(Int.self, forKey: .messageId)
         status = try container.decode(APIMessageProcessingStatus.self, forKey: .status)
         assistantMessage = try container.decodeIfPresent(APIChatMessage.self, forKey: .assistantMessage)
+        partialAssistantMessage = try container.decodeIfPresent(APIChatMessage.self, forKey: .partialAssistantMessage)
+        streamGeneration = try container.decodeIfPresent(Int.self, forKey: .streamGeneration)
+        streamRevision = try container.decodeIfPresent(Int.self, forKey: .streamRevision)
         error = try container.decodeIfPresent(String.self, forKey: .error)
     }
 
@@ -1542,6 +1557,9 @@ struct APIMessageStatusResponse: Codable {
         try container.encode(messageId, forKey: .messageId)
         try container.encode(status, forKey: .status)
         try container.encodeIfPresent(assistantMessage, forKey: .assistantMessage)
+        try container.encodeIfPresent(partialAssistantMessage, forKey: .partialAssistantMessage)
+        try container.encodeIfPresent(streamGeneration, forKey: .streamGeneration)
+        try container.encodeIfPresent(streamRevision, forKey: .streamRevision)
         try container.encodeIfPresent(error, forKey: .error)
     }
 }

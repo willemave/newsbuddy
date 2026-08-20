@@ -6,6 +6,7 @@ import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from enum import StrEnum
 from threading import Lock
 from typing import Any, cast
 
@@ -72,6 +73,7 @@ class DetachedChatTurn:
     session_type: str | None
     source: str
     task_id: int | None
+    stream_generation: int = 0
     llm_task_id: int | None = None
 
     @property
@@ -90,6 +92,7 @@ def snapshot_detached_chat_turn(
     message_id: int | None,
     source: str,
     task_id: int | None,
+    stream_generation: int = 0,
 ) -> DetachedChatTurn:
     """Snapshot session fields that remain safe after its DB session closes."""
     usage_snapshot = ChatUsageSnapshot.from_session(session)
@@ -104,6 +107,7 @@ def snapshot_detached_chat_turn(
         session_type=usage_snapshot.session_type,
         source=source,
         task_id=task_id,
+        stream_generation=stream_generation,
     )
 
 
@@ -113,6 +117,7 @@ def snapshot_detached_chat_turn_from_snapshot(
     message_id: int | None,
     source: str,
     task_id: int | None,
+    stream_generation: int = 0,
 ) -> DetachedChatTurn:
     """Build detached runtime state directly from an acceptance-time snapshot."""
     return DetachedChatTurn(
@@ -126,7 +131,24 @@ def snapshot_detached_chat_turn_from_snapshot(
         session_type=snapshot.session_type,
         source=source,
         task_id=task_id,
+        stream_generation=stream_generation,
     )
+
+
+class QueuedChatTurnOutcome(StrEnum):
+    """Terminal result returned to the durable queue adapter."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    OWNERSHIP_LOST = "ownership_lost"
+
+
+class ChatTurnOwnershipLost(RuntimeError):
+    """The current attempt may no longer mutate canonical chat state."""
+
+
+class ChatTurnLeaseCheckError(RuntimeError):
+    """The exact lease could not be verified, so the queue must retry safely."""
 
 
 def start_detached_chat_turn(
@@ -358,6 +380,17 @@ def close_sandbox_session(sandbox_session: PersonalLibrarySandboxSession | None)
         sandbox_session.close()
     except Exception:
         logger.debug("Ignoring sandbox close failure", exc_info=True)
+
+
+def require_current_chat_lease(ensure_lease: Callable[[], bool]) -> None:
+    """Turn an exact lease callback into explicit ownership semantics."""
+
+    try:
+        owns_lease = ensure_lease()
+    except Exception as exc:  # noqa: BLE001
+        raise ChatTurnLeaseCheckError("Unable to verify chat task ownership") from exc
+    if not owns_lease:
+        raise ChatTurnOwnershipLost("Chat task lease ownership was lost")
 
 
 def log_chat_usage(

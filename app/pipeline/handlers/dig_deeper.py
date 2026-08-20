@@ -8,6 +8,13 @@ from app.models.db import Content
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.services.chat_agent import update_message_failed
+from app.services.chat_partial_stream import initialize_chat_stream_attempt
+from app.services.chat_turn_runtime import (
+    ChatTurnLeaseCheckError,
+    ChatTurnOwnershipLost,
+    QueuedChatTurnOutcome,
+    require_current_chat_lease,
+)
 from app.services.dig_deeper import (
     InactiveDigDeeperUserError,
     prepare_dig_deeper_task_message,
@@ -16,6 +23,8 @@ from app.services.dig_deeper import (
 from app.services.queue import TaskType
 
 logger = get_logger(__name__)
+
+DIG_DEEPER_RETRY_EXHAUSTED_MESSAGE = "Dig-deeper chat stopped after repeated worker interruptions"
 
 
 class DigDeeperHandler:
@@ -98,22 +107,67 @@ class DigDeeperHandler:
                 )
                 return TaskResult.fail(str(exc), retryable=False)
 
-        if message_status is MessageProcessingStatus.COMPLETED:
-            return TaskResult.ok()
-        if message_status is MessageProcessingStatus.FAILED:
-            return TaskResult.fail(
-                "Dig-deeper message already failed",
-                retryable=False,
-            )
+            if message_status is MessageProcessingStatus.COMPLETED:
+                return TaskResult.ok()
+            if message_status is MessageProcessingStatus.FAILED:
+                return TaskResult.fail(
+                    "Dig-deeper message already failed",
+                    retryable=False,
+                )
+            if task.retry_count > context.settings.queue.max_retries:
+                try:
+                    require_current_chat_lease(context.renew_current_lease)
+                    initialize_chat_stream_attempt(
+                        db,
+                        message_id=message_id,
+                        stream_generation=task.retry_count,
+                    )
+                    update_message_failed(
+                        db,
+                        message_id,
+                        DIG_DEEPER_RETRY_EXHAUSTED_MESSAGE,
+                        expected_stream_generation=task.retry_count,
+                        commit=False,
+                    )
+                except ChatTurnLeaseCheckError:
+                    return TaskResult.fail(
+                        "Dig-deeper task lease could not be verified",
+                        retryable=True,
+                    )
+                except ChatTurnOwnershipLost:
+                    return TaskResult.fail(
+                        "Dig-deeper task lease ownership was lost",
+                        retryable=True,
+                    )
+                return TaskResult.fail(
+                    DIG_DEEPER_RETRY_EXHAUSTED_MESSAGE,
+                    retryable=False,
+                )
 
         try:
-            run_dig_deeper_message(
+            outcome = run_dig_deeper_message(
                 session_id,
                 message_id,
                 prompt,
                 task_id=task.id,
                 turn_context=turn_context,
+                stream_generation=task.retry_count,
+                ensure_lease=context.renew_current_lease,
             )
+        except ChatTurnLeaseCheckError:
+            logger.warning(
+                "DIG_DEEPER_TASK_ERROR: Could not verify terminal queue ownership",
+                extra={
+                    "component": "dig_deeper",
+                    "operation": "verify_terminal_lease",
+                    "item_id": content_id,
+                    "context_data": {
+                        "session_id": session_id,
+                        "message_id": message_id,
+                    },
+                },
+            )
+            return TaskResult.fail("Dig-deeper task lease could not be verified", retryable=True)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "DIG_DEEPER_TASK_ERROR: Failed to process message for content %s",
@@ -129,32 +183,10 @@ class DigDeeperHandler:
                     },
                 },
             )
-            terminal_state_persisted = False
-            try:
-                with context.db_factory() as db:
-                    update_message_failed(
-                        db,
-                        message_id,
-                        str(exc),
-                        commit=False,
-                    )
-                terminal_state_persisted = True
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "DIG_DEEPER_TASK_ERROR: Failed to mark message terminal",
-                    extra={
-                        "component": "dig_deeper",
-                        "operation": "fail_message",
-                        "item_id": content_id,
-                        "context_data": {
-                            "session_id": session_id,
-                            "message_id": message_id,
-                        },
-                    },
-                )
-            return TaskResult.fail(
-                str(exc),
-                retryable=not terminal_state_persisted,
-            )
+            return TaskResult.fail(str(exc), retryable=True)
 
-        return TaskResult.ok()
+        if outcome == QueuedChatTurnOutcome.COMPLETED:
+            return TaskResult.ok()
+        if outcome == QueuedChatTurnOutcome.OWNERSHIP_LOST:
+            return TaskResult.ok()
+        return TaskResult.fail("Dig-deeper chat turn failed", retryable=False)

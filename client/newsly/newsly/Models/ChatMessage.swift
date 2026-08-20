@@ -289,6 +289,12 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         role == .assistant
     }
 
+    var isVisiblePartialResponse: Bool {
+        isAssistant
+            && isProcessing
+            && !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var isProcessSummary: Bool {
         displayType == .process_summary
     }

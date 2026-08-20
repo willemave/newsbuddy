@@ -6,22 +6,83 @@
 import SwiftUI
 import UIKit
 
+enum LearningDeckChatPresentation: Equatable {
+    case peek
+    case compact
+    case focus
+}
+
+enum LearningDeckChatHeightPolicy {
+    private static let compactHeight: CGFloat = 230
+    private static let regularHeight: CGFloat = 280
+    private static let accessibilityHeight: CGFloat = 340
+
+    static func height(
+        for presentation: LearningDeckChatPresentation,
+        size: CGSize,
+        isAccessibilitySize: Bool
+    ) -> CGFloat? {
+        switch presentation {
+        case .peek:
+            return nil
+        case .compact:
+            let preferred = if isAccessibilitySize {
+                accessibilityHeight
+            } else if size.height < 760 {
+                compactHeight
+            } else {
+                regularHeight
+            }
+            let maximumFraction = isAccessibilitySize ? 0.58 : 0.42
+            return min(preferred, size.height * maximumFraction)
+        case .focus:
+            return size.height * 0.74
+        }
+    }
+}
+
 enum LearningDeckChatFlyoverInteraction {
-    static func shouldExpand(for translation: CGSize) -> Bool {
-        translation.height <= -24 && abs(translation.height) > abs(translation.width)
+    static func target(
+        from presentation: LearningDeckChatPresentation,
+        for translation: CGSize
+    ) -> LearningDeckChatPresentation {
+        guard abs(translation.height) >= 24 else { return presentation }
+        guard abs(translation.height) > abs(translation.width) else { return presentation }
+        if translation.height < 0 {
+            switch presentation {
+            case .peek: return .compact
+            case .compact, .focus: return .focus
+            }
+        }
+        switch presentation {
+        case .peek, .compact: return .peek
+        case .focus: return .compact
+        }
     }
 }
 
 struct LearningDeckChatFlyover: View {
     @Bindable var viewModel: LearningDeckReaderViewModel
-    @Binding var isExpanded: Bool
+    @Binding var presentation: LearningDeckChatPresentation
 
     var body: some View {
         Group {
-            if isExpanded {
+            if presentation != .peek {
                 LearningDeckChatPanel(
                     viewModel: viewModel,
-                    onCollapse: { isExpanded = false }
+                    isFocused: presentation == .focus,
+                    onResize: {
+                        presentation = presentation == .focus ? .compact : .focus
+                    },
+                    onCollapse: {
+                        presentation = .peek
+                    },
+                    onHeaderDrag: { translation in
+                        presentation = LearningDeckChatFlyoverInteraction.target(
+                            from: presentation,
+                            for: translation
+                        )
+                    }
                 )
             } else {
                 peekBar
@@ -37,7 +98,7 @@ struct LearningDeckChatFlyover: View {
 
     private var peekBar: some View {
         Button {
-            isExpanded = true
+            presentation = .compact
         } label: {
             VStack(spacing: 6) {
                 Capsule()
@@ -56,6 +117,13 @@ struct LearningDeckChatFlyover: View {
 
                     Spacer()
 
+                    if viewModel.isSending {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Color.brandPrimary)
+                            .accessibilityLabel("Deck chat is responding")
+                    }
+
                     if let label = learningDeckSlideLabel(for: viewModel.currentSlideContext) {
                         LearningDeckChatSlidePill(label: label)
                     }
@@ -70,11 +138,10 @@ struct LearningDeckChatFlyover: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
-                    if LearningDeckChatFlyoverInteraction.shouldExpand(
+                    presentation = LearningDeckChatFlyoverInteraction.target(
+                        from: presentation,
                         for: value.translation
-                    ) {
-                        isExpanded = true
-                    }
+                    )
                 }
         )
         .accessibilityLabel("Open deck chat")
@@ -84,16 +151,26 @@ struct LearningDeckChatFlyover: View {
 
 struct LearningDeckChatPanel: View {
     @Bindable var viewModel: LearningDeckReaderViewModel
+    let isFocused: Bool
+    let onResize: (() -> Void)?
     let onCollapse: (() -> Void)?
+    let onHeaderDrag: ((CGSize) -> Void)?
 
     @State private var feedOptionActionModel = AssistantFeedOptionActionModel()
+    @State private var isNearBottom = true
 
     init(
         viewModel: LearningDeckReaderViewModel,
-        onCollapse: (() -> Void)? = nil
+        isFocused: Bool = false,
+        onResize: (() -> Void)? = nil,
+        onCollapse: (() -> Void)? = nil,
+        onHeaderDrag: ((CGSize) -> Void)? = nil
     ) {
         self.viewModel = viewModel
+        self.isFocused = isFocused
+        self.onResize = onResize
         self.onCollapse = onCollapse
+        self.onHeaderDrag = onHeaderDrag
     }
 
     var body: some View {
@@ -136,6 +213,23 @@ struct LearningDeckChatPanel: View {
                 LearningDeckChatSlidePill(label: label)
             }
 
+            if let onResize {
+                Button(action: onResize) {
+                    Image(
+                        systemName: isFocused
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right"
+                    )
+                    .font(.appSymbol(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isFocused ? "Use compact chat" : "Use focused chat")
+                .accessibilityIdentifier("learning_deck.chat.resize")
+            }
+
             if let onCollapse {
                 Button(action: onCollapse) {
                     Image(systemName: "chevron.down")
@@ -152,6 +246,13 @@ struct LearningDeckChatPanel: View {
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 10)
         .padding(.bottom, 8)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    onHeaderDrag?(value.translation)
+                }
+        )
     }
 
     private var transcript: some View {
@@ -174,7 +275,7 @@ struct LearningDeckChatPanel: View {
                             .id(item.id)
                         }
 
-                        if viewModel.isSending {
+                        if viewModel.isSending && !viewModel.hasVisiblePartialResponse {
                             ThinkingBubbleView(
                                 startDate: viewModel.thinkingStartedAt,
                                 statusText: "Reading the current slide"
@@ -194,14 +295,33 @@ struct LearningDeckChatPanel: View {
                 .animation(AppMotion.subtle, value: viewModel.timeline.count)
                 .animation(AppMotion.subtle, value: viewModel.isSending)
             }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                let distanceFromBottom =
+                    geometry.contentSize.height
+                    - geometry.visibleRect.maxY
+                    + geometry.contentInsets.bottom
+                return distanceFromBottom < 48
+            } action: { _, newValue in
+                isNearBottom = newValue
+            }
             .onChange(of: viewModel.timeline.last?.id) { _, newId in
                 guard let newId else { return }
+                guard isNearBottom || viewModel.timeline.last?.message.isUser == true else {
+                    return
+                }
                 scrollToBottom(newId, proxy: proxy)
+            }
+            .onChange(of: viewModel.timeline.last?.message.content) { _, _ in
+                guard isNearBottom, let lastId = viewModel.timeline.last?.id else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(lastId, anchor: .bottom)
+                }
             }
             .onChange(of: viewModel.isSending) { _, isSending in
                 if isSending {
+                    guard isNearBottom else { return }
                     scrollToBottom("learning-deck-thinking", proxy: proxy)
-                } else if let lastId = viewModel.timeline.last?.id {
+                } else if isNearBottom, let lastId = viewModel.timeline.last?.id {
                     scrollToBottom(lastId, proxy: proxy)
                 }
             }

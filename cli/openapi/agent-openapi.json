@@ -543,7 +543,7 @@
             "type": "integer"
           },
           "note": {
-            "maxLength": 500,
+            "maxLength": 1500,
             "nullable": true,
             "title": "Note",
             "type": "string"
@@ -4707,8 +4707,27 @@
             "title": "Message Id",
             "type": "integer"
           },
+          "partial_assistant_message": {
+            "$ref": "#/components/schemas/ChatMessageDto",
+            "description": "Latest durable assistant text snapshot while status=processing",
+            "nullable": true
+          },
           "status": {
             "$ref": "#/components/schemas/MessageProcessingStatus"
+          },
+          "stream_generation": {
+            "description": "Monotonic worker-attempt generation for partial response snapshots",
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Stream Generation",
+            "type": "integer"
+          },
+          "stream_revision": {
+            "description": "Monotonic partial response revision within the current generation",
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Stream Revision",
+            "type": "integer"
           }
         },
         "required": [
@@ -5983,7 +6002,7 @@
             "type": "string"
           },
           "interests_prompt": {
-            "description": "Optional presentation interests prompt",
+            "description": "Optional user instructions for Learning Deck generation",
             "maxLength": 4000,
             "nullable": true,
             "title": "Interests Prompt",

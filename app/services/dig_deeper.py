@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,6 +20,7 @@ from app.models.metadata.state import extract_share_and_chat_requests
 from app.services.active_users import lock_active_user
 from app.services.chat_agent import create_processing_message, process_message_async
 from app.services.chat_turn_queue import build_chat_turn_context
+from app.services.chat_turn_runtime import QueuedChatTurnOutcome
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
 from app.services.personal_markdown_library import sync_personal_markdown_for_content
@@ -509,8 +510,10 @@ def run_dig_deeper_message(
     prompt: str,
     *,
     turn_context: ChatTurnProcessingContext,
+    stream_generation: int,
+    ensure_lease: Callable[[], bool],
     task_id: int | None = None,
-) -> None:
+) -> QueuedChatTurnOutcome:
     """Run the dig-deeper message processing synchronously.
 
     Args:
@@ -518,8 +521,10 @@ def run_dig_deeper_message(
         message_id: Chat message ID created for processing.
         prompt: Prompt string to send.
         task_id: Optional queue task identifier for telemetry.
+        stream_generation: Monotonic retry generation for partial and terminal writes.
+        ensure_lease: Exact queue-claim renewal callback before terminal persistence.
     """
-    asyncio.run(
+    return asyncio.run(
         process_message_async(
             session_id,
             message_id,
@@ -527,6 +532,8 @@ def run_dig_deeper_message(
             source="queue",
             task_id=task_id,
             turn_context=turn_context,
+            stream_generation=stream_generation,
+            ensure_lease=ensure_lease,
         )
     )
 

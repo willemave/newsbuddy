@@ -46,10 +46,27 @@ def execute(
 
     status = resolve_message_status(db_message)
     if status == MessageProcessingStatusDto.PROCESSING:
+        partial_assistant_message = None
+        if isinstance(db_message.partial_text, str) and db_message.partial_text.strip():
+            partial_assistant_message = ChatMessageDto(
+                id=build_async_assistant_display_id(message_id),
+                source_message_id=message_id,
+                session_id=session.parent_session_id or require_session_id(session),
+                role=ChatMessageRole.ASSISTANT,
+                content=db_message.partial_text,
+                timestamp=require_timestamp(
+                    db_message.stream_updated_at or db_message.created_at,
+                    detail="Partial chat message missing timestamp",
+                ),
+                status=MessageProcessingStatusDto.PROCESSING,
+            )
         return MessageStatusResponse(
             message_id=message_id,
             status=status,
             assistant_message=None,
+            partial_assistant_message=partial_assistant_message,
+            stream_generation=db_message.stream_generation,
+            stream_revision=db_message.stream_revision,
             error=None,
         )
 
@@ -58,6 +75,9 @@ def execute(
             message_id=message_id,
             status=status,
             assistant_message=None,
+            partial_assistant_message=None,
+            stream_generation=None,
+            stream_revision=None,
             error=db_message.error,
         )
 
@@ -109,6 +129,9 @@ def execute(
             message_id=message_id,
             status=status,
             assistant_message=assistant_message,
+            partial_assistant_message=None,
+            stream_generation=None,
+            stream_revision=None,
             error=None,
         )
 

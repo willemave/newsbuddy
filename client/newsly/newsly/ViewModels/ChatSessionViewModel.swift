@@ -224,6 +224,7 @@ final class ChatSessionViewModel {
     /// instead of re-scanning and re-sorting the timeline on every observation tick.
     private(set) var latestProcessSummary: String?
     private(set) var councilCandidates: [CouncilCandidate] = []
+    private(set) var hasVisiblePartialResponse = false
     private var timelineCouncilActiveChildSessionId: Int?
 
     var activeCouncilChildSessionId: Int? {
@@ -250,6 +251,7 @@ final class ChatSessionViewModel {
         } catch where isCancelledOperation(error) {
             logger.debug("[ViewModel] pollForMessageCompletion cancelled | sessionId=\(self.sessionId)")
         } catch {
+            removePartialAssistantMessage(messageId: messageId)
             logger.error("[ViewModel] pollForMessageCompletion error | error=\(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
@@ -273,6 +275,9 @@ final class ChatSessionViewModel {
                     return
                 }
                 await self.refreshTranscriptSnapshot()
+            },
+            onPartial: { [weak self] update in
+                self?.applyPartialResponse(update, messageId: messageId)
             }
         )
         upsertServerMessage(assistantMessage)
@@ -375,6 +380,9 @@ final class ChatSessionViewModel {
                 logger.debug("[ViewModel] sendMessage cancelled before server acknowledgement | sessionId=\(self.sessionId)")
             }
         } catch {
+            if let messageId = pendingSends[localId]?.messageId {
+                removePartialAssistantMessage(messageId: messageId)
+            }
             errorMessage = error.localizedDescription
             markPendingSendFailed(localId: localId, error: error.localizedDescription)
             logger.error("[ViewModel] sendMessage error | error=\(error.localizedDescription)")
@@ -604,6 +612,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         latestProcessSummary = latestProcessSummaryValue
         councilCandidates = latestCouncilMessage?.councilCandidates.sorted { $0.order < $1.order } ?? []
         timelineCouncilActiveChildSessionId = latestCouncilMessage?.activeCouncilChildSessionId
+        hasVisiblePartialResponse = timeline.contains { $0.message.isVisiblePartialResponse }
     }
 
     private func upsertPendingSend(_ pending: PendingSend) {
@@ -640,10 +649,43 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         )
     }
 
+    private func applyPartialResponse(
+        _ update: ChatPartialResponseUpdate,
+        messageId: Int
+    ) {
+        if let message = update.message {
+            upsertServerMessage(message)
+            return
+        }
+        removePartialAssistantMessage(messageId: messageId)
+    }
+
+    private func removePartialAssistantMessage(messageId: Int) {
+        let partialId = ChatTimelineID.server(
+            sourceMessageId: messageId,
+            role: .assistant,
+            displayType: .message
+        )
+        publishTimeline(
+            timeline.filter { item in
+                item.id != partialId || !item.message.isProcessing
+            }
+        )
+    }
+
     private func upsertTimelineItem(_ item: ChatTimelineItem) {
-        var itemsById = Dictionary(uniqueKeysWithValues: timeline.map { ($0.id, $0) })
-        itemsById[item.id] = item
-        publishTimeline(Array(itemsById.values))
+        if let existingIndex = timeline.firstIndex(where: { $0.id == item.id }) {
+            var replacement = item
+            if case .local(let localId) = item.id {
+                replacement.isQueued = sendQueue.contains(localId: localId)
+            }
+            var updated = timeline
+            updated[existingIndex] = replacement
+            timeline = updated
+            refreshDerivedTimelineState()
+            return
+        }
+        publishTimeline(timeline + [item])
     }
 
     private func discardPendingSend(localId: UUID) {

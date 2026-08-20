@@ -17,6 +17,10 @@ from app.pipeline.handlers.chat_turn import (
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope
 from app.services.chat_turn_queue import build_chat_turn_context
+from app.services.chat_turn_runtime import (
+    ChatTurnLeaseCheckError,
+    QueuedChatTurnOutcome,
+)
 
 
 def _seed_turn(db, user, *, session: ChatSession | None = None):
@@ -30,6 +34,7 @@ def _seed_turn(db, user, *, session: ChatSession | None = None):
         )
         db.add(session)
         db.flush()
+    assert session.id is not None
     context = build_chat_turn_context(
         session,
         visible_session_id=session.id,
@@ -45,6 +50,7 @@ def _seed_turn(db, user, *, session: ChatSession | None = None):
     )
     db.add(message)
     db.flush()
+    assert message.id is not None
     task = ProcessingTask(
         owner_user_id=user.id,
         task_type=TaskType.CHAT_TURN.value,
@@ -58,6 +64,9 @@ def _seed_turn(db, user, *, session: ChatSession | None = None):
 
 
 def _envelope(task: ProcessingTask) -> TaskEnvelope:
+    assert task.id is not None
+    assert isinstance(task.payload, dict)
+    assert task.retry_count is not None
     return TaskEnvelope(
         id=task.id,
         task_type=TaskType.CHAT_TURN,
@@ -79,13 +88,14 @@ def _context(db_session_factory) -> TaskContext:
         finally:
             db.close()
 
-    class Context:
-        pass
-
-    context = Context()
-    context.db_factory = db_factory
-    context.settings = SimpleNamespace(queue=SimpleNamespace(max_retries=3))
-    return cast(TaskContext, context)
+    return cast(
+        TaskContext,
+        SimpleNamespace(
+            db_factory=db_factory,
+            settings=SimpleNamespace(queue=SimpleNamespace(max_retries=3)),
+            renew_current_lease=lambda: True,
+        ),
+    )
 
 
 def test_chat_turn_completes_and_terminal_redelivery_is_a_noop(
@@ -100,12 +110,14 @@ def test_chat_turn_completes_and_terminal_redelivery_is_a_noop(
     db_session.commit()
     calls = []
 
-    def complete(_task, turn_context) -> None:
+    def complete(_task, turn_context, *, ensure_lease) -> QueuedChatTurnOutcome:
+        assert ensure_lease() is True
         calls.append(turn_context)
         with db_session_factory() as db:
             row = db.query(ChatMessage).filter(ChatMessage.id == message.id).one()
             row.status = MessageProcessingStatus.COMPLETED.value
             db.commit()
+        return QueuedChatTurnOutcome.COMPLETED
 
     monkeypatch.setattr("app.pipeline.handlers.chat_turn._run_chat_turn", complete)
     handler = ChatTurnHandler()
@@ -146,11 +158,12 @@ def test_chat_turn_defers_behind_earlier_processing_message(
     earlier_row.status = MessageProcessingStatus.FAILED.value
     db_session.commit()
 
-    def complete_later(_task, _turn_context) -> None:
+    def complete_later(_task, _turn_context, **_kwargs) -> QueuedChatTurnOutcome:
         with db_session_factory() as db:
             row = db.get(ChatMessage, later.id)
             row.status = MessageProcessingStatus.COMPLETED.value
             db.commit()
+        return QueuedChatTurnOutcome.COMPLETED
 
     monkeypatch.setattr("app.pipeline.handlers.chat_turn._run_chat_turn", complete_later)
     assert (
@@ -198,7 +211,7 @@ def test_chat_turn_rejects_invalid_lifecycle_boundaries_without_provider_work(
     assert persisted.status == expected_status
 
 
-def test_chat_turn_provider_exception_uses_stable_terminal_copy(
+def test_unexpected_chat_executor_exception_preserves_message_for_retry(
     db_session,
     db_session_factory,
     monkeypatch,
@@ -214,12 +227,11 @@ def test_chat_turn_provider_exception_uses_stable_terminal_copy(
     result = ChatTurnHandler().handle(_envelope(task), _context(db_session_factory))
 
     assert result.success is False
-    assert result.retryable is False
+    assert result.retryable is True
     db_session.expire_all()
     persisted = db_session.get(ChatMessage, message.id)
-    assert persisted.status == MessageProcessingStatus.FAILED.value
-    assert persisted.error == CHAT_TURN_FAILED_MESSAGE
-    assert "secret" not in persisted.error
+    assert persisted.status == MessageProcessingStatus.PROCESSING.value
+    assert persisted.error is None
 
 
 def test_chat_turn_reclaim_budget_exhaustion_terminalizes_without_provider(
@@ -244,3 +256,47 @@ def test_chat_turn_reclaim_budget_exhaustion_terminalizes_without_provider(
     persisted = db_session.get(ChatMessage, message.id)
     assert persisted.status == MessageProcessingStatus.FAILED.value
     assert persisted.error == CHAT_TURN_FAILED_MESSAGE
+
+
+def test_chat_turn_ownership_loss_does_not_terminalize_canonical_message(
+    db_session,
+    db_session_factory,
+    monkeypatch,
+    test_user,
+) -> None:
+    _, message, task, _ = _seed_turn(db_session, test_user)
+    monkeypatch.setattr(
+        "app.pipeline.handlers.chat_turn._run_chat_turn",
+        lambda *_args, **_kwargs: QueuedChatTurnOutcome.OWNERSHIP_LOST,
+    )
+
+    result = ChatTurnHandler().handle(_envelope(task), _context(db_session_factory))
+
+    assert result.success is True
+    db_session.expire_all()
+    assert (
+        db_session.get(ChatMessage, message.id).status == MessageProcessingStatus.PROCESSING.value
+    )
+
+
+def test_chat_turn_lease_verification_error_retries_without_message_write(
+    db_session,
+    db_session_factory,
+    monkeypatch,
+    test_user,
+) -> None:
+    _, message, task, _ = _seed_turn(db_session, test_user)
+
+    def fail_lease_check(*_args, **_kwargs):
+        raise ChatTurnLeaseCheckError("database unavailable")
+
+    monkeypatch.setattr("app.pipeline.handlers.chat_turn._run_chat_turn", fail_lease_check)
+
+    result = ChatTurnHandler().handle(_envelope(task), _context(db_session_factory))
+
+    assert result.success is False
+    assert result.retryable is True
+    db_session.expire_all()
+    assert (
+        db_session.get(ChatMessage, message.id).status == MessageProcessingStatus.PROCESSING.value
+    )

@@ -135,6 +135,7 @@ struct ChatSessionView: View {
             isSending: viewModel.isSending,
             thinkingStartedAt: viewModel.thinkingStartedAt,
             latestProcessSummary: viewModel.latestProcessSummary,
+            hasVisiblePartialResponse: viewModel.hasVisiblePartialResponse,
             session: viewModel.session,
             scrollToBottomRequest: scrollToBottomRequest,
             retryingCouncilChildSessionId: viewModel.retryingCouncilChildSessionId,

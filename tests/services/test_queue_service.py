@@ -700,6 +700,7 @@ def test_dequeue_reclaims_expired_processing_task(db_session, monkeypatch):
     ("task_type", "queue_name"),
     [
         (TaskType.CHAT_TURN, TaskQueue.CHAT),
+        (TaskType.DIG_DEEPER, TaskQueue.CHAT),
         (TaskType.RUN_LLM_TASK, TaskQueue.LLM),
         (TaskType.GENERATE_AUDIO_EPISODE, TaskQueue.AUDIO_EPISODE),
     ],

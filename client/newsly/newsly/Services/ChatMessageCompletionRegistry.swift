@@ -11,22 +11,45 @@ protocol MessageStatusFetching: AnyObject {
 
 /// Controls the status-request cadence for an asynchronous chat message.
 ///
-/// The live policy preserves the previous one-minute timeout window while reducing
-/// the maximum request count from 120 to 36: four fast polls, four medium polls,
-/// then a bounded two-second cadence.
+/// The live policy preserves the one-minute idle timeout with 36 requests. A newer
+/// durable partial cursor resets that idle budget and polls at the fast cadence,
+/// bounded by a separate absolute request ceiling.
 struct ChatMessageCompletionPollingPolicy: Sendable, Equatable {
     let delaysNanoseconds: [UInt64]
+    let progressDelayNanoseconds: UInt64
+    let absoluteMaximumRequestCount: Int
 
-    var maximumRequestCount: Int {
-        delaysNanoseconds.count + 1
+    init(
+        delaysNanoseconds: [UInt64],
+        progressDelayNanoseconds: UInt64 = 500_000_000,
+        absoluteMaximumRequestCount: Int? = nil
+    ) {
+        let idleMaximumRequestCount = delaysNanoseconds.count + 1
+        self.delaysNanoseconds = delaysNanoseconds
+        self.progressDelayNanoseconds = progressDelayNanoseconds
+        self.absoluteMaximumRequestCount = max(
+            idleMaximumRequestCount,
+            absoluteMaximumRequestCount ?? idleMaximumRequestCount
+        )
     }
 
     static let adaptive = ChatMessageCompletionPollingPolicy(
         delaysNanoseconds:
             Array(repeating: 500_000_000, count: 4)
             + Array(repeating: 1_000_000_000, count: 4)
-            + Array(repeating: 2_000_000_000, count: 27)
+            + Array(repeating: 2_000_000_000, count: 27),
+        absoluteMaximumRequestCount: 120
     )
+}
+
+struct ChatPartialResponseCursor: Equatable, Sendable {
+    let generation: Int
+    let revision: Int
+}
+
+struct ChatPartialResponseUpdate: @unchecked Sendable {
+    let message: ChatMessage?
+    let cursor: ChatPartialResponseCursor
 }
 
 /// Owns message-status polling for the whole app and coalesces all observers of a
@@ -37,9 +60,17 @@ actor ChatMessageCompletionRegistry {
     typealias FetchStatus = @Sendable (Int) async throws -> MessageStatusResponse
     typealias Sleep = @Sendable (UInt64) async throws -> Void
     typealias ProcessingObserver = @MainActor @Sendable (Int) async -> Void
+    typealias PartialObserver = @MainActor @Sendable (ChatPartialResponseUpdate) async -> Void
 
-    private struct ObserverMetadata {
+    private final class ObserverMetadata {
         let onProcessing: ProcessingObserver?
+        let onPartial: PartialObserver?
+        var lastPartialCursor: ChatPartialResponseCursor?
+
+        init(onProcessing: ProcessingObserver?, onPartial: PartialObserver?) {
+            self.onProcessing = onProcessing
+            self.onPartial = onPartial
+        }
     }
 
     private typealias ObserverStore = KeyedPollingObserverStore<Int, ChatMessage, ObserverMetadata>
@@ -91,7 +122,8 @@ actor ChatMessageCompletionRegistry {
 
     nonisolated func waitForCompletion(
         messageId: Int,
-        onProcessing: ProcessingObserver? = nil
+        onProcessing: ProcessingObserver? = nil,
+        onPartial: PartialObserver? = nil
     ) async throws -> ChatMessage {
         let observerID = UUID()
         let cancellationState = PollingObserverCancellationState()
@@ -101,7 +133,8 @@ actor ChatMessageCompletionRegistry {
                 messageId: messageId,
                 observerID: observerID,
                 cancellationState: cancellationState,
-                onProcessing: onProcessing
+                onProcessing: onProcessing,
+                onPartial: onPartial
             )
             try Task.checkCancellation()
             return message
@@ -123,7 +156,8 @@ actor ChatMessageCompletionRegistry {
         messageId: Int,
         observerID: UUID,
         cancellationState: PollingObserverCancellationState,
-        onProcessing: ProcessingObserver?
+        onProcessing: ProcessingObserver?,
+        onPartial: PartialObserver?
     ) async throws -> ChatMessage {
         try await withCheckedThrowingContinuation { continuation in
             if cancellationState.isCancelled {
@@ -138,7 +172,10 @@ actor ChatMessageCompletionRegistry {
 
             let observer = ObserverStore.Observer(
                 continuation: continuation,
-                metadata: ObserverMetadata(onProcessing: onProcessing)
+                metadata: ObserverMetadata(
+                    onProcessing: onProcessing,
+                    onPartial: onPartial
+                )
             )
             guard let generation = observerStore.addObserver(
                 observer,
@@ -188,7 +225,10 @@ actor ChatMessageCompletionRegistry {
     }
 
     private func poll(messageId: Int, generation: UUID) async {
-        for requestIndex in 0..<policy.maximumRequestCount {
+        var idleRequestIndex = 0
+        var latestCursor: ChatPartialResponseCursor?
+
+        for requestIndex in 0..<policy.absoluteMaximumRequestCount {
             do {
                 try Task.checkCancellation()
                 guard observerStore.isActive(key: messageId, generation: generation) else { return }
@@ -222,23 +262,62 @@ actor ChatMessageCompletionRegistry {
                     return
 
                 case .processing, .unknown(_):
+                    let responseCursor = partialCursor(from: status)
+                    let madeProgress = responseCursor.map {
+                        isNewerPartialCursor($0, than: latestCursor)
+                    } ?? false
+                    if let responseCursor {
+                        if madeProgress {
+                            latestCursor = responseCursor
+                        }
+                        if responseCursor == latestCursor {
+                            await notifyPartial(
+                                messageId: messageId,
+                                generation: generation,
+                                update: ChatPartialResponseUpdate(
+                                    message: status.partialAssistantMessage,
+                                    cursor: responseCursor
+                                )
+                            )
+                        }
+                    }
                     await notifyProcessing(
                         messageId: messageId,
                         generation: generation,
                         attempt: requestIndex + 1
                     )
+
+                    guard requestIndex + 1 < policy.absoluteMaximumRequestCount else {
+                        finish(
+                            messageId: messageId,
+                            generation: generation,
+                            outcome: .failure(ChatServiceError.timeout),
+                            cachesOutcome: false
+                        )
+                        return
+                    }
+
+                    let delay: UInt64
+                    if madeProgress {
+                        idleRequestIndex = 0
+                        delay = policy.progressDelayNanoseconds
+                    } else {
+                        guard idleRequestIndex < policy.delaysNanoseconds.count else {
+                            finish(
+                                messageId: messageId,
+                                generation: generation,
+                                outcome: .failure(ChatServiceError.timeout),
+                                cachesOutcome: false
+                            )
+                            return
+                        }
+                        delay = policy.delaysNanoseconds[idleRequestIndex]
+                        idleRequestIndex += 1
+                    }
+                    try await sleep(delay)
+                    continue
                 }
 
-                guard requestIndex < policy.delaysNanoseconds.count else {
-                    finish(
-                        messageId: messageId,
-                        generation: generation,
-                        outcome: .failure(ChatServiceError.timeout),
-                        cachesOutcome: false
-                    )
-                    return
-                }
-                try await sleep(policy.delaysNanoseconds[requestIndex])
             } catch is CancellationError {
                 return
             } catch {
@@ -253,9 +332,39 @@ actor ChatMessageCompletionRegistry {
         }
     }
 
+    private func partialCursor(from status: MessageStatusResponse) -> ChatPartialResponseCursor? {
+        guard let generation = status.streamGeneration, let revision = status.streamRevision else {
+            return nil
+        }
+        return ChatPartialResponseCursor(generation: generation, revision: revision)
+    }
+
+    private func isNewerPartialCursor(
+        _ cursor: ChatPartialResponseCursor,
+        than previous: ChatPartialResponseCursor?
+    ) -> Bool {
+        guard let previous else { return true }
+        if cursor.generation != previous.generation {
+            return cursor.generation > previous.generation
+        }
+        return cursor.revision > previous.revision
+    }
+
     private func notifyProcessing(messageId: Int, generation: UUID, attempt: Int) async {
         for observer in observerStore.observers(for: messageId, generation: generation) {
             await observer.metadata.onProcessing?(attempt)
+        }
+    }
+
+    private func notifyPartial(
+        messageId: Int,
+        generation: UUID,
+        update: ChatPartialResponseUpdate
+    ) async {
+        for observer in observerStore.observers(for: messageId, generation: generation) {
+            guard observer.metadata.lastPartialCursor != update.cursor else { continue }
+            observer.metadata.lastPartialCursor = update.cursor
+            await observer.metadata.onPartial?(update)
         }
     }
 

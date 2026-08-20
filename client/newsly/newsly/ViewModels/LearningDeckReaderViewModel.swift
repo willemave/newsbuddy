@@ -85,6 +85,10 @@ final class LearningDeckReaderViewModel {
     var errorMessage: String?
     var thinkingStartedAt: Date?
 
+    var hasVisiblePartialResponse: Bool {
+        timeline.contains { $0.message.isVisiblePartialResponse }
+    }
+
     // Viewer resolution (generating state) — populated when the deck is still
     // being generated and has no viewer URL yet.
     var resolvedViewerURL: URL?
@@ -394,7 +398,10 @@ final class LearningDeckReaderViewModel {
                 return
             }
             let assistantMessage = try await messageCompletionRegistry.waitForCompletion(
-                messageId: response.messageId
+                messageId: response.messageId,
+                onPartial: { [weak self] update in
+                    self?.applyPartialResponse(update, messageId: response.messageId)
+                }
             )
             upsertTimelineItem(
                 ChatTimelineItem(
@@ -410,6 +417,7 @@ final class LearningDeckReaderViewModel {
                 removeTimelineItem(id: .local(localId))
             }
         } catch {
+            removePartialAssistantMessage(messageId: pendingMessageId(for: .local(localId)))
             errorMessage = error.localizedDescription
             upsertTimelineItem(
                 ChatTimelineItem(
@@ -449,7 +457,10 @@ final class LearningDeckReaderViewModel {
 
         do {
             let assistantMessage = try await messageCompletionRegistry.waitForCompletion(
-                messageId: messageId
+                messageId: messageId,
+                onPartial: { [weak self] update in
+                    self?.applyPartialResponse(update, messageId: messageId)
+                }
             )
             upsertTimelineItem(
                 ChatTimelineItem(
@@ -463,6 +474,7 @@ final class LearningDeckReaderViewModel {
         } catch where isNetworkCancellation(error) {
             return
         } catch {
+            removePartialAssistantMessage(messageId: messageId)
             errorMessage = error.localizedDescription
             markPendingMessageFailed(messageId: messageId, error: error.localizedDescription)
         }
@@ -497,7 +509,7 @@ final class LearningDeckReaderViewModel {
             lines.append("Slide text: \(text)")
         }
 
-        return Self.clipped(lines.joined(separator: "\n"), maxLength: 500)
+        return lines.joined(separator: "\n")
     }
 
     private var currentSlidePosition: String? {
@@ -512,20 +524,50 @@ final class LearningDeckReaderViewModel {
     }
 
     private func upsertTimelineItem(_ item: ChatTimelineItem) {
-        var itemsById = Dictionary(uniqueKeysWithValues: timeline.map { ($0.id, $0) })
-        itemsById[item.id] = item
-        timeline = itemsById.values.map { item in
-            var resolved = item
-            if case .local(let localId) = item.id {
-                resolved.isQueued = sendQueue.contains(localId: localId)
-            }
-            return resolved
+        var replacement = item
+        if case .local(let localId) = item.id {
+            replacement.isQueued = sendQueue.contains(localId: localId)
         }
-        .sorted { $0.isOrderedBefore($1) }
+        if let existingIndex = timeline.firstIndex(where: { $0.id == item.id }) {
+            timeline[existingIndex] = replacement
+            return
+        }
+        timeline.append(replacement)
+        timeline.sort { $0.isOrderedBefore($1) }
     }
 
     private func removeTimelineItem(id: ChatTimelineID) {
         timeline.removeAll { $0.id == id }
+    }
+
+    private func applyPartialResponse(
+        _ update: ChatPartialResponseUpdate,
+        messageId: Int
+    ) {
+        if let message = update.message {
+            upsertTimelineItem(
+                ChatTimelineItem(
+                    id: ChatTimelineID.server(for: message),
+                    message: message,
+                    pendingMessageId: messageId,
+                    retryText: nil
+                )
+            )
+            return
+        }
+        removePartialAssistantMessage(messageId: messageId)
+    }
+
+    private func removePartialAssistantMessage(messageId: Int?) {
+        guard let messageId else { return }
+        let partialId = ChatTimelineID.server(
+            sourceMessageId: messageId,
+            role: .assistant,
+            displayType: .message
+        )
+        timeline.removeAll { item in
+            item.id == partialId && item.message.isProcessing
+        }
     }
 
     private var pendingForegroundMessageId: Int? {
@@ -578,9 +620,4 @@ final class LearningDeckReaderViewModel {
         Int(id.uuidString.prefix(8), radix: 16) ?? 0
     }
 
-    private static func clipped(_ value: String, maxLength: Int) -> String {
-        guard value.count > maxLength else { return value }
-        guard maxLength > 3 else { return String(value.prefix(maxLength)) }
-        return String(value.prefix(maxLength - 3)) + "..."
-    }
 }

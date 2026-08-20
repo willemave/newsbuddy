@@ -159,12 +159,76 @@ final class ChatMessageCompletionRegistryTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
 
-        XCTAssertEqual(policy.maximumRequestCount, 36)
         let fetchCount = await source.callCount
         let recordedDelays = await delays.values
         XCTAssertEqual(fetchCount, 36)
         XCTAssertEqual(recordedDelays.count, 35)
         XCTAssertEqual(recordedDelays.reduce(0, +), 60_000_000_000)
+    }
+
+    func testPartialCursorAdvancementPublishesSnapshotsAndResetsIdleCadence() async throws {
+        let source = ScriptedMessageStatusSource(
+            responses: [
+                .partial(Self.partialMessage("Draft"), generation: 0, revision: 1),
+                .partial(Self.partialMessage("Draft"), generation: 0, revision: 1),
+                .partial(Self.partialMessage("Draft expanded"), generation: 0, revision: 2),
+                .completed(Self.assistantMessage()),
+            ]
+        )
+        let delays = CompletionDelayRecorder()
+        let partials = PartialResponseRecorder()
+        let registry = ChatMessageCompletionRegistry(
+            fetchStatus: { try await source.fetch(messageId: $0) },
+            policy: ChatMessageCompletionPollingPolicy(
+                delaysNanoseconds: [10, 20],
+                progressDelayNanoseconds: 1,
+                absoluteMaximumRequestCount: 10
+            ),
+            sleep: { delay in await delays.record(delay) }
+        )
+
+        let final = try await registry.waitForCompletion(
+            messageId: 501,
+            onPartial: { update in
+                await partials.record(update)
+            }
+        )
+
+        XCTAssertEqual(final.content, "Ready")
+        let recordedPartials = await partials.contents
+        let recordedDelays = await delays.values
+        XCTAssertEqual(recordedPartials, ["Draft", "Draft expanded"])
+        XCTAssertEqual(recordedDelays, [1, 10, 1])
+    }
+
+    func testNewGenerationPublishesPartialResetBeforeFinal() async throws {
+        let source = ScriptedMessageStatusSource(
+            responses: [
+                .partial(Self.partialMessage("Old attempt"), generation: 0, revision: 2),
+                .partial(nil, generation: 1, revision: 0),
+                .completed(Self.assistantMessage()),
+            ]
+        )
+        let partials = PartialResponseRecorder()
+        let registry = ChatMessageCompletionRegistry(
+            fetchStatus: { try await source.fetch(messageId: $0) },
+            policy: ChatMessageCompletionPollingPolicy(
+                delaysNanoseconds: [1],
+                progressDelayNanoseconds: 1,
+                absoluteMaximumRequestCount: 5
+            ),
+            sleep: { _ in }
+        )
+
+        _ = try await registry.waitForCompletion(
+            messageId: 501,
+            onPartial: { update in
+                await partials.record(update)
+            }
+        )
+
+        let recordedPartials = await partials.contents
+        XCTAssertEqual(recordedPartials, ["Old attempt", nil])
     }
 
     private static func assistantMessage() -> ChatMessage {
@@ -174,6 +238,17 @@ final class ChatMessageCompletionRegistryTests: XCTestCase {
             timestamp: Date(timeIntervalSince1970: 0),
             content: "Ready",
             status: .completed
+        )
+    }
+
+    private static func partialMessage(_ content: String) -> ChatMessage {
+        ChatMessage(
+            id: 901,
+            sourceMessageId: 501,
+            role: .assistant,
+            timestamp: Date(timeIntervalSince1970: 0),
+            content: content,
+            status: .processing
         )
     }
 
@@ -194,6 +269,7 @@ final class ChatMessageCompletionRegistryTests: XCTestCase {
 
 private enum ScriptedMessageStatus {
     case processing
+    case partial(ChatMessage?, generation: Int, revision: Int)
     case completed(ChatMessage)
     case failed(String)
 }
@@ -221,6 +297,14 @@ private actor ScriptedMessageStatusSource {
         switch response {
         case .processing:
             return MessageStatusResponse(messageId: messageId, status: .processing)
+        case .partial(let message, let generation, let revision):
+            return MessageStatusResponse(
+                messageId: messageId,
+                status: .processing,
+                partialAssistantMessage: message,
+                streamGeneration: generation,
+                streamRevision: revision
+            )
         case .completed(let message):
             return MessageStatusResponse(
                 messageId: messageId,
@@ -234,6 +318,14 @@ private actor ScriptedMessageStatusSource {
                 error: error
             )
         }
+    }
+}
+
+private actor PartialResponseRecorder {
+    private(set) var contents: [String?] = []
+
+    func record(_ update: ChatPartialResponseUpdate) {
+        contents.append(update.message?.content)
     }
 }
 

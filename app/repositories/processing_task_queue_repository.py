@@ -19,6 +19,7 @@ _TASKS = ProcessingTask.__table__
 _LEASE_RECLAIM_BUDGET_TASK_TYPES = frozenset(
     {
         TaskType.CHAT_TURN.value,
+        TaskType.DIG_DEEPER.value,
         TaskType.GENERATE_AUDIO_EPISODE.value,
         TaskType.RUN_LLM_TASK.value,
     }

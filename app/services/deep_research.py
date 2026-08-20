@@ -5,6 +5,7 @@ Deep research runs as a background task with web search and code interpreter too
 """
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
@@ -18,6 +19,13 @@ from app.core.settings import get_settings
 from app.models.contracts import MessageProcessingStatus
 from app.models.db import ChatMessage, ChatSession, Content
 from app.models.internal.chat_turn import ChatTurnProcessingContext
+from app.services.chat_partial_stream import initialize_chat_stream_attempt
+from app.services.chat_turn_runtime import (
+    ChatTurnLeaseCheckError,
+    ChatTurnOwnershipLost,
+    QueuedChatTurnOutcome,
+    require_current_chat_lease,
+)
 from app.services.llm_models import DEEP_RESEARCH_MODEL
 from app.services.vendor_costs import record_vendor_usage_out_of_band
 
@@ -32,6 +40,7 @@ logger = get_logger(__name__)
 DEEP_RESEARCH_TIMEOUT = 600.0  # 10 minutes max
 POLL_INTERVAL = 2.0  # Poll every 2 seconds
 MAX_POLL_ATTEMPTS = 300  # 10 minutes at 2 second intervals
+DEEP_RESEARCH_FAILED_MESSAGE = "This research turn could not be completed. Please retry."
 
 
 @dataclass
@@ -54,6 +63,7 @@ class DeepResearchTurnState:
     user_id: int
     content_id: int | None
     context: str | None
+    response_id: str | None
 
 
 class DeepResearchClient:
@@ -431,14 +441,17 @@ def _load_deep_research_turn_state(
     message_id: int,
     source: str,
     turn_context: ChatTurnProcessingContext,
-) -> DeepResearchTurnState | None:
+) -> DeepResearchTurnState:
     session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
     if not session:
         logger.error("[DeepResearch:ERROR] Session %s not found", session_id)
-        return None
+        raise ValueError(f"Chat session {session_id} not found")
     session_snapshot = turn_context.session
     if session_snapshot.effective_session_id != session_id:
         raise ValueError("Deep-research turn context does not match the requested session")
+    message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+    if message is None or message.session_id != session_id:
+        raise ValueError("Deep-research message does not match the requested session")
 
     context = None
     if session_snapshot.context_snapshot:
@@ -473,7 +486,30 @@ def _load_deep_research_turn_state(
         user_id=session_snapshot.user_id,
         content_id=session_snapshot.content_id,
         context=context,
+        response_id=message.deep_research_response_id,
     )
+
+
+def _persist_deep_research_response_id(
+    db: Session,
+    *,
+    message_id: int,
+    response_id: str,
+    stream_generation: int,
+) -> str:
+    """Persist the provider run identity before long-lived polling begins."""
+    message = db.query(ChatMessage).filter(ChatMessage.id == message_id).with_for_update().first()
+    if message is None:
+        raise ValueError(f"Message {message_id} not found")
+    if message.stream_generation != stream_generation:
+        raise ChatTurnOwnershipLost("A newer chat attempt owns this message")
+    if message.status != MessageProcessingStatus.PROCESSING.value:
+        raise ChatTurnOwnershipLost("Chat message is already terminal")
+    if message.deep_research_response_id:
+        return str(message.deep_research_response_id)
+    message.deep_research_response_id = response_id
+    db.commit()
+    return response_id
 
 
 def _persist_deep_research_success(
@@ -483,6 +519,7 @@ def _persist_deep_research_success(
     message_id: int,
     user_prompt: str,
     output_text: str,
+    stream_generation: int,
 ) -> bool:
     from pydantic_ai.messages import (
         ModelMessagesTypeAdapter,
@@ -510,11 +547,15 @@ def _persist_deep_research_success(
     session = db.query(ChatSession).filter(ChatSession.id == state.session_id).first()
     if db_message is None or session is None:
         return False
+    if db_message.stream_generation != stream_generation:
+        raise ChatTurnOwnershipLost("A newer chat attempt owns this message")
     if db_message.status != MessageProcessingStatus.PROCESSING.value:
         return db_message.status == MessageProcessingStatus.COMPLETED.value
 
     db_message.message_list = message_json
     db_message.status = MessageProcessingStatus.COMPLETED.value
+    db_message.error = None
+    db_message.partial_text = None
     session.last_message_at = datetime.now(UTC)
     session.updated_at = datetime.now(UTC)
     db.commit()
@@ -526,10 +567,12 @@ async def process_deep_research_message(
     message_id: int,
     user_prompt: str,
     *,
+    turn_context: ChatTurnProcessingContext,
+    stream_generation: int,
+    ensure_lease: Callable[[], bool],
     source: str = "realtime",
     task_id: int | None = None,
-    turn_context: ChatTurnProcessingContext,
-) -> None:
+) -> QueuedChatTurnOutcome:
     """Process a deep research message asynchronously.
 
     This function runs independently after the endpoint returns.
@@ -540,6 +583,9 @@ async def process_deep_research_message(
         session_id: Chat session ID.
         message_id: ChatMessage ID to update on completion.
         user_prompt: The user's research query.
+        turn_context: Immutable acceptance-time session and screen context.
+        stream_generation: Monotonic attempt generation for fenced writes.
+        ensure_lease: Exact queue-claim renewal callback.
         source: Request source label (`realtime` or `queue`).
         task_id: Optional queue task identifier.
     """
@@ -560,11 +606,15 @@ async def process_deep_research_message(
         ),
     )
 
-    SessionLocal = get_session_factory()
-    state: DeepResearchTurnState | None = None
-    response_id: str | None = None
+    session_factory = get_session_factory()
     try:
-        with SessionLocal() as db:
+        with session_factory() as db:
+            initialize_chat_stream_attempt(
+                db,
+                message_id=message_id,
+                stream_generation=stream_generation,
+            )
+            db.commit()
             state = _load_deep_research_turn_state(
                 db,
                 session_id=session_id,
@@ -572,8 +622,6 @@ async def process_deep_research_message(
                 source=source,
                 turn_context=turn_context,
             )
-        if state is None:
-            return
 
         logger.info(
             "Deep research LLM call started",
@@ -591,80 +639,59 @@ async def process_deep_research_message(
                 context_data={"model": DEEP_RESEARCH_MODEL},
             ),
         )
-        # Start the deep research
         client = get_deep_research_client()
-        response_id = await client.start_research(user_prompt, state.context)
+        response_id = state.response_id
+        if response_id is None:
+            require_current_chat_lease(ensure_lease)
+            submitted_response_id = await client.start_research(user_prompt, state.context)
+            with session_factory() as db:
+                response_id = _persist_deep_research_response_id(
+                    db,
+                    message_id=message_id,
+                    response_id=submitted_response_id,
+                    stream_generation=stream_generation,
+                )
 
-        logger.info(
-            "[DeepResearch:SUBMITTED] sid=%s mid=%s response_id=%s user_id=%s",
-            session_id,
-            message_id,
-            response_id,
-            state.user_id,
-        )
+            logger.info(
+                "[DeepResearch:SUBMITTED] sid=%s mid=%s response_id=%s user_id=%s",
+                session_id,
+                message_id,
+                response_id,
+                state.user_id,
+            )
+        else:
+            logger.info(
+                "[DeepResearch:RESUMED] sid=%s mid=%s response_id=%s user_id=%s",
+                session_id,
+                message_id,
+                response_id,
+                state.user_id,
+            )
 
-        # Wait for completion
+        require_current_chat_lease(ensure_lease)
         result = await client.wait_for_completion(response_id)
 
         if result.status in ("succeeded", "completed") and result.output_text:
-            with SessionLocal() as db:
+            require_current_chat_lease(ensure_lease)
+            with session_factory() as db:
                 persisted = _persist_deep_research_success(
                     db,
                     state=state,
                     message_id=message_id,
                     user_prompt=user_prompt,
                     output_text=result.output_text,
+                    stream_generation=stream_generation,
                 )
-            if persisted:
-                total_ms = (perf_counter() - total_start) * 1000
-                logger.info(
-                    "Deep research turn completed",
-                    extra=build_log_extra(
-                        component="deep_research",
-                        operation="process_message",
-                        event_name="chat.turn",
-                        status="completed",
-                        duration_ms=total_ms,
-                        session_id=session_id,
-                        message_id=message_id,
-                        user_id=state.user_id,
-                        content_id=state.content_id,
-                        source=source,
-                        task_id=task_id,
-                        context_data={
-                            "output_chars": len(result.output_text),
-                            "model": DEEP_RESEARCH_MODEL,
-                        },
-                    ),
-                )
-            if result.usage:
-                record_vendor_usage_out_of_band(
-                    provider="deep_research",
-                    model=DEEP_RESEARCH_MODEL,
-                    feature="chat",
-                    operation="chat.deep_research",
-                    source=source,
-                    usage=result.usage,
-                    task_id=task_id,
-                    content_id=state.content_id,
-                    session_id=session_id,
-                    message_id=message_id,
-                    user_id=state.user_id,
-                    metadata={"response_id": response_id},
-                )
-        else:
-            error_msg = result.error or f"Research failed with status: {result.status}"
-            with SessionLocal() as db:
-                _update_message_failed(db, message_id, error_msg)
-
+            if not persisted:
+                raise RuntimeError("Deep research result could not be persisted")
             total_ms = (perf_counter() - total_start) * 1000
-            logger.error(
-                "Deep research turn failed",
+            logger.info(
+                "Deep research turn completed",
                 extra=build_log_extra(
                     component="deep_research",
                     operation="process_message",
                     event_name="chat.turn",
-                    status="failed",
+                    status="completed",
                     duration_ms=total_ms,
                     session_id=session_id,
                     message_id=message_id,
@@ -673,13 +700,42 @@ async def process_deep_research_message(
                     source=source,
                     task_id=task_id,
                     context_data={
-                        "failure_class": result.status,
-                        "response_id": response_id,
+                        "output_chars": len(result.output_text),
+                        "model": DEEP_RESEARCH_MODEL,
                     },
                 ),
             )
+            if result.usage:
+                try:
+                    record_vendor_usage_out_of_band(
+                        provider="deep_research",
+                        model=DEEP_RESEARCH_MODEL,
+                        feature="chat",
+                        operation="chat.deep_research",
+                        source=source,
+                        usage=result.usage,
+                        task_id=task_id,
+                        content_id=state.content_id,
+                        session_id=session_id,
+                        message_id=message_id,
+                        user_id=state.user_id,
+                        metadata={"response_id": response_id},
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Deep research usage telemetry failed after result persistence",
+                        exc_info=True,
+                        extra={"session_id": session_id, "message_id": message_id},
+                    )
+            return QueuedChatTurnOutcome.COMPLETED
+        error_msg = result.error or f"Research failed with status: {result.status}"
+        raise RuntimeError(error_msg)
 
-    except Exception as exc:
+    except ChatTurnOwnershipLost:
+        return QueuedChatTurnOutcome.OWNERSHIP_LOST
+    except ChatTurnLeaseCheckError:
+        raise
+    except Exception as exc:  # noqa: BLE001
         total_ms = (perf_counter() - total_start) * 1000
         logger.exception(
             "Deep research turn raised exception",
@@ -697,14 +753,26 @@ async def process_deep_research_message(
             ),
         )
         try:
-            with SessionLocal() as db:
-                _update_message_failed(db, message_id, str(exc))
+            require_current_chat_lease(ensure_lease)
+            with session_factory() as db:
+                _update_message_failed(
+                    db,
+                    message_id,
+                    DEEP_RESEARCH_FAILED_MESSAGE,
+                    stream_generation=stream_generation,
+                )
+        except ChatTurnOwnershipLost:
+            return QueuedChatTurnOutcome.OWNERSHIP_LOST
+        except ChatTurnLeaseCheckError:
+            raise
         except Exception as update_exc:
             logger.error(
                 "[DeepResearch:UPDATE_FAILED] mid=%s error=%s",
                 message_id,
                 update_exc,
             )
+            raise
+        return QueuedChatTurnOutcome.FAILED
 
 
 def _build_research_context(content: Content) -> str | None:
@@ -767,13 +835,25 @@ def _build_research_context(content: Content) -> str | None:
     return context
 
 
-def _update_message_failed(db: Session, message_id: int, error: str) -> None:
+def _update_message_failed(
+    db: Session,
+    message_id: int,
+    error: str,
+    *,
+    stream_generation: int,
+) -> None:
     """Mark a message as failed."""
     db_message = (
         db.query(ChatMessage).filter(ChatMessage.id == message_id).with_for_update().first()
     )
-    if db_message and db_message.status == MessageProcessingStatus.PROCESSING.value:
-        db_message.status = MessageProcessingStatus.FAILED.value
-        db_message.error = error
-        db.commit()
-        logger.debug("[DeepResearch:DB] Updated message %s to failed", message_id)
+    if db_message is None:
+        raise ValueError(f"Message {message_id} not found")
+    if db_message.stream_generation != stream_generation:
+        raise ChatTurnOwnershipLost("A newer chat attempt owns this message")
+    if db_message.status != MessageProcessingStatus.PROCESSING.value:
+        return
+    db_message.status = MessageProcessingStatus.FAILED.value
+    db_message.error = error
+    db_message.partial_text = None
+    db.commit()
+    logger.debug("[DeepResearch:DB] Updated message %s to failed", message_id)

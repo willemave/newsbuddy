@@ -45,6 +45,7 @@ from app.services.assistant_router import (
     create_assistant_session,
     run_assistant_turn_sync,
 )
+from app.services.assistant_turn_routing import resolve_assistant_turn_profile
 from app.services.chat_agent import load_message_history
 from app.services.llm_models import (
     DEFAULT_MODEL,
@@ -607,6 +608,7 @@ def run_assistant_eval_case(
                 session_id=chat_session_id,
                 screen_context=screen_context,
                 context_snapshot=context_snapshot,
+                turn_profile=resolve_assistant_turn_profile(case.query, screen_context),
                 session_factory=session_factory,
             )
             provider_api_key = resolve_effective_api_key(

@@ -25,6 +25,18 @@ struct MessageRow: View {
                 feedOptionActionModel: feedOptionActionModel
             )
 
+            if item.message.isVisiblePartialResponse {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Still working")
+                        .font(.terracottaLabelSmall)
+                }
+                .foregroundStyle(Color.onSurfaceTertiary)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("knowledge.chat_partial_status")
+            }
+
             if item.isQueued {
                 Label("Queued", systemImage: "clock")
                     .font(.terracottaLabelSmall)

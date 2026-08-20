@@ -33,7 +33,7 @@ from app.services.chat_agent import (
     save_messages,
 )
 from app.services.chat_turn_queue import build_chat_turn_context
-from app.services.chat_turn_runtime import ChatUsageSnapshot
+from app.services.chat_turn_runtime import ChatUsageSnapshot, QueuedChatTurnOutcome
 from app.services.sandbox_runtime import (
     LocalPersonalLibrarySandboxSession,
     SandboxRuntimeUnavailableError,
@@ -763,7 +763,7 @@ def test_process_message_async_persists_completion_usage_and_ledger(
     )
 
     async def _fake_run_in_threadpool(_func, _model, prompt, deps, history, **_kwargs):
-        assert prompt == "What changed?"
+        assert prompt in {"What changed?", "Will the old worker win?"}
         assert deps.session_id == session_id
         assert deps.user_id == test_user.id
         assert history == []
@@ -784,6 +784,8 @@ def test_process_message_async_persists_completion_usage_and_ledger(
             message_id,
             "What changed?",
             turn_context=turn_context,
+            stream_generation=0,
+            ensure_lease=lambda: True,
         )
     )
 
@@ -801,3 +803,42 @@ def test_process_message_async_persists_completion_usage_and_ledger(
     assert ledger is not None
     assert ledger.status == LlmTaskStatus.COMPLETED.value
     assert ledger.output_json["message_id"] == message_id
+
+    superseded_message = create_processing_message(
+        db_session,
+        session_id,
+        "Will the old worker win?",
+    )
+    assert superseded_message.id is not None
+    superseded_context = build_chat_turn_context(
+        session,
+        visible_session_id=session_id,
+        user_prompt="Will the old worker win?",
+        kind="article",
+        source="queue",
+    )
+    outcome = asyncio.run(
+        chat_agent.process_message_async(
+            session_id,
+            superseded_message.id,
+            "Will the old worker win?",
+            turn_context=superseded_context,
+            stream_generation=1,
+            ensure_lease=lambda: False,
+        )
+    )
+
+    db_session.expire_all()
+    superseded_row = db_session.get(ChatMessage, superseded_message.id)
+    assert superseded_row is not None
+    cancelled_ledger = (
+        db_session.query(LlmTask)
+        .filter(LlmTask.workflow_key == "chat.article.v1")
+        .order_by(LlmTask.id.desc())
+        .first()
+    )
+    assert outcome == QueuedChatTurnOutcome.OWNERSHIP_LOST
+    assert superseded_row.status == MessageProcessingStatus.PROCESSING.value
+    assert superseded_row.stream_generation == 1
+    assert cancelled_ledger is not None
+    assert cancelled_ledger.status == LlmTaskStatus.CANCELLED.value

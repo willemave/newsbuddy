@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from pydantic import ValidationError
 
@@ -12,6 +13,10 @@ from app.models.db import ChatMessage, ChatSession, ProcessingTask, User
 from app.models.internal.chat_turn import ChatTurnProcessingContext
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.services.chat_turn_runtime import (
+    ChatTurnLeaseCheckError,
+    QueuedChatTurnOutcome,
+)
 
 logger = get_logger(__name__)
 
@@ -57,8 +62,12 @@ class ChatTurnHandler:
             try:
                 turn_context = ChatTurnProcessingContext.model_validate(message.processing_context)
             except ValidationError:
-                _mark_message_failed(message, CHAT_TURN_UNAVAILABLE_MESSAGE)
-                return TaskResult.fail("Invalid chat processing context", retryable=False)
+                return _terminalize_preflight_failure(
+                    context=context,
+                    message=message,
+                    public_error=CHAT_TURN_UNAVAILABLE_MESSAGE,
+                    task_error="Invalid chat processing context",
+                )
 
             snapshot = turn_context.session
             if snapshot.user_id != user_id or snapshot.effective_session_id != session_id:
@@ -68,13 +77,18 @@ class ChatTurnHandler:
                 session=session,
                 turn_context=turn_context,
             ):
-                _mark_message_failed(message, CHAT_TURN_UNAVAILABLE_MESSAGE)
-                return TaskResult.fail("Chat turn lifecycle validation failed", retryable=False)
+                return _terminalize_preflight_failure(
+                    context=context,
+                    message=message,
+                    public_error=CHAT_TURN_UNAVAILABLE_MESSAGE,
+                    task_error="Chat turn lifecycle validation failed",
+                )
             if task.retry_count > context.settings.queue.max_retries:
-                _mark_message_failed(message, CHAT_TURN_FAILED_MESSAGE)
-                return TaskResult.fail(
-                    "Chat turn stopped after repeated worker interruptions",
-                    retryable=False,
+                return _terminalize_preflight_failure(
+                    context=context,
+                    message=message,
+                    public_error=CHAT_TURN_FAILED_MESSAGE,
+                    task_error="Chat turn stopped after repeated worker interruptions",
                 )
 
             earlier_message_exists = (
@@ -91,7 +105,24 @@ class ChatTurnHandler:
                 return TaskResult.defer(retry_delay_seconds=ORDER_RETRY_DELAY_SECONDS)
 
         try:
-            _run_chat_turn(task, turn_context)
+            outcome = _run_chat_turn(
+                task,
+                turn_context,
+                ensure_lease=context.renew_current_lease,
+            )
+        except ChatTurnLeaseCheckError:
+            logger.warning(
+                "Queued chat turn could not verify its terminal lease",
+                extra={
+                    "component": "chat_turn",
+                    "operation": "verify_terminal_lease",
+                    "task_id": task.id,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "message_id": message_id,
+                },
+            )
+            return TaskResult.fail("Chat task lease could not be verified", retryable=True)
         except Exception:  # noqa: BLE001
             logger.exception(
                 "Queued chat turn raised an exception",
@@ -104,31 +135,13 @@ class ChatTurnHandler:
                     "message_id": message_id,
                 },
             )
-            with context.db_factory() as db:
-                message = (
-                    db.query(ChatMessage)
-                    .filter(ChatMessage.id == message_id)
-                    .with_for_update()
-                    .first()
-                )
-                if message is not None:
-                    _mark_message_failed(message, CHAT_TURN_FAILED_MESSAGE)
-            return TaskResult.fail(CHAT_TURN_FAILED_MESSAGE, retryable=False)
+            return TaskResult.fail(CHAT_TURN_FAILED_MESSAGE, retryable=True)
 
-        with context.db_factory() as db:
-            message = (
-                db.query(ChatMessage).filter(ChatMessage.id == message_id).with_for_update().first()
-            )
-            if message is None:
-                return TaskResult.fail("Chat message disappeared", retryable=False)
-            if message.status == MessageProcessingStatus.COMPLETED.value:
-                return TaskResult.ok()
-            if message.status == MessageProcessingStatus.FAILED.value:
-                message.error = CHAT_TURN_FAILED_MESSAGE
-                return TaskResult.fail(CHAT_TURN_FAILED_MESSAGE, retryable=False)
-
-            _mark_message_failed(message, CHAT_TURN_FAILED_MESSAGE)
-            return TaskResult.fail(CHAT_TURN_FAILED_MESSAGE, retryable=False)
+        if outcome == QueuedChatTurnOutcome.COMPLETED:
+            return TaskResult.ok()
+        if outcome == QueuedChatTurnOutcome.OWNERSHIP_LOST:
+            return TaskResult.ok()
+        return TaskResult.fail(CHAT_TURN_FAILED_MESSAGE, retryable=False)
 
 
 def _turn_lifecycle_is_valid(
@@ -156,15 +169,41 @@ def _mark_message_failed(message: ChatMessage, error: str) -> None:
     message.status = MessageProcessingStatus.FAILED.value
     message.render_metadata = None
     message.error = error
+    message.partial_text = None
 
 
-def _run_chat_turn(task: TaskEnvelope, context: ChatTurnProcessingContext) -> None:
+def _terminalize_preflight_failure(
+    *,
+    context: TaskContext,
+    message: ChatMessage,
+    public_error: str,
+    task_error: str,
+) -> TaskResult:
+    """Write a pre-provider failure only while the exact queue claim is current."""
+
+    try:
+        owns_lease = context.renew_current_lease()
+    except Exception:  # noqa: BLE001
+        logger.exception("Could not verify chat task ownership before preflight failure")
+        return TaskResult.fail("Chat task lease could not be verified", retryable=True)
+    if not owns_lease:
+        return TaskResult.fail("Chat task lease ownership was lost", retryable=True)
+    _mark_message_failed(message, public_error)
+    return TaskResult.fail(task_error, retryable=False)
+
+
+def _run_chat_turn(
+    task: TaskEnvelope,
+    context: ChatTurnProcessingContext,
+    *,
+    ensure_lease: Callable[[], bool],
+) -> QueuedChatTurnOutcome:
     """Route one validated context to its queue-aware async executor."""
     snapshot = context.session
     if context.kind in {"article", "council"}:
         from app.services.chat_agent import process_message_async
 
-        asyncio.run(
+        return asyncio.run(
             process_message_async(
                 snapshot.effective_session_id,
                 int(task.payload["message_id"]),
@@ -172,13 +211,14 @@ def _run_chat_turn(task: TaskEnvelope, context: ChatTurnProcessingContext) -> No
                 source=context.source,
                 task_id=task.id,
                 turn_context=context,
+                stream_generation=task.retry_count,
+                ensure_lease=ensure_lease,
             )
         )
-        return
     if context.kind == "deep_research":
         from app.services.deep_research import process_deep_research_message
 
-        asyncio.run(
+        return asyncio.run(
             process_deep_research_message(
                 snapshot.effective_session_id,
                 int(task.payload["message_id"]),
@@ -186,15 +226,16 @@ def _run_chat_turn(task: TaskEnvelope, context: ChatTurnProcessingContext) -> No
                 source=context.source,
                 task_id=task.id,
                 turn_context=context,
+                stream_generation=task.retry_count,
+                ensure_lease=ensure_lease,
             )
         )
-        return
 
     from app.services.assistant_router import process_assistant_turn_async
 
     if context.screen_context is None:
         raise ValueError("Assistant turn is missing screen context")
-    asyncio.run(
+    return asyncio.run(
         process_assistant_turn_async(
             snapshot.effective_session_id,
             int(task.payload["message_id"]),
@@ -203,5 +244,7 @@ def _run_chat_turn(task: TaskEnvelope, context: ChatTurnProcessingContext) -> No
             source=context.source,
             task_id=task.id,
             turn_context=context,
+            stream_generation=task.retry_count,
+            ensure_lease=ensure_lease,
         )
     )

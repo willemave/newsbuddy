@@ -17,6 +17,7 @@ struct ChatMessageList: View {
     let isSending: Bool
     let thinkingStartedAt: Date?
     let latestProcessSummary: String?
+    let hasVisiblePartialResponse: Bool
     let session: ChatSessionSummary?
     let scrollToBottomRequest: Int
     let retryingCouncilChildSessionId: Int?
@@ -98,7 +99,7 @@ struct ChatMessageList: View {
                         .animation(messageAnimation, value: timeline.last?.id)
 
                         Group {
-                            if isSending {
+                            if isSending && !hasVisiblePartialResponse {
                                 ThinkingBubbleView(
                                     startDate: thinkingStartedAt,
                                     statusText: latestProcessSummary
@@ -127,6 +128,10 @@ struct ChatMessageList: View {
             }
             .onChange(of: timeline.last?.id) { _, newId in
                 handleTimelineChange(newId, proxy: proxy)
+            }
+            .onChange(of: timeline.last?.message.content) { _, _ in
+                guard isNearBottom, let lastId = timeline.last?.id else { return }
+                scrollToBottom(lastId, proxy: proxy)
             }
             .onChange(of: isSending) { wasSending, sending in
                 handleSendingChange(from: wasSending, to: sending, proxy: proxy)
@@ -299,6 +304,7 @@ private struct ChatLoadErrorState: View {
         isSending: true,
         thinkingStartedAt: Date(timeIntervalSinceNow: -42),
         latestProcessSummary: "Drafting a grounded response",
+        hasVisiblePartialResponse: false,
         session: ChatPreviewFixtures.session,
         scrollToBottomRequest: 0,
         retryingCouncilChildSessionId: nil,

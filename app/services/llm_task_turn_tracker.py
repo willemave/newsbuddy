@@ -117,6 +117,24 @@ class LlmTaskTurnTracker:
             error_message=error_message,
         )
 
+    def cancelled(
+        self,
+        db: Session,
+        *,
+        note: str,
+        error_type: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """Record an interrupted attempt without classifying it as a chat failure."""
+        self.set_status(
+            db,
+            status=LlmTaskStatus.CANCELLED,
+            workflow_state=LlmWorkflowState.CANCELLED,
+            note=note,
+            error_type=error_type,
+            error_message=error_message,
+        )
+
     def set_status(
         self,
         db: Session,

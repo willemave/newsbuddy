@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
 
 from fastapi.concurrency import run_in_threadpool
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.capabilities import PrepareTools
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.models.openai import ReasoningEffort
+from pydantic_ai.tools import ToolDefinition
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.commands import ingest_content as ingest_content_command
@@ -49,41 +51,35 @@ from app.repositories.search_repository import (
 from app.services import knowledge as knowledge_service
 from app.services.assistant_feed_finder import find_feed_options as find_feed_options_service
 from app.services.assistant_feed_subscription import subscribe_known_feed
+from app.services.assistant_turn_routing import AssistantTurnProfile
+from app.services.assistant_turn_routing import (
+    resolve_assistant_turn_profile as _resolve_assistant_turn_profile,
+)
 from app.services.chat_agent import (
     load_message_history,
     save_messages,
     update_message_completed,
     update_message_failed,
 )
+from app.services.chat_partial_stream import (
+    DurableChatPartialWriter as _DurableChatPartialWriter,
+)
+from app.services.chat_partial_stream import (
+    build_final_text_event_stream_handler as _build_final_text_event_stream_handler,
+)
 from app.services.chat_turn_runtime import DetachedChatTurn as _DetachedChatTurn
 from app.services.chat_turn_runtime import (
     DetachedChatTurnLifecycle as _DetachedChatTurnLifecycle,
 )
+from app.services.chat_turn_runtime import QueuedChatTurnOutcome
 from app.services.chat_turn_runtime import (
     close_sandbox_session as _close_sandbox_session,
 )
-from app.services.chat_turn_runtime import (
-    complete_detached_chat_turn as _complete_detached_chat_turn,
-)
 from app.services.chat_turn_runtime import extract_tool_names as _extract_tool_names
 from app.services.chat_turn_runtime import get_or_create_cached_agent as _get_or_create_cached_agent
-from app.services.chat_turn_runtime import (
-    log_chat_usage as _log_chat_usage,
-)
-from app.services.chat_turn_runtime import (
-    mark_detached_chat_turn_running as _mark_detached_chat_turn_running,
-)
-from app.services.chat_turn_runtime import (
-    persist_detached_turn_failure as _persist_detached_turn_failure,
-)
+from app.services.chat_turn_runtime import log_chat_usage as _log_chat_usage
 from app.services.chat_turn_runtime import (
     register_personal_library_tools as _register_personal_library_tools,
-)
-from app.services.chat_turn_runtime import (
-    snapshot_detached_chat_turn_from_snapshot as _snapshot_detached_chat_turn_from_snapshot,
-)
-from app.services.chat_turn_runtime import (
-    start_detached_chat_turn as _start_detached_chat_turn,
 )
 from app.services.exa_client import exa_search
 from app.services.knowledge_search import search_knowledge as search_knowledge_hits
@@ -93,10 +89,11 @@ from app.services.llm_models import (
     build_pydantic_model,
     resolve_effective_api_key,
 )
-from app.services.llm_task_turn_tracker import LlmTaskTurnSpec, LlmTaskTurnTracker
+from app.services.llm_task_turn_tracker import LlmTaskTurnSpec
 from app.services.news_feed import list_unread_visible_news_items
 from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
 from app.services.prompt_library import load_prompt
+from app.services.queued_chat_turn import execute_queued_chat_turn as _execute_queued_chat_turn
 from app.services.sandbox_runtime import (
     PersonalLibrarySandboxSession,
     SandboxRuntimeUnavailableError,
@@ -112,7 +109,6 @@ ASSISTANT_SESSION_TYPES = {
     *LEGACY_KNOWLEDGE_SESSION_TYPES,
     "weekly_discovery",
 }
-ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS = "pick_interesting_unread_news"
 
 ASSISTANT_OPENAI_REASONING_EFFORT: ReasoningEffort = "low"
 
@@ -139,89 +135,6 @@ CONTEXTUAL_ASSISTANT_TURN_SPEC = LlmTaskTurnSpec(
     prompt_pack="chat.contextual_assistant",
 )
 
-SMALL_TALK_PHRASES = {
-    "hi",
-    "hello",
-    "hey",
-    "yo",
-    "thanks",
-    "thank you",
-    "how are you",
-    "good morning",
-    "good afternoon",
-    "good evening",
-}
-KNOWLEDGE_HINTS = (
-    "my favorite",
-    "my favourites",
-    "my favorites",
-    "my saved",
-    "my bookmarked",
-    "what did i save",
-    "what i saved",
-    "my article",
-    "my podcast",
-    "i read",
-    "i listened",
-    "favorited",
-)
-CONTENT_SEARCH_HINTS = (
-    "in my feed",
-    "in my inbox",
-    "from my feed",
-    "from my inbox",
-    "my feed",
-    "last day's content",
-    "recent news items",
-    "news items and articles",
-    "recent articles",
-    "recent posts",
-)
-WEB_HINTS = (
-    "latest",
-    "recent",
-    "today",
-    "current",
-    "news",
-    "find",
-    "look up",
-    "search",
-    "who is",
-    "what is",
-    "what are",
-    "how to",
-)
-SOURCE_RECOMMENDATION_HINTS = (
-    "blogs",
-    "blog",
-    "publications",
-    "publication",
-    "newsletters",
-    "newsletter",
-    "sites",
-    "sources",
-)
-FEED_DISCOVERY_HINTS = (
-    "feed",
-    "feeds",
-    "rss",
-    "atom",
-    "blog",
-    "blogs",
-    "newsletter",
-    "newsletters",
-    "podcast",
-    "podcasts",
-)
-FEED_DISCOVERY_ACTION_HINTS = (
-    "find",
-    "search",
-    "look up",
-    "discover",
-    "recommend",
-    "subscribe",
-)
-
 
 @dataclass
 class AssistantDeps:
@@ -231,6 +144,7 @@ class AssistantDeps:
     session_id: int
     screen_context: AssistantScreenContext
     context_snapshot: str
+    turn_profile: AssistantTurnProfile
     session_factory: sessionmaker[Session]
     llm_task_id: int | None = None
     sandbox_session: PersonalLibrarySandboxSession | None = None
@@ -255,145 +169,6 @@ def _build_submit_content_request(
         chat_initial_message=None,
         save_to_knowledge_and_mark_read=False,
     )
-
-
-def _normalize_turn_text(user_text: str) -> str:
-    """Normalize turn text for routing heuristics."""
-
-    return " ".join(user_text.strip().lower().split())
-
-
-def _is_small_talk(user_text: str) -> bool:
-    """Detect short conversational turns that do not require tool calls."""
-
-    normalized = _normalize_turn_text(user_text)
-    if not normalized:
-        return True
-    if normalized in SMALL_TALK_PHRASES:
-        return True
-    return len(normalized.split()) <= 3 and normalized in {
-        "hi there",
-        "hello there",
-        "thank you",
-    }
-
-
-def _should_route_to_knowledge(user_text: str) -> bool:
-    """Detect turns that should prioritize saved-content lookup."""
-
-    normalized = _normalize_turn_text(user_text)
-    if " my " in f" {normalized} " and any(
-        marker in normalized for marker in ("favorite", "saved", "bookmarked", "article", "podcast")
-    ):
-        return True
-    return any(hint in normalized for hint in KNOWLEDGE_HINTS)
-
-
-def _should_route_to_markdown_library(user_text: str) -> bool:
-    """Detect turns that should prioritize the personal markdown library."""
-
-    normalized = _normalize_turn_text(user_text)
-    if not normalized:
-        return False
-    markdown_hints = ("markdown", "file path", "filepath", "source md", "summary md", ".md")
-    file_hints = ("saved file", "library file", "raw markdown", "summary markdown")
-    if any(hint in normalized for hint in markdown_hints + file_hints):
-        return True
-    return "path" in normalized and _should_route_to_knowledge(normalized)
-
-
-def _should_route_to_web(user_text: str) -> bool:
-    """Detect turns that should prioritize web search."""
-
-    normalized = _normalize_turn_text(user_text)
-    if _should_route_to_knowledge(normalized):
-        return False
-    if _should_route_to_feed_finder(normalized):
-        return False
-    if _is_small_talk(normalized):
-        return False
-    if any(hint in normalized for hint in WEB_HINTS):
-        return True
-    return "?" in user_text and normalized.startswith(
-        ("what ", "who ", "when ", "where ", "why ", "how ")
-    )
-
-
-def _contains_explicit_url(user_text: str) -> bool:
-    """Return True when the prompt already contains a direct URL."""
-
-    normalized = _normalize_turn_text(user_text)
-    return "http://" in normalized or "https://" in normalized
-
-
-def _should_route_to_feed_finder(user_text: str) -> bool:
-    """Detect turns asking for feeds, blogs, newsletters, or podcast sources."""
-
-    normalized = _normalize_turn_text(user_text)
-    if _contains_explicit_url(normalized):
-        return False
-    if _should_route_to_knowledge(normalized) or _should_route_to_content_search(normalized):
-        return False
-    has_feed_hint = any(hint in normalized for hint in FEED_DISCOVERY_HINTS)
-    has_action_hint = any(hint in normalized for hint in FEED_DISCOVERY_ACTION_HINTS)
-    return has_feed_hint and has_action_hint
-
-
-def _should_route_to_weekly_discovery_action(
-    user_text: str,
-    screen_context: AssistantScreenContext | None,
-) -> bool:
-    """Detect mutation requests against the numbered weekly discovery options."""
-    if screen_context is None or screen_context.screen_type != "weekly_discovery":
-        return False
-    normalized = f" {_normalize_turn_text(user_text)} "
-    return any(marker in normalized for marker in (" add ", " subscribe ", " follow "))
-
-
-def _build_turn_instructions(
-    user_text: str,
-    screen_context: AssistantScreenContext | None = None,
-) -> str | None:
-    """Build per-turn routing instructions for the assistant agent."""
-
-    if (
-        screen_context is not None
-        and screen_context.assistant_action == ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS
-    ):
-        return load_prompt("chat/contextual_assistant#turn_pick_interesting_unread_news")
-
-    if _should_route_to_weekly_discovery_action(user_text, screen_context):
-        return load_prompt("chat/contextual_assistant#turn_weekly_discovery_action")
-
-    if _is_small_talk(user_text):
-        return None
-
-    if _should_route_to_feed_finder(user_text):
-        return load_prompt("chat/contextual_assistant#turn_feed_finder")
-
-    if _should_route_to_markdown_library(user_text):
-        return load_prompt("chat/contextual_assistant#turn_markdown_library")
-
-    if _should_route_to_content_search(user_text):
-        return load_prompt("chat/contextual_assistant#turn_content_search")
-
-    if _should_route_to_knowledge(user_text):
-        return load_prompt("chat/contextual_assistant#turn_knowledge_search")
-
-    if _should_route_to_web(user_text):
-        normalized = _normalize_turn_text(user_text)
-        if any(hint in normalized for hint in SOURCE_RECOMMENDATION_HINTS):
-            return load_prompt("chat/contextual_assistant#turn_source_recommendation")
-        return load_prompt("chat/contextual_assistant#turn_web_search")
-
-    return load_prompt("chat/contextual_assistant#turn_default_tool_preference")
-
-
-def _should_route_to_content_search(user_text: str) -> bool:
-    """Detect turns that should use in-app content search."""
-
-    normalized = _normalize_turn_text(user_text)
-    return any(hint in normalized for hint in CONTENT_SEARCH_HINTS)
 
 
 def _format_knowledge_hits(hits: Sequence[object], query: str) -> str:
@@ -634,6 +409,7 @@ def _create_assistant_agent(
         output_type=str,
         system_prompt=ASSISTANT_SYSTEM_PROMPT,
         model_settings=model_settings,
+        capabilities=[PrepareTools(_prepare_assistant_tools)],
     )
 
     @agent.tool
@@ -642,7 +418,7 @@ def _create_assistant_agent(
         query: str,
         limit: int = 5,
     ) -> str:
-        """Search the web for current context or discovery."""
+        """Search the web through Exa for current context or discovery."""
         normalized_limit = max(1, min(limit, 8))
         results = exa_search(
             query=query,
@@ -986,6 +762,33 @@ def _create_assistant_agent(
     return agent
 
 
+async def _prepare_assistant_tools(
+    ctx: RunContext[AssistantDeps],
+    tool_defs: list[ToolDefinition],
+) -> list[ToolDefinition]:
+    """Expose only the exact schemas selected by the pure turn profile."""
+
+    allowed = ctx.deps.turn_profile.tool_names
+    selected = [tool_def for tool_def in tool_defs if tool_def.name in allowed]
+    logger.info(
+        "Assistant tool schemas prepared",
+        extra=build_log_extra(
+            component="assistant_turn",
+            operation="prepare_tools",
+            event_name="assistant.turn.tools_prepared",
+            status="completed",
+            session_id=ctx.deps.session_id,
+            user_id=ctx.deps.user_id,
+            context_data={
+                "route": ctx.deps.turn_profile.route,
+                "tool_schema_count": len(selected),
+                "available_tool_schema_count": len(tool_defs),
+            },
+        ),
+    )
+    return selected
+
+
 def _parse_feed_options_tool_return(content: object) -> list[AssistantFeedOption]:
     """Parse one `find_feed_options` tool return payload into validated options."""
 
@@ -1137,7 +940,13 @@ def build_screen_context_snapshot(
             short_summary = content.short_summary
             if short_summary:
                 lines.append(f"  Short Summary: {short_summary}")
-            transcript_excerpt = _extract_transcript_excerpt(content)
+            excerpt_limit = (
+                1800
+                if screen_context.screen_type == "learning_deck"
+                and content_id == screen_context.content_id
+                else 420
+            )
+            transcript_excerpt = _extract_transcript_excerpt(content, max_length=excerpt_limit)
             if transcript_excerpt:
                 lines.append(f"  Transcript Excerpt: {transcript_excerpt}")
 
@@ -1235,17 +1044,28 @@ def run_assistant_turn_sync(
     history: list[ModelMessage],
     *,
     provider_api_key: str | None = None,
+    partial_writer: _DurableChatPartialWriter | None = None,
 ):
     """Run one assistant turn synchronously and return the raw agent result."""
     agent = _get_or_create_agent(model_spec, api_key_override=provider_api_key)
-    turn_instructions = _build_turn_instructions(user_prompt, deps.screen_context)
+    turn_instructions = deps.turn_profile.instructions
     prompt_sections: list[str] = []
     if turn_instructions:
         prompt_sections.append(f"Turn instructions:\n{turn_instructions}")
     prompt_sections.append(f"User request:\n{user_prompt.strip()}")
     prompt_sections.append(f"Current context:\n{deps.context_snapshot}")
     prompt = "\n\n".join(prompt_sections)
-    return agent.run_sync(prompt, deps=deps, message_history=history)
+    event_stream_handler = (
+        _build_final_text_event_stream_handler(partial_writer)
+        if partial_writer is not None
+        else None
+    )
+    return agent.run_sync(
+        prompt,
+        deps=deps,
+        message_history=history,
+        event_stream_handler=event_stream_handler,
+    )
 
 
 def _build_assistant_personal_library_runtime(
@@ -1303,6 +1123,8 @@ def _prepare_assistant_background_turn(
     turn: _DetachedChatTurn,
     *,
     screen_context: AssistantScreenContext,
+    user_prompt: str,
+    turn_profile: AssistantTurnProfile | None = None,
 ) -> _PreparedAssistantTurn:
     history_start = perf_counter()
     history = load_message_history(
@@ -1337,16 +1159,21 @@ def _prepare_assistant_background_turn(
         user_id=turn.user_id,
         screen_context=screen_context,
     )
+    turn_profile = turn_profile or _resolve_assistant_turn_profile(user_prompt, screen_context)
+    sandbox_session: PersonalLibrarySandboxSession | None = None
+    personal_library_error: str | None = None
+    if turn_profile.uses_personal_library:
+        sandbox_session, personal_library_error = _build_assistant_personal_library_runtime(
+            db=db,
+            user_id=turn.user_id,
+        )
     context_ms = (perf_counter() - context_start) * 1000
-    sandbox_session, personal_library_error = _build_assistant_personal_library_runtime(
-        db=db,
-        user_id=turn.user_id,
-    )
     deps = AssistantDeps(
         user_id=turn.user_id,
         session_id=turn.session_id,
         screen_context=screen_context,
         context_snapshot=context_snapshot,
+        turn_profile=turn_profile,
         session_factory=get_session_factory(),
         llm_task_id=turn.llm_task_id,
         sandbox_session=sandbox_session,
@@ -1366,7 +1193,10 @@ def _prepare_assistant_background_turn(
             content_id=turn.content_id,
             context_data={
                 "screen_type": screen_context.screen_type,
+                "route": turn_profile.route,
                 "context_chars": len(context_snapshot or ""),
+                "tool_schema_count": len(turn_profile.tool_names),
+                "uses_personal_library": turn_profile.uses_personal_library,
                 "llm_task_id": turn.llm_task_id,
             },
         ),
@@ -1389,6 +1219,7 @@ async def _execute_assistant_background_turn(
     turn: _DetachedChatTurn,
     *,
     user_prompt: str,
+    partial_writer: _DurableChatPartialWriter,
 ) -> _ExecutedAssistantTurn:
     logger.info(
         "Assistant LLM call started",
@@ -1416,6 +1247,7 @@ async def _execute_assistant_background_turn(
         prepared.deps,
         prepared.history,
         provider_api_key=prepared.provider_api_key,
+        partial_writer=partial_writer,
     )
     new_messages = result.new_messages()
     tool_names = _extract_tool_names(result)
@@ -1443,6 +1275,7 @@ def _persist_assistant_background_turn(
         executed.new_messages,
         display_user_prompt=user_prompt,
         render_metadata=executed.render_metadata,
+        expected_stream_generation=turn.stream_generation,
         commit=False,
     )
     return {
@@ -1458,8 +1291,15 @@ def _stage_assistant_message_failed(
     db: Session,
     message_id: int,
     error: str,
+    stream_generation: int,
 ) -> object:
-    return update_message_failed(db, message_id, error, commit=False)
+    return update_message_failed(
+        db,
+        message_id,
+        error,
+        expected_stream_generation=stream_generation,
+        commit=False,
+    )
 
 
 async def process_assistant_turn_async(
@@ -1468,16 +1308,15 @@ async def process_assistant_turn_async(
     user_prompt: str,
     *,
     screen_context: AssistantScreenContext,
+    turn_context: ChatTurnProcessingContext,
+    stream_generation: int,
+    ensure_lease: Callable[[], bool],
     source: str = "assistant",
     task_id: int | None = None,
-    turn_context: ChatTurnProcessingContext,
-) -> None:
+) -> QueuedChatTurnOutcome:
     """Process one assistant turn without retaining a DB session across I/O."""
     total_start = perf_counter()
     session_factory = get_session_factory()
-    tracker = LlmTaskTurnTracker(task_id=None)
-    turn: _DetachedChatTurn | None = None
-    prepared: _PreparedAssistantTurn | None = None
     logger.info(
         "Assistant turn started",
         extra=build_log_extra(
@@ -1503,118 +1342,64 @@ async def process_assistant_turn_async(
         usage_context=source,
     )
 
-    try:
-        with session_factory() as prepare_db:
-            session = prepare_db.query(ChatSession).filter(ChatSession.id == session_id).first()
-            if session is None:
-                logger.error("Assistant session %s not found", session_id)
-                return
-
-            session_snapshot = turn_context.session
-            if session_snapshot.effective_session_id != session_id:
-                raise ValueError("Assistant turn context does not match the requested session")
-            turn = _snapshot_detached_chat_turn_from_snapshot(
-                session_snapshot,
-                message_id=message_id,
-                source=source,
-                task_id=task_id,
-            )
-            turn, tracker = _start_detached_chat_turn(
-                prepare_db,
-                turn=turn,
-                lifecycle=lifecycle,
-                input_json={
-                    "chat_session_id": turn.session_id,
-                    "content_id": turn.content_id,
-                    "news_item_id": turn.news_item_id,
-                    "source": turn.source,
-                    "screen_type": screen_context.screen_type,
-                    "assistant_action": screen_context.assistant_action,
-                    "queue_task_id": task_id,
-                    "prompt_chars": len(user_prompt),
-                    "model": turn.model,
-                },
-            )
-            prepared = _prepare_assistant_background_turn(
-                prepare_db,
-                session_snapshot,
-                turn,
-                screen_context=screen_context,
-            )
-            _mark_detached_chat_turn_running(
-                prepare_db,
-                turn=turn,
-                tracker=tracker,
-                lifecycle=lifecycle,
-            )
-
-        external_start = perf_counter()
-        executed = await _execute_assistant_background_turn(
+    session_snapshot = turn_context.session
+    turn_profile = _resolve_assistant_turn_profile(user_prompt, screen_context)
+    result = await _execute_queued_chat_turn(
+        session_factory=session_factory,
+        session_snapshot=session_snapshot,
+        session_id=session_id,
+        message_id=message_id,
+        source=source,
+        task_id=task_id,
+        stream_generation=stream_generation,
+        lifecycle=lifecycle,
+        input_json=lambda turn: {
+            "chat_session_id": turn.session_id,
+            "content_id": turn.content_id,
+            "news_item_id": turn.news_item_id,
+            "source": turn.source,
+            "screen_type": screen_context.screen_type,
+            "assistant_action": screen_context.assistant_action,
+            "route": turn_profile.route,
+            "tool_names": sorted(turn_profile.tool_names),
+            "queue_task_id": task_id,
+            "prompt_chars": len(user_prompt),
+            "model": turn.model,
+            "stream_generation": turn.stream_generation,
+        },
+        prepare=lambda db, turn: _prepare_assistant_background_turn(
+            db,
+            session_snapshot,
+            turn,
+            screen_context=screen_context,
+            user_prompt=user_prompt,
+            turn_profile=turn_profile,
+        ),
+        execute=lambda prepared, turn, partial_writer: _execute_assistant_background_turn(
             prepared,
             turn,
             user_prompt=user_prompt,
-        )
-        external_ms = (perf_counter() - external_start) * 1000
-        _log_chat_usage(
-            executed.raw_result,
-            turn.usage_snapshot,
-            turn.session_id,
-            turn.message_id,
-            lifecycle.usage_context,
-        )
+            partial_writer=partial_writer,
+        ),
+        persist=lambda db, executed, turn: _persist_assistant_background_turn(
+            db,
+            executed,
+            turn,
+            user_prompt=user_prompt,
+        ),
+        mark_message_failed=_stage_assistant_message_failed,
+        raw_result=lambda executed: executed.raw_result,
+        record_usage=_log_chat_usage,
+        ensure_lease=ensure_lease,
+        cleanup=lambda prepared: _close_sandbox_session(prepared.deps.sandbox_session),
+    )
+    if result.outcome != QueuedChatTurnOutcome.COMPLETED:
+        return result.outcome
 
-        with session_factory() as persist_db:
-            persisted_session = (
-                persist_db.query(ChatSession).filter(ChatSession.id == turn.session_id).first()
-            )
-            if persisted_session is None:
-                raise RuntimeError(f"Assistant session {turn.session_id} disappeared")
-            output_json = _persist_assistant_background_turn(
-                persist_db,
-                executed,
-                turn,
-                user_prompt=user_prompt,
-            )
-            _complete_detached_chat_turn(
-                persist_db,
-                session=persisted_session,
-                turn=turn,
-                tracker=tracker,
-                lifecycle=lifecycle,
-                output_json=output_json,
-            )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception(
-            "Assistant turn failed",
-            extra=build_log_extra(
-                component="assistant_turn",
-                operation="process_turn",
-                event_name="assistant.turn",
-                status="failed",
-                duration_ms=(perf_counter() - total_start) * 1000,
-                session_id=session_id,
-                message_id=message_id,
-                source=source,
-                context_data={
-                    "failure_class": type(exc).__name__,
-                    "llm_task_id": turn.llm_task_id if turn is not None else None,
-                },
-            ),
-        )
-        _persist_detached_turn_failure(
-            session_factory=session_factory,
-            tracker=tracker,
-            lifecycle=lifecycle,
-            message_id=message_id,
-            error=exc,
-            mark_message_failed=_stage_assistant_message_failed,
-        )
-        return
-    finally:
-        if prepared is not None:
-            _close_sandbox_session(prepared.deps.sandbox_session)
-
-    if turn is None or prepared is None:
+    turn = result.turn
+    prepared = result.prepared
+    executed = result.executed
+    if turn is None or prepared is None or executed is None:
         raise RuntimeError("Assistant turn completed without runtime state")
 
     logger.info(
@@ -1634,13 +1419,16 @@ async def process_assistant_turn_async(
                 "model": turn.model,
                 "tool_names": executed.tool_names,
                 "tool_count": len(executed.tool_names),
-                "agent_ms": round(external_ms, 2),
+                "agent_ms": round(result.external_ms, 2),
                 "history_ms": round(prepared.history_ms, 2),
                 "context_ms": round(prepared.context_ms, 2),
+                "partial_write_count": result.partial_write_count,
+                "first_partial_ms": result.first_partial_ms,
                 "llm_task_id": turn.llm_task_id,
             },
         ),
     )
+    return result.outcome
 
 
 def seed_assistant_message(

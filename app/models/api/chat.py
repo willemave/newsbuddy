@@ -295,6 +295,20 @@ class MessageStatusResponse(BaseModel):
         default=None,
         description="Assistant response (present when status=completed)",
     )
+    partial_assistant_message: ChatMessageDto | None = Field(
+        default=None,
+        description="Latest durable assistant text snapshot while status=processing",
+    )
+    stream_generation: int | None = Field(
+        default=None,
+        ge=0,
+        description="Monotonic worker-attempt generation for partial response snapshots",
+    )
+    stream_revision: int | None = Field(
+        default=None,
+        ge=0,
+        description="Monotonic partial response revision within the current generation",
+    )
     error: str | None = Field(default=None, description="Error message if status=failed")
 
 

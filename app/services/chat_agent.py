@@ -2,6 +2,7 @@
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
@@ -25,6 +26,13 @@ from app.models.db import ChatMessage, ChatSession, Content
 from app.models.domain.chat_render import ChatMessageRenderMetadata
 from app.models.domain.chat_sessions import KNOWLEDGE_SESSION_TYPE
 from app.models.internal.chat_turn import ChatTurnProcessingContext, ChatTurnSessionSnapshot
+from app.services.chat_partial_stream import (
+    DurableChatPartialWriter as _DurableChatPartialWriter,
+)
+from app.services.chat_partial_stream import (
+    build_final_text_event_stream_handler as _build_final_text_event_stream_handler,
+)
+from app.services.chat_turn_runtime import ChatTurnOwnershipLost, QueuedChatTurnOutcome
 from app.services.chat_turn_runtime import (
     ChatUsageSnapshot as _ChatUsageSnapshot,
 )
@@ -62,9 +70,6 @@ from app.services.chat_turn_runtime import (
     snapshot_detached_chat_turn as _snapshot_detached_chat_turn,
 )
 from app.services.chat_turn_runtime import (
-    snapshot_detached_chat_turn_from_snapshot as _snapshot_detached_chat_turn_from_snapshot,
-)
-from app.services.chat_turn_runtime import (
     start_detached_chat_turn as _start_detached_chat_turn,
 )
 from app.services.exa_client import exa_search, get_exa_client
@@ -76,6 +81,7 @@ from app.services.llm_models import (
 from app.services.llm_task_turn_tracker import LlmTaskTurnSpec, LlmTaskTurnTracker
 from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
 from app.services.prompt_library import load_prompt, render_prompt
+from app.services.queued_chat_turn import execute_queued_chat_turn as _execute_queued_chat_turn
 from app.services.sandbox_runtime import (
     PersonalLibrarySandboxSession,
     SandboxRuntimeUnavailableError,
@@ -765,6 +771,7 @@ def update_message_completed(
     *,
     display_user_prompt: str | None = None,
     render_metadata: ChatMessageRenderMetadata | dict[str, object] | None = None,
+    expected_stream_generation: int | None = None,
     commit: bool = True,
 ) -> ChatMessage:
     """Update a processing message with the completed result.
@@ -785,6 +792,11 @@ def update_message_completed(
     if not db_message:
         raise ValueError(f"Message {message_id} not found")
 
+    if (
+        expected_stream_generation is not None
+        and db_message.stream_generation != expected_stream_generation
+    ):
+        raise ChatTurnOwnershipLost("A newer chat attempt owns this message")
     if db_message.status != MessageProcessingStatus.PROCESSING.value:
         return db_message
 
@@ -795,6 +807,8 @@ def update_message_completed(
     db_message.message_list = message_json
     db_message.render_metadata = _serialize_render_metadata(render_metadata)
     db_message.status = MessageProcessingStatus.COMPLETED.value
+    db_message.error = None
+    db_message.partial_text = None
     db.flush()
     if commit:
         db.commit()
@@ -808,6 +822,7 @@ def update_message_failed(
     message_id: int,
     error: str,
     *,
+    expected_stream_generation: int | None = None,
     commit: bool = True,
 ) -> ChatMessage:
     """Mark a processing message as failed.
@@ -826,12 +841,18 @@ def update_message_failed(
     if not db_message:
         raise ValueError(f"Message {message_id} not found")
 
+    if (
+        expected_stream_generation is not None
+        and db_message.stream_generation != expected_stream_generation
+    ):
+        raise ChatTurnOwnershipLost("A newer chat attempt owns this message")
     if db_message.status != MessageProcessingStatus.PROCESSING.value:
         return db_message
 
     db_message.status = MessageProcessingStatus.FAILED.value
     db_message.render_metadata = None
     db_message.error = error
+    db_message.partial_text = None
     db.flush()
     if commit:
         db.commit()
@@ -1023,11 +1044,22 @@ def _run_agent_sync(
     history: list[ModelMessage],
     *,
     provider_api_key: str | None = None,
+    partial_writer: _DurableChatPartialWriter | None = None,
 ):
     """Run the chat agent synchronously in a worker thread."""
     agent = get_chat_agent(model_spec, api_key_override=provider_api_key)
     model_user_prompt = _build_run_user_prompt(user_prompt, deps)
-    return agent.run_sync(model_user_prompt, deps=deps, message_history=history)
+    event_stream_handler = (
+        _build_final_text_event_stream_handler(partial_writer)
+        if partial_writer is not None
+        else None
+    )
+    return agent.run_sync(
+        model_user_prompt,
+        deps=deps,
+        message_history=history,
+        event_stream_handler=event_stream_handler,
+    )
 
 
 async def run_chat_turn(
@@ -1354,6 +1386,7 @@ async def _execute_article_background_turn(
     turn: _DetachedChatTurn,
     *,
     user_prompt: str,
+    partial_writer: _DurableChatPartialWriter,
 ) -> _ExecutedArticleChatTurn:
     logger.info(
         "Async chat LLM call started",
@@ -1382,6 +1415,7 @@ async def _execute_article_background_turn(
         prepared.deps,
         prepared.history,
         provider_api_key=prepared.provider_api_key,
+        partial_writer=partial_writer,
     )
     agent_ms = (perf_counter() - agent_start) * 1000
     output_text = _agent_output_text(result)
@@ -1430,6 +1464,7 @@ def _persist_article_background_turn(
         turn.message_id,
         executed.new_messages,
         display_user_prompt=user_prompt,
+        expected_stream_generation=turn.stream_generation,
         commit=False,
     )
     return {
@@ -1442,8 +1477,19 @@ def _persist_article_background_turn(
     }
 
 
-def _stage_message_failed(db: Session, message_id: int, error: str) -> ChatMessage:
-    return update_message_failed(db, message_id, error, commit=False)
+def _stage_message_failed(
+    db: Session,
+    message_id: int,
+    error: str,
+    stream_generation: int,
+) -> ChatMessage:
+    return update_message_failed(
+        db,
+        message_id,
+        error,
+        expected_stream_generation=stream_generation,
+        commit=False,
+    )
 
 
 async def process_message_async(
@@ -1451,19 +1497,18 @@ async def process_message_async(
     message_id: int,
     user_prompt: str,
     *,
+    turn_context: ChatTurnProcessingContext,
+    stream_generation: int,
+    ensure_lease: Callable[[], bool],
     source: str = "realtime",
     task_id: int | None = None,
-    turn_context: ChatTurnProcessingContext,
-) -> None:
+) -> QueuedChatTurnOutcome:
     """Process one article-chat message without retaining a DB session across I/O."""
     from app.core.db import get_session_factory
 
     total_start = perf_counter()
     session_factory = get_session_factory()
     lifecycle = ARTICLE_BACKGROUND_TURN_LIFECYCLE
-    tracker = LlmTaskTurnTracker(task_id=None)
-    turn: _DetachedChatTurn | None = None
-    prepared: _PreparedArticleChatTurn | None = None
     logger.info(
         "Async chat turn started",
         extra=build_log_extra(
@@ -1478,112 +1523,54 @@ async def process_message_async(
         ),
     )
 
-    try:
-        with session_factory() as prepare_db:
-            session = prepare_db.query(ChatSession).filter(ChatSession.id == session_id).first()
-            if session is None:
-                logger.error("[AsyncChat:ERROR] Session %s not found", session_id)
-                return
-
-            session_snapshot = turn_context.session
-            if session_snapshot.effective_session_id != session_id:
-                raise ValueError("Article turn context does not match the requested session")
-            turn = _snapshot_detached_chat_turn_from_snapshot(
-                session_snapshot,
-                message_id=message_id,
-                source=source,
-                task_id=task_id,
-            )
-            turn, tracker = _start_detached_chat_turn(
-                prepare_db,
-                turn=turn,
-                lifecycle=lifecycle,
-                input_json={
-                    "chat_session_id": turn.session_id,
-                    "content_id": turn.content_id,
-                    "source": turn.source,
-                    "queue_task_id": turn.task_id,
-                    "prompt_chars": len(user_prompt),
-                    "model": turn.model,
-                },
-            )
-            prepared = _prepare_article_background_turn(prepare_db, session_snapshot, turn)
-            _mark_detached_chat_turn_running(
-                prepare_db,
-                turn=turn,
-                tracker=tracker,
-                lifecycle=lifecycle,
-            )
-
-        external_start = perf_counter()
-        executed = await _execute_article_background_turn(
+    session_snapshot = turn_context.session
+    result = await _execute_queued_chat_turn(
+        session_factory=session_factory,
+        session_snapshot=session_snapshot,
+        session_id=session_id,
+        message_id=message_id,
+        source=source,
+        task_id=task_id,
+        stream_generation=stream_generation,
+        lifecycle=lifecycle,
+        input_json=lambda turn: {
+            "chat_session_id": turn.session_id,
+            "content_id": turn.content_id,
+            "source": turn.source,
+            "queue_task_id": turn.task_id,
+            "prompt_chars": len(user_prompt),
+            "model": turn.model,
+            "stream_generation": turn.stream_generation,
+        },
+        prepare=lambda db, turn: _prepare_article_background_turn(
+            db,
+            session_snapshot,
+            turn,
+        ),
+        execute=lambda prepared, turn, partial_writer: _execute_article_background_turn(
             prepared,
             turn,
             user_prompt=user_prompt,
-        )
-        external_ms = (perf_counter() - external_start) * 1000
-        _log_chat_usage(
-            executed.raw_result,
-            turn.usage_snapshot,
-            turn.session_id,
-            turn.message_id,
-            lifecycle.usage_context,
-        )
+            partial_writer=partial_writer,
+        ),
+        persist=lambda db, executed, turn: _persist_article_background_turn(
+            db,
+            executed,
+            turn,
+            user_prompt=user_prompt,
+        ),
+        mark_message_failed=_stage_message_failed,
+        raw_result=lambda executed: executed.raw_result,
+        record_usage=_log_chat_usage,
+        ensure_lease=ensure_lease,
+        cleanup=lambda prepared: _close_sandbox_session(prepared.deps.sandbox_session),
+        after_persist=_sync_parent_session_activity,
+    )
+    if result.outcome != QueuedChatTurnOutcome.COMPLETED:
+        return result.outcome
 
-        persistence_start = perf_counter()
-        with session_factory() as persist_db:
-            persisted_session = (
-                persist_db.query(ChatSession).filter(ChatSession.id == turn.session_id).first()
-            )
-            if persisted_session is None:
-                raise RuntimeError(f"Chat session {turn.session_id} disappeared before persistence")
-            output_json = _persist_article_background_turn(
-                persist_db,
-                executed,
-                turn,
-                user_prompt=user_prompt,
-            )
-            _sync_parent_session_activity(persist_db, persisted_session)
-            _complete_detached_chat_turn(
-                persist_db,
-                session=persisted_session,
-                turn=turn,
-                tracker=tracker,
-                lifecycle=lifecycle,
-                output_json=output_json,
-            )
-        persistence_ms = (perf_counter() - persistence_start) * 1000
-    except Exception as exc:  # noqa: BLE001
-        logger.exception(
-            "Async chat turn failed",
-            extra=build_log_extra(
-                component="chat",
-                operation="process_message_async",
-                event_name="chat.turn.failed",
-                status="failed",
-                duration_ms=(perf_counter() - total_start) * 1000,
-                session_id=session_id,
-                message_id=message_id,
-                source=source,
-                context_data={
-                    "failure_class": type(exc).__name__,
-                    "llm_task_id": turn.llm_task_id if turn is not None else None,
-                },
-            ),
-        )
-        _persist_detached_turn_failure(
-            session_factory=session_factory,
-            tracker=tracker,
-            lifecycle=lifecycle,
-            message_id=message_id,
-            error=exc,
-            mark_message_failed=_stage_message_failed,
-        )
-        return
-    finally:
-        if prepared is not None:
-            _close_sandbox_session(prepared.deps.sandbox_session)
-
+    turn = result.turn
+    prepared = result.prepared
     if turn is None or prepared is None:
         raise RuntimeError("Article chat turn completed without runtime state")
 
@@ -1604,12 +1591,15 @@ async def process_message_async(
                 "model": turn.model,
                 "deps_ms": round(prepared.deps_ms, 2),
                 "history_ms": round(prepared.history_ms, 2),
-                "agent_ms": round(external_ms, 2),
-                "save_ms": round(persistence_ms, 2),
+                "agent_ms": round(result.external_ms, 2),
+                "save_ms": round(result.persistence_ms, 2),
+                "partial_write_count": result.partial_write_count,
+                "first_partial_ms": result.first_partial_ms,
                 "llm_task_id": turn.llm_task_id,
             },
         ),
     )
+    return result.outcome
 
 
 INITIAL_QUESTIONS_PROMPT = load_prompt("chat/article#initial_questions_user")

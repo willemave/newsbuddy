@@ -4,9 +4,12 @@ import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import Any, cast
 
+from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.tools import ToolDefinition
 
 from app.core.settings import get_settings
 from app.models.contracts import LlmTaskStatus, MessageProcessingStatus, TaskType
@@ -25,61 +28,64 @@ from app.repositories.search_repository import (
     search_news,
     search_subscription_feeds,
 )
-from app.services import assistant_router, chat_turn_runtime
+from app.services import assistant_router, assistant_turn_routing, chat_turn_runtime
 from app.services.chat_agent import create_processing_message
 from app.services.chat_turn_queue import build_chat_turn_context
 from tests.support.feed_subscription_test_helpers import stub_feed_validator
 
 
-def test_build_turn_instructions_prefers_knowledge_for_saved_content_prompts() -> None:
+def test_turn_profile_prefers_knowledge_for_saved_content_prompts() -> None:
     """Favorite/saved prompts should route to search_knowledge."""
 
-    instructions = assistant_router._build_turn_instructions("What is my favorite article?")
+    profile = assistant_turn_routing.resolve_assistant_turn_profile("What is my favorite article?")
 
-    assert instructions is not None
-    assert "search_knowledge" in instructions
+    assert profile.route == "knowledge_search"
+    assert profile.tool_names == assistant_turn_routing.ASSISTANT_DEFAULT_TOOL_NAMES
 
 
-def test_build_turn_instructions_prefers_web_for_recent_questions() -> None:
+def test_turn_profile_prefers_web_for_recent_questions() -> None:
     """Recent factual prompts should route to web search."""
 
-    instructions = assistant_router._build_turn_instructions("What is the latest Rust release?")
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "What is the latest Rust release?"
+    )
 
-    assert instructions is not None
-    assert "search_web" in instructions
+    assert profile.route == "web_search"
+    assert profile.tool_names == assistant_turn_routing.ASSISTANT_DEFAULT_TOOL_NAMES
 
 
-def test_build_turn_instructions_prefers_feed_finder_for_blog_subscription() -> None:
+def test_turn_profile_prefers_feed_finder_for_blog_subscription() -> None:
     """Feed/blog discovery prompts should route to the feed finder tool."""
 
-    instructions = assistant_router._build_turn_instructions(
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
         "please find a blog by Armin Ronacher and subscribe to it"
     )
 
-    assert instructions is not None
-    assert "find_feed_options" in instructions
-    assert "subscribe_to_feed" in instructions
-    assert "recommendation mode" in instructions
+    assert profile.route == "feed_finder"
+    assert profile.tool_names == assistant_turn_routing.ASSISTANT_DEFAULT_TOOL_NAMES
+    assert profile.instructions is not None
+    assert "recommendation mode" in profile.instructions
 
 
-def test_build_turn_instructions_keeps_feed_recommendations_non_mutating() -> None:
+def test_turn_profile_keeps_feed_recommendations_non_mutating() -> None:
     """Feed recommendation prompts should stay in recommendation mode."""
 
-    instructions = assistant_router._build_turn_instructions(
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
         "Recommend a few feeds, newsletters, or podcasts I should add "
         "based on what I've been reading."
     )
 
-    assert instructions is not None
-    assert "find_feed_options" in instructions
-    assert "recommendation mode" in instructions
-    assert "attached below for review" in instructions
+    assert profile.route == "feed_finder"
+    assert profile.tool_names == assistant_turn_routing.ASSISTANT_DEFAULT_TOOL_NAMES
+    assert profile.instructions is not None
+    assert "recommendation mode" in profile.instructions
+    assert "attached below for review" in profile.instructions
 
 
-def test_build_turn_instructions_resolves_weekly_ordinal_subscription_actions() -> None:
+def test_turn_profile_resolves_weekly_ordinal_subscription_actions() -> None:
     """Weekly ordinal mutations should use frozen identities without rediscovery."""
 
-    instructions = assistant_router._build_turn_instructions(
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
         "add first two",
         AssistantScreenContext(
             screen_type="weekly_discovery",
@@ -87,46 +93,280 @@ def test_build_turn_instructions_resolves_weekly_ordinal_subscription_actions() 
         ),
     )
 
-    assert instructions is not None
-    assert "canonical numbered weekly discovery identities" in instructions
-    assert "exact feed_url as url" in instructions
-    assert "exact suggestion_type as feed_type" in instructions
-    assert "Do not search for or re-detect" in instructions
+    assert profile.route == "weekly_discovery_action"
+    assert profile.tool_names == frozenset({"subscribe_to_feed"})
+    assert profile.instructions is not None
+    assert "canonical numbered weekly discovery identities" in profile.instructions
+    assert "exact feed_url as url" in profile.instructions
+    assert "exact suggestion_type as feed_type" in profile.instructions
+    assert "Do not search for or re-detect" in profile.instructions
 
 
-def test_build_turn_instructions_prefers_content_search_for_feed_summary() -> None:
+def test_turn_profile_prefers_content_search_for_feed_summary() -> None:
     """Feed summary prompts should route to in-app search tools before web search."""
 
-    instructions = assistant_router._build_turn_instructions(
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
         "Give me a summary of the last day's content from my feed, "
         "including recent news items and articles."
     )
 
-    assert instructions is not None
-    assert "search_content" in instructions
-    assert "search_news" in instructions
+    assert profile.route == "content_search"
+    assert profile.tool_names == assistant_turn_routing.ASSISTANT_DEFAULT_TOOL_NAMES
 
 
-def test_build_turn_instructions_requires_unread_news_tool_for_action() -> None:
+def test_compound_turn_keeps_search_and_mutation_capabilities() -> None:
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "Search my feed for climate articles and save the best one to Knowledge."
+    )
+
+    assert profile.route == "content_search"
+    assert {"search_content", "save_to_knowledge"} <= profile.tool_names
+
+
+def test_compound_feed_discovery_turn_can_subscribe_after_discovery() -> None:
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "Search the web for a good Python newsletter and subscribe me to it."
+    )
+
+    assert profile.route == "feed_finder"
+    assert {"find_feed_options", "subscribe_to_feed"} <= profile.tool_names
+
+
+def test_compound_saved_and_current_turn_keeps_knowledge_and_web_search() -> None:
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "Compare my saved article about Rust with the latest Rust release."
+    )
+
+    assert profile.route == "knowledge_search"
+    assert {"search_knowledge", "search_web"} <= profile.tool_names
+
+
+def test_turn_profile_requires_unread_news_tool_for_action() -> None:
     """The unread-news quick action should force the dedicated news tool."""
 
-    instructions = assistant_router._build_turn_instructions(
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
         "Pick the best stories.",
         AssistantScreenContext(
             screen_type="short_news_feed",
-            assistant_action=assistant_router.ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS,
+            assistant_action=(assistant_turn_routing.ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS),
         ),
     )
 
-    assert instructions is not None
-    assert "list_unread_news_items" in instructions
-    assert "Do not mark items read" in instructions
+    assert profile.route == "pick_interesting_unread_news"
+    assert profile.tool_names == frozenset({"list_unread_news_items", "search_web"})
+    assert profile.instructions is not None
+    assert "Do not mark items read" in profile.instructions
 
 
-def test_build_turn_instructions_skips_small_talk() -> None:
+def test_turn_profile_skips_small_talk_tools_and_instructions() -> None:
     """Small talk should not force a tool route."""
 
-    assert assistant_router._build_turn_instructions("hello") is None
+    profile = assistant_turn_routing.resolve_assistant_turn_profile("hello")
+
+    assert profile.route == "small_talk"
+    assert profile.instructions is None
+    assert profile.tool_names == frozenset()
+
+
+def test_learning_deck_explanation_stays_grounded_without_tool_schemas() -> None:
+    screen_context = AssistantScreenContext(
+        screen_type="learning_deck",
+        screen_title="Distributed systems",
+        note="Slide text: Leases establish temporary ownership.",
+    )
+
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "Why does this matter?",
+        screen_context,
+    )
+    tool_defs = [
+        ToolDefinition(name="search_web"),
+        ToolDefinition(name="search_knowledge"),
+    ]
+    context = cast(
+        RunContext[assistant_router.AssistantDeps],
+        SimpleNamespace(
+            deps=SimpleNamespace(
+                turn_profile=profile,
+                session_id=1,
+                user_id=1,
+            )
+        ),
+    )
+    selected = asyncio.run(assistant_router._prepare_assistant_tools(context, tool_defs))
+
+    assert profile.route == "learning_deck_grounded"
+    assert profile.tool_names == frozenset()
+    assert selected == []
+
+
+def test_learning_deck_explicit_current_request_exposes_only_exa_web_search() -> None:
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "Search online for the latest developments",
+        AssistantScreenContext(screen_type="learning_deck"),
+    )
+
+    assert profile.route == "web_search"
+    assert profile.tool_names == frozenset({"search_web"})
+
+
+def test_learning_deck_current_slide_reference_does_not_trigger_web_search() -> None:
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "Can you explain the current slide?",
+        AssistantScreenContext(screen_type="learning_deck"),
+    )
+
+    assert profile.route == "learning_deck_grounded"
+    assert profile.tool_names == frozenset()
+
+
+def test_learning_deck_grounding_precedes_general_feed_and_library_routes() -> None:
+    screen_context = AssistantScreenContext(screen_type="learning_deck")
+
+    feed_profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "Explain this in the context of my feed",
+        screen_context,
+    )
+    library_profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "How does this relate to my saved markdown?",
+        screen_context,
+    )
+
+    assert feed_profile.route == "learning_deck_grounded"
+    assert feed_profile.tool_names == frozenset()
+    assert library_profile.route == "learning_deck_grounded"
+    assert library_profile.tool_names == frozenset()
+
+
+def test_learning_deck_current_practice_request_exposes_exa_web_search() -> None:
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "How does this compare with current best practices?",
+        AssistantScreenContext(screen_type="learning_deck"),
+    )
+
+    assert profile.route == "web_search"
+    assert profile.tool_names == frozenset({"search_web"})
+
+
+def test_default_route_does_not_start_the_personal_library_sandbox() -> None:
+    profile = assistant_turn_routing.resolve_assistant_turn_profile(
+        "Help me think this through",
+        AssistantScreenContext(screen_type="assistant_quick"),
+    )
+
+    assert profile.route == "default"
+    assert profile.uses_personal_library is False
+
+
+def test_learning_deck_route_does_not_hydrate_personal_library(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Deck chat",
+        session_type="knowledge_chat",
+        context_snapshot="Current slide: Leases establish temporary ownership.",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.6-terra",
+    )
+    db_session.add(session)
+    db_session.commit()
+    assert session.id is not None
+    turn_context = build_chat_turn_context(
+        session,
+        visible_session_id=session.id,
+        user_prompt="Explain this simply",
+        kind="assistant",
+        source="assistant",
+        screen_context=AssistantScreenContext(screen_type="learning_deck"),
+    )
+    turn = chat_turn_runtime.snapshot_detached_chat_turn_from_snapshot(
+        turn_context.session,
+        message_id=10,
+        source="assistant",
+        task_id=20,
+    )
+    monkeypatch.setattr(assistant_router, "load_message_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(assistant_router, "resolve_effective_api_key", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        assistant_router,
+        "_build_assistant_personal_library_runtime",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("sandbox must stay lazy")),
+    )
+
+    prepared = assistant_router._prepare_assistant_background_turn(
+        db_session,
+        turn_context.session,
+        turn,
+        screen_context=AssistantScreenContext(screen_type="learning_deck"),
+        user_prompt="Explain this simply",
+    )
+
+    assert prepared.deps.turn_profile.route == "learning_deck_grounded"
+    assert prepared.deps.sandbox_session is None
+
+
+def test_markdown_route_hydrates_personal_library_once(
+    db_session,
+    test_user,
+    monkeypatch,
+) -> None:
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Markdown library chat",
+        session_type="knowledge_chat",
+        context_snapshot="Knowledge hub",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.6-terra",
+    )
+    db_session.add(session)
+    db_session.commit()
+    assert session.id is not None
+    screen_context = AssistantScreenContext(screen_type="assistant_quick")
+    prompt = "Read my saved markdown file"
+    turn_context = build_chat_turn_context(
+        session,
+        visible_session_id=session.id,
+        user_prompt=prompt,
+        kind="assistant",
+        source="assistant",
+        screen_context=screen_context,
+    )
+    turn = chat_turn_runtime.snapshot_detached_chat_turn_from_snapshot(
+        turn_context.session,
+        message_id=10,
+        source="assistant",
+        task_id=20,
+    )
+    sandbox = SimpleNamespace()
+    runtime_calls: list[int] = []
+    monkeypatch.setattr(assistant_router, "load_message_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(assistant_router, "resolve_effective_api_key", lambda **_kwargs: None)
+
+    def build_runtime(*, db, user_id):
+        assert db is db_session
+        runtime_calls.append(user_id)
+        return sandbox, None
+
+    monkeypatch.setattr(
+        assistant_router,
+        "_build_assistant_personal_library_runtime",
+        build_runtime,
+    )
+
+    prepared = assistant_router._prepare_assistant_background_turn(
+        db_session,
+        turn_context.session,
+        turn,
+        screen_context=screen_context,
+        user_prompt=prompt,
+    )
+
+    assert prepared.deps.turn_profile.route == "markdown_library"
+    assert prepared.deps.sandbox_session is sandbox
+    assert runtime_calls == [test_user.id]
 
 
 def test_build_screen_context_snapshot_omits_user_id(db_session, test_user) -> None:
@@ -189,11 +429,14 @@ def test_known_feed_subscription_tool_persists_once_and_is_idempotent(
     )
     agent = assistant_router._create_assistant_agent("test:model")
     subscribe = agent._function_toolset.tools["subscribe_to_feed"].function
-    context = SimpleNamespace(
-        deps=SimpleNamespace(
-            user_id=test_user.id,
-            session_factory=db_session_factory,
-        )
+    context = cast(
+        RunContext[Any],
+        SimpleNamespace(
+            deps=SimpleNamespace(
+                user_id=test_user.id,
+                session_factory=db_session_factory,
+            )
+        ),
     )
 
     first_result = subscribe(
@@ -242,11 +485,14 @@ def test_known_feed_subscription_tool_rejects_bad_identity_and_rolls_back_queue_
     )
     agent = assistant_router._create_assistant_agent("test:model")
     subscribe = agent._function_toolset.tools["subscribe_to_feed"].function
-    context = SimpleNamespace(
-        deps=SimpleNamespace(
-            user_id=test_user.id,
-            session_factory=db_session_factory,
-        )
+    context = cast(
+        RunContext[Any],
+        SimpleNamespace(
+            deps=SimpleNamespace(
+                user_id=test_user.id,
+                session_factory=db_session_factory,
+            )
+        ),
     )
 
     assert (
@@ -685,6 +931,8 @@ def test_process_assistant_turn_persists_completion_usage_and_ledger(
             "Find my saved article",
             screen_context=screen_context,
             turn_context=turn_context,
+            stream_generation=0,
+            ensure_lease=lambda: True,
         )
     )
 

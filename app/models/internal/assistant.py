@@ -22,7 +22,7 @@ class AssistantScreenContext(BaseModel):
     )
     selected_topic: str | None = Field(default=None, max_length=200)
     query: str | None = Field(default=None, max_length=200)
-    note: str | None = Field(default=None, max_length=500)
+    note: str | None = Field(default=None, max_length=1500)
     assistant_action: str | None = Field(default=None, max_length=100)
 
     @model_validator(mode="after")

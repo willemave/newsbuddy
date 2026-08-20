@@ -7,9 +7,6 @@ import SwiftUI
 import UIKit
 
 private enum LearningDeckReaderLayout {
-    static let compactExpandedChatHeight: CGFloat = 230
-    static let regularExpandedChatHeight: CGFloat = 280
-    static let accessibilityExpandedChatHeight: CGFloat = 340
     static let flyoverHorizontalInset: CGFloat = 12
     static let flyoverBottomInset: CGFloat = 8
     static let landscapeHorizontalSafeReserve: CGFloat = 76
@@ -20,7 +17,7 @@ struct LearningDeckReaderView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var viewModel: LearningDeckReaderViewModel
     @State private var webController = LearningDeckReaderWebController()
-    @State private var isPortraitChatExpanded = false
+    @State private var portraitChatPresentation: LearningDeckChatPresentation = .peek
     @State private var showLandscapeChat = false
 
     let deck: LearningDeck
@@ -71,7 +68,7 @@ struct LearningDeckReaderView: View {
             LearningDeckChatPanel(
                 viewModel: viewModel
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.medium, .fraction(0.75), .large])
             .presentationDragIndicator(.visible)
         }
     }
@@ -98,19 +95,21 @@ struct LearningDeckReaderView: View {
                 portraitChatFlyover(geometry: geometry)
             }
         }
-        .animation(AppMotion.subtle, value: isPortraitChatExpanded)
+        .animation(AppMotion.subtle, value: portraitChatPresentation)
         .animation(AppMotion.subtle, value: isLandscape)
     }
 
     private func portraitChatFlyover(geometry: GeometryProxy) -> some View {
         LearningDeckChatFlyover(
             viewModel: viewModel,
-            isExpanded: $isPortraitChatExpanded
+            presentation: $portraitChatPresentation
         )
         .frame(
-            height: isPortraitChatExpanded
-                ? expandedChatHeight(for: geometry.size)
-                : nil
+            height: LearningDeckChatHeightPolicy.height(
+                for: portraitChatPresentation,
+                size: geometry.size,
+                isAccessibilitySize: dynamicTypeSize.isAccessibilitySize
+            )
         )
         .clipShape(
             RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
@@ -396,19 +395,6 @@ struct LearningDeckReaderView: View {
             label += ", \(title)"
         }
         return label
-    }
-
-    private func expandedChatHeight(for size: CGSize) -> CGFloat {
-        let isAccessibilitySize = dynamicTypeSize.isAccessibilitySize
-        let preferred = if isAccessibilitySize {
-            LearningDeckReaderLayout.accessibilityExpandedChatHeight
-        } else if size.height < 760 {
-            LearningDeckReaderLayout.compactExpandedChatHeight
-        } else {
-            LearningDeckReaderLayout.regularExpandedChatHeight
-        }
-        let maximumFraction = isAccessibilitySize ? 0.58 : 0.42
-        return min(preferred, size.height * maximumFraction)
     }
 
     private var closeButtonTopPadding: CGFloat {

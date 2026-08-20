@@ -70,6 +70,14 @@ class ChatMessage(Base):
     # Immutable inputs captured when an asynchronous turn is accepted. Workers
     # read this row instead of mutable session context after queue delay.
     processing_context = Column(JSON, nullable=True)
+    # Durable, advisory assistant text for an in-flight attempt. The canonical
+    # transcript remains message_list after terminal completion.
+    partial_text = Column(Text, nullable=True)
+    stream_generation = Column(Integer, nullable=True)
+    stream_revision = Column(Integer, nullable=True)
+    stream_updated_at = Column(DateTime(timezone=True), nullable=True)
+    # Provider identity for resumable Deep Research polling across worker attempts.
+    deep_research_response_id = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     # Async processing fields
     status = Column(
