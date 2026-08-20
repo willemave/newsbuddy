@@ -2,7 +2,6 @@ from unittest.mock import MagicMock, patch
 
 from app.scraping.aggregators.config import RssClusterAggregator
 from app.scraping.aggregators.techmeme import TechmemeAggregatorScraper
-from app.services.feed_research_runtime import FeedResearchRuntimeError
 
 
 def _settings() -> RssClusterAggregator:
@@ -24,7 +23,7 @@ def test_cluster_link_requires_a_domain_boundary() -> None:
     assert scraper._is_cluster_link("https://techmeme.com.evil.test/250921/p26") is False
 
 
-def test_feed_sandbox_outage_is_reported_in_run_stats() -> None:
+def test_feed_http_outage_is_reported_in_run_stats() -> None:
     scraper = TechmemeAggregatorScraper(_settings())
     save_stats = {
         "saved": 0,
@@ -37,7 +36,7 @@ def test_feed_sandbox_outage_is_reported_in_run_stats() -> None:
     with (
         patch(
             "app.scraping.aggregators._rss_cluster.fetch_and_parse_feed",
-            side_effect=FeedResearchRuntimeError("E2B feed runtime unavailable"),
+            side_effect=RuntimeError("Feed HTTP unavailable"),
         ),
         patch.object(scraper, "_save_items_with_stats", return_value=save_stats),
     ):
@@ -46,9 +45,7 @@ def test_feed_sandbox_outage_is_reported_in_run_stats() -> None:
     assert stats.scraped == 0
     assert stats.saved == 0
     assert stats.errors == 1
-    assert stats.error_details == [
-        "https://www.techmeme.com/feed.xml: E2B feed runtime unavailable"
-    ]
+    assert stats.error_details == ["https://www.techmeme.com/feed.xml: Feed HTTP unavailable"]
 
 
 def test_malformed_entry_preserves_partial_progress_and_error_stats() -> None:

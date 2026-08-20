@@ -7,14 +7,15 @@ from inspect import signature
 import pytest
 
 from app.scraping.atom_unified import AtomScraper
-from app.scraping.base import BaseScraper
 from app.scraping.feed_concurrency import run_feed_jobs
 from app.scraping.podcast_unified import PodcastUnifiedScraper
 from app.scraping.substack_unified import SubstackScraper
 
+type FeedScraperType = type[AtomScraper] | type[SubstackScraper] | type[PodcastUnifiedScraper]
+
 
 @pytest.mark.parametrize("scraper_type", [AtomScraper, SubstackScraper, PodcastUnifiedScraper])
-def test_feed_scrapers_expose_one_public_scrape_mode(scraper_type: type[BaseScraper]) -> None:
+def test_feed_scrapers_expose_one_public_scrape_mode(scraper_type: FeedScraperType) -> None:
     assert tuple(signature(scraper_type.scrape).parameters) == ("self",)
 
 
@@ -26,8 +27,8 @@ def test_feed_scrapers_expose_one_public_scrape_mode(scraper_type: type[BaseScra
         (PodcastUnifiedScraper, "_load_podcast_feeds"),
     ],
 )
-def test_e2b_feed_fetch_failure_is_reported_in_scraper_stats(
-    scraper_type: type[BaseScraper],
+def test_feed_http_failure_is_reported_in_scraper_stats(
+    scraper_type: FeedScraperType,
     load_attr: str,
     monkeypatch,
 ) -> None:
@@ -40,7 +41,7 @@ def test_e2b_feed_fetch_failure_is_reported_in_scraper_stats(
     )
 
     def fail_fetch(*_args, **_kwargs):
-        raise RuntimeError("E2B unavailable")
+        raise RuntimeError("Feed HTTP unavailable")
 
     monkeypatch.setattr(
         f"{scraper_type.__module__}.fetch_and_parse_feed",
@@ -50,7 +51,7 @@ def test_e2b_feed_fetch_failure_is_reported_in_scraper_stats(
     stats = scraper.run_with_stats()
 
     assert (stats.scraped, stats.saved, stats.duplicates, stats.errors) == (0, 0, 0, 1)
-    assert stats.error_details == [f"{feed_url}: E2B unavailable"]
+    assert stats.error_details == [f"{feed_url}: Feed HTTP unavailable"]
 
 
 def test_run_feed_jobs_is_bounded_ordered_and_failure_isolated() -> None:

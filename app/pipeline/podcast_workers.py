@@ -21,7 +21,7 @@ from app.services.audio_pipeline import (
     transcribe_audio_file_with_metadata,
 )
 from app.services.content_bodies import sync_content_body_storage
-from app.services.feed_research_runtime import sandboxed_http_service
+from app.services.http import get_http_service
 from app.services.queue import TaskType, get_queue_service
 from app.services.sandbox_media_download import download_remote_media_in_sandbox
 from app.utils.url_utils import is_domain_or_subdomain
@@ -232,14 +232,10 @@ class PodcastMediaWorker:
         platform = (content.metadata.get("platform") or db_content.platform or "").lower()
         is_apple_url = self._is_apple_podcasts_url(str(content.url))
         if platform == "apple_podcasts" or is_apple_url:
-            with sandboxed_http_service(
-                user_id=self._sandbox_user_id(content),
-                execution_id=content.id,
-            ) as http_service:
-                resolution = resolve_apple_podcast_episode(
-                    str(content.url),
-                    feed_http_service=http_service,
-                )
+            resolution = resolve_apple_podcast_episode(
+                str(content.url),
+                feed_fetch=get_http_service().fetch_bounded_public,
+            )
             if resolution.feed_url:
                 content.metadata.setdefault("feed_url", resolution.feed_url)
             if resolution.episode_title:

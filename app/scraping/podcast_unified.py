@@ -10,7 +10,6 @@ from app.models.contracts import ContentType
 from app.scraping.base import BaseScraper
 from app.scraping.feed_concurrency import run_feed_jobs
 from app.scraping.feed_fetch import fetch_and_parse_feed
-from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.scraper_configs import build_feed_payloads, list_active_configs_by_type
 
 logger = get_logger(__name__)
@@ -56,7 +55,6 @@ class PodcastUnifiedScraper(BaseScraper):
         limit = feed_config.get("limit", 10)
         user_id = feed_config.get("user_id")
         config_id = feed_config.get("config_id")
-
         if not feed_url:
             logger.warning(f"No URL found for feed: {feed_name}")
             return items
@@ -65,11 +63,7 @@ class PodcastUnifiedScraper(BaseScraper):
 
         try:
             # Parse RSS feed with better encoding handling
-            parsed_feed = fetch_and_parse_feed(
-                feed_url,
-                user_id=resolve_sandbox_user_id(user_id),
-                execution_id=config_id if isinstance(config_id, int) else None,
-            )
+            parsed_feed = fetch_and_parse_feed(feed_url)
 
             # Check for parsing issues
             if parsed_feed.bozo:

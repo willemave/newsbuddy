@@ -188,7 +188,7 @@ def test_apple_podcast_pattern_resolution_uses_feed_sandbox_runtime(
     db_session.add(content)
     db_session.commit()
     content_id = _require_id(content.id)
-    sandbox_http_service = object()
+    sandbox_http_service = Mock()
     runtime_calls: list[dict[str, object]] = []
 
     @contextmanager
@@ -196,9 +196,9 @@ def test_apple_podcast_pattern_resolution_uses_feed_sandbox_runtime(
         runtime_calls.append(kwargs)
         yield sandbox_http_service
 
-    def _resolve(url: str, *, feed_http_service: object) -> ApplePodcastResolution:
+    def _resolve(url: str, *, feed_fetch) -> ApplePodcastResolution:  # noqa: ANN001
         assert url == apple_url
-        assert feed_http_service is sandbox_http_service
+        assert feed_fetch == sandbox_http_service.fetch
         return ApplePodcastResolution(
             feed_url="https://publisher.example/show.xml",
             episode_title="Sandboxed Episode",

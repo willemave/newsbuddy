@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -105,24 +104,19 @@ def test_sciurls_respects_limit() -> None:
     assert len(items) == 2
 
 
-def test_sciurls_fetches_homepage_through_feed_research_runtime(monkeypatch) -> None:
+def test_sciurls_fetches_homepage_through_pipeline_http(monkeypatch) -> None:
     settings = HtmlGroupedAggregator(
         key="sciurls", name="SciURLs", kind="html_grouped", url="https://sciurls.com", limit=2
     )
     calls: list[str] = []
 
     class FakeHttpService:
-        def fetch(self, url: str, *, headers):  # noqa: ANN001
+        def fetch_bounded_public(self, url: str, *, headers):  # noqa: ANN001
             del headers
             calls.append(url)
             return SimpleNamespace(text=load_fixture("sciurls", "sample.html"))
 
-    @contextmanager
-    def fake_runtime(**kwargs):
-        assert kwargs == {"user_id": 0}
-        yield FakeHttpService()
-
-    monkeypatch.setattr(_html_grouped, "sandboxed_http_service", fake_runtime)
+    monkeypatch.setattr(_html_grouped, "get_http_service", FakeHttpService)
 
     items = SciUrlsAggregatorScraper(settings).scrape()
 
@@ -130,22 +124,22 @@ def test_sciurls_fetches_homepage_through_feed_research_runtime(monkeypatch) -> 
     assert calls == ["https://sciurls.com"]
 
 
-def test_sciurls_sandbox_outage_is_reported_in_scraper_stats(monkeypatch) -> None:
+def test_sciurls_http_outage_is_reported_in_scraper_stats(monkeypatch) -> None:
     settings = HtmlGroupedAggregator(
         key="sciurls", name="SciURLs", kind="html_grouped", url="https://sciurls.com", limit=2
     )
 
-    broken_runtime = MagicMock()
-    broken_runtime.return_value.__enter__.side_effect = RuntimeError("E2B unavailable")
+    broken_http = MagicMock()
+    broken_http.fetch_bounded_public.side_effect = RuntimeError("HTTP unavailable")
 
-    monkeypatch.setattr(_html_grouped, "sandboxed_http_service", broken_runtime)
+    monkeypatch.setattr(_html_grouped, "get_http_service", lambda: broken_http)
 
     stats = SciUrlsAggregatorScraper(settings).run_with_stats()
 
     assert stats.scraped == 0
     assert stats.saved == 0
     assert stats.errors == 1
-    assert stats.error_details == ["E2B unavailable"]
+    assert stats.error_details == ["HTTP unavailable"]
 
 
 def test_sciurls_markup_drift_is_reported_in_scraper_stats(monkeypatch) -> None:
@@ -154,15 +148,11 @@ def test_sciurls_markup_drift_is_reported_in_scraper_stats(monkeypatch) -> None:
     )
 
     class FakeHttpService:
-        def fetch(self, _url: str, *, headers):  # noqa: ANN001
+        def fetch_bounded_public(self, _url: str, *, headers):  # noqa: ANN001
             del headers
             return SimpleNamespace(text="<html><body>unexpected markup</body></html>")
 
-    @contextmanager
-    def fake_runtime(**_kwargs):
-        yield FakeHttpService()
-
-    monkeypatch.setattr(_html_grouped, "sandboxed_http_service", fake_runtime)
+    monkeypatch.setattr(_html_grouped, "get_http_service", FakeHttpService)
 
     stats = SciUrlsAggregatorScraper(settings).run_with_stats()
 

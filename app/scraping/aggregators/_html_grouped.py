@@ -23,8 +23,7 @@ from bs4 import BeautifulSoup, Tag
 from app.models.contracts import ContentType
 from app.scraping.aggregators.base import AggregatorScraper
 from app.scraping.aggregators.config import HtmlGroupedAggregator
-from app.services.agent_vm_runtime import SYSTEM_USER_ID
-from app.services.feed_research_runtime import sandboxed_http_service
+from app.services.http import get_http_service
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -50,11 +49,10 @@ class HtmlGroupedAggregatorScraper(AggregatorScraper):
         self.base_url = str(settings.url).rstrip("/")
 
     def scrape(self) -> list[dict[str, Any]]:
-        with sandboxed_http_service(user_id=SYSTEM_USER_ID) as http_service:
-            response = http_service.fetch(
-                self.base_url,
-                headers={"User-Agent": USER_AGENT},
-            )
+        response = get_http_service().fetch_bounded_public(
+            self.base_url,
+            headers={"User-Agent": USER_AGENT},
+        )
         items = self.parse(response.text)
         if not items:
             raise ValueError(f"{self.name} returned no parseable items")

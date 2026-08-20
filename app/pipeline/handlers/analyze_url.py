@@ -123,7 +123,7 @@ def _resolve_apple_podcast_in_feed_sandbox(
     ) as http_service:
         return resolve_apple_podcast_episode(
             url,
-            feed_http_service=http_service,
+            feed_fetch=http_service.fetch,
         )
 
 

@@ -13,7 +13,6 @@ from app.scraping.base import BaseScraper
 from app.scraping.feed_concurrency import run_feed_jobs
 from app.scraping.feed_fetch import fetch_and_parse_feed
 from app.scraping.rss_helpers import resolve_feed_source
-from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.scraper_configs import build_feed_payloads, list_active_configs_by_type
 
 ENCODING_OVERRIDE_EXCEPTIONS = tuple(
@@ -65,18 +64,13 @@ class AtomScraper(BaseScraper):
         limit = feed_info.get("limit", 10)
         user_id = feed_info.get("user_id")
         config_id = feed_info.get("config_id")
-
         if not feed_url:
             logger.warning("Skipping empty feed URL.")
             return items
 
         logger.info(f"Scraping Atom feed: {feed_url} (source: {source_name}, limit: {limit})")
         try:
-            parsed_feed = fetch_and_parse_feed(
-                feed_url,
-                user_id=resolve_sandbox_user_id(user_id),
-                execution_id=config_id if isinstance(config_id, int) else None,
-            )
+            parsed_feed = fetch_and_parse_feed(feed_url)
 
             logger.debug(
                 "Parsed feed %s (entries=%s, bozo=%s, feed_title=%s)",

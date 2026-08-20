@@ -3,9 +3,12 @@ from typing import Any, Literal, cast
 import httpx
 import pytest
 
+from app.services import http as http_module
 from app.services.http import (
     HttpService,
     NonRetryableError,
+    ResponseTooLargeError,
+    UnsafeHttpUrlError,
     fetch_quiet,
     get_http_service,
     reset_http_service_for_testing,
@@ -114,11 +117,154 @@ def test_fetch_retries_timeouts(monkeypatch) -> None:
     assert client.calls == 3
 
 
+def test_bounded_public_fetch_streams_with_hard_body_limit(monkeypatch) -> None:
+    service = HttpService()
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                headers={"Content-Length": "3"},
+                stream=httpx.ByteStream(b"abcdef"),
+                request=request,
+            )
+        )
+    )
+    monkeypatch.setattr(http_module, "_resolve_host_addresses", lambda *_args: {"8.8.8.8"})
+    monkeypatch.setattr(service, "get_client", lambda url=None, **_kwargs: client)
+
+    try:
+        with pytest.raises(ResponseTooLargeError, match="5 byte limit"):
+            service.fetch_bounded_public("https://feeds.example/show.xml", max_response_bytes=5)
+    finally:
+        client.close()
+
+
+def test_bounded_public_fetch_pins_validated_address_and_preserves_origin(monkeypatch) -> None:
+    service = HttpService()
+    captured_request: httpx.Request | None = None
+    client_options: list[tuple[str | None, bool]] = []
+
+    def _dispatch(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_request
+        captured_request = request
+        return httpx.Response(200, content=b"feed", request=request)
+
+    def _get_client(url: str | None = None, *, trust_env: bool = True) -> httpx.Client:
+        client_options.append((url, trust_env))
+        return client
+
+    client = httpx.Client(transport=httpx.MockTransport(_dispatch))
+    monkeypatch.setattr(http_module, "_resolve_host_addresses", lambda *_args: {"8.8.8.8"})
+    monkeypatch.setattr(service, "get_client", _get_client)
+
+    try:
+        response = service.fetch_bounded_public("https://feeds.example/show.xml")
+    finally:
+        client.close()
+
+    assert captured_request is not None
+    assert captured_request.url.host == "8.8.8.8"
+    assert captured_request.headers["host"] == "feeds.example"
+    assert captured_request.headers["connection"] == "close"
+    assert captured_request.extensions["sni_hostname"] == "feeds.example"
+    assert response.url == httpx.URL("https://feeds.example/show.xml")
+    assert response.content == b"feed"
+    assert client_options == [("https://feeds.example/show.xml", False)]
+
+
+def test_bounded_public_fetch_tries_each_validated_address(monkeypatch) -> None:
+    service = HttpService()
+    dispatched_hosts: list[str] = []
+
+    def _dispatch(request: httpx.Request) -> httpx.Response:
+        dispatched_hosts.append(request.url.host)
+        if request.url.host == "1.1.1.1":
+            raise httpx.ConnectError("first address unavailable", request=request)
+        return httpx.Response(200, content=b"feed", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(_dispatch))
+    monkeypatch.setattr(
+        http_module,
+        "_resolve_host_addresses",
+        lambda *_args: {"1.1.1.1", "8.8.8.8"},
+    )
+    monkeypatch.setattr(service, "get_client", lambda url=None, **_kwargs: client)
+
+    try:
+        response = service.fetch_bounded_public("https://feeds.example/show.xml")
+    finally:
+        client.close()
+
+    assert response.content == b"feed"
+    assert dispatched_hosts == ["1.1.1.1", "8.8.8.8"]
+
+
+@pytest.mark.parametrize("address", ["10.0.0.8", "224.0.0.1", "ff02::1"])
+def test_bounded_public_fetch_rejects_non_public_target_before_dispatch(
+    monkeypatch,
+    address: str,
+) -> None:
+    service = HttpService()
+    calls = 0
+
+    def _resolve(host: str, _port: int) -> set[str]:
+        assert host == "internal.example"
+        return {address}
+
+    def _dispatch(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200)
+
+    client = httpx.Client(transport=httpx.MockTransport(_dispatch))
+    monkeypatch.setattr(http_module, "_resolve_host_addresses", _resolve)
+    monkeypatch.setattr(service, "get_client", lambda url=None, **_kwargs: client)
+
+    try:
+        with pytest.raises(UnsafeHttpUrlError, match="non-public address"):
+            service.fetch_bounded_public("https://internal.example/feed.xml")
+    finally:
+        client.close()
+
+    assert calls == 0
+
+
+def test_bounded_public_fetch_revalidates_redirect_targets(monkeypatch) -> None:
+    service = HttpService()
+    dispatched_hosts: list[str] = []
+
+    def _resolve(host: str, _port: int) -> set[str]:
+        return {"8.8.8.8"} if host == "public.example" else {"127.0.0.1"}
+
+    def _dispatch(request: httpx.Request) -> httpx.Response:
+        dispatched_hosts.append(request.url.host)
+        return httpx.Response(
+            302,
+            headers={"Location": "http://localhost/private-feed"},
+            request=request,
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(_dispatch))
+    monkeypatch.setattr(http_module, "_resolve_host_addresses", _resolve)
+    monkeypatch.setattr(service, "get_client", lambda url=None, **_kwargs: client)
+
+    try:
+        with pytest.raises(UnsafeHttpUrlError, match="non-public address"):
+            service.fetch_bounded_public("https://public.example/feed.xml")
+    finally:
+        client.close()
+
+    assert dispatched_hosts == ["8.8.8.8"]
+
+
 def test_clients_are_reused_by_ssl_policy_and_closed() -> None:
     service = HttpService()
 
     normal_client = service.get_client("https://example.com/one")
     assert service.get_client("https://another.example/two") is normal_client
+    direct_client = service.get_client("https://example.com/direct", trust_env=False)
+    assert direct_client is not normal_client
+    assert service.get_client("https://another.example/direct", trust_env=False) is direct_client
 
     relaxed_client = service.get_client("https://feeds.0x80.pl/rss")
     assert relaxed_client is not normal_client
@@ -127,6 +273,7 @@ def test_clients_are_reused_by_ssl_policy_and_closed() -> None:
     service.close()
 
     assert normal_client.is_closed
+    assert direct_client.is_closed
     assert relaxed_client.is_closed
 
 

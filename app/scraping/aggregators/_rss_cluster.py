@@ -21,7 +21,6 @@ from app.models.contracts import ContentType
 from app.scraping.aggregators.base import AggregatorScraper
 from app.scraping.aggregators.config import RssClusterAggregator
 from app.scraping.feed_fetch import fetch_and_parse_feed
-from app.services.agent_vm_runtime import SYSTEM_USER_ID
 from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
@@ -52,7 +51,7 @@ class RssClusterAggregatorScraper(AggregatorScraper):
         feed_url = str(self.settings.url)
 
         try:
-            parsed_feed = fetch_and_parse_feed(feed_url, user_id=SYSTEM_USER_ID)
+            parsed_feed = fetch_and_parse_feed(feed_url)
         except Exception as exc:  # noqa: BLE001 - report the isolated source outage
             logger.exception("Failed to fetch %s feed: %s", self.DISPLAY_NAME, exc)
             self._record_scrape_error(feed_url, exc)

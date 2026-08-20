@@ -1,5 +1,4 @@
-from types import SimpleNamespace
-
+import httpx
 import pytest
 
 from app.models.llm.feed_discovery import DiscoveryCandidate
@@ -75,25 +74,32 @@ def test_apple_episode_fetches_publisher_rss_only_through_sandbox_http(monkeypat
     fetched_urls: list[str] = []
 
     class _SandboxHttpService:
-        def fetch(self, url: str, **_kwargs):
+        def fetch(
+            self,
+            url: str,
+            headers: dict[str, str] | None = None,
+        ) -> httpx.Response:
+            del headers
             fetched_urls.append(url)
-            return SimpleNamespace(
+            return httpx.Response(
+                200,
                 text=(
                     "<rss><channel><item><title>Sandboxed Episode</title>"
                     '<enclosure url="https://cdn.example.com/episode.mp3" '
                     'type="audio/mpeg" /></item></channel></rss>'
-                )
+                ),
+                request=httpx.Request("GET", url),
             )
 
     resolution = apple_podcasts.resolve_apple_podcast_episode(
         "https://podcasts.apple.com/us/podcast/show/id123?i=456",
-        feed_http_service=_SandboxHttpService(),
+        feed_fetch=_SandboxHttpService().fetch,
     )
 
     assert resolution.audio_url == "https://cdn.example.com/episode.mp3"
     assert fetched_urls == [feed_url]
 
-    with pytest.raises(ValueError, match="requires sandbox HTTP"):
+    with pytest.raises(ValueError, match="requires a feed fetch function"):
         apple_podcasts.resolve_apple_podcast_episode(
             "https://podcasts.apple.com/us/podcast/show/id123?i=456"
         )

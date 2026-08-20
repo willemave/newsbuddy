@@ -27,8 +27,7 @@ from app.models.contracts import ContentType
 from app.scraping.aggregators._html_grouped import USER_AGENT
 from app.scraping.aggregators.base import AggregatorScraper
 from app.scraping.aggregators.config import HtmlTopicAggregator
-from app.services.agent_vm_runtime import SYSTEM_USER_ID
-from app.services.feed_research_runtime import sandboxed_http_service
+from app.services.http import get_http_service
 
 logger = get_logger(__name__)
 
@@ -45,19 +44,19 @@ class BrutalistReportAggregatorScraper(AggregatorScraper):
 
     def scrape(self) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
-        with sandboxed_http_service(user_id=SYSTEM_USER_ID) as http_service:
-            for topic in self.settings.topics:
-                try:
-                    topic_url = self._build_topic_url(topic)
-                    response = http_service.fetch(
-                        topic_url,
-                        headers={"User-Agent": USER_AGENT},
-                    )
-                except Exception as exc:  # noqa: BLE001 - preserve per-topic progress
-                    logger.exception("Failed to fetch Brutalist Report topic %s: %s", topic, exc)
-                    self._record_scrape_error(topic, exc)
-                    continue
-                items.extend(self.parse(response.text, topic=topic))
+        http_service = get_http_service()
+        for topic in self.settings.topics:
+            try:
+                topic_url = self._build_topic_url(topic)
+                response = http_service.fetch_bounded_public(
+                    topic_url,
+                    headers={"User-Agent": USER_AGENT},
+                )
+            except Exception as exc:  # noqa: BLE001 - preserve per-topic progress
+                logger.exception("Failed to fetch Brutalist Report topic %s: %s", topic, exc)
+                self._record_scrape_error(topic, exc)
+                continue
+            items.extend(self.parse(response.text, topic=topic))
         return items
 
     def _build_topic_url(self, topic: str) -> str:

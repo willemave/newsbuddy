@@ -5,13 +5,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Protocol
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import feedparser
+import httpx
 
 from app.core.logging import get_logger
 from app.core.settings import get_settings
-from app.services.http import HttpFetcher, HttpService
+from app.services.http import HttpService
 from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
@@ -33,10 +35,20 @@ class ApplePodcastResolution:
     audio_url: str | None
 
 
+class FeedFetch(Protocol):
+    """Callable boundary shared by sandboxed discovery and bounded ingestion."""
+
+    def __call__(
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response: ...
+
+
 def resolve_apple_podcast_episode(
     url: str,
     *,
-    feed_http_service: HttpFetcher | None = None,
+    feed_fetch: FeedFetch | None = None,
     resolve_audio: bool = True,
 ) -> ApplePodcastResolution:
     """Resolve Apple Podcasts episode metadata from a share URL.
@@ -66,13 +78,13 @@ def resolve_apple_podcast_episode(
             episode_title=episode_title,
             audio_url=None,
         )
-    if feed_http_service is None:
-        raise ValueError("Apple Podcasts RSS resolution requires sandbox HTTP")
+    if feed_fetch is None:
+        raise ValueError("Apple Podcasts RSS resolution requires a feed fetch function")
 
     audio_url = _resolve_episode_audio_url(
         feed_url,
         episode_title,
-        http_service=feed_http_service,
+        feed_fetch=feed_fetch,
     )
     return ApplePodcastResolution(
         feed_url=feed_url,
@@ -193,10 +205,10 @@ def _resolve_episode_audio_url(
     feed_url: str,
     episode_title: str,
     *,
-    http_service: HttpFetcher,
+    feed_fetch: FeedFetch,
 ) -> str | None:
     try:
-        response = http_service.fetch(feed_url, headers={"Accept": "application/rss+xml"})
+        response = feed_fetch(feed_url, headers={"Accept": "application/rss+xml"})
         feed = feedparser.parse(response.text)
     except Exception as exc:  # noqa: BLE001
         logger.warning(

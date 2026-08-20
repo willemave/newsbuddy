@@ -1,9 +1,11 @@
 import atexit
+import ipaddress
 import logging
+import socket
 import threading
 from contextlib import nullcontext
 from typing import Protocol
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
@@ -52,11 +54,65 @@ NON_RETRYABLE_STATUS_CODES: set[int] = {
     451,  # Client errors
 }
 
+DEFAULT_BOUNDED_RESPONSE_BYTES = 2_000_000
+DEFAULT_MAX_REDIRECTS = 5
+
 
 class NonRetryableError(Exception):
     """Exception for errors that should not be retried."""
 
     pass
+
+
+class UnsafeHttpUrlError(NonRetryableError):
+    """Raised when a host download could reach a non-public network target."""
+
+
+class ResponseTooLargeError(NonRetryableError):
+    """Raised when a streamed response exceeds its configured byte budget."""
+
+
+def _resolve_host_addresses(host: str, port: int) -> set[str]:
+    """Resolve a host for public-network validation before dispatch."""
+    return {str(result[4][0]) for result in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)}
+
+
+def _resolve_public_http_addresses(url: str) -> tuple[str, ...]:
+    """Resolve and return only public unicast addresses for an HTTP target."""
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise UnsafeHttpUrlError("Only HTTP and HTTPS URLs may be downloaded")
+    if not parsed.hostname:
+        raise UnsafeHttpUrlError("Download URL must include a hostname")
+    if parsed.username is not None or parsed.password is not None:
+        raise UnsafeHttpUrlError("Credentialed download URLs are not allowed")
+
+    try:
+        port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    except ValueError as exc:
+        raise UnsafeHttpUrlError("Download URL has an invalid port") from exc
+
+    try:
+        addresses = _resolve_host_addresses(parsed.hostname, port)
+    except OSError as exc:
+        raise NonRetryableError(f"DNS resolution error: {exc}") from exc
+    if not addresses:
+        raise NonRetryableError(f"DNS resolution returned no addresses for {parsed.hostname}")
+
+    public_addresses: list[str] = []
+    for address in addresses:
+        try:
+            parsed_address = ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise UnsafeHttpUrlError(
+                f"DNS returned an invalid address for {parsed.hostname}"
+            ) from exc
+        if not parsed_address.is_global or parsed_address.is_multicast:
+            raise UnsafeHttpUrlError(
+                f"Download target {parsed.hostname} resolves to a non-public address"
+            )
+        public_addresses.append(str(parsed_address))
+    return tuple(sorted(public_addresses))
 
 
 def should_bypass_ssl(url: str) -> bool:
@@ -167,25 +223,32 @@ class HttpService:
             "DNT": "1",
             "Connection": "keep-alive",
         }
-        self._clients: dict[bool, httpx.Client] = {}
+        self._clients: dict[tuple[bool, bool], httpx.Client] = {}
         self._clients_lock = threading.Lock()
 
-    def get_client(self, url: str | None = None) -> httpx.Client:
+    def get_client(
+        self,
+        url: str | None = None,
+        *,
+        trust_env: bool = True,
+    ) -> httpx.Client:
         """Return a reusable client with the URL's required SSL policy."""
         verify_ssl = not (url and should_bypass_ssl(url))
         if not verify_ssl:
             logger.warning("Bypassing SSL verification for %s", urlparse(url).netloc)
 
+        client_key = (verify_ssl, trust_env)
         with self._clients_lock:
-            client = self._clients.get(verify_ssl)
+            client = self._clients.get(client_key)
             if client is None or client.is_closed:
                 client = httpx.Client(
                     timeout=self.timeout,
                     follow_redirects=True,
                     headers=self.headers,
                     verify=verify_ssl,
+                    trust_env=trust_env,
                 )
-                self._clients[verify_ssl] = client
+                self._clients[client_key] = client
             return client
 
     def close(self) -> None:
@@ -336,6 +399,138 @@ class HttpService:
                         },
                     )
                 raise
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=8),
+        retry=retry_if_exception(_is_retryable_http_error),
+        reraise=True,
+    )
+    def fetch_bounded_public(
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
+        *,
+        max_response_bytes: int = DEFAULT_BOUNDED_RESPONSE_BYTES,
+        max_redirects: int = DEFAULT_MAX_REDIRECTS,
+        log_client_errors: bool = True,
+        log_exceptions: bool = True,
+    ) -> httpx.Response:
+        """Stream a public URL with strict response and redirect bounds."""
+        if max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be positive")
+        if max_redirects < 0:
+            raise ValueError("max_redirects must be non-negative")
+
+        request_headers = self.headers.copy()
+        if headers:
+            request_headers.update(headers)
+        current_url = url
+
+        try:
+            for redirect_count in range(max_redirects + 1):
+                addresses = _resolve_public_http_addresses(current_url)
+                original_url = httpx.URL(current_url)
+                client = self.get_client(current_url, trust_env=False)
+                hop_headers = {
+                    key: value for key, value in request_headers.items() if key.lower() != "host"
+                }
+                hop_headers["Host"] = original_url.netloc.decode("ascii")
+                # Pinned IP origins must not share pooled TLS connections across
+                # distinct virtual hosts that happen to resolve to the same address.
+                hop_headers["Connection"] = "close"
+                redirect_location: str | None = None
+                last_transport_error: httpx.TransportError | None = None
+
+                for address in addresses:
+                    pinned_url = original_url.copy_with(host=address)
+                    logger.debug(
+                        "Fetching bounded public URL %s via %s",
+                        current_url,
+                        address,
+                    )
+                    try:
+                        with client.stream(
+                            "GET",
+                            pinned_url,
+                            headers=hop_headers,
+                            follow_redirects=False,
+                            extensions={"sni_hostname": original_url.host},
+                        ) as response:
+                            if response.has_redirect_location:
+                                if redirect_count >= max_redirects:
+                                    raise NonRetryableError(
+                                        f"HTTP redirect limit exceeded for {url}"
+                                    )
+                                redirect_location = response.headers["location"]
+                                break
+
+                            response.raise_for_status()
+                            content_length = response.headers.get("content-length")
+                            if content_length is not None:
+                                try:
+                                    declared_bytes = int(content_length)
+                                except ValueError:
+                                    declared_bytes = 0
+                                if declared_bytes > max_response_bytes:
+                                    raise ResponseTooLargeError(
+                                        f"Response exceeds {max_response_bytes} byte limit"
+                                    )
+
+                            body = bytearray()
+                            for chunk in response.iter_bytes():
+                                body.extend(chunk)
+                                if len(body) > max_response_bytes:
+                                    raise ResponseTooLargeError(
+                                        f"Response exceeds {max_response_bytes} byte limit"
+                                    )
+
+                            materialized_headers = [
+                                (key, value)
+                                for key, value in response.headers.multi_items()
+                                if key.lower() not in {"content-encoding", "content-length"}
+                            ]
+                            materialized_request = httpx.Request(
+                                "GET",
+                                original_url,
+                                headers=hop_headers,
+                            )
+                            return httpx.Response(
+                                response.status_code,
+                                headers=materialized_headers,
+                                content=bytes(body),
+                                request=materialized_request,
+                            )
+                    except httpx.TransportError as exc:
+                        last_transport_error = exc
+
+                if redirect_location is not None:
+                    current_url = urljoin(current_url, redirect_location)
+                    continue
+                if last_transport_error is not None:
+                    raise last_transport_error
+                raise RuntimeError("Bounded HTTP fetch exhausted resolved addresses")
+        except httpx.HTTPStatusError as exc:
+            categorized_error = categorize_http_error(exc)
+            status_code = exc.response.status_code
+            if status_code >= 500 or log_client_errors:
+                level = logging.ERROR if status_code >= 500 else logging.DEBUG
+                logger.log(level, "HTTP error %s for %s", status_code, current_url)
+            raise categorized_error from exc
+        except httpx.ConnectError as exc:
+            if is_ssl_error(exc):
+                raise NonRetryableError(f"SSL error: {exc}") from exc
+            if is_dns_resolution_error(exc):
+                raise NonRetryableError(f"DNS resolution error: {exc}") from exc
+            if log_exceptions:
+                logger.exception("Connection error for bounded URL %s", current_url)
+            raise
+        except Exception:
+            if log_exceptions:
+                logger.exception("Bounded HTTP fetch error for %s", current_url)
+            raise
+
+        raise RuntimeError("Bounded HTTP fetch ended without a response")
 
     @retry(
         stop=stop_after_attempt(3),

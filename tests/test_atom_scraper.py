@@ -84,8 +84,8 @@ def test_atom_scraper_continues_after_feed_timeout(monkeypatch) -> None:
     assert [item["title"] for item in items] == ["Recovered item"]
     fetch.assert_has_calls(
         [
-            call(first_url, user_id=0, execution_id=None),
-            call(second_url, user_id=0, execution_id=None),
+            call(first_url),
+            call(second_url),
         ],
         any_order=True,
     )

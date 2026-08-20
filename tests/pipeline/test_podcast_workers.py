@@ -79,24 +79,21 @@ def test_apple_podcasts_resolution_fills_audio_url(db_session, mocker, tmp_path)
         yield db_session
 
     mocker.patch("app.pipeline.podcast_workers.get_db", _get_db)
-    sandbox_http_service = object()
-    runtime_calls: list[dict[str, object]] = []
+    pipeline_http_service = mocker.Mock()
 
-    @contextmanager
-    def _feed_runtime(**kwargs):
-        runtime_calls.append(kwargs)
-        yield sandbox_http_service
-
-    def _resolve(url: str, *, feed_http_service: object) -> ApplePodcastResolution:
+    def _resolve(url: str, *, feed_fetch) -> ApplePodcastResolution:  # noqa: ANN001
         assert url == apple_url
-        assert feed_http_service is sandbox_http_service
+        assert feed_fetch == pipeline_http_service.fetch_bounded_public
         return ApplePodcastResolution(
             feed_url="https://example.com/feed.xml",
             episode_title="Episode Title",
             audio_url="https://example.com/audio.mp3",
         )
 
-    mocker.patch("app.pipeline.podcast_workers.sandboxed_http_service", _feed_runtime)
+    mocker.patch(
+        "app.pipeline.podcast_workers.get_http_service",
+        return_value=pipeline_http_service,
+    )
     mocker.patch(
         "app.pipeline.podcast_workers.resolve_apple_podcast_episode",
         side_effect=_resolve,
@@ -118,8 +115,6 @@ def test_apple_podcasts_resolution_fills_audio_url(db_session, mocker, tmp_path)
     assert metadata.get("audio_url") == "https://example.com/audio.mp3"
     assert metadata.get("feed_url") == "https://example.com/feed.xml"
     assert metadata.get("episode_title") == "Episode Title"
-    assert runtime_calls == [{"user_id": 17, "execution_id": content.id}]
-
     worker.queue_service.enqueue.assert_called_once_with(TaskType.SUMMARIZE, content_id=content.id)
 
 
