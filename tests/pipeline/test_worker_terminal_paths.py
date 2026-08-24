@@ -159,10 +159,10 @@ def test_canonical_conflict_relinks_ordinary_submission_user_state(
     db_session,
 ) -> None:
     _patch_worker_db(monkeypatch, db_session)
-    sync_calls: list[tuple[int, int]] = []
+    sync_calls: list[tuple[int, tuple[int, ...]]] = []
     monkeypatch.setattr(
-        "app.services.canonical_content_state.sync_personal_markdown_for_content",
-        lambda _db, *, user_id, content_id: sync_calls.append((user_id, content_id)),
+        "app.services.canonical_content_state.enqueue_agent_data_sync",
+        lambda _db, *, user_id, content_ids: sync_calls.append((user_id, content_ids)),
     )
 
     winner = Content(
@@ -234,7 +234,7 @@ def test_canonical_conflict_relinks_ordinary_submission_user_state(
     )
     assert db_session.query(ContentUnlikes).filter_by(content_id=loser_id).count() == 0
     assert db_session.query(ContentUnlikes).filter_by(content_id=winner_id).count() == 1
-    assert sync_calls == [(7, loser_id), (7, winner_id)]
+    assert sync_calls == [(7, (loser_id, winner_id))]
 
     assert (
         finalize_canonical_user_state(

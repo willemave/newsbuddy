@@ -1,16 +1,18 @@
 """Chat agent service using pydantic-ai for deep-dive conversations."""
 
 import json
-import math
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
 
 from fastapi.concurrency import run_in_threadpool
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, UsageLimits
+from pydantic_ai.capabilities import PrepareTools
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from pydantic_ai.models.openai import ReasoningEffort
+from pydantic_ai.tools import ToolDefinition
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
@@ -26,11 +28,42 @@ from app.models.db import ChatMessage, ChatSession, Content
 from app.models.domain.chat_render import ChatMessageRenderMetadata
 from app.models.domain.chat_sessions import KNOWLEDGE_SESSION_TYPE
 from app.models.internal.chat_turn import ChatTurnProcessingContext, ChatTurnSessionSnapshot
+from app.services.agent_data_events import enqueue_agent_data_sync
+from app.services.agent_toolset import (
+    AGENT_VM_SYSTEM_INSTRUCTIONS,
+    AgentToolPolicy,
+    AgentToolsetConfig,
+    register_agent_vm_tools,
+)
+from app.services.agent_vm_runtime import AGENT_VM_TOOL_NAMES, AgentVmError
+from app.services.chat_context_budget import (
+    CHAT_HISTORY_MAX_TOKENS,
+    CHAT_OUTPUT_RESERVE_TOKENS,
+    CHAT_TOOL_SCHEMA_RESERVE_TOKENS,
+    CONTEXT_WINDOW_TOKENS,
+    SYSTEM_AND_ARTICLE_BUDGET_RATIO,
+    available_chat_history_tokens,
+    trim_message_history_to_token_budget,
+)
+from app.services.chat_context_budget import (
+    estimate_tokens as _estimate_tokens,
+)
+from app.services.chat_context_budget import (
+    truncate_to_token_budget as _truncate_to_token_budget,
+)
+from app.services.chat_history import load_message_history
 from app.services.chat_partial_stream import (
     DurableChatPartialWriter as _DurableChatPartialWriter,
 )
+from app.services.chat_partial_stream import DurableChatToolProgressWriter
 from app.services.chat_partial_stream import (
     build_final_text_event_stream_handler as _build_final_text_event_stream_handler,
+)
+from app.services.chat_tool_progress import (
+    agent_vm_tool_log_context,
+    numeric_tool_payload_value,
+    publish_tool_progress,
+    tool_event_status,
 )
 from app.services.chat_turn_runtime import ChatTurnOwnershipLost, QueuedChatTurnOutcome
 from app.services.chat_turn_runtime import (
@@ -41,7 +74,7 @@ from app.services.chat_turn_runtime import (
     DetachedChatTurnLifecycle as _DetachedChatTurnLifecycle,
 )
 from app.services.chat_turn_runtime import (
-    close_sandbox_session as _close_sandbox_session,
+    close_agent_vm_runtime as _close_agent_vm_runtime,
 )
 from app.services.chat_turn_runtime import (
     complete_detached_chat_turn as _complete_detached_chat_turn,
@@ -58,9 +91,6 @@ from app.services.chat_turn_runtime import (
     persist_detached_turn_failure as _persist_detached_turn_failure,
 )
 from app.services.chat_turn_runtime import (
-    register_personal_library_tools as _register_personal_library_tools,
-)
-from app.services.chat_turn_runtime import (
     require_session_id as _require_session_id,
 )
 from app.services.chat_turn_runtime import (
@@ -73,27 +103,19 @@ from app.services.chat_turn_runtime import (
     start_detached_chat_turn as _start_detached_chat_turn,
 )
 from app.services.exa_client import exa_search, get_exa_client
+from app.services.lazy_agent_vm import LazyAgentVmRuntime
 from app.services.llm_models import (
     build_pydantic_model,
     resolve_effective_api_key,
     resolve_model_provider,
 )
 from app.services.llm_task_turn_tracker import LlmTaskTurnSpec, LlmTaskTurnTracker
-from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
-from app.services.prompt_library import load_prompt, render_prompt
+from app.services.prompt_library import load_prompt
 from app.services.queued_chat_turn import execute_queued_chat_turn as _execute_queued_chat_turn
-from app.services.sandbox_runtime import (
-    PersonalLibrarySandboxSession,
-    SandboxRuntimeUnavailableError,
-    create_personal_library_sandbox_session,
-)
 
 logger = get_logger(__name__)
 
 CHAT_OPENAI_REASONING_EFFORT: ReasoningEffort = "low"
-CONTEXT_WINDOW_TOKENS = 200_000
-SYSTEM_AND_ARTICLE_BUDGET_RATIO = 0.75
-TOKEN_CHARS_PER_TOKEN = 4
 
 SYSTEM_PROMPT_TEXT = load_prompt("chat/article#system")
 ARTICLE_CHAT_TURN_SPEC = LlmTaskTurnSpec(
@@ -105,7 +127,7 @@ ARTICLE_CHAT_TURN_SPEC = LlmTaskTurnSpec(
     tool_policy={
         "execute_bash": True,
         "web_search": True,
-        "personal_library": "read_only",
+        "files": "read_write",
     },
     prompt_pack="chat.article",
 )
@@ -116,23 +138,6 @@ ARTICLE_BACKGROUND_TURN_LIFECYCLE = _DetachedChatTurnLifecycle(
     failed_note="Async article chat turn failed",
     usage_context="async",
 )
-
-
-def _estimate_tokens(text: str | None) -> int:
-    """Approximate token count using character length."""
-    if not text:
-        return 0
-    return max(1, math.ceil(len(text) / TOKEN_CHARS_PER_TOKEN))
-
-
-def _truncate_to_token_budget(text: str, max_tokens: int) -> str:
-    """Truncate text to an approximate token budget."""
-    if max_tokens <= 0:
-        return ""
-    max_chars = max_tokens * TOKEN_CHARS_PER_TOKEN
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "..."
 
 
 def _extract_summary_insights(summary: dict[str, object]) -> list[dict[str, str]]:
@@ -264,12 +269,10 @@ class ChatDeps:
     user_id: int
     content_id: int | None = None
     has_content: bool = False
-    has_context_snapshot: bool = False
     article_context: str | None = None
-    context_label: str = "Article Context"
     system_context: str = ""
-    sandbox_session: PersonalLibrarySandboxSession | None = None
-    personal_library_error: str | None = None
+    vm_runtime: LazyAgentVmRuntime | None = None
+    tool_progress_writer: DurableChatToolProgressWriter | None = None
 
 
 def _build_article_header(content: Content | None, topic: str | None) -> list[str]:
@@ -299,16 +302,33 @@ def _build_context_prompt_parts(
     return parts
 
 
-def _build_run_user_prompt(user_prompt: str, deps: ChatDeps) -> str:
-    """Build the model-facing user prompt for a chat turn."""
-    if deps.has_context_snapshot and deps.article_context:
-        return render_prompt(
-            "chat/article#run_with_context_user",
-            context_label=deps.context_label,
-            article_context=deps.article_context,
-            user_prompt=user_prompt,
-        )
-    return user_prompt
+def _chat_vm_session(deps: ChatDeps):
+    runtime = deps.vm_runtime
+    if runtime is None:
+        raise AgentVmError("Chat VM is unavailable")
+    return runtime.get_session()
+
+
+def _log_chat_vm_tool(deps: ChatDeps, event: str, payload: dict[str, object]) -> None:
+    publish_tool_progress(deps.tool_progress_writer, event=event, payload=payload)
+    status = tool_event_status(event, payload)
+    logger.info(
+        "Chat VM tool event",
+        extra=build_log_extra(
+            component="chat",
+            operation=event,
+            event_name=f"chat.tool.{event}",
+            status=status,
+            session_id=deps.session_id,
+            user_id=deps.user_id,
+            content_id=deps.content_id,
+            duration_ms=numeric_tool_payload_value(payload, "duration_ms"),
+            context_data=agent_vm_tool_log_context(
+                payload,
+                sandbox_acquired=bool(deps.vm_runtime and deps.vm_runtime.acquired),
+            ),
+        ),
+    )
 
 
 def get_chat_agent(
@@ -349,8 +369,9 @@ def _create_chat_agent(
         model,
         deps_type=ChatDeps,
         output_type=str,
-        system_prompt=SYSTEM_PROMPT_TEXT,
+        system_prompt=f"{SYSTEM_PROMPT_TEXT}\n\n{AGENT_VM_SYSTEM_INSTRUCTIONS}",
         model_settings=model_settings,
+        capabilities=[PrepareTools(_prepare_chat_tools)],
     )
 
     @agent.system_prompt
@@ -358,55 +379,17 @@ def _create_chat_agent(
         """Add article context to the system prompt."""
         return ctx.deps.system_context
 
-    @agent.tool
-    def execute_bash(
-        ctx: RunContext[ChatDeps],
-        command: str,
-        timeout_seconds: int | None = None,
-    ) -> dict[str, object]:
-        """Run a bash command in the chat sandbox for additional investigation."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return {
-                "ok": False,
-                "error": ctx.deps.personal_library_error or "Chat sandbox is unavailable.",
-            }
-        bounded_timeout = min(max(timeout_seconds or 60, 1), 300)
-        try:
-            result = sandbox_session.execute_bash(
-                command,
-                timeout_seconds=bounded_timeout,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Chat sandbox command failed",
-                extra=build_log_extra(
-                    component="chat",
-                    operation="execute_bash",
-                    event_name="chat.tool.execute_bash",
-                    status="failed",
-                    session_id=ctx.deps.session_id,
-                    user_id=ctx.deps.user_id,
-                    context_data={"failure_class": type(exc).__name__},
-                ),
-            )
-            return {
-                "ok": False,
-                "error": "Sandbox command failed.",
-                "failure_class": type(exc).__name__,
-            }
-        return {
-            "ok": result.exit_code == 0,
-            "exit_code": result.exit_code,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-        }
-
-    _register_personal_library_tools(
+    register_agent_vm_tools(
         agent,
-        search_name="search_personal_library",
-        list_name="list_personal_library",
-        read_name="read_personal_markdown_file",
+        session_getter=_chat_vm_session,
+        log_event=_log_chat_vm_tool,
+        config=AgentToolsetConfig(
+            feature="article_chat",
+            operation_prefix="chat.tool",
+            source="chat",
+            tool_policy=AgentToolPolicy(web_search=False),
+            stream_command_progress=True,
+        ),
     )
 
     @agent.tool
@@ -517,6 +500,16 @@ def _create_chat_agent(
     return agent
 
 
+async def _prepare_chat_tools(
+    ctx: RunContext[ChatDeps],
+    tool_defs: list[ToolDefinition],
+) -> list[ToolDefinition]:
+    """Hide VM schemas when this turn has no lazy VM capability."""
+    if ctx.deps.vm_runtime is not None:
+        return tool_defs
+    return [tool_def for tool_def in tool_defs if tool_def.name not in AGENT_VM_TOOL_NAMES]
+
+
 def build_article_context(
     db: Session,
     content: Content,
@@ -599,50 +592,6 @@ def build_article_context(
         return f"{full_text_label}:\n{truncated_text}"
 
     return None
-
-
-def load_message_history(
-    db: Session,
-    session_id: int,
-    *,
-    exclude_message_id: int | None = None,
-    completed_only: bool = True,
-) -> list[ModelMessage]:
-    """Load model history for a chat session from the database.
-
-    Args:
-        db: Database session.
-        session_id: Chat session ID.
-        exclude_message_id: Optional active turn row to omit from history.
-        completed_only: When true, ignore processing/failed rows so placeholders
-            and failed partial turns do not become model context.
-
-    Returns:
-        List of ModelMessage objects in chronological order.
-    """
-    messages: list[ModelMessage] = []
-
-    # Query chat_messages ordered by created_at
-    query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
-    if exclude_message_id is not None:
-        query = query.filter(ChatMessage.id != exclude_message_id)
-    if completed_only:
-        query = query.filter(ChatMessage.status == MessageProcessingStatus.COMPLETED.value)
-    db_messages = query.order_by(ChatMessage.created_at).all()
-
-    for db_msg in db_messages:
-        try:
-            # Deserialize JSON to list of ModelMessage
-            message_list_json = db_msg.message_list
-            if not isinstance(message_list_json, str):
-                continue
-            msg_list = ModelMessagesTypeAdapter.validate_json(message_list_json)
-            messages.extend(msg_list)
-        except Exception as e:
-            logger.warning(f"Failed to deserialize message {db_msg.id}: {e}")
-            continue
-
-    return messages
 
 
 def _dump_messages_json(
@@ -897,7 +846,8 @@ def _build_chat_deps(
     session: ChatSession,
     include_full_text: bool = False,
     *,
-    include_library_tools: bool = True,
+    include_vm_tools: bool = True,
+    user_prompt: str = "",
 ) -> ChatDeps:
     """Construct detached-safe chat dependencies for a session."""
     return _build_chat_deps_from_values(
@@ -909,7 +859,8 @@ def _build_chat_deps(
         topic=session.topic,
         context_snapshot=session.context_snapshot,
         include_full_text=include_full_text,
-        include_library_tools=include_library_tools,
+        include_vm_tools=include_vm_tools,
+        user_prompt=user_prompt,
     )
 
 
@@ -923,14 +874,15 @@ def _build_chat_deps_from_values(
     topic: str | None,
     context_snapshot: str | None,
     include_full_text: bool = False,
-    include_library_tools: bool = True,
+    include_vm_tools: bool = True,
+    llm_task_id: int | None = None,
+    user_prompt: str = "",
 ) -> ChatDeps:
     """Construct detached-safe chat dependencies from explicit session fields."""
     content: Content | None = None
     article_context: str | None = None
     context_label = "Article Context"
-    sandbox_session: PersonalLibrarySandboxSession | None = None
-    personal_library_error: str | None = None
+    vm_runtime: LazyAgentVmRuntime | None = None
 
     if content_id:
         content = db.query(Content).filter(Content.id == content_id).first()
@@ -939,8 +891,18 @@ def _build_chat_deps_from_values(
         session_type == KNOWLEDGE_SESSION_TYPE or not context_snapshot
     )
     if use_live_content and content is not None:
-        max_system_article_tokens = int(CONTEXT_WINDOW_TOKENS * SYSTEM_AND_ARTICLE_BUDGET_RATIO)
-        system_tokens = _estimate_tokens(SYSTEM_PROMPT_TEXT)
+        max_system_article_tokens = min(
+            int(CONTEXT_WINDOW_TOKENS * SYSTEM_AND_ARTICLE_BUDGET_RATIO),
+            max(
+                CONTEXT_WINDOW_TOKENS
+                - CHAT_OUTPUT_RESERVE_TOKENS
+                - CHAT_TOOL_SCHEMA_RESERVE_TOKENS
+                - CHAT_HISTORY_MAX_TOKENS
+                - _estimate_tokens(user_prompt),
+                0,
+            ),
+        )
+        system_tokens = _estimate_tokens(f"{SYSTEM_PROMPT_TEXT}\n\n{AGENT_VM_SYSTEM_INSTRUCTIONS}")
         header_text = "\n".join(_build_article_header(content, topic))
         header_tokens = _estimate_tokens(header_text)
         available_tokens = max(max_system_article_tokens - system_tokens - header_tokens, 0)
@@ -951,15 +913,24 @@ def _build_chat_deps_from_values(
             max_tokens=available_tokens,
         )
     elif context_snapshot:
-        article_context = context_snapshot
+        max_snapshot_tokens = max(
+            CONTEXT_WINDOW_TOKENS
+            - CHAT_OUTPUT_RESERVE_TOKENS
+            - CHAT_TOOL_SCHEMA_RESERVE_TOKENS
+            - CHAT_HISTORY_MAX_TOKENS
+            - _estimate_tokens(
+                f"{SYSTEM_PROMPT_TEXT}\n{AGENT_VM_SYSTEM_INSTRUCTIONS}\n{user_prompt}"
+            ),
+            0,
+        )
+        article_context = _truncate_to_token_budget(context_snapshot, max_snapshot_tokens)
         context_label = "Session Context"
 
-    if include_library_tools:
-        sandbox_session, personal_library_error = _build_personal_library_runtime(
-            db,
+    if include_vm_tools:
+        vm_runtime = _build_chat_vm_runtime(
             session_id=session_id,
             user_id=user_id,
-            content_id=content_id,
+            llm_task_id=llm_task_id,
         )
 
     system_context = "\n".join(
@@ -976,49 +947,28 @@ def _build_chat_deps_from_values(
         user_id=user_id,
         content_id=content_id,
         has_content=use_live_content,
-        has_context_snapshot=bool(context_snapshot),
         article_context=article_context,
-        context_label=context_label,
         system_context=system_context,
-        sandbox_session=sandbox_session,
-        personal_library_error=personal_library_error,
+        vm_runtime=vm_runtime,
     )
 
 
-def _build_personal_library_runtime(
-    db: Session,
+def _build_chat_vm_runtime(
     *,
     session_id: int,
     user_id: int,
-    content_id: int | None,
-) -> tuple[PersonalLibrarySandboxSession | None, str | None]:
-    """Synchronize and hydrate the personal markdown library for a chat turn."""
+    llm_task_id: int | None = None,
+) -> LazyAgentVmRuntime | None:
+    """Build a lazy handle without touching E2B or synchronizing user data."""
     settings = get_settings()
-    if settings.chat_sandbox_provider == "disabled":
-        return None, None
-
-    try:
-        if settings.personal_markdown_enabled:
-            sync_personal_markdown_library_for_user(db, user_id=user_id)
-        sandbox_session = create_personal_library_sandbox_session(user_id=user_id)
-        return sandbox_session, None
-    except SandboxRuntimeUnavailableError as exc:
-        return None, str(exc)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Failed to prepare personal markdown library",
-            extra=build_log_extra(
-                component="chat",
-                operation="build_personal_library_runtime",
-                event_name="chat.turn.personal_library",
-                status="degraded",
-                session_id=session_id,
-                user_id=user_id,
-                content_id=content_id,
-                context_data={"failure_class": type(exc).__name__},
-            ),
-        )
-        return None, str(exc)
+    if settings.llm_task_sandbox_provider == "disabled":
+        return None
+    return LazyAgentVmRuntime(
+        user_id=user_id,
+        session_id=session_id,
+        llm_task_id=llm_task_id,
+        feature="chat",
+    )
 
 
 def _sync_parent_session_activity(db: Session, session: ChatSession) -> None:
@@ -1048,17 +998,17 @@ def _run_agent_sync(
 ):
     """Run the chat agent synchronously in a worker thread."""
     agent = get_chat_agent(model_spec, api_key_override=provider_api_key)
-    model_user_prompt = _build_run_user_prompt(user_prompt, deps)
     event_stream_handler = (
         _build_final_text_event_stream_handler(partial_writer)
         if partial_writer is not None
         else None
     )
     return agent.run_sync(
-        model_user_prompt,
+        user_prompt,
         deps=deps,
         message_history=history,
         event_stream_handler=event_stream_handler,
+        usage_limits=UsageLimits(request_limit=get_settings().llm_task_sandbox_request_limit),
     )
 
 
@@ -1122,29 +1072,12 @@ async def run_chat_turn(
         ),
     )
 
-    history_start = perf_counter()
-    history = load_message_history(db, session_row_id)
-    history_ms = (perf_counter() - history_start) * 1000
-    logger.info(
-        "Chat history loaded",
-        extra=build_log_extra(
-            component="chat",
-            operation="load_history",
-            event_name="chat.turn.history_loaded",
-            status="completed",
-            duration_ms=history_ms,
-            session_id=session_row_id,
-            user_id=session_user_id,
-            context_data={"history_count": len(history)},
-        ),
-    )
-    include_full_text = True
-
     deps_start = perf_counter()
     deps = _build_chat_deps(
         db,
         session,
-        include_full_text=include_full_text,
+        include_full_text=True,
+        user_prompt=user_prompt,
     )
     provider_api_key = resolve_effective_api_key(
         db=db,
@@ -1164,6 +1097,31 @@ async def run_chat_turn(
             user_id=session_user_id,
             content_id=session_content_id,
             context_data={"context_chars": len(deps.article_context or "")},
+        ),
+    )
+
+    history_start = perf_counter()
+    history = load_message_history(
+        db,
+        session_row_id,
+        max_tokens=available_chat_history_tokens(
+            static_system_prompt=f"{SYSTEM_PROMPT_TEXT}\n{AGENT_VM_SYSTEM_INSTRUCTIONS}",
+            dynamic_system_prompt=deps.system_context,
+            user_prompt=user_prompt,
+        ),
+    )
+    history_ms = (perf_counter() - history_start) * 1000
+    logger.info(
+        "Chat history loaded",
+        extra=build_log_extra(
+            component="chat",
+            operation="load_history",
+            event_name="chat.turn.history_loaded",
+            status="completed",
+            duration_ms=history_ms,
+            session_id=session_row_id,
+            user_id=session_user_id,
+            context_data={"history_count": len(history)},
         ),
     )
 
@@ -1206,6 +1164,12 @@ async def run_chat_turn(
             session_row_id,
             new_messages,
             display_user_prompt=user_prompt,
+            commit=False,
+        )
+        enqueue_agent_data_sync(
+            db,
+            user_id=session_user_id,
+            chat_session_ids=(session_row_id,),
         )
 
         session.last_message_at = datetime.now(UTC)
@@ -1284,7 +1248,7 @@ async def run_chat_turn(
         )
         raise
     finally:
-        _close_sandbox_session(deps.sandbox_session)
+        _close_agent_vm_runtime(deps.vm_runtime)
 
 
 @dataclass(frozen=True)
@@ -1308,19 +1272,66 @@ def _prepare_article_background_turn(
     db: Session,
     session: ChatTurnSessionSnapshot,
     turn: _DetachedChatTurn,
+    *,
+    user_prompt: str,
 ) -> _PreparedArticleChatTurn:
-    deps_start = perf_counter()
-    deps = _build_chat_deps_from_values(
-        db,
-        session_id=session.effective_session_id,
-        user_id=session.user_id,
-        content_id=session.content_id,
-        session_type=session.session_type,
-        topic=session.topic,
-        context_snapshot=session.context_snapshot,
-        include_full_text=True,
+    del db
+    from app.core.db import get_session_factory
+
+    session_factory = get_session_factory()
+
+    def build_deps() -> tuple[ChatDeps, float]:
+        started_at = perf_counter()
+        with session_factory() as prepare_db:
+            value = _build_chat_deps_from_values(
+                prepare_db,
+                session_id=session.effective_session_id,
+                user_id=session.user_id,
+                content_id=session.content_id,
+                session_type=session.session_type,
+                topic=session.topic,
+                context_snapshot=session.context_snapshot,
+                include_full_text=True,
+                llm_task_id=turn.llm_task_id,
+                user_prompt=user_prompt,
+            )
+        return value, (perf_counter() - started_at) * 1000
+
+    def build_history() -> tuple[list[ModelMessage], float]:
+        started_at = perf_counter()
+        with session_factory() as history_db:
+            value = load_message_history(
+                history_db,
+                turn.session_id,
+                exclude_message_id=turn.message_id,
+                completed_only=True,
+            )
+        return value, (perf_counter() - started_at) * 1000
+
+    def resolve_key() -> str | None:
+        with session_factory() as key_db:
+            return resolve_effective_api_key(
+                db=key_db,
+                user_id=turn.user_id,
+                model_spec=turn.model,
+            )
+
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="chat-prepare") as executor:
+        deps_future = executor.submit(build_deps)
+        history_future = executor.submit(build_history)
+        key_future = executor.submit(resolve_key)
+        deps, deps_ms = deps_future.result()
+        history, history_ms = history_future.result()
+        provider_api_key = key_future.result()
+    history = trim_message_history_to_token_budget(
+        history,
+        max_tokens=available_chat_history_tokens(
+            static_system_prompt=f"{SYSTEM_PROMPT_TEXT}\n{AGENT_VM_SYSTEM_INSTRUCTIONS}",
+            dynamic_system_prompt=deps.system_context,
+            user_prompt=user_prompt,
+        ),
     )
-    deps_ms = (perf_counter() - deps_start) * 1000
+
     logger.info(
         "Async chat context built",
         extra=build_log_extra(
@@ -1337,19 +1348,14 @@ def _prepare_article_background_turn(
             context_data={
                 "context_chars": len(deps.article_context or ""),
                 "has_content": deps.has_content,
+                "sandbox_acquired": bool(deps.vm_runtime and deps.vm_runtime.acquired),
+                "sandbox_acquisition_ms": 0.0,
+                "sandbox_hydration_ms": 0.0,
                 "llm_task_id": turn.llm_task_id,
             },
         ),
     )
 
-    history_start = perf_counter()
-    history = load_message_history(
-        db,
-        turn.session_id,
-        exclude_message_id=turn.message_id,
-        completed_only=True,
-    )
-    history_ms = (perf_counter() - history_start) * 1000
     logger.info(
         "Async chat history loaded",
         extra=build_log_extra(
@@ -1367,11 +1373,6 @@ def _prepare_article_background_turn(
             },
         ),
     )
-    provider_api_key = resolve_effective_api_key(
-        db=db,
-        user_id=turn.user_id,
-        model_spec=turn.model,
-    )
     return _PreparedArticleChatTurn(
         deps=deps,
         history=history,
@@ -1388,6 +1389,14 @@ async def _execute_article_background_turn(
     user_prompt: str,
     partial_writer: _DurableChatPartialWriter,
 ) -> _ExecutedArticleChatTurn:
+    if turn.message_id is not None:
+        from app.core.db import get_session_factory
+
+        prepared.deps.tool_progress_writer = DurableChatToolProgressWriter(
+            session_factory=get_session_factory(),
+            message_id=turn.message_id,
+            stream_generation=turn.stream_generation,
+        )
     logger.info(
         "Async chat LLM call started",
         extra=build_log_extra(
@@ -1466,6 +1475,11 @@ def _persist_article_background_turn(
         display_user_prompt=user_prompt,
         expected_stream_generation=turn.stream_generation,
         commit=False,
+    )
+    enqueue_agent_data_sync(
+        db,
+        user_id=turn.user_id,
+        chat_session_ids=(turn.session_id,),
     )
     return {
         "chat_session_id": turn.session_id,
@@ -1546,6 +1560,7 @@ async def process_message_async(
             db,
             session_snapshot,
             turn,
+            user_prompt=user_prompt,
         ),
         execute=lambda prepared, turn, partial_writer: _execute_article_background_turn(
             prepared,
@@ -1563,7 +1578,7 @@ async def process_message_async(
         raw_result=lambda executed: executed.raw_result,
         record_usage=_log_chat_usage,
         ensure_lease=ensure_lease,
-        cleanup=lambda prepared: _close_sandbox_session(prepared.deps.sandbox_session),
+        cleanup=lambda prepared: _close_agent_vm_runtime(prepared.deps.vm_runtime),
         after_persist=_sync_parent_session_activity,
     )
     if result.outcome != QueuedChatTurnOutcome.COMPLETED:
@@ -1632,7 +1647,12 @@ def _prepare_initial_suggestions_turn(
     turn: _DetachedChatTurn,
 ) -> _PreparedInitialSuggestionsTurn:
     deps_start = perf_counter()
-    deps = _build_chat_deps(db, session, include_full_text=True)
+    deps = _build_chat_deps(
+        db,
+        session,
+        include_full_text=True,
+        include_vm_tools=False,
+    )
     provider_api_key = resolve_effective_api_key(
         db=db,
         user_id=turn.user_id,
@@ -1685,6 +1705,11 @@ def _persist_initial_suggestions_turn(
     )
     if message.id is None:
         raise ValueError("Initial suggestions message is missing an id")
+    enqueue_agent_data_sync(
+        db,
+        user_id=turn.user_id,
+        chat_session_ids=(turn.session_id,),
+    )
     return {
         "chat_session_id": turn.session_id,
         "message_id": int(message.id),
@@ -1838,7 +1863,7 @@ async def generate_initial_suggestions(
         raise
     finally:
         if prepared is not None:
-            _close_sandbox_session(prepared.deps.sandbox_session)
+            _close_agent_vm_runtime(prepared.deps.vm_runtime)
 
     if turn is None or prepared is None:
         raise RuntimeError("Initial suggestions completed without runtime state")

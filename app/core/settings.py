@@ -48,6 +48,7 @@ def _local_storage_fallback(field_name: str) -> Path:
         "content_body_local_root": data_dir / "content_bodies",
         "podcast_scratch_dir": data_dir / "scratch",
         "personal_markdown_root": data_dir / "personal_markdown",
+        "agent_data_mirror_root": data_dir / "agent_user_data",
     }
     return fallbacks[field_name]
 
@@ -152,8 +153,8 @@ class ProviderSettingsView(BaseModel):
     podcast_index_api_key_configured: bool
     podcast_index_api_secret_configured: bool
     firecrawl_api_key_configured: bool
-    chat_sandbox_provider: str
-    chat_sandbox_e2b_api_key_configured: bool
+    llm_task_sandbox_provider: str
+    llm_task_sandbox_e2b_api_key_configured: bool
     learning_deck_model: str
 
 
@@ -455,16 +456,6 @@ class Settings(BaseSettings):
         default_factory=lambda: Path.cwd() / "data" / "personal_markdown"
     )
     personal_markdown_max_slug_length: int = Field(default=80, ge=16, le=160)
-    chat_sandbox_provider: Literal["disabled", "local", "e2b"] = "e2b"
-    chat_sandbox_e2b_api_key: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CHAT_SANDBOX_E2B_API_KEY", "E2B_API_KEY"),
-    )
-    chat_sandbox_template: str | None = None
-    chat_sandbox_timeout_seconds: int = Field(default=900, ge=60, le=86_400)
-    chat_sandbox_allow_internet_access: bool = True
-    chat_sandbox_library_root: str = "/tmp/newsly/personal_markdown"
-    chat_sandbox_max_output_chars: int = Field(default=12_000, ge=1_000, le=100_000)
     learning_deck_model: str = CHEAP_MODEL_SPEC
     llm_task_model: str = CHEAP_MODEL_SPEC
     llm_task_sandbox_provider: Literal["disabled", "local", "e2b"] = "e2b"
@@ -472,11 +463,19 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("LLM_TASK_SANDBOX_E2B_API_KEY", "E2B_API_KEY"),
     )
-    llm_task_sandbox_template: str | None = None
-    llm_task_sandbox_timeout_seconds: int = Field(default=1800, ge=60, le=86_400)
+    llm_task_sandbox_timeout_seconds: int = Field(default=300, ge=60, le=3_600)
     llm_task_sandbox_allow_internet_access: bool = True
-    llm_task_sandbox_root: str = "/tmp/newsly"
+    llm_task_sandbox_request_limit: int = Field(default=8, ge=1, le=50)
+    llm_task_sandbox_root: str = "/data/workspace"
     llm_task_sandbox_max_output_chars: int = Field(default=20_000, ge=1_000, le=200_000)
+    agent_data_mirror_root: Path = Field(
+        default_factory=lambda: Path.cwd() / "data" / "agent_user_data"
+    )
+    agent_data_document_max_bytes: int = Field(default=200_000, ge=10_000, le=2_000_000)
+    # High safety ceiling; the model-facing history is bounded by complete-turn
+    # token budgeting rather than by this row count.
+    chat_history_message_limit: int = Field(default=200, ge=2, le=200)
+    agent_data_backfill_batch_size: int = Field(default=500, ge=25, le=2_000)
     learning_deck_signed_url_ttl_seconds: int = Field(default=900, ge=60, le=86_400)
     learning_deck_max_index_html_bytes: int = Field(default=2_000_000, ge=10_000)
     learning_deck_max_source_notes_bytes: int = Field(default=1_000_000, ge=1_000)
@@ -576,12 +575,6 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "LLM_TASK_SANDBOX_E2B_API_KEY or E2B_API_KEY must be set in production"
                 )
-            if self.chat_sandbox_provider != "e2b":
-                raise ValueError("CHAT_SANDBOX_PROVIDER must be e2b in production")
-            if not (self.chat_sandbox_e2b_api_key or "").strip():
-                raise ValueError(
-                    "CHAT_SANDBOX_E2B_API_KEY or E2B_API_KEY must be set in production"
-                )
         if not self.apple_signin_audiences:
             raise ValueError("APPLE_SIGNIN_AUDIENCES must include at least one audience")
         return self
@@ -603,6 +596,7 @@ class Settings(BaseSettings):
         "content_body_local_root",
         "podcast_scratch_dir",
         "personal_markdown_root",
+        "agent_data_mirror_root",
         mode="after",
     )
     @classmethod
@@ -688,8 +682,8 @@ class Settings(BaseSettings):
             podcast_index_api_key_configured=bool(self.podcast_index_api_key),
             podcast_index_api_secret_configured=bool(self.podcast_index_api_secret),
             firecrawl_api_key_configured=bool(self.firecrawl_api_key),
-            chat_sandbox_provider=self.chat_sandbox_provider,
-            chat_sandbox_e2b_api_key_configured=bool(self.chat_sandbox_e2b_api_key),
+            llm_task_sandbox_provider=self.llm_task_sandbox_provider,
+            llm_task_sandbox_e2b_api_key_configured=bool(self.llm_task_sandbox_e2b_api_key),
             learning_deck_model=self.learning_deck_model,
         )
 

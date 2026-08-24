@@ -18,12 +18,12 @@ from app.models.domain.chat_sessions import KNOWLEDGE_SESSION_TYPE
 from app.models.internal.chat_turn import ChatTurnProcessingContext
 from app.models.metadata.state import extract_share_and_chat_requests
 from app.services.active_users import lock_active_user
+from app.services.agent_data_events import enqueue_agent_data_sync
 from app.services.chat_agent import create_processing_message, process_message_async
 from app.services.chat_turn_queue import build_chat_turn_context
 from app.services.chat_turn_runtime import QueuedChatTurnOutcome
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.llm_models import DEFAULT_MODEL, DEFAULT_PROVIDER
-from app.services.personal_markdown_library import sync_personal_markdown_for_content
 from app.services.prompt_library import render_prompt
 from app.services.queue import TaskEnqueueRequest, TaskType
 from app.utils.title_utils import resolve_content_display_title
@@ -306,16 +306,18 @@ def build_dig_deeper_prompt(db: Session, content: Content) -> str:
 
 
 def _sync_dig_deeper_markdown(db: Session, *, content: Content, user_id: int) -> None:
-    """Best-effort sync after the owning database transaction commits."""
+    """Best-effort agent-data update after the owning transaction commits."""
     try:
-        sync_personal_markdown_for_content(
+        enqueue_agent_data_sync(
             db,
             user_id=user_id,
-            content_id=_require_content_id(content),
+            content_ids=(_require_content_id(content),),
         )
+        db.commit()
     except Exception:
+        db.rollback()
         logger.exception(
-            "Failed to sync personal markdown for dig-deeper session",
+            "Failed to enqueue agent data for dig-deeper session",
             extra={
                 "component": "dig_deeper",
                 "operation": "create_session",

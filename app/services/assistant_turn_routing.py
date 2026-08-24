@@ -5,17 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.models.internal.assistant import AssistantScreenContext
+from app.services.agent_vm_runtime import AGENT_VM_TOOL_NAMES
 from app.services.prompt_library import load_prompt
 
 ASSISTANT_ACTION_PICK_INTERESTING_UNREAD_NEWS = "pick_interesting_unread_news"
 ASSISTANT_WEB_TOOL = "search_web"
-ASSISTANT_PERSONAL_LIBRARY_TOOLS = frozenset(
-    {
-        "SearchMarkdownLibrary",
-        "ListMarkdownLibrary",
-        "ReadMarkdownFile",
-    }
-)
 ASSISTANT_DEFAULT_TOOL_NAMES = frozenset(
     {
         ASSISTANT_WEB_TOOL,
@@ -131,8 +125,8 @@ class AssistantTurnProfile:
     tool_names: frozenset[str]
 
     @property
-    def uses_personal_library(self) -> bool:
-        return bool(self.tool_names & ASSISTANT_PERSONAL_LIBRARY_TOOLS)
+    def uses_agent_vm(self) -> bool:
+        return bool(self.tool_names & AGENT_VM_TOOL_NAMES)
 
 
 def resolve_assistant_turn_profile(
@@ -183,7 +177,7 @@ def resolve_assistant_turn_profile(
         return AssistantTurnProfile(
             route="markdown_library",
             instructions=load_prompt("chat/contextual_assistant#turn_markdown_library"),
-            tool_names=ASSISTANT_PERSONAL_LIBRARY_TOOLS | ASSISTANT_DEFAULT_TOOL_NAMES,
+            tool_names=AGENT_VM_TOOL_NAMES | ASSISTANT_DEFAULT_TOOL_NAMES,
         )
     if _should_route_to_content_search(user_text):
         return AssistantTurnProfile(

@@ -26,6 +26,7 @@ from app.models.domain.user_profile import (
     CouncilPersonaConfig,
     resolve_user_council_personas,
 )
+from app.services.agent_data_events import enqueue_agent_data_sync
 from app.services.chat_agent import build_article_context, run_chat_turn, save_messages
 from app.services.prompt_library import load_prompt, render_prompt
 
@@ -57,6 +58,13 @@ def _require_session_id(session: ChatSession) -> int:
     if session_id is None:
         raise ValueError("Chat session must be persisted before use")
     return session_id
+
+
+def _require_session_user_id(session: ChatSession) -> int:
+    user_id = session.user_id
+    if user_id is None:
+        raise ValueError("Chat session must have an owner before use")
+    return user_id
 
 
 def validate_council_parent_session(session: ChatSession) -> None:
@@ -419,6 +427,7 @@ async def start_council_chat(
             council_candidates=candidates,
             active_council_child_session_id=active_child_session_id,
         ),
+        commit=False,
     )
 
     parent_session.council_mode = True
@@ -426,6 +435,11 @@ async def start_council_chat(
     parent_session.council_message_id = council_message.id
     parent_session.updated_at = datetime.now(UTC)
     parent_session.last_message_at = datetime.now(UTC)
+    enqueue_agent_data_sync(
+        db,
+        user_id=_require_session_user_id(parent_session),
+        chat_session_ids=(_require_session_id(parent_session),),
+    )
     db.commit()
     db.refresh(parent_session)
 
@@ -516,6 +530,11 @@ async def retry_council_branch(
         active_council_child_session_id=active_child_session_id,
     ).model_dump(mode="json")
 
+    enqueue_agent_data_sync(
+        db,
+        user_id=_require_session_user_id(parent_session),
+        chat_session_ids=(_require_session_id(parent_session),),
+    )
     db.commit()
     db.refresh(parent_session)
 
@@ -580,6 +599,11 @@ def select_council_branch(
                     active_council_child_session_id=child_session.id,
                 ).model_dump(mode="json")
 
+    enqueue_agent_data_sync(
+        db,
+        user_id=_require_session_user_id(parent_session),
+        chat_session_ids=(_require_session_id(parent_session),),
+    )
     db.commit()
     db.refresh(parent_session)
     return child_session

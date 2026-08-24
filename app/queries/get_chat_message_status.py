@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.api.chat import ChatMessageDto, MessageStatusResponse
+from app.models.api.chat import ChatMessageDto, ChatToolProgressDto, MessageStatusResponse
 from app.models.api.chat import (
     MessageProcessingStatus as MessageProcessingStatusDto,
 )
@@ -67,6 +67,12 @@ def execute(
             partial_assistant_message=partial_assistant_message,
             stream_generation=db_message.stream_generation,
             stream_revision=db_message.stream_revision,
+            tool_progress=(
+                ChatToolProgressDto.model_validate(db_message.tool_progress)
+                if isinstance(db_message.tool_progress, dict)
+                else None
+            ),
+            tool_progress_revision=db_message.tool_progress_revision,
             error=None,
         )
 

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
 SYSTEM_USER_ID = 0
+AGENT_VM_TOOL_NAMES = frozenset(
+    {"execute_bash", "write_file", "edit_file", "read_file", "list_files"}
+)
 
 
 def resolve_sandbox_user_id(value: object) -> int:
@@ -98,6 +102,8 @@ class AgentVmSession(ABC):
         command: str,
         *,
         timeout_seconds: float | None = None,
+        on_stdout: Callable[[str], None] | None = None,
+        max_output_chars: int | None = None,
     ) -> AgentCommandResult:
         """Run one shell command in the VM workspace."""
 

@@ -1,6 +1,7 @@
 name: newsly-prod
 
 x-newsly-environment: &newsly-environment
+  AGENT_DATA_MIRROR_ROOT: /data/agent_user_data
   DATABASE_URL: ${NEWSLY_DATABASE_URL:?NEWSLY_DATABASE_URL is required}
   NEWSLY_WAIT_FOR_BOOTSTRAP: "false"
   PUBLIC_BASE_URL: ${NEWSLY_PUBLIC_BASE_URL:-https://news.willemsavenue.com}

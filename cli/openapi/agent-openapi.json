@@ -2055,6 +2055,35 @@
         "title": "ChatSessionSummaryDto",
         "type": "object"
       },
+      "ChatToolProgressDto": {
+        "description": "Latest advisory VM tool state for an in-flight chat turn.",
+        "properties": {
+          "detail": {
+            "nullable": true,
+            "title": "Detail",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "nullable": true,
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name",
+          "status"
+        ],
+        "title": "ChatToolProgressDto",
+        "type": "object"
+      },
       "CliLinkApproveRequest": {
         "description": "Authenticated request to approve one pending CLI link session.",
         "properties": {
@@ -4727,6 +4756,18 @@
             "minimum": 0.0,
             "nullable": true,
             "title": "Stream Revision",
+            "type": "integer"
+          },
+          "tool_progress": {
+            "$ref": "#/components/schemas/ChatToolProgressDto",
+            "description": "Latest advisory VM tool state, separate from transcript text",
+            "nullable": true
+          },
+          "tool_progress_revision": {
+            "description": "Monotonic advisory tool-state revision for this worker attempt",
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Tool Progress Revision",
             "type": "integer"
           }
         },

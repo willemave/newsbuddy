@@ -19,10 +19,10 @@ from app.queries.chat_read_models import (
     resolve_session_article_presentation,
     session_to_summary,
 )
+from app.services.agent_data_events import enqueue_agent_data_sync
 from app.services.assistant_router import KNOWLEDGE_SESSION_TYPE, build_screen_context_snapshot
 from app.services.llm_models import is_deep_research_provider, resolve_model
 from app.services.news_feed import get_visible_news_item
-from app.services.personal_markdown_library import sync_personal_markdown_for_content
 from app.utils.title_utils import derive_chat_session_title
 
 logger = get_logger(__name__)
@@ -114,18 +114,20 @@ def execute(
 
     if request.content_id:
         try:
-            sync_personal_markdown_for_content(
+            enqueue_agent_data_sync(
                 db,
                 user_id=user_id,
-                content_id=request.content_id,
+                content_ids=(request.content_id,),
             )
+            db.commit()
         except Exception:
+            db.rollback()
             logger.exception(
-                "Failed to sync personal markdown after chat session creation",
+                "Failed to enqueue agent data after chat session creation",
                 extra=build_log_extra(
                     component="chat",
                     operation="create_session",
-                    event_name="chat.session.personal_markdown",
+                    event_name="chat.session.agent_data",
                     status="degraded",
                     user_id=user_id,
                     session_id=session_row_id,

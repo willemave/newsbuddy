@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.models.contracts import TaskStatus
 from app.models.db import (
+    AgentDataFile,
     AnalyticsInteraction,
     AudioEpisode,
     BriefingLens,
@@ -53,6 +54,7 @@ from app.models.db import (
     VendorUsageRecord,
 )
 from app.models.metadata.state import remove_user_references
+from app.services.agent_data_sync import get_agent_data_user_root
 from app.services.learning_deck_artifacts import delete_learning_deck_objects
 from app.services.personal_markdown_library import get_personal_markdown_user_root
 from app.services.token_crypto import decrypt_token
@@ -64,6 +66,7 @@ logger = get_logger(__name__)
 # SQLAlchemy model registry so adding a new user-owned table requires a deletion decision.
 USER_OWNED_MODELS: tuple[tuple[type, str], ...] = (
     (AnalyticsInteraction, "user_id"),
+    (AgentDataFile, "user_id"),
     (UserApiKey, "user_id"),
     (ConsumedRefreshToken, "user_id"),
     (ProcessingTaskUserAccess, "user_id"),
@@ -123,6 +126,7 @@ def purge_user_account(db: Session, *, user_id: int, current_task_id: int) -> No
         db.commit()
         return
 
+    _destroy_agent_vm(user)
     _revoke_x_connections(db, user_id=user_id)
     _delete_user_files(db, user_id=user_id)
     _delete_indirect_rows(db, user_id=user_id)
@@ -285,6 +289,39 @@ def _delete_user_files(db: Session, *, user_id: int) -> None:
     user_root = get_personal_markdown_user_root(user_id)
     if user_root.exists():
         shutil.rmtree(user_root)
+    agent_data_root = get_agent_data_user_root(user_id)
+    if agent_data_root.exists():
+        shutil.rmtree(agent_data_root)
+
+
+def _destroy_agent_vm(user: User) -> None:
+    """Destroy external per-user compute and recovery state before deletion."""
+    from app.core.settings import get_settings
+
+    settings = get_settings()
+    api_key = settings.llm_task_sandbox_e2b_api_key
+    sandbox_id = str(user.agent_vm_sandbox_id or "").strip()
+    snapshot_id = str(user.agent_vm_snapshot_id or "").strip()
+    if not sandbox_id and not snapshot_id:
+        return
+    if not api_key:
+        raise RuntimeError("E2B_API_KEY is required to destroy the user's external sandbox data")
+    if sandbox_id:
+        try:
+            from e2b_code_interpreter import Sandbox
+
+            Sandbox.kill(sandbox_id, api_key=api_key)
+        except Exception as exc:  # noqa: BLE001
+            if "not found" not in str(exc).lower():
+                raise
+    if snapshot_id:
+        try:
+            from e2b_code_interpreter import Sandbox
+
+            Sandbox.delete_snapshot(snapshot_id, api_key=api_key)
+        except Exception as exc:  # noqa: BLE001
+            if "not found" not in str(exc).lower():
+                raise
 
 
 def _scrub_deletion_task(db: Session, *, current_task_id: int) -> None:

@@ -8,9 +8,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from threading import Lock
-from typing import Any, cast
+from typing import cast
 
-from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from sqlalchemy.orm import Session
 
@@ -18,9 +17,9 @@ from app.core.logging import get_logger
 from app.core.observability import build_log_extra
 from app.models.db import ChatSession
 from app.models.internal.chat_turn import ChatTurnSessionSnapshot
+from app.services.lazy_agent_vm import LazyAgentVmRuntime
 from app.services.llm_models import DEFAULT_MODEL, resolve_model_provider
 from app.services.llm_task_turn_tracker import LlmTaskTurnSpec, LlmTaskTurnTracker
-from app.services.sandbox_runtime import PersonalLibrarySandboxSession
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 
 logger = get_logger(__name__)
@@ -263,70 +262,6 @@ def resolve_session_model(session: ChatSession) -> str:
     return DEFAULT_MODEL
 
 
-def personal_library_unavailable_message(error: str | None) -> str:
-    """Render a consistent personal-library tool fallback."""
-    if error:
-        return f"Personal markdown library is unavailable: {error}"
-    return "Personal markdown library is unavailable for this chat."
-
-
-def register_personal_library_tools(
-    agent: Agent[Any, Any],
-    *,
-    search_name: str,
-    list_name: str,
-    read_name: str,
-) -> None:
-    """Register the shared read-only personal-library tool trio on an agent."""
-
-    @agent.tool(name=search_name)
-    def search_personal_library(
-        ctx: RunContext[Any],
-        query: str,
-        limit: int = 20,
-        glob: str = "*.md",
-    ) -> str:
-        """Search the user's sandbox-mounted personal markdown library."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return personal_library_unavailable_message(ctx.deps.personal_library_error)
-        return sandbox_session.search_files(
-            query=query,
-            glob=glob,
-            limit=max(1, min(limit, 50)),
-        )
-
-    @agent.tool(name=list_name)
-    def list_personal_library(
-        ctx: RunContext[Any],
-        subpath: str = "",
-        limit: int = 200,
-    ) -> str:
-        """List markdown files in the user's sandbox-mounted personal library."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return personal_library_unavailable_message(ctx.deps.personal_library_error)
-        return sandbox_session.list_files(
-            subpath=subpath,
-            limit=max(1, min(limit, 500)),
-        )
-
-    @agent.tool(name=read_name)
-    def read_personal_markdown_file(
-        ctx: RunContext[Any],
-        relative_path: str,
-        max_chars: int = 12_000,
-    ) -> str:
-        """Read one markdown file from the user's sandbox-mounted personal library."""
-        sandbox_session = ctx.deps.sandbox_session
-        if sandbox_session is None:
-            return personal_library_unavailable_message(ctx.deps.personal_library_error)
-        return sandbox_session.read_file(
-            relative_path=relative_path,
-            max_chars=max(500, min(max_chars, 40_000)),
-        )
-
-
 def extract_tool_names(result: object) -> list[str]:
     """Return tool names used by this turn from canonical new message parts."""
     new_messages = getattr(result, "new_messages", None)
@@ -372,14 +307,14 @@ def clear_agent_cache_for_tests() -> None:
         _AGENT_CACHE.clear()
 
 
-def close_sandbox_session(sandbox_session: PersonalLibrarySandboxSession | None) -> None:
-    """Release a per-turn personal-library sandbox session."""
-    if sandbox_session is None:
+def close_agent_vm_runtime(vm_runtime: LazyAgentVmRuntime | None) -> None:
+    """Release a lazy per-turn VM handle without destroying persistent compute."""
+    if vm_runtime is None:
         return
     try:
-        sandbox_session.close()
+        vm_runtime.close()
     except Exception:
-        logger.debug("Ignoring sandbox close failure", exc_info=True)
+        logger.debug("Ignoring agent VM runtime close failure", exc_info=True)
 
 
 def require_current_chat_lease(ensure_lease: Callable[[], bool]) -> None:

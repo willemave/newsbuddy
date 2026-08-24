@@ -25,6 +25,7 @@ from app.services.chat_agent import (
 )
 from app.services.chat_partial_stream import (
     DurableChatPartialWriter,
+    DurableChatToolProgressWriter,
     build_final_text_event_stream_handler,
     initialize_chat_stream_attempt,
 )
@@ -82,6 +83,66 @@ def test_new_stream_generation_clears_partial_and_rejects_old_writer(
     assert persisted.stream_generation == 2
     assert persisted.stream_revision == 0
     assert persisted.partial_text is None
+
+
+def test_tool_progress_is_retry_fenced_and_separate_from_partial_text(
+    db_session,
+    db_session_factory,
+    test_user,
+) -> None:
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Tool progress",
+        session_type="knowledge_chat",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.6-terra",
+    )
+    db_session.add(session)
+    db_session.flush()
+    message = ChatMessage(
+        session_id=session.id,
+        message_list="[]",
+        status=MessageProcessingStatus.PROCESSING.value,
+    )
+    db_session.add(message)
+    db_session.commit()
+    assert message.id is not None
+
+    initialize_chat_stream_attempt(db_session, message_id=message.id, stream_generation=1)
+    db_session.commit()
+    old_writer = DurableChatToolProgressWriter(
+        session_factory=db_session_factory,
+        message_id=message.id,
+        stream_generation=1,
+        minimum_interval_seconds=0,
+    )
+    assert old_writer.publish(
+        tool_name="execute_bash",
+        status="running",
+        detail="first stdout chunk",
+    )
+
+    db_session.expire_all()
+    persisted = db_session.get(ChatMessage, message.id)
+    assert persisted is not None
+    assert persisted.partial_text is None
+    assert persisted.tool_progress == {
+        "tool_name": "execute_bash",
+        "status": "running",
+        "detail": "first stdout chunk",
+        "updated_at": persisted.tool_progress["updated_at"],
+    }
+    assert persisted.tool_progress_revision == 1
+
+    initialize_chat_stream_attempt(db_session, message_id=message.id, stream_generation=2)
+    db_session.commit()
+    assert old_writer.publish(tool_name="execute_bash", status="completed") is False
+
+    db_session.expire_all()
+    persisted = db_session.get(ChatMessage, message.id)
+    assert persisted is not None
+    assert persisted.tool_progress is None
+    assert persisted.tool_progress_revision == 0
 
 
 @pytest.mark.asyncio

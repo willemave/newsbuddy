@@ -1,6 +1,5 @@
 import asyncio
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +8,6 @@ from pydantic_ai.messages import (
     ModelResponse,
     SystemPromptPart,
     TextPart,
-    ToolCallPart,
     UserPromptPart,
 )
 from sqlalchemy.orm import object_session
@@ -24,7 +22,6 @@ from app.services.chat_agent import (
     ChatDeps,
     _build_chat_deps,
     _build_context_prompt_parts,
-    _build_run_user_prompt,
     _dump_messages_json,
     build_article_context,
     create_processing_message,
@@ -34,10 +31,7 @@ from app.services.chat_agent import (
 )
 from app.services.chat_turn_queue import build_chat_turn_context
 from app.services.chat_turn_runtime import ChatUsageSnapshot, QueuedChatTurnOutcome
-from app.services.sandbox_runtime import (
-    LocalPersonalLibrarySandboxSession,
-    SandboxRuntimeUnavailableError,
-)
+from app.services.lazy_agent_vm import LazyAgentVmRuntime
 
 
 def test_build_article_context_includes_full_transcript_with_budget(db_session) -> None:
@@ -163,7 +157,7 @@ def test_build_chat_deps_prefers_session_context_snapshot(db_session) -> None:
     deps = _build_chat_deps(db_session, session, include_full_text=True)
 
     assert deps.article_context == "News bullets:\n- Bullet A\n- Bullet B"
-    assert deps.context_label == "Session Context"
+    assert "Session Context:\nNews bullets:\n- Bullet A\n- Bullet B" in deps.system_context
     assert deps.has_content is False
     assert not any(isinstance(value, (ChatSession, Content)) for value in vars(deps).values())
     assert "Overview text" not in deps.article_context
@@ -197,7 +191,7 @@ def test_build_chat_deps_uses_processed_content_for_knowledge_chat(db_session) -
 
     assert deps.has_content is True
     assert not any(isinstance(value, (ChatSession, Content)) for value in vars(deps).values())
-    assert deps.context_label == "Article Context"
+    assert "Article Context:" in deps.system_context
     assert deps.article_context is not None
     assert "full processed article body" in deps.article_context
     assert "Compact pre-processing snapshot" not in deps.article_context
@@ -205,15 +199,6 @@ def test_build_chat_deps_uses_processed_content_for_knowledge_chat(db_session) -
 
 def test_article_chat_enables_sandboxed_bash() -> None:
     assert ARTICLE_CHAT_TURN_SPEC.tool_policy["execute_bash"] is True
-
-
-def test_local_chat_sandbox_rejects_bash(tmp_path: Path) -> None:
-    session = LocalPersonalLibrarySandboxSession(library_root=tmp_path)
-
-    with pytest.raises(SandboxRuntimeUnavailableError, match="requires the isolated E2B"):
-        session.execute_bash("touch ../escaped", timeout_seconds=5)
-
-    assert not (tmp_path.parent / "escaped").exists()
 
 
 def test_build_context_prompt_parts_marks_snapshot_as_reference_material() -> None:
@@ -228,22 +213,6 @@ def test_build_context_prompt_parts_marks_snapshot_as_reference_material() -> No
     assert "Provided reference context is available below." in rendered
     assert "do not ask the user to paste it again" in rendered
     assert "Session Context:\nNews bullets:\n- Bullet A\n- Bullet B" in rendered
-
-
-def test_build_run_user_prompt_includes_snapshot_context() -> None:
-    deps = ChatDeps(
-        session_id=123,
-        user_id=123,
-        has_context_snapshot=True,
-        article_context="News bullets:\n- Bullet A\n- Bullet B",
-        context_label="Session Context",
-    )
-
-    prompt = _build_run_user_prompt("Dig deeper into these news bullets.", deps)
-
-    assert "Use the provided session context below as the source material" in prompt
-    assert "Session Context:\nNews bullets:\n- Bullet A\n- Bullet B" in prompt
-    assert prompt.endswith("User request:\nDig deeper into these news bullets.")
 
 
 def test_dump_messages_json_restores_user_visible_prompt(db_session) -> None:
@@ -377,7 +346,6 @@ def test_generate_initial_suggestions_persists_assistant_only_transcript(
             new_messages=lambda: [
                 ModelResponse(
                     parts=[
-                        ToolCallPart(tool_name="search_personal_library", args={}),
                         TextPart(content="Here are a few useful directions."),
                     ]
                 )
@@ -444,7 +412,7 @@ def test_generate_initial_suggestions_persists_assistant_only_transcript(
     assert task.input_json["queue_task_id"] == 77
     assert task.output_json["chat_session_id"] == session_id
     assert task.output_json["message_id"] == display_messages[0].source_message_id
-    assert task.output_json["tool_names"] == ["search_personal_library"]
+    assert task.output_json["tool_names"] == []
 
 
 def test_generate_initial_suggestions_skips_sessions_without_context(
@@ -483,7 +451,6 @@ def test_generate_initial_suggestions_records_failure_without_partial_message(
     db_session,
     test_user,
     monkeypatch,
-    tmp_path,
 ) -> None:
     content = Content(
         content_type=ContentType.ARTICLE.value,
@@ -509,7 +476,12 @@ def test_generate_initial_suggestions_records_failure_without_partial_message(
     session_id = int(session.id)
     db_session.close()
     sandbox_closed: list[bool] = []
-    sandbox = LocalPersonalLibrarySandboxSession(library_root=tmp_path)
+    sandbox = LazyAgentVmRuntime(
+        user_id=user_id,
+        session_id=session_id,
+        llm_task_id=None,
+        feature="chat",
+    )
     monkeypatch.setattr(sandbox, "close", lambda: sandbox_closed.append(True))
 
     monkeypatch.setattr(
@@ -521,7 +493,7 @@ def test_generate_initial_suggestions_records_failure_without_partial_message(
             content_id=current_session.content_id,
             has_content=True,
             article_context="Article context",
-            sandbox_session=sandbox,
+            vm_runtime=sandbox,
         ),
     )
     monkeypatch.setattr(chat_agent, "resolve_effective_api_key", lambda **_kwargs: None)
@@ -548,16 +520,13 @@ def test_generate_initial_suggestions_records_failure_without_partial_message(
     assert task.error_message == "provider unavailable"
 
 
-def test_build_chat_deps_prepares_personal_library_runtime(
+def test_build_chat_deps_prepares_lazy_runtime_without_acquiring_vm(
     db_session,
     test_user,
     monkeypatch,
-    tmp_path: Path,
 ) -> None:
     settings = get_settings()
-    monkeypatch.setattr(settings, "personal_markdown_root", tmp_path / "personal_markdown")
-    monkeypatch.setattr(settings, "personal_markdown_enabled", True)
-    monkeypatch.setattr(settings, "chat_sandbox_provider", "local")
+    monkeypatch.setattr(settings, "llm_task_sandbox_provider", "local")
 
     content = Content(
         content_type=ContentType.ARTICLE.value,
@@ -587,23 +556,18 @@ def test_build_chat_deps_prepares_personal_library_runtime(
 
     deps = _build_chat_deps(db_session, session, include_full_text=True)
 
-    assert deps.personal_library_error is None
-    assert deps.sandbox_session is not None
-    files = deps.sandbox_session.list_files()
-    assert "library-article" in files
-    deps.sandbox_session.close()
+    assert isinstance(deps.vm_runtime, LazyAgentVmRuntime)
+    assert deps.vm_runtime.acquired is False
+    deps.vm_runtime.close()
 
 
-def test_build_chat_deps_keeps_local_personal_library_read_only(
+def test_build_chat_deps_local_runtime_can_execute_when_a_tool_requests_it(
     db_session,
     test_user,
     monkeypatch,
-    tmp_path: Path,
 ) -> None:
     settings = get_settings()
-    monkeypatch.setattr(settings, "personal_markdown_root", tmp_path / "personal_markdown")
-    monkeypatch.setattr(settings, "personal_markdown_enabled", False)
-    monkeypatch.setattr(settings, "chat_sandbox_provider", "local")
+    monkeypatch.setattr(settings, "llm_task_sandbox_provider", "local")
     session = ChatSession(
         user_id=test_user.id,
         title="Research chat",
@@ -617,28 +581,20 @@ def test_build_chat_deps_keeps_local_personal_library_read_only(
 
     deps = _build_chat_deps(db_session, session, include_full_text=True)
 
-    assert deps.sandbox_session is not None
-    with pytest.raises(SandboxRuntimeUnavailableError, match="requires the isolated E2B"):
-        deps.sandbox_session.execute_bash("printf 'available'", timeout_seconds=5)
-    deps.sandbox_session.close()
+    assert deps.vm_runtime is not None
+    vm_session = deps.vm_runtime.get_session()
+    result = vm_session.execute_bash("printf 'available'", timeout_seconds=5)
+    assert result.stdout == "available"
+    deps.vm_runtime.close()
 
 
-def test_build_chat_deps_skips_personal_library_sync_when_sandbox_disabled(
+def test_build_chat_deps_hides_vm_tools_when_llm_sandbox_is_disabled(
     db_session,
     test_user,
     monkeypatch,
 ) -> None:
     settings = get_settings()
-    monkeypatch.setattr(settings, "personal_markdown_enabled", True)
-    monkeypatch.setattr(settings, "chat_sandbox_provider", "disabled")
-
-    sync_calls: list[int] = []
-
-    def _unexpected_sync(_db, *, user_id: int):  # noqa: ANN001
-        sync_calls.append(user_id)
-        raise AssertionError("personal markdown sync should not run when sandbox is disabled")
-
-    monkeypatch.setattr(chat_agent, "sync_personal_markdown_library_for_user", _unexpected_sync)
+    monkeypatch.setattr(settings, "llm_task_sandbox_provider", "disabled")
 
     session = ChatSession(
         user_id=test_user.id,
@@ -653,12 +609,10 @@ def test_build_chat_deps_skips_personal_library_sync_when_sandbox_disabled(
 
     deps = _build_chat_deps(db_session, session, include_full_text=True)
 
-    assert deps.sandbox_session is None
-    assert deps.personal_library_error is None
-    assert sync_calls == []
+    assert deps.vm_runtime is None
 
 
-def test_run_chat_turn_builds_deps_with_library_tools_enabled(
+def test_run_chat_turn_builds_deps_with_vm_tools_enabled(
     db_session,
     test_user,
     monkeypatch,
@@ -681,10 +635,11 @@ def test_run_chat_turn_builds_deps_with_library_tools_enabled(
         current_session,
         include_full_text: bool = False,
         *,
-        include_library_tools: bool = True,
+        include_vm_tools: bool = True,
+        user_prompt: str = "",
     ) -> ChatDeps:
-        del db, include_full_text
-        captured_flags.append(include_library_tools)
+        del db, include_full_text, user_prompt
+        captured_flags.append(include_vm_tools)
         return ChatDeps(
             session_id=int(current_session.id),
             user_id=int(current_session.user_id),
@@ -706,7 +661,7 @@ def test_run_chat_turn_builds_deps_with_library_tools_enabled(
     monkeypatch.setattr(chat_agent, "_log_chat_usage", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(chat_agent, "run_in_threadpool", _fake_run_in_threadpool)
 
-    result = asyncio.run(chat_agent.run_chat_turn(db_session, session, "Use the personal library."))
+    result = asyncio.run(chat_agent.run_chat_turn(db_session, session, "Use the VM files."))
 
     assert result.output_text == "Mocked assistant reply"
     assert captured_flags == [True]
@@ -749,9 +704,8 @@ def test_process_message_async_persists_completion_usage_and_ledger(
             session_id=kwargs["session_id"],
             user_id=kwargs["user_id"],
             content_id=kwargs["content_id"],
-            has_context_snapshot=True,
             article_context="Saved context",
-            context_label="Session Context",
+            system_context="Session Context:\nSaved context",
         ),
     )
     monkeypatch.setattr(chat_agent, "load_message_history", lambda *_args, **_kwargs: [])

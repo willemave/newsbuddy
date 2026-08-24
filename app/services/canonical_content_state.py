@@ -15,7 +15,7 @@ from app.models.db import (
     ContentUnlikes,
 )
 from app.models.metadata.access import metadata_view
-from app.services.personal_markdown_library import sync_personal_markdown_for_content
+from app.services.agent_data_events import enqueue_agent_data_sync
 from app.services.x_bookmark_destinations import reconcile_x_bookmark_destinations_for_content
 
 logger = get_logger(__name__)
@@ -118,25 +118,25 @@ def sync_canonical_personal_library(
     loser_content_id: int,
     winner_content_id: int,
 ) -> None:
-    """Refresh file projections after Knowledge or chat destinations move."""
-    for user_id in sorted(user_ids):
-        for content_id in (loser_content_id, winner_content_id):
-            try:
-                sync_personal_markdown_for_content(
-                    db,
-                    user_id=user_id,
-                    content_id=content_id,
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Failed to sync canonical personal-library projection",
-                    extra={
-                        "component": "content_worker",
-                        "operation": "canonical_user_state_sync",
-                        "item_id": str(content_id),
-                        "context_data": {"user_id": user_id},
-                    },
-                )
+    """Refresh agent-data projections after Knowledge or chat destinations move."""
+    try:
+        for user_id in sorted(user_ids):
+            enqueue_agent_data_sync(
+                db,
+                user_id=user_id,
+                content_ids=(loser_content_id, winner_content_id),
+            )
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        logger.exception(
+            "Failed to enqueue canonical agent-data projection",
+            extra={
+                "component": "content_worker",
+                "operation": "canonical_user_state_sync",
+                "context_data": {"user_ids": sorted(user_ids)},
+            },
+        )
 
 
 def reconcile_canonical_x_bookmark_destinations(

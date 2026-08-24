@@ -33,35 +33,6 @@ TEST_LIFECYCLE = chat_turn_runtime.DetachedChatTurnLifecycle(
 )
 
 
-class _ToolRecordingAgent:
-    def __init__(self) -> None:
-        self.tools = {}
-
-    def tool(self, *, name: str):  # noqa: ANN201
-        def _register(function):  # noqa: ANN001, ANN202
-            self.tools[name] = function
-            return function
-
-        return _register
-
-
-class _LibrarySandbox:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, dict[str, object]]] = []
-
-    def search_files(self, **kwargs) -> str:  # noqa: ANN003
-        self.calls.append(("search", kwargs))
-        return "search result"
-
-    def list_files(self, **kwargs) -> str:  # noqa: ANN003
-        self.calls.append(("list", kwargs))
-        return "file list"
-
-    def read_file(self, **kwargs) -> str:  # noqa: ANN003
-        self.calls.append(("read", kwargs))
-        return "file body"
-
-
 def test_extract_tool_names_uses_only_new_message_parts() -> None:
     result = SimpleNamespace(
         all_messages=[ModelResponse(parts=[ToolCallPart(tool_name="old_tool", args={})])],
@@ -84,51 +55,6 @@ def test_extract_tool_names_uses_only_new_message_parts() -> None:
 
 def test_extract_tool_names_returns_empty_for_non_agent_result() -> None:
     assert chat_turn_runtime.extract_tool_names(SimpleNamespace()) == []
-
-
-def test_personal_library_tool_registration_preserves_names_and_bounds() -> None:
-    agent = _ToolRecordingAgent()
-    sandbox = _LibrarySandbox()
-    chat_turn_runtime.register_personal_library_tools(
-        agent,
-        search_name="SearchMarkdownLibrary",
-        list_name="ListMarkdownLibrary",
-        read_name="ReadMarkdownFile",
-    )
-    context = SimpleNamespace(
-        deps=SimpleNamespace(sandbox_session=sandbox, personal_library_error=None)
-    )
-
-    assert set(agent.tools) == {
-        "SearchMarkdownLibrary",
-        "ListMarkdownLibrary",
-        "ReadMarkdownFile",
-    }
-    assert agent.tools["SearchMarkdownLibrary"](context, "query", limit=999) == "search result"
-    assert agent.tools["ListMarkdownLibrary"](context, limit=9999) == "file list"
-    assert agent.tools["ReadMarkdownFile"](context, "path.md", max_chars=2) == "file body"
-    assert sandbox.calls == [
-        ("search", {"query": "query", "glob": "*.md", "limit": 50}),
-        ("list", {"subpath": "", "limit": 500}),
-        ("read", {"relative_path": "path.md", "max_chars": 500}),
-    ]
-
-
-def test_personal_library_tools_share_unavailable_message() -> None:
-    agent = _ToolRecordingAgent()
-    chat_turn_runtime.register_personal_library_tools(
-        agent,
-        search_name="search",
-        list_name="list",
-        read_name="read",
-    )
-    context = SimpleNamespace(
-        deps=SimpleNamespace(sandbox_session=None, personal_library_error="E2B unavailable")
-    )
-
-    assert agent.tools["search"](context, "query") == (
-        "Personal markdown library is unavailable: E2B unavailable"
-    )
 
 
 def test_get_or_create_cached_agent_scopes_by_namespace_model_and_credential() -> None:

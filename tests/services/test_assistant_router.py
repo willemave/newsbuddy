@@ -102,6 +102,36 @@ def test_turn_profile_resolves_weekly_ordinal_subscription_actions() -> None:
     assert "Do not search for or re-detect" in profile.instructions
 
 
+def test_seed_assistant_message_enqueues_chat_corpus_sync(
+    db_session,
+    test_user,
+) -> None:
+    session = ChatSession(
+        user_id=test_user.id,
+        title="Weekly seed",
+        session_type="weekly_discovery",
+        llm_provider="openai",
+        llm_model="openai:gpt-5.6-terra",
+    )
+    db_session.add(session)
+    db_session.flush()
+    assert session.id is not None
+
+    assistant_router.seed_assistant_message(
+        db_session,
+        session_id=session.id,
+        assistant_text="A durable seed",
+    )
+
+    task = (
+        db_session.query(ProcessingTask)
+        .filter(ProcessingTask.task_type == TaskType.SYNC_AGENT_DATA.value)
+        .one()
+    )
+    assert task.owner_user_id == test_user.id
+    assert task.payload["chat_session_ids"] == [session.id]
+
+
 def test_turn_profile_prefers_content_search_for_feed_summary() -> None:
     """Feed summary prompts should route to in-app search tools before web search."""
 
@@ -248,17 +278,17 @@ def test_learning_deck_current_practice_request_exposes_exa_web_search() -> None
     assert profile.tool_names == frozenset({"search_web"})
 
 
-def test_default_route_does_not_start_the_personal_library_sandbox() -> None:
+def test_default_route_does_not_start_the_agent_vm() -> None:
     profile = assistant_turn_routing.resolve_assistant_turn_profile(
         "Help me think this through",
         AssistantScreenContext(screen_type="assistant_quick"),
     )
 
     assert profile.route == "default"
-    assert profile.uses_personal_library is False
+    assert profile.uses_agent_vm is False
 
 
-def test_learning_deck_route_does_not_hydrate_personal_library(
+def test_learning_deck_route_does_not_start_the_agent_vm(
     db_session,
     test_user,
     monkeypatch,
@@ -292,7 +322,7 @@ def test_learning_deck_route_does_not_hydrate_personal_library(
     monkeypatch.setattr(assistant_router, "resolve_effective_api_key", lambda **_kwargs: None)
     monkeypatch.setattr(
         assistant_router,
-        "_build_assistant_personal_library_runtime",
+        "_build_assistant_vm_runtime",
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("sandbox must stay lazy")),
     )
 
@@ -305,10 +335,10 @@ def test_learning_deck_route_does_not_hydrate_personal_library(
     )
 
     assert prepared.deps.turn_profile.route == "learning_deck_grounded"
-    assert prepared.deps.sandbox_session is None
+    assert prepared.deps.vm_runtime is None
 
 
-def test_markdown_route_hydrates_personal_library_once(
+def test_markdown_route_builds_one_lazy_vm_runtime(
     db_session,
     test_user,
     monkeypatch,
@@ -340,19 +370,20 @@ def test_markdown_route_hydrates_personal_library_once(
         source="assistant",
         task_id=20,
     )
-    sandbox = SimpleNamespace()
+    sandbox = SimpleNamespace(acquired=False)
     runtime_calls: list[int] = []
     monkeypatch.setattr(assistant_router, "load_message_history", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(assistant_router, "resolve_effective_api_key", lambda **_kwargs: None)
 
-    def build_runtime(*, db, user_id):
-        assert db is db_session
+    def build_runtime(*, user_id, session_id, llm_task_id):
         runtime_calls.append(user_id)
-        return sandbox, None
+        assert session_id == session.id
+        assert llm_task_id == turn.llm_task_id
+        return sandbox
 
     monkeypatch.setattr(
         assistant_router,
-        "_build_assistant_personal_library_runtime",
+        "_build_assistant_vm_runtime",
         build_runtime,
     )
 
@@ -365,7 +396,7 @@ def test_markdown_route_hydrates_personal_library_once(
     )
 
     assert prepared.deps.turn_profile.route == "markdown_library"
-    assert prepared.deps.sandbox_session is sandbox
+    assert prepared.deps.vm_runtime is sandbox
     assert runtime_calls == [test_user.id]
 
 
@@ -825,38 +856,16 @@ def test_search_news_uses_metadata_titles(
     assert [item.id for item, _is_read in rows] == [matched_item.id]
 
 
-def test_build_assistant_personal_library_runtime_skips_sync_when_sandbox_disabled(
-    db_session,
-    monkeypatch,
-) -> None:
+def test_build_assistant_vm_runtime_is_absent_when_sandbox_disabled(monkeypatch) -> None:
     settings = get_settings()
-    monkeypatch.setattr(settings, "personal_markdown_enabled", True)
-    monkeypatch.setattr(settings, "chat_sandbox_provider", "disabled")
+    monkeypatch.setattr(settings, "llm_task_sandbox_provider", "disabled")
 
-    sync_calls: list[int] = []
-
-    def _unexpected_sync(_db, *, user_id: int):  # noqa: ANN001
-        sync_calls.append(user_id)
-        raise AssertionError(
-            "assistant personal markdown sync should not run when sandbox is disabled"
-        )
-
-    monkeypatch.setattr(
-        assistant_router,
-        "sync_personal_markdown_library_for_user",
-        _unexpected_sync,
+    vm_runtime = assistant_router._build_assistant_vm_runtime(
+        user_id=42,
+        session_id=7,
     )
 
-    sandbox_session, personal_library_error = (
-        assistant_router._build_assistant_personal_library_runtime(
-            db=db_session,
-            user_id=42,
-        )
-    )
-
-    assert sandbox_session is None
-    assert personal_library_error is None
-    assert sync_calls == []
+    assert vm_runtime is None
 
 
 def test_process_assistant_turn_persists_completion_usage_and_ledger(
@@ -885,8 +894,8 @@ def test_process_assistant_turn_persists_completion_usage_and_ledger(
     monkeypatch.setattr(assistant_router, "load_message_history", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         assistant_router,
-        "_build_assistant_personal_library_runtime",
-        lambda **_kwargs: (None, None),
+        "_build_assistant_vm_runtime",
+        lambda **_kwargs: None,
     )
     monkeypatch.setattr(assistant_router, "resolve_effective_api_key", lambda **_kwargs: None)
     monkeypatch.setattr(

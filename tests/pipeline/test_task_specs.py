@@ -45,7 +45,11 @@ def test_every_task_type_has_a_production_enqueue_path() -> None:
             for path, source in sources.items()
             if path != handler_path
             and task_reference in source
-            and ("enqueue(" in source or "TaskEnqueueRequest(" in source)
+            and (
+                "enqueue(" in source
+                or "TaskEnqueueRequest(" in source
+                or "enqueue_agent_data_sync(" in source
+            )
         ]
         if not producers:
             missing_producers.append(task_type.value)
@@ -131,6 +135,28 @@ def test_task_spec_payload_validation_rejects_bad_types() -> None:
 
     with pytest.raises(ValueError, match="Invalid payload"):
         spec.normalize_payload({"content_id": "not-an-int"})
+
+
+def test_agent_data_task_payloads_reject_cross_task_fields() -> None:
+    sync = get_task_spec(TaskType.SYNC_AGENT_DATA)
+    index = get_task_spec(TaskType.INDEX_AGENT_DATA)
+    backfill = get_task_spec(TaskType.BACKFILL_AGENT_DATA)
+    reconcile = get_task_spec(TaskType.RECONCILE_AGENT_DATA)
+
+    assert backfill.normalize_payload({"user_id": 7}) == {
+        "user_id": 7,
+        "stage": "knowledge",
+    }
+    assert reconcile.normalize_payload({"user_id": 7, "before_id": 12}) == {
+        "user_id": 7,
+        "before_id": 12,
+    }
+    with pytest.raises(ValueError, match="Invalid payload for sync_agent_data"):
+        sync.normalize_payload({"user_id": 7, "before_id": 12})
+    with pytest.raises(ValueError, match="Invalid payload for index_agent_data"):
+        index.normalize_payload({"user_id": 7, "content_ids": [3]})
+    with pytest.raises(ValueError, match="Invalid payload for backfill_agent_data"):
+        backfill.normalize_payload({"user_id": 7, "stage": "unknown"})
 
 
 def test_task_spec_payload_validation_rejects_missing_required_fields() -> None:

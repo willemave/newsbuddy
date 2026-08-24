@@ -8,6 +8,7 @@ services:
     env_file:
       - ${NEWSLY_ENV_FILE:-.env.docker.local}
     environment:
+      AGENT_DATA_MIRROR_ROOT: /data/agent_user_data
       PORT: ${PORT:-8000}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
     ports:

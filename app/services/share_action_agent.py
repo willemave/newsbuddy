@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import Any, cast
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, UsageLimits
 from pydantic_ai.settings import ModelSettings
 
 from app.core.logging import get_logger
@@ -17,9 +17,11 @@ from app.core.settings import get_settings
 from app.models.api.share_actions import ShareActionAgentResult
 from app.models.db import LlmTask
 from app.services.agent_toolset import (
+    AGENT_VM_SYSTEM_INSTRUCTIONS,
     AgentToolPolicy,
     AgentToolsetConfig,
     register_agent_vm_tools,
+    register_agent_web_search_tool,
 )
 from app.services.agent_vm_runtime import (
     AgentVmDeadlineExceeded,
@@ -113,7 +115,7 @@ def run_share_action_agent(
             model,
             deps_type=ShareActionAgentDeps,
             output_type=str,
-            system_prompt=_build_system_prompt(task),
+            system_prompt=(f"{_build_system_prompt(task)}\n\n{AGENT_VM_SYSTEM_INSTRUCTIONS}"),
         )
         _register_tools(agent, task=task)
         deps = ShareActionAgentDeps(
@@ -131,6 +133,7 @@ def run_share_action_agent(
                     base_model_settings,
                     deadline=deadline,
                 ),
+                usage_limits=UsageLimits(request_limit=settings.llm_task_sandbox_request_limit),
             )
         except Exception as exc:
             _append_agent_log_event(
@@ -180,22 +183,30 @@ def run_share_action_agent(
 
 
 def _register_tools(agent: Agent[ShareActionAgentDeps, str], *, task: LlmTask) -> None:
+    policy = AgentToolPolicy.from_mapping(task.tool_policy)
+    config = AgentToolsetConfig(
+        feature="share_action",
+        operation_prefix="share_action",
+        source="queue",
+        tool_policy=policy,
+    )
     register_agent_vm_tools(
         agent,
         session_getter=lambda deps: deps.sandbox,
         log_event=_append_agent_log_event,
-        user_id_getter=lambda deps: deps.user_id,
-        metadata_getter=lambda deps: {
-            "llm_task_id": deps.llm_task_id,
-            "mode": deps.task.mode,
-        },
-        config=AgentToolsetConfig(
-            feature="share_action",
-            operation_prefix="share_action",
-            source="queue",
-            tool_policy=AgentToolPolicy.from_mapping(task.tool_policy),
-        ),
+        config=config,
     )
+    if policy.web_search:
+        register_agent_web_search_tool(
+            agent,
+            log_event=_append_agent_log_event,
+            user_id_getter=lambda deps: deps.user_id,
+            metadata_getter=lambda deps: {
+                "llm_task_id": deps.llm_task_id,
+                "mode": deps.task.mode,
+            },
+            config=config,
+        )
 
 
 def _create_configured_sandbox(

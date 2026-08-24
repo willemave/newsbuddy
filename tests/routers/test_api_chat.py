@@ -4,7 +4,6 @@ import asyncio
 import base64
 import json
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,7 +11,6 @@ from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from sqlalchemy.orm import Session
 
-from app.core.settings import get_settings
 from app.models.contracts import (
     ContentStatus,
     ContentType,
@@ -278,17 +276,11 @@ def test_create_chat_session_content_not_found(client: TestClient) -> None:
     assert "not found" in response.json()["detail"].lower()
 
 
-def test_create_chat_session_syncs_personal_markdown_library(
+def test_create_chat_session_enqueues_agent_data_sync(
     client: TestClient,
     db_session: Session,
     test_user,
-    monkeypatch,
-    tmp_path: Path,
 ) -> None:
-    settings = get_settings()
-    monkeypatch.setattr(settings, "personal_markdown_root", tmp_path / "personal_markdown")
-    monkeypatch.setattr(settings, "personal_markdown_enabled", True)
-
     content = Content(
         url="https://example.com/personal-library-article",
         content_type=ContentType.ARTICLE.value,
@@ -300,6 +292,8 @@ def test_create_chat_session_syncs_personal_markdown_library(
             "summary": {
                 "full_markdown": "# Personal Library Article\n\nSaved summary",
             },
+            "summary_kind": "long_structured",
+            "summary_version": 1,
         },
     )
     db_session.add(content)
@@ -312,10 +306,16 @@ def test_create_chat_session_syncs_personal_markdown_library(
     )
 
     assert response.status_code == 200
-    user_root = settings.personal_markdown_root_dir / str(test_user.id)
-    summary_files = list(user_root.rglob(f"*__summary__c{content.id}.md"))
-    assert len(summary_files) == 1
-    assert "Personal Library Article" in summary_files[0].read_text(encoding="utf-8")
+    task = (
+        db_session.query(ProcessingTask)
+        .filter(
+            ProcessingTask.owner_user_id == test_user.id,
+            ProcessingTask.task_type == TaskType.SYNC_AGENT_DATA.value,
+        )
+        .one()
+    )
+    assert isinstance(task.payload, dict)
+    assert task.payload["content_ids"] == [content.id]
 
 
 def test_list_chat_sessions(client: TestClient, db_session: Session, test_user) -> None:
@@ -1958,6 +1958,12 @@ def test_message_status_returns_retry_fenced_partial_assistant_snapshot(
         stream_generation=2,
         stream_revision=4,
         stream_updated_at=datetime.now(UTC),
+        tool_progress={
+            "tool_name": "execute_bash",
+            "status": "running",
+            "detail": "Downloading sources",
+        },
+        tool_progress_revision=3,
     )
     db_session.add(db_message)
     db_session.commit()
@@ -1971,6 +1977,13 @@ def test_message_status_returns_retry_fenced_partial_assistant_snapshot(
     assert payload["assistant_message"] is None
     assert payload["stream_generation"] == 2
     assert payload["stream_revision"] == 4
+    assert payload["tool_progress"] == {
+        "tool_name": "execute_bash",
+        "status": "running",
+        "detail": "Downloading sources",
+        "updated_at": None,
+    }
+    assert payload["tool_progress_revision"] == 3
     assert partial["source_message_id"] == db_message.id
     assert partial["display_key"] == f"server|{db_message.id}|assistant|message"
     assert partial["role"] == "assistant"

@@ -107,42 +107,6 @@ def test_production_settings_reject_blank_e2b_api_key(
         )
 
 
-@pytest.mark.parametrize("provider", ["disabled", "local"])
-def test_production_settings_require_e2b_for_chat_sandbox(provider: str) -> None:
-    with pytest.raises(
-        ValidationError,
-        match="CHAT_SANDBOX_PROVIDER must be e2b in production",
-    ):
-        build_settings(
-            database_url="postgresql://postgres@localhost/test",
-            JWT_SECRET_KEY="test-secret-key",
-            ADMIN_PASSWORD="test-admin-password",
-            environment="production",
-            cors_allow_origins=["https://app.example.com"],
-            public_base_url="https://app.example.com",
-            E2B_API_KEY="test-e2b-key",
-            chat_sandbox_provider=provider,
-        )
-
-
-def test_production_settings_require_chat_sandbox_e2b_api_key() -> None:
-    with pytest.raises(
-        ValidationError,
-        match="CHAT_SANDBOX_E2B_API_KEY or E2B_API_KEY must be set in production",
-    ):
-        build_settings(
-            database_url="postgresql://postgres@localhost/test",
-            JWT_SECRET_KEY="test-secret-key",
-            ADMIN_PASSWORD="test-admin-password",
-            environment="production",
-            cors_allow_origins=["https://app.example.com"],
-            public_base_url="https://app.example.com",
-            LLM_TASK_SANDBOX_E2B_API_KEY="test-llm-task-key",
-            chat_sandbox_provider="e2b",
-            CHAT_SANDBOX_E2B_API_KEY="   ",
-        )
-
-
 def test_public_base_url_must_be_an_origin() -> None:
     with pytest.raises(ValidationError, match="PUBLIC_BASE_URL must be an origin"):
         build_settings(
@@ -189,8 +153,6 @@ def test_settings_parse_csv_security_lists_from_environment(
     )
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://app.example.com")
     monkeypatch.setenv("E2B_API_KEY", "test-e2b-key")
-    monkeypatch.setenv("CHAT_SANDBOX_PROVIDER", "e2b")
-
     settings = build_settings()
 
     assert settings.cors_allow_origins == [

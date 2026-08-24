@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.models.contracts import TaskQueue, TaskType
+from app.models.contracts import AgentDataBackfillStage, TaskQueue, TaskType
 from app.models.internal.feed_backfill import FeedBatchBackfillRequest
 
 
@@ -79,6 +79,32 @@ class SyncIntegrationPayload(RequiredUserPayload):
 
 class BriefingRefreshPayload(RequiredUserPayload):
     mode: str = "append"
+
+
+class AgentDataUserPayload(TaskPayload):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int = Field(gt=0)
+
+
+class AgentDataSyncPayload(AgentDataUserPayload):
+    content_ids: list[int] = Field(default_factory=list)
+    news_item_ids: list[int] = Field(default_factory=list)
+    chat_session_ids: list[int] = Field(default_factory=list)
+    briefing_dates: list[str] = Field(default_factory=list)
+
+
+class AgentDataIndexPayload(AgentDataUserPayload):
+    pass
+
+
+class AgentDataBackfillPayload(AgentDataUserPayload):
+    stage: AgentDataBackfillStage = AgentDataBackfillStage.KNOWLEDGE
+    before_id: int | None = Field(default=None, gt=0)
+
+
+class AgentDataReconcilePayload(AgentDataUserPayload):
+    before_id: int | None = Field(default=None, gt=0)
 
 
 @dataclass(frozen=True)
@@ -264,6 +290,38 @@ _TASK_SPEC_SEQUENCE: tuple[TaskSpec, ...] = (
         BriefingRefreshPayload,
         "app.pipeline.handlers.briefing_refresh",
         "BriefingRefreshHandler",
+        requires_owner=True,
+    ),
+    TaskSpec(
+        TaskType.SYNC_AGENT_DATA,
+        TaskQueue.BACKFILL,
+        AgentDataSyncPayload,
+        "app.pipeline.handlers.agent_data_sync",
+        "SyncAgentDataHandler",
+        requires_owner=True,
+    ),
+    TaskSpec(
+        TaskType.INDEX_AGENT_DATA,
+        TaskQueue.BACKFILL,
+        AgentDataIndexPayload,
+        "app.pipeline.handlers.agent_data_sync",
+        "IndexAgentDataHandler",
+        requires_owner=True,
+    ),
+    TaskSpec(
+        TaskType.BACKFILL_AGENT_DATA,
+        TaskQueue.BACKFILL,
+        AgentDataBackfillPayload,
+        "app.pipeline.handlers.agent_data_sync",
+        "BackfillAgentDataHandler",
+        requires_owner=True,
+    ),
+    TaskSpec(
+        TaskType.RECONCILE_AGENT_DATA,
+        TaskQueue.BACKFILL,
+        AgentDataReconcilePayload,
+        "app.pipeline.handlers.agent_data_sync",
+        "ReconcileAgentDataHandler",
         requires_owner=True,
     ),
     TaskSpec(

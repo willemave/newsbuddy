@@ -286,6 +286,15 @@ class AssistantTurnResponse(BaseModel):
     )
 
 
+class ChatToolProgressDto(BaseModel):
+    """Latest advisory VM tool state for an in-flight chat turn."""
+
+    tool_name: str
+    status: str
+    detail: str | None = None
+    updated_at: UTCDateTime | None = None
+
+
 class MessageStatusResponse(BaseModel):
     """Response when polling for message completion status."""
 
@@ -308,6 +317,15 @@ class MessageStatusResponse(BaseModel):
         default=None,
         ge=0,
         description="Monotonic partial response revision within the current generation",
+    )
+    tool_progress: ChatToolProgressDto | None = Field(
+        default=None,
+        description="Latest advisory VM tool state, separate from transcript text",
+    )
+    tool_progress_revision: int | None = Field(
+        default=None,
+        ge=0,
+        description="Monotonic advisory tool-state revision for this worker attempt",
     )
     error: str | None = Field(default=None, description="Error message if status=failed")
 

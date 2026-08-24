@@ -1511,6 +1511,8 @@ struct APIMessageStatusResponse: Codable {
     let partialAssistantMessage: APIChatMessage?
     let streamGeneration: Int?
     let streamRevision: Int?
+    let toolProgress: APIChatToolProgress?
+    let toolProgressRevision: Int?
     let error: String?
 
     init(
@@ -1520,6 +1522,8 @@ struct APIMessageStatusResponse: Codable {
         partialAssistantMessage: APIChatMessage? = nil,
         streamGeneration: Int? = nil,
         streamRevision: Int? = nil,
+        toolProgress: APIChatToolProgress? = nil,
+        toolProgressRevision: Int? = nil,
         error: String? = nil
     ) {
         self.messageId = messageId
@@ -1528,6 +1532,8 @@ struct APIMessageStatusResponse: Codable {
         self.partialAssistantMessage = partialAssistantMessage
         self.streamGeneration = streamGeneration
         self.streamRevision = streamRevision
+        self.toolProgress = toolProgress
+        self.toolProgressRevision = toolProgressRevision
         self.error = error
     }
 
@@ -1538,6 +1544,8 @@ struct APIMessageStatusResponse: Codable {
         case partialAssistantMessage = "partial_assistant_message"
         case streamGeneration = "stream_generation"
         case streamRevision = "stream_revision"
+        case toolProgress = "tool_progress"
+        case toolProgressRevision = "tool_progress_revision"
         case error = "error"
     }
 
@@ -1549,6 +1557,8 @@ struct APIMessageStatusResponse: Codable {
         partialAssistantMessage = try container.decodeIfPresent(APIChatMessage.self, forKey: .partialAssistantMessage)
         streamGeneration = try container.decodeIfPresent(Int.self, forKey: .streamGeneration)
         streamRevision = try container.decodeIfPresent(Int.self, forKey: .streamRevision)
+        toolProgress = try container.decodeIfPresent(APIChatToolProgress.self, forKey: .toolProgress)
+        toolProgressRevision = try container.decodeIfPresent(Int.self, forKey: .toolProgressRevision)
         error = try container.decodeIfPresent(String.self, forKey: .error)
     }
 
@@ -1560,6 +1570,8 @@ struct APIMessageStatusResponse: Codable {
         try container.encodeIfPresent(partialAssistantMessage, forKey: .partialAssistantMessage)
         try container.encodeIfPresent(streamGeneration, forKey: .streamGeneration)
         try container.encodeIfPresent(streamRevision, forKey: .streamRevision)
+        try container.encodeIfPresent(toolProgress, forKey: .toolProgress)
+        try container.encodeIfPresent(toolProgressRevision, forKey: .toolProgressRevision)
         try container.encodeIfPresent(error, forKey: .error)
     }
 }
@@ -5581,6 +5593,55 @@ struct APIAssistantScreenContext: Codable {
         try container.encodeIfPresent(query, forKey: .query)
         try container.encodeIfPresent(note, forKey: .note)
         try container.encodeIfPresent(assistantAction, forKey: .assistantAction)
+    }
+}
+
+struct APIChatToolProgress: Codable {
+    let toolName: String
+    let status: String
+    let detail: String?
+    let updatedAt: Date?
+
+    init(
+        toolName: String,
+        status: String,
+        detail: String? = nil,
+        updatedAt: Date? = nil
+    ) {
+        self.toolName = toolName
+        self.status = status
+        self.detail = detail
+        self.updatedAt = updatedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case toolName = "tool_name"
+        case status = "status"
+        case detail = "detail"
+        case updatedAt = "updated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        toolName = try container.decode(String.self, forKey: .toolName)
+        status = try container.decode(String.self, forKey: .status)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+        if let updatedAtRaw = try container.decodeIfPresent(String.self, forKey: .updatedAt) {
+            guard let updatedAtParsed = ServerDate.parse(updatedAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .updatedAt, in: container, debugDescription: "Unparseable date for updatedAt")
+            }
+            updatedAt = updatedAtParsed
+        } else {
+            updatedAt = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(toolName, forKey: .toolName)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(detail, forKey: .detail)
+        try container.encodeIfPresent(updatedAt.map(ServerDate.format), forKey: .updatedAt)
     }
 }
 

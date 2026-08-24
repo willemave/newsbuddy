@@ -6,17 +6,31 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from e2b.exceptions import SandboxNotFoundException, TimeoutException
 
 from app.core.settings import get_settings
-from app.services import agent_vm_capabilities, agent_vm_sessions
+from app.services import (
+    agent_vm_capabilities,
+    agent_vm_e2b_pool,
+    agent_vm_io,
+    agent_vm_local,
+    agent_vm_sessions,
+)
+from app.services.agent_vm_e2b_pool import E2BSandboxAcquisition
+from app.services.agent_vm_runtime import SYSTEM_USER_ID
 from app.services.agent_vm_sessions import create_agent_vm_session
+from app.services.agent_vm_state import LockedAgentVmState
+from app.services.agent_vm_template import (
+    AGENT_VM_TEMPLATE_NAME,
+    AGENT_VM_TEMPLATE_REVISION,
+)
 from app.services.feed_research_runtime import FeedResearchRuntimeError, feed_research_runtime
 
 
@@ -77,7 +91,7 @@ def test_local_agent_vm_session_normalizes_workspace_absolute_paths_and_blocks_e
 
     outside = tmp_path / "outside"
     outside.mkdir()
-    assert isinstance(session, agent_vm_sessions.LocalAgentVmSession)
+    assert isinstance(session, agent_vm_local.LocalAgentVmSession)
     (session.workspace_root / "escape").symlink_to(outside, target_is_directory=True)
     with pytest.raises(agent_vm_sessions.AgentVmPathError, match="inside the task workspace"):
         session.write_file("escape/payload.txt", "blocked")
@@ -98,10 +112,11 @@ class _FakeE2BCommands:
         command: str,
         *,
         cwd: str | None = None,
+        user: str | None = None,
         timeout: float | None = None,
         request_timeout: float | None = None,
     ) -> SimpleNamespace:
-        del cwd
+        del cwd, user
         self.commands.append(command)
         self.timeouts.append(timeout)
         self.request_timeouts.append(request_timeout)
@@ -109,27 +124,7 @@ class _FakeE2BCommands:
             raise RuntimeError("The sandbox was not found")
         if command.startswith("mkdir -p") and self.sandbox.bootstrap_error is not None:
             raise self.sandbox.bootstrap_error
-        if command == "newsly-sandbox-probe --json":
-            return SimpleNamespace(
-                stdout=json.dumps(
-                    {
-                        name: "test"
-                        for name in (
-                            "bash",
-                            "python",
-                            "node",
-                            "git",
-                            "curl",
-                            "jq",
-                            "chromium",
-                            "playwright",
-                        )
-                    }
-                ),
-                stderr="",
-                exit_code=0,
-            )
-        if command == agent_vm_capabilities.E2B_DEFAULT_CAPABILITY_PROBE:
+        if command == agent_vm_capabilities.AGENT_VM_CAPABILITY_PROBE:
             return SimpleNamespace(
                 stdout=json.dumps(
                     {
@@ -139,9 +134,9 @@ class _FakeE2BCommands:
                         "git": "/usr/bin/git",
                         "curl": "/usr/bin/curl",
                         "jq": "/usr/bin/jq",
-                        "chromium": False,
-                        "playwright": False,
-                        "browser_validation_error": "Node Playwright package is unavailable",
+                        "rg": "/usr/bin/rg",
+                        "chromium": True,
+                        "playwright": True,
                     }
                 ),
                 stderr="",
@@ -227,6 +222,9 @@ class _FakeE2BSandbox:
     command_error: Exception | None = None
     command_error_contains: str | None = None
     create_kwargs: list[dict[str, object]] = []
+    instances_by_id: dict[str, _FakeE2BSandbox] = {}
+    created_snapshot_ids: list[str] = []
+    deleted_snapshot_ids: list[str] = []
 
     def __init__(self, *, missing: bool = False) -> None:
         self.id = f"fake-e2b-{uuid4()}"
@@ -234,8 +232,10 @@ class _FakeE2BSandbox:
         self.killed = False
         self.kill_count = 0
         self.timeout_refreshes: list[int] = []
+        self.network_updates: list[dict[str, object]] = []
         self.commands = _FakeE2BCommands(self)
         self.files = _FakeE2BFiles(self)
+        type(self).instances_by_id[self.id] = self
 
     @classmethod
     def create(cls, **_kwargs) -> _FakeE2BSandbox:
@@ -254,38 +254,159 @@ class _FakeE2BSandbox:
         cls.created.append(sandbox)
         return sandbox
 
-    def kill(self, *, request_timeout: float | None = None) -> None:
-        del request_timeout
-        self.killed = True
-        self.kill_count += 1
-
-    def set_timeout(
+    def kill(
         self,
-        timeout_seconds: int,
+        *,
+        api_key: str | None = None,
+        request_timeout: float | None = None,
+    ) -> bool:
+        del api_key, request_timeout
+        sandbox = (
+            self
+            if isinstance(self, _FakeE2BSandbox)
+            else _FakeE2BSandbox.instances_by_id.get(str(self))
+        )
+        if sandbox is None or sandbox.missing:
+            return False
+        sandbox.killed = True
+        sandbox.missing = True
+        sandbox.kill_count += 1
+        return True
+
+    def create_snapshot(self, **_kwargs: object) -> SimpleNamespace:
+        snapshot_id = f"snapshot-{uuid4()}"
+        type(self).created_snapshot_ids.append(snapshot_id)
+        return SimpleNamespace(snapshot_id=snapshot_id)
+
+    @staticmethod
+    def delete_snapshot(snapshot_id: str, **_kwargs: object) -> bool:
+        _FakeE2BSandbox.deleted_snapshot_ids.append(snapshot_id)
+        return True
+
+    def connect(
+        self,
+        timeout: int | None = None,
+        *,
+        api_key: str | None = None,
+        request_timeout: float | None = None,
+    ) -> _FakeE2BSandbox:
+        """Model E2B's instance/class method variant with one test double."""
+        del api_key, request_timeout
+        if isinstance(self, _FakeE2BSandbox):
+            sandbox = self
+        else:
+            sandbox = _FakeE2BSandbox.instances_by_id.get(str(self))
+            if sandbox is None:
+                raise SandboxNotFoundException(f"Sandbox {self} not found")
+        if sandbox.timeout_error is not None:
+            raise sandbox.timeout_error
+        if sandbox.missing:
+            raise SandboxNotFoundException(f"Sandbox {sandbox.id} not found")
+        if timeout is not None:
+            sandbox.timeout_refreshes.append(timeout)
+        return sandbox
+
+    def update_network(
+        self,
+        network: dict[str, object],
         *,
         request_timeout: float | None = None,
     ) -> None:
         del request_timeout
-        if self.timeout_error is not None:
-            raise self.timeout_error
-        if self.missing:
-            raise SandboxNotFoundException(f"Sandbox {self.id} not found")
-        self.timeout_refreshes.append(timeout_seconds)
+        self.network_updates.append(network)
 
 
 def test_missing_sandbox_error_does_not_match_template_or_dependency_failures() -> None:
-    assert agent_vm_sessions._is_missing_e2b_sandbox_error(
+    assert agent_vm_e2b_pool.is_missing_e2b_sandbox_error(
         SandboxNotFoundException("Sandbox sandbox-123 not found")
     )
-    assert not agent_vm_sessions._is_missing_e2b_sandbox_error(
+    assert not agent_vm_e2b_pool.is_missing_e2b_sandbox_error(
         RuntimeError("Sandbox template not found")
     )
-    assert not agent_vm_sessions._is_missing_e2b_sandbox_error(
+    assert not agent_vm_e2b_pool.is_missing_e2b_sandbox_error(
         RuntimeError("Sandbox dependency not found")
     )
 
 
+def test_agent_vm_capability_probe_rejects_non_object_manifest() -> None:
+    sandbox = SimpleNamespace(
+        commands=SimpleNamespace(
+            run=lambda *_args, **_kwargs: SimpleNamespace(
+                stdout="[]",
+                stderr="",
+                exit_code=0,
+            )
+        )
+    )
+
+    with pytest.raises(
+        agent_vm_sessions.AgentVmError,
+        match="invalid capability manifest",
+    ):
+        agent_vm_capabilities.probe_agent_vm_template(sandbox)
+
+
+def test_system_vm_enables_only_candidate_egress_then_resets_to_denied(
+    monkeypatch,
+) -> None:
+    _install_fake_e2b(monkeypatch)
+    _configure_e2b(monkeypatch)
+
+    session = create_agent_vm_session(
+        user_id=0,
+        llm_task_id=1,
+        vm_namespace=f"test:{uuid4()}",
+        workspace_path="/data/workspace/feed/one",
+        shared_workspace_path="/data/workspace/shared",
+        feature="feed_research",
+    )
+
+    assert isinstance(session, agent_vm_sessions.E2BAgentVmSession)
+    sandbox = _FakeE2BSandbox.created[0]
+    assert _FakeE2BSandbox.create_kwargs[0]["allow_internet_access"] is False
+    create_network = cast(dict[str, object], _FakeE2BSandbox.create_kwargs[0]["network"])
+    create_denials = cast(list[str], create_network["deny_out"])
+    assert "0.0.0.0/8" not in create_denials
+    assert "224.0.0.0/4" not in create_denials
+    assert "127.0.0.0/8" not in create_denials
+    assert "::1/128" not in create_denials
+
+    session.set_allowed_outbound_hosts(["feeds.example.com", "feeds.example.com"])
+    session.reset_network_policy()
+
+    assert sandbox.network_updates[0]["allow_internet_access"] is True
+    assert sandbox.network_updates[0]["allow_out"] == ["feeds.example.com"]
+    first_denials = cast(list[str], sandbox.network_updates[0]["deny_out"])
+    assert "0.0.0.0/0" in first_denials
+    assert "127.0.0.0/8" not in first_denials
+    assert "::1/128" not in first_denials
+    assert sandbox.network_updates[1]["allow_internet_access"] is False
+    assert sandbox.network_updates[1]["allow_out"] == []
+    session.close()
+
+
+def test_sandbox_creation_has_no_private_beta_volume_mount(monkeypatch) -> None:
+    _install_fake_e2b(monkeypatch)
+    _configure_e2b(monkeypatch)
+
+    session = create_agent_vm_session(
+        user_id=0,
+        llm_task_id=1,
+        vm_namespace=f"test:{uuid4()}",
+        workspace_path="/data/workspace/feed/one",
+        shared_workspace_path="/data/workspace/shared",
+        feature="feed_research",
+    )
+
+    assert "volume_mounts" not in _FakeE2BSandbox.create_kwargs[0]
+    assert _FakeE2BSandbox.create_kwargs[0]["lifecycle"] == {
+        "on_timeout": {"action": "pause", "keep_memory": True}
+    }
+    session.close()
+
+
 def _install_fake_e2b(monkeypatch) -> None:
+    agent_vm_sessions.close_process_agent_vm_sessions()
     _FakeE2BSandbox.created = []
     _FakeE2BSandbox.create_delay_seconds = 0.0
     _FakeE2BSandbox.create_barrier = None
@@ -296,10 +417,24 @@ def _install_fake_e2b(monkeypatch) -> None:
     _FakeE2BSandbox.command_error = None
     _FakeE2BSandbox.command_error_contains = None
     _FakeE2BSandbox.create_kwargs = []
+    _FakeE2BSandbox.instances_by_id = {}
+    _FakeE2BSandbox.created_snapshot_ids = []
+    _FakeE2BSandbox.deleted_snapshot_ids = []
     monkeypatch.setitem(
         sys.modules,
         "e2b_code_interpreter",
         SimpleNamespace(Sandbox=_FakeE2BSandbox),
+    )
+
+    @contextmanager
+    def process_local_state(**_kwargs: object):
+        yield LockedAgentVmState(row=None, durable=False, db=None)
+
+    monkeypatch.setattr(agent_vm_e2b_pool, "locked_agent_vm_state", process_local_state)
+    monkeypatch.setattr(
+        agent_vm_e2b_pool,
+        "harden_canonical_agent_vm",
+        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         agent_vm_sessions,
@@ -312,7 +447,6 @@ def _configure_e2b(monkeypatch) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "llm_task_sandbox_provider", "e2b")
     monkeypatch.setattr(settings, "llm_task_sandbox_e2b_api_key", "test-key")
-    monkeypatch.setattr(settings, "llm_task_sandbox_template", None)
     monkeypatch.setattr(settings, "llm_task_sandbox_timeout_seconds", 60)
     monkeypatch.setattr(settings, "llm_task_sandbox_allow_internet_access", True)
     monkeypatch.setattr(settings, "llm_task_sandbox_max_output_chars", 20_000)
@@ -323,8 +457,8 @@ def test_e2b_agent_vm_session_recreates_stale_cached_sandbox(monkeypatch) -> Non
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
     stale = _FakeE2BSandbox(missing=True)
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
-    agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] = stale
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
+    agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] = stale
 
     session = create_agent_vm_session(
         user_id=1,
@@ -335,15 +469,12 @@ def test_e2b_agent_vm_session_recreates_stale_cached_sandbox(monkeypatch) -> Non
         feature="test",
     )
 
-    assert stale.killed is True
+    assert stale.killed is False
     assert stale.timeout_refreshes == []
     assert len(_FakeE2BSandbox.created) == 1
     assert session.sandbox_id == _FakeE2BSandbox.created[0].id
     assert session.lease.reused is False
-    assert (
-        agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key]
-        is (_FakeE2BSandbox.created[0])
-    )
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] is (_FakeE2BSandbox.created[0])
     session.close()
 
 
@@ -355,8 +486,8 @@ def test_cached_workspace_bootstrap_missing_retries_once_with_fresh_sandbox(
     namespace = f"test:{uuid4()}"
     stale = _FakeE2BSandbox()
     stale.bootstrap_error = SandboxNotFoundException(f"Sandbox {stale.id} not found")
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
-    agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] = stale
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
+    agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] = stale
 
     session = create_agent_vm_session(
         user_id=1,
@@ -401,18 +532,23 @@ def test_workspace_retry_uses_final_acquisition_reuse_metadata(monkeypatch) -> N
     replacement = _FakeE2BSandbox()
     acquisitions = iter(
         [
-            (stale, False, {"bash": True}),
-            (replacement, False, {"bash": True}),
+            E2BSandboxAcquisition(stale, False, {"bash": True}, None),
+            E2BSandboxAcquisition(replacement, False, {"bash": True}, None),
         ]
     )
     monkeypatch.setattr(
-        agent_vm_sessions,
-        "_get_or_create_e2b_sandbox",
+        agent_vm_e2b_pool.E2B_SANDBOX_POOL,
+        "acquire",
         lambda **_kwargs: next(acquisitions),
     )
     monkeypatch.setattr(
-        agent_vm_sessions,
-        "_discard_e2b_sandbox_lease",
+        agent_vm_e2b_pool.E2B_SANDBOX_POOL,
+        "discard",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        agent_vm_e2b_pool.E2B_SANDBOX_POOL,
+        "release",
         lambda *_args: None,
     )
 
@@ -430,45 +566,7 @@ def test_workspace_retry_uses_final_acquisition_reuse_metadata(monkeypatch) -> N
     session.close()
 
 
-def test_e2b_agent_vm_session_probes_configured_template_once(monkeypatch) -> None:
-    _install_fake_e2b(monkeypatch)
-    _configure_e2b(monkeypatch)
-    settings = get_settings()
-    monkeypatch.setattr(settings, "llm_task_sandbox_template", "newsly-agent-v1")
-    namespace = f"test:{uuid4()}"
-
-    first = create_agent_vm_session(
-        user_id=1,
-        llm_task_id=1,
-        vm_namespace=namespace,
-        workspace_path="/workspace/newsly/users/1/tasks/one",
-        shared_workspace_path="/workspace/newsly/users/1/shared",
-        feature="test",
-    )
-    second = create_agent_vm_session(
-        user_id=1,
-        llm_task_id=2,
-        vm_namespace=namespace,
-        workspace_path="/workspace/newsly/users/1/tasks/two",
-        shared_workspace_path="/workspace/newsly/users/1/shared",
-        feature="test",
-    )
-
-    probe_commands = [
-        command
-        for command in _FakeE2BSandbox.created[0].commands.commands
-        if command == "newsly-sandbox-probe --json"
-    ]
-    assert probe_commands == ["newsly-sandbox-probe --json"]
-    assert first.lease.template_revision == "newsly-agent-v1"
-    assert first.lease.capabilities is not None
-    assert first.lease.capabilities["chromium"] == "test"
-    assert second.lease.capabilities == first.lease.capabilities
-    first.close()
-    second.close()
-
-
-def test_e2b_agent_vm_session_inspects_default_browser_capabilities_once(monkeypatch) -> None:
+def test_e2b_agent_vm_session_uses_and_probes_canonical_template_once(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
@@ -493,12 +591,13 @@ def test_e2b_agent_vm_session_inspects_default_browser_capabilities_once(monkeyp
     probe_commands = [
         command
         for command in _FakeE2BSandbox.created[0].commands.commands
-        if command == agent_vm_capabilities.E2B_DEFAULT_CAPABILITY_PROBE
+        if command == agent_vm_capabilities.AGENT_VM_CAPABILITY_PROBE
     ]
-    assert probe_commands == [agent_vm_capabilities.E2B_DEFAULT_CAPABILITY_PROBE]
+    assert probe_commands == [agent_vm_capabilities.AGENT_VM_CAPABILITY_PROBE]
+    assert _FakeE2BSandbox.create_kwargs[0]["template"] == AGENT_VM_TEMPLATE_NAME
+    assert first.lease.template_revision == AGENT_VM_TEMPLATE_REVISION
     assert first.lease.capabilities is not None
-    assert first.lease.capabilities["playwright"] is False
-    assert first.lease.capabilities["chromium"] is False
+    assert first.lease.capabilities["chromium"] is True
     assert second.lease.capabilities == first.lease.capabilities
     first.close()
     second.close()
@@ -609,10 +708,12 @@ def test_e2b_session_normalizes_workspace_absolute_paths_and_blocks_escape(monke
         feature="test",
     )
     sandbox = _FakeE2BSandbox.created[0]
+    command_count_before_write = len(sandbox.commands.commands)
 
     session.write_file(f"{workspace_path}/output/source-notes.md", "notes")
 
     assert session.read_file("output/source-notes.md") == "notes"
+    assert len(sandbox.commands.commands) == command_count_before_write
     assert sandbox.files.files == {f"{workspace_path}/output/source-notes.md": "notes"}
     assert session.resolve_relative_path(f"{workspace_path}/output/source-notes.md") == (
         "output/source-notes.md"
@@ -648,7 +749,7 @@ def test_e2b_session_bounds_default_command_and_file_operations(monkeypatch) -> 
     model_command = next(
         command for command in command_timeouts if command.endswith("printf bounded")
     )
-    list_command = next(command for command in command_timeouts if "\nfind " in command)
+    list_command = next(command for command in command_timeouts if command.startswith("find "))
     assert (
         command_timeouts[model_command]
         == agent_vm_sessions.AGENT_VM_DEFAULT_COMMAND_TIMEOUT_SECONDS
@@ -695,7 +796,7 @@ def test_e2b_session_closes_bounded_read_stream_when_file_is_too_large(monkeypat
 def test_e2b_session_rejects_oversized_host_file_write(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
-    monkeypatch.setattr(agent_vm_sessions, "AGENT_VM_MAX_FILE_BYTES", 4)
+    monkeypatch.setattr(agent_vm_io, "AGENT_VM_MAX_FILE_BYTES", 4)
     session = create_agent_vm_session(
         user_id=1,
         llm_task_id=1,
@@ -722,6 +823,7 @@ def test_e2b_session_rejects_operations_after_overall_deadline(monkeypatch) -> N
     _configure_e2b(monkeypatch)
     clock = [100.0]
     monkeypatch.setattr(agent_vm_sessions, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(agent_vm_io, "monotonic", lambda: clock[0])
     session = create_agent_vm_session(
         user_id=1,
         llm_task_id=1,
@@ -746,7 +848,7 @@ def test_e2b_session_maps_file_timeout_without_evicting_live_sandbox(monkeypatch
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
     session = create_agent_vm_session(
         user_id=1,
         llm_task_id=1,
@@ -763,7 +865,7 @@ def test_e2b_session_maps_file_timeout_without_evicting_live_sandbox(monkeypatch
     with pytest.raises(agent_vm_sessions.AgentVmDeadlineExceeded, match="file-read"):
         session.read_file_bytes("payload.txt")
 
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] is sandbox
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] is sandbox
     assert sandbox.killed is False
     session.close()
 
@@ -815,8 +917,8 @@ def test_e2b_session_deadline_bounds_namespace_lock_wait(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
-    namespace_lock = agent_vm_sessions._e2b_namespace_lock(cache_key)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
+    namespace_lock = agent_vm_e2b_pool.E2B_SANDBOX_POOL._namespace_lock(cache_key)
     namespace_lock.acquire()
     try:
         with pytest.raises(
@@ -836,26 +938,26 @@ def test_e2b_session_deadline_bounds_namespace_lock_wait(monkeypatch) -> None:
         namespace_lock.release()
 
     assert _FakeE2BSandbox.created == []
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_ACTIVE_ACQUISITIONS == 0
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._active_acquisitions == 0
 
 
 def test_e2b_namespace_lock_cache_releases_quiescent_keys() -> None:
-    cache_key = agent_vm_sessions._e2b_cache_key(f"test:{uuid4()}", None)
-    namespace_lock = agent_vm_sessions._e2b_namespace_lock(cache_key)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(f"test:{uuid4()}")
+    namespace_lock = agent_vm_e2b_pool.E2B_SANDBOX_POOL._namespace_lock(cache_key)
 
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_LOCKS_BY_NAMESPACE[cache_key] is namespace_lock
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._namespace_locks[cache_key] is namespace_lock
 
     del namespace_lock
     gc.collect()
 
-    assert cache_key not in agent_vm_sessions._PROCESS_LOCAL_E2B_LOCKS_BY_NAMESPACE
+    assert cache_key not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._namespace_locks
 
 
 def test_e2b_command_request_timeout_maps_to_deadline_without_eviction(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
     session = create_agent_vm_session(
         user_id=1,
         llm_task_id=1,
@@ -872,7 +974,7 @@ def test_e2b_command_request_timeout_maps_to_deadline_without_eviction(monkeypat
     with pytest.raises(agent_vm_sessions.AgentVmDeadlineExceeded):
         session.execute_bash("slow-command", timeout_seconds=0.01)
 
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] is sandbox
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] is sandbox
     assert sandbox.killed is False
     session.close()
 
@@ -881,7 +983,7 @@ def test_cached_e2b_refresh_deadline_does_not_evict_live_sandbox(monkeypatch) ->
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
     first = create_agent_vm_session(
         user_id=1,
         llm_task_id=1,
@@ -904,7 +1006,7 @@ def test_cached_e2b_refresh_deadline_does_not_evict_live_sandbox(monkeypatch) ->
             deadline=time.monotonic() + 0.1,
         )
 
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] is sandbox
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] is sandbox
     assert sandbox.killed is False
     first.close()
 
@@ -913,7 +1015,7 @@ def test_cached_e2b_bootstrap_deadline_releases_lease_without_eviction(monkeypat
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
     first = create_agent_vm_session(
         user_id=1,
         llm_task_id=1,
@@ -937,8 +1039,8 @@ def test_cached_e2b_bootstrap_deadline_releases_lease_without_eviction(monkeypat
             deadline=time.monotonic() + 0.1,
         )
 
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] is sandbox
-    assert id(sandbox) not in agent_vm_sessions._PROCESS_LOCAL_E2B_ACTIVE_SESSION_COUNTS
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] is sandbox
+    assert id(sandbox) not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._active_session_counts
     assert sandbox.killed is False
 
 
@@ -967,10 +1069,10 @@ def test_different_namespaces_initialize_e2b_sandboxes_concurrently(monkeypatch)
         session.close()
 
 
-def test_idle_e2b_cache_evicts_least_recently_idle_session(monkeypatch) -> None:
+def test_idle_e2b_cache_detaches_least_recently_idle_session(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
-    monkeypatch.setattr(agent_vm_sessions, "E2B_MAX_IDLE_CACHED_SESSIONS", 2)
+    monkeypatch.setattr(agent_vm_e2b_pool, "E2B_MAX_IDLE_CACHED_SESSIONS", 2)
     namespaces = [f"idle-limit:{uuid4()}" for _index in range(3)]
     sessions = [
         create_agent_vm_session(
@@ -983,25 +1085,25 @@ def test_idle_e2b_cache_evicts_least_recently_idle_session(monkeypatch) -> None:
         )
         for index, namespace in enumerate(namespaces, start=1)
     ]
-    cache_keys = [agent_vm_sessions._e2b_cache_key(namespace, None) for namespace in namespaces]
+    cache_keys = [
+        agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace) for namespace in namespaces
+    ]
     sandboxes = list(_FakeE2BSandbox.created)
 
     for session in sessions:
         session.close()
 
-    assert sandboxes[0].killed is True
-    assert cache_keys[0] not in agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE
+    assert sandboxes[0].killed is False
+    assert cache_keys[0] not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes
     assert sandboxes[1].killed is False
     assert sandboxes[2].killed is False
-    assert set(agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE).issuperset(
-        cache_keys[1:]
-    )
+    assert set(agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes).issuperset(cache_keys[1:])
 
 
 def test_idle_e2b_cache_never_evicts_active_session(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
-    monkeypatch.setattr(agent_vm_sessions, "E2B_MAX_IDLE_CACHED_SESSIONS", 1)
+    monkeypatch.setattr(agent_vm_e2b_pool, "E2B_MAX_IDLE_CACHED_SESSIONS", 1)
     active_namespace = f"active-limit:{uuid4()}"
     active = create_agent_vm_session(
         user_id=1,
@@ -1012,7 +1114,7 @@ def test_idle_e2b_cache_never_evicts_active_session(monkeypatch) -> None:
         feature="test",
     )
     active_sandbox = _FakeE2BSandbox.created[0]
-    active_cache_key = agent_vm_sessions._e2b_cache_key(active_namespace, None)
+    active_cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(active_namespace)
 
     idle_sessions = [
         create_agent_vm_session(
@@ -1029,11 +1131,8 @@ def test_idle_e2b_cache_never_evicts_active_session(monkeypatch) -> None:
         session.close()
 
     assert active_sandbox.killed is False
-    assert (
-        agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[active_cache_key]
-        is active_sandbox
-    )
-    assert _FakeE2BSandbox.created[1].killed is True
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[active_cache_key] is active_sandbox
+    assert _FakeE2BSandbox.created[1].killed is False
     assert _FakeE2BSandbox.created[2].killed is False
 
     active.close()
@@ -1042,7 +1141,7 @@ def test_idle_e2b_cache_never_evicts_active_session(monkeypatch) -> None:
 def test_idle_e2b_cache_trims_when_final_acquisition_finishes(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
-    monkeypatch.setattr(agent_vm_sessions, "E2B_MAX_IDLE_CACHED_SESSIONS", 1)
+    monkeypatch.setattr(agent_vm_e2b_pool, "E2B_MAX_IDLE_CACHED_SESSIONS", 1)
     first = create_agent_vm_session(
         user_id=1,
         llm_task_id=1,
@@ -1083,13 +1182,13 @@ def test_idle_e2b_cache_trims_when_final_acquisition_finishes(monkeypatch) -> No
         _FakeE2BSandbox.create_release.set()
         third = future.result(timeout=1)
 
-    assert first_sandbox.kill_count == 1
+    assert first_sandbox.kill_count == 0
     assert second_sandbox.killed is False
     third_sandbox = _FakeE2BSandbox.created[2]
     assert third_sandbox.killed is False
 
     third.close()
-    assert second_sandbox.kill_count == 1
+    assert second_sandbox.kill_count == 0
     assert third_sandbox.killed is False
 
 
@@ -1115,7 +1214,7 @@ def test_process_cleanup_waits_for_inflight_e2b_initialization(monkeypatch) -> N
         assert _FakeE2BSandbox.create_started.wait(timeout=1)
         cleanup_future = executor.submit(agent_vm_sessions.close_process_agent_vm_sessions)
         deadline = time.monotonic() + 1
-        while not agent_vm_sessions._PROCESS_LOCAL_E2B_DRAINING:
+        while not agent_vm_e2b_pool.E2B_SANDBOX_POOL._draining:
             assert time.monotonic() < deadline
             time.sleep(0.001)
         try:
@@ -1127,13 +1226,12 @@ def test_process_cleanup_waits_for_inflight_e2b_initialization(monkeypatch) -> N
 
     assert session.sandbox_id == _FakeE2BSandbox.created[0].id
     assert _FakeE2BSandbox.created[0].killed is False
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE == {}
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_CAPABILITIES_BY_NAMESPACE == {}
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_LOCKS_BY_NAMESPACE == {}
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_ACTIVE_ACQUISITIONS == 0
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_DRAINING is False
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes == {}
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._namespace_locks == {}
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._active_acquisitions == 0
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._draining is False
     session.close()
-    assert _FakeE2BSandbox.created[0].killed is True
+    assert _FakeE2BSandbox.created[0].killed is False
 
 
 def test_post_create_workspace_failure_kills_and_evicts_sandbox(monkeypatch) -> None:
@@ -1141,7 +1239,7 @@ def test_post_create_workspace_failure_kills_and_evicts_sandbox(monkeypatch) -> 
     _configure_e2b(monkeypatch)
     _FakeE2BSandbox.bootstrap_error = RuntimeError("workspace bootstrap failed")
     namespace = f"test:{uuid4()}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
 
     with pytest.raises(RuntimeError, match="workspace bootstrap failed"):
         create_agent_vm_session(
@@ -1155,14 +1253,14 @@ def test_post_create_workspace_failure_kills_and_evicts_sandbox(monkeypatch) -> 
 
     assert len(_FakeE2BSandbox.created) == 1
     assert _FakeE2BSandbox.created[0].killed is True
-    assert cache_key not in agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE
+    assert cache_key not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes
 
 
 def test_post_create_telemetry_failure_releases_lease_and_sandbox(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
     monkeypatch.setattr(
         agent_vm_sessions,
         "record_vendor_usage_out_of_band",
@@ -1181,19 +1279,19 @@ def test_post_create_telemetry_failure_releases_lease_and_sandbox(monkeypatch) -
 
     sandbox = _FakeE2BSandbox.created[0]
     assert sandbox.killed is True
-    assert cache_key not in agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE
-    assert id(sandbox) not in agent_vm_sessions._PROCESS_LOCAL_E2B_ACTIVE_SESSION_COUNTS
-    assert id(sandbox) not in agent_vm_sessions._PROCESS_LOCAL_E2B_PENDING_KILLS
+    assert cache_key not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes
+    assert id(sandbox) not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._active_session_counts
+    assert id(sandbox) not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._pending_kills
 
 
-def test_cached_sandbox_timeout_failure_evicts_poisoned_instance(monkeypatch) -> None:
+def test_cached_sandbox_connect_failure_preserves_persistent_instance(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
     poisoned = _FakeE2BSandbox()
     poisoned.timeout_error = RuntimeError("timeout refresh failed")
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
-    agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] = poisoned
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
+    agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] = poisoned
 
     with pytest.raises(RuntimeError, match="timeout refresh failed"):
         create_agent_vm_session(
@@ -1205,16 +1303,16 @@ def test_cached_sandbox_timeout_failure_evicts_poisoned_instance(monkeypatch) ->
             feature="test",
         )
 
-    assert poisoned.killed is True
-    assert cache_key not in agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE
+    assert poisoned.killed is False
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] is poisoned
 
 
-def test_malformed_feed_metadata_evicts_cached_session_before_reuse(monkeypatch) -> None:
+def test_malformed_feed_batch_evicts_cached_session_before_reuse(monkeypatch) -> None:
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     user_id = uuid4().int % 1_000_000_000 + 100
-    namespace = f"user:{user_id}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    namespace = f"user:{SYSTEM_USER_ID}"
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
     sessions = []
 
     def _session_factory(**kwargs):
@@ -1223,7 +1321,7 @@ def test_malformed_feed_metadata_evicts_cached_session_before_reuse(monkeypatch)
         return session
 
     with (
-        pytest.raises(FeedResearchRuntimeError, match="invalid curl metadata"),
+        pytest.raises(FeedResearchRuntimeError, match="incomplete result set"),
         feed_research_runtime(
             user_id=user_id,
             execution_id=1,
@@ -1236,29 +1334,25 @@ def test_malformed_feed_metadata_evicts_cached_session_before_reuse(monkeypatch)
     stale_session = sessions[0]
     stale_sandbox = _FakeE2BSandbox.created[0]
     assert stale_sandbox.killed is True
-    assert cache_key not in agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE
+    assert cache_key not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes
 
     replacement = create_agent_vm_session(
-        user_id=user_id,
+        user_id=SYSTEM_USER_ID,
         llm_task_id=2,
         vm_namespace=namespace,
         workspace_path="/tmp/newsly/tasks/2",
-        shared_workspace_path=f"/tmp/newsly/users/{user_id}/shared",
+        shared_workspace_path=f"/tmp/newsly/users/{SYSTEM_USER_ID}/shared",
         feature="feed_research",
     )
 
     assert len(_FakeE2BSandbox.created) == 2
     assert replacement.lease.reused is False
     replacement_sandbox = _FakeE2BSandbox.created[1]
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] is (
-        replacement_sandbox
-    )
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] is (replacement_sandbox)
 
     agent_vm_sessions.evict_agent_vm_session(stale_session)
     assert replacement_sandbox.killed is False
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] is (
-        replacement_sandbox
-    )
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] is (replacement_sandbox)
     agent_vm_sessions.evict_agent_vm_session(replacement)
     replacement.close()
 
@@ -1269,7 +1363,7 @@ def test_evict_detaches_immediately_but_waits_for_all_active_session_leases(
     _install_fake_e2b(monkeypatch)
     _configure_e2b(monkeypatch)
     namespace = f"test:{uuid4()}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
     session_kwargs: dict[str, Any] = {
         "user_id": 1,
         "vm_namespace": namespace,
@@ -1290,7 +1384,7 @@ def test_evict_detaches_immediately_but_waits_for_all_active_session_leases(
 
     agent_vm_sessions.evict_agent_vm_session(first)
 
-    assert cache_key not in agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE
+    assert cache_key not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes
     assert poisoned.killed is False
 
     replacement = create_agent_vm_session(
@@ -1299,10 +1393,7 @@ def test_evict_detaches_immediately_but_waits_for_all_active_session_leases(
         workspace_path="/workspace/newsly/users/1/tasks/three",
     )
     assert replacement.sandbox_id != first.sandbox_id
-    assert (
-        agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key]
-        is (_FakeE2BSandbox.created[1])
-    )
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] is (_FakeE2BSandbox.created[1])
     assert poisoned.killed is False
 
     first.close()
@@ -1362,7 +1453,7 @@ def test_feed_command_channel_failure_evicts_cached_session(monkeypatch) -> None
     _FakeE2BSandbox.command_error_contains = "curl"
     user_id = uuid4().int % 1_000_000_000 + 100
     namespace = f"user:{user_id}"
-    cache_key = agent_vm_sessions._e2b_cache_key(namespace, None)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(namespace)
 
     with (
         pytest.raises(FeedResearchRuntimeError, match="became unavailable"),
@@ -1375,30 +1466,28 @@ def test_feed_command_channel_failure_evicts_cached_session(monkeypatch) -> None
         assert runtime.detector.validate_feed_url("https://example.com/feed.xml") is None
 
     assert _FakeE2BSandbox.created[0].killed is True
-    assert cache_key not in agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE
+    assert cache_key not in agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes
 
 
-def test_process_cleanup_kills_cached_sandboxes_and_removes_local_roots(
+def test_process_cleanup_detaches_cached_sandboxes_and_removes_local_roots(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
     sandbox = _FakeE2BSandbox()
-    cache_key = agent_vm_sessions._e2b_cache_key(f"test:{uuid4()}", None)
+    cache_key = agent_vm_e2b_pool.E2B_SANDBOX_POOL.cache_key(f"test:{uuid4()}")
     local_root = tmp_path / "local-agent-root"
     local_root.mkdir()
     (local_root / "artifact.txt").write_text("temporary", encoding="utf-8")
-    agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE[cache_key] = sandbox
-    agent_vm_sessions._PROCESS_LOCAL_E2B_CAPABILITIES_BY_NAMESPACE[cache_key] = {"bash": True}
-    agent_vm_sessions._PROCESS_LOCAL_ROOTS_BY_NAMESPACE["local:test"] = local_root
+    agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes[cache_key] = sandbox
+    agent_vm_local._PROCESS_LOCAL_ROOTS_BY_NAMESPACE["local:test"] = local_root
 
     agent_vm_sessions.close_process_agent_vm_sessions()
 
-    assert sandbox.killed is True
+    assert sandbox.killed is False
     assert not local_root.exists()
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_SANDBOXES_BY_NAMESPACE == {}
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_CAPABILITIES_BY_NAMESPACE == {}
-    assert agent_vm_sessions._PROCESS_LOCAL_E2B_LOCKS_BY_NAMESPACE == {}
-    assert agent_vm_sessions._PROCESS_LOCAL_ROOTS_BY_NAMESPACE == {}
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._sandboxes == {}
+    assert agent_vm_e2b_pool.E2B_SANDBOX_POOL._namespace_locks == {}
+    assert agent_vm_local._PROCESS_LOCAL_ROOTS_BY_NAMESPACE == {}
 
 
 def test_e2b_acquisition_after_process_cleanup_creates_fresh_sandbox(monkeypatch) -> None:
@@ -1431,9 +1520,9 @@ def test_e2b_acquisition_after_process_cleanup_creates_fresh_sandbox(monkeypatch
     assert _FakeE2BSandbox.created[1].killed is False
 
     first.close()
-    assert _FakeE2BSandbox.created[0].killed is True
+    assert _FakeE2BSandbox.created[0].killed is False
 
     agent_vm_sessions.close_process_agent_vm_sessions()
     assert _FakeE2BSandbox.created[1].killed is False
     second.close()
-    assert _FakeE2BSandbox.created[1].killed is True
+    assert _FakeE2BSandbox.created[1].killed is False

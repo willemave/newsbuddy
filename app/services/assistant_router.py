@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
 
 from fastapi.concurrency import run_in_threadpool
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, UsageLimits
 from pydantic_ai.capabilities import PrepareTools
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.models.openai import ReasoningEffort
@@ -49,6 +50,14 @@ from app.repositories.search_repository import (
     search_subscription_feeds,
 )
 from app.services import knowledge as knowledge_service
+from app.services.agent_data_events import enqueue_agent_data_sync
+from app.services.agent_toolset import (
+    AGENT_VM_SYSTEM_INSTRUCTIONS,
+    AgentToolPolicy,
+    AgentToolsetConfig,
+    register_agent_vm_tools,
+)
+from app.services.agent_vm_runtime import AgentVmError
 from app.services.assistant_feed_finder import find_feed_options as find_feed_options_service
 from app.services.assistant_feed_subscription import subscribe_known_feed
 from app.services.assistant_turn_routing import AssistantTurnProfile
@@ -64,8 +73,15 @@ from app.services.chat_agent import (
 from app.services.chat_partial_stream import (
     DurableChatPartialWriter as _DurableChatPartialWriter,
 )
+from app.services.chat_partial_stream import DurableChatToolProgressWriter
 from app.services.chat_partial_stream import (
     build_final_text_event_stream_handler as _build_final_text_event_stream_handler,
+)
+from app.services.chat_tool_progress import (
+    agent_vm_tool_log_context,
+    numeric_tool_payload_value,
+    publish_tool_progress,
+    tool_event_status,
 )
 from app.services.chat_turn_runtime import DetachedChatTurn as _DetachedChatTurn
 from app.services.chat_turn_runtime import (
@@ -73,16 +89,14 @@ from app.services.chat_turn_runtime import (
 )
 from app.services.chat_turn_runtime import QueuedChatTurnOutcome
 from app.services.chat_turn_runtime import (
-    close_sandbox_session as _close_sandbox_session,
+    close_agent_vm_runtime as _close_agent_vm_runtime,
 )
 from app.services.chat_turn_runtime import extract_tool_names as _extract_tool_names
 from app.services.chat_turn_runtime import get_or_create_cached_agent as _get_or_create_cached_agent
 from app.services.chat_turn_runtime import log_chat_usage as _log_chat_usage
-from app.services.chat_turn_runtime import (
-    register_personal_library_tools as _register_personal_library_tools,
-)
 from app.services.exa_client import exa_search
 from app.services.knowledge_search import search_knowledge as search_knowledge_hits
+from app.services.lazy_agent_vm import LazyAgentVmRuntime
 from app.services.llm_models import (
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
@@ -91,14 +105,8 @@ from app.services.llm_models import (
 )
 from app.services.llm_task_turn_tracker import LlmTaskTurnSpec
 from app.services.news_feed import list_unread_visible_news_items
-from app.services.personal_markdown_library import sync_personal_markdown_library_for_user
 from app.services.prompt_library import load_prompt
 from app.services.queued_chat_turn import execute_queued_chat_turn as _execute_queued_chat_turn
-from app.services.sandbox_runtime import (
-    PersonalLibrarySandboxSession,
-    SandboxRuntimeUnavailableError,
-    create_personal_library_sandbox_session,
-)
 from app.utils.news_titles import resolve_news_display_title
 from app.utils.title_utils import derive_chat_session_title, resolve_content_display_title
 
@@ -127,9 +135,9 @@ CONTEXTUAL_ASSISTANT_TURN_SPEC = LlmTaskTurnSpec(
         "create_learning_deck",
     ],
     tool_policy={
-        "execute_bash": False,
+        "execute_bash": True,
         "web_search": True,
-        "personal_library": "read_only",
+        "files": "read_write",
         "app_tools": "host_managed",
     },
     prompt_pack="chat.contextual_assistant",
@@ -147,8 +155,40 @@ class AssistantDeps:
     turn_profile: AssistantTurnProfile
     session_factory: sessionmaker[Session]
     llm_task_id: int | None = None
-    sandbox_session: PersonalLibrarySandboxSession | None = None
-    personal_library_error: str | None = None
+    vm_runtime: LazyAgentVmRuntime | None = None
+    tool_progress_writer: DurableChatToolProgressWriter | None = None
+
+
+def _assistant_vm_session(deps: AssistantDeps):
+    runtime = deps.vm_runtime
+    if runtime is None:
+        raise AgentVmError("Assistant VM is unavailable")
+    return runtime.get_session()
+
+
+def _log_assistant_vm_tool(
+    deps: AssistantDeps,
+    event: str,
+    payload: dict[str, object],
+) -> None:
+    publish_tool_progress(deps.tool_progress_writer, event=event, payload=payload)
+    status = tool_event_status(event, payload)
+    logger.info(
+        "Assistant VM tool event",
+        extra=build_log_extra(
+            component="assistant_turn",
+            operation=event,
+            event_name=f"assistant.tool.{event}",
+            status=status,
+            session_id=deps.session_id,
+            user_id=deps.user_id,
+            duration_ms=numeric_tool_payload_value(payload, "duration_ms"),
+            context_data=agent_vm_tool_log_context(
+                payload,
+                sandbox_acquired=bool(deps.vm_runtime and deps.vm_runtime.acquired),
+            ),
+        ),
+    )
 
 
 def _build_submit_content_request(
@@ -407,10 +447,15 @@ def _create_assistant_agent(
         model,
         deps_type=AssistantDeps,
         output_type=str,
-        system_prompt=ASSISTANT_SYSTEM_PROMPT,
+        system_prompt=f"{ASSISTANT_SYSTEM_PROMPT}\n\n{AGENT_VM_SYSTEM_INSTRUCTIONS}",
         model_settings=model_settings,
         capabilities=[PrepareTools(_prepare_assistant_tools)],
     )
+
+    @agent.system_prompt
+    def add_screen_context(ctx: RunContext[AssistantDeps]) -> str:
+        """Keep stable screen context in the system side of the prompt."""
+        return f"Current context:\n{ctx.deps.context_snapshot}"
 
     @agent.tool
     def search_web(
@@ -478,11 +523,17 @@ def _create_assistant_agent(
             )
         return _format_knowledge_hits(hits, query)
 
-    _register_personal_library_tools(
+    register_agent_vm_tools(
         agent,
-        search_name="SearchMarkdownLibrary",
-        list_name="ListMarkdownLibrary",
-        read_name="ReadMarkdownFile",
+        session_getter=_assistant_vm_session,
+        log_event=_log_assistant_vm_tool,
+        config=AgentToolsetConfig(
+            feature="assistant_chat",
+            operation_prefix="assistant.tool",
+            source="assistant",
+            tool_policy=AgentToolPolicy(web_search=False),
+            stream_command_progress=True,
+        ),
     )
 
     @agent.tool(name="search_subscription_feeds")
@@ -1053,7 +1104,6 @@ def run_assistant_turn_sync(
     if turn_instructions:
         prompt_sections.append(f"Turn instructions:\n{turn_instructions}")
     prompt_sections.append(f"User request:\n{user_prompt.strip()}")
-    prompt_sections.append(f"Current context:\n{deps.context_snapshot}")
     prompt = "\n\n".join(prompt_sections)
     event_stream_handler = (
         _build_final_text_event_stream_handler(partial_writer)
@@ -1065,38 +1115,26 @@ def run_assistant_turn_sync(
         deps=deps,
         message_history=history,
         event_stream_handler=event_stream_handler,
+        usage_limits=UsageLimits(request_limit=get_settings().llm_task_sandbox_request_limit),
     )
 
 
-def _build_assistant_personal_library_runtime(
+def _build_assistant_vm_runtime(
     *,
-    db: Session,
     user_id: int,
-) -> tuple[PersonalLibrarySandboxSession | None, str | None]:
-    """Synchronize and hydrate the personal markdown library for assistant turns."""
+    session_id: int = 0,
+    llm_task_id: int | None = None,
+) -> LazyAgentVmRuntime | None:
+    """Build a lazy VM handle without performing E2B or corpus work."""
     settings = get_settings()
-    if not settings.personal_markdown_enabled or settings.chat_sandbox_provider == "disabled":
-        return None, None
-
-    try:
-        sync_personal_markdown_library_for_user(db, user_id=user_id)
-        sandbox_session = create_personal_library_sandbox_session(user_id=user_id)
-        return sandbox_session, None
-    except SandboxRuntimeUnavailableError as exc:
-        return None, str(exc)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Failed to prepare assistant personal markdown library",
-            extra=build_log_extra(
-                component="assistant_turn",
-                operation="build_personal_library_runtime",
-                event_name="assistant.turn.personal_library",
-                status="degraded",
-                user_id=user_id,
-                context_data={"failure_class": type(exc).__name__},
-            ),
-        )
-        return None, str(exc)
+    if settings.llm_task_sandbox_provider == "disabled":
+        return None
+    return LazyAgentVmRuntime(
+        user_id=user_id,
+        session_id=session_id,
+        llm_task_id=llm_task_id,
+        feature="assistant",
+    )
 
 
 @dataclass(frozen=True)
@@ -1126,14 +1164,52 @@ def _prepare_assistant_background_turn(
     user_prompt: str,
     turn_profile: AssistantTurnProfile | None = None,
 ) -> _PreparedAssistantTurn:
-    history_start = perf_counter()
-    history = load_message_history(
-        db,
-        turn.session_id,
-        exclude_message_id=turn.message_id,
-        completed_only=True,
+    del db
+    session_factory = get_session_factory()
+    resolved_turn_profile = turn_profile or _resolve_assistant_turn_profile(
+        user_prompt,
+        screen_context,
     )
-    history_ms = (perf_counter() - history_start) * 1000
+
+    def build_history() -> tuple[list[ModelMessage], float]:
+        started_at = perf_counter()
+        with session_factory() as history_db:
+            value = load_message_history(
+                history_db,
+                turn.session_id,
+                exclude_message_id=turn.message_id,
+                completed_only=True,
+            )
+        return value, (perf_counter() - started_at) * 1000
+
+    def build_context() -> tuple[str, float]:
+        started_at = perf_counter()
+        if session.context_snapshot:
+            value = session.context_snapshot
+        else:
+            with session_factory() as context_db:
+                value = build_screen_context_snapshot(
+                    context_db,
+                    user_id=turn.user_id,
+                    screen_context=screen_context,
+                )
+        return value, (perf_counter() - started_at) * 1000
+
+    def resolve_key() -> str | None:
+        with session_factory() as key_db:
+            return resolve_effective_api_key(
+                db=key_db,
+                user_id=turn.user_id,
+                model_spec=turn.model,
+            )
+
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="assistant-prepare") as executor:
+        history_future = executor.submit(build_history)
+        context_future = executor.submit(build_context)
+        key_future = executor.submit(resolve_key)
+        history, history_ms = history_future.result()
+        context_snapshot, context_ms = context_future.result()
+        provider_api_key = key_future.result()
     logger.info(
         "Assistant history loaded",
         extra=build_log_extra(
@@ -1153,31 +1229,22 @@ def _prepare_assistant_background_turn(
         ),
     )
 
-    context_start = perf_counter()
-    context_snapshot = session.context_snapshot or build_screen_context_snapshot(
-        db,
-        user_id=turn.user_id,
-        screen_context=screen_context,
-    )
-    turn_profile = turn_profile or _resolve_assistant_turn_profile(user_prompt, screen_context)
-    sandbox_session: PersonalLibrarySandboxSession | None = None
-    personal_library_error: str | None = None
-    if turn_profile.uses_personal_library:
-        sandbox_session, personal_library_error = _build_assistant_personal_library_runtime(
-            db=db,
+    vm_runtime: LazyAgentVmRuntime | None = None
+    if resolved_turn_profile.uses_agent_vm:
+        vm_runtime = _build_assistant_vm_runtime(
             user_id=turn.user_id,
+            session_id=turn.session_id,
+            llm_task_id=turn.llm_task_id,
         )
-    context_ms = (perf_counter() - context_start) * 1000
     deps = AssistantDeps(
         user_id=turn.user_id,
         session_id=turn.session_id,
         screen_context=screen_context,
         context_snapshot=context_snapshot,
-        turn_profile=turn_profile,
-        session_factory=get_session_factory(),
+        turn_profile=resolved_turn_profile,
+        session_factory=session_factory,
         llm_task_id=turn.llm_task_id,
-        sandbox_session=sandbox_session,
-        personal_library_error=personal_library_error,
+        vm_runtime=vm_runtime,
     )
     logger.info(
         "Assistant context built",
@@ -1193,10 +1260,13 @@ def _prepare_assistant_background_turn(
             content_id=turn.content_id,
             context_data={
                 "screen_type": screen_context.screen_type,
-                "route": turn_profile.route,
+                "route": resolved_turn_profile.route,
                 "context_chars": len(context_snapshot or ""),
-                "tool_schema_count": len(turn_profile.tool_names),
-                "uses_personal_library": turn_profile.uses_personal_library,
+                "tool_schema_count": len(resolved_turn_profile.tool_names),
+                "uses_agent_vm": resolved_turn_profile.uses_agent_vm,
+                "sandbox_acquired": bool(vm_runtime and vm_runtime.acquired),
+                "sandbox_acquisition_ms": 0.0,
+                "sandbox_hydration_ms": 0.0,
                 "llm_task_id": turn.llm_task_id,
             },
         ),
@@ -1204,11 +1274,7 @@ def _prepare_assistant_background_turn(
     return _PreparedAssistantTurn(
         deps=deps,
         history=history,
-        provider_api_key=resolve_effective_api_key(
-            db=db,
-            user_id=turn.user_id,
-            model_spec=turn.model,
-        ),
+        provider_api_key=provider_api_key,
         history_ms=history_ms,
         context_ms=context_ms,
     )
@@ -1221,6 +1287,12 @@ async def _execute_assistant_background_turn(
     user_prompt: str,
     partial_writer: _DurableChatPartialWriter,
 ) -> _ExecutedAssistantTurn:
+    if turn.message_id is not None:
+        prepared.deps.tool_progress_writer = DurableChatToolProgressWriter(
+            session_factory=get_session_factory(),
+            message_id=turn.message_id,
+            stream_generation=turn.stream_generation,
+        )
     logger.info(
         "Assistant LLM call started",
         extra=build_log_extra(
@@ -1277,6 +1349,11 @@ def _persist_assistant_background_turn(
         render_metadata=executed.render_metadata,
         expected_stream_generation=turn.stream_generation,
         commit=False,
+    )
+    enqueue_agent_data_sync(
+        db,
+        user_id=turn.user_id,
+        chat_session_ids=(turn.session_id,),
     )
     return {
         "chat_session_id": turn.session_id,
@@ -1391,7 +1468,7 @@ async def process_assistant_turn_async(
         raw_result=lambda executed: executed.raw_result,
         record_usage=_log_chat_usage,
         ensure_lease=ensure_lease,
-        cleanup=lambda prepared: _close_sandbox_session(prepared.deps.sandbox_session),
+        cleanup=lambda prepared: _close_agent_vm_runtime(prepared.deps.vm_runtime),
     )
     if result.outcome != QueuedChatTurnOutcome.COMPLETED:
         return result.outcome
@@ -1442,10 +1519,20 @@ def seed_assistant_message(
     """Persist an assistant-only seed message into a chat session."""
     from pydantic_ai.messages import ModelResponse, TextPart
 
+    user_id = db.query(ChatSession.user_id).filter(ChatSession.id == session_id).scalar()
+    if user_id is None:
+        raise ValueError(f"Chat session {session_id} not found")
     save_messages(
         db,
         session_id,
         [ModelResponse(parts=[TextPart(content=assistant_text)])],
         render_metadata=render_metadata,
-        commit=commit,
+        commit=False,
     )
+    enqueue_agent_data_sync(
+        db,
+        user_id=int(user_id),
+        chat_session_ids=(session_id,),
+    )
+    if commit:
+        db.commit()

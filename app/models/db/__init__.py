@@ -1,5 +1,6 @@
 # ruff: noqa: F401
 
+from app.models.db.agent_vm import AgentDataFile, AgentVmSystemState
 from app.models.db.analytics import AnalyticsInteraction
 from app.models.db.api_keys import UserApiKey
 from app.models.db.audio_episode import AudioEpisode

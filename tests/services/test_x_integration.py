@@ -16,6 +16,7 @@ from app.models.db import (
     UserIntegrationSyncedItem,
     UserIntegrationSyncState,
 )
+from app.services.queue import TaskType
 from app.services.token_crypto import decrypt_token
 from app.services.x_api import XTokenResponse, XTweet, XTweetsPage, XUser
 from app.services.x_integration import (
@@ -568,7 +569,9 @@ def test_sync_x_sources_saves_reused_completed_content_without_reanalysis(
     synced_item = db_session.query(UserIntegrationSyncedItem).one()
     assert summary.channels["bookmarks"].reused == 1
     assert synced_item.content_id == existing.id
-    assert db_session.query(ProcessingTask).count() == 0
+    tasks = db_session.query(ProcessingTask).all()
+    assert [task.task_type for task in tasks] == [TaskType.SYNC_AGENT_DATA.value]
+    assert tasks[0].content_id is None
     assert (
         db_session.query(ContentKnowledgeSave)
         .filter_by(user_id=test_user.id, content_id=existing.id)

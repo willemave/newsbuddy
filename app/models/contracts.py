@@ -64,7 +64,21 @@ class TaskType(StrEnum):
     GENERATE_AUDIO_EPISODE = "generate_audio_episode"
     RUN_LLM_TASK = "run_llm_task"
     BRIEFING_REFRESH = "briefing_refresh"
+    SYNC_AGENT_DATA = "sync_agent_data"
+    INDEX_AGENT_DATA = "index_agent_data"
+    BACKFILL_AGENT_DATA = "backfill_agent_data"
+    RECONCILE_AGENT_DATA = "reconcile_agent_data"
     DELETE_USER_ACCOUNT = "delete_user_account"
+
+
+class AgentDataBackfillStage(StrEnum):
+    """Finite stages in the bounded per-user corpus backfill."""
+
+    KNOWLEDGE = "knowledge"
+    CONTENT = "content"
+    NEWS = "news"
+    CHATS = "chats"
+    BRIEFINGS = "briefings"
 
 
 class TaskQueue(StrEnum):

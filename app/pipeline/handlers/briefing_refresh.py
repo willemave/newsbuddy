@@ -6,6 +6,7 @@ from time import perf_counter
 from app.core.logging import get_logger
 from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
+from app.services.agent_data_events import briefing_date_key, enqueue_agent_data_sync
 from app.services.briefing.refresh import RefreshMode, run_briefing_refresh
 from app.services.queue import TaskType
 
@@ -47,6 +48,13 @@ class BriefingRefreshHandler:
                     mode=mode,
                     task_id=task.id,
                 )
+                if result.appended_segments or result.compacted_segments or result.retired_segments:
+                    enqueue_agent_data_sync(
+                        db,
+                        user_id=user_id,
+                        briefing_dates=(briefing_date_key(datetime.now(UTC)),),
+                    )
+                    db.commit()
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "Briefing refresh failed",

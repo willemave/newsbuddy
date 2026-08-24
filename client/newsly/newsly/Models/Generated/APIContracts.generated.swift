@@ -135,6 +135,10 @@ enum APITaskType: Codable, Equatable, Hashable {
     case generate_audio_episode
     case run_llm_task
     case briefing_refresh
+    case sync_agent_data
+    case index_agent_data
+    case backfill_agent_data
+    case reconcile_agent_data
     case delete_user_account
     case unknown(String)
 
@@ -159,6 +163,10 @@ enum APITaskType: Codable, Equatable, Hashable {
         .generate_audio_episode,
         .run_llm_task,
         .briefing_refresh,
+        .sync_agent_data,
+        .index_agent_data,
+        .backfill_agent_data,
+        .reconcile_agent_data,
         .delete_user_account,
     ]
 
@@ -184,6 +192,10 @@ enum APITaskType: Codable, Equatable, Hashable {
         case .generate_audio_episode: "generate_audio_episode"
         case .run_llm_task: "run_llm_task"
         case .briefing_refresh: "briefing_refresh"
+        case .sync_agent_data: "sync_agent_data"
+        case .index_agent_data: "index_agent_data"
+        case .backfill_agent_data: "backfill_agent_data"
+        case .reconcile_agent_data: "reconcile_agent_data"
         case .delete_user_account: "delete_user_account"
         case .unknown(let rawValue): rawValue
         }
@@ -211,6 +223,10 @@ enum APITaskType: Codable, Equatable, Hashable {
         case "generate_audio_episode": self = .generate_audio_episode
         case "run_llm_task": self = .run_llm_task
         case "briefing_refresh": self = .briefing_refresh
+        case "sync_agent_data": self = .sync_agent_data
+        case "index_agent_data": self = .index_agent_data
+        case "backfill_agent_data": self = .backfill_agent_data
+        case "reconcile_agent_data": self = .reconcile_agent_data
         case "delete_user_account": self = .delete_user_account
         default: self = .unknown(rawValue)
         }

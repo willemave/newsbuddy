@@ -7,14 +7,14 @@ from typing import Any
 
 from app.services.agent_vm_runtime import AgentVmError
 
-E2B_DEFAULT_CAPABILITY_PROBE = r"""python - <<'PY'
+AGENT_VM_CAPABILITY_PROBE = r"""python - <<'PY'
 import json
 import shutil
 import subprocess
 
 capabilities = {
     name: shutil.which(name) or False
-    for name in ("bash", "python", "node", "git", "curl", "jq")
+    for name in ("bash", "python", "node", "git", "curl", "jq", "rg")
 }
 browser_error = None
 if capabilities["node"]:
@@ -56,49 +56,41 @@ print(json.dumps(capabilities, sort_keys=True))
 PY"""
 
 
-def probe_configured_e2b_sandbox(
+def probe_agent_vm_template(
     sandbox: Any,
     *,
     request_timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """Require the declared capabilities from a configured E2B template."""
+    """Require the generic capabilities from the canonical E2B template.
+
+    The template intentionally has no Newsly-specific helper or credential
+    bootstrap. Its revision is the cache key; the probe itself is portable.
+    """
     result = sandbox.commands.run(
-        "newsly-sandbox-probe --json",
+        AGENT_VM_CAPABILITY_PROBE,
         timeout=min(30.0, request_timeout_seconds or 30.0),
         request_timeout=request_timeout_seconds,
     )
     if int(getattr(result, "exit_code", getattr(result, "exitCode", 0)) or 0) != 0:
-        raise AgentVmError("Configured E2B template failed newsly-sandbox-probe")
+        raise AgentVmError("Agent VM template capability probe failed")
     try:
         payload = json.loads(str(getattr(result, "stdout", "") or ""))
     except (TypeError, ValueError) as exc:
-        raise AgentVmError(
-            "Configured E2B template returned an invalid capability manifest"
-        ) from exc
-    required = {"bash", "python", "node", "git", "curl", "jq", "chromium", "playwright"}
+        raise AgentVmError("Agent VM template returned an invalid capability manifest") from exc
+    if not isinstance(payload, dict):
+        raise AgentVmError("Agent VM template returned an invalid capability manifest")
+    required = {
+        "bash",
+        "python",
+        "node",
+        "git",
+        "curl",
+        "jq",
+        "rg",
+        "chromium",
+        "playwright",
+    }
     missing = sorted(name for name in required if not payload.get(name))
     if missing:
-        raise AgentVmError(f"Configured E2B template is missing capabilities: {', '.join(missing)}")
-    return payload
-
-
-def probe_default_e2b_sandbox(
-    sandbox: Any,
-    *,
-    request_timeout_seconds: float | None = None,
-) -> dict[str, Any]:
-    """Inspect the provider default so feature code never mistakes unknown for capable."""
-    result = sandbox.commands.run(
-        E2B_DEFAULT_CAPABILITY_PROBE,
-        timeout=min(30.0, request_timeout_seconds or 30.0),
-        request_timeout=request_timeout_seconds,
-    )
-    if int(getattr(result, "exit_code", getattr(result, "exitCode", 0)) or 0) != 0:
-        raise AgentVmError("Default E2B sandbox capability probe failed")
-    try:
-        payload = json.loads(str(getattr(result, "stdout", "") or ""))
-    except (TypeError, ValueError) as exc:
-        raise AgentVmError("Default E2B sandbox returned invalid capabilities") from exc
-    if not isinstance(payload, dict):
-        raise AgentVmError("Default E2B sandbox returned invalid capabilities")
+        raise AgentVmError(f"Agent VM template is missing capabilities: {', '.join(missing)}")
     return payload

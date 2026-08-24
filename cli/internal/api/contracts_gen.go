@@ -86,12 +86,16 @@ const (
 	TaskTypeGenerateAudioEpisode TaskType = "generate_audio_episode"
 	TaskTypeRunLLMTask TaskType = "run_llm_task"
 	TaskTypeBriefingRefresh TaskType = "briefing_refresh"
+	TaskTypeSyncAgentData TaskType = "sync_agent_data"
+	TaskTypeIndexAgentData TaskType = "index_agent_data"
+	TaskTypeBackfillAgentData TaskType = "backfill_agent_data"
+	TaskTypeReconcileAgentData TaskType = "reconcile_agent_data"
 	TaskTypeDeleteUserAccount TaskType = "delete_user_account"
 )
 
 func (v TaskType) Known() bool {
 	switch v {
-	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeChatTurn, TaskTypeSyncIntegration, TaskTypeGenerateAudioEpisode, TaskTypeRunLLMTask, TaskTypeBriefingRefresh, TaskTypeDeleteUserAccount:
+	case TaskTypeScrape, TaskTypeBackfillFeeds, TaskTypeAnalyzeURL, TaskTypeProcessContent, TaskTypeEnrichNewsItemArticle, TaskTypeProcessNewsItem, TaskTypeProcessPodcastMedia, TaskTypeDownloadTweetVideoAudio, TaskTypeTranscribeTweetVideo, TaskTypeSummarize, TaskTypeFetchNewsItemDiscussion, TaskTypeGenerateImage, TaskTypeDiscoverFeeds, TaskTypeOnboardingDiscover, TaskTypeDigDeeper, TaskTypeChatTurn, TaskTypeSyncIntegration, TaskTypeGenerateAudioEpisode, TaskTypeRunLLMTask, TaskTypeBriefingRefresh, TaskTypeSyncAgentData, TaskTypeIndexAgentData, TaskTypeBackfillAgentData, TaskTypeReconcileAgentData, TaskTypeDeleteUserAccount:
 		return true
 	default:
 		return false

@@ -53,6 +53,9 @@ def initialize_chat_stream_attempt(
         message.stream_generation = stream_generation
         message.stream_revision = 0
         message.stream_updated_at = None
+        message.tool_progress = None
+        message.tool_progress_revision = 0
+        message.tool_progress_updated_at = None
     db.flush()
 
 
@@ -134,6 +137,77 @@ class DurableChatPartialWriter:
         self.write_count += 1
         if self.first_partial_ms is None:
             self.first_partial_ms = (now - self._started_at) * 1000
+        return True
+
+
+class DurableChatToolProgressWriter:
+    """Persist advisory tool state separately from the canonical transcript."""
+
+    def __init__(
+        self,
+        *,
+        session_factory: Callable[[], Session],
+        message_id: int,
+        stream_generation: int,
+        minimum_interval_seconds: float = 0.25,
+    ) -> None:
+        self._session_factory = session_factory
+        self._message_id = message_id
+        self._stream_generation = stream_generation
+        self._minimum_interval_seconds = minimum_interval_seconds
+        self._last_write_at: float | None = None
+        self._disabled = False
+
+    def publish(
+        self,
+        *,
+        tool_name: str,
+        status: str,
+        detail: str | None = None,
+    ) -> bool:
+        if self._disabled:
+            return False
+        write_started_at = perf_counter()
+        if (
+            status == "running"
+            and self._last_write_at is not None
+            and write_started_at - self._last_write_at < self._minimum_interval_seconds
+        ):
+            return False
+        now = datetime.now(UTC)
+        try:
+            with self._session_factory() as db:
+                message = (
+                    db.query(ChatMessage)
+                    .filter(ChatMessage.id == self._message_id)
+                    .with_for_update()
+                    .first()
+                )
+                if (
+                    message is None
+                    or message.status != MessageProcessingStatus.PROCESSING.value
+                    or message.stream_generation != self._stream_generation
+                ):
+                    self._disabled = True
+                    return False
+                message.tool_progress = {
+                    "tool_name": tool_name,
+                    "status": status,
+                    "detail": detail[-2_000:] if detail else None,
+                    "updated_at": now.isoformat(),
+                }
+                message.tool_progress_revision = int(message.tool_progress_revision or 0) + 1
+                message.tool_progress_updated_at = now
+                db.commit()
+        except Exception:  # noqa: BLE001
+            self._disabled = True
+            logger.warning(
+                "Disabling advisory tool progress after a persistence failure",
+                exc_info=True,
+                extra={"message_id": self._message_id},
+            )
+            return False
+        self._last_write_at = write_started_at
         return True
 
 

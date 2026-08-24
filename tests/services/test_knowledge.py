@@ -150,21 +150,21 @@ class TestSaveToKnowledge:
         assert second is not None
         assert first.id == second.id
 
-    def test_markdown_sync_failure_rolls_back_best_effort_transaction(
+    def test_agent_data_enqueue_failure_rolls_back_best_effort_transaction(
         self,
         db_session: Session,
         test_user: User,
         test_content: Content,
         monkeypatch,
     ) -> None:
-        """A failed optional markdown sync must not poison the caller's session."""
+        """A failed optional corpus enqueue must not poison the caller's session."""
         content_id = _require_id(test_content.id)
         user_id = _require_id(test_user.id)
 
-        def fail_markdown_sync(db: Session, **_kwargs) -> None:
+        def fail_agent_data_enqueue(db: Session, **_kwargs) -> None:
             db.execute(text("SELECT 1 / 0"))
 
-        monkeypatch.setattr(knowledge, "sync_personal_markdown_for_content", fail_markdown_sync)
+        monkeypatch.setattr(knowledge, "enqueue_agent_data_sync", fail_agent_data_enqueue)
 
         knowledge.save_to_knowledge(db_session, content_id, user_id)
 

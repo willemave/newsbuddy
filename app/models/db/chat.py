@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.db import Base
 from app.core.logging import get_logger
@@ -76,6 +77,10 @@ class ChatMessage(Base):
     stream_generation = Column(Integer, nullable=True)
     stream_revision = Column(Integer, nullable=True)
     stream_updated_at = Column(DateTime(timezone=True), nullable=True)
+    # Separate from transcript text: advisory status for an in-flight tool call.
+    tool_progress = Column(JSONB, nullable=True)
+    tool_progress_revision = Column(Integer, nullable=True)
+    tool_progress_updated_at = Column(DateTime(timezone=True), nullable=True)
     # Provider identity for resumable Deep Research polling across worker attempts.
     deep_research_response_id = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
