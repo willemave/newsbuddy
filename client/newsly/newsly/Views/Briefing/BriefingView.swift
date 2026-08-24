@@ -80,8 +80,8 @@ struct BriefingView: View {
         mastheadHeight + (showsCategoryStrip ? categoryStripHeight : 0)
     }
 
-    /// Bottom edge of the chrome that remains pinned while reading. Segment
-    /// midpoints cross this edge beneath the pills, not the pager's raw top.
+    /// Bottom edge of the chrome that remains pinned while reading. A segment
+    /// must pass fully above this edge beneath the pills to become read.
     private var readBoundaryY: CGFloat? {
         briefingPinnedReadBoundaryY(
             expandedChromeHeight: expandedChromeHeight,

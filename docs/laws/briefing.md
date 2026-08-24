@@ -20,7 +20,7 @@ B9. Refreshes may coalesce, but publication requires successful composition and 
 
 B10. Server state remains authoritative. Local snapshots support cold starts, and recoverable failures, retries, or reopening preserve readable content while unfinished work resumes safely.
 
-B11. A segment becomes read only after it was visible and the reader passes its midpoint. Initial offscreen geometry never marks it read.
+B11. A segment becomes read only after it was visible and its full rendered body passes above the readable viewport boundary. Initial offscreen geometry never marks it read.
 
 B12. Reading a segment marks its full source batch once, and the segment retires when every source is read. Marking a lens read covers every active source and canonical duplicate representative.
 

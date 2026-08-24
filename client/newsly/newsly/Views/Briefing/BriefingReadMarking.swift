@@ -10,31 +10,31 @@ func briefingPinnedReadBoundaryY(
     return max(expandedChromeHeight - collapsibleChromeHeight, 0)
 }
 
-func briefingSegmentHasCrossedReadMidpoint(
+func briefingSegmentHasPassedReadBoundary(
     frame: CGRect,
     readBoundaryY: CGFloat?
 ) -> Bool {
     guard let readBoundaryY else { return false }
-    return frame.midY < readBoundaryY
+    return frame.maxY < readBoundaryY
 }
 
-struct BriefingMidpointReadTracker {
-    private var hasObservedBeforeMidpoint = false
+struct BriefingReadBoundaryTracker {
+    private var hasObservedBeforeBoundary = false
     private var didMark = false
 
-    mutating func update(hasCrossedMidpoint: Bool, isEnabled: Bool) -> Bool {
+    mutating func update(hasPassedBoundary: Bool, isEnabled: Bool) -> Bool {
         guard isEnabled else {
-            hasObservedBeforeMidpoint = false
+            hasObservedBeforeBoundary = false
             return false
         }
         guard !didMark else { return false }
 
-        if !hasCrossedMidpoint {
-            hasObservedBeforeMidpoint = true
+        if !hasPassedBoundary {
+            hasObservedBeforeBoundary = true
             return false
         }
 
-        guard hasObservedBeforeMidpoint else { return false }
+        guard hasObservedBeforeBoundary else { return false }
         didMark = true
         return true
     }

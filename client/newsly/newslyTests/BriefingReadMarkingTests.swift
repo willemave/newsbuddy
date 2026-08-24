@@ -22,58 +22,58 @@ final class BriefingReadMarkingTests: XCTestCase {
         )
     }
 
-    func testSegmentMidpointJustBeforePinnedBoundaryHasNotCrossed() {
-        let frame = CGRect(x: 0, y: 30.5, width: 100, height: 100)
+    func testSegmentBottomJustBeforePinnedBoundaryHasNotPassed() {
+        let frame = CGRect(x: 0, y: -19.5, width: 100, height: 100)
 
         XCTAssertFalse(
-            briefingSegmentHasCrossedReadMidpoint(frame: frame, readBoundaryY: 80)
+            briefingSegmentHasPassedReadBoundary(frame: frame, readBoundaryY: 80)
         )
     }
 
-    func testSegmentMidpointExactlyAtPinnedBoundaryHasNotCrossed() {
-        let frame = CGRect(x: 0, y: 30, width: 100, height: 100)
+    func testSegmentBottomExactlyAtPinnedBoundaryHasNotPassed() {
+        let frame = CGRect(x: 0, y: -20, width: 100, height: 100)
 
         XCTAssertFalse(
-            briefingSegmentHasCrossedReadMidpoint(frame: frame, readBoundaryY: 80)
+            briefingSegmentHasPassedReadBoundary(frame: frame, readBoundaryY: 80)
         )
     }
 
-    func testSegmentMidpointJustAfterPinnedBoundaryHasCrossed() {
-        let frame = CGRect(x: 0, y: 29.5, width: 100, height: 100)
+    func testSegmentBottomJustAfterPinnedBoundaryHasPassed() {
+        let frame = CGRect(x: 0, y: -20.5, width: 100, height: 100)
 
         XCTAssertTrue(
-            briefingSegmentHasCrossedReadMidpoint(frame: frame, readBoundaryY: 80)
+            briefingSegmentHasPassedReadBoundary(frame: frame, readBoundaryY: 80)
         )
     }
 
-    func testSegmentMidpointDoesNotCrossBeforeBoundaryMeasurement() {
+    func testSegmentDoesNotPassBeforeBoundaryMeasurement() {
         let frame = CGRect(x: 0, y: -100, width: 100, height: 100)
 
         XCTAssertFalse(
-            briefingSegmentHasCrossedReadMidpoint(frame: frame, readBoundaryY: nil)
+            briefingSegmentHasPassedReadBoundary(frame: frame, readBoundaryY: nil)
         )
     }
 
-    func testInitialObservationAfterMidpointDoesNotMarkRead() {
-        var tracker = BriefingMidpointReadTracker()
+    func testInitialObservationAfterBoundaryDoesNotMarkRead() {
+        var tracker = BriefingReadBoundaryTracker()
 
-        XCTAssertFalse(tracker.update(hasCrossedMidpoint: true, isEnabled: true))
+        XCTAssertFalse(tracker.update(hasPassedBoundary: true, isEnabled: true))
     }
 
-    func testBeforeToAfterMidpointMarksReadExactlyOnce() {
-        var tracker = BriefingMidpointReadTracker()
+    func testBeforeToAfterBoundaryMarksReadExactlyOnce() {
+        var tracker = BriefingReadBoundaryTracker()
 
-        XCTAssertFalse(tracker.update(hasCrossedMidpoint: false, isEnabled: true))
-        XCTAssertTrue(tracker.update(hasCrossedMidpoint: true, isEnabled: true))
-        XCTAssertFalse(tracker.update(hasCrossedMidpoint: true, isEnabled: true))
+        XCTAssertFalse(tracker.update(hasPassedBoundary: false, isEnabled: true))
+        XCTAssertTrue(tracker.update(hasPassedBoundary: true, isEnabled: true))
+        XCTAssertFalse(tracker.update(hasPassedBoundary: true, isEnabled: true))
     }
 
-    func testDisablingTrackingClearsPriorMidpointObservation() {
-        var tracker = BriefingMidpointReadTracker()
+    func testDisablingTrackingClearsPriorBoundaryObservation() {
+        var tracker = BriefingReadBoundaryTracker()
 
-        XCTAssertFalse(tracker.update(hasCrossedMidpoint: false, isEnabled: true))
-        XCTAssertFalse(tracker.update(hasCrossedMidpoint: false, isEnabled: false))
-        XCTAssertFalse(tracker.update(hasCrossedMidpoint: true, isEnabled: true))
+        XCTAssertFalse(tracker.update(hasPassedBoundary: false, isEnabled: true))
+        XCTAssertFalse(tracker.update(hasPassedBoundary: false, isEnabled: false))
+        XCTAssertFalse(tracker.update(hasPassedBoundary: true, isEnabled: true))
     }
 
     func testLensContentIdentityChangesOnlyWithLensOrOrderedSegments() {

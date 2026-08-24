@@ -322,7 +322,7 @@ struct BriefingLensPageView: View, Equatable {
                                     .briefingSegmentReadMarker(
                                         isEnabled: isReadTrackingEnabled,
                                         readBoundaryY: readBoundaryY,
-                                        onMidpointCrossed: {
+                                        onBoundaryPassed: {
                                             onMarkSegmentSeen(segment)
                                         }
                                     )
@@ -662,33 +662,33 @@ private struct BriefingSegmentView: View {
 private struct BriefingSegmentReadMarker: ViewModifier {
     let isEnabled: Bool
     let readBoundaryY: CGFloat?
-    let onMidpointCrossed: () -> Void
+    let onBoundaryPassed: () -> Void
 
-    @State private var tracker = BriefingMidpointReadTracker()
-    @State private var hasCrossedMidpoint = false
+    @State private var tracker = BriefingReadBoundaryTracker()
+    @State private var hasPassedBoundary = false
 
     func body(content: Content) -> some View {
         content
             .onGeometryChange(for: Bool.self) { proxy in
-                briefingSegmentHasCrossedReadMidpoint(
+                briefingSegmentHasPassedReadBoundary(
                     frame: proxy.frame(in: .named(briefingReadCoordinateSpaceName)),
                     readBoundaryY: readBoundaryY
                 )
-            } action: { _, crossed in
-                hasCrossedMidpoint = crossed
-                markReadIfNeeded(hasCrossedMidpoint: crossed, isEnabled: isEnabled)
+            } action: { _, passed in
+                hasPassedBoundary = passed
+                markReadIfNeeded(hasPassedBoundary: passed, isEnabled: isEnabled)
             }
             .onChange(of: isEnabled, initial: true) { _, enabled in
-                markReadIfNeeded(hasCrossedMidpoint: hasCrossedMidpoint, isEnabled: enabled)
+                markReadIfNeeded(hasPassedBoundary: hasPassedBoundary, isEnabled: enabled)
             }
     }
 
-    private func markReadIfNeeded(hasCrossedMidpoint: Bool, isEnabled: Bool) {
+    private func markReadIfNeeded(hasPassedBoundary: Bool, isEnabled: Bool) {
         guard tracker.update(
-            hasCrossedMidpoint: hasCrossedMidpoint,
+            hasPassedBoundary: hasPassedBoundary,
             isEnabled: isEnabled
         ) else { return }
-        onMidpointCrossed()
+        onBoundaryPassed()
     }
 }
 
@@ -696,13 +696,13 @@ private extension View {
     func briefingSegmentReadMarker(
         isEnabled: Bool,
         readBoundaryY: CGFloat?,
-        onMidpointCrossed: @escaping () -> Void
+        onBoundaryPassed: @escaping () -> Void
     ) -> some View {
         modifier(
             BriefingSegmentReadMarker(
                 isEnabled: isEnabled,
                 readBoundaryY: readBoundaryY,
-                onMidpointCrossed: onMidpointCrossed
+                onBoundaryPassed: onBoundaryPassed
             )
         )
     }
