@@ -105,7 +105,11 @@ def test_build_pydantic_model_anthropic(monkeypatch: pytest.MonkeyPatch) -> None
     model, model_settings = llm_models.build_pydantic_model("claude-opus-4-6")
 
     assert isinstance(model, AnthropicModel)
-    assert model_settings is None
+    assert model_settings == {
+        "anthropic_cache_instructions": True,
+        "anthropic_cache_tool_definitions": True,
+        "anthropic_cache_messages": True,
+    }
 
 
 def test_build_pydantic_model_google(monkeypatch: pytest.MonkeyPatch) -> None:

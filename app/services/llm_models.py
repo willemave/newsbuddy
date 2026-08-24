@@ -7,7 +7,7 @@ from enum import Enum, StrEnum
 from typing import Any, cast
 
 from pydantic_ai.models import Model
-from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models.openai import (
     OpenAIChatModel,
@@ -271,7 +271,14 @@ def build_pydantic_model(
             raise ValueError("ANTHROPIC_API_KEY not configured in settings.")
         anthropic_provider = AnthropicProvider(api_key=resolved_api_key)
         model_to_use = model_name if provider_prefix == "anthropic" else model_spec
-        return AnthropicModel(model_to_use, provider=anthropic_provider), None
+        return (
+            AnthropicModel(model_to_use, provider=anthropic_provider),
+            AnthropicModelSettings(
+                anthropic_cache_instructions=True,
+                anthropic_cache_tool_definitions=True,
+                anthropic_cache_messages=True,
+            ),
+        )
 
     if provider_prefix == "cerebras" or model_spec.startswith("cerebras:"):
         resolved_api_key = api_key_override or settings.cerebras_api_key
