@@ -15,6 +15,38 @@ PRODUCTION_CLUSTER_CASES = [
         ],
     },
     {
+        "case_id": "prod_2026_08_12_pixel_11_pro_fold_launch",
+        "label": "Google Pixel 11 Pro Fold launch",
+        "titles": [
+            "Google unveils Pixel 11 Pro Fold at $1,899+ with Tensor G6 and brighter displays",
+            "Google launches Pixel 11 Pro Fold with thinner design and new features",
+        ],
+    },
+    {
+        "case_id": "prod_2026_08_12_pixel_11_price_hike",
+        "label": "Google Pixel 11 lineup price hike",
+        "titles": [
+            "Google raises Pixel 11 prices $100, Pixel Watch 5 $50, reduces Pro RAM to 12GB",
+            "Google Pixel 11 series: $100 price hike, new HiLight, minor camera updates",
+        ],
+    },
+    {
+        "case_id": "prod_2026_08_12_pixel_11_pro_xl_launch",
+        "label": "Google Pixel 11, Pro, and Pro XL launch",
+        "titles": [
+            "Google unveils $899+ Pixel 11, $1,099+ Pro, $1,299+ Pro XL with Tensor G6",
+            "Google unveils Pixel 11 Pro and Pro XL with spacecraft-grade aluminum frames",
+        ],
+    },
+    {
+        "case_id": "prod_2026_08_12_pixel_watch_5_launch",
+        "label": "Google Pixel Watch 5 launch",
+        "titles": [
+            "Google unveils $399 Pixel Watch 5 with offline Gemini, health trends, and satin pyrite finish",
+            "Google announces Pixel Watch 5 with Gemini AI and Health Guardian",
+        ],
+    },
+    {
         "case_id": "batch_008_c1",
         "label": "Anthropic Fable 5 export controls lifted",
         "titles": [
@@ -874,6 +906,31 @@ PRODUCTION_CLUSTER_CASES = [
 
 
 NEGATIVE_PRODUCTION_CLUSTER_CASES = [
+    {
+        "case_id": "prod_2026_08_12_negative_pixel_11_launch_vs_adjacent_angles",
+        "label": "Pixel 11 launch coverage should not absorb distinct product and feature stories",
+        "groups": [
+            [
+                "Google unveils Pixel 11 Pro Fold at $1,899+ with Tensor G6 and brighter displays",
+                "Google launches Pixel 11 Pro Fold with thinner design and new features",
+            ],
+            [
+                "Google raises Pixel 11 prices $100, Pixel Watch 5 $50, reduces Pro RAM to 12GB",
+                "Google Pixel 11 series: $100 price hike, new HiLight, minor camera updates",
+            ],
+            [
+                "Google unveils $899+ Pixel 11, $1,099+ Pro, $1,299+ Pro XL with Tensor G6",
+                "Google unveils Pixel 11 Pro and Pro XL with spacecraft-grade aluminum frames",
+            ],
+            ["Google Pixel 11 Pro Fold hands-on: coasting with minimal changes"],
+            ["Google Pixel 11 introduces Camera Looks for more authentic photos"],
+            [
+                "Google cuts Pixel 11 Pro AI Pro trial to 6 months, removes free trial for base Pixel 11"
+            ],
+            ["Google adds insulin-resistance trend tracking to Watch 5 and Fitbit"],
+            ["Google DeepMind launches SL2T sign-language-to-text model on Pixel 11"],
+        ],
+    },
     {
         "case_id": "batch_004_negative_tiktok_jv_false_merge",
         "label": "TikTok JV cluster should not absorb XML or privacy-update titles",

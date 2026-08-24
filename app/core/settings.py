@@ -283,7 +283,7 @@ class Settings(BaseSettings):
     news_group_model: str = CHEAP_MODEL_SPEC
     news_header_model: str = CHEAP_MODEL_SPEC
     news_list_warm_embeddings: bool = True
-    news_list_related_lookback_days: int = Field(default=7, ge=1, le=30)
+    news_list_related_lookback_days: int = Field(default=14, ge=1, le=30)
     news_list_max_related_candidates: int = Field(default=150, ge=1)
     news_list_primary_similarity_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     news_list_secondary_similarity_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
@@ -309,6 +309,7 @@ class Settings(BaseSettings):
     briefing_lens_idle_days: int = Field(default=7, ge=1, le=90)
     briefing_window_min: int = Field(default=3, ge=1, le=12)
     briefing_news_window_max: int = Field(default=4, ge=2, le=4)
+    briefing_news_event_similarity: float = Field(default=0.78, ge=0.0, le=1.0)
     briefing_max_figures_deep: int = Field(default=12, ge=0, le=50)
     briefing_max_figures_news: int = Field(default=6, ge=0, le=50)
     briefing_llm_timeout_seconds: int = Field(default=300, ge=1, le=600)

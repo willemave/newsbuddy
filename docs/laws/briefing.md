@@ -6,7 +6,7 @@ B2. Eligible sources are completed, unread, non-skipped articles, podcasts, and 
 
 B3. A source key is the canonical unit of coverage, citation, and read state.
 
-B4. Article and podcast segments cover one source each, while news segments may combine several sources into a compact roundup.
+B4. Article and podcast segments cover one source each, while news segments may combine several sources into a compact roundup. A news segment is sized by the distinct events it covers, not by source count: sources covering one event always stay in the same segment, however many there are.
 
 B5. Lens names and order remain stable within one representation, and counts describe active unread source coverage.
 

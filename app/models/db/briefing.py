@@ -46,6 +46,8 @@ class BriefingSegment(Base):
     markdown_raw = Column(Text, nullable=False, default="")
     narration_text = Column(Text, nullable=False, default="")
     source_keys = Column(JSONB, nullable=False, default=list)
+    # Source keys grouped by event; null means every source is its own event.
+    event_groups = Column(JSONB, nullable=True)
     status = Column(String(16), nullable=False, default="active", index=True)
     model = Column(String(64), nullable=False)
     prompt_version = Column(String(16), nullable=False)

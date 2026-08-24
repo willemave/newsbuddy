@@ -19,10 +19,10 @@ def test_fragmentation_metrics_report_achievable_floor_and_duplicates(monkeypatc
 
     metrics = compaction_service.briefing_fragmentation_metrics(
         [
-            ["news:1", "news:2", "news:2"],
-            ["news:3", "news:4"],
-            ["news:5", "news:6"],
-            ["news:7", "news:8"],
+            [["news:1"], ["news:2"], ["news:2"]],
+            [["news:3"], ["news:4"]],
+            [["news:5"], ["news:6"]],
+            [["news:7"], ["news:8"]],
         ],
         tier="news",
         read_keys={"news:8"},
@@ -30,8 +30,30 @@ def test_fragmentation_metrics_report_achievable_floor_and_duplicates(monkeypatc
     )
 
     assert metrics.unique_unread_source_count == 7
-    assert metrics.window_source_limit == 3
+    assert metrics.unread_event_count == 7
+    assert metrics.window_event_limit == 3
     assert metrics.minimum_required_segment_count == 3
+    assert metrics.excess_fragmentation == 1
+
+
+def test_fragmentation_metrics_count_events_not_sources(monkeypatch) -> None:
+    """One five-source event plus two singles fit one window; a read event drops out."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "briefing_news_window_max", 4)
+
+    metrics = compaction_service.briefing_fragmentation_metrics(
+        [
+            [["news:1", "news:2", "news:3", "news:4", "news:5"], ["news:6"]],
+            [["news:7"], ["news:8", "news:9"]],
+        ],
+        tier="news",
+        read_keys={"news:8", "news:9"},
+        settings=settings,
+    )
+
+    assert metrics.unique_unread_source_count == 7
+    assert metrics.unread_event_count == 3
+    assert metrics.minimum_required_segment_count == 1
     assert metrics.excess_fragmentation == 1
 
 
@@ -537,6 +559,29 @@ def test_large_lens_does_not_compact_full_windows() -> None:
         )
         == []
     )
+
+
+def test_news_compaction_donors_count_unread_events_not_sources() -> None:
+    one_event = BriefingSegment(
+        source_keys=["news:1", "news:2", "news:3", "news:4", "news:5"],
+        event_groups=[["news:1", "news:2", "news:3", "news:4", "news:5"]],
+    )
+    two_events_one_read = BriefingSegment(
+        source_keys=["news:6", "news:7", "news:8"],
+        event_groups=[["news:6", "news:7"], ["news:8"]],
+    )
+    three_events = BriefingSegment(
+        source_keys=["news:9", "news:10", "news:11"],
+        event_groups=[["news:9"], ["news:10"], ["news:11"]],
+    )
+
+    donors = compaction_service._compaction_donors(
+        [one_event, two_events_one_read, three_events],
+        read_keys={"news:8"},
+        tier="news",
+    )
+
+    assert donors == [one_event, two_events_one_read]
 
 
 @pytest.mark.parametrize("tier", ["longform", "audio"])

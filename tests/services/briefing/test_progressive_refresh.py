@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
 import pytest
 from sqlalchemy.orm import Session
 
@@ -13,11 +14,17 @@ from app.models.db import (
     ProcessingTask,
 )
 from app.models.db.users import User
+from app.services.briefing import event_grouping
 from app.services.briefing.first_run import start_first_edition
 from app.services.briefing.presentation import get_briefing_index
 from app.services.briefing.refresh import enqueue_ready_source, run_briefing_refresh
 
 pytestmark = pytest.mark.usefixtures("stub_briefing_layout_generator")
+
+
+def _distinct_event_vectors(texts: list[str], **_kwargs: object) -> np.ndarray:
+    """Embed every source orthogonally so each one is its own Briefing event."""
+    return np.eye(len(texts))
 
 
 def test_ready_sources_pull_the_debounced_refresh_forward_at_three(
@@ -77,6 +84,9 @@ def test_append_assigns_all_news_but_publishes_one_window(
     news_item_factory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        event_grouping, "encode_texts_with_embedding_model", _distinct_event_vectors
+    )
     assert test_user.id is not None
     user_id = test_user.id
     settings = get_settings().model_copy(
@@ -210,6 +220,9 @@ def test_append_updates_existing_news_category_one_window_at_a_time(
     news_item_factory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        event_grouping, "encode_texts_with_embedding_model", _distinct_event_vectors
+    )
     assert test_user.id is not None
     user_id = test_user.id
     settings = get_settings().model_copy(

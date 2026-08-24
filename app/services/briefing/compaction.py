@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.core.settings import Settings
 from app.models.db import BriefingLens, BriefingSegment
-from app.services.briefing.composer import plan_windows
-from app.services.briefing.segments import build_briefing_segment
+from app.services.briefing.composer import plan_event_windows
+from app.services.briefing.segments import build_briefing_segment, segment_event_groups
 from app.services.briefing.sources import (
     BriefingSource,
     eligible_unread_source_keys_for,
@@ -35,6 +35,7 @@ class CompactionWindow:
     tier: str
     window_index: int
     sources: tuple[BriefingSource, ...]
+    event_groups: tuple[tuple[str, ...], ...]
 
 
 @dataclass(frozen=True)
@@ -49,31 +50,43 @@ class CompactionPlan:
 @dataclass(frozen=True)
 class BriefingFragmentationMetrics:
     unique_unread_source_count: int
-    window_source_limit: int
+    unread_event_count: int
+    window_event_limit: int
     minimum_required_segment_count: int
     excess_fragmentation: int
 
 
 def briefing_fragmentation_metrics(
-    source_key_groups: list[list[str]],
+    event_groups: list[list[list[str]]],
     *,
     tier: str,
     read_keys: set[str],
     settings: Settings,
 ) -> BriefingFragmentationMetrics:
-    unique_unread_keys = {
-        str(source_key)
-        for source_keys in source_key_groups
-        for source_key in source_keys
-        if str(source_key) not in read_keys
-    }
-    window_source_limit = max(settings.briefing_news_window_max, 1) if tier == "news" else 1
-    minimum_required = ceil(len(unique_unread_keys) / window_source_limit)
+    """Measure how far a lens is from the fewest segments its unread events allow.
+
+    ``event_groups`` holds, per active segment, its events as lists of source
+    keys. An event stays unread while any of its sources is unread; a window
+    holds up to ``briefing_news_window_max`` events regardless of source count.
+    """
+    unique_unread_keys: set[str] = set()
+    unread_events: list[frozenset[str]] = []
+    for segment_events in event_groups:
+        for event in segment_events:
+            unread = frozenset(str(key) for key in event if str(key) not in read_keys)
+            if not unread:
+                continue
+            unique_unread_keys |= unread
+            if unread not in unread_events:
+                unread_events.append(unread)
+    window_event_limit = max(settings.briefing_news_window_max, 1) if tier == "news" else 1
+    minimum_required = ceil(len(unread_events) / window_event_limit)
     return BriefingFragmentationMetrics(
         unique_unread_source_count=len(unique_unread_keys),
-        window_source_limit=window_source_limit,
+        unread_event_count=len(unread_events),
+        window_event_limit=window_event_limit,
         minimum_required_segment_count=minimum_required,
-        excess_fragmentation=max(len(source_key_groups) - minimum_required, 0),
+        excess_fragmentation=max(len(event_groups) - minimum_required, 0),
     )
 
 
@@ -122,7 +135,7 @@ def prepare_compactions(
         if lens.id is None:
             continue
         segments = segments_by_lens_id[int(lens.id)]
-        eligible_source_groups: list[list[str]] = []
+        eligible_event_groups: list[list[list[str]]] = []
         unavailable_source_keys: set[str] = set()
         repair_donors: list[BriefingSegment] = []
         for segment in segments:
@@ -130,12 +143,17 @@ def prepare_compactions(
             eligible_keys = [key for key in unread_keys if key in eligible_source_keys]
             unavailable_keys = [key for key in unread_keys if key not in eligible_source_keys]
             if eligible_keys:
-                eligible_source_groups.append(eligible_keys)
+                eligible_event_groups.append(
+                    [
+                        [key for key in event if key in eligible_keys]
+                        for event in segment_event_groups(segment)
+                    ]
+                )
             if unavailable_keys:
                 unavailable_source_keys.update(unavailable_keys)
                 repair_donors.append(segment)
         fragmentation = briefing_fragmentation_metrics(
-            eligible_source_groups,
+            eligible_event_groups,
             tier=str(lens.tier),
             read_keys=set(),
             settings=settings,
@@ -150,7 +168,8 @@ def prepare_compactions(
                     "lens_key": str(lens.key),
                     "active_segment_count": len(segments),
                     "unique_unread_source_count": fragmentation.unique_unread_source_count,
-                    "window_source_limit": fragmentation.window_source_limit,
+                    "unread_event_count": fragmentation.unread_event_count,
+                    "window_event_limit": fragmentation.window_event_limit,
                     "minimum_required_segment_count": (
                         fragmentation.minimum_required_segment_count
                     ),
@@ -192,10 +211,18 @@ def prepare_compactions(
                 lens_title=str(lens.title),
                 tier=str(lens.tier),
                 window_index=window_index,
-                sources=tuple(window),
+                sources=tuple(source for event in window_events for source in event),
+                event_groups=tuple(
+                    tuple(source.source_key for source in event) for event in window_events
+                ),
             )
-            for window_index, window in enumerate(
-                plan_windows(sources, tier=str(lens.tier), settings=settings),
+            for window_index, window_events in enumerate(
+                plan_event_windows(
+                    sources,
+                    tier=str(lens.tier),
+                    settings=settings,
+                    source_of=lambda source: source,
+                ),
                 start=1,
             )
         )
@@ -314,6 +341,7 @@ def persist_compactions(
                     user_id=user_id,
                     segment=segment,
                     source_keys=[source.source_key for source in window.prepared.sources],
+                    event_groups=window.prepared.event_groups,
                     extra_warnings=("compaction_segment",),
                 )
             )
@@ -355,8 +383,16 @@ def _compaction_donors(
         return donors
 
     return [
-        segment for segment in segments if 0 < len(set(segment.source_keys or []) - read_keys) <= 2
+        segment
+        for segment in segments
+        if 0 < _segment_unread_event_count(segment, read_keys=read_keys) <= 2
     ]
+
+
+def _segment_unread_event_count(segment: BriefingSegment, *, read_keys: set[str]) -> int:
+    return sum(
+        1 for event in segment_event_groups(segment) if any(key not in read_keys for key in event)
+    )
 
 
 def _segment_unread_source_keys(

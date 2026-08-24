@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>News dedupe — explainer</title>
+<style>
+:root{--bg:#141414;--panel:#1d1d1d;--line:#3a3a3a;--ink:#e8e6e1;--mute:#8f8c86;--amber:#d9a441;--bad:#c0564a;--ok:#6f9a6a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,Inter,Helvetica,sans-serif;padding:40px 48px;max-width:1100px;margin:auto}
+h1{font-size:28px;margin:0 0 4px;font-weight:600}h2{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--amber);margin:44px 0 14px}
+.sub{color:var(--mute);margin:0 0 8px}
+.flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:150px;flex:1}
+.box b{display:block;font-size:14px}.box small{color:var(--mute);display:block;margin-top:3px}
+.arrow{display:flex;align-items:center;padding:0 8px;color:var(--mute);font-size:20px}
+.bad{border-color:var(--bad)}.bad b{color:#e58b80}.ok{border-color:var(--ok)}.ok b{color:#9fc59a}.new{border-color:var(--amber);border-style:dashed}.new b{color:var(--amber)}
+.tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--mute);margin-top:6px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.seg{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;background:var(--panel);font-size:13px}
+.seg span{display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;border-radius:6px;background:#2a2a2a}
+.seg .pix{background:#3b3118;color:var(--amber)}
+.bar{display:flex;height:22px;border-radius:6px;overflow:hidden;border:1px solid var(--line);margin:8px 0 4px;font-size:11px}
+.bar div{display:flex;align-items:center;justify-content:center;white-space:nowrap}
+.legend{color:var(--mute);font-size:12px}
+.stats{display:flex;gap:18px;margin:10px 0 0}.stat{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.stat .n{font-size:26px;font-weight:600}.stat .n.a{color:var(--amber)}.stat small{color:var(--mute)}
+ol.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+ol.steps li{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;position:relative}
+ol.steps li:before{counter-increment:s;content:counter(s);position:absolute;top:-12px;left:12px;background:var(--amber);color:#141414;font-weight:700;width:24px;height:24px;border-radius:99px;display:flex;align-items:center;justify-content:center;font-size:13px}
+ol.steps li b{display:block;margin-bottom:4px}ol.steps li small{color:var(--mute)}
+ol.steps li.skip{opacity:.55}ol.steps li.skip:before{background:var(--line);color:var(--mute)}
+</style></head><body>
+<h1>Why the Pixel 11 stories repeated</h1>
+<p class="sub">News → cluster → Briefing. Two layers, two different misses.</p>
+
+<h2>1 · Pipeline today</h2>
+<div class="flow">
+ <div class="box"><b>Ingest</b><small>news_items</small></div><div class="arrow">→</div>
+ <div class="box"><b>Find candidates</b><small>7-day lookback</small><span class="tag">was: 150 newest</span></div><div class="arrow">→</div>
+ <div class="box"><b>Score</b><small>title 0.55 · content 0.35 · source 0.10</small><span class="tag">≥0.85 merge · ≥0.75 guarded</span></div><div class="arrow">→</div>
+ <div class="box"><b>Cluster</b><small>representative + members</small></div><div class="arrow">→</div>
+ <div class="box"><b>Briefing windows</b><small>unread sources, 4 per passage, by arrival</small></div><div class="arrow">→</div>
+ <div class="box"><b>Compaction</b><small>only segments with ≤2 unread</small></div>
+</div>
+
+<h2>2 · Layer A — same-story pairs never met</h2>
+<div class="row">
+ <div>
+  <p class="sub">Aug 12: ~586 representatives in one day. The old window kept the 150 newest by <code>ingested_at</code>.</p>
+  <div class="bar"><div style="flex:150;background:#3b3118;color:var(--amber)">150 scanned</div><div style="flex:436;background:#262626;color:var(--mute)">~436 never scored ← Fold #1 · Pro XL #1 · Watch 5 #1</div></div>
+  <div class="legend">Candidate list at the moment the second Fold story (25488) was processed</div>
+  <div class="stats">
+   <div class="stat"><div class="n">4</div><small>obvious pairs left split</small></div>
+   <div class="stat"><div class="n">7%</div><small>merge rate Aug 9–15</small></div>
+   <div class="stat"><div class="n a">25%</div><small>after Aug 16 deploy (9db24b09)</small></div>
+  </div>
+ </div>
+ <div>
+  <div class="flow" style="flex-direction:column;gap:8px">
+   <div class="box bad"><b>Then</b><small>newest 150 → partner outside window → no score at all</small></div>
+   <div class="box ok"><b>Now</b><small>lexical title rank over full lookback → cap → embed. All 4 pairs merge, F1 1.0</small></div>
+   <div class="box"><b>Not backfilled</b><small>Aug 12 rows stay singletons. Lookback floor is now Aug 15 — a backfill would find nothing.</small></div>
+  </div>
+ </div>
+</div>
+
+<h2>3 · Layer B — one event, three passages</h2>
+<div class="row">
+ <div>
+  <p class="sub">Windows are cut by arrival, not by topic. Full segments are never recomposed.</p>
+  <div class="seg">#4707 <span class="pix">Fold hands-on</span><span class="pix">price hike</span><span class="pix">SL2T</span></div>
+  <div class="seg">#4709 <span class="pix">Pro/XL frames</span><span class="pix">Watch insulin</span><span class="pix">Camera Looks</span><span class="pix">AI trial</span></div>
+  <div class="seg">#4728 <span class="pix">Fold official</span><span>unrelated</span><span>unrelated</span></div>
+  <div class="legend">3 + 4 + 3 unread → compaction rule (≤2) skips all three</div>
+ </div>
+ <div>
+  <p class="sub">And the widened window now over-merges the other way:</p>
+  <div class="flow" style="flex-direction:column;gap:8px">
+   <div class="box bad"><b>Fold launch ⊃ Pixel 11/Pro/XL launch</b><small>0.877 · primary band · detail veto never runs ≥0.85</small></div>
+   <div class="box bad"><b>Fold launch ⊃ Fold hands-on</b><small>0.884 · same</small></div>
+   <div class="box"><b>Price hike stayed out by luck</b><small>“12gb” vs “g6” vetoed the bridge merge</small></div>
+  </div>
+ </div>
+</div>
+
+<h2>4 · Proposed changes, in order</h2>
+<ol class="steps">
+ <li><b>Persist relation traces</b><small>model/version, candidate ids, scores, reject reason. Sink already exists — make it durable.</small></li>
+ <li><b>Group windows by topic</b><small>Order unread news by event signal before slicing into 4s. Cheap; fixes most of the screenshot.</small></li>
+ <li><b>Gated recompaction</b><small>Allow 3/4-source donors when one event spans ≥2 unread segments and the result has fewer segments.</small></li>
+ <li><b>Decide event granularity</b><small>One launch event vs one per product. Write it in laws, then tune the primary-band veto.</small></li>
+</ol>
+<p class="sub" style="margin-top:14px"><b style="color:var(--mute)">Dropped:</b> singleton backfill — items are read, outside lookback, and aging out.</p>
+</body></html>

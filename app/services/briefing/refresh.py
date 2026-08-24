@@ -9,6 +9,7 @@ from time import perf_counter
 from typing import Literal
 
 from sqlalchemy import func, or_
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
@@ -21,7 +22,11 @@ from app.models.db import (
     ProcessingTask,
 )
 from app.services.briefing import compaction, window_composition
-from app.services.briefing.composer import LayoutGenerator, generate_layout_with_llm, plan_windows
+from app.services.briefing.composer import (
+    LayoutGenerator,
+    generate_layout_with_llm,
+    plan_event_windows,
+)
 from app.services.briefing.eligibility import is_briefing_enabled_for_user
 from app.services.briefing.first_run import bump_first_edition_revision
 from app.services.briefing.lenses import (
@@ -87,9 +92,7 @@ def enqueue_ready_source(
         if inserted:
             db.flush()
         resolved_delay = settings.briefing_debounce_seconds
-        batch_minimum = settings.briefing_window_min
-        if lens_key is None:
-            batch_minimum = max(batch_minimum, settings.briefing_new_lens_min_items)
+        batch_minimum = _briefing_batch_minimum(settings=settings, lens_key=lens_key)
         if _pending_batch_source_count(db, user_id=user_id, lens_key=lens_key) >= batch_minimum:
             resolved_delay = 0
     enqueue_briefing_refresh_task(
@@ -99,6 +102,133 @@ def enqueue_ready_source(
         delay_seconds=resolved_delay,
     )
     return inserted
+
+
+def insert_pending_sources(
+    db: Session,
+    *,
+    user_ids: set[int],
+    source_kind: str,
+    source_id: int,
+    lens_key: str | None,
+) -> set[int]:
+    """Insert one ready source for many users and return newly inserted owners."""
+    if not user_ids:
+        return set()
+    rows = [
+        {
+            "user_id": user_id,
+            "lens_key": lens_key,
+            "source_kind": source_kind,
+            "source_id": source_id,
+        }
+        for user_id in sorted(user_ids)
+    ]
+    result = db.execute(
+        postgresql_insert(BriefingPendingSource)
+        .values(rows)
+        .on_conflict_do_nothing(
+            index_elements=[
+                BriefingPendingSource.user_id,
+                BriefingPendingSource.source_kind,
+                BriefingPendingSource.source_id,
+            ]
+        )
+        .returning(BriefingPendingSource.user_id)
+    )
+    inserted_user_ids = {
+        int(user_id) for user_id in result.scalars().all() if isinstance(user_id, int)
+    }
+    if lens_key is not None:
+        (
+            db.query(BriefingPendingSource)
+            .filter(
+                BriefingPendingSource.user_id.in_(user_ids),
+                BriefingPendingSource.source_kind == source_kind,
+                BriefingPendingSource.source_id == source_id,
+                BriefingPendingSource.lens_key.is_(None),
+            )
+            .update(
+                {BriefingPendingSource.lens_key: lens_key},
+                synchronize_session=False,
+            )
+        )
+    return inserted_user_ids
+
+
+def build_ready_source_refresh_requests(
+    db: Session,
+    *,
+    user_ids: set[int],
+    lens_key: str | None,
+    settings: Settings,
+) -> list[TaskEnqueueRequest]:
+    """Build per-user refresh requests from the canonical batch threshold."""
+    if not user_ids:
+        return []
+    pending_counts = {
+        int(user_id): int(count)
+        for user_id, count in db.query(
+            BriefingPendingSource.user_id,
+            func.count(BriefingPendingSource.id),
+        )
+        .filter(
+            BriefingPendingSource.user_id.in_(user_ids),
+            (
+                BriefingPendingSource.lens_key.is_(None)
+                if lens_key is None
+                else BriefingPendingSource.lens_key == lens_key
+            ),
+        )
+        .group_by(BriefingPendingSource.user_id)
+        .all()
+    }
+    now = datetime.now(UTC).replace(tzinfo=None)
+    batch_minimum = _briefing_batch_minimum(settings=settings, lens_key=lens_key)
+    return [
+        build_briefing_refresh_request(
+            user_id=user_id,
+            mode="append",
+            available_at=now
+            + timedelta(
+                seconds=(
+                    0
+                    if pending_counts.get(user_id, 0) >= batch_minimum
+                    else settings.briefing_debounce_seconds
+                )
+            ),
+        )
+        for user_id in sorted(user_ids)
+    ]
+
+
+def expedite_pending_refreshes(
+    db: Session,
+    *,
+    requests: list[TaskEnqueueRequest],
+    task_ids: list[int],
+) -> None:
+    """Pull existing pending refreshes forward to their newly calculated deadlines."""
+    by_available_at: dict[datetime, list[int]] = {}
+    for request, task_id in zip(requests, task_ids, strict=True):
+        if request.available_at is not None:
+            by_available_at.setdefault(request.available_at, []).append(task_id)
+    for available_at, ids in by_available_at.items():
+        (
+            db.query(ProcessingTask)
+            .filter(
+                ProcessingTask.id.in_(ids),
+                ProcessingTask.status == TaskStatus.PENDING.value,
+                or_(
+                    ProcessingTask.available_at.is_(None),
+                    ProcessingTask.available_at > available_at,
+                ),
+            )
+            .update(
+                {ProcessingTask.available_at: available_at},
+                synchronize_session=False,
+            )
+        )
 
 
 def enqueue_briefing_refresh_task(
@@ -111,7 +241,12 @@ def enqueue_briefing_refresh_task(
     """Enqueue a delayed refresh task using the same active dedupe constraint as QueueService."""
 
     available_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=max(delay_seconds, 0))
-    dedupe_key = _refresh_dedupe_key(user_id=user_id, mode=mode)
+    request = build_briefing_refresh_request(
+        user_id=user_id,
+        mode=mode,
+        available_at=available_at,
+    )
+    dedupe_key = str(request.dedupe_key)
     existing_task_id = (
         db.query(ProcessingTask.id)
         .filter(ProcessingTask.dedupe_key == dedupe_key)
@@ -120,15 +255,7 @@ def enqueue_briefing_refresh_task(
     )
     task_id = get_task_queue_gateway().enqueue_many_in_session(
         db,
-        [
-            TaskEnqueueRequest(
-                task_type=TaskType.BRIEFING_REFRESH,
-                payload={"user_id": user_id, "mode": mode},
-                dedupe_key=dedupe_key,
-                owner_user_id=user_id,
-                available_at=available_at,
-            )
-        ],
+        [request],
     )[0]
     if existing_task_id is None:
         return True
@@ -145,6 +272,22 @@ def enqueue_briefing_refresh_task(
         .update({ProcessingTask.available_at: available_at}, synchronize_session=False)
     )
     return bool(updated)
+
+
+def build_briefing_refresh_request(
+    *,
+    user_id: int,
+    mode: RefreshMode,
+    available_at: datetime,
+) -> TaskEnqueueRequest:
+    """Build the canonical refresh request for atomic multi-user fanout."""
+    return TaskEnqueueRequest(
+        task_type=TaskType.BRIEFING_REFRESH,
+        payload={"user_id": user_id, "mode": mode},
+        dedupe_key=_refresh_dedupe_key(user_id=user_id, mode=mode),
+        owner_user_id=user_id,
+        available_at=available_at,
+    )
 
 
 def run_briefing_refresh(
@@ -381,6 +524,13 @@ def _pending_batch_source_count(
     return int(query.scalar() or 0)
 
 
+def _briefing_batch_minimum(*, settings: Settings, lens_key: str | None) -> int:
+    minimum = settings.briefing_window_min
+    if lens_key is None:
+        minimum = max(minimum, settings.briefing_new_lens_min_items)
+    return minimum
+
+
 def _release_current_sweep_dedupe(db: Session, *, task_id: int) -> None:
     db.query(ProcessingTask).filter(ProcessingTask.id == task_id).filter(
         ProcessingTask.task_type == TaskType.BRIEFING_REFRESH.value,
@@ -577,10 +727,16 @@ def _plan_ready_windows(
         source_rows = [
             (int(row.id), source) for row, source in pending_sources if row.id is not None
         ]
-        planned_windows = plan_windows(source_rows, tier=str(lens.tier), settings=settings)
+        planned_windows = plan_event_windows(
+            source_rows,
+            tier=str(lens.tier),
+            settings=settings,
+            source_of=lambda row: row[1],
+        )
         if mode != "full":
             planned_windows = planned_windows[:1]
-        for window_index, window_rows in enumerate(planned_windows, start=1):
+        for window_index, window_events in enumerate(planned_windows, start=1):
+            window_rows = [row for event in window_events for row in event]
             windows.append(
                 AppendWindow(
                     lens_id=int(lens.id),
@@ -590,6 +746,10 @@ def _plan_ready_windows(
                     window_index=window_index,
                     pending_row_ids=tuple(row_id for row_id, _source in window_rows),
                     sources=tuple(source for _row_id, source in window_rows),
+                    event_groups=tuple(
+                        tuple(source.source_key for _row_id, source in event)
+                        for event in window_events
+                    ),
                 )
             )
     return windows

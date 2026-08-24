@@ -41,6 +41,7 @@ from app.models.domain.content_mapper import content_to_domain
 from app.queries.queue_health import get_queue_health_snapshot
 from app.services.briefing.compaction import briefing_fragmentation_metrics
 from app.services.briefing.refresh import RefreshMode, run_briefing_refresh, status_counts
+from app.services.briefing.segments import segment_event_groups
 from app.services.briefing.sources import read_source_keys
 from app.services.content_metadata_merge import refresh_merge_content_metadata
 from app.services.image_generation import ImageGenerationService, get_image_generation_service
@@ -327,7 +328,7 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                     for segment in active_segment_rows
                 )
                 fragmentation = briefing_fragmentation_metrics(
-                    [list(segment.source_keys or []) for segment in active_segment_rows],
+                    [segment_event_groups(segment) for segment in active_segment_rows],
                     tier=str(lens.tier),
                     read_keys=briefing_read_keys,
                     settings=settings,
@@ -346,7 +347,8 @@ def briefing_status(context: RemoteContext, *, user_id: int) -> dict[str, Any]:
                         "position": lens.position,
                         "active_segments": active_segments,
                         "unique_unread_sources": fragmentation.unique_unread_source_count,
-                        "window_source_limit": fragmentation.window_source_limit,
+                        "unread_events": fragmentation.unread_event_count,
+                        "window_event_limit": fragmentation.window_event_limit,
                         "minimum_required_segments": fragmentation.minimum_required_segment_count,
                         "excess_fragmentation": fragmentation.excess_fragmentation,
                         "source_references": source_references,
@@ -758,10 +760,7 @@ def logs_exceptions(
         elif candidate[:2] > selected[0][:2]:
             heapq.heapreplace(selected, candidate)
 
-    matched = [
-        item[2]
-        for item in sorted(selected, key=lambda item: item[:2], reverse=True)
-    ]
+    matched = [item[2] for item in sorted(selected, key=lambda item: item[:2], reverse=True)]
 
     rendered = matched if unsafe_raw else [redact_value(record) for record in matched]
     return {

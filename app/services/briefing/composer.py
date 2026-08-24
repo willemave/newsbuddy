@@ -4,6 +4,7 @@ import json
 import re
 import time
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -12,6 +13,7 @@ from pydantic_ai.agent import AgentRunResult
 
 from app.core.logging import get_logger
 from app.core.settings import Settings, get_settings
+from app.services.briefing.event_grouping import group_news_events
 from app.services.briefing.layout_models import ComposerLayout
 from app.services.briefing.layout_policy import (
     BriefingLayoutAssessment,
@@ -99,28 +101,55 @@ class ProcessedLayout:
         )
 
 
-def plan_windows[WindowItem](
+def plan_event_windows[WindowItem](
     sources: list[WindowItem],
     *,
     tier: str,
     settings: Settings | None = None,
-) -> list[list[WindowItem]]:
+    source_of: Callable[[WindowItem], BriefingSource] | None = None,
+) -> list[list[list[WindowItem]]]:
+    """Split sources into composition windows of events.
+
+    News windows hold up to ``briefing_news_window_max`` *events*, not rows:
+    when ``source_of`` is given, sources covering one event are grouped first
+    and always land in the same window, however many of them there are.
+    Other tiers yield one single-source event per window.
+    """
     if tier != "news":
-        return [[source] for source in sources]
+        return [[[source]] for source in sources]
 
     settings = settings or get_settings()
     max_size = max(1, settings.briefing_news_window_max)
     if not sources:
         return []
-    window_count = (len(sources) + max_size - 1) // max_size
-    base_size, larger_windows = divmod(len(sources), window_count)
-    windows: list[list[WindowItem]] = []
+    events: list[list[WindowItem]]
+    if source_of is None:
+        events = [[source] for source in sources]
+    else:
+        events = group_news_events(sources, source_of=source_of, settings=settings)
+    window_count = (len(events) + max_size - 1) // max_size
+    base_size, larger_windows = divmod(len(events), window_count)
+    windows: list[list[list[WindowItem]]] = []
     start = 0
     for window_index in range(window_count):
         size = base_size + int(window_index < larger_windows)
-        windows.append(sources[start : start + size])
+        windows.append(events[start : start + size])
         start += size
     return windows
+
+
+def plan_windows[WindowItem](
+    sources: list[WindowItem],
+    *,
+    tier: str,
+    settings: Settings | None = None,
+    source_of: Callable[[WindowItem], BriefingSource] | None = None,
+) -> list[list[WindowItem]]:
+    """Flattened ``plan_event_windows``: each window as its ordered sources."""
+    return [
+        [item for event in window for item in event]
+        for window in plan_event_windows(sources, tier=tier, settings=settings, source_of=source_of)
+    ]
 
 
 def compose_window(

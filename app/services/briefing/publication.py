@@ -28,6 +28,7 @@ class AppendWindow:
     window_index: int
     pending_row_ids: tuple[int, ...]
     sources: tuple[BriefingSource, ...]
+    event_groups: tuple[tuple[str, ...], ...]
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,7 @@ def _persist_append_windows(
                 user_id=user_id,
                 segment=composed.segment,
                 source_keys=[source.source_key for source in prepared.sources],
+                event_groups=prepared.event_groups,
             )
         )
         pending_row_ids.extend(prepared.pending_row_ids)
