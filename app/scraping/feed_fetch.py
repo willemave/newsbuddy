@@ -16,6 +16,7 @@ def fetch_and_parse_feed(url: str) -> Any:
     response = get_http_service().fetch_bounded_public(
         url,
         headers=FEED_REQUEST_HEADERS,
+        max_response_bytes=None,
         log_client_errors=False,
         log_exceptions=False,
     )

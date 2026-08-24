@@ -139,6 +139,33 @@ def test_bounded_public_fetch_streams_with_hard_body_limit(monkeypatch) -> None:
         client.close()
 
 
+def test_bounded_public_fetch_can_disable_body_limit(monkeypatch) -> None:
+    service = HttpService()
+    payload = b"x" * (http_module.DEFAULT_BOUNDED_RESPONSE_BYTES + 1)
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                headers={"Content-Length": str(len(payload))},
+                stream=httpx.ByteStream(payload),
+                request=request,
+            )
+        )
+    )
+    monkeypatch.setattr(http_module, "_resolve_host_addresses", lambda *_args: {"8.8.8.8"})
+    monkeypatch.setattr(service, "get_client", lambda url=None, **_kwargs: client)
+
+    try:
+        response = service.fetch_bounded_public(
+            "https://feeds.example/show.xml",
+            max_response_bytes=None,
+        )
+    finally:
+        client.close()
+
+    assert response.content == payload
+
+
 def test_bounded_public_fetch_pins_validated_address_and_preserves_origin(monkeypatch) -> None:
     service = HttpService()
     captured_request: httpx.Request | None = None

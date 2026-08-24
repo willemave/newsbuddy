@@ -28,6 +28,7 @@ def test_fetch_and_parse_feed_uses_shared_pipeline_http_client(monkeypatch) -> N
     http_service.fetch_bounded_public.assert_called_once_with(
         str(request.url),
         headers=feed_fetch.FEED_REQUEST_HEADERS,
+        max_response_bytes=None,
         log_client_errors=False,
         log_exceptions=False,
     )

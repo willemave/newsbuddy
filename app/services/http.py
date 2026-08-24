@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import atexit
 import ipaddress
 import logging
 import socket
 import threading
+from collections.abc import Callable, Iterator
 from contextlib import nullcontext
-from typing import Protocol
+from typing import Protocol, TypeVar
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -56,6 +59,7 @@ NON_RETRYABLE_STATUS_CODES: set[int] = {
 
 DEFAULT_BOUNDED_RESPONSE_BYTES = 2_000_000
 DEFAULT_MAX_REDIRECTS = 5
+_BoundedResult = TypeVar("_BoundedResult")
 
 
 class NonRetryableError(Exception):
@@ -70,6 +74,19 @@ class UnsafeHttpUrlError(NonRetryableError):
 
 class ResponseTooLargeError(NonRetryableError):
     """Raised when a streamed response exceeds its configured byte budget."""
+
+
+def _bounded_response_chunks(
+    response: httpx.Response,
+    *,
+    max_response_bytes: int | None,
+) -> Iterator[bytes]:
+    byte_count = 0
+    for chunk in response.iter_bytes():
+        byte_count += len(chunk)
+        if max_response_bytes is not None and byte_count > max_response_bytes:
+            raise ResponseTooLargeError(f"Response exceeds {max_response_bytes} byte limit")
+        yield chunk
 
 
 def _resolve_host_addresses(host: str, port: int) -> set[str]:
@@ -189,6 +206,28 @@ class HttpFetcher(Protocol):
     ) -> httpx.Response: ...
 
 
+class BoundedPublicHttpService:
+    """HttpFetcher adapter that always applies SSRF, redirect, and byte bounds."""
+
+    def __init__(self, service: HttpService | None = None) -> None:
+        self._service = service or get_http_service()
+
+    def fetch(
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
+        *,
+        log_client_errors: bool = True,
+        log_exceptions: bool = True,
+    ) -> httpx.Response:
+        return self._service.fetch_bounded_public(
+            url,
+            headers=headers,
+            log_client_errors=log_client_errors,
+            log_exceptions=log_exceptions,
+        )
+
+
 def fetch_quiet(
     http_service: HttpFetcher,
     url: str,
@@ -259,6 +298,114 @@ class HttpService:
         for client in clients:
             if not client.is_closed:
                 client.close()
+
+    def _consume_bounded_public(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str] | None,
+        max_response_bytes: int | None,
+        max_redirects: int,
+        consumer: Callable[
+            [httpx.Response, httpx.URL, dict[str, str], Iterator[bytes]],
+            _BoundedResult,
+        ],
+        log_client_errors: bool,
+        log_exceptions: bool,
+    ) -> _BoundedResult:
+        """Validate, pin, redirect, and bound one public streaming request."""
+        if max_response_bytes is not None and max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be positive")
+        if max_redirects < 0:
+            raise ValueError("max_redirects must be non-negative")
+
+        request_headers = self.headers.copy()
+        if headers:
+            request_headers.update(headers)
+        current_url = url
+        try:
+            for redirect_count in range(max_redirects + 1):
+                addresses = _resolve_public_http_addresses(current_url)
+                original_url = httpx.URL(current_url)
+                client = self.get_client(current_url, trust_env=False)
+                hop_headers = {
+                    key: value for key, value in request_headers.items() if key.lower() != "host"
+                }
+                hop_headers["Host"] = original_url.netloc.decode("ascii")
+                hop_headers["Connection"] = "close"
+                redirect_location: str | None = None
+                last_transport_error: httpx.TransportError | None = None
+
+                for address in addresses:
+                    pinned_url = original_url.copy_with(host=address)
+                    logger.debug("Fetching bounded public URL %s via %s", current_url, address)
+                    try:
+                        with client.stream(
+                            "GET",
+                            pinned_url,
+                            headers=hop_headers,
+                            follow_redirects=False,
+                            extensions={"sni_hostname": original_url.host},
+                        ) as response:
+                            if response.has_redirect_location:
+                                if redirect_count >= max_redirects:
+                                    raise NonRetryableError(
+                                        f"HTTP redirect limit exceeded for {url}"
+                                    )
+                                redirect_location = response.headers["location"]
+                                break
+                            response.raise_for_status()
+                            content_length = response.headers.get("content-length")
+                            if content_length is not None:
+                                try:
+                                    declared_bytes = int(content_length)
+                                except ValueError:
+                                    declared_bytes = 0
+                                if (
+                                    max_response_bytes is not None
+                                    and declared_bytes > max_response_bytes
+                                ):
+                                    raise ResponseTooLargeError(
+                                        f"Response exceeds {max_response_bytes} byte limit"
+                                    )
+                            return consumer(
+                                response,
+                                original_url,
+                                hop_headers,
+                                _bounded_response_chunks(
+                                    response,
+                                    max_response_bytes=max_response_bytes,
+                                ),
+                            )
+                    except httpx.TransportError as exc:
+                        last_transport_error = exc
+
+                if redirect_location is not None:
+                    current_url = urljoin(current_url, redirect_location)
+                    continue
+                if last_transport_error is not None:
+                    raise last_transport_error
+                raise RuntimeError("Bounded HTTP request exhausted resolved addresses")
+        except httpx.HTTPStatusError as exc:
+            categorized_error = categorize_http_error(exc)
+            status_code = exc.response.status_code
+            if status_code >= 500 or log_client_errors:
+                level = logging.ERROR if status_code >= 500 else logging.DEBUG
+                logger.log(level, "HTTP error %s for %s", status_code, current_url)
+            raise categorized_error from exc
+        except httpx.ConnectError as exc:
+            if is_ssl_error(exc):
+                raise NonRetryableError(f"SSL error: {exc}") from exc
+            if is_dns_resolution_error(exc):
+                raise NonRetryableError(f"DNS resolution error: {exc}") from exc
+            if log_exceptions:
+                logger.exception("Connection error for bounded URL %s", current_url)
+            raise
+        except Exception:
+            if log_exceptions:
+                logger.exception("Bounded HTTP request error for %s", current_url)
+            raise
+        raise RuntimeError("Bounded HTTP request ended without a response")
 
     @retry(
         stop=stop_after_attempt(3),
@@ -411,126 +558,83 @@ class HttpService:
         url: str,
         headers: dict[str, str] | None = None,
         *,
-        max_response_bytes: int = DEFAULT_BOUNDED_RESPONSE_BYTES,
+        max_response_bytes: int | None = DEFAULT_BOUNDED_RESPONSE_BYTES,
         max_redirects: int = DEFAULT_MAX_REDIRECTS,
         log_client_errors: bool = True,
         log_exceptions: bool = True,
     ) -> httpx.Response:
-        """Stream a public URL with strict response and redirect bounds."""
-        if max_response_bytes <= 0:
-            raise ValueError("max_response_bytes must be positive")
-        if max_redirects < 0:
-            raise ValueError("max_redirects must be non-negative")
+        """Stream a public URL with strict redirect and optional response bounds."""
 
-        request_headers = self.headers.copy()
-        if headers:
-            request_headers.update(headers)
-        current_url = url
+        def materialize(
+            response: httpx.Response,
+            original_url: httpx.URL,
+            hop_headers: dict[str, str],
+            chunks: Iterator[bytes],
+        ) -> httpx.Response:
+            body = b"".join(chunks)
+            materialized_headers = [
+                (key, value)
+                for key, value in response.headers.multi_items()
+                if key.lower() not in {"content-encoding", "content-length"}
+            ]
+            return httpx.Response(
+                response.status_code,
+                headers=materialized_headers,
+                content=body,
+                request=httpx.Request("GET", original_url, headers=hop_headers),
+            )
 
-        try:
-            for redirect_count in range(max_redirects + 1):
-                addresses = _resolve_public_http_addresses(current_url)
-                original_url = httpx.URL(current_url)
-                client = self.get_client(current_url, trust_env=False)
-                hop_headers = {
-                    key: value for key, value in request_headers.items() if key.lower() != "host"
-                }
-                hop_headers["Host"] = original_url.netloc.decode("ascii")
-                # Pinned IP origins must not share pooled TLS connections across
-                # distinct virtual hosts that happen to resolve to the same address.
-                hop_headers["Connection"] = "close"
-                redirect_location: str | None = None
-                last_transport_error: httpx.TransportError | None = None
+        return self._consume_bounded_public(
+            url,
+            headers=headers,
+            max_response_bytes=max_response_bytes,
+            max_redirects=max_redirects,
+            consumer=materialize,
+            log_client_errors=log_client_errors,
+            log_exceptions=log_exceptions,
+        )
 
-                for address in addresses:
-                    pinned_url = original_url.copy_with(host=address)
-                    logger.debug(
-                        "Fetching bounded public URL %s via %s",
-                        current_url,
-                        address,
-                    )
-                    try:
-                        with client.stream(
-                            "GET",
-                            pinned_url,
-                            headers=hop_headers,
-                            follow_redirects=False,
-                            extensions={"sni_hostname": original_url.host},
-                        ) as response:
-                            if response.has_redirect_location:
-                                if redirect_count >= max_redirects:
-                                    raise NonRetryableError(
-                                        f"HTTP redirect limit exceeded for {url}"
-                                    )
-                                redirect_location = response.headers["location"]
-                                break
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=8),
+        retry=retry_if_exception(_is_retryable_http_error),
+        reraise=True,
+    )
+    def download_bounded_public(
+        self,
+        url: str,
+        destination: str,
+        *,
+        max_response_bytes: int,
+        max_redirects: int = DEFAULT_MAX_REDIRECTS,
+        headers: dict[str, str] | None = None,
+    ) -> int:
+        """Stream a public URL to one host file with the same SSRF boundaries."""
 
-                            response.raise_for_status()
-                            content_length = response.headers.get("content-length")
-                            if content_length is not None:
-                                try:
-                                    declared_bytes = int(content_length)
-                                except ValueError:
-                                    declared_bytes = 0
-                                if declared_bytes > max_response_bytes:
-                                    raise ResponseTooLargeError(
-                                        f"Response exceeds {max_response_bytes} byte limit"
-                                    )
+        def write_file(
+            _response: httpx.Response,
+            _original_url: httpx.URL,
+            _hop_headers: dict[str, str],
+            chunks: Iterator[bytes],
+        ) -> int:
+            byte_count = 0
+            with open(destination, "wb") as output:  # noqa: PTH123
+                for chunk in chunks:
+                    byte_count += len(chunk)
+                    output.write(chunk)
+            if byte_count <= 0:
+                raise NonRetryableError("Remote media response was empty")
+            return byte_count
 
-                            body = bytearray()
-                            for chunk in response.iter_bytes():
-                                body.extend(chunk)
-                                if len(body) > max_response_bytes:
-                                    raise ResponseTooLargeError(
-                                        f"Response exceeds {max_response_bytes} byte limit"
-                                    )
-
-                            materialized_headers = [
-                                (key, value)
-                                for key, value in response.headers.multi_items()
-                                if key.lower() not in {"content-encoding", "content-length"}
-                            ]
-                            materialized_request = httpx.Request(
-                                "GET",
-                                original_url,
-                                headers=hop_headers,
-                            )
-                            return httpx.Response(
-                                response.status_code,
-                                headers=materialized_headers,
-                                content=bytes(body),
-                                request=materialized_request,
-                            )
-                    except httpx.TransportError as exc:
-                        last_transport_error = exc
-
-                if redirect_location is not None:
-                    current_url = urljoin(current_url, redirect_location)
-                    continue
-                if last_transport_error is not None:
-                    raise last_transport_error
-                raise RuntimeError("Bounded HTTP fetch exhausted resolved addresses")
-        except httpx.HTTPStatusError as exc:
-            categorized_error = categorize_http_error(exc)
-            status_code = exc.response.status_code
-            if status_code >= 500 or log_client_errors:
-                level = logging.ERROR if status_code >= 500 else logging.DEBUG
-                logger.log(level, "HTTP error %s for %s", status_code, current_url)
-            raise categorized_error from exc
-        except httpx.ConnectError as exc:
-            if is_ssl_error(exc):
-                raise NonRetryableError(f"SSL error: {exc}") from exc
-            if is_dns_resolution_error(exc):
-                raise NonRetryableError(f"DNS resolution error: {exc}") from exc
-            if log_exceptions:
-                logger.exception("Connection error for bounded URL %s", current_url)
-            raise
-        except Exception:
-            if log_exceptions:
-                logger.exception("Bounded HTTP fetch error for %s", current_url)
-            raise
-
-        raise RuntimeError("Bounded HTTP fetch ended without a response")
+        return self._consume_bounded_public(
+            url,
+            headers=headers,
+            max_response_bytes=max_response_bytes,
+            max_redirects=max_redirects,
+            consumer=write_file,
+            log_client_errors=True,
+            log_exceptions=True,
+        )
 
     @retry(
         stop=stop_after_attempt(3),
