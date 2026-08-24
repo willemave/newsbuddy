@@ -97,9 +97,20 @@ def stub_detector_feed(
             }
         return None
 
+    def _validate_response(_self, candidate_url: str, _response: object):
+        return _validate(_self, candidate_url)
+
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.FeedDetector.validate_feed_url",
         _validate,
+    )
+    monkeypatch.setattr(
+        "app.services.feed_subscription_resolution.FeedDetector._fetch_candidate_batch",
+        lambda _self, urls: [object() for _url in urls],
+    )
+    monkeypatch.setattr(
+        "app.services.feed_subscription_resolution.FeedDetector._validate_feed_response",
+        _validate_response,
     )
     monkeypatch.setattr(
         "app.services.feed_subscription_resolution.FeedDetector.classify_feed_type",

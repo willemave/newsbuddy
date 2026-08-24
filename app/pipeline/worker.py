@@ -21,8 +21,13 @@ from app.pipeline.tweet_video_metadata import (
     promote_tweet_video_metadata,
     resolve_tweet_video_metadata,
 )
+from app.processing_strategies.html_strategy import HtmlProcessorStrategy
 from app.processing_strategies.registry import get_strategy_registry
 from app.processing_strategies.youtube_strategy import YouTubeProcessorStrategy
+from app.services.article_processing_input import (
+    build_preextracted_html_data,
+    resolve_article_processing_url,
+)
 from app.services.canonical_content_state import (
     finalize_canonical_user_state,
     reconcile_canonical_x_bookmark_destinations,
@@ -368,10 +373,17 @@ class ContentWorker:
                 "original_url": str(content.url),
             }
 
+            preextracted_data = (
+                build_preextracted_html_data(content, processed_url=processed_url)
+                if isinstance(strategy, HtmlProcessorStrategy)
+                else None
+            )
             # Download content using strategy (HTML strategy uses crawl4ai)
             try:
+                if preextracted_data is not None:
+                    raw_content = None
                 # Handle async methods from YouTubeStrategy
-                if asyncio.iscoroutinefunction(strategy.download_content):
+                elif asyncio.iscoroutinefunction(strategy.download_content):
                     raw_content = asyncio.run(strategy.download_content(processed_url))
                 else:
                     raw_content = strategy.download_content(processed_url)
@@ -382,8 +394,10 @@ class ContentWorker:
 
             # Extract data using strategy
             try:
+                if preextracted_data is not None:
+                    extracted_data = preextracted_data
                 # Handle async methods from YouTubeStrategy
-                if asyncio.iscoroutinefunction(strategy.extract_data):
+                elif asyncio.iscoroutinefunction(strategy.extract_data):
                     extracted_data = asyncio.run(
                         strategy.extract_data(
                             raw_content,
@@ -699,49 +713,7 @@ class ContentWorker:
             return False
 
     def _resolve_article_url(self, content: ContentData) -> str:
-        """Select the best URL to fetch when processing an article/news item."""
-
-        base_url = str(content.url)
-
-        if content.content_type != ContentType.NEWS:
-            return base_url
-
-        metadata = content.metadata or {}
-        platform = (metadata.get("platform") or content.platform or "").lower()
-
-        candidate_urls: list[str | None] = []
-
-        if is_http_url(base_url):
-            return self._normalize_target_url(base_url)
-
-        article_info = metadata.get("article", {})
-        candidate_urls.append(article_info.get("url"))
-
-        if platform == "hackernews":
-            aggregator_meta = metadata.get("aggregator", {})
-            candidate_urls.append(aggregator_meta.get("metadata", {}).get("hn_linked_url"))
-
-        candidate_urls.extend(
-            [
-                metadata.get("primary_article_url"),
-                metadata.get("primary_url"),
-                metadata.get("url"),
-            ]
-        )
-
-        for candidate in candidate_urls:
-            normalized = normalize_http_url(candidate) if isinstance(candidate, str) else None
-            if normalized:
-                return normalized
-
-        return base_url
-
-    @staticmethod
-    def _normalize_target_url(url: str) -> str:
-        normalized = url.strip()
-        if normalized.startswith("http://"):
-            normalized = "https://" + normalized[len("http://") :]
-        return normalized
+        return resolve_article_processing_url(content)
 
     def _update_canonical_url(self, content: ContentData, canonical_url: str) -> None:
         """Update content.url to canonical_url if safe and unique."""

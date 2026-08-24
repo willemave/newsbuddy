@@ -571,6 +571,16 @@ class FeedDetector:
             )
             return None
 
+        return self._validate_feed_response(feed_url, response)
+
+    def _validate_feed_response(
+        self,
+        feed_url: str,
+        response: object,
+    ) -> dict[str, str] | None:
+        if not hasattr(response, "content") or not hasattr(response, "headers"):
+            return None
+
         parsed_feed = feedparser.parse(response.content)
         if parsed_feed.bozo and not parsed_feed.entries and not getattr(parsed_feed, "feed", None):
             return None
@@ -612,22 +622,29 @@ class FeedDetector:
         """Validate a feed URL and return metadata if it looks like a real feed."""
         return self._validate_feed_candidate(feed_url)
 
-    def _validate_feed_candidates(self, feed_urls: list[str]) -> list[dict[str, str]]:
-        validated: list[dict[str, str]] = []
-        for feed_url in feed_urls[: self.max_candidate_fetches]:
-            result = self.validate_feed_url(feed_url)
-            if result:
-                validated.append(result)
-                break
-        return validated
+    def validate_feed_urls(self, feed_urls: list[str]) -> dict[str, str] | None:
+        """Validate ordered candidate URLs in one fetch batch and return the first feed."""
+        validated = self._validate_feed_links([{"feed_url": feed_url} for feed_url in feed_urls])
+        return validated[0] if validated else None
 
-    def _validate_feed_links(self, feed_links: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _validate_feed_links(
+        self,
+        feed_links: list[dict[str, str]],
+        *,
+        max_candidates: int | None = None,
+    ) -> list[dict[str, str]]:
         validated: list[dict[str, str]] = []
-        for feed_link in feed_links[: self.max_candidate_fetches]:
-            feed_url = feed_link.get("feed_url")
-            if not isinstance(feed_url, str) or not feed_url.strip():
+        candidate_limit = max_candidates or self.max_candidate_fetches
+        candidates = [
+            (feed_link, str(feed_link.get("feed_url") or "").strip())
+            for feed_link in feed_links[:candidate_limit]
+            if str(feed_link.get("feed_url") or "").strip()
+        ]
+        responses = self._fetch_candidate_batch([feed_url for _link, feed_url in candidates])
+        for (feed_link, feed_url), response in zip(candidates, responses, strict=True):
+            if isinstance(response, Exception):
                 continue
-            result = self.validate_feed_url(feed_url.strip())
+            result = self._validate_feed_response(feed_url, response)
             if not result:
                 continue
             validated.append(
@@ -640,21 +657,33 @@ class FeedDetector:
             break
         return validated
 
+    def _fetch_candidate_batch(self, urls: list[str]) -> list[object]:
+        fetch_many = getattr(self.http_service, "fetch_many", None)
+        if callable(fetch_many):
+            return list(fetch_many(urls))
+        responses: list[object] = []
+        for url in urls:
+            try:
+                responses.append(fetch_quiet(self.http_service, url))
+            except Exception as exc:  # noqa: BLE001
+                responses.append(exc)
+        return responses
+
     def _discover_feed_links(
         self,
         page_url: str,
         html_content: str | None,
     ) -> list[dict[str, str]]:
+        ordered_candidates: list[dict[str, str]] = []
         if html_content:
-            feed_links = extract_feed_links(html_content, page_url)
-            validated_explicit_feeds = self._validate_feed_links(feed_links)
-            if validated_explicit_feeds:
-                return validated_explicit_feeds
-
-            podcast_feeds = extract_podcast_feed_links_from_anchors(html_content, page_url)
-            validated_podcast_feeds = self._validate_feed_links(podcast_feeds)
-            if validated_podcast_feeds:
-                return validated_podcast_feeds
+            ordered_candidates.extend(
+                extract_feed_links(html_content, page_url)[: self.max_candidate_fetches]
+            )
+            ordered_candidates.extend(
+                extract_podcast_feed_links_from_anchors(html_content, page_url)[
+                    : self.max_candidate_fetches
+                ]
+            )
 
         candidate_urls: list[str] = []
         candidate_page_urls = [page_url]
@@ -663,17 +692,30 @@ class FeedDetector:
         for candidate_page_url in candidate_page_urls:
             candidate_urls.extend(_build_candidate_feed_urls(candidate_page_url))
         candidate_urls = list(dict.fromkeys(candidate_urls))
-        candidate_feeds = self._validate_feed_candidates(candidate_urls)
-        if candidate_feeds:
-            return candidate_feeds
+        ordered_candidates.extend(
+            {"feed_url": candidate_url}
+            for candidate_url in candidate_urls[: self.max_candidate_fetches]
+        )
 
         if html_content:
-            anchor_feeds = extract_feed_links_from_anchors(html_content, page_url)
-            validated_anchor_feeds = self._validate_feed_links(anchor_feeds)
-            if validated_anchor_feeds:
-                return validated_anchor_feeds
+            ordered_candidates.extend(
+                extract_feed_links_from_anchors(html_content, page_url)[
+                    : self.max_candidate_fetches
+                ]
+            )
 
-        return []
+        deduplicated_candidates: list[dict[str, str]] = []
+        seen_candidate_urls: set[str] = set()
+        for candidate in ordered_candidates:
+            candidate_url = str(candidate.get("feed_url") or "").strip()
+            if not candidate_url or candidate_url in seen_candidate_urls:
+                continue
+            seen_candidate_urls.add(candidate_url)
+            deduplicated_candidates.append(candidate)
+        return self._validate_feed_links(
+            deduplicated_candidates,
+            max_candidates=len(deduplicated_candidates),
+        )
 
     def detect_from_html(
         self,

@@ -14,16 +14,15 @@ from app.models.contracts import ContentStatus
 from app.models.db import Content
 from app.models.domain.content import ContentData
 from app.models.domain.content_mapper import content_to_domain, domain_to_content
-from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.apple_podcasts import resolve_apple_podcast_episode
 from app.services.audio_pipeline import (
     download_audio_via_ytdlp,
     transcribe_audio_file_with_metadata,
 )
+from app.services.bounded_media_download import download_remote_media_bounded
 from app.services.content_bodies import sync_content_body_storage
 from app.services.http import get_http_service
 from app.services.queue import TaskType, get_queue_service
-from app.services.sandbox_media_download import download_remote_media_in_sandbox
 from app.utils.url_utils import is_domain_or_subdomain
 
 logger = get_logger(__name__)
@@ -262,10 +261,6 @@ class PodcastMediaWorker:
 
         return None
 
-    @staticmethod
-    def _sandbox_user_id(content: ContentData) -> int:
-        return resolve_sandbox_user_id(content.metadata.get("submitted_by_user_id"))
-
     def _download_to_scratch(
         self,
         *,
@@ -273,7 +268,6 @@ class PodcastMediaWorker:
         title: str | None,
         audio_url: str,
         scratch_dir: Path,
-        sandbox_user_id: int,
     ) -> Path:
         scratch_dir.mkdir(parents=True, exist_ok=True)
         if self._is_youtube_url(audio_url):
@@ -287,7 +281,7 @@ class PodcastMediaWorker:
         filename = f"{sanitize_filename(title or f'podcast_{content_id}')}{extension}"
         audio_path = scratch_dir / filename
         logger.info(
-            "Podcast sandbox download started",
+            "Podcast bounded host download started",
             extra=self._log_extra(
                 operation="download_audio",
                 content_id=content_id,
@@ -295,14 +289,9 @@ class PodcastMediaWorker:
                 context_data={"audio_url": sanitize_url_for_logs(resolved_audio_url)},
             ),
         )
-        result = download_remote_media_in_sandbox(
-            resolved_audio_url,
-            audio_path,
-            user_id=sandbox_user_id,
-            execution_id=content_id,
-        )
+        result = download_remote_media_bounded(resolved_audio_url, audio_path)
         logger.info(
-            "Podcast sandbox download completed",
+            "Podcast bounded host download completed",
             extra=self._log_extra(
                 operation="download_audio",
                 content_id=content_id,
@@ -384,7 +373,6 @@ class PodcastMediaWorker:
                         title=content.title,
                         audio_url=audio_url,
                         scratch_dir=scratch_dir,
-                        sandbox_user_id=self._sandbox_user_id(content),
                     )
                     normalized_audio_path = self._normalize_audio_file(audio_path)
                     transcript_text, detected_language = transcribe_audio_file_with_metadata(

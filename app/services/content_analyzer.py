@@ -26,9 +26,8 @@ from app.models.llm.content_analysis import (
     InstructionLink,
     InstructionResult,
 )
-from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.feed_detection import extract_feed_links
-from app.services.feed_research_runtime import sandboxed_http_service
+from app.services.http import BoundedPublicHttpService
 from app.services.llm_models import build_pydantic_model
 from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_usage import record_model_usage
@@ -290,40 +289,30 @@ class ContentAnalyzer:
                 },
             )
 
-            usage_user_id = (usage_persist or {}).get("user_id")
-            sandbox_user_id = resolve_sandbox_user_id(usage_user_id)
-            usage_content_id = (usage_persist or {}).get("content_id")
-            execution_id = (
-                usage_content_id
-                if isinstance(usage_content_id, int) and not isinstance(usage_content_id, bool)
-                else None
-            )
-            # Page fetch and any linked RSS fetches share one E2B-backed runtime.
-            with sandboxed_http_service(
-                user_id=sandbox_user_id,
-                execution_id=execution_id,
-            ) as http_service:
-                html, text = _fetch_page_content(url, http_service=http_service)
-                if not html:
-                    logger.warning(
-                        "Content analyzer fetch failed; continuing with web search only",
-                        extra={
-                            "component": "content_analyzer",
-                            "operation": "fetch_page_content",
-                            "context_data": {"url": url},
-                        },
-                    )
-                    html = ""
-                    text = ""
-                detected = (
-                    _detect_media_in_html(
-                        html,
-                        url,
-                        http_service=http_service,
-                    )
-                    if html
-                    else _empty_detected_media()
+            # This is ordinary processing, so use the host's bounded public
+            # transport. E2B remains reserved for feed research.
+            http_service = BoundedPublicHttpService()
+            html, text = _fetch_page_content(url, http_service=http_service)
+            if not html:
+                logger.warning(
+                    "Content analyzer fetch failed; continuing with web search only",
+                    extra={
+                        "component": "content_analyzer",
+                        "operation": "fetch_page_content",
+                        "context_data": {"url": url},
+                    },
                 )
+                html = ""
+                text = ""
+            detected = (
+                _detect_media_in_html(
+                    html,
+                    url,
+                    http_service=http_service,
+                )
+                if html
+                else _empty_detected_media()
+            )
 
             # Step 3: Use LLM to analyze content with detected media info
             agent = self._get_agent()
@@ -386,7 +375,7 @@ class ContentAnalyzer:
                     },
                 )
                 return AnalysisError("Invalid LLM output format", recoverable=True)
-            parsed = result.output
+            parsed = result.output.model_copy(update={"page_text": text or None})
 
             logger.info(
                 "LLM analysis complete: type=%s, platform=%s",

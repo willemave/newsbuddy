@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
-import re
-import shlex
+import base64
+import json
+import threading
+import weakref
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from time import monotonic
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
 import httpx
+from sqlalchemy import text
 
+from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.services.agent_vm_runtime import (
+    SYSTEM_USER_ID,
     AgentVmDeadlineExceeded,
     AgentVmError,
-    AgentVmFileSizeLimitExceeded,
     AgentVmSession,
 )
 from app.services.agent_vm_sessions import create_agent_vm_session, evict_agent_vm_session
@@ -55,7 +59,9 @@ _CANDIDATE_LOCAL_CURL_EXIT_CODES = frozenset(
         63,  # response exceeds max-filesize
     }
 )
-_HEADER_BLOCK_SEPARATOR = re.compile(rb"\r?\n\r?\n")
+_NETWORK_LOCK_GUARD = threading.Lock()
+_NETWORK_LOCKS: weakref.WeakValueDictionary[str, threading.Lock] = weakref.WeakValueDictionary()
+_FEED_NETWORK_ADVISORY_LOCK_ID = 6_142_100_000
 
 
 class FeedResearchRuntimeError(AgentVmError):
@@ -79,6 +85,13 @@ class FeedResearchRuntime:
 
 
 AgentVmSessionFactory = Callable[..., AgentVmSession]
+
+
+@runtime_checkable
+class _NetworkPolicySession(Protocol):
+    def set_allowed_outbound_hosts(self, hosts: list[str]) -> None: ...
+
+    def reset_network_policy(self) -> None: ...
 
 
 class SandboxFeedHttpService:
@@ -118,15 +131,22 @@ class SandboxFeedHttpService:
         log_exceptions: bool = True,
     ) -> httpx.Response:
         del log_client_errors, log_exceptions
-        return self._request(url, headers=headers)
+        result = self.fetch_many([url], headers=headers)[0]
+        if isinstance(result, Exception):
+            raise result
+        return result
 
-    def _request(
+    def fetch_many(
         self,
-        url: str,
+        urls: list[str],
         *,
-        headers: dict[str, str] | None,
-    ) -> httpx.Response:
-        _validate_http_url(url)
+        headers: dict[str, str] | None = None,
+    ) -> list[httpx.Response | Exception]:
+        """Fetch a candidate batch in one VM command and isolate URL failures."""
+        if not urls:
+            return []
+        for url in urls:
+            _validate_http_url(url)
         self.raise_if_unhealthy()
         remaining_seconds = self._remaining_seconds()
         curl_timeout_seconds = min(
@@ -137,111 +157,56 @@ class SandboxFeedHttpService:
             FEED_CONNECT_TIMEOUT_SECONDS,
             curl_timeout_seconds,
         )
-        request_key = uuid4().hex
-        body_path = f"scratch/feed-http-{request_key}.body"
-        header_path = f"scratch/feed-http-{request_key}.headers"
-        command = _build_curl_command(
-            url=url,
-            body_path=body_path,
-            header_path=header_path,
+        command = _build_batch_curl_command(
+            urls=urls,
             headers=headers,
             connect_timeout_seconds=connect_timeout_seconds,
             max_time_seconds=curl_timeout_seconds,
         )
+        results: list[httpx.Response | Exception] = []
         try:
-            result = self._session.execute_bash(
-                command,
-                timeout_seconds=self._bounded_timeout(
-                    FEED_FETCH_TIMEOUT_SECONDS + FEED_COMMAND_TIMEOUT_OVERHEAD_SECONDS
-                ),
-            )
-            if result.exit_code != 0:
-                error = (
-                    f"Sandbox feed request failed with curl exit {result.exit_code}: "
-                    f"{result.stderr.strip()[:500]}"
+            with _candidate_network_scope(self._session, urls=urls):
+                result = self._session.execute_bash(
+                    command,
+                    timeout_seconds=self._bounded_timeout(
+                        FEED_FETCH_TIMEOUT_SECONDS + FEED_COMMAND_TIMEOUT_OVERHEAD_SECONDS
+                    ),
+                    max_output_chars=min(
+                        60_000_000,
+                        len(urls) * (MAX_FEED_RESPONSE_BYTES * 2 + 200_000),
+                    ),
                 )
-                if result.exit_code in _CANDIDATE_LOCAL_CURL_EXIT_CODES:
-                    raise FeedResearchCandidateError(error)
-                raise FeedResearchRuntimeError(error)
-            self._remaining_seconds()
-            effective_url, status_code = _parse_curl_metadata(result.stdout)
-            raw_headers = self._session.read_file_bytes(
-                header_path,
-                max_bytes=128_000,
-            )
-            self._remaining_seconds()
-            content = self._session.read_file_bytes(
-                body_path,
-                max_bytes=MAX_FEED_RESPONSE_BYTES,
-            )
-            self._remaining_seconds()
-            response = httpx.Response(
-                status_code,
-                headers=_parse_final_headers(raw_headers),
-                content=content,
-                request=httpx.Request("GET", effective_url),
-            )
-            if status_code >= 400:
-                response.raise_for_status()
+            if result.exit_code != 0:
+                raise FeedResearchRuntimeError(
+                    "Sandbox feed batch command failed: " + result.stderr.strip()[:500]
+                )
+            rows = _parse_batch_rows(result.stdout, expected_count=len(urls))
+            for url, row in zip(urls, rows, strict=True):
+                curl_exit = _batch_integer(row, "curl_exit")
+                if curl_exit != 0:
+                    error = (
+                        f"Sandbox feed request failed with curl exit {curl_exit}: "
+                        f"{str(row.get('stderr') or '')[:500]}"
+                    )
+                    if curl_exit in _CANDIDATE_LOCAL_CURL_EXIT_CODES:
+                        results.append(FeedResearchCandidateError(error))
+                        continue
+                    raise FeedResearchRuntimeError(error)
+                response = _response_from_batch_row(url, row)
+                if response.status_code >= 400:
+                    try:
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as exc:
+                        results.append(exc)
+                        continue
+                results.append(response)
         except AgentVmDeadlineExceeded as exc:
             raise FeedResearchDeadlineExceeded("Feed research deadline was exceeded") from exc
-        except AgentVmFileSizeLimitExceeded as exc:
-            raise FeedResearchCandidateError(
-                "Feed candidate exceeded the response size limit"
-            ) from exc
-        except (FeedResearchCandidateError, httpx.HTTPStatusError):
-            raise
         except Exception as exc:
             self._record_fatal_error(exc)
             raise
-        finally:
-            cleanup_timeout = self._bounded_timeout(5, allow_expired=True)
-            if cleanup_timeout is None:
-                self._record_fatal_error(
-                    FeedResearchRuntimeError(
-                        "Feed research scratch cleanup missed its request deadline"
-                    )
-                )
-                logger.debug(
-                    "Unable to remove feed-research scratch files before the request deadline",
-                    extra={
-                        "component": "feed_research",
-                        "operation": "scratch_cleanup",
-                        "sandbox_id": self._session.sandbox_id,
-                    },
-                )
-            else:
-                try:
-                    cleanup_result = self._session.execute_bash(
-                        f"rm -f {shlex.quote(body_path)} {shlex.quote(header_path)}",
-                        timeout_seconds=cleanup_timeout,
-                    )
-                    if cleanup_result.exit_code != 0:
-                        raise FeedResearchRuntimeError(
-                            "Feed research scratch cleanup returned a non-zero exit code"
-                        )
-                except AgentVmDeadlineExceeded as exc:
-                    self._record_fatal_error(exc)
-                    logger.debug(
-                        "Feed-research scratch cleanup reached its request deadline",
-                        extra={
-                            "component": "feed_research",
-                            "operation": "scratch_cleanup",
-                            "sandbox_id": self._session.sandbox_id,
-                        },
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    self._record_fatal_error(exc)
-                    logger.debug(
-                        "Unable to remove feed-research scratch files",
-                        extra={
-                            "component": "feed_research",
-                            "operation": "scratch_cleanup",
-                            "sandbox_id": self._session.sandbox_id,
-                        },
-                    )
         self._remaining_seconds()
-        return response
+        return results
 
     def _remaining_seconds(self) -> float:
         deadline = self._deadline
@@ -252,19 +217,12 @@ class SandboxFeedHttpService:
             raise FeedResearchDeadlineExceeded("Feed research deadline was exceeded")
         return remaining
 
-    def _bounded_timeout(
-        self,
-        maximum_seconds: float,
-        *,
-        allow_expired: bool = False,
-    ) -> float | None:
+    def _bounded_timeout(self, maximum_seconds: float) -> float:
         deadline = self._deadline
         if deadline is None:
             return maximum_seconds
         remaining = deadline - monotonic()
         if remaining <= 0:
-            if allow_expired:
-                return None
             raise FeedResearchDeadlineExceeded("Feed research deadline was exceeded")
         return min(maximum_seconds, remaining)
 
@@ -281,12 +239,12 @@ def sandboxed_http_service(
     if deadline is not None and monotonic() >= deadline:
         raise FeedResearchDeadlineExceeded("Feed research deadline was exceeded")
     resolved_execution_id = execution_id or uuid4().int
-    paths = build_llm_task_paths(user_id=user_id, llm_task_id=resolved_execution_id)
+    paths = build_llm_task_paths(user_id=SYSTEM_USER_ID, llm_task_id=resolved_execution_id)
     create_session = session_factory or create_agent_vm_session
     session_kwargs: dict[str, Any] = {
-        "user_id": user_id,
+        "user_id": SYSTEM_USER_ID,
         "llm_task_id": resolved_execution_id,
-        "vm_namespace": paths.vm_namespace,
+        "vm_namespace": f"user:{SYSTEM_USER_ID}",
         "workspace_path": paths.workspace_path,
         "shared_workspace_path": paths.shared_workspace_path,
         "feature": "feed_research",
@@ -365,11 +323,9 @@ def _validate_http_url(url: str) -> None:
         raise FeedResearchRuntimeError("Feed research URL must use HTTP or HTTPS")
 
 
-def _build_curl_command(
+def _build_batch_curl_command(
     *,
-    url: str,
-    body_path: str,
-    header_path: str,
+    urls: list[str],
     headers: dict[str, str] | None,
     connect_timeout_seconds: float = FEED_CONNECT_TIMEOUT_SECONDS,
     max_time_seconds: float = FEED_FETCH_TIMEOUT_SECONDS,
@@ -382,59 +338,138 @@ def _build_curl_command(
         "User-Agent": "NewslyFeedResearch/1.0",
         **(headers or {}),
     }
-    header_args: list[str] = []
+    clean_headers: dict[str, str] = {}
     for name, value in request_headers.items():
         clean_name = str(name).replace("\r", "").replace("\n", "").strip()
         clean_value = str(value).replace("\r", "").replace("\n", "").strip()
         if clean_name and clean_value:
-            header_args.extend(("--header", f"{clean_name}: {clean_value}"))
+            clean_headers[clean_name] = clean_value
 
-    args = [
-        "curl",
-        "--location",
-        "--silent",
-        "--show-error",
-        "--compressed",
-        "--connect-timeout",
-        _format_timeout_seconds(connect_timeout_seconds),
-        "--max-time",
-        _format_timeout_seconds(max_time_seconds),
-        "--max-filesize",
-        str(MAX_FEED_RESPONSE_BYTES),
-        *header_args,
-        "--dump-header",
-        header_path,
-        "--output",
-        body_path,
-        "--write-out",
-        "%{url_effective}\\n%{http_code}",
-        url,
-    ]
-    return "mkdir -p scratch && " + shlex.join(args)
+    payload = base64.b64encode(
+        json.dumps(
+            {
+                "urls": urls,
+                "headers": clean_headers,
+                "connect_timeout": _format_timeout_seconds(connect_timeout_seconds),
+                "max_time": _format_timeout_seconds(max_time_seconds),
+                "max_bytes": MAX_FEED_RESPONSE_BYTES,
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).decode("ascii")
+    return f"""python3 - <<'PY'
+import base64
+import concurrent.futures
+import json
+import pathlib
+import subprocess
+import tempfile
+
+request = json.loads(base64.b64decode({payload!r}))
+
+def fetch(entry):
+    index, url = entry
+    with tempfile.TemporaryDirectory(prefix="newsly-feed-") as directory:
+        root = pathlib.Path(directory)
+        body_path = root / "body"
+        header_path = root / "headers"
+        args = [
+            "curl", "--location", "--silent", "--show-error", "--compressed",
+            "--connect-timeout", request["connect_timeout"],
+            "--max-time", request["max_time"],
+            "--max-filesize", str(request["max_bytes"]),
+        ]
+        for name, value in request["headers"].items():
+            args.extend(["--header", f"{{name}}: {{value}}"])
+        args.extend([
+            "--dump-header", str(header_path), "--output", str(body_path),
+            "--write-out", "%{{url_effective}}\\n%{{http_code}}", url,
+        ])
+        completed = subprocess.run(args, capture_output=True, text=True, check=False)
+        metadata = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        effective_url = metadata[-2] if len(metadata) >= 2 else url
+        try:
+            status = int(metadata[-1]) if metadata else 0
+        except ValueError:
+            status = 0
+        body = body_path.read_bytes() if body_path.exists() else b""
+        raw_headers = header_path.read_bytes() if header_path.exists() else b""
+        return {{
+            "index": index,
+            "url": url,
+            "effective_url": effective_url,
+            "status": status,
+            "headers_b64": base64.b64encode(raw_headers).decode("ascii"),
+            "body_b64": base64.b64encode(body).decode("ascii"),
+            "curl_exit": completed.returncode,
+            "stderr": completed.stderr[-2000:],
+        }}
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(request["urls"]))) as pool:
+    rows = list(pool.map(fetch, enumerate(request["urls"])))
+for row in sorted(rows, key=lambda item: item["index"]):
+    print(json.dumps(row, separators=(",", ":")))
+PY"""
 
 
 def _format_timeout_seconds(seconds: float) -> str:
     return f"{seconds:.6f}".rstrip("0").rstrip(".")
 
 
-def _parse_curl_metadata(stdout: str) -> tuple[str, int]:
-    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
-    if len(lines) < 2:
-        raise FeedResearchRuntimeError("Sandbox feed request returned invalid curl metadata")
-    effective_url = lines[-2]
+def _parse_batch_rows(stdout: str, *, expected_count: int) -> list[dict[str, object]]:
+    if "[... truncated ...]" in stdout:
+        raise FeedResearchRuntimeError("Sandbox feed batch output exceeded its explicit limit")
+    rows: list[dict[str, object]] = []
+    for line in stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise FeedResearchRuntimeError("Sandbox feed batch returned invalid JSONL") from exc
+        if not isinstance(row, dict):
+            raise FeedResearchRuntimeError("Sandbox feed batch returned invalid JSONL")
+        rows.append(row)
+    if len(rows) != expected_count:
+        raise FeedResearchRuntimeError("Sandbox feed batch returned an incomplete result set")
+    return rows
+
+
+def _response_from_batch_row(url: str, row: dict[str, object]) -> httpx.Response:
     try:
-        status_code = int(lines[-1])
+        status_code = _batch_integer(row, "status")
+        content = base64.b64decode(str(row.get("body_b64") or ""), validate=True)
+        raw_headers = base64.b64decode(str(row.get("headers_b64") or ""), validate=True)
+    except (ValueError, TypeError) as exc:
+        raise FeedResearchRuntimeError("Sandbox feed batch returned invalid response data") from exc
+    if not 100 <= status_code <= 599:
+        raise FeedResearchCandidateError("Feed candidate returned no valid HTTP status")
+    if len(content) > MAX_FEED_RESPONSE_BYTES:
+        raise FeedResearchCandidateError("Feed candidate exceeded the response size limit")
+    effective_url = str(row.get("effective_url") or url)
+    return httpx.Response(
+        status_code,
+        headers=_parse_final_headers(raw_headers),
+        content=content,
+        request=httpx.Request("GET", effective_url),
+    )
+
+
+def _batch_integer(row: dict[str, object], field: str) -> int:
+    value = row.get(field)
+    if value is None:
+        return 0
+    if not isinstance(value, (int, str)) or isinstance(value, bool):
+        raise FeedResearchRuntimeError(f"Sandbox feed batch returned invalid {field}")
+    try:
+        return int(value)
     except ValueError as exc:
-        raise FeedResearchRuntimeError(
-            "Sandbox feed request returned an invalid HTTP status"
-        ) from exc
-    if status_code < 100 or status_code > 599:
-        raise FeedResearchRuntimeError("Sandbox feed request returned an invalid HTTP status")
-    return effective_url, status_code
+        raise FeedResearchRuntimeError(f"Sandbox feed batch returned invalid {field}") from exc
 
 
 def _parse_final_headers(raw_headers: bytes) -> dict[str, str]:
-    blocks = [block for block in _HEADER_BLOCK_SEPARATOR.split(raw_headers) if block.strip()]
+    normalized = raw_headers.replace(b"\r\n", b"\n")
+    blocks = [block for block in normalized.split(b"\n\n") if block.strip()]
     for block in reversed(blocks):
         lines = block.splitlines()
         if not lines or not lines[0].startswith(b"HTTP/"):
@@ -452,3 +487,42 @@ def _parse_final_headers(raw_headers: bytes) -> dict[str, str]:
                 headers[name] = value
         return headers
     return {}
+
+
+@contextmanager
+def _candidate_network_scope(
+    session: AgentVmSession,
+    *,
+    urls: list[str],
+) -> Iterator[None]:
+    if not isinstance(session, _NetworkPolicySession):
+        raise FeedResearchRuntimeError("Feed research sandbox cannot enforce network policy")
+    sandbox_id = str(session.sandbox_id or id(session))
+    with _NETWORK_LOCK_GUARD:
+        lock = _NETWORK_LOCKS.get(sandbox_id)
+        if lock is None:
+            lock = threading.Lock()
+            _NETWORK_LOCKS[sandbox_id] = lock
+    hosts = sorted({str(httpx.URL(url).host) for url in urls if httpx.URL(url).host})
+    with lock, _distributed_feed_network_lock():
+        session.set_allowed_outbound_hosts(hosts)
+        try:
+            yield
+        finally:
+            session.reset_network_policy()
+
+
+@contextmanager
+def _distributed_feed_network_lock() -> Iterator[None]:
+    """Serialize network-policy replacement for the shared system VM."""
+    session_factory = get_session_factory()
+    with session_factory() as db:
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                {"lock_id": _FEED_NETWORK_ADVISORY_LOCK_ID},
+            )
+        try:
+            yield
+        finally:
+            db.rollback()

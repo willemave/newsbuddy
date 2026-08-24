@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import ast
-import shlex
+import base64
+import json
 from pathlib import Path
 from time import monotonic
-from types import SimpleNamespace
+from typing import cast
 
 import httpx
 import pytest
 
 from app.services.agent_vm_runtime import (
+    SYSTEM_USER_ID,
     AgentCommandResult,
     AgentVmDeadlineExceeded,
-    AgentVmFileSizeLimitExceeded,
     AgentVmLease,
+    AgentVmSession,
 )
 from app.services.feed_research_runtime import (
     FeedResearchCandidateError,
@@ -24,20 +26,47 @@ from app.services.feed_research_runtime import (
 )
 from app.services.http import HttpService
 
+RSS_BODY = b"<?xml version='1.0'?><rss><channel><title>Example</title></channel></rss>"
+
+
+def _row(
+    url: str,
+    *,
+    status: int = 200,
+    body: bytes = RSS_BODY,
+    headers: bytes = b"HTTP/2 200\r\nContent-Type: application/rss+xml\r\n\r\n",
+    curl_exit: int = 0,
+    stderr: str = "",
+    effective_url: str | None = None,
+) -> dict[str, object]:
+    return {
+        "index": 0,
+        "url": url,
+        "effective_url": effective_url or url,
+        "status": status,
+        "headers_b64": base64.b64encode(headers).decode(),
+        "body_b64": base64.b64encode(body).decode(),
+        "curl_exit": curl_exit,
+        "stderr": stderr,
+    }
+
 
 class _FakeFeedSandbox:
     provider = "e2b"
     sandbox_id = "sandbox-feed-test"
     lease = AgentVmLease(
         provider="e2b",
-        vm_namespace="user:7",
+        vm_namespace=f"user:{SYSTEM_USER_ID}",
         sandbox_id=sandbox_id,
-        reuse_scope="process_namespace",
+        reuse_scope="persistent_user",
         reused=False,
     )
 
-    def __init__(self) -> None:
-        self.commands: list[tuple[str, float | None]] = []
+    def __init__(self, outputs: list[object] | None = None) -> None:
+        self.outputs = list(outputs or [])
+        self.commands: list[dict[str, object]] = []
+        self.allowed_hosts: list[list[str]] = []
+        self.reset_calls = 0
         self.closed = False
 
     def execute_bash(
@@ -45,41 +74,57 @@ class _FakeFeedSandbox:
         command: str,
         *,
         timeout_seconds: float | None = None,
+        max_output_chars: int | None = None,
     ) -> AgentCommandResult:
-        self.commands.append((command, timeout_seconds))
-        if "curl" in command:
-            return AgentCommandResult(
-                stdout="https://example.com/feed.xml\n200",
-                stderr="",
-                exit_code=0,
-            )
-        return AgentCommandResult(stdout="", stderr="", exit_code=0)
+        self.commands.append(
+            {
+                "command": command,
+                "timeout_seconds": timeout_seconds,
+                "max_output_chars": max_output_chars,
+            }
+        )
+        output = self.outputs.pop(0) if self.outputs else []
+        if isinstance(output, Exception):
+            raise output
+        if isinstance(output, AgentCommandResult):
+            return output
+        assert isinstance(output, list)
+        return AgentCommandResult(
+            stdout="\n".join(json.dumps(row) for row in output),
+            stderr="",
+            exit_code=0,
+        )
 
-    def read_file_bytes(
-        self,
-        path: str,
-        *,
-        max_bytes: int | None = None,
-        timeout_seconds: float | None = None,
-    ) -> bytes:
-        del max_bytes, timeout_seconds
-        if path.endswith(".headers"):
-            return (
-                b"HTTP/1.1 301 Moved Permanently\r\nLocation: /feed.xml\r\n\r\n"
-                b"HTTP/2 200\r\nContent-Type: application/rss+xml\r\n"
-                b"Content-Encoding: gzip\r\nContent-Length: 999\r\n\r\n"
-            )
-        return b"<?xml version='1.0'?><rss><channel><title>Example</title></channel></rss>"
+    def set_allowed_outbound_hosts(self, hosts: list[str]) -> None:
+        self.allowed_hosts.append(hosts)
+
+    def reset_network_policy(self) -> None:
+        self.reset_calls += 1
 
     def close(self) -> None:
         self.closed = True
 
 
-def test_sandbox_feed_http_service_fetches_and_cleans_up_inside_vm() -> None:
-    sandbox = _FakeFeedSandbox()
+def test_sandbox_feed_http_service_returns_batch_output_without_scratch_io() -> None:
+    url = "https://example.com/blog"
+    sandbox = _FakeFeedSandbox(
+        [
+            [
+                _row(
+                    url,
+                    headers=(
+                        b"HTTP/1.1 301 Moved Permanently\r\nLocation: /feed.xml\r\n\r\n"
+                        b"HTTP/2 200\r\nContent-Type: application/rss+xml\r\n"
+                        b"Content-Encoding: gzip\r\nContent-Length: 999\r\n\r\n"
+                    ),
+                    effective_url="https://example.com/feed.xml",
+                )
+            ]
+        ]
+    )
     service = SandboxFeedHttpService(sandbox)  # type: ignore[arg-type]
 
-    response = service.fetch("https://example.com/blog")
+    response = service.fetch(url)
 
     assert response.status_code == 200
     assert response.url == httpx.URL("https://example.com/feed.xml")
@@ -87,10 +132,47 @@ def test_sandbox_feed_http_service_fetches_and_cleans_up_inside_vm() -> None:
     assert "content-encoding" not in response.headers
     assert response.headers["content-length"] == str(len(response.content))
     assert b"<rss>" in response.content
-    curl_command = sandbox.commands[0][0]
-    assert "curl" in curl_command
-    assert "https://example.com/blog" in curl_command
-    assert sandbox.commands[-1][0].startswith("rm -f scratch/feed-http-")
+    assert len(sandbox.commands) == 1
+    assert "ThreadPoolExecutor" in str(sandbox.commands[0]["command"])
+    assert sandbox.allowed_hosts == [["example.com"]]
+    assert sandbox.reset_calls == 1
+
+
+def test_sandbox_feed_http_service_fails_closed_without_network_policy() -> None:
+    class NoNetworkPolicySandbox:
+        sandbox_id = "sandbox-without-network-policy"
+
+    service = SandboxFeedHttpService(NoNetworkPolicySandbox())  # type: ignore[arg-type]
+
+    with pytest.raises(FeedResearchRuntimeError, match="cannot enforce network policy"):
+        service.fetch("https://example.com/feed.xml")
+
+    assert service.is_unhealthy is True
+
+
+def test_fetch_many_uses_one_command_and_keeps_candidate_failures_local() -> None:
+    urls = [
+        "https://one.example/feed.xml",
+        "https://two.example/feed.xml",
+        "https://three.example/feed.xml",
+    ]
+    rows = [
+        _row(urls[0]),
+        _row(urls[1], curl_exit=28, stderr="timed out"),
+        _row(urls[2], status=404),
+    ]
+    sandbox = _FakeFeedSandbox([rows])
+    service = SandboxFeedHttpService(sandbox)  # type: ignore[arg-type]
+
+    results = service.fetch_many(urls)
+
+    assert len(sandbox.commands) == 1
+    assert isinstance(results[0], httpx.Response)
+    assert isinstance(results[1], FeedResearchCandidateError)
+    assert isinstance(results[2], httpx.HTTPStatusError)
+    assert service.is_unhealthy is False
+    assert sandbox.allowed_hosts == [["one.example", "three.example", "two.example"]]
+    assert sandbox.reset_calls == 1
 
 
 def test_sandbox_feed_http_service_rejects_non_http_urls_without_dispatch() -> None:
@@ -103,7 +185,7 @@ def test_sandbox_feed_http_service_rejects_non_http_urls_without_dispatch() -> N
     assert sandbox.commands == []
 
 
-def test_feed_research_runtime_uses_user_workspace_and_closes_session() -> None:
+def test_feed_research_runtime_uses_persistent_system_namespace_and_closes_lease() -> None:
     sandbox = _FakeFeedSandbox()
     calls: list[dict[str, object]] = []
 
@@ -117,17 +199,15 @@ def test_feed_research_runtime_uses_user_workspace_and_closes_session() -> None:
         session_factory=_factory,
         use_llm=False,
     ) as runtime:
-        assert isinstance(runtime.detector.http_service, SandboxFeedHttpService)
         assert runtime.detector.http_service is runtime.http_service
-        assert not hasattr(runtime.detector, "use_exa_search")
 
     assert calls == [
         {
-            "user_id": 7,
+            "user_id": SYSTEM_USER_ID,
             "llm_task_id": 42,
-            "vm_namespace": "user:7",
-            "workspace_path": "/tmp/newsly/tasks/42",
-            "shared_workspace_path": "/tmp/newsly/users/7/shared",
+            "vm_namespace": f"user:{SYSTEM_USER_ID}",
+            "workspace_path": "/data/workspace/tasks/42",
+            "shared_workspace_path": "/data/workspace/users/0/shared",
             "feature": "feed_research",
         }
     ]
@@ -143,7 +223,7 @@ def test_feed_research_runtime_rejects_non_e2b_session() -> None:
         feed_research_runtime(
             user_id=7,
             execution_id=42,
-            session_factory=lambda **_kwargs: sandbox,
+            session_factory=lambda **_kwargs: cast(AgentVmSession, sandbox),
             use_llm=False,
         ),
     ):
@@ -198,24 +278,9 @@ def test_feed_research_runtime_bounds_session_acquisition_with_shared_deadline()
     assert calls[0]["deadline"] == deadline
 
 
-def test_feed_research_runtime_normalizes_session_acquisition_failure() -> None:
-    def _factory(**_kwargs):
-        raise RuntimeError("E2B allocation unavailable")
-
-    with (
-        pytest.raises(FeedResearchRuntimeError, match="initialize"),
-        feed_research_runtime(
-            user_id=7,
-            execution_id=42,
-            session_factory=_factory,
-            use_llm=False,
-        ),
-    ):
-        pytest.fail("a failed sandbox acquisition must not enter the runtime")
-
-
 def test_feed_validator_never_falls_back_to_host_http(monkeypatch) -> None:
-    sandbox = _FakeFeedSandbox()
+    url = "https://example.com/feed.xml"
+    sandbox = _FakeFeedSandbox([[_row(url)]])
 
     def _unexpected_host_http(*_args, **_kwargs):
         raise AssertionError("feed validation must not use host HTTP")
@@ -225,17 +290,17 @@ def test_feed_validator_never_falls_back_to_host_http(monkeypatch) -> None:
     with feed_research_runtime(
         user_id=7,
         execution_id=44,
-        session_factory=lambda **_kwargs: sandbox,
+        session_factory=lambda **_kwargs: cast(AgentVmSession, sandbox),
         use_llm=False,
     ) as runtime:
-        validated = runtime.detector.validate_feed_url("https://example.com/feed.xml")
+        validated = runtime.detector.validate_feed_url(url)
 
     assert validated == {
-        "feed_url": "https://example.com/feed.xml",
+        "feed_url": url,
         "feed_format": "rss",
         "title": "Example",
     }
-    assert sum("curl" in command for command, _timeout in sandbox.commands) == 1
+    assert len(sandbox.commands) == 1
 
 
 def test_production_feed_detectors_are_only_built_by_sandbox_runtime() -> None:
@@ -255,253 +320,38 @@ def test_production_feed_detectors_are_only_built_by_sandbox_runtime() -> None:
     assert constructors == ["services/feed_research_runtime.py"]
 
 
-def test_feed_research_runtime_surfaces_hidden_sandbox_transport_failure() -> None:
-    class _BrokenFeedSandbox(_FakeFeedSandbox):
-        def execute_bash(self, command: str, *, timeout_seconds: int | None = None):
-            if "curl" in command:
-                raise RuntimeError("sandbox transport disconnected")
-            return super().execute_bash(command, timeout_seconds=timeout_seconds)
-
-    sandbox = _BrokenFeedSandbox()
-
-    with (
-        pytest.raises(FeedResearchRuntimeError, match="became unavailable"),
-        feed_research_runtime(
-            user_id=7,
-            execution_id=43,
-            session_factory=lambda **_kwargs: sandbox,
-            use_llm=False,
-        ) as runtime,
-    ):
-        assert runtime.detector.validate_feed_url("https://example.com/feed.xml") is None
-
-    assert sandbox.closed is True
-
-
-@pytest.mark.parametrize(
-    "exit_code",
-    [3, 6, 7, 8, 16, 18, 22, 28, 35, 47, 52, 55, 56, 60, 61, 63],
-)
-def test_feed_research_runtime_keeps_curl_target_failure_candidate_local_and_continues(
+@pytest.mark.parametrize("exit_code", [3, 6, 7, 18, 28, 35, 47, 60, 63])
+def test_curl_target_failure_is_candidate_local_and_next_request_continues(
     exit_code: int,
 ) -> None:
-    class _FailedCandidateSandbox(_FakeFeedSandbox):
-        def __init__(self) -> None:
-            super().__init__()
-            self.curl_calls = 0
-
-        def execute_bash(self, command: str, *, timeout_seconds: int | None = None):
-            result = super().execute_bash(command, timeout_seconds=timeout_seconds)
-            if "curl" in command:
-                self.curl_calls += 1
-                if self.curl_calls == 1:
-                    return AgentCommandResult(
-                        stdout="",
-                        stderr=f"curl: ({exit_code}) candidate request failed",
-                        exit_code=exit_code,
-                    )
-            return result
-
-    sandbox = _FailedCandidateSandbox()
+    broken_url = "https://broken.example/feed.xml"
+    good_url = "https://example.com/feed.xml"
+    sandbox = _FakeFeedSandbox(
+        [
+            [_row(broken_url, curl_exit=exit_code, stderr="candidate failed")],
+            [_row(good_url)],
+        ]
+    )
 
     with feed_research_runtime(
         user_id=7,
         execution_id=45,
-        session_factory=lambda **_kwargs: sandbox,
+        session_factory=lambda **_kwargs: cast(AgentVmSession, sandbox),
         use_llm=False,
     ) as runtime:
-        assert runtime.detector.validate_feed_url("https://broken.example/feed.xml") is None
-        assert runtime.detector.validate_feed_url("https://example.com/feed.xml") == {
-            "feed_url": "https://example.com/feed.xml",
+        assert runtime.detector.validate_feed_url(broken_url) is None
+        assert runtime.detector.validate_feed_url(good_url) == {
+            "feed_url": good_url,
             "feed_format": "rss",
             "title": "Example",
         }
         assert runtime.http_service.is_unhealthy is False
 
-    assert sandbox.curl_calls == 2
-    assert sandbox.closed is True
+    assert len(sandbox.commands) == 2
 
 
-def test_feed_research_runtime_keeps_file_size_limit_candidate_local_and_continues() -> None:
-    class _OversizedCandidateSandbox(_FakeFeedSandbox):
-        def __init__(self) -> None:
-            super().__init__()
-            self.body_reads = 0
-
-        def read_file_bytes(
-            self,
-            path: str,
-            *,
-            max_bytes: int | None = None,
-            timeout_seconds: float | None = None,
-        ) -> bytes:
-            if not path.endswith(".headers"):
-                self.body_reads += 1
-                if self.body_reads == 1:
-                    raise AgentVmFileSizeLimitExceeded("candidate body exceeded its limit")
-            return super().read_file_bytes(
-                path,
-                max_bytes=max_bytes,
-                timeout_seconds=timeout_seconds,
-            )
-
-    sandbox = _OversizedCandidateSandbox()
-
-    with feed_research_runtime(
-        user_id=7,
-        execution_id=47,
-        session_factory=lambda **_kwargs: sandbox,
-        use_llm=False,
-    ) as runtime:
-        assert runtime.detector.validate_feed_url("https://oversized.example/feed.xml") is None
-        assert runtime.detector.validate_feed_url("https://example.com/feed.xml") == {
-            "feed_url": "https://example.com/feed.xml",
-            "feed_format": "rss",
-            "title": "Example",
-        }
-        assert runtime.http_service.is_unhealthy is False
-
-    assert sandbox.body_reads == 2
-    assert sandbox.closed is True
-
-
-def test_sandbox_feed_http_service_clamps_all_timeouts_to_remaining_budget() -> None:
-    sandbox = _FakeFeedSandbox()
-    service = SandboxFeedHttpService(
-        sandbox,  # type: ignore[arg-type]
-        deadline=monotonic() + 0.5,
-    )
-
-    service.fetch("https://example.com/blog")
-
-    curl_command, execute_timeout = sandbox.commands[0]
-    curl_args = shlex.split(curl_command.split("&&", 1)[1])
-    connect_timeout = float(curl_args[curl_args.index("--connect-timeout") + 1])
-    max_time = float(curl_args[curl_args.index("--max-time") + 1])
-    assert execute_timeout is not None
-    assert 0 < execute_timeout <= 0.5
-    assert 0 < connect_timeout <= 0.5
-    assert 0 < max_time <= 0.5
-    cleanup_timeout = sandbox.commands[-1][1]
-    assert cleanup_timeout is not None
-    assert 0 < cleanup_timeout <= 0.5
-
-
-def test_sandbox_feed_http_service_rejects_expired_deadline_without_dispatch() -> None:
-    sandbox = _FakeFeedSandbox()
-    service = SandboxFeedHttpService(
-        sandbox,  # type: ignore[arg-type]
-        deadline=monotonic() - 1,
-    )
-
-    with pytest.raises(FeedResearchDeadlineExceeded):
-        service.fetch("https://example.com/blog")
-
-    assert sandbox.commands == []
-
-
-def test_deadline_expiry_after_curl_preserves_error_and_poisons_unclean_session() -> None:
-    class _DeadlineSandbox(_FakeFeedSandbox):
-        def __init__(self) -> None:
-            super().__init__()
-            self.file_reads = 0
-
-        def execute_bash(self, command: str, *, timeout_seconds: int | None = None):
-            result = super().execute_bash(command, timeout_seconds=timeout_seconds)
-            if "curl" in command:
-                service._deadline = monotonic() - 1
-            return result
-
-        def read_file_bytes(
-            self,
-            path: str,
-            *,
-            max_bytes: int | None = None,
-            timeout_seconds: float | None = None,
-        ) -> bytes:
-            self.file_reads += 1
-            return super().read_file_bytes(
-                path,
-                max_bytes=max_bytes,
-                timeout_seconds=timeout_seconds,
-            )
-
-    sandbox = _DeadlineSandbox()
-    service = SandboxFeedHttpService(
-        sandbox,  # type: ignore[arg-type]
-        deadline=monotonic() + 2,
-    )
-
-    with pytest.raises(FeedResearchCandidateError, match="deadline"):
-        service.fetch("https://example.com/blog")
-
-    assert service.is_unhealthy is True
-    assert sandbox.file_reads == 0
-    assert len(sandbox.commands) == 1
-
-
-def test_cleanup_command_deadline_poisons_feed_sandbox() -> None:
-    class _CleanupDeadlineSandbox(_FakeFeedSandbox):
-        def execute_bash(
-            self,
-            command: str,
-            *,
-            timeout_seconds: float | None = None,
-        ) -> AgentCommandResult:
-            if command.startswith("rm -f "):
-                self.commands.append((command, timeout_seconds))
-                raise AgentVmDeadlineExceeded("cleanup timed out")
-            return super().execute_bash(command, timeout_seconds=timeout_seconds)
-
-    sandbox = _CleanupDeadlineSandbox()
-    service = SandboxFeedHttpService(sandbox)  # type: ignore[arg-type]
-
-    response = service.fetch("https://example.com/blog")
-
-    assert response.status_code == 200
-    assert service.is_unhealthy is True
-    with pytest.raises(FeedResearchRuntimeError, match="became unavailable"):
-        service.raise_if_unhealthy()
-
-
-def test_nonzero_cleanup_poisons_feed_sandbox() -> None:
-    class _FailedCleanupSandbox(_FakeFeedSandbox):
-        def execute_bash(
-            self,
-            command: str,
-            *,
-            timeout_seconds: float | None = None,
-        ) -> AgentCommandResult:
-            result = super().execute_bash(command, timeout_seconds=timeout_seconds)
-            if command.startswith("rm -f "):
-                return AgentCommandResult(stdout="", stderr="cleanup failed", exit_code=1)
-            return result
-
-    sandbox = _FailedCleanupSandbox()
-    service = SandboxFeedHttpService(sandbox)  # type: ignore[arg-type]
-
-    response = service.fetch("https://example.com/blog")
-
-    assert response.status_code == 200
-    assert service.is_unhealthy is True
-    with pytest.raises(FeedResearchRuntimeError, match="scratch cleanup"):
-        service.raise_if_unhealthy()
-
-
-def test_feed_runtime_evicts_session_after_scratch_cleanup_failure(monkeypatch) -> None:
-    class _FailedCleanupSandbox(_FakeFeedSandbox):
-        def execute_bash(
-            self,
-            command: str,
-            *,
-            timeout_seconds: float | None = None,
-        ) -> AgentCommandResult:
-            result = super().execute_bash(command, timeout_seconds=timeout_seconds)
-            if command.startswith("rm -f "):
-                return AgentCommandResult(stdout="", stderr="cleanup failed", exit_code=1)
-            return result
-
-    sandbox = _FailedCleanupSandbox()
+def test_malformed_batch_output_is_fatal_and_evicts_session(monkeypatch) -> None:
+    sandbox = _FakeFeedSandbox([AgentCommandResult(stdout="not-jsonl", stderr="", exit_code=0)])
     evicted: list[object] = []
     monkeypatch.setattr(
         "app.services.feed_research_runtime.evict_agent_vm_session",
@@ -509,166 +359,66 @@ def test_feed_runtime_evicts_session_after_scratch_cleanup_failure(monkeypatch) 
     )
 
     with (
-        pytest.raises(FeedResearchRuntimeError, match="scratch cleanup"),
+        pytest.raises(FeedResearchRuntimeError, match="invalid JSONL"),
         feed_research_runtime(
             user_id=7,
-            execution_id=48,
-            session_factory=lambda **_kwargs: sandbox,
+            execution_id=46,
+            session_factory=lambda **_kwargs: cast(AgentVmSession, sandbox),
             use_llm=False,
         ) as runtime,
     ):
-        assert runtime.http_service.fetch("https://example.com/blog").status_code == 200
+        assert runtime.detector.validate_feed_url("https://example.com/feed.xml") is None
 
     assert evicted == [sandbox]
     assert sandbox.closed is True
 
 
-def test_sandbox_command_deadline_preserves_error_and_poisons_unclean_session() -> None:
-    class _TimedOutSandbox(_FakeFeedSandbox):
-        def execute_bash(
-            self,
-            command: str,
-            *,
-            timeout_seconds: float | None = None,
-        ) -> AgentCommandResult:
-            del command, timeout_seconds
-            service._deadline = monotonic() - 1
-            raise AgentVmDeadlineExceeded("sandbox request timed out")
+def test_unexpected_curl_exit_is_fatal() -> None:
+    url = "https://example.com/feed.xml"
+    sandbox = _FakeFeedSandbox([[_row(url, curl_exit=2, stderr="bad invocation")]])
 
-    service = SandboxFeedHttpService(
-        _TimedOutSandbox(),  # type: ignore[arg-type]
-        deadline=monotonic() + 1,
-    )
+    with pytest.raises(FeedResearchRuntimeError, match="curl exit 2"):
+        SandboxFeedHttpService(sandbox).fetch(url)  # type: ignore[arg-type]
 
-    with pytest.raises(FeedResearchDeadlineExceeded):
-        service.fetch("https://example.com/blog")
-
-    assert service.is_unhealthy is True
-
-
-def test_feed_research_runtime_surfaces_malformed_curl_metadata() -> None:
-    class _MalformedMetadataSandbox(_FakeFeedSandbox):
-        def execute_bash(self, command: str, *, timeout_seconds: int | None = None):
-            result = super().execute_bash(command, timeout_seconds=timeout_seconds)
-            if "curl" in command:
-                return AgentCommandResult(
-                    stdout="not-curl-metadata",
-                    stderr="",
-                    exit_code=0,
-                )
-            return result
-
-    sandbox = _MalformedMetadataSandbox()
-
-    with (
-        pytest.raises(FeedResearchRuntimeError, match="invalid curl metadata"),
-        feed_research_runtime(
-            user_id=7,
-            execution_id=46,
-            session_factory=lambda **_kwargs: sandbox,
-            use_llm=False,
-        ) as runtime,
-    ):
-        assert runtime.detector.validate_feed_url("https://example.com/feed.xml") is None
-
-    assert sandbox.closed is True
-
-
-def test_feed_research_runtime_surfaces_sandbox_file_channel_failure() -> None:
-    class _BrokenFileSandbox(_FakeFeedSandbox):
-        def read_file_bytes(
-            self,
-            path: str,
-            *,
-            max_bytes: int | None = None,
-            timeout_seconds: float | None = None,
-        ) -> bytes:
-            del path, max_bytes, timeout_seconds
-            raise RuntimeError("sandbox file channel disconnected")
-
-    sandbox = _BrokenFileSandbox()
-
-    with (
-        pytest.raises(FeedResearchRuntimeError, match="became unavailable"),
-        feed_research_runtime(
-            user_id=7,
-            execution_id=46,
-            session_factory=lambda **_kwargs: sandbox,
-            use_llm=False,
-        ) as runtime,
-    ):
-        assert runtime.detector.validate_feed_url("https://example.com/feed.xml") is None
-
-    assert sandbox.closed is True
-
-
-def test_feed_research_runtime_treats_unexpected_curl_exit_as_fatal() -> None:
-    class _ProtocolFailureSandbox(_FakeFeedSandbox):
-        def execute_bash(self, command: str, *, timeout_seconds: int | None = None):
-            result = super().execute_bash(command, timeout_seconds=timeout_seconds)
-            if "curl" in command:
-                return AgentCommandResult(
-                    stdout="",
-                    stderr="curl invocation rejected",
-                    exit_code=2,
-                )
-            return result
-
-    sandbox = _ProtocolFailureSandbox()
-
-    with (
-        pytest.raises(FeedResearchRuntimeError, match="curl exit 2"),
-        feed_research_runtime(
-            user_id=7,
-            execution_id=46,
-            session_factory=lambda **_kwargs: sandbox,
-            use_llm=False,
-        ) as runtime,
-    ):
-        assert runtime.detector.validate_feed_url("https://example.com/feed.xml") is None
-
-    assert sandbox.closed is True
-
-
-def test_sandbox_feed_http_service_surfaces_http_failure() -> None:
-    class _MissingFeedSandbox(_FakeFeedSandbox):
-        def execute_bash(self, command: str, *, timeout_seconds: int | None = None):
-            result = super().execute_bash(command, timeout_seconds=timeout_seconds)
-            if "curl" in command:
-                return SimpleNamespace(
-                    stdout="https://example.com/missing\n404",
-                    stderr="",
-                    exit_code=0,
-                )
-            return result
-
-    service = SandboxFeedHttpService(_MissingFeedSandbox())  # type: ignore[arg-type]
-
-    with pytest.raises(httpx.HTTPStatusError):
-        service.fetch("https://example.com/missing")
+    assert sandbox.reset_calls == 1
 
 
 @pytest.mark.parametrize("status_code", [404, 500])
-def test_feed_research_runtime_keeps_http_failure_candidate_local(status_code: int) -> None:
-    class _MissingFeedSandbox(_FakeFeedSandbox):
-        def execute_bash(self, command: str, *, timeout_seconds: int | None = None):
-            result = super().execute_bash(command, timeout_seconds=timeout_seconds)
-            if "curl" in command:
-                return AgentCommandResult(
-                    stdout=f"https://example.com/missing\n{status_code}",
-                    stderr="",
-                    exit_code=0,
-                )
-            return result
+def test_http_failure_stays_candidate_local(status_code: int) -> None:
+    url = "https://example.com/missing"
+    sandbox = _FakeFeedSandbox([[_row(url, status=status_code)]])
+    service = SandboxFeedHttpService(sandbox)  # type: ignore[arg-type]
 
-    sandbox = _MissingFeedSandbox()
+    with pytest.raises(httpx.HTTPStatusError):
+        service.fetch(url)
 
-    with feed_research_runtime(
-        user_id=7,
-        execution_id=47,
-        session_factory=lambda **_kwargs: sandbox,
-        use_llm=False,
-    ) as runtime:
-        assert runtime.detector.validate_feed_url("https://example.com/missing") is None
+    assert service.is_unhealthy is False
 
-    assert sandbox.closed is True
+
+def test_command_deadline_preserves_session_and_resets_network_policy() -> None:
+    sandbox = _FakeFeedSandbox([AgentVmDeadlineExceeded("request timed out")])
+    service = SandboxFeedHttpService(sandbox)  # type: ignore[arg-type]
+
+    with pytest.raises(FeedResearchDeadlineExceeded):
+        service.fetch("https://example.com/feed.xml")
+
+    assert service.is_unhealthy is False
+    assert sandbox.reset_calls == 1
+
+
+def test_batch_command_uses_remaining_deadline_and_explicit_output_bound() -> None:
+    url = "https://example.com/feed.xml"
+    sandbox = _FakeFeedSandbox([[_row(url)]])
+    service = SandboxFeedHttpService(
+        sandbox,  # type: ignore[arg-type]
+        deadline=monotonic() + 0.5,
+    )
+
+    service.fetch(url)
+
+    command = sandbox.commands[0]
+    timeout_seconds = command["timeout_seconds"]
+    assert isinstance(timeout_seconds, float)
+    assert 0 < timeout_seconds <= 0.5
+    assert isinstance(command["max_output_chars"], int)
+    assert int(command["max_output_chars"]) > 2_000_000

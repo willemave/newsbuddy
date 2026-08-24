@@ -71,3 +71,8 @@ class ContentAnalysisOutput(BaseModel):
 
     analysis: ContentAnalysisResult
     instruction: InstructionResult | None = None
+    page_text: str | None = Field(
+        default=None,
+        exclude=True,
+        description="Host-extracted clean text carried outside the model output contract",
+    )

@@ -20,7 +20,13 @@ from app.models.contracts import (
     NewsItemStatus,
     NewsItemVisibilityScope,
 )
-from app.models.db import NewsItem, NewsItemDiscussion, NewsItemReadStatus, UserScraperConfig
+from app.models.db import (
+    NewsItem,
+    NewsItemDiscussion,
+    NewsItemReadStatus,
+    User,
+    UserScraperConfig,
+)
 from app.presenters.news_item_content_adapter import (
     present_news_item_detail,
     present_news_item_summary,
@@ -133,6 +139,53 @@ def build_visible_news_item_filter(db: Session, *, user_id: int):
         return or_(global_clause, user_clause)
 
     return user_clause
+
+
+def visible_user_ids_for_news_item(db: Session, *, item: NewsItem) -> set[int]:
+    """Resolve every active viewer with one set-based ownership/config query."""
+    if item.visibility_scope == NewsItemVisibilityScope.USER.value:
+        owner_user_id = item.owner_user_id
+        if not isinstance(owner_user_id, int):
+            return set()
+        row = db.query(User.id).filter(User.id == owner_user_id, User.is_active.is_(True)).first()
+        return {owner_user_id} if row is not None else set()
+    if item.visibility_scope != NewsItemVisibilityScope.GLOBAL.value:
+        return set()
+
+    rows = (
+        db.query(User.id, UserScraperConfig.config)
+        .join(UserScraperConfig, UserScraperConfig.user_id == User.id)
+        .filter(
+            User.is_active.is_(True),
+            UserScraperConfig.scraper_type == AGGREGATOR_SCRAPER_TYPE,
+            UserScraperConfig.is_active.is_(True),
+        )
+        .all()
+    )
+    return {
+        int(user_id)
+        for user_id, config in rows
+        if _aggregator_config_matches_item(config, item=item)
+    }
+
+
+def _aggregator_config_matches_item(config: object, *, item: NewsItem) -> bool:
+    if not isinstance(config, dict):
+        return False
+    key = str(config.get("key") or "").strip().lower()
+    if key not in SUPPORTED_AGGREGATOR_KEYS or key != str(item.platform or "").lower():
+        return False
+    topics = {
+        value.strip().lower()
+        for value in config.get("topics") or []
+        if isinstance(value, str) and value.strip()
+    }
+    if key not in _TOPIC_SCOPED_AGGREGATOR_KEYS or not topics:
+        return True
+    raw_metadata = item.raw_metadata if isinstance(item.raw_metadata, dict) else {}
+    aggregator = raw_metadata.get("aggregator")
+    topic = aggregator.get("topic") if isinstance(aggregator, dict) else None
+    return isinstance(topic, str) and topic.strip().lower() in topics
 
 
 def _news_item_is_read_clause(*, user_id: int):

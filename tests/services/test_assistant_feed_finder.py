@@ -107,9 +107,9 @@ def test_find_feed_options_extracts_and_validates_feed_urls(monkeypatch) -> None
         ],
     )
     monkeypatch.setattr(
-        "app.services.feed_detection.FeedDetector.validate_feed_url",
-        lambda self, url: {
-            "feed_url": url,
+        "app.services.feed_detection.FeedDetector.validate_feed_urls",
+        lambda self, urls: {
+            "feed_url": urls[0],
             "feed_format": "atom",
             "title": "lucumr &raquo;",
         },
@@ -156,9 +156,9 @@ def test_find_feed_options_dedupes_normalized_feed_urls(monkeypatch) -> None:
         ],
     )
     monkeypatch.setattr(
-        "app.services.feed_detection.FeedDetector.validate_feed_url",
-        lambda self, url: {
-            "feed_url": url,
+        "app.services.feed_detection.FeedDetector.validate_feed_urls",
+        lambda self, urls: {
+            "feed_url": urls[0],
             "feed_format": "rss",
             "title": "Example Feed",
         },
@@ -194,9 +194,9 @@ def test_find_feed_options_truncates_long_option_fields(monkeypatch) -> None:
         ],
     )
     monkeypatch.setattr(
-        "app.services.feed_detection.FeedDetector.validate_feed_url",
-        lambda self, url: {
-            "feed_url": url,
+        "app.services.feed_detection.FeedDetector.validate_feed_urls",
+        lambda self, urls: {
+            "feed_url": urls[0],
             "feed_format": "rss",
             "title": "D" * 500,
         },
@@ -286,11 +286,11 @@ def test_find_feed_options_uses_live_youtube_detection_over_stale_exa_feed(monke
         ),
     )
     monkeypatch.setattr(
-        "app.services.feed_detection.FeedDetector.validate_feed_url",
-        lambda self, url: {
-            "feed_url": url,
+        "app.services.feed_detection.FeedDetector.validate_feed_urls",
+        lambda self, urls: {
+            "feed_url": urls[0],
             "feed_format": "atom",
-            "title": "Chris Palmer SEO" if "UC8P0dc0Zn2gf8L6tJi_k6xg" in url else "Bg2 Pod",
+            "title": ("Chris Palmer SEO" if "UC8P0dc0Zn2gf8L6tJi_k6xg" in urls[0] else "Bg2 Pod"),
         },
     )
     monkeypatch.setattr(
@@ -392,7 +392,9 @@ def test_find_feed_options_prefers_live_apple_podcast_link_over_generic_feed(
     assert option.title == "Training Data"
     assert option.feed_url == SEQUOIA_TRAINING_DATA_FEED
     assert option.feed_type == "podcast_rss"
-    assert "https://sequoiacap.com/feed" not in fetched_urls
+    assert fetched_urls.index(SEQUOIA_TRAINING_DATA_FEED) < fetched_urls.index(
+        "https://sequoiacap.com/feed"
+    )
 
 
 def test_find_feed_options_prefers_podcast_rss_for_podcast_queries(monkeypatch) -> None:
@@ -430,11 +432,11 @@ def test_find_feed_options_prefers_podcast_rss_for_podcast_queries(monkeypatch) 
         lambda self, *args, **kwargs: None,
     )
     monkeypatch.setattr(
-        "app.services.feed_detection.FeedDetector.validate_feed_url",
-        lambda self, url: {
-            "feed_url": url,
-            "feed_format": "atom" if "youtube.com" in url else "rss",
-            "title": "Bg2 Pod YouTube" if "youtube.com" in url else "BG2 Pod",
+        "app.services.feed_detection.FeedDetector.validate_feed_urls",
+        lambda self, urls: {
+            "feed_url": urls[0],
+            "feed_format": "atom" if "youtube.com" in urls[0] else "rss",
+            "title": "Bg2 Pod YouTube" if "youtube.com" in urls[0] else "BG2 Pod",
         },
     )
     monkeypatch.setattr(

@@ -49,7 +49,7 @@ def find_feed_options(
     request_timeout_seconds = None if deadline is None else max(0.0, deadline - monotonic())
     search_results = exa_search(
         normalized_query,
-        num_results=min(MAX_FEED_SEARCH_RESULTS, max(normalized_limit * 3, normalized_limit)),
+        num_results=min(MAX_FEED_SEARCH_RESULTS, normalized_limit * 3),
         max_characters=MAX_FEED_CONTENT_CHARACTERS,
         telemetry={
             "feature": "assistant_feed_finder",

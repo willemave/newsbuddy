@@ -35,6 +35,12 @@ def test_resolve_feed_candidate_returns_validated_candidate() -> None:
                 }
             return None
 
+        def validate_feed_urls(self, feed_urls: list[str]) -> dict[str, str] | None:
+            return next(
+                (result for url in feed_urls if (result := self.validate_feed_url(url))),
+                None,
+            )
+
     result = resolve_feed_candidate(
         detector=cast(Any, DummyDetector()),
         title="Example Feed",
@@ -47,6 +53,43 @@ def test_resolve_feed_candidate_returns_validated_candidate() -> None:
         "feed_format": "rss",
         "title": "Example Feed",
     }
+
+
+def test_resolve_feed_candidate_batches_ordered_candidates() -> None:
+    observed: list[list[str]] = []
+
+    class DummyDetector:
+        def validate_feed_urls(self, feed_urls: list[str]) -> dict[str, str] | None:
+            observed.append(feed_urls)
+            return {
+                "feed_url": feed_urls[1],
+                "feed_format": "rss",
+                "title": "Second Feed",
+            }
+
+        def validate_feed_url(self, _feed_url: str) -> None:
+            raise AssertionError("scalar candidate validation should not run")
+
+    result = resolve_feed_candidate(
+        detector=cast(Any, DummyDetector()),
+        site_url="https://example.com",
+        candidate_feed_urls=[
+            "https://example.com/broken.xml",
+            "https://example.com/feed.xml",
+        ],
+    )
+
+    assert result == {
+        "feed_url": "https://example.com/feed.xml",
+        "feed_format": "rss",
+        "title": "Second Feed",
+    }
+    assert observed == [
+        [
+            "https://example.com/broken.xml",
+            "https://example.com/feed.xml",
+        ]
+    ]
 
 
 def test_resolve_feed_candidate_repairs_invalid_candidate_from_site_html() -> None:
@@ -67,6 +110,12 @@ def test_resolve_feed_candidate_repairs_invalid_candidate_from_site_html() -> No
                     "title": "Creative Coding Weekly",
                 }
             return None
+
+        def validate_feed_urls(self, feed_urls: list[str]) -> dict[str, str] | None:
+            return next(
+                (result for url in feed_urls if (result := self.validate_feed_url(url))),
+                None,
+            )
 
         def detect_from_links(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
             assert kwargs["page_url"] == "https://example.com/show"

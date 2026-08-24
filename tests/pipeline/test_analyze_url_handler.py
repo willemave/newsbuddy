@@ -170,7 +170,7 @@ def test_pattern_analysis_rebinds_type_collision_without_integrity_error(db_sess
     )
 
 
-def test_apple_podcast_pattern_resolution_uses_feed_sandbox_runtime(
+def test_apple_podcast_pattern_resolution_uses_bounded_host_http(
     db_session,
     monkeypatch,
 ) -> None:
@@ -188,26 +188,20 @@ def test_apple_podcast_pattern_resolution_uses_feed_sandbox_runtime(
     db_session.add(content)
     db_session.commit()
     content_id = _require_id(content.id)
-    sandbox_http_service = Mock()
-    runtime_calls: list[dict[str, object]] = []
-
-    @contextmanager
-    def _feed_runtime(**kwargs):
-        runtime_calls.append(kwargs)
-        yield sandbox_http_service
+    host_http_service = Mock()
 
     def _resolve(url: str, *, feed_fetch) -> ApplePodcastResolution:  # noqa: ANN001
         assert url == apple_url
-        assert feed_fetch == sandbox_http_service.fetch
+        assert feed_fetch == host_http_service.fetch
         return ApplePodcastResolution(
             feed_url="https://publisher.example/show.xml",
-            episode_title="Sandboxed Episode",
+            episode_title="Host-fetched Episode",
             audio_url="https://cdn.example/episode.mp3",
         )
 
     monkeypatch.setattr(
-        "app.pipeline.handlers.analyze_url.sandboxed_http_service",
-        _feed_runtime,
+        "app.pipeline.handlers.analyze_url.BoundedPublicHttpService",
+        lambda: host_http_service,
     )
     monkeypatch.setattr(
         "app.pipeline.handlers.analyze_url.resolve_apple_podcast_episode",
@@ -226,7 +220,6 @@ def test_apple_podcast_pattern_resolution_uses_feed_sandbox_runtime(
     )
 
     assert result.success is True
-    assert runtime_calls == [{"user_id": 1, "execution_id": content_id}]
     db_session.refresh(content)
     metadata = _metadata(content.content_metadata)
     assert metadata["feed_url"] == "https://publisher.example/show.xml"

@@ -3,12 +3,30 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Protocol
 
-from app.services.http import fetch_quiet
+from app.services.http import HttpFetcher, fetch_quiet
 
 URL_REGEX = r"https?://[^\s\"'<>]+"
 URL_TRIM_CHARS = ".,);]>'\""
+
+
+class FeedCandidateDetector(Protocol):
+    http_service: HttpFetcher
+
+    def validate_feed_urls(self, feed_urls: list[str]) -> dict[str, str] | None: ...
+
+    def detect_from_links(
+        self,
+        content: Any,
+        *,
+        page_url: str,
+        page_title: str | None,
+        html_content: str | None,
+        source: str,
+        content_type: str,
+        force_detect: bool,
+    ) -> dict[str, Any] | None: ...
 
 
 def extract_candidate_feed_urls(site_url: str | None, page_text: str | None) -> list[str]:
@@ -26,7 +44,7 @@ def extract_candidate_feed_urls(site_url: str | None, page_text: str | None) -> 
 
 def resolve_feed_candidate(
     *,
-    detector: Any,
+    detector: FeedCandidateDetector,
     title: str | None = None,
     site_url: str | None = None,
     candidate_feed_urls: list[str] | None = None,
@@ -49,8 +67,8 @@ def resolve_feed_candidate(
         if site_resolved:
             return site_resolved
 
-    for feed_url in ordered_candidates:
-        validated = detector.validate_feed_url(feed_url)
+    if ordered_candidates:
+        validated = detector.validate_feed_urls(ordered_candidates)
         if validated:
             return validated
 
@@ -69,7 +87,7 @@ def resolve_feed_candidate(
 
 def _resolve_from_site(
     *,
-    detector: Any,
+    detector: FeedCandidateDetector,
     title: str | None,
     site_url: str | None,
     html_content: str | None,

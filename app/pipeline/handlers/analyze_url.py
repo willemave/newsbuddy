@@ -20,15 +20,19 @@ from app.pipeline.task_context import TaskContext
 from app.pipeline.task_models import TaskEnvelope, TaskResult
 from app.pipeline.workflows.analyze_url_workflow import AnalyzeUrlWorkflow
 from app.services.active_users import lock_active_user
-from app.services.agent_vm_runtime import resolve_sandbox_user_id
 from app.services.apple_podcasts import ApplePodcastResolution, resolve_apple_podcast_episode
 from app.services.canonical_content_state import finalize_canonical_user_state
 from app.services.content_analyzer import AnalysisError
+from app.services.content_bodies import (
+    ContentBodyFormat,
+    ContentBodyVariant,
+    persist_content_body,
+)
 from app.services.content_metadata_merge import refresh_merge_content_metadata
-from app.services.feed_research_runtime import sandboxed_http_service
 from app.services.feed_subscription import subscribe_to_detected_feed_result
 from app.services.feed_subscription_resolution import FeedSubscriptionResolver
 from app.services.gateways.llm_gateway import get_llm_gateway
+from app.services.http import BoundedPublicHttpService
 from app.services.instruction_links import create_contents_from_instruction_links
 from app.services.queue import TaskType
 from app.services.tweet_target_resolution import (
@@ -58,6 +62,7 @@ from app.services.x_tweet_metadata import (
 )
 
 logger = get_logger(__name__)
+MIN_REUSABLE_ANALYZE_TEXT_CHARS = 500
 
 
 def _require_content_id(content: Content) -> int:
@@ -110,21 +115,12 @@ def _build_x_spend_cap_error(error_message: str) -> str:
     )
 
 
-def _resolve_apple_podcast_in_feed_sandbox(
-    url: str,
-    *,
-    user_id: object,
-    content_id: int | None,
-) -> ApplePodcastResolution:
-    sandbox_user_id = resolve_sandbox_user_id(user_id)
-    with sandboxed_http_service(
-        user_id=sandbox_user_id,
-        execution_id=content_id,
-    ) as http_service:
-        return resolve_apple_podcast_episode(
-            url,
-            feed_fetch=http_service.fetch,
-        )
+def _resolve_apple_podcast_on_host(url: str) -> ApplePodcastResolution:
+    http_service = BoundedPublicHttpService()
+    return resolve_apple_podcast_episode(
+        url,
+        feed_fetch=http_service.fetch,
+    )
 
 
 @dataclass(frozen=True)
@@ -585,11 +581,7 @@ class UrlAnalysisFlow:
                 content.platform = platform
                 metadata["platform"] = platform
             if platform == "apple_podcasts":
-                resolution = _resolve_apple_podcast_in_feed_sandbox(
-                    url,
-                    user_id=metadata.get("submitted_by_user_id"),
-                    content_id=content.id,
-                )
+                resolution = _resolve_apple_podcast_on_host(url)
                 if resolution.feed_url:
                     metadata.setdefault("feed_url", resolution.feed_url)
                 if resolution.episode_title:
@@ -650,6 +642,17 @@ class UrlAnalysisFlow:
                 metadata.setdefault("youtube_video", True)
         else:
             analysis = result.analysis
+            page_text = result.page_text.strip() if result.page_text else ""
+            if page_text:
+                persist_content_body(
+                    db,
+                    content_id=_require_content_id(content),
+                    variant=ContentBodyVariant.SOURCE,
+                    text=page_text,
+                    content_format=ContentBodyFormat.TEXT,
+                )
+                if len(page_text) >= MIN_REUSABLE_ANALYZE_TEXT_CHARS:
+                    metadata["analyze_url_source_body_ready"] = True
             if analysis.content_type == "article":
                 content.content_type = ContentType.ARTICLE.value
             elif analysis.content_type in ("podcast", "video"):

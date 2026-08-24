@@ -185,7 +185,66 @@ def test_detect_from_html_resolves_sequoia_fixture_before_generic_candidates(
         },
         "all_detected_feeds": None,
     }
-    assert fetched_urls == [SEQUOIA_TRAINING_DATA_FEED]
+    assert fetched_urls[0] == SEQUOIA_TRAINING_DATA_FEED
+    assert fetched_urls.index(SEQUOIA_TRAINING_DATA_FEED) < fetched_urls.index(
+        "https://sequoiacap.com/rss.xml"
+    )
+
+
+def test_discover_feed_links_probes_all_candidate_stages_in_one_batch() -> None:
+    rss_payload = b'<?xml version="1.0"?><rss><channel><title>Anchor Feed</title></channel></rss>'
+
+    class DummyHttpService:
+        def __init__(self) -> None:
+            self.batches: list[list[str]] = []
+
+        def fetch_many(self, urls: list[str]) -> list[object]:
+            self.batches.append(urls)
+            return [
+                SimpleNamespace(
+                    url=url,
+                    headers={
+                        "content-type": (
+                            "application/rss+xml"
+                            if url.endswith("anchor-feed.xml")
+                            else "text/html"
+                        )
+                    },
+                    content=(
+                        rss_payload
+                        if url.endswith("anchor-feed.xml")
+                        else b"<html>not a feed</html>"
+                    ),
+                )
+                for url in urls
+            ]
+
+    http_service = DummyHttpService()
+    detector = feed_detection.FeedDetector(
+        use_llm=False,
+        http_service=cast(Any, http_service),
+    )
+
+    result = detector._discover_feed_links(
+        "https://example.com/articles/post",
+        (
+            '<link rel="alternate" type="application/rss+xml" href="/broken.xml">'
+            '<a href="/anchor-feed.xml">RSS feed</a>'
+        ),
+    )
+
+    assert result == [
+        {
+            "feed_url": "https://example.com/anchor-feed.xml",
+            "feed_format": "rss",
+            "title": "RSS feed",
+        }
+    ]
+    assert len(http_service.batches) == 1
+    batch = http_service.batches[0]
+    assert batch[0] == "https://example.com/broken.xml"
+    assert "https://example.com/rss.xml" in batch
+    assert batch[-1] == "https://example.com/anchor-feed.xml"
 
 
 def test_build_candidate_feed_urls_includes_root_and_section() -> None:

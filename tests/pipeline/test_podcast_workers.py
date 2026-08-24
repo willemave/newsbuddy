@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+import pytest
+
 from app.models.contracts import ContentType
 from app.models.db import Content, ContentBody
 from app.pipeline.podcast_workers import PodcastMediaWorker
 from app.services.apple_podcasts import ApplePodcastResolution
+from app.services.bounded_media_download import BoundedMediaDownloadError
 from app.services.queue import TaskType
 
 
@@ -164,41 +167,28 @@ def test_podcast_media_uses_direct_content_url_when_audio_metadata_missing(
     assert body.char_count == len("Transcript text")
     download.assert_called_once()
     assert download.call_args.kwargs["audio_url"] == audio_url
-    assert download.call_args.kwargs["sandbox_user_id"] == 0
     worker.queue_service.enqueue.assert_called_once_with(TaskType.SUMMARIZE, content_id=content.id)
 
 
-def test_non_youtube_media_download_uses_sandbox_for_link_local_url(mocker, tmp_path):
+def test_non_youtube_media_download_rejects_link_local_url_via_bounded_host_path(
+    mocker,
+    tmp_path,
+):
     worker = PodcastMediaWorker()
-    audio_bytes = b"sandbox-audio"
-    host_http = mocker.patch(
-        "httpx.Client",
-        side_effect=AssertionError("untrusted media must not use host HTTP"),
+    bounded_download = mocker.patch(
+        "app.pipeline.podcast_workers.download_remote_media_bounded",
+        side_effect=BoundedMediaDownloadError("private address blocked"),
     )
 
-    def _sandbox_download(url, destination, *, user_id, execution_id):
-        assert url == "http://169.254.169.254/private.mp3"
-        assert user_id == 17
-        assert execution_id == 42
-        destination.write_bytes(audio_bytes)
-        return destination
+    with pytest.raises(BoundedMediaDownloadError, match="private address blocked"):
+        worker._download_to_scratch(
+            content_id=42,
+            title="Private episode",
+            audio_url="http://169.254.169.254/private.mp3",
+            scratch_dir=tmp_path,
+        )
 
-    sandbox_download = mocker.patch(
-        "app.pipeline.podcast_workers.download_remote_media_in_sandbox",
-        side_effect=_sandbox_download,
-    )
-
-    result = worker._download_to_scratch(
-        content_id=42,
-        title="Private episode",
-        audio_url="http://169.254.169.254/private.mp3",
-        scratch_dir=tmp_path,
-        sandbox_user_id=17,
-    )
-
-    assert result.read_bytes() == audio_bytes
-    sandbox_download.assert_called_once()
-    host_http.assert_not_called()
+    bounded_download.assert_called_once()
 
 
 def test_youtube_media_download_keeps_existing_ytdlp_path(mocker, tmp_path):
@@ -211,16 +201,15 @@ def test_youtube_media_download_keeps_existing_ytdlp_path(mocker, tmp_path):
         "_download_youtube_audio",
         return_value=expected,
     )
-    sandbox_download = mocker.patch("app.pipeline.podcast_workers.download_remote_media_in_sandbox")
+    bounded_download = mocker.patch("app.pipeline.podcast_workers.download_remote_media_bounded")
 
     result = worker._download_to_scratch(
         content_id=42,
         title="YouTube episode",
         audio_url="https://www.youtube.com/watch?v=abc123xyz",
         scratch_dir=tmp_path,
-        sandbox_user_id=17,
     )
 
     assert result == expected
     youtube_download.assert_called_once()
-    sandbox_download.assert_not_called()
+    bounded_download.assert_not_called()
