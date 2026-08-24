@@ -18,6 +18,15 @@ func briefingSegmentHasPassedReadBoundary(
     return frame.maxY < readBoundaryY
 }
 
+func briefingTrailingReadClearance(
+    containerHeight: CGFloat,
+    readBoundaryY: CGFloat?
+) -> CGFloat {
+    let minimumClearance: CGFloat = 24
+    guard containerHeight > 0, let readBoundaryY else { return minimumClearance }
+    return max(containerHeight - readBoundaryY + 1, minimumClearance)
+}
+
 struct BriefingReadBoundaryTracker {
     private var hasObservedBeforeBoundary = false
     private var didMark = false

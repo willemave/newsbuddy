@@ -925,3 +925,14 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Follow-up (same day):** Compaction now counts events too. Added nullable `briefing_segments.event_groups` (migration `20260822_01`; null = one event per source for legacy rows), persisted from `plan_event_windows` on append and compaction. `briefing_fragmentation_metrics` takes per-segment event groups and reports `unread_event_count` / `window_event_limit` (an event stays unread while any source is unread); `_compaction_donors` admits news segments with ≤2 unread events; `admin briefing status` reports the same fields. Migration upgraded, downgraded, and upgraded locally; 419 Briefing/admin/relation/model/guardrail tests passed with zero network embedding calls; Ruff and mypy clean. `tests/migrations/test_task_ownership_chat_turn_migration.py` fails identically without these changes (pre-existing `partial_text` duplicate column).
 - **Remaining:** The over-merge of same-event/different-product pairs in the relation matcher remains a product decision. No commit, push, or deployment performed.
 - **Commits:** Uncommitted.
+
+### 2026-08-24 — `main` — Restore final Briefing podcast read completion
+
+- **Status:** Complete locally.
+- **Scope:** iOS Briefing trailing scroll geometry for viewport-driven read marking.
+- **Evidence:** Production persisted two podcast reads after the full-passage threshold shipped, confirming the read API and ordinary segment crossing remain healthy. The final segment had only 40 points of bottom content margin, so its bottom edge could not cross the pinned read boundary at maximum scroll.
+- **Changes:** Size the trailing scroll clearance from the visible container and pinned read boundary so the final segment in Podcasts, Articles, or News can pass fully above the readable viewport and trigger the existing mark-once flow. Added focused clearance regressions.
+- **Decisions:** Preserve the full-passage product law and existing read-state pipeline; fix the unreachable terminal geometry instead of weakening the threshold or special-casing podcasts.
+- **Validation:** All 16 `BriefingReadMarkingTests` passed on the iOS 26.5 Newsly Regression simulator; the focused test run built the app and test targets successfully.
+- **Remaining:** Authenticated simulator interaction remains unavailable on the clean regression simulator. No production mutation, commit, push, or deployment performed.
+- **Commits:** Uncommitted.

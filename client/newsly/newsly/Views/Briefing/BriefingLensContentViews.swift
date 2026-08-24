@@ -331,7 +331,12 @@ struct BriefingLensPageView: View, Equatable {
                             }
 
                             Color.clear
-                                .frame(height: 24)
+                                .frame(
+                                    height: briefingTrailingReadClearance(
+                                        containerHeight: containerHeight,
+                                        readBoundaryY: readBoundaryY
+                                    )
+                                )
                                 .accessibilityHidden(true)
 
                             if renderModel.hasMore || continuationError != nil {

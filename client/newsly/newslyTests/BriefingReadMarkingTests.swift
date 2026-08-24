@@ -54,6 +54,26 @@ final class BriefingReadMarkingTests: XCTestCase {
         )
     }
 
+    func testTrailingClearanceLetsFinalSegmentPassPinnedBoundary() {
+        XCTAssertEqual(
+            briefingTrailingReadClearance(
+                containerHeight: 800,
+                readBoundaryY: 80
+            ),
+            721
+        )
+    }
+
+    func testTrailingClearanceUsesMinimumBeforeGeometryIsAvailable() {
+        XCTAssertEqual(
+            briefingTrailingReadClearance(
+                containerHeight: 0,
+                readBoundaryY: nil
+            ),
+            24
+        )
+    }
+
     func testInitialObservationAfterBoundaryDoesNotMarkRead() {
         var tracker = BriefingReadBoundaryTracker()
 
