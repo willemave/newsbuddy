@@ -250,7 +250,8 @@ Most orchestration logic lives here. Major service families:
 - X integration and sync
 - content interactions, Knowledge saves, read state
 - narration, transcription, and audio episodes
-- content-body storage and personal markdown sync
+- content-body storage, compatibility personal-markdown exports, and the maintained agent-data corpus
+- persistent E2B VM lifecycle, snapshot recovery, revisioned corpus hydration, and shared VM tools
 - Exa and external API clients
 
 ### 5.8 `app/pipeline/`
@@ -320,7 +321,9 @@ X sync and YouTube configuration paths exist outside the default scheduled scrap
 - HTTP client
   - timeout and retry counts
 - storage paths
-  - media, logs, generated images, content bodies, personal markdown libraries
+  - media, logs, generated images, content bodies, personal markdown libraries, agent-data mirror
+- VM execution
+  - provider, runtime-input-derived template revision, auto-pause timeout, request/output bounds
 - object storage
   - local or S3-compatible content-body storage
 - crawl4ai options
@@ -328,7 +331,8 @@ X sync and YouTube configuration paths exist outside the default scheduled scrap
 - Firecrawl
   - API key and timeout for HTML fallback extraction
 
-Production rejects wildcard CORS origins and non-PostgreSQL database URLs during settings validation.
+Production rejects wildcard CORS origins, non-PostgreSQL database URLs, a non-E2B VM provider,
+and a missing E2B API key during settings validation.
 
 ### 6.2 Path conventions
 
@@ -337,6 +341,8 @@ Production rejects wildcard CORS origins and non-PostgreSQL database URLs during
 - images default to `/data/images` when writable, otherwise `./data/images`
 - content bodies default to `./data/content_bodies`
 - personal markdown libraries default to `./data/personal_markdown`
+- the persistent agent-data mirror defaults to `./data/agent_user_data` and is mounted at
+  `/data/agent_user_data` in Docker runtimes
 
 ## 7. Data Model
 
@@ -346,7 +352,7 @@ SQLAlchemy tables live under `app/models/db/`. API DTOs, domain objects, metadat
 
 | Table | Purpose | Notes |
 |---|---|---|
-| `users` | End users and admin users | Apple identity, profile, onboarding flags, X username, display preferences |
+| `users` | End users and admin users | Identity/profile plus persistent per-user sandbox/snapshot IDs and corpus revision |
 | `contents` | Canonical long-form records and compatibility rows | Content type, URL, source/platform, lifecycle status, compact metadata, publication date |
 | `content_bodies` | Canonical body storage pointers | Source/rendered text stored outside `content_metadata` in local or S3-compatible storage |
 | `processing_tasks` | Async task queue | Task type, queue partition, normalized payload, active dedupe key, retries, lease owner/token/timestamps |
@@ -377,7 +383,9 @@ SQLAlchemy tables live under `app/models/db/`. API DTOs, domain objects, metadat
 | `user_api_keys` | Machine access keys | Prefix + hash + audit fields |
 | `cli_link_sessions` | CLI/device link sessions | Links local agent clients to approved API keys |
 | `chat_sessions` | Stored chat sessions | Session type, model/provider, optional content/news link, snapshot |
-| `chat_messages` | Stored message history | Serialized pydantic-ai messages plus async message status |
+| `chat_messages` | Stored message history | Serialized pydantic-ai messages, async state, retry-fenced partial text, and separate advisory tool progress |
+| `agent_vm_system_state` | Singleton system VM ownership | Durable sandbox/template identity for feed research (`user:0`) |
+| `agent_data_files` | Per-user corpus checksum ledger | Typed document identity, canonical and stale paths, index metadata, byte size, checksum, revision, and soft-deletion state |
 | `user_feedback` | User-submitted feedback | Admin-visible product feedback |
 
 ### 7.2 Fast-news read model
@@ -453,9 +461,10 @@ Chat is server-stored, not client-authoritative.
 - `chat_messages`
   - serialized pydantic-ai message arrays plus render metadata
   - nullable cumulative `partial_text` plus attempt `stream_generation`, `stream_revision`, and update timestamp for advisory in-flight display
+  - nullable `tool_progress` plus its own revision/timestamp; tool output never becomes transcript text
 - async message state
   - `processing`, `completed`, `failed`
-  - the status endpoint returns a stable-ID partial assistant DTO only while processing; completed message arrays remain canonical
+  - the status endpoint returns a stable-ID partial assistant DTO and the latest tool-progress state only while processing; completed message arrays remain canonical
   - the iOS client polls one coalesced sequence, applies newer partial cursors in place, and resets its idle polling budget while the stream advances
 
 ### 7.6 Schema evolution
@@ -484,6 +493,7 @@ Alembic migration history in `migrations/alembic/versions/` shows the app’s ma
 - news-item discussions and news chat linkage
 - audio episodes
 - user integration synced-item ledger
+- persistent agent VM identity, per-user corpus revisions/checksum ledger, and separate chat tool progress
 
 ## 8. API Surface
 
@@ -754,6 +764,10 @@ Defined in `app/models/contracts.py`:
 - `generate_audio_episode`
 - `run_llm_task`
 - `briefing_refresh`
+- `sync_agent_data`
+- `index_agent_data`
+- `backfill_agent_data`
+- `reconcile_agent_data`
 - `delete_user_account`
 
 ### 9.2 Queue partitions
@@ -796,6 +810,10 @@ used by `app/services/queue.py`:
 | `generate_audio_episode` | `audio_episode` |
 | `run_llm_task` | `llm` |
 | `briefing_refresh` | `llm` |
+| `sync_agent_data` | `backfill` |
+| `index_agent_data` | `backfill` |
+| `backfill_agent_data` | `backfill` |
+| `reconcile_agent_data` | `backfill` |
 | `delete_user_account` | `backfill` |
 
 ### 9.3 Queue semantics
@@ -883,6 +901,10 @@ Registered handlers:
 - generate audio episode
 - run LLM task
 - refresh briefing
+- synchronize agent data
+- publish the agent-data index/manifest
+- backfill agent data in bounded pages
+- reconcile agent-data checksums in bounded pages
 - delete user account
 
 ### 9.5 LLM task workflows
@@ -920,32 +942,91 @@ still identifies that source. If ingestion later marks that row as a duplicate t
 `canonical_content_id`, deck preparation follows the canonical row and updates its persisted source
 pointer before classifying the source as terminal.
 
-VM-backed agents share five direct host tools: `execute_bash`, `read_file`, `write_file`,
-`list_files`, and `web_search`. File tools share one workspace-relative path contract across local
-and E2B providers: an echoed absolute path is accepted only when it identifies the current task
-workspace, while traversal and foreign absolute paths fail visibly. Tool results are structured.
-Learning Deck output is validated automatically; a missing or invalid artifact gets one focused
-repair turn before a typed terminal failure, and validation guidance names only contract-relative
-paths.
+VM-backed agents share exactly five VM tools: `execute_bash`, `read_file`, `write_file`,
+`edit_file`, and `list_files`. `edit_file` performs an exact UTF-8 replacement, requires a unique
+match unless replace-all is explicit, and returns only the replacement count and resulting size.
+Host-managed Exa search remains a separate product tool and no Exa or Newsly
+credential enters the VM. Writes are restricted to the task directory below `/data/workspace`;
+reads may also address the credential-free corpus below `/data`. Traversal and foreign absolute
+paths fail visibly, results are structured and bounded, bash is capped at 300 seconds, and the
+agent request limit defaults to eight. Learning Deck output is validated automatically; a missing
+or invalid artifact gets one focused repair turn before a typed terminal failure, and validation
+guidance names only contract-relative paths.
 
-New-feed discovery uses the same process-scoped agent VM pool. Mixed Search, contextual assistant
-discovery, onboarding suggestions, add-feed resolution, scraper-config validation, and
-ingestion-time feed detection send untrusted candidate probes through `SandboxFeedHttpService`
-inside the configured E2B workspace. The canonical `FeedDetector` requires an injected HTTP service
-and is constructed only by this E2B runtime, which rejects local/disabled VM sessions, so discovery
-and validation cannot silently fall back to host HTTP or a host-backed sandbox.
+Article chat, contextual-assistant library routes, and council branches hold a
+`LazyAgentVmRuntime`: constructing the turn and registering conditional schemas performs no E2B
+operation. The first VM tool connects to the durable `sandbox_id` on the user row or creates one;
+turn cleanup releases the local lease without killing or extending it. E2B auto-pauses after 300
+seconds with memory preserved, which makes connect the normal warm-activation path. PostgreSQL row
+and advisory locks serialize connect-or-create and corpus transfer across processes. Every workflow
+uses the code-owned `newsly-agent` template; no environment can select the provider default or
+another template. Its revision hashes the checked-in Dockerfile, host hardening program, and corpus
+installer, so any reusable-runtime compatibility change retires stale compute automatically, and
+the capability probe is cached by that revision. Learning Deck and
+Share Action workflows use the same `AgentVmSession` implementation for their required VM work. The
+canonical template exposes Playwright's module and browser cache through filesystem lookup paths
+because E2B command sessions do not inherit the Docker image's `NODE_PATH` or
+`PLAYWRIGHT_BROWSERS_PATH` values.
+
+E2B's template finalizer adds passwordless sudo to its default `user` after Dockerfile execution.
+Newsly revokes the sudoers entries and sudo-group membership through a root control-plane command on
+each fresh canonical sandbox before capability probing, hydration, snapshotting, or model access. A
+failed revocation aborts and destroys the sandbox. Recovery snapshots inherit the revoked state, so
+connect and snapshot-clone warm paths add no hardening command.
+
+The user corpus is maintained outside chat turns. Incremental `backfill`-queue tasks render all
+completed user-visible content, ready news, active/degraded Briefings, and completed chat text as
+bounded markdown files, while `agent_data_files` records typed identities, checksums, revisions, and
+index metadata. A recent-first 500-document backfill fills existing accounts; debounced index tasks
+replace `index.jsonl` and write `manifest.json` last; nightly reconciliation walks the ledger in
+bounded pages, repairs checksum drift, and follows with the same backfill traversal to discover
+missing documents. Event enqueue holds a shared user lock through commit: identical pending syncs
+coalesce, while an identical sync that is already processing gets one deduplicated successor. The
+sync handler takes the exclusive side of that lock before rendering, so no committed mutation can
+be absorbed by work that already rendered. On acquisition, a missing or invalid remote manifest receives one full archive;
+otherwise the host pushes only files and tombstones after the remote revision. The transfer runs
+under the same user row lock as lifecycle acquisition, installs the index atomically, and writes the
+manifest last. Delta installation touches only transferred paths instead of rescanning the full
+corpus. A remote revision ahead of the host is corruption and causes a rebuild from host
+state. Corpus files are root-owned and read-only to the model user; only `/data/workspace` is
+writable.
+
+After the first full hydration, a user sandbox creates one clean E2B snapshot before user commands
+run. If the paused sandbox is later missing, Newsly restores that snapshot and applies only later
+corpus revisions from the root-owned manifest checkpoint inside the snapshot. Snapshot failure is
+fail-open for the live canonical sandbox, while a successful
+snapshot must reconnect before its ID is published. Snapshot checkpoints are not advanced after
+user work. E2B Volumes are not used: this account cannot access the private beta, and there is no
+untested Volume mode or runtime fallback. The system feed sandbox has no user corpus, so it relies on
+memory-preserving pause/resume and the canonical template rather than snapshots.
+
+Chat VM creation allows general internet egress but denies private/link-local ranges and the
+host-resolved public addresses of the configured Newsly origin, exposes no inbound public traffic,
+and passes only `NEWSLY_USER_ID`. E2B currently rejects hostnames in `deny_out`, so origin addresses
+are resolved to `/32`/`/128` selectors on the host and resolution failure degrades with a warning
+rather than making VM creation unavailable. E2B's own `169.254.169.254` metadata responder bypasses
+deny-all; a live canary found no IAM-role credentials there, and no Newsly or vendor credential is
+provisioned in the VM. New-feed
+discovery uses the same persistent lifecycle under the singleton system namespace (`user:0`) but
+starts deny-by-default. `SandboxFeedHttpService` temporarily allows only the exact candidate hosts,
+adds E2B's required `0.0.0.0/0` deny-all selector, batches all URLs for one detector probe into one
+parallel curl command, parses bounded JSONL stdout, then restores deny-by-default. Loopback remains
+available inside the sandbox so Playwright can control Chromium. A PostgreSQL advisory lock
+serializes that network-policy mutation across worker processes. The E2B-only boundary rejects
+local/disabled sessions, so discovery and validation cannot silently fall back to host HTTP.
 
 Once a feed or fixed aggregator source is configured, steady-state ingestion uses the shared
-application HTTP client with a hard decoded-body limit, public-unicast resolution pinned to the
-dispatched address, environment-proxy bypass, bounded redirects, and validation of every redirect
-target. Scheduled RSS, Atom, Substack, podcast, and fixed HTML
+application HTTP client with no byte cap for RSS or Atom documents, public-unicast resolution
+pinned to the dispatched address, environment-proxy bypass, bounded redirects, and validation of
+every redirect target. Page and media downloads retain their separate response limits. Scheduled
+RSS, Atom, Substack, podcast, and fixed HTML
 aggregator downloads therefore do not acquire an E2B session. Pipeline-time publisher RSS lookup
-uses the same bounded host path, while discovery-time publisher-feed validation remains sandboxed. Trusted
+uses the same hardened host path, while discovery-time publisher-feed validation remains sandboxed. Trusted
 fixed-provider/control-plane APIs (Exa, Apple/iTunes, Spotify, Podcast Index, Hacker News Firebase,
 and model providers) also remain host-managed. General chat web search remains host-managed and does
-not acquire a feed sandbox. Same-user discovery requests reuse one sandbox with task-isolated
-workspace paths, and API and worker shutdown drain cached E2B sessions only after active work has
-stopped.
+not acquire a feed sandbox. Discovery requests reuse the durable system sandbox with task-isolated
+workspace paths, and API/worker shutdown detaches cached handles only after active work has stopped;
+it does not destroy persistent sandboxes.
 
 Weekly discovery checkpoints a successful completed run for the current Sunday-based discovery
 window before any paid provider call. A weekly-chat projection retry therefore reuses the completed
@@ -1003,12 +1084,14 @@ Behavior:
 
 `app/services/content_analyzer.py`:
 
-- fetches page HTML with `httpx`
+- fetches page HTML through the bounded host HTTP path, pinning validated public addresses,
+  revalidating redirects, bypassing environment proxies, and limiting decoded bytes
 - extracts readable text with `trafilatura`
 - detects podcast/video/media patterns in raw HTML
 - extracts RSS/Atom links
 - uses an LLM to classify `article`, `podcast`, or `video`
 - supports optional instruction-driven link extraction for share flows
+- persists clean extracted text as the canonical source body when available
 
 ### 10.4 Content processing worker
 
@@ -1018,7 +1101,8 @@ High-level behavior:
 
 - load ORM content and convert to `ContentData`
 - choose a processing strategy by URL
-- download/extract strategy-specific data
+- reuse a sufficiently large clean source body from Analyze URL for generic HTML, otherwise
+  download/extract strategy-specific data
 - merge metadata safely
 - persist workflow state transitions
 - enqueue `SUMMARIZE` when extraction succeeded and summarization is applicable
@@ -1061,7 +1145,9 @@ Normal podcast processing is:
 - `PROCESS_CONTENT`
   - identify podcast metadata and enqueue media work
 - `PROCESS_PODCAST_MEDIA`
-  - download, normalize, transcribe when needed, persist transcript/body state, then enqueue `SUMMARIZE`
+  - resolve media on the host; download non-YouTube audio through the bounded public downloader
+    (500 MB limit, public redirects only, atomic temporary file), use yt-dlp for YouTube, normalize,
+    transcribe when needed, persist transcript/body state, then enqueue `SUMMARIZE`
 - `SUMMARIZE`
   - summarize transcript once text is available
 
@@ -1264,20 +1350,29 @@ then act. Explicit product modes remain narrow: small talk and grounded Learning
 send no tools, Deck requests for current or external information send only Exa, and frozen weekly
 discovery actions send only the matching mutation.
 
-Personal-library tools are registered once in `chat_turn_runtime.py` for both article chat and the
-contextual assistant. The canonical configured provider is E2B: turns whose capability profile
-selects personal-library tools synchronize the user's markdown library, hydrate an isolated sandbox,
-expose bounded search/list/read tools, and close the sandbox afterward. Other contextual turns do
-not start E2B. `local` remains a deterministic development/test provider and `disabled` is an
-explicit operational rollback.
+The five standard VM schemas are registered once through `agent_toolset.py`; `PrepareTools` hides
+them from chat turns without a lazy VM capability. A no-tool turn therefore performs no sandbox
+connect, create, hydration, timeout refresh, or corpus synchronization. When the model invokes one,
+the persistent per-user VM sees `/data/index.jsonl`, `knowledge/`, `content/`, `news/`,
+`briefings/`, and `chats/`, plus its writable task workspace. Product mutations and Exa search stay
+host-side. `local` remains a deterministic development/test provider and `disabled` is an explicit
+operational rollback.
+
+Chat preparation selects the newest complete user turns within a 16k-token history budget and uses
+200 rows only as a safety ceiling. It caps historical tool results separately and budgets history
+after reserving output, tool schemas, system/context material, and the current prompt against a
+64k-token request window. It resolves independent history/context/API-key work in parallel for
+queued turns and caps agent requests at eight. The shared model builder enables Anthropic
+instruction/tool/message cache breakpoints and OpenAI 24-hour prompt-cache retention.
 
 Pydantic-ai event handlers persist only text belonging to a confirmed final text response, never
-intermediate tool-planning text. The polling API projects those cumulative snapshots onto the same
-assistant display key used by terminal and session-detail responses. Both full chat and the Learning
-Deck flyover update that row in place and label it as still working. Streaming follows the bottom
-only while the reader remains near it; scrolling upward preserves the transcript position. Portrait
-deck chat has peek, compact, and approximately three-quarter-screen focused states; landscape sheets
-expose medium, three-quarter, and large detents.
+intermediate tool-planning text. VM tool status/stdout is throttled into the separate retry-fenced
+`tool_progress` state. The polling API projects cumulative text snapshots onto the same assistant
+display key used by terminal and session-detail responses and returns tool progress separately.
+Both full chat and the Learning Deck flyover update that row in place and label it as still working.
+Streaming follows the bottom only while the reader remains near it; scrolling upward preserves the
+transcript position. Portrait deck chat has peek, compact, and approximately three-quarter-screen
+focused states; landscape sheets expose medium, three-quarter, and large detents.
 
 ### 13.2 Deep research
 
@@ -1299,7 +1394,7 @@ The `/api/agent/*` surface wraps existing features into machine-friendly flows:
 - external search
 - onboarding start/status/complete
 - CLI link approval/polling
-- personal markdown library manifest/file reads
+- compatibility personal-markdown manifest/file reads (the maintained VM corpus is internal)
 - job polling
 
 These APIs are intended for assistant and CLI style clients that do not need the full mobile UI semantics.
@@ -1407,7 +1502,11 @@ Search is intentionally abstracted from the routers.
 
 ### 16.3 Knowledge search
 
-Knowledge search is intentionally scoped to user-saved content. Assistant tools and library APIs read from `content_knowledge_saves`, `content_bodies`, and the personal markdown library rather than searching every visible feed item.
+Product Knowledge search is intentionally scoped to user-saved content and remains backed by
+`content_knowledge_saves` plus canonical bodies. This is distinct from the credential-free VM
+corpus: the model may use `jq`, `rg`, or Python over every completed content/news item, Briefing,
+and completed chat the same user can access. The older personal-markdown APIs remain a compatibility
+surface for external clients, not the VM hydration path.
 
 ## 17. iOS Client Architecture
 
@@ -1609,6 +1708,7 @@ The previous API slot remains running as an immediate rollback target. Productio
 - `scripts/run_feed_discovery.py`
 - `scripts/run_integration_sync.py`
 - `scripts/run_twitter_sync.py`
+- `scripts/reconcile_agent_data.py` (nightly producer for bounded corpus repair/backfill)
 - `scripts/sync_production_state.py`
 
 ### 21.6 Queue and content maintenance
@@ -1623,6 +1723,8 @@ The previous API slot remains running as an immediate rollback target. Productio
 - `scripts/retranscribe_podcasts.py`
 - `scripts/generate_thumbnails.py`
 - `scripts/resize_thumbnails.py`
+- `scripts/build_agent_vm_template.py --check` for local template validation; omit `--check`
+  only with E2B credentials when intentionally building `e2b.Dockerfile`
 
 ### 21.7 Contract and documentation generation
 

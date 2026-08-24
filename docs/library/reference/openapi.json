@@ -2559,6 +2559,47 @@
         "title": "ChatSessionSummaryDto",
         "type": "object"
       },
+      "ChatToolProgressDto": {
+        "description": "Latest advisory VM tool state for an in-flight chat turn.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "tool_name",
+          "status"
+        ],
+        "title": "ChatToolProgressDto",
+        "type": "object"
+      },
       "CliLinkApproveRequest": {
         "description": "Authenticated request to approve one pending CLI link session.",
         "properties": {
@@ -6064,6 +6105,30 @@
             ],
             "description": "Monotonic partial response revision within the current generation",
             "title": "Stream Revision"
+          },
+          "tool_progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatToolProgressDto"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest advisory VM tool state, separate from transcript text"
+          },
+          "tool_progress_revision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monotonic advisory tool-state revision for this worker attempt",
+            "title": "Tool Progress Revision"
           }
         },
         "required": [

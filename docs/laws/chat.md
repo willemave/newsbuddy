@@ -21,3 +21,13 @@ CH9. Council branches run independently, retain failed candidates for inspection
 CH10. Opening global chat dismisses covering presentations and installs one visible route.
 
 CH11. Learning Deck chat stays grounded in the deck and its sources, remains secondary to reading, and searches the web only for an explicit current, external, or verification request.
+
+CH12. A chat turn that invokes no VM tool performs no sandbox operation.
+
+CH13. The VM sees the user's readable corpus as credential-free files. Newsly mutations, product credentials, and vendor credentials remain on the host.
+
+CH14. VM-capable agents expose the same five execution tools: execute, read, write, exact edit, and list. Tool progress remains retry-fenced and separate from visible transcript text.
+
+CH15. Every E2B-backed product workflow uses the canonical Newsly agent template. Provider-default and per-workflow template selection are not runtime fallbacks.
+
+CH16. Model history contains newest complete user turns within the remaining request budget. Output, tool schemas, system/context material, and the current prompt are reserved before history; trimming never leaves an orphaned assistant or tool sequence.
