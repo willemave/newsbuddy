@@ -97,18 +97,17 @@ shippable mid-flight.
      `LearningDeckTimelineRow`, `LearningNarrationRow`; keep the `PreparingActivityDot`,
      narration play circle, swipe/context actions, and saved-state semantics.
 3. Rebuild `KnowledgeView` root: masthead → composer (moved from `LearningView`) →
-   filter chips → day-grouped timeline; per-source inline errors; skeleton and unified
-   empty states; pull-to-refresh across all four sources.
+   day-grouped timeline; per-source inline errors; skeleton and unified empty states;
+   pull-to-refresh across all four sources.
 4. Compose `ContentListViewModel`, `LearningHubViewModel`, `LearningDecksViewModel`, and
    `CustomNarrationLibraryViewModel` in the Knowledge root via `RootDependencyFactory`;
-   implement the newest-oldest-loaded pagination rule across the two cursor feeds; wire
-   chip scoping.
+   implement the newest-oldest-loaded pagination rule across the two cursor feeds.
 5. Rebuild `KnowledgeSearchView` results on the shared row component.
 
 **Tests / validation**
 
 - Unit: merge ordering across four kinds, stable IDs, day grouping, partial-source
-  failure, chip filtering, pagination-source selection.
+  failure, pagination-source selection.
 - Deterministic visual fixtures: saved article (ready/processing/unavailable), linked
   chat, deck, narration in one seeded timeline.
 - Focused XCTest + iPhone simulator build; AXe pass over `knowledge.*` identifiers.
@@ -170,7 +169,7 @@ simulator read-through of a long markdown answer.
 2. Update `docs/log.md` per phase; final entry records validation evidence.
 3. Full sweep: `ruff check` + focused `pytest` (Postgres harness included), iOS build +
    focused XCTest, Maestro flows, AXe on Briefing/Knowledge/chat, seeded screenshots of
-   the Knowledge root (all four kinds + chips), search results, chat session, and both
+   the Knowledge root (all four kinds), search results, chat session, and both
    tab-bar states; screenshot paths recorded in the handoff.
 
 ## Risks and Mitigations
@@ -189,7 +188,7 @@ simulator read-through of a long markdown answer.
 
 ## Explicit Cut Lines
 
-If scope pressure hits, cut from the bottom: filter chips (Phase 3 step 4's chip scoping)
-→ haptic/morph niceties (Phase 5, keep the two-item bar plain) → corpus-path bridging in
-tool results (Phase 1 step 4). The FTS foundation, the tool itself, the merged timeline,
-and the two-tab navigation are not cuttable.
+If scope pressure hits, cut from the bottom: haptic/morph niceties (Phase 5, keep the
+two-item bar plain) → corpus-path bridging in tool results (Phase 1 step 4). The FTS
+foundation, the tool itself, the merged timeline, and the two-tab navigation are not
+cuttable.

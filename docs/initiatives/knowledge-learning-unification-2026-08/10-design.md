@@ -37,10 +37,10 @@ Briefing | Knowledge
    Partial-source failure stays visible (law K5 semantics now cover the merged surface).
 3. The "Ask anything…" composer moves to the top of the combined screen, directly under the
    masthead, keeping Learning's conversational entry as the primary action.
-4. A lightweight filter chip row (`ALL · SAVED · CHATS · DECKS · AUDIO`) sits between the
-   composer and the timeline. This supersedes the 2026-07-12 decision against Knowledge
-   filter controls: with four interleaved kinds, a kind filter is navigation, not taxonomy.
-   Topics/collections/AI clustering remain out of scope.
+4. The combined root has **no filter chips or segmented control** — the 2026-07-12
+   decision against filter controls carries over. Kind legibility comes from the uniform
+   tile content and kicker line, and lookup comes from search. Topics/collections/AI
+   clustering remain out of scope.
 5. Every row uses one **56×56** leading tile (continuous corner radius 10). Saved articles
    shrink from 92×76 thumbnails; learning glyph tiles grow from 38×38 with glyphs at 22pt
    (up from 16pt). Kind is communicated by the tile content plus an uppercase kicker line,
@@ -77,8 +77,6 @@ EditorialMastheadHeader("Knowledge")            search · more
 
 [ Ask anything...                                       mic ]
 
-ALL   SAVED   CHATS   DECKS   AUDIO
-
 ---------------------- TODAY ----------------------
 [56 thumb]  How Solar Got Cheap                      ›
             The state of the transition, in one …
@@ -110,16 +108,6 @@ ALL   SAVED   CHATS   DECKS   AUDIO
 - The composer is the existing Learning composer unchanged: `terracottaBodyLarge` field,
   48pt min height, `CornerRadius.control` surface, send/mic trailing controls, and the
   same durable send path into `ChatSessionRoute`.
-
-### Filter chips
-
-- Horizontal row, 20pt gutter, `HStack(spacing: 8)`, chip height 30, capsule shape.
-- Label `.terracottaCategoryPill` (Lato 10 semibold, tracking 1.5), uppercase.
-- Selected: `Color.onSurface` fill, `Color.surfacePrimary` text — mirroring the tab pill.
-- Unselected: `surfaceSecondary` fill, 1pt `borderSubtle` stroke, `onSurfaceSecondary` text.
-- Selection filters the merged timeline client-side and scopes pagination to the sources
-  that feed the active kind. `ALL` is the default and resets on tab re-tap.
-- Accessibility ids: `knowledge.filter.all`, `.saved`, `.chats`, `.decks`, `.audio`.
 
 ### Timeline model
 
@@ -327,7 +315,7 @@ No new endpoints and no contract regeneration:
 
 ## Accessibility
 
-- `knowledge.screen`, `knowledge.search`, `knowledge.filter.<kind>`,
+- `knowledge.screen`, `knowledge.search`,
   `knowledge.saved.<id>`, `knowledge.chat.<id>`, `knowledge.deck.<id>`,
   `knowledge.narration.<id>`, `knowledge.chat.input`, `knowledge.chat.mic`.
 - Rows combine children into one label ("Saved article, How Solar Got Cheap,
