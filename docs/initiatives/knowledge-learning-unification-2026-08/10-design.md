@@ -53,7 +53,7 @@ Briefing | Knowledge
    (matched-geometry), icon-only unselected items, and an icon+label expanded selected
    item. Existing glass/shadow/motion tokens are authoritative; no new design-system
    primitives.
-8. Chat message reading type steps down from 16pt to 15pt via a new `Font.chatBody`
+8. Chat message reading type steps down from 16pt to 13pt via a new `Font.chatBody`
    role consumed by both the user bubble and the assistant markdown renderer. Composer,
    timestamps, and pills keep their current sizes.
 9. `search_knowledge` is a **host-side** tool, like `web_search`: it runs Postgres FTS on
@@ -201,19 +201,22 @@ Two items let the bar shrink and gain personality while keeping the existing gla
 
 ## Chat Typography
 
-One deliberate step smaller for reading surfaces; input stays as is.
+Deliberately smaller, denser reading surfaces; input stays as is.
 
 | Surface | Today | New |
 |---|---|---|
-| User bubble text (`MessageBubble`) | `.appCallout` — Lato 16 | `Font.chatBody` — Lato **15**, relative `.callout` |
-| Assistant markdown (`SelectableMarkdownView` base font) | `appSans(size: 16)` | `appSans(size: 15)` (code spans scale to ~12.8) |
+| User bubble text (`MessageBubble`) | `.appCallout` — Lato 16 | `Font.chatBody` — Lato **13**, relative `.callout` |
+| Assistant markdown (`SelectableMarkdownView` base font) | `appSans(size: 16)` | `appSans(size: 13)` (code spans scale to ~11) |
 | Assistant markdown theme (`Theme.chat`) | em-based | unchanged — inherits the smaller base |
 | Timestamps / process pill / retry | 11 / 12 | unchanged |
-| Composer field (`ChatComposerDock`) | Lato 14 | unchanged |
+| Composer field (`ChatComposerDock`) | Lato 14 | unchanged (input stays a touch larger than reading text) |
 | Root composer ("Ask anything…") | Lato 16 | unchanged |
 
 `Font.chatBody` is added to `DesignTokens` as the single chat reading-size owner so both
-renderers cannot drift. `ContentTextSize` user scaling continues to apply on top.
+renderers cannot drift. `ContentTextSize` user scaling continues to apply on top, so
+readers who prefer larger chat text can still scale up from the 13pt base. Validate the
+metadata hierarchy in fixtures: body (13) must remain visually dominant over the process
+pill (12) and timestamps (11).
 
 ## Search Architecture
 

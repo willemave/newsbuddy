@@ -153,9 +153,9 @@ shippable mid-flight.
 
 ## Phase 6 — Chat typography (iOS)
 
-1. Add `Font.chatBody` (Lato 15, relative `.callout`) to `DesignTokens`.
+1. Add `Font.chatBody` (Lato 13, relative `.callout`) to `DesignTokens`.
 2. `MessageBubble`: user text `.appCallout` → `.chatBody`; assistant
-   `SelectableMarkdownView` base font 16 → 15 (theme is em-based; code spans follow).
+   `SelectableMarkdownView` base font 16 → 13 (theme is em-based; code spans follow).
 3. Leave composer fields, timestamps, pills, and empty states unchanged; verify
    `ContentTextSize` scaling still applies at every step.
 
