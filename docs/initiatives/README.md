@@ -17,6 +17,7 @@ Change-oriented docs that used to live under `docs/plans/`, `docs/specs/`, and `
 - `codebase-refactoring/`
 - `dig-deeper-selection-menu/`
 - `ios-chat-stability-2026-04/`
+- `knowledge-learning-unification-2026-08/` - combined Knowledge/Learning tab, uniform row system, two-tab bottom bar, FTS-backed `search_knowledge` chat tool, smaller chat type.
 - `llm-call-sites/`
 - `longform-artifact-system-2026-04/`
 - `news-button-navigation-2025-11/`
