@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-25 — `claude/knowledge-learning-redesign-ypsn56` — Knowledge + Learning unification design
+
+- **Status:** Complete (design only; no implementation).
+- **Scope:** New initiative `docs/initiatives/knowledge-learning-unification-2026-08/` (`10-design.md`, `20-implementation-plan.md`); initiatives README index.
+- **Decisions:** Combine Knowledge and Learning into one Knowledge tab with a merged four-source timeline (saved content, chats, decks, narrations) extended client-side from `LearningTimelineItem`; uniform 56×56 leading tile (saved thumbnails shrink from 92×76, learning glyph tiles grow from 38×38 with 22pt glyphs); two-item morphing glass bottom bar with a matched-geometry selection pill; chat reading type 16→13 via a new `Font.chatBody` role; `search_knowledge` becomes a host-side chat tool (no sandbox — CH12/CH14 preserved) backed by Postgres FTS through one shared content-search expression builder that also fixes the existing `idx_contents_search_document_gin` index/query mismatch and upgrades the Knowledge tab's `q` filter; prompts direct the model to search knowledge before VM corpus or web tools, and tool hits carry `/data` corpus paths for targeted VM follow-up reads.
+- **Changes:** Design and phased implementation plan documents only; laws untouched (proposed amendments recorded in the design for the shipping change).
+- **Validation:** Documentation-only; grounded in file/line-level review of `ContentView`/`AppChrome`/`KnowledgeView`/`LearningView`/`MessageBubble`/`DesignTokens`, `agent_toolset.py`, `chat_agent.py`, `assistant_router.py`, `knowledge_search.py`, `search_repository.py`, and migrations `20260409_02`/`20260410_01`.
+- **Remaining:** Implementation per the plan's Phases 1–7.
+- **Commits:** Documentation commit containing this entry.
+
 ### 2026-08-23 — `main` — Harden and simplify snapshot-backed VM persistence
 
 - **Status:** Complete locally and committed; canonical template rebuilt; not deployed.
