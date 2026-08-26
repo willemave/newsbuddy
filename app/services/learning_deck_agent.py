@@ -172,7 +172,7 @@ def run_learning_deck_agent(
                     base_model_settings,
                     deadline=deadline,
                 ),
-                usage_limits=UsageLimits(request_limit=settings.llm_task_sandbox_request_limit),
+                usage_limits=UsageLimits(request_limit=None),
             )
         except Exception as exc:
             _append_agent_log_event(
@@ -249,7 +249,7 @@ def run_learning_deck_agent(
                         base_model_settings,
                         deadline=deadline,
                     ),
-                    usage_limits=UsageLimits(request_limit=settings.llm_task_sandbox_request_limit),
+                    usage_limits=UsageLimits(request_limit=None),
                 )
                 record_model_usage(
                     "learning_deck_repair",

@@ -182,9 +182,11 @@ class _BrowserValidationFailureSandbox(_FakeSandbox):
 
 class _RepairingAgent(_FakeAgent):
     calls = 0
+    request_limits: list[int | None] = []
 
     def run_sync(self, *_args: Any, **kwargs: Any) -> _FakeAgentResult:
         type(self).calls += 1
+        type(self).request_limits.append(kwargs["usage_limits"].request_limit)
         if type(self).calls == 2:
             sandbox = kwargs["deps"].sandbox
             sandbox.write_file(
@@ -641,6 +643,7 @@ def test_learning_deck_agent_repairs_missing_required_artifacts_once(
     del vendor_usage_db
     sandbox = _MissingOutputSandbox()
     _RepairingAgent.calls = 0
+    _RepairingAgent.request_limits = []
     monkeypatch.setattr(learning_deck_agent, "Agent", _RepairingAgent)
     monkeypatch.setattr(
         learning_deck_agent,
@@ -658,6 +661,7 @@ def test_learning_deck_agent_repairs_missing_required_artifacts_once(
     )
 
     assert _RepairingAgent.calls == 2
+    assert _RepairingAgent.request_limits == [None, None]
     assert "Repaired" in result.index_html
     assert any(
         event["event_type"] == "artifact_validation_failed" for event in result.agent_log_events
