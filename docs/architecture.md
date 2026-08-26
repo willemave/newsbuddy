@@ -1508,6 +1508,12 @@ corpus: the model may use `jq`, `rg`, or Python over every completed content/new
 and completed chat the same user can access. The older personal-markdown APIs remain a compatibility
 surface for external clients, not the VM hydration path.
 
+The Knowledge list orders and paginates saved content by the current user's
+`content_knowledge_saves.saved_at` value. `ContentSummaryResponse.knowledge_saved_at` carries that
+activity timestamp to clients; publication and ingestion timestamps remain content metadata rather
+than saved-library ordering keys. Article chat and the contextual assistant register the same
+host-managed Knowledge-search tool and formatter through `agent_toolset.py`.
+
 ## 17. iOS Client Architecture
 
 The SwiftUI client lives in `client/newsly/newsly/`.
@@ -1529,7 +1535,7 @@ Primary layers:
 - `ViewModels/`
   - feature-level state and pagination
 - `Views/`
-  - authenticated root, Briefing, Knowledge, Learning, search, detail, chat, onboarding, settings, sources, and shared dictation views
+  - authenticated root, Briefing, unified Knowledge, search, detail, chat, onboarding, settings, sources, and shared dictation views
 - `Shared/`
   - app chrome, state stores, shared container utilities
 
@@ -1557,6 +1563,12 @@ Briefing data loading and lens content remain owned by `BriefingViewModel`. Per-
 manifests, preparation polling, playback selection, completion advancement, and narration errors are
 owned by `BriefingNarrationController`; `BriefingView` renders the controller session and sends user
 intents to it.
+
+The unified Knowledge root is owned by `KnowledgeTimelineViewModel`. It composes the saved-content,
+chat, Learning Deck, and narration feature models, materializes their reverse-chronological timeline
+when a source collection changes, and owns screen-level loading, pagination, and source-specific
+recovery. The root view renders that stored projection and does not maintain parallel revision
+counters or its own timeline cache.
 
 ### 17.4 Generated API contracts
 

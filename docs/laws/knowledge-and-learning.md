@@ -8,7 +8,7 @@ K3. A normal save leaves read state unchanged. Actions that save and mark read m
 
 K4. Knowledge preserves source provenance and remains authoritative over best-effort Markdown or other exported copies.
 
-K5. Learning combines chats, Learning Decks, and narrations in one reverse-chronological stream. Failure in one activity type cannot erase the others.
+K5. Knowledge combines saved items, chats, Learning Decks, and narrations in one reverse-chronological stream. Entries stay compact and keep titles to one trailing-truncated line. A saved item's activity time is when that user saved it, not when the source was published or ingested. Failure in one source cannot erase the others.
 
 K6. A Learning Deck keeps one explicit source identity, its notes, and its attribution. A URL submitted for a deck becomes saved source material and stays out of unread Briefing.
 
@@ -21,3 +21,5 @@ K9. Private deck links expire. Public sharing is explicit and remains available 
 K10. Deleting a deck cancels active generation, revokes access, and removes artifacts owned by that deck.
 
 K11. Deck chat keeps the deck visible, uses the deck's identity, and remains secondary to the reading surface.
+
+K12. Learning Deck generation may iterate for as many model and tool turns as it needs within its execution deadline. It cannot fail solely because it crossed a fixed request-count budget.

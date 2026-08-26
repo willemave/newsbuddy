@@ -37,3 +37,7 @@ P17. The agent corpus is an event-maintained per-user mirror with bounded docume
 P18. The host is authoritative for the agent corpus. Acquisition applies full or revision-delta hydration under the owning user lock, writes the manifest last, rejects remote revisions ahead of the host, and grants the VM no callback token.
 
 P19. A user VM snapshot is a clean recovery checkpoint taken after canonical hydration and before user commands. Live pause/resume is the warm path; snapshot restore may apply later corpus revisions, and system/feed VMs with no user corpus use the canonical template instead.
+
+P20. Short-form processing reuses durable summaries for definitive duplicates before paid provider work, retains independent summarization for uncertain semantic matches, bounds provider input, and generates optional enrichment only for unsuppressed representatives.
+
+P21. Discussion comment collection and summary publication have independent cadences. The first usable summary is immediate; later input changes accumulate and coalesce by materiality and time, while stale changed summaries eventually refresh.

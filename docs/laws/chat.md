@@ -31,3 +31,5 @@ CH14. VM-capable agents expose the same five execution tools: execute, read, wri
 CH15. Every E2B-backed product workflow uses the canonical Newsly agent template. Provider-default and per-workflow template selection are not runtime fallbacks.
 
 CH16. Model history contains newest complete user turns within the remaining request budget. Output, tool schemas, system/context material, and the current prompt are reserved before history; trimming never leaves an orphaned assistant or tool sequence.
+
+CH17. Knowledge lookup in chat is served by a host-side search tool over the user's saved library. Searching knowledge alone never acquires a sandbox.

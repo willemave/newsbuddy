@@ -26,6 +26,6 @@ B12. Reading a segment marks its full source batch once, and the segment retires
 
 B13. Read-only styling preserves scroll position. Replacing the ordered document resets the lens to the top without interrupting the readable view during refresh.
 
-B14. Links, figures, discussions, and citations resolve to sources owned by their segment, while invalid references are repaired or rejected before publication. Pullquotes are editorial callouts and never claim to be source quotations, while Dig Deeper uses the selected passage with user-visible support.
+B14. Links, figures, discussions, and citations resolve to sources owned by their segment, while invalid references are repaired or rejected before publication. Article and podcast passages identify each work by its title and its available publication or show name. Pullquotes are editorial callouts and never claim to be source quotations, while Dig Deeper uses the selected passage with user-visible support.
 
 B15. First-run progress is durable and incremental. One unavailable source cannot block later sources or remove categories already ready to read.

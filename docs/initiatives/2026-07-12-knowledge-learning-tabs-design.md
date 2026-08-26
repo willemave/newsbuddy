@@ -1,7 +1,9 @@
 # Knowledge and Learning Tabs Design
 
+> Superseded on 2026-08-25 by the unified Knowledge design in PR #10 and the current behavior in `docs/laws/knowledge-and-learning.md`.
+
 **Date:** 2026-07-12
-**Status:** Implemented and simulator-verified
+**Status:** Superseded; retained as historical context
 **Scope:** iOS tab architecture, saved Knowledge presentation, Learning activity timeline,
 saved-only search, test fixtures, and simulator verification
 

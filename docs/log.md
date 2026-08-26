@@ -27,6 +27,36 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-25 — `main` — Knowledge tab visual design pass
+
+- **Status:** Complete
+- **Scope:** iOS Knowledge tab: `KnowledgeTimelineRows.swift`, `KnowledgeTimelineView.swift`, `KnowledgeView.swift`.
+- **Decisions:** Kickers only show status when abnormal (deck hides "READY", narration hides "COMPLETED" and gains a relative timestamp) to match the saved-row convention. Search screen field restyled to the timeline composer treatment (`surfaceSecondary` + `borderSubtle`) instead of the heavier `surfaceContainerHighest` pill.
+- **Changes:** Saved rows aligned to compact shared metrics (40-point artwork, 10-point gap, and 6-point vertical padding); subtitle suppressed when it duplicates the title; intra-group `Divider()` replaced with `KnowledgeTimelineRowDivider` (explicit hairline aligned to the text column) because `Divider` rendered as a stray vertical tick inside these list rows on iOS 26. Titles stay single-line by request — wrapping made rows too tall.
+- **Validation:** Built and ran on iPhone 17 Pro sim (iOS 26.4) against the local server; before/after screenshots of the timeline (light + dark) and Search Knowledge screen; magnified crop confirms the hairline renders horizontally at the text column. The compact-row source regression and focused dark-mode visual assertion passed.
+- **Remaining:** Duplicate "Mini NAS Showdown" chat rows in the timeline are a data issue, not addressed.
+- **Commits:** `a672ff4f`.
+
+### 2026-08-25 — `main` — Reduce recurring news token usage
+
+- **Status:** Complete and committed; not deployed.
+- **Scope:** Short-form news processing, duplicate reconciliation, article-link enrichment, discussion-summary cadence, focused tests, and processing laws.
+- **Decisions:** Keep hourly raw discussion refreshes while coalescing LLM summaries; reuse summaries only for definitive URL/external-ID matches so semantic clustering retains its content evidence; rank optional article links only after an item remains representative; cap summary article bodies at an approximate 12,000-token budget while retaining the beginning and conclusion.
+- **Changes:** Raised the discussion materiality gate to more than 25 changed comments, added a six-hour minimum summary interval and a 24-hour stale-change refresh, reused exact representative summaries before article resolution or paid calls, moved article-link ranking after relation reconciliation, and bounded oversized short-form article prompts.
+- **Validation:** The complete focused service, pipeline, scraper, and API slice passed 175/175 tests. Ruff, formatting checks, focused MyPy, and `git diff --check` passed.
+- **Remaining:** The full repository suite was not run. Realized token savings require deployment and a comparable 24-hour production measurement. No production mutation or deployment performed.
+- **Commits:** `e7b0b7e3`.
+
+### 2026-08-25 — `main` — Unify Knowledge and Learning
+
+- **Status:** Complete and committed; not deployed.
+- **Scope:** Saved-knowledge FTS, host-side chat lookup, the iOS Knowledge/Learning root, bottom navigation, timeline rows, and chat typography.
+- **Decisions:** Keep one four-source Knowledge timeline materialized by the screen store; retain the existing list endpoints while adding the saved-activity timestamp required by the unified chronology; make the shared weighted content document authoritative for both queries and the GIN index; preserve legacy `learning` tab persistence by mapping it to Knowledge; keep knowledge-only chat turns VM-free.
+- **Changes:** Added ranked Postgres FTS with indexable trigram matching, body snippets, explicit empty results, and targeted `/data` corpus paths; realigned the content GIN and summary-title trigram indexes through a concurrent migration; ordered Knowledge saves by `content_knowledge_saves.saved_at` and exposed that value as `knowledge_saved_at`; registered one host-managed `search_knowledge` tool with complete URL/type results and durable start/success/failure progress; merged saves, chats, decks, and narrations under day delimiters with uniform compact 40-point tiles and single-line trailing-truncated titles; moved loading, recovery, pagination, and the materialized timeline projection into `KnowledgeTimelineViewModel`; collapsed navigation to Briefing and Knowledge; rebuilt the compact bar as a two-item morphing capsule; and reduced chat reading type to 13 points through shared SwiftUI and UIKit tokens. The cleanup pass also split timeline rows and store tests, removed duplicate projections and revision counters, deleted stale Learning-root names, made the migration independent of mutable application code, and updated the visual catalog for unified Knowledge while removing the obsolete standalone Learning screenshot.
+- **Validation:** Ruff passed on the touched backend and tests; the final focused backend/API/contract slice passed 135 tests, public contract artifacts were current, and the focused client source/contract slice passed 57 tests with one unrelated Learning Deck portrait-chat assertion deselected. The compact-row source regression passed. The iOS app built for the iPhone 17 Pro simulator, and 39 focused Knowledge timeline, Knowledge chat, and generated-contract Xcode tests passed. The full simulator E2E run completed with 43 passes and two failures; the saved-article chat handoff was fixed and passed on focused rerun. All 10 dark-mode screenshot states across the three visual scenarios were freshly recorded and inspected on an iPhone 17 Pro; nine baselines changed, More remained byte-identical, and the normal visual assertion rerun passed 3/3. The compact Knowledge baseline was subsequently refreshed and inspected after the row-density change, then its focused non-recording assertion passed 1/1 after a clean Simulator build. The full simulator suite was not rerun after those fixes. Cleanup-focused AXe tab reselection and Knowledge deck regeneration scenarios passed together. The migration reached local Alembic head, and a local Postgres `EXPLAIN` of the runtime predicate confirmed a `BitmapOr` across the FTS, summary-title, title, and source indexes.
+- **Remaining:** The full repository test suite was not run. No deployment or production mutation performed.
+- **Commits:** `a672ff4f`.
+
 ### 2026-08-23 — `main` — Harden and simplify snapshot-backed VM persistence
 
 - **Status:** Complete locally and committed; canonical template rebuilt; not deployed.
@@ -46,6 +76,17 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** The migration integration passes through head `20260823_01`; 318 focused tests pass. The full suite completed with 2,829 passed and 40 skipped; its only failures are the same two pre-existing unrelated Learning Deck source assertions. Ruff, all-Python formatting, MyPy over 499 application modules, the 779-file/23-ratchet module guard, all 134 architecture tests, generated contracts, Compose renders, template revision `newsly-agent-60168587fedaf740`, focused high-confidence Vulture, and `git diff --check` pass. A live user canary proved read-only corpus enforcement, workspace editing, process and file survival across memory pause, delta/tombstone application, clean-snapshot recovery, later-revision-only hydration, sudo revocation, and cleanup: cold 7.96 s, immediate reuse 174 ms, memory resume plus delta 624 ms, snapshot recovery plus delta 9.27 s. Real no-tool/cold-tool/warm-tool chat measured 1.45/12.82/3.55 s with VM acquisition 0/10.12/1.22 s. Cold/warm full feed discovery measured 26.97/10.03 s with VM acquisition 7.74/1.03 s and validated the same canonical Atom feed. Canary cleanup left no temporary users, system VM row, or user VM IDs.
 - **Remaining:** Production p50/p95 and cost/storage measurements after deployment. The full local suite retains only the two pre-existing unrelated Learning Deck assertions noted below; no production mutation was performed.
 - **Commits:** Uncommitted.
+
+### 2026-08-25 — `main` — Remove Learning Deck agent request caps
+
+- **Status:** Complete and committed; not deployed.
+- **Scope:** Learning Deck generation and artifact-repair agent loops.
+- **Evidence:** Production deck `23` / task `88` generated both required artifacts, then browser validation timed out and the repair loop was terminated before its ninth model request by the shared request limit of 8.
+- **Changes:** Disabled Pydantic AI request-count limits for both the initial Learning Deck run and its artifact-repair run; recorded the no-fixed-request-budget behavior in law K12 and added regression coverage for both phases.
+- **Decisions:** Keep the execution deadline and artifact safety/hosting validation as the operational boundaries; they protect worker and hosting reliability without imposing an arbitrary model-turn count.
+- **Validation:** All 19 Learning Deck agent tests passed, including the initial and repair request-limit regression. Ruff lint/format, focused MyPy, and `git diff --check` passed. The broader 69-test Learning Deck slice had 68 passes and the pre-existing unrelated public-share viewer-controls assertion failure.
+- **Remaining:** The production attempt remains failed until this change is deployed and the deck is retried. No deployment or production retry performed.
+- **Commits:** `819a6ff1`.
 
 ### 2026-08-23 — `main` — Clean up the VM execution implementation
 
@@ -109,7 +150,7 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ### 2026-08-20 — `main` — Decouple configured feed ingestion from E2B
 
-- **Status:** Complete locally.
+- **Status:** Complete and committed; not deployed.
 - **Scope:** Scheduled RSS, Atom, Substack, podcast, fixed aggregator, and pipeline-time publisher RSS retrieval.
 - **Changes:** Routed steady-state configured-source downloads through the shared bounded application HTTP client while retaining E2B for new-feed discovery and validation. Updated the processing law, architecture contract, and focused transport tests.
 - **Decisions:** Treat sandboxing as a discovery boundary rather than a prerequisite for routine ingestion; keep downloaded feed/page bytes as inert parser input and preserve per-source error isolation.
@@ -936,3 +977,25 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** All 16 `BriefingReadMarkingTests` passed on the iOS 26.5 Newsly Regression simulator; the focused test run built the app and test targets successfully.
 - **Remaining:** Authenticated simulator interaction remains unavailable on the clean regression simulator. No production mutation, commit, push, or deployment performed.
 - **Commits:** Uncommitted.
+
+### 2026-08-24 — `main` — Correct terminal Briefing read geometry with live reproduction
+
+- **Status:** Complete and committed; not deployed.
+- **Scope:** Recheck and repair automatic read completion for the final Podcast segment.
+- **Evidence:** Reproduced against the authenticated local showcase user on the iOS 26.5 Newsly Regression simulator. The first two Podcast segments decremented the unread count from 3 to 1 and persisted normally. At maximum scroll, the final rendered segment remained visibly below the pinned boundary, the count stayed at 1, and no final read mark was persisted.
+- **Cause:** The first repair subtracted an outer-coordinate read boundary from `ScrollGeometry.containerSize.height`, which is a local size rather than a position in the same coordinate space. That under-allocated the terminal scroll clearance whenever the viewport started below the Briefing chrome.
+- **Changes:** Measure the scroll viewport's bottom edge in `briefing.read-tracking`, the same named coordinate space as the segment and pinned boundary, and derive clearance from those two positions. Added a regression covering a viewport whose origin is displaced by overlaid chrome.
+- **Decisions:** Preserve strict full-segment passage and the existing optimistic/debounced read pipeline; correct the coordinate-space mismatch rather than relaxing the completion threshold.
+- **Validation:** All 17 `BriefingReadMarkingTests` passed. Rebuilt and installed the app on the iOS 26.5 Newsly Regression simulator, reset the authenticated local showcase user to three unread Podcast segments, and repeated the same scroll: counts moved `3 → 2 → 1 → 0`; production-shaped persistence reported zero Podcast segments and zero unread sources afterward. Simulator logs recorded all three optimistic publications and index reconciliation through version 4. `git diff --check` passed.
+- **Remaining:** No production mutation or deployment performed.
+- **Commits:** `18e8fb87`.
+
+### 2026-08-24 — `main` — Identify Briefing articles and podcasts by title and source
+
+- **Status:** Complete and committed; not deployed.
+- **Scope:** Briefing composition metadata and prompts for article and podcast passages.
+- **Decisions:** Require the exact provided work title and available publication or show name near the beginning of each treatment; omit unavailable source names instead of inventing them.
+- **Changes:** Added the content source name to the composition payload, tightened both deep-tier prompts, advanced the composition prompt version to `briefing-v6`, and recorded the attribution behavior in law B14.
+- **Validation:** All 60 focused prompt, composer, and source tests passed; Ruff and `git diff --check` passed on the touched scope.
+- **Remaining:** Existing persisted Briefing segments retain their original text until normal regeneration. No deployment or production mutation performed.
+- **Commits:** `75b3e35`.
