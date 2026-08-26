@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from datetime import date as date_type
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, exists, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.contracts import ContentStatus, ContentType
@@ -19,6 +19,13 @@ from app.repositories.content_feed_query import (
     apply_sort_timestamp_cursor,
     build_user_feed_query,
     content_sort_timestamp_expr,
+)
+from app.repositories.content_search_expressions import (
+    content_search_expressions,
+    content_search_text_expression,
+    content_source_expression,
+    content_summary_title_expression,
+    content_title_expression,
 )
 
 AVAILABLE_DATES_LOOKBACK_DAYS = 120
@@ -232,22 +239,73 @@ def get_knowledge_library_entries(
     user_id: int,
     last_id: int | None,
     last_sort_timestamp: datetime | None,
+    last_rank: float | None,
     limit: int,
     search_query: str | None = None,
 ):
     """Return knowledge-library card rows."""
-    query = build_user_feed_query(db, user_id, mode="knowledge_library")
-    if search_query:
-        pattern = f"%{search_query}%"
+    query = build_user_feed_query(db, user_id, mode="knowledge_library").add_columns(
+        ContentKnowledgeSave.saved_at.label("knowledge_saved_at")
+    )
+    rank_expression = None
+    normalized_query = " ".join((search_query or "").split()).strip()
+    bind = db.get_bind()
+    if normalized_query and bind is not None and bind.dialect.name == "postgresql":
+        expressions = content_search_expressions(normalized_query)
+        rank_expression = expressions.rank
+        query = query.filter(expressions.matches)
+    elif normalized_query:
+        tokens = [token for token in normalized_query.lower().split() if len(token) >= 2]
+        for token in tokens:
+            query = query.filter(
+                or_(
+                    func.lower(content_summary_title_expression()).like(f"%{token}%"),
+                    func.lower(content_title_expression()).like(f"%{token}%"),
+                    func.lower(content_source_expression()).like(f"%{token}%"),
+                    func.lower(content_search_text_expression()).like(f"%{token}%"),
+                )
+            )
+
+    if rank_expression is None:
+        query = apply_sort_timestamp_cursor(
+            query,
+            last_sort_timestamp,
+            last_id,
+            sort_expr=ContentKnowledgeSave.saved_at,
+        )
+        return (
+            query.add_columns(literal(None).label("_search_rank"))
+            .order_by(ContentKnowledgeSave.saved_at.desc(), Content.id.desc())
+            .limit(limit + 1)
+            .all()
+        )
+
+    if last_id and last_sort_timestamp and last_rank is not None:
         query = query.filter(
             or_(
-                Content.title.ilike(pattern),
-                Content.source.ilike(pattern),
-                Content.url.ilike(pattern),
+                rank_expression < last_rank,
+                and_(
+                    rank_expression == last_rank,
+                    or_(
+                        ContentKnowledgeSave.saved_at < last_sort_timestamp,
+                        and_(
+                            ContentKnowledgeSave.saved_at == last_sort_timestamp,
+                            Content.id < last_id,
+                        ),
+                    ),
+                ),
             )
         )
-    query = apply_sort_timestamp_cursor(query, last_sort_timestamp, last_id)
-    return query.order_by(Content.created_at.desc(), Content.id.desc()).limit(limit + 1).all()
+    return (
+        query.add_columns(rank_expression.label("_search_rank"))
+        .order_by(
+            rank_expression.desc(),
+            ContentKnowledgeSave.saved_at.desc(),
+            Content.id.desc(),
+        )
+        .limit(limit + 1)
+        .all()
+    )
 
 
 def get_recently_read(

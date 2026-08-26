@@ -219,6 +219,7 @@ extension Font {
     static let appSubheadline = Font.appSans(size: 15, relativeTo: .subheadline)
     static let appBody = Font.appSans(size: 16, relativeTo: .body)
     static let appCallout = Font.appSans(size: 16, relativeTo: .callout)
+    static let chatBody = Font.appSans(size: 13, relativeTo: .callout)
     static let appFootnote = Font.appSans(size: 13, relativeTo: .footnote)
     static let appCaption = Font.appSans(size: 12, relativeTo: .caption)
     static let appCaption2 = Font.appSans(size: 11, relativeTo: .caption2)
@@ -265,6 +266,8 @@ extension Font {
 }
 
 extension UIFont {
+    static var chatBody: UIFont { appSans(size: 13) }
+
     static func appSerif(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
         let baseFont = UIFont(name: AppFontFamily.serif, size: size)
             ?? UIFont.systemFont(ofSize: size, weight: weight)

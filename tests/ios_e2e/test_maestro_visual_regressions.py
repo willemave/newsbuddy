@@ -40,7 +40,6 @@ BASELINE_FILES = {
         "briefing-articles.png",
         "briefing-news.png",
         "redesign-knowledge.png",
-        "redesign-learning.png",
         "main-more.png",
     ],
     "visual_content_modals": [

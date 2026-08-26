@@ -15,13 +15,13 @@ appId: "${APP_ID}"
       newslyE2EFakeSpeechEnabled: true
       newslyE2EFakeSpeechTranscript: "${TRANSCRIPT}"
 - tapOn:
-    id: tab.learning
+    id: tab.knowledge
 - assertVisible:
-    id: learning.chat.mic
+    id: knowledge.chat.mic
 - tapOn:
-    id: learning.chat.mic
+    id: knowledge.chat.mic
 - tapOn:
-    id: learning.chat.mic
+    id: knowledge.chat.mic
 - assertVisible:
     id: knowledge.chat_input
 - assertVisible:

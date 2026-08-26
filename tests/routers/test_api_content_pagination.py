@@ -392,6 +392,66 @@ class TestKnowledgeLibraryPagination:
         ids_page2 = {item["id"] for item in data2["contents"]}
         assert ids_page1.isdisjoint(ids_page2)
 
+    def test_knowledge_library_orders_and_paginates_by_saved_time(
+        self,
+        client,
+        db_session: Session,
+        test_user: User,
+    ) -> None:
+        now = datetime.now(UTC).replace(tzinfo=None)
+        recently_saved_old_content = Content(
+            url="https://example.com/recent-save-old-content",
+            title="Recently saved old content",
+            content_type=ContentType.ARTICLE.value,
+            status=ContentStatus.COMPLETED.value,
+            created_at=now - timedelta(days=365),
+        )
+        earlier_saved_new_content = Content(
+            url="https://example.com/earlier-save-new-content",
+            title="Earlier saved new content",
+            content_type=ContentType.ARTICLE.value,
+            status=ContentStatus.COMPLETED.value,
+            created_at=now,
+        )
+        db_session.add_all([recently_saved_old_content, earlier_saved_new_content])
+        db_session.flush()
+        recent_saved_at = now - timedelta(minutes=5)
+        db_session.add_all(
+            [
+                ContentKnowledgeSave(
+                    user_id=test_user.id,
+                    content_id=recently_saved_old_content.id,
+                    saved_at=recent_saved_at,
+                ),
+                ContentKnowledgeSave(
+                    user_id=test_user.id,
+                    content_id=earlier_saved_new_content.id,
+                    saved_at=now - timedelta(days=2),
+                ),
+            ]
+        )
+        db_session.commit()
+
+        first_page = client.get("/api/content/knowledge/list", params={"limit": 1})
+
+        assert first_page.status_code == 200
+        first_data = first_page.json()
+        assert [item["id"] for item in first_data["contents"]] == [recently_saved_old_content.id]
+        assert (
+            datetime.fromisoformat(first_data["contents"][0]["knowledge_saved_at"])
+            == recent_saved_at
+        )
+
+        second_page = client.get(
+            "/api/content/knowledge/list",
+            params={"limit": 1, "cursor": first_data["meta"]["next_cursor"]},
+        )
+
+        assert second_page.status_code == 200
+        assert [item["id"] for item in second_page.json()["contents"]] == [
+            earlier_saved_new_content.id
+        ]
+
     def test_empty_knowledge_library(self, client, sample_contents):
         """Test knowledge library pagination with no saved items."""
         response = client.get("/api/content/knowledge/list")
@@ -498,6 +558,50 @@ class TestKnowledgeLibraryPagination:
 
         assert response.status_code == 200
         assert response.json()["contents"] == []
+
+    def test_knowledge_library_ranked_cursor_traverses_same_query_without_gaps(
+        self,
+        client,
+        sample_contents,
+        db_session: Session,
+        test_user,
+    ) -> None:
+        saved_at = datetime.now(UTC).replace(tzinfo=None)
+        contents = sample_contents[:3]
+        for index, content in enumerate(contents):
+            content.title = "Walkable city study"
+            db_session.add(
+                ContentKnowledgeSave(
+                    user_id=test_user.id,
+                    content_id=content.id,
+                    saved_at=saved_at - timedelta(hours=index),
+                )
+            )
+        db_session.commit()
+
+        returned_ids: list[int] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        for _page in range(len(contents) + 1):
+            params = {"q": "walkable", "limit": 1}
+            if cursor is not None:
+                params["cursor"] = cursor
+            response = client.get("/api/content/knowledge/list", params=params)
+
+            assert response.status_code == 200
+            data = response.json()
+            returned_ids.extend(item["id"] for item in data["contents"])
+            cursor = data["meta"]["next_cursor"]
+            if not data["meta"]["has_more"]:
+                break
+            assert cursor is not None
+            assert cursor not in seen_cursors
+            seen_cursors.add(cursor)
+        else:
+            pytest.fail("Ranked Knowledge pagination did not terminate")
+
+        assert returned_ids == [content.id for content in contents]
+        assert len(returned_ids) == len(set(returned_ids))
 
     def test_knowledge_library_search_cursor_rejects_a_different_query(
         self,

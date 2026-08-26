@@ -1,14 +1,13 @@
 //
-//  LearningHubViewModel.swift
+//  KnowledgeChatViewModel.swift
 //  newsly
 //
 
 import Foundation
 import Observation
-import SwiftUI
 
 @MainActor
-protocol LearningHubChatServicing: AnyObject {
+protocol KnowledgeChatServicing: AnyObject {
     func listSessionsPage(
         contentId: Int?,
         newsItemId: Int?,
@@ -25,20 +24,17 @@ protocol LearningHubChatServicing: AnyObject {
     func deleteSession(sessionId: Int) async throws
 }
 
-extension ChatService: LearningHubChatServicing {}
+extension ChatService: KnowledgeChatServicing {}
 
 @MainActor
 @Observable
-final class LearningHubViewModel {
+final class KnowledgeChatViewModel {
     private struct LocallyCreatedSession {
         let revision: Int
         let session: ChatSessionSummary
     }
 
-    var sessions: [ChatSessionSummary] = [] {
-        didSet { timelineRevision &+= 1 }
-    }
-    private(set) var timelineRevision = 0
+    var sessions: [ChatSessionSummary] = []
     var isLoading = false
     var isLoadingMore = false
     var hasMoreSessions = false
@@ -54,7 +50,7 @@ final class LearningHubViewModel {
     private(set) var completedVoiceRoute: ChatSessionRoute?
 
     @ObservationIgnored
-    private let chatService: any LearningHubChatServicing
+    private let chatService: any KnowledgeChatServicing
     @ObservationIgnored
     private let voiceCoordinator: VoiceDictationCoordinator
     @ObservationIgnored
@@ -83,7 +79,7 @@ final class LearningHubViewModel {
     }
 
     init(
-        chatService: any LearningHubChatServicing,
+        chatService: any KnowledgeChatServicing,
         transcriptionService: (any SpeechTranscribing)? = nil,
         refreshTranscriptionAvailability: @escaping () async -> Bool = { false },
         initialVoiceDictationAvailable: Bool = false,
@@ -97,7 +93,7 @@ final class LearningHubViewModel {
         self.activeChatPollIntervalNanoseconds = activeChatPollIntervalNanoseconds
     }
 
-    func loadLearning() async {
+    func loadChats() async {
         guard !isLoading else { return }
         let requestStartRevision = sessionMutationRevision
         isLoading = true
@@ -146,7 +142,7 @@ final class LearningHubViewModel {
                 return
             }
             guard !Task.isCancelled else { return }
-            await loadLearning()
+            await loadChats()
         }
     }
 
@@ -240,10 +236,7 @@ final class LearningHubViewModel {
         isVoiceActionInFlight = false
     }
 
-    private func startAssistantTurn(
-        message: String,
-        screenContext: AssistantScreenContext? = nil
-    ) async -> ChatSessionRoute? {
+    private func startAssistantTurn(message: String) async -> ChatSessionRoute? {
         guard !isCreatingSession else { return nil }
         isCreatingSession = true
         errorMessage = nil
@@ -253,7 +246,7 @@ final class LearningHubViewModel {
             let response = try await chatService.createAssistantTurn(
                 message: message,
                 sessionId: nil,
-                screenContext: screenContext ?? makeLearningContext()
+                screenContext: makeKnowledgeContext()
             )
             prependSession(response.session)
             return ChatSessionRoute(
@@ -270,15 +263,12 @@ final class LearningHubViewModel {
         }
     }
 
-    private func makeLearningContext(
-        query: String? = nil,
-        note: String? = nil
-    ) -> AssistantScreenContext {
+    private func makeKnowledgeContext() -> AssistantScreenContext {
         AssistantScreenContext(
-            screenType: "learning",
-            screenTitle: "Learning",
-            query: query,
-            note: note
+            screenType: "knowledge_hub",
+            screenTitle: "Knowledge",
+            query: nil,
+            note: nil
         )
     }
 

@@ -28,7 +28,7 @@ def tool_event_status(
     return "completed"
 
 
-def agent_vm_tool_log_context(
+def agent_tool_log_context(
     payload: dict[str, object],
     *,
     sandbox_acquired: bool,
@@ -45,6 +45,8 @@ def agent_vm_tool_log_context(
         "path": payload.get("path"),
         "chars": payload.get("chars"),
         "failure_class": payload.get("failure_class"),
+        "query": payload.get("query"),
+        "result_count": payload.get("result_count"),
     }
 
 

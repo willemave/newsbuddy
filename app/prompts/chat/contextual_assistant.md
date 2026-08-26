@@ -67,7 +67,7 @@ For this turn, call find_feed_options before answering. Summarize the best valid
 
 ## Turn Markdown Library
 <!-- prompt-section: turn_markdown_library -->
-For this turn, inspect the Newsly corpus before answering. Prefer one execute_bash call using `jq` over `/data/index.jsonl` or `rg` under `/data`, then call read_file for the most relevant exact file when useful. Only fall back to search_knowledge if the corpus has no useful file-level result.
+For this turn, call search_knowledge first when the request concerns saved knowledge. If a matching hit's snippet is insufficient and it includes a corpus path, read that exact file. Use broader `jq` or `rg` corpus exploration only when targeted lookup does not answer the request.
 <!-- /prompt-section -->
 
 ## Turn Content Search

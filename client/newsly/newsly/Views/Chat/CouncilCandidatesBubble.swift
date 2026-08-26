@@ -128,7 +128,7 @@ private struct CouncilCandidateCard: View {
                 SelectableMarkdownView(
                     markdown: candidate.content,
                     textColor: textColor,
-                    baseFont: .appSans(size: 16),
+                    baseFont: .chatBody,
                     adjustsFontForContentSizeCategory: true,
                     scalingTextStyle: .callout
                 )

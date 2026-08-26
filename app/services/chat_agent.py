@@ -33,6 +33,7 @@ from app.services.agent_toolset import (
     AGENT_VM_SYSTEM_INSTRUCTIONS,
     AgentToolPolicy,
     AgentToolsetConfig,
+    register_agent_knowledge_search_tool,
     register_agent_vm_tools,
 )
 from app.services.agent_vm_runtime import AGENT_VM_TOOL_NAMES, AgentVmError
@@ -60,7 +61,7 @@ from app.services.chat_partial_stream import (
     build_final_text_event_stream_handler as _build_final_text_event_stream_handler,
 )
 from app.services.chat_tool_progress import (
-    agent_vm_tool_log_context,
+    agent_tool_log_context,
     numeric_tool_payload_value,
     publish_tool_progress,
     tool_event_status,
@@ -267,6 +268,7 @@ class ChatDeps:
 
     session_id: int
     user_id: int
+    session_factory: Callable[[], Session]
     content_id: int | None = None
     has_content: bool = False
     article_context: str | None = None
@@ -309,11 +311,11 @@ def _chat_vm_session(deps: ChatDeps):
     return runtime.get_session()
 
 
-def _log_chat_vm_tool(deps: ChatDeps, event: str, payload: dict[str, object]) -> None:
+def _log_chat_tool(deps: ChatDeps, event: str, payload: dict[str, object]) -> None:
     publish_tool_progress(deps.tool_progress_writer, event=event, payload=payload)
     status = tool_event_status(event, payload)
     logger.info(
-        "Chat VM tool event",
+        "Chat agent tool event",
         extra=build_log_extra(
             component="chat",
             operation=event,
@@ -323,7 +325,7 @@ def _log_chat_vm_tool(deps: ChatDeps, event: str, payload: dict[str, object]) ->
             user_id=deps.user_id,
             content_id=deps.content_id,
             duration_ms=numeric_tool_payload_value(payload, "duration_ms"),
-            context_data=agent_vm_tool_log_context(
+            context_data=agent_tool_log_context(
                 payload,
                 sandbox_acquired=bool(deps.vm_runtime and deps.vm_runtime.acquired),
             ),
@@ -382,7 +384,7 @@ def _create_chat_agent(
     register_agent_vm_tools(
         agent,
         session_getter=_chat_vm_session,
-        log_event=_log_chat_vm_tool,
+        log_event=_log_chat_tool,
         config=AgentToolsetConfig(
             feature="article_chat",
             operation_prefix="chat.tool",
@@ -390,6 +392,13 @@ def _create_chat_agent(
             tool_policy=AgentToolPolicy(web_search=False),
             stream_command_progress=True,
         ),
+    )
+
+    register_agent_knowledge_search_tool(
+        agent,
+        session_factory_getter=lambda deps: deps.session_factory,
+        user_id_getter=lambda deps: deps.user_id,
+        log_event=_log_chat_tool,
     )
 
     @agent.tool
@@ -942,6 +951,8 @@ def _build_chat_deps_from_values(
         )
     )
 
+    from app.core.db import get_session_factory
+
     return ChatDeps(
         session_id=session_id,
         user_id=user_id,
@@ -950,6 +961,7 @@ def _build_chat_deps_from_values(
         article_context=article_context,
         system_context=system_context,
         vm_runtime=vm_runtime,
+        session_factory=get_session_factory(),
     )
 
 

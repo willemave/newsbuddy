@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+from sqlalchemy.orm import Session
+
 from app.services.agent_toolset import (
     AgentToolPolicy,
     AgentToolsetConfig,
+    register_agent_knowledge_search_tool,
     register_agent_vm_tools,
 )
 from app.services.agent_vm_runtime import resolve_workspace_relative_path
+from app.services.knowledge_search import KnowledgeHit
 
 
 class _FakeAgent:
@@ -17,10 +23,83 @@ class _FakeAgent:
         self.tool_names: list[str] = []
         self.tools: dict[str, Any] = {}
 
-    def tool(self, func):
-        self.tool_names.append(func.__name__)
-        self.tools[func.__name__] = func
-        return func
+    def tool(self, func=None, *, name: str | None = None):
+        def register(candidate):
+            tool_name = name or candidate.__name__
+            self.tool_names.append(tool_name)
+            self.tools[tool_name] = candidate
+            return candidate
+
+        return register(func) if func is not None else register
+
+
+def test_knowledge_search_tool_preserves_contract_and_progress_lifecycle(monkeypatch) -> None:
+    agent = _FakeAgent()
+    events: list[tuple[str, dict[str, Any]]] = []
+    hit = KnowledgeHit(
+        content_id=42,
+        title="Local-first systems",
+        url="https://example.com/local-first",
+        source="Systems Weekly",
+        content_type="article",
+        saved_at=datetime(2026, 8, 25, 12, tzinfo=UTC),
+        snippet="A useful summary.",
+        corpus_path="/data/knowledge/42.md",
+    )
+    monkeypatch.setattr(
+        "app.services.agent_toolset.search_knowledge",
+        lambda _db, *, user_id, query, limit: [hit],
+    )
+    register_agent_knowledge_search_tool(
+        cast(Any, agent),
+        session_factory_getter=lambda _deps: Session,
+        user_id_getter=lambda _deps: 7,
+        log_event=lambda _deps, event, payload: events.append((event, payload)),
+    )
+
+    result = agent.tools["search_knowledge"](
+        SimpleNamespace(deps=object()),
+        "local first",
+        99,
+    )
+
+    assert [event for event, _payload in events] == [
+        "search_knowledge_started",
+        "search_knowledge",
+    ]
+    assert events[0][1] == {"query": "local first", "limit": 10}
+    assert events[1][1] == {"query": "local first", "result_count": 1}
+    assert "article" in result
+    assert "https://example.com/local-first" in result
+
+
+def test_knowledge_search_tool_publishes_failure_and_reraises(monkeypatch) -> None:
+    agent = _FakeAgent()
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def fail_search(*_args, **_kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr("app.services.agent_toolset.search_knowledge", fail_search)
+    register_agent_knowledge_search_tool(
+        cast(Any, agent),
+        session_factory_getter=lambda _deps: Session,
+        user_id_getter=lambda _deps: 7,
+        log_event=lambda _deps, event, payload: events.append((event, payload)),
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        agent.tools["search_knowledge"](SimpleNamespace(deps=object()), "local first")
+
+    assert [event for event, _payload in events] == [
+        "search_knowledge_started",
+        "search_knowledge_failed",
+    ]
+    assert events[1][1] == {
+        "query": "local first",
+        "error": "database unavailable",
+        "failure_class": "RuntimeError",
+    }
 
 
 def test_register_agent_vm_tools_respects_tool_policy() -> None:

@@ -1,5 +1,6 @@
 """API response builders for normalized content."""
 
+from datetime import datetime
 from typing import Any
 
 from app.models.api.content import (
@@ -196,6 +197,7 @@ def build_content_summary_response(
     image_url: str | None = None,
     thumbnail_url: str | None = None,
     saved_source_override: SavedSource | None = None,
+    knowledge_saved_at: datetime | None = None,
 ) -> ContentSummaryResponse:
     """Build a summary response for list/search views."""
     content_id = _require_content_id(domain_content.id)
@@ -275,6 +277,7 @@ def build_content_summary_response(
         else None,
         is_read=is_read,
         is_saved_to_knowledge=is_saved_to_knowledge,
+        knowledge_saved_at=knowledge_saved_at.isoformat() if knowledge_saved_at else None,
         news_article_url=news_article_url,
         news_discussion_url=news_discussion_url,
         news_key_points=news_key_points,
@@ -368,6 +371,7 @@ def build_fallback_content_summary_response(
         publication_date=content.publication_date.isoformat() if content.publication_date else None,
         is_read=is_read,
         is_saved_to_knowledge=is_saved_to_knowledge,
+        knowledge_saved_at=None,
         news_article_url=None,
         news_discussion_url=None,
         news_key_points=None,

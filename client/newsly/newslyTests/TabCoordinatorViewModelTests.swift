@@ -3,13 +3,7 @@ import XCTest
 
 final class TabCoordinatorViewModelTests: XCTestCase {
     func testRootTabsContainOnlyBriefingCompositionSurfaces() {
-        XCTAssertEqual(RootTab.allCases, [.briefing, .knowledge, .learning])
-    }
-
-    func testRootTabLogNamesMatchActiveSurfaces() {
-        XCTAssertEqual(RootTab.briefing.logName, "briefing")
-        XCTAssertEqual(RootTab.knowledge.logName, "knowledge")
-        XCTAssertEqual(RootTab.learning.logName, "learning")
+        XCTAssertEqual(RootTab.allCases, [.briefing, .knowledge])
     }
 
     @MainActor
@@ -61,6 +55,22 @@ final class TabCoordinatorViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testLegacyLearningSelectionRestoresAsKnowledge() {
+        let suiteName = "TabCoordinatorViewModelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set("learning", forKey: "root.selectedTab.user.7")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let coordinator = TabCoordinatorViewModel(
+            briefingVM: BriefingViewModel(service: MockBriefingService()),
+            userID: 7,
+            defaults: defaults
+        )
+
+        XCTAssertEqual(coordinator.selectedTab, .knowledge)
+    }
+
+    @MainActor
     func testExplicitInitialTabOverridesRestoredTab() {
         let suiteName = "TabCoordinatorViewModelTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -71,10 +81,10 @@ final class TabCoordinatorViewModelTests: XCTestCase {
             briefingVM: BriefingViewModel(service: MockBriefingService()),
             userID: 7,
             defaults: defaults,
-            initialTab: .learning
+            initialTab: .knowledge
         )
 
-        XCTAssertEqual(coordinator.selectedTab, .learning)
+        XCTAssertEqual(coordinator.selectedTab, .knowledge)
     }
 
     @MainActor

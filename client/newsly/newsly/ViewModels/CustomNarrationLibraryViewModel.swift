@@ -40,10 +40,7 @@ extension AudioEpisodeService: CustomNarrationLibraryServicing {}
 @MainActor
 @Observable
 final class CustomNarrationLibraryViewModel {
-    private(set) var episodes: [AudioEpisode] = [] {
-        didSet { timelineRevision &+= 1 }
-    }
-    private(set) var timelineRevision = 0
+    private(set) var episodes: [AudioEpisode] = []
     private(set) var isLoading = false
     private(set) var sharingEpisodeIds: Set<Int> = []
     private(set) var loadErrorMessage: String?

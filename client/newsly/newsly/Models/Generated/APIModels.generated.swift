@@ -4301,6 +4301,7 @@ struct APIContentSummaryResponse: Codable {
     let publicationDate: String?
     let isRead: Bool
     let isSavedToKnowledge: Bool
+    let knowledgeSavedAt: String?
     let newsArticleUrl: String?
     let newsDiscussionUrl: String?
     let newsKeyPoints: [String]?
@@ -4335,6 +4336,7 @@ struct APIContentSummaryResponse: Codable {
         publicationDate: String? = nil,
         isRead: Bool = false,
         isSavedToKnowledge: Bool = false,
+        knowledgeSavedAt: String? = nil,
         newsArticleUrl: String? = nil,
         newsDiscussionUrl: String? = nil,
         newsKeyPoints: [String]? = nil,
@@ -4368,6 +4370,7 @@ struct APIContentSummaryResponse: Codable {
         self.publicationDate = publicationDate
         self.isRead = isRead
         self.isSavedToKnowledge = isSavedToKnowledge
+        self.knowledgeSavedAt = knowledgeSavedAt
         self.newsArticleUrl = newsArticleUrl
         self.newsDiscussionUrl = newsDiscussionUrl
         self.newsKeyPoints = newsKeyPoints
@@ -4403,6 +4406,7 @@ struct APIContentSummaryResponse: Codable {
         case publicationDate = "publication_date"
         case isRead = "is_read"
         case isSavedToKnowledge = "is_saved_to_knowledge"
+        case knowledgeSavedAt = "knowledge_saved_at"
         case newsArticleUrl = "news_article_url"
         case newsDiscussionUrl = "news_discussion_url"
         case newsKeyPoints = "news_key_points"
@@ -4439,6 +4443,7 @@ struct APIContentSummaryResponse: Codable {
         publicationDate = try container.decodeIfPresent(String.self, forKey: .publicationDate)
         isRead = try container.decode(Bool.self, forKey: .isRead)
         isSavedToKnowledge = try container.decode(Bool.self, forKey: .isSavedToKnowledge)
+        knowledgeSavedAt = try container.decodeIfPresent(String.self, forKey: .knowledgeSavedAt)
         newsArticleUrl = try container.decodeIfPresent(String.self, forKey: .newsArticleUrl)
         newsDiscussionUrl = try container.decodeIfPresent(String.self, forKey: .newsDiscussionUrl)
         newsKeyPoints = try container.decodeIfPresent([String].self, forKey: .newsKeyPoints)
@@ -4475,6 +4480,7 @@ struct APIContentSummaryResponse: Codable {
         try container.encodeIfPresent(publicationDate, forKey: .publicationDate)
         try container.encode(isRead, forKey: .isRead)
         try container.encode(isSavedToKnowledge, forKey: .isSavedToKnowledge)
+        try container.encodeIfPresent(knowledgeSavedAt, forKey: .knowledgeSavedAt)
         try container.encodeIfPresent(newsArticleUrl, forKey: .newsArticleUrl)
         try container.encodeIfPresent(newsDiscussionUrl, forKey: .newsDiscussionUrl)
         try container.encodeIfPresent(newsKeyPoints, forKey: .newsKeyPoints)

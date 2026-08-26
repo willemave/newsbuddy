@@ -788,6 +788,7 @@ type ContentSummaryResponse struct {
 	PublicationDate *string `json:"publication_date,omitempty"`
 	IsRead *bool `json:"is_read,omitempty"`
 	IsSavedToKnowledge *bool `json:"is_saved_to_knowledge,omitempty"`
+	KnowledgeSavedAt *string `json:"knowledge_saved_at,omitempty"`
 	NewsArticleURL *string `json:"news_article_url,omitempty"`
 	NewsDiscussionURL *string `json:"news_discussion_url,omitempty"`
 	NewsKeyPoints []string `json:"news_key_points,omitempty"`

@@ -153,6 +153,7 @@ def present_news_item_summary(
         publication_date=item.published_at.isoformat() if item.published_at else None,
         is_read=is_read,
         is_saved_to_knowledge=False,
+        knowledge_saved_at=None,
         saved_source=None,
         news_article_url=item.article_url or item.canonical_story_url,
         news_discussion_url=item.discussion_url or item.canonical_item_url,

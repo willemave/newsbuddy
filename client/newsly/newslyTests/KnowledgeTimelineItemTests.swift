@@ -2,7 +2,7 @@ import XCTest
 @testable import newsly
 
 @MainActor
-final class LearningTimelineItemTests: XCTestCase {
+final class KnowledgeTimelineItemTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_780_771_260)
 
     func testMergedTimelineSortsNewestFirstAcrossSources() {
@@ -10,7 +10,8 @@ final class LearningTimelineItemTests: XCTestCase {
         let deck = makeDeck(id: 2, activityDate: now.addingTimeInterval(-42 * 60))
         let narration = makeNarration(id: 3, activityDate: now.addingTimeInterval(-25 * 60 * 60))
 
-        let items = LearningTimelineItem.merged(
+        let items = KnowledgeTimelineItem.merged(
+            saved: [],
             chats: [chat],
             decks: [deck],
             narrations: [narration]
@@ -21,7 +22,8 @@ final class LearningTimelineItemTests: XCTestCase {
 
     func testStableIDsAreNamespacedByItemKind() {
         let activityDate = now.addingTimeInterval(-60)
-        let items = LearningTimelineItem.merged(
+        let items = KnowledgeTimelineItem.merged(
+            saved: [],
             chats: [makeSession(id: 7, activityDate: activityDate)],
             decks: [makeDeck(id: 7, activityDate: activityDate)],
             narrations: [makeNarration(id: 7, activityDate: activityDate)]
@@ -30,8 +32,38 @@ final class LearningTimelineItemTests: XCTestCase {
         XCTAssertEqual(Set(items.map(\.id)), ["chat-7", "deck-7", "narration-7"])
     }
 
+    func testSavedItemsJoinTheSameReverseChronologicalTimeline() {
+        let saved = makeSaved(id: 9, activityDate: now.addingTimeInterval(-5 * 60))
+        let chat = makeSession(id: 9, activityDate: now.addingTimeInterval(-10 * 60))
+
+        let items = KnowledgeTimelineItem.merged(
+            saved: [saved],
+            chats: [chat],
+            decks: [],
+            narrations: []
+        )
+
+        XCTAssertEqual(items.map(\.id), ["saved-9", "chat-9"])
+    }
+
+    func testPaginationLoadsTheSourceWhoseOldestItemIsNewest() {
+        XCTAssertEqual(
+            KnowledgePaginationSource.next(
+                savedOldest: now.addingTimeInterval(-60),
+                chatOldest: now.addingTimeInterval(-120)
+            ),
+            .saved
+        )
+        XCTAssertEqual(
+            KnowledgePaginationSource.next(savedOldest: nil, chatOldest: now),
+            .chats
+        )
+        XCTAssertNil(KnowledgePaginationSource.next(savedOldest: nil, chatOldest: nil))
+    }
+
     func testMergePrecomputesSingleLineChatPreview() {
-        let items = LearningTimelineItem.merged(
+        let items = KnowledgeTimelineItem.merged(
+            saved: [],
             chats: [
                 makeSession(
                     id: 8,
@@ -48,20 +80,6 @@ final class LearningTimelineItemTests: XCTestCase {
         }
         XCTAssertEqual(session.id, 8)
         XCTAssertEqual(preview, "Signal First point Second point")
-    }
-
-    func testMergeKeepsSuccessfulSourcesWhenChatSourceFails() async {
-        let chatViewModel = LearningHubViewModel(chatService: FailingLearningTimelineChatService())
-        await chatViewModel.loadLearning()
-
-        let items = LearningTimelineItem.merged(
-            chats: chatViewModel.sessions,
-            decks: [makeDeck(id: 4, activityDate: now)],
-            narrations: [makeNarration(id: 5, activityDate: now.addingTimeInterval(-60))]
-        )
-
-        XCTAssertNotNil(chatViewModel.loadErrorMessage)
-        XCTAssertEqual(items.map(\.id), ["deck-4", "narration-5"])
     }
 
     func testDeckSubtitleSuppressesRepeatedSourceTitle() {
@@ -103,6 +121,28 @@ final class LearningTimelineItemTests: XCTestCase {
         )
     }
 
+    private func makeSaved(id: Int, activityDate: Date) -> ContentSummary {
+        ContentSummary(
+            id: id,
+            contentType: .article,
+            url: "https://example.com/\(id)",
+            title: "Saved \(id)",
+            source: "Example",
+            platform: nil,
+            status: .completed,
+            shortSummary: "Summary",
+            createdAt: ServerDate.format(activityDate.addingTimeInterval(-365 * 24 * 60 * 60)),
+            processedAt: nil,
+            classification: nil,
+            publicationDate: ServerDate.format(
+                activityDate.addingTimeInterval(-365 * 24 * 60 * 60)
+            ),
+            isRead: false,
+            isSavedToKnowledge: true,
+            knowledgeSavedAt: ServerDate.format(activityDate)
+        )
+    }
+
     private func makeDeck(
         id: Int,
         activityDate: Date,
@@ -137,33 +177,5 @@ final class LearningTimelineItemTests: XCTestCase {
             createdAt: activityDate.addingTimeInterval(-60),
             updatedAt: activityDate
         )
-    }
-}
-
-@MainActor
-private final class FailingLearningTimelineChatService: LearningHubChatServicing {
-    private enum Failure: Error {
-        case unavailable
-    }
-
-    func listSessionsPage(
-        contentId: Int?,
-        newsItemId: Int?,
-        limit: Int,
-        cursor: String?
-    ) async throws -> ChatSessionListResponse {
-        throw Failure.unavailable
-    }
-
-    func createAssistantTurn(
-        message: String,
-        sessionId: Int?,
-        screenContext: AssistantScreenContext
-    ) async throws -> AssistantTurnResponse {
-        throw Failure.unavailable
-    }
-
-    func deleteSession(sessionId: Int) async throws {
-        throw Failure.unavailable
     }
 }

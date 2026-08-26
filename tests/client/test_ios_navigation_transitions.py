@@ -9,7 +9,7 @@ def test_phase5_zoom_transitions_pair_matched_sources_with_destinations() -> Non
     helper_source = (VIEWS_ROOT / "ContentZoomTransition.swift").read_text()
     root_tabs_source = (VIEWS_ROOT / "RootTabs.swift").read_text()
     routes_source = (VIEWS_ROOT / "ContentRoutes.swift").read_text()
-    learning_source = (VIEWS_ROOT / "LearningView.swift").read_text()
+    knowledge_timeline_source = (VIEWS_ROOT / "KnowledgeTimelineView.swift").read_text()
     chat_history_source = (VIEWS_ROOT / "ChatSessionHistoryView.swift").read_text()
     detail_source = (VIEWS_ROOT / "ContentDetailView.swift").read_text()
     detail_action_bar_source = (VIEWS_ROOT / "Components/DetailActionBar.swift").read_text()
@@ -32,7 +32,7 @@ def test_phase5_zoom_transitions_pair_matched_sources_with_destinations() -> Non
 
     assert (
         ".matchedContentZoomSource(id: session.id, namespace: chatTransitionNamespace)"
-        in learning_source
+        in knowledge_timeline_source
     )
     assert (
         ".matchedContentZoomSource(id: session.id, namespace: chatTransitionNamespace)"

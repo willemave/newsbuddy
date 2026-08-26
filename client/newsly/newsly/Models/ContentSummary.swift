@@ -33,6 +33,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     let publicationDate: String?
     let isRead: Bool
     var isSavedToKnowledge: Bool
+    let knowledgeSavedAt: String?
     let imageUrl: String?
     let thumbnailUrl: String?
     let primaryTopic: String?
@@ -49,6 +50,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
     private let cachedDisplayDate: Date?
     private let cachedProcessedDate: Date?
     private let cachedItemDate: Date?
+    private let cachedKnowledgeSavedDate: Date?
     private let cachedCalendarDayKey: String
 
     enum CodingKeys: String, CodingKey {
@@ -66,6 +68,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         case publicationDate = "publication_date"
         case isRead = "is_read"
         case isSavedToKnowledge = "is_saved_to_knowledge"
+        case knowledgeSavedAt = "knowledge_saved_at"
         case imageUrl = "image_url"
         case thumbnailUrl = "thumbnail_url"
         case primaryTopic = "primary_topic"
@@ -132,6 +135,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         publicationDate: String?,
         isRead: Bool,
         isSavedToKnowledge: Bool,
+        knowledgeSavedAt: String? = nil,
         imageUrl: String? = nil,
         thumbnailUrl: String? = nil,
         primaryTopic: String? = nil,
@@ -160,6 +164,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         self.publicationDate = publicationDate
         self.isRead = isRead
         self.isSavedToKnowledge = isSavedToKnowledge
+        self.knowledgeSavedAt = knowledgeSavedAt
         self.imageUrl = imageUrl
         self.thumbnailUrl = thumbnailUrl
         self.primaryTopic = primaryTopic
@@ -176,9 +181,11 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         let displayDate = Self.parseDate(processedAt ?? createdAt)
         let processedDate = processedAt.flatMap(Self.parseDate)
         let itemDate = Self.parseDate(publicationDate ?? processedAt ?? createdAt)
+        let knowledgeSavedDate = knowledgeSavedAt.flatMap(Self.parseDate)
         self.cachedDisplayDate = displayDate
         self.cachedProcessedDate = processedDate
         self.cachedItemDate = itemDate
+        self.cachedKnowledgeSavedDate = knowledgeSavedDate
         self.cachedCalendarDayKey = itemDate.map { Self.calendarDayFormatter.string(from: $0) } ?? ""
     }
 
@@ -198,6 +205,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
             publicationDate: response.publicationDate,
             isRead: response.isRead,
             isSavedToKnowledge: response.isSavedToKnowledge,
+            knowledgeSavedAt: response.knowledgeSavedAt,
             imageUrl: response.imageUrl,
             thumbnailUrl: response.thumbnailUrl,
             primaryTopic: response.primaryTopic,
@@ -234,6 +242,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(publicationDate, forKey: .publicationDate)
         try container.encode(isRead, forKey: .isRead)
         try container.encode(isSavedToKnowledge, forKey: .isSavedToKnowledge)
+        try container.encodeIfPresent(knowledgeSavedAt, forKey: .knowledgeSavedAt)
         try container.encodeIfPresent(imageUrl, forKey: .imageUrl)
         try container.encodeIfPresent(thumbnailUrl, forKey: .thumbnailUrl)
         try container.encodeIfPresent(primaryTopic, forKey: .primaryTopic)
@@ -361,6 +370,15 @@ struct ContentSummary: Codable, Identifiable, Equatable {
         return ContentTimestampFormatter.compactRelativeText(from: date)
     }
 
+    var knowledgeActivityDate: Date {
+        cachedKnowledgeSavedDate ?? Self.parseDate(createdAt) ?? .distantPast
+    }
+
+    var knowledgeRelativeTimeDisplay: String? {
+        guard knowledgeActivityDate != .distantPast else { return nil }
+        return ContentTimestampFormatter.compactRelativeText(from: knowledgeActivityDate)
+    }
+
     func updating(
         isRead: Bool? = nil,
         isSavedToKnowledge: Bool? = nil
@@ -380,6 +398,7 @@ struct ContentSummary: Codable, Identifiable, Equatable {
             publicationDate: publicationDate,
             isRead: isRead ?? self.isRead,
             isSavedToKnowledge: isSavedToKnowledge ?? self.isSavedToKnowledge,
+            knowledgeSavedAt: knowledgeSavedAt,
             imageUrl: imageUrl,
             thumbnailUrl: thumbnailUrl,
             primaryTopic: primaryTopic,

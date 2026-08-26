@@ -101,7 +101,7 @@ private extension DynamicTypeSize {
     }
 }
 
-/// Floating replacement for the system tab bar in the briefing experience.
+/// Floating replacement for the system root tab bar.
 struct CompactTabBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -117,7 +117,7 @@ struct CompactTabBar: View {
     let items: [Item]
     let selection: RootTab
     let onSelect: (RootTab) -> Void
-    @Namespace private var glassNamespace
+    @Namespace private var selectionNamespace
 
     var body: some View {
         Group {
@@ -127,20 +127,21 @@ struct CompactTabBar: View {
                 fallbackBar
             }
         }
-        .frame(maxWidth: 264)
+        .frame(maxWidth: 200)
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 8)
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity)
         .animation(
-            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.subtle),
+            AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized),
             value: selection
         )
+        .sensoryFeedback(.impact(weight: .light), trigger: selection)
     }
 
     @available(iOS 26.0, *)
     private var liquidGlassBar: some View {
-        GlassEffectContainer(spacing: 4) {
+        GlassEffectContainer(spacing: 6) {
             tabItems
                 .padding(5)
                 .background(barFill)
@@ -168,52 +169,40 @@ struct CompactTabBar: View {
     }
 
     private var tabItems: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             ForEach(items) { item in
                 itemButton(item)
             }
         }
     }
 
-    @ViewBuilder
     private func itemButton(_ item: Item) -> some View {
         let isSelected = item.tab == selection
-
-        if #available(iOS 26.0, *), isSelected {
-            baseButton(item, isSelected: true)
-                .glassEffect(
-                    .regular.tint(Color.onSurface).interactive(),
-                    in: .rect(cornerRadius: 22)
-                )
-                .glassEffectID("compact-tab-selection", in: glassNamespace)
-        } else {
-            baseButton(item, isSelected: isSelected)
-                .background {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(Color.onSurface)
-                    }
-                }
-        }
-    }
-
-    private func baseButton(_ item: Item, isSelected: Bool) -> some View {
-        Button {
+        return Button {
             onSelect(item.tab)
         } label: {
-            VStack(spacing: 3) {
+            HStack(spacing: 6) {
                 Image(systemName: item.icon)
-                    .font(.appSymbol(size: 15, weight: .semibold))
-                    .frame(height: 17)
-                Text(item.label)
-                    .font(.appCaption2.weight(.semibold))
-                    .lineLimit(1)
+                    .font(.appSymbol(size: 18, weight: .semibold))
+                if isSelected {
+                    Text(item.label)
+                        .font(.appCaption2.weight(.semibold))
+                        .lineLimit(1)
+                        .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+                }
             }
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 52)
+            .padding(.horizontal, isSelected ? 14 : 0)
+            .padding(.vertical, isSelected ? 9 : 0)
+            .frame(minWidth: 44, minHeight: 44)
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurfaceSecondary)
-            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background {
+                if isSelected {
+                    Capsule()
+                        .fill(Color.onSurface)
+                        .matchedGeometryEffect(id: "tab.pill", in: selectionNamespace)
+                }
+            }
+            .contentShape(Capsule())
         }
         .buttonStyle(CompactTabButtonStyle(reduceMotion: reduceMotion))
         .accessibilityLabel(item.label)
@@ -370,13 +359,24 @@ enum RootDependencyFactory {
         )
     }
 
-    static func makeLearningHubViewModel() -> LearningHubViewModel {
-        LearningHubViewModel(
+    static func makeKnowledgeChatViewModel() -> KnowledgeChatViewModel {
+        KnowledgeChatViewModel(
             chatService: ChatService.shared,
             transcriptionService: SpeechTranscriberFactory.makeVoiceDictationTranscriber(),
             refreshTranscriptionAvailability: {
                 await OpenAIService.shared.refreshTranscriptionAvailability()
             }
+        )
+    }
+
+    static func makeKnowledgeTimelineViewModel(
+        readStateCache: ReadStateCache
+    ) -> KnowledgeTimelineViewModel {
+        KnowledgeTimelineViewModel(
+            savedContent: makeContentListViewModel(readStateCache: readStateCache),
+            chats: makeKnowledgeChatViewModel(),
+            decks: makeLearningDecksViewModel(),
+            narrations: makeCustomNarrationLibraryViewModel(readStateCache: readStateCache)
         )
     }
 

@@ -108,10 +108,16 @@ final class APIContractsGeneratedTests: XCTestCase {
         XCTAssertEqual(summary.contentType, .article)
         XCTAssertEqual(summary.status, .completed)
         XCTAssertEqual(summary.savedSource, .knowledge)
+        XCTAssertEqual(summary.knowledgeSavedAt, "2026-04-27T12:05:00Z")
 
         let appSummary = try decodeFixture(ContentSummary.self, "content_summary_article.json")
         XCTAssertEqual(appSummary.contentType, .article)
         XCTAssertEqual(appSummary.isSavedToKnowledge, true)
+        XCTAssertEqual(appSummary.knowledgeSavedAt, "2026-04-27T12:05:00Z")
+        XCTAssertEqual(
+            appSummary.knowledgeActivityDate,
+            ServerDate.parse("2026-04-27T12:05:00Z")
+        )
 
         let detail = try decodeFixture(ContentDetail.self, "content_detail_long_read.json")
         XCTAssertEqual(detail.id, 401)

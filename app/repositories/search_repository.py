@@ -6,12 +6,19 @@ import re
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import String, and_, cast, func, literal, literal_column, or_
+from sqlalchemy import and_, func, literal, or_
 from sqlalchemy.orm import Session
 
 from app.models.contracts import NewsItemStatus, NewsItemVisibilityScope
 from app.models.db import Content, NewsItem, NewsItemReadStatus, UserScraperConfig
 from app.repositories.content_feed_query import apply_sort_timestamp_cursor, build_user_feed_query
+from app.repositories.content_search_expressions import (
+    content_search_expressions,
+    content_search_text_expression,
+    content_source_expression,
+    content_summary_title_expression,
+    content_title_expression,
+)
 from app.repositories.news_search_expressions import (
     news_article_domain_expression,
     news_article_title_expression,
@@ -75,71 +82,14 @@ def _query_tokens(query_text: str, *, min_length: int) -> list[str]:
     ]
 
 
-def _content_summary_title_expr():
-    return func.coalesce(
-        cast(Content.content_metadata["summary"]["title"].as_string(), String),
-        "",
-    )
-
-
-def _content_title_expr():
-    return func.coalesce(cast(Content.title, String), "")
-
-
-def _content_source_expr():
-    return func.coalesce(cast(Content.source, String), "")
-
-
-def _content_search_text_expr():
-    return func.coalesce(cast(Content.search_text, String), "")
-
-
 def _apply_postgres_content_search(query, query_text: str, *, context: dict[str, Any]):
     normalized = " ".join(query_text.split()).strip()
     if not normalized:
         return query
 
-    summary_title_vector = func.setweight(
-        func.to_tsvector("english", _content_summary_title_expr()),
-        literal_column("'A'"),
-    )
-    stored_title_vector = func.setweight(
-        func.to_tsvector("english", _content_title_expr()),
-        literal_column("'B'"),
-    )
-    source_vector = func.setweight(
-        func.to_tsvector("english", _content_source_expr()),
-        literal_column("'C'"),
-    )
-    search_text_vector = func.setweight(
-        func.to_tsvector("english", _content_search_text_expr()),
-        literal_column("'D'"),
-    )
-    search_document = (
-        summary_title_vector.op("||")(stored_title_vector)
-        .op("||")(source_vector)
-        .op("||")(search_text_vector)
-    )
-
-    search_query = func.websearch_to_tsquery("english", normalized)
-    search_rank = func.ts_rank_cd(search_document, search_query)
-    summary_title_match = _content_summary_title_expr().bool_op("OPERATOR(public.%)")(normalized)
-    stored_title_match = _content_title_expr().bool_op("OPERATOR(public.%)")(normalized)
-    source_match = _content_source_expr().bool_op("OPERATOR(public.%)")(normalized)
-    trigram_rank = func.greatest(
-        func.public.word_similarity(normalized, _content_summary_title_expr()),
-        func.public.word_similarity(normalized, _content_title_expr()),
-        func.public.word_similarity(normalized, _content_source_expr()),
-    )
-    combined_filter = or_(
-        search_document.op("@@")(search_query),
-        summary_title_match,
-        stored_title_match,
-        source_match,
-        trigram_rank >= 0.5,
-    )
-    context["rank_expr"] = func.greatest(search_rank, trigram_rank * 0.25)
-    return query.filter(combined_filter)
+    expressions = content_search_expressions(normalized)
+    context["rank_expr"] = expressions.rank
+    return query.filter(expressions.matches)
 
 
 def _apply_generic_content_search(query, query_text: str, *, context: dict[str, Any]):
@@ -150,10 +100,10 @@ def _apply_generic_content_search(query, query_text: str, *, context: dict[str, 
 
     token_filters = [
         or_(
-            func.lower(_content_summary_title_expr()).like(f"%{token}%"),
-            func.lower(_content_title_expr()).like(f"%{token}%"),
-            func.lower(_content_source_expr()).like(f"%{token}%"),
-            func.lower(_content_search_text_expr()).like(f"%{token}%"),
+            func.lower(content_summary_title_expression()).like(f"%{token}%"),
+            func.lower(content_title_expression()).like(f"%{token}%"),
+            func.lower(content_source_expression()).like(f"%{token}%"),
+            func.lower(content_search_text_expression()).like(f"%{token}%"),
         )
         for token in tokens
     ]

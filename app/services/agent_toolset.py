@@ -8,9 +8,11 @@ from time import perf_counter
 from typing import Any
 
 from pydantic_ai import Agent, RunContext
+from sqlalchemy.orm import Session
 
 from app.services.agent_vm_runtime import AgentVmPathError, AgentVmSession
 from app.services.exa_client import exa_search
+from app.services.knowledge_search import KnowledgeHit, search_knowledge
 
 AGENT_VM_SYSTEM_INSTRUCTIONS = """VM execution environment:
 - Commands start in a task-specific directory below /data/workspace. Keep scratch files there.
@@ -87,6 +89,8 @@ SessionGetter = Callable[[Any], AgentVmSession]
 LogEventCallback = Callable[[Any, str, dict[str, Any]], None]
 UserIdGetter = Callable[[Any], int | None]
 MetadataGetter = Callable[[Any], dict[str, Any]]
+KnowledgeSessionFactoryGetter = Callable[[Any], Callable[[], Session]]
+KnowledgeUserIdGetter = Callable[[Any], int]
 
 
 def register_agent_vm_tools(
@@ -464,6 +468,75 @@ def register_agent_web_search_tool(
                 for result in results
             ],
         }
+
+
+def register_agent_knowledge_search_tool(
+    agent: Agent[Any, Any],
+    *,
+    session_factory_getter: KnowledgeSessionFactoryGetter,
+    user_id_getter: KnowledgeUserIdGetter,
+    log_event: LogEventCallback,
+) -> None:
+    """Register the canonical host-managed saved-knowledge search tool."""
+
+    @agent.tool(name="search_knowledge")
+    def search_knowledge_tool(
+        ctx: RunContext[Any],
+        query: str,
+        limit: int = 8,
+    ) -> str:
+        """Search the current user's saved Newsly knowledge without acquiring a VM."""
+        bounded_limit = min(max(int(limit), 1), 10)
+        log_event(
+            ctx.deps,
+            "search_knowledge_started",
+            {"query": query, "limit": bounded_limit},
+        )
+        try:
+            with session_factory_getter(ctx.deps)() as db:
+                hits = search_knowledge(
+                    db,
+                    user_id=user_id_getter(ctx.deps),
+                    query=query,
+                    limit=bounded_limit,
+                )
+        except Exception as exc:
+            log_event(
+                ctx.deps,
+                "search_knowledge_failed",
+                {
+                    "query": query,
+                    "error": _bounded_text(str(exc), max_chars=500),
+                    "failure_class": type(exc).__name__,
+                },
+            )
+            raise
+        log_event(
+            ctx.deps,
+            "search_knowledge",
+            {"query": query, "result_count": len(hits)},
+        )
+        return _format_knowledge_hits(hits, query)
+
+
+def _format_knowledge_hits(hits: list[KnowledgeHit], query: str) -> str:
+    if not hits:
+        return f'No matching saved knowledge was found for "{query}".'
+
+    lines = [f'Found {len(hits)} saved knowledge items for "{query}":']
+    for index, hit in enumerate(hits, start=1):
+        source = hit.source or "unknown source"
+        saved_date = hit.saved_at.date().isoformat()
+        lines.append(
+            f"{index}. **{hit.title}** — {source} · saved {saved_date} · "
+            f"{hit.content_type} · content {hit.content_id}"
+        )
+        lines.append(f"   URL: {hit.url}")
+        if hit.snippet:
+            lines.append(f"   {hit.snippet}")
+        if hit.corpus_path:
+            lines.append(f"   Corpus path: `{hit.corpus_path}`")
+    return "\n".join(lines)
 
 
 def _bounded_text(value: str, *, max_chars: int = 20_000) -> str:

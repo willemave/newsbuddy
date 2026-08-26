@@ -3902,6 +3902,18 @@
             "description": "Key takeaway to display under long-form list titles",
             "title": "Key Takeaway"
           },
+          "knowledge_saved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO timestamp when the user saved this content to the knowledge library",
+            "title": "Knowledge Saved At"
+          },
           "news_article_url": {
             "anyOf": [
               {

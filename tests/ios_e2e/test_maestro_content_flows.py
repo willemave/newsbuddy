@@ -256,7 +256,7 @@ def test_long_form_detail_learning_deck_create_ignores_failed_legacy_attempt(
     assert stale_task.status == LlmTaskStatus.FAILED.value
 
 
-def test_learning_tab_long_press_regenerates_deck_with_existing_focus(
+def test_knowledge_timeline_long_press_regenerates_deck_with_existing_focus(
     run_ios_flow,
     create_sample_content,
     sample_article_long,
@@ -297,7 +297,7 @@ def test_learning_tab_long_press_regenerates_deck_with_existing_focus(
     db_session.commit()
 
     run_ios_flow(
-        "learning_deck_regenerate_from_learning.yaml",
+        "learning_deck_regenerate_from_knowledge.yaml",
         extra_env={"DECK_ID": str(deck.id)},
     )
 

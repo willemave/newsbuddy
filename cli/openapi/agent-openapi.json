@@ -3056,6 +3056,12 @@
             "title": "Key Takeaway",
             "type": "string"
           },
+          "knowledge_saved_at": {
+            "description": "ISO timestamp when the user saved this content to the knowledge library",
+            "nullable": true,
+            "title": "Knowledge Saved At",
+            "type": "string"
+          },
           "news_article_url": {
             "description": "Canonical article link for news content",
             "nullable": true,

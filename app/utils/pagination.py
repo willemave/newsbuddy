@@ -29,6 +29,7 @@ class PaginationCursor:
         last_id: int,
         last_created_at: datetime,
         filters: dict[str, Any] | None = None,
+        last_rank: float | None = None,
     ) -> str:
         """Encode pagination state into an opaque cursor token.
 
@@ -44,6 +45,8 @@ class PaginationCursor:
             "last_id": last_id,
             "last_created_at": last_created_at.isoformat(),
         }
+        if last_rank is not None:
+            cursor_data["last_rank"] = last_rank
 
         # Add filters hash for validation
         if filters:

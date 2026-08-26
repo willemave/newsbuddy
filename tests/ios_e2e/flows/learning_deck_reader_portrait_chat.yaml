@@ -13,13 +13,13 @@ appId: "${APP_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
 - tapOn:
-    id: tab.learning
+    id: tab.knowledge
 - extendedWaitUntil:
     visible:
-      id: learning.deck.${DECK_ID}
+      id: knowledge.deck.${DECK_ID}
     timeout: 15000
 - tapOn:
-    id: learning.deck.${DECK_ID}
+    id: knowledge.deck.${DECK_ID}
 - extendedWaitUntil:
     visible:
       id: learning_deck.reader.webview

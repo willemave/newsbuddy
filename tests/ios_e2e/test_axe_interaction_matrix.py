@@ -335,12 +335,7 @@ def test_main_navigation_has_no_dead_end(
         expectation=AxeStateExpectation(ids=("knowledge.screen",)),
     )
     axe_runner.tap_id(
-        "tab.learning",
-        name="learning_tab",
-        expectation=AxeStateExpectation(ids=("learning.screen",)),
-    )
-    axe_runner.tap_id(
-        "learning.more_menu",
+        "knowledge.more_menu",
         name="more_sheet",
         expectation=AxeStateExpectation(ids=("more.screen",)),
     )
@@ -643,15 +638,15 @@ def test_chat_feed_discovery_round_trips_through_knowledge(
 
     _launch_completed_app(axe_runner, live_server=live_server, user_id=test_user.id)
     axe_runner.tap_id(
-        "tab.learning",
-        name="chat_learning_hub",
+        "tab.knowledge",
+        name="chat_knowledge_hub",
         timeout_seconds=20,
         expectation=AxeStateExpectation(
-            ids=("learning.screen", f"learning.chat.{session.id}"),
+            ids=("knowledge.screen", f"knowledge.chat.{session.id}"),
         ),
     )
     axe_runner.tap_id(
-        f"learning.chat.{session.id}",
+        f"knowledge.chat.{session.id}",
         name="chat_feed_discovery_opened",
         timeout_seconds=20,
         expectation=AxeStateExpectation(
@@ -709,14 +704,14 @@ def test_chat_feed_discovery_round_trips_through_knowledge(
 
     axe_runner.tap_id(
         "navigation.back",
-        name="chat_back_to_learning",
+        name="chat_back_to_knowledge",
         timeout_seconds=20,
         expectation=AxeStateExpectation(
-            ids=("learning.screen", f"learning.chat.{session.id}"),
+            ids=("knowledge.screen", f"knowledge.chat.{session.id}"),
         ),
     )
     axe_runner.tap_id(
-        f"learning.chat.{session.id}",
+        f"knowledge.chat.{session.id}",
         name="chat_reopened",
         timeout_seconds=20,
         expectation=AxeStateExpectation(
@@ -727,7 +722,7 @@ def test_chat_feed_discovery_round_trips_through_knowledge(
     axe_runner.tap_id(
         "navigation.back",
         name="reopened_chat_back",
-        expectation=AxeStateExpectation(ids=("learning.screen",)),
+        expectation=AxeStateExpectation(ids=("knowledge.screen",)),
     )
     axe_runner.tap_id(
         "tab.knowledge",
@@ -910,15 +905,15 @@ def test_knowledge_learning_deck_voice_focus_reaches_processing_projection(
     axe_runner.tap_id(
         "navigation.back",
         name="learning_deck_content_closed",
-        expectation=AxeStateExpectation(ids=("briefing.screen", "tab.learning")),
+        expectation=AxeStateExpectation(ids=("briefing.screen", "tab.knowledge")),
     )
     axe_runner.tap_id(
-        "tab.learning",
+        "tab.knowledge",
         name="learning_deck_processing_row",
         timeout_seconds=20,
         expectation=AxeStateExpectation(
-            ids=(f"learning.deck.{deck.id}",),
-            id_values={f"learning.deck.{deck.id}": "Queued"},
+            ids=(f"knowledge.deck.{deck.id}",),
+            id_values={f"knowledge.deck.{deck.id}": "Queued"},
         ),
     )
 
@@ -940,7 +935,7 @@ def test_active_tab_reselection_restores_scrolled_headers(
         knowledge_save_factory(user=test_user, content=content)
         chat_session_factory(
             user=test_user,
-            title=f"AXe Learning Session {index + 1}",
+            title=f"AXe Knowledge Chat {index + 1}",
             session_type="knowledge_chat",
         )
 
@@ -950,7 +945,7 @@ def test_active_tab_reselection_restores_scrolled_headers(
         name="scroll_to_top_knowledge_loaded",
         expectation=AxeStateExpectation(
             ids=("knowledge.screen",),
-            texts=("AXe Knowledge Item",),
+            texts=("AXe Knowledge Item", "AXe Knowledge Chat"),
         ),
         timeout_seconds=15,
     )
@@ -965,28 +960,6 @@ def test_active_tab_reselection_restores_scrolled_headers(
         "tab.knowledge",
         name="scroll_to_top_knowledge_restored",
         expectation=AxeStateExpectation(ids=("knowledge.screen",)),
-    )
-
-    learning = axe_runner.tap_id(
-        "tab.learning",
-        name="scroll_to_top_learning_loaded",
-        expectation=AxeStateExpectation(
-            ids=("learning.screen",),
-            texts=("AXe Learning Session",),
-        ),
-        timeout_seconds=15,
-    )
-    _scroll_until_id_absent(
-        axe_runner,
-        initial_tree=learning.tree,
-        identifier="learning.screen",
-        persistent_identifier="tab.learning",
-        path_name="learning",
-    )
-    axe_runner.tap_id(
-        "tab.learning",
-        name="scroll_to_top_learning_restored",
-        expectation=AxeStateExpectation(ids=("learning.screen",)),
     )
 
 

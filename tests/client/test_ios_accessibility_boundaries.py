@@ -54,8 +54,7 @@ def test_product_screen_ids_live_on_stable_header_leaves() -> None:
     masthead_screens = {
         "Briefing/BriefingView.swift": "briefing.screen",
         "Briefing/BriefingEmptyStateView.swift": "briefing.screen",
-        "KnowledgeView.swift": "knowledge.screen",
-        "LearningView.swift": "learning.screen",
+        "KnowledgeTimelineView.swift": "knowledge.screen",
         "MoreView.swift": "more.screen",
     }
     for filename, identifier in masthead_screens.items():

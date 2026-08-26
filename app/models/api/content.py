@@ -61,6 +61,7 @@ class ContentSummaryResponse(BaseModel):
         False,
         description="Whether the content has been saved to the user's knowledge library",
     )
+    knowledge_saved_at: str | None = Field(None, description="ISO timestamp of the user's save")
     news_article_url: str | None = Field(
         None, description="Canonical article link for news content"
     )

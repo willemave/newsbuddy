@@ -1,8 +1,10 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from pydantic_ai import RunContext
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
@@ -10,11 +12,13 @@ from pydantic_ai.messages import (
     TextPart,
     UserPromptPart,
 )
+from pydantic_ai.models.test import TestModel
+from pydantic_ai.tools import ToolDefinition
 from sqlalchemy.orm import object_session
 
 from app.core.settings import get_settings
 from app.models.contracts import ContentType, LlmTaskStatus, MessageProcessingStatus
-from app.models.db import ChatMessage, ChatSession, Content, LlmTask
+from app.models.db import ChatMessage, ChatSession, Content, ContentKnowledgeSave, LlmTask
 from app.queries.chat_read_models import extract_messages_for_display
 from app.services import chat_agent
 from app.services.chat_agent import (
@@ -32,6 +36,10 @@ from app.services.chat_agent import (
 from app.services.chat_turn_queue import build_chat_turn_context
 from app.services.chat_turn_runtime import ChatUsageSnapshot, QueuedChatTurnOutcome
 from app.services.lazy_agent_vm import LazyAgentVmRuntime
+
+
+def _unused_session_factory():
+    raise AssertionError("This test does not perform saved-knowledge search")
 
 
 def test_build_article_context_includes_full_transcript_with_budget(db_session) -> None:
@@ -201,6 +209,72 @@ def test_article_chat_enables_sandboxed_bash() -> None:
     assert ARTICLE_CHAT_TURN_SPEC.tool_policy["execute_bash"] is True
 
 
+def test_article_chat_searches_saved_knowledge_without_a_vm(
+    db_session,
+    db_session_factory,
+    test_user,
+    monkeypatch,
+) -> None:
+    content = Content(
+        content_type="article",
+        url="https://example.com/batteries",
+        title="Battery chemistry",
+        source="Example",
+        status="completed",
+        search_text="Lithium iron phosphate storage",
+    )
+    db_session.add(content)
+    db_session.flush()
+    db_session.add(ContentKnowledgeSave(user_id=test_user.id, content_id=content.id))
+    db_session.commit()
+    monkeypatch.setattr(
+        chat_agent,
+        "build_pydantic_model",
+        lambda *_args, **_kwargs: (TestModel(custom_output_text="ok"), {}),
+    )
+
+    agent = chat_agent._create_chat_agent("test:model")
+    search = agent._function_toolset.tools["search_knowledge"].function
+    result = search(
+        cast(
+            RunContext[ChatDeps],
+            SimpleNamespace(
+                deps=ChatDeps(
+                    session_id=1,
+                    user_id=test_user.id,
+                    session_factory=db_session_factory,
+                )
+            ),
+        ),
+        "phosphate",
+        8,
+    )
+
+    assert "Battery chemistry" in result
+    assert "content" in result
+
+
+def test_vm_less_article_chat_keeps_host_knowledge_search() -> None:
+    context = cast(
+        RunContext[ChatDeps],
+        SimpleNamespace(
+            deps=ChatDeps(
+                session_id=1,
+                user_id=1,
+                session_factory=_unused_session_factory,
+            )
+        ),
+    )
+    tools = [
+        ToolDefinition(name="search_knowledge"),
+        ToolDefinition(name="execute_bash"),
+    ]
+
+    selected = asyncio.run(chat_agent._prepare_chat_tools(context, tools))
+
+    assert [tool.name for tool in selected] == ["search_knowledge"]
+
+
 def test_build_context_prompt_parts_marks_snapshot_as_reference_material() -> None:
     parts = _build_context_prompt_parts(
         None,
@@ -357,6 +431,7 @@ def test_generate_initial_suggestions_persists_assistant_only_transcript(
         return ChatDeps(
             session_id=int(current_session.id),
             user_id=int(current_session.user_id),
+            session_factory=_unused_session_factory,
             content_id=current_session.content_id,
             has_content=True,
             article_context="Article context",
@@ -490,6 +565,7 @@ def test_generate_initial_suggestions_records_failure_without_partial_message(
         lambda _db, current_session, **_kwargs: ChatDeps(
             session_id=int(current_session.id),
             user_id=int(current_session.user_id),
+            session_factory=_unused_session_factory,
             content_id=current_session.content_id,
             has_content=True,
             article_context="Article context",
@@ -643,6 +719,7 @@ def test_run_chat_turn_builds_deps_with_vm_tools_enabled(
         return ChatDeps(
             session_id=int(current_session.id),
             user_id=int(current_session.user_id),
+            session_factory=_unused_session_factory,
             content_id=current_session.content_id,
             article_context=None,
         )
@@ -703,6 +780,7 @@ def test_process_message_async_persists_completion_usage_and_ledger(
         lambda _db, **kwargs: ChatDeps(
             session_id=kwargs["session_id"],
             user_id=kwargs["user_id"],
+            session_factory=_unused_session_factory,
             content_id=kwargs["content_id"],
             article_context="Saved context",
             system_context="Session Context:\nSaved context",

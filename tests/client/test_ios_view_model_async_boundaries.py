@@ -79,7 +79,7 @@ def test_voice_dictation_view_models_use_event_coordinator() -> None:
 
     expected_coordinator_users = [
         VIEW_MODELS_ROOT / "ChatVoiceInputController.swift",
-        VIEW_MODELS_ROOT / "LearningHubViewModel.swift",
+        VIEW_MODELS_ROOT / "KnowledgeChatViewModel.swift",
         VIEW_MODELS_ROOT / "OnboardingViewModel.swift",
         VIEW_MODELS_ROOT / "LearningDeckFocusRecorder.swift",
         VIEW_MODELS_ROOT / "TweetSuggestionsViewModel.swift",
@@ -118,28 +118,28 @@ def test_chat_route_queue_is_acknowledged_only_after_root_presentation() -> None
     assert begin < presentation
     assert "let presentedRoute = chatNavigation.presentedRoute" in content_source
     assert "chatNavigation.acknowledgePresented(presentedRoute)" in content_source
-    learning_call = content_source[
-        content_source.index("LearningTab(") : content_source.index(
-            ".environment(", content_source.index("LearningTab(")
+    knowledge_call = content_source[
+        content_source.index("KnowledgeTab(") : content_source.index(
+            ".environment(", content_source.index("KnowledgeTab(")
         )
     ]
-    learning_tab = root_tabs_source[
-        root_tabs_source.index("struct LearningTab") : root_tabs_source.index(
-            "struct BriefingCompactTabBarInset"
+    knowledge_tab = root_tabs_source[
+        root_tabs_source.index("struct KnowledgeTab") : root_tabs_source.index(
+            "struct RootCompactTabBarInset"
         )
     ]
-    assert "onSelectSession: openChatSession" in learning_call
-    assert "let onSelectSession: (ChatSessionRoute) -> Void" in learning_tab
-    assert "onSelectSession: onSelectSession" in learning_tab
+    assert "onSelectSession: openChatSession" in knowledge_call
+    assert "let onSelectSession: (ChatSessionRoute) -> Void" in knowledge_tab
+    assert "onSelectSession: onSelectSession" in knowledge_tab
     assert "private func pushSession(_ route: ChatSessionRoute)" not in root_tabs_source
-    learning_path_change = content_source[
-        content_source.index(".onChange(of: learningPath.count)") : content_source.index(
+    knowledge_path_change = content_source[
+        content_source.index(".onChange(of: knowledgePath.count)") : content_source.index(
             ".onChange(of: scenePhase)"
         )
     ]
-    assert "if oldValue > 0, newValue == 0" in learning_path_change
-    assert learning_path_change.count("drainPendingChatRoute()") == 1
-    assert learning_path_change.index("drainPendingChatRoute()") > learning_path_change.index(
+    assert "if oldValue > 0, newValue == 0" in knowledge_path_change
+    assert knowledge_path_change.count("drainPendingChatRoute()") == 1
+    assert knowledge_path_change.index("drainPendingChatRoute()") > knowledge_path_change.index(
         "chatNavigation.acknowledgePresented(presentedRoute)"
     )
 

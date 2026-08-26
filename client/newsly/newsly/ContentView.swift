@@ -11,7 +11,7 @@ struct ContentView: View {
     private let authenticatedUserID: Int?
 
     @State private var tabCoordinator: TabCoordinatorViewModel
-    @State private var learningHubViewModel: LearningHubViewModel
+    @State private var knowledgeViewModel: KnowledgeTimelineViewModel
 
     @State private var readingStateStore: ReadingStateStore
     @State private var readStateCache: ReadStateCache
@@ -22,7 +22,6 @@ struct ContentView: View {
     @State private var e2eRouteInjector = E2ERouteInjector()
     @State private var briefingPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
-    @State private var learningPath = NavigationPath()
     @State private var morePath = NavigationPath()
     @State private var showMoreSheet = false
     @State private var isMoreSheetActive = false
@@ -38,7 +37,11 @@ struct ContentView: View {
         _tabCoordinator = State(
             initialValue: tabCoordinator ?? RootDependencyFactory.makeTabCoordinator(userID: userId)
         )
-        _learningHubViewModel = State(initialValue: RootDependencyFactory.makeLearningHubViewModel())
+        _knowledgeViewModel = State(
+            initialValue: RootDependencyFactory.makeKnowledgeTimelineViewModel(
+                readStateCache: readStateCache
+            )
+        )
         _submissionStatusViewModel = State(
             initialValue: RootDependencyFactory.makeSubmissionStatusViewModel()
         )
@@ -62,23 +65,12 @@ struct ContentView: View {
                 KnowledgeTab(
                     path: $knowledgePath,
                     scrollToTopRequest: tabCoordinator.scrollToTopRequest(for: .knowledge),
+                    viewModel: knowledgeViewModel,
                     readStateCache: readStateCache,
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize,
-                    onOpenMore: { showMoreSheet = true }
-                )
-            }
-
-            Tab("Learning", systemImage: "sparkles", value: RootTab.learning) {
-                LearningTab(
-                    path: $learningPath,
-                    scrollToTopRequest: tabCoordinator.scrollToTopRequest(for: .learning),
-                    viewModel: learningHubViewModel,
-                    readStateCache: readStateCache,
-                    readingStateStore: readingStateStore,
-                    contentTextSize: contentTextSize,
-                    onSelectSession: openChatSession,
-                    onOpenMore: { showMoreSheet = true }
+                    onOpenMore: { showMoreSheet = true },
+                    onSelectSession: openChatSession
                 )
             }
         }
@@ -87,7 +79,7 @@ struct ContentView: View {
             isCompactTabBarVisible ? compactTabBarHeight : 0
         )
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            BriefingCompactTabBarInset(
+            RootCompactTabBarInset(
                 selectedTab: tabCoordinator.selectedTab,
                 isVisible: isCompactTabBarVisible,
                 onSelect: selectRootTab
@@ -145,9 +137,6 @@ struct ContentView: View {
         }
         .onChange(of: knowledgePath.count) { oldValue, newValue in
             logRootPathChange(tab: .knowledge, oldDepth: oldValue, newDepth: newValue)
-        }
-        .onChange(of: learningPath.count) { oldValue, newValue in
-            logRootPathChange(tab: .learning, oldDepth: oldValue, newDepth: newValue)
             if oldValue > 0, newValue == 0 {
                 if let presentedRoute = chatNavigation.presentedRoute {
                     chatNavigation.acknowledgePresented(presentedRoute)
@@ -200,14 +189,12 @@ struct ContentView: View {
             briefingPath.isEmpty
         case .knowledge:
             knowledgePath.isEmpty
-        case .learning:
-            learningPath.isEmpty
         }
     }
 
     private func logRootPathChange(tab: RootTab, oldDepth: Int, newDepth: Int) {
         logger.info(
-            "[Navigation] pathChanged tab=\(tab.logName, privacy: .public) oldCount=\(oldDepth, privacy: .public) newCount=\(newDepth, privacy: .public)"
+            "[Navigation] pathChanged tab=\(tab.rawValue, privacy: .public) oldCount=\(oldDepth, privacy: .public) newCount=\(newDepth, privacy: .public)"
         )
     }
 
@@ -227,8 +214,8 @@ struct ContentView: View {
             return
         }
         let replacesBackgroundChat = chatNavigation.presentedRoute != nil
-            && tabCoordinator.selectedTab != .learning
-        guard learningPath.isEmpty || replacesBackgroundChat else { return }
+            && tabCoordinator.selectedTab != .knowledge
+        guard knowledgePath.isEmpty || replacesBackgroundChat else { return }
         guard chatNavigation.beginPresentation(
             route,
             replacingPresented: replacesBackgroundChat
@@ -241,8 +228,8 @@ struct ContentView: View {
         if tabCoordinator.selectedTab == .briefing {
             briefingPath = NavigationPath()
         }
-        learningPath = navigationPath(containing: route)
-        tabCoordinator.selectedTab = .learning
+        knowledgePath = navigationPath(containing: route)
+        tabCoordinator.selectedTab = .knowledge
     }
 
     private func openContentRoute(_ route: ContentDetailRoute) {

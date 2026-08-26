@@ -61,19 +61,25 @@ struct BriefingTab: View {
 struct KnowledgeTab: View {
     @Binding var path: NavigationPath
     let scrollToTopRequest: Int
+    @Namespace private var chatTransitionNamespace
+    let viewModel: KnowledgeTimelineViewModel
     let readStateCache: ReadStateCache
     let readingStateStore: ReadingStateStore
     let contentTextSize: DynamicTypeSize
     let onOpenMore: () -> Void
+    let onSelectSession: (ChatSessionRoute) -> Void
 
     var body: some View {
         NavigationStack(path: $path) {
             KnowledgeView(
                 scrollToTopRequest: scrollToTopRequest,
                 onSelectContent: pushContent,
+                onSelectSession: onSelectSession,
                 onSearch: { path.append(KnowledgeSearchRoute()) },
                 onOpenMore: onOpenMore,
-                readStateCache: readStateCache
+                viewModel: viewModel,
+                contentTextSize: contentTextSize,
+                chatTransitionNamespace: chatTransitionNamespace
             )
             .navigationDestination(for: KnowledgeSearchRoute.self) { _ in
                 KnowledgeSearchView(
@@ -85,7 +91,9 @@ struct KnowledgeTab: View {
                 path: $path,
                 readingStateStore: readingStateStore,
                 readStateCache: readStateCache,
-                contentTextSize: contentTextSize
+                contentTextSize: contentTextSize,
+                chatTransitionNamespace: chatTransitionNamespace,
+                allowsChatHistory: true
             )
         }
         .toolbar(.hidden, for: .tabBar)
@@ -96,42 +104,7 @@ struct KnowledgeTab: View {
     }
 }
 
-struct LearningTab: View {
-    @Binding var path: NavigationPath
-    let scrollToTopRequest: Int
-    @Namespace private var chatTransitionNamespace
-    let viewModel: LearningHubViewModel
-    let readStateCache: ReadStateCache
-    let readingStateStore: ReadingStateStore
-    let contentTextSize: DynamicTypeSize
-    let onSelectSession: (ChatSessionRoute) -> Void
-    let onOpenMore: () -> Void
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            LearningView(
-                scrollToTopRequest: scrollToTopRequest,
-                onSelectSession: onSelectSession,
-                onOpenMore: onOpenMore,
-                viewModel: viewModel,
-                readStateCache: readStateCache,
-                contentTextSize: contentTextSize,
-                chatTransitionNamespace: chatTransitionNamespace
-            )
-            .withContentRoutes(
-                path: $path,
-                readingStateStore: readingStateStore,
-                readStateCache: readStateCache,
-                contentTextSize: contentTextSize,
-                chatTransitionNamespace: chatTransitionNamespace,
-                allowsChatHistory: true
-            )
-        }
-        .toolbar(.hidden, for: .tabBar)
-    }
-}
-
-struct BriefingCompactTabBarInset: View {
+struct RootCompactTabBarInset: View {
     let selectedTab: RootTab
     let isVisible: Bool
     let onSelect: (RootTab) -> Void
@@ -159,11 +132,5 @@ struct BriefingCompactTabBarInset: View {
             icon: "books.vertical.fill",
             accessibilityIdentifier: "tab.knowledge"
         ),
-        CompactTabBar.Item(
-            tab: .learning,
-            label: "Learning",
-            icon: "sparkles",
-            accessibilityIdentifier: "tab.learning"
-        )
     ]
 }

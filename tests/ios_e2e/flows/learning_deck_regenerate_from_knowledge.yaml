@@ -13,22 +13,22 @@ appId: "${APP_ID}"
       newslyE2ECompleteOnboarding: true
       newslyE2ECompleteTutorial: true
 - tapOn:
-    id: tab.learning
+    id: tab.knowledge
 - extendedWaitUntil:
     visible:
-      id: learning.screen
+      id: knowledge.screen
     timeout: 15000
 - extendedWaitUntil:
     visible:
-      id: learning.deck.${DECK_ID}
+      id: knowledge.deck.${DECK_ID}
     timeout: 10000
 - longPressOn:
-    id: learning.deck.${DECK_ID}
+    id: knowledge.deck.${DECK_ID}
 - extendedWaitUntil:
     visible: Regenerate
     timeout: 5000
 - tapOn: Regenerate
 - extendedWaitUntil:
     visible:
-      id: learning.deck.${DECK_ID}.preparing
+      id: knowledge.deck.${DECK_ID}.preparing
     timeout: 8000

@@ -59,7 +59,7 @@ struct MessageBubble: View {
     private var bubbleContent: some View {
         if message.isUser {
             Text(message.content)
-                .font(.appCallout)
+                .font(.chatBody)
                 .textSelection(.enabled)
         } else {
             VStack(alignment: .leading, spacing: 12) {
@@ -76,7 +76,7 @@ struct MessageBubble: View {
                     SelectableMarkdownView(
                         markdown: message.content,
                         textColor: assistantTextColor,
-                        baseFont: .appSans(size: 16),
+                        baseFont: .chatBody,
                         adjustsFontForContentSizeCategory: true,
                         scalingTextStyle: .callout,
                         onDigDeeper: onDigDeeper

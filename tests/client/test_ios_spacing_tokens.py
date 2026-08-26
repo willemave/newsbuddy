@@ -195,17 +195,17 @@ def test_content_text_size_reaches_briefing_detail_and_chat() -> None:
     assert "AppTextSize(index: settings.appTextSizeIndex)" not in history_view
 
 
-def test_learning_view_uses_model_destinations() -> None:
-    learning_source = (VIEWS_ROOT / "LearningView.swift").read_text()
+def test_knowledge_timeline_uses_model_destinations() -> None:
+    knowledge_timeline_source = (VIEWS_ROOT / "KnowledgeTimelineView.swift").read_text()
 
     assert (
         "@State private var deckReaderDestination: LearningDeckReaderDestination?"
-        in learning_source
+        in knowledge_timeline_source
     )
-    assert ".fullScreenCover(item: $deckReaderDestination)" in learning_source
-    assert "LearningFocusRequest" not in learning_source
-    assert "CustomNarrationListSheet" not in learning_source
-    assert "DispatchQueue.main.async" not in learning_source
+    assert ".fullScreenCover(item: $deckReaderDestination)" in knowledge_timeline_source
+    assert "LearningFocusRequest" not in knowledge_timeline_source
+    assert "CustomNarrationListSheet" not in knowledge_timeline_source
+    assert "DispatchQueue.main.async" not in knowledge_timeline_source
 
 
 def test_settings_sheets_use_single_model_destination() -> None:
@@ -273,8 +273,7 @@ def test_chat_session_sheets_use_single_model_destination() -> None:
 
 def test_primary_scroll_surfaces_use_top_edge_fade() -> None:
     expected_usages = {
-        VIEWS_ROOT / "KnowledgeView.swift": ".topScreenEdgeFade()",
-        VIEWS_ROOT / "LearningView.swift": ".topScreenEdgeFade()",
+        VIEWS_ROOT / "KnowledgeTimelineView.swift": ".topScreenEdgeFade()",
         VIEWS_ROOT / "ChatSessionHistoryView.swift": ".topScreenEdgeFade()",
     }
     offenders: list[str] = []
@@ -300,34 +299,64 @@ def test_knowledge_ready_content_projection_is_owned_by_view_model() -> None:
     view_source = (VIEWS_ROOT / "KnowledgeView.swift").read_text()
     model_source = (APP_ROOT / "ViewModels/ContentListViewModel.swift").read_text()
 
-    assert view_source.count("let contents = viewModel.contents") == 2
-    assert view_source.count("ForEach(contents)") == 2
-    assert view_source.count("allContentIds: viewModel.readyContentIDs") == 2
+    assert "let contents = viewModel.contents" not in view_source
+    assert view_source.count("ForEach(viewModel.contents)") == 1
+    assert view_source.count("allContentIds: viewModel.readyContentIDs") == 1
     assert "let allContentIds: [Int]" not in view_source
     assert "let onOpen: () -> Void" in view_source
-    assert "compactMap" not in view_source
+    assert "readyContentIDs = contents.compactMap" not in view_source
     assert "private(set) var readyContentIDs: [Int] = []" in model_source
     assert "private func refreshReadyContentIDs()" in model_source
 
 
-def test_learning_timeline_projection_stays_out_of_render_path() -> None:
-    view_source = (VIEWS_ROOT / "LearningView.swift").read_text()
-    item_source = (APP_ROOT / "Models/LearningTimelineItem.swift").read_text()
+def test_chat_reading_type_uses_shared_swiftui_and_uikit_tokens() -> None:
+    tokens = (VIEWS_ROOT / "Shared" / "DesignTokens.swift").read_text()
+    message_bubble = (VIEWS_ROOT / "Chat" / "MessageBubble.swift").read_text()
+    council_bubble = (VIEWS_ROOT / "Chat" / "CouncilCandidatesBubble.swift").read_text()
+
+    assert "static let chatBody = Font.appSans(size: 13, relativeTo: .callout)" in tokens
+    assert "static var chatBody: UIFont { appSans(size: 13) }" in tokens
+    assert ".font(.chatBody)" in message_bubble
+    assert "baseFont: .chatBody" in message_bubble
+    assert "baseFont: .chatBody" in council_bubble
+
+
+def test_knowledge_timeline_projection_stays_out_of_render_path() -> None:
+    view_source = (VIEWS_ROOT / "KnowledgeTimelineView.swift").read_text()
+    store_source = (APP_ROOT / "ViewModels/KnowledgeTimelineViewModel.swift").read_text()
     model_sources = [
-        APP_ROOT / "ViewModels/LearningHubViewModel.swift",
+        APP_ROOT / "ViewModels/KnowledgeChatViewModel.swift",
+        APP_ROOT / "ViewModels/ContentListViewModel.swift",
         APP_ROOT / "ViewModels/LearningDecksViewModel.swift",
         APP_ROOT / "ViewModels/CustomNarrationLibraryViewModel.swift",
     ]
 
-    assert "@State private var timeline: [LearningTimelineItem] = []" in view_source
-    assert ".onChange(of: timelineRevision, initial: true)" in view_source
-    assert view_source.count("rebuildTimeline()") == 3
-    assert view_source.count("LearningTimelineItem.merged(") == 1
-    assert "private var preview: String?" not in view_source
-    assert "ShareContent.plainText" not in view_source
-    assert "preview: LearningChatPreview.make(for: session)" in item_source
+    assert "@State private var viewModel: KnowledgeTimelineViewModel" in view_source
+    assert "KnowledgeTimelineItem.merged(" not in view_source
+    assert "KnowledgeTimelineItem.merged(" in store_source
+    assert "private(set) var timeline: [KnowledgeTimelineItem] = []" in store_source
+    assert "private(set) var groupedTimeline: [KnowledgeTimelineDayGroup] = []" in store_source
+    assert "private func refreshTimelineProjection()" in store_source
+    assert store_source.count("KnowledgeTimelineItem.merged(") == 1
+    assert "async let savedLoad" in store_source
+    assert "async let chatLoad" in store_source
+    assert "timelineRevision" not in view_source
     for path in model_sources:
-        assert "didSet { timelineRevision &+= 1 }" in path.read_text()
+        assert "timelineRevision" not in path.read_text(), path
+
+
+def test_knowledge_timeline_rows_keep_the_compact_learning_shape() -> None:
+    timeline_rows = (VIEWS_ROOT / "KnowledgeTimelineRows.swift").read_text()
+    saved_rows = (VIEWS_ROOT / "KnowledgeView.swift").read_text()
+
+    assert "private let size: CGFloat = 40" in timeline_rows
+    assert "private let imageSize = CGSize(width: 40, height: 40)" in saved_rows
+    assert "Text(title)" in timeline_rows
+    assert "Text(content.displayTitle)" in saved_rows
+    assert timeline_rows.count(".lineLimit(1)") >= 3
+    assert saved_rows.count(".lineLimit(1)") >= 3
+    assert ".padding(.vertical, 6)" in timeline_rows
+    assert ".padding(.vertical, 6)" in saved_rows
 
 
 def test_chat_messages_use_single_parameterized_bubble_surface() -> None:

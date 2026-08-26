@@ -37,6 +37,7 @@ def execute(
 
     last_id = None
     last_sort_timestamp = None
+    last_rank = None
     if cursor:
         try:
             cursor_data = PaginationCursor.decode_cursor(cursor)
@@ -44,6 +45,7 @@ def execute(
                 raise ValueError("Invalid pagination cursor for filters")
             last_id = cursor_data.last_id
             last_sort_timestamp = cursor_data.last_created_at
+            last_rank = cursor_data.last_rank
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -52,6 +54,7 @@ def execute(
         user_id=user_id,
         last_id=last_id,
         last_sort_timestamp=last_sort_timestamp,
+        last_rank=last_rank,
         limit=limit,
         search_query=normalized_query,
     )
@@ -62,10 +65,10 @@ def execute(
     x_bookmark_content_ids = list_x_bookmark_destination_content_ids(
         db,
         user_id=user_id,
-        content_ids=[content.id for content, _read_id, _saved_row_id in rows],
+        content_ids=[content.id for content, _read_id, _saved_row_id, _saved_at, _rank in rows],
     )
     contents = []
-    for content, read_id, _saved_row_id in rows:
+    for content, read_id, _saved_row_id, saved_at, _rank in rows:
         try:
             domain_content = content_to_domain(content)
         except Exception:
@@ -87,6 +90,7 @@ def execute(
                 is_saved_to_knowledge=True,
                 image_url=image_url,
                 thumbnail_url=thumbnail_url,
+                knowledge_saved_at=saved_at,
                 saved_source_override=(
                     SavedSource.X_BOOKMARK
                     if content.id in x_bookmark_content_ids
@@ -100,8 +104,9 @@ def execute(
         last_item = rows[-1][0]
         next_cursor = PaginationCursor.encode_cursor(
             last_id=last_item.id,
-            last_created_at=last_item.created_at,
+            last_created_at=rows[-1][3],
             filters={"q": normalized_query},
+            last_rank=float(rows[-1][4]) if rows[-1][4] is not None else None,
         )
 
     return ContentListResponse(

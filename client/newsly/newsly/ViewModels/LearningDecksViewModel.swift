@@ -23,10 +23,7 @@ private struct VersionedLearningDeckMutation {
 @MainActor
 @Observable
 final class LearningDecksViewModel {
-    private(set) var decks: [LearningDeck] = [] {
-        didSet { timelineRevision &+= 1 }
-    }
-    private(set) var timelineRevision = 0
+    private(set) var decks: [LearningDeck] = []
     private(set) var isLoading = false
     private(set) var isCreating = false
     private(set) var busyDeckIDs: Set<Int> = []

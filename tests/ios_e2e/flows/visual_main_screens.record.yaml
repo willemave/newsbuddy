@@ -39,29 +39,21 @@ appId: "${APP_ID}"
     visible:
       id: knowledge.screen
     timeout: 15000
-- assertVisible: Recently Saved
+- assertVisible:
+    id: knowledge.chat.input
 - assertVisible:
     id: knowledge.saved.${LONG_CONTENT_ID}
+- assertVisible:
+    id: knowledge.chat.${CHAT_SESSION_ID}
+- assertVisible:
+    id: knowledge.deck.1
+- assertVisible:
+    id: knowledge.narration.1
 - waitForAnimationToEnd
 - takeScreenshot:
     path: "${BASELINE_DIR}/redesign-knowledge"
 - tapOn:
-    id: tab.learning
-- extendedWaitUntil:
-    visible:
-      id: learning.screen
-    timeout: 15000
-- assertVisible:
-    id: learning.chat.${CHAT_SESSION_ID}
-- assertVisible:
-    id: learning.deck.1
-- assertVisible:
-    id: learning.narration.1
-- waitForAnimationToEnd
-- takeScreenshot:
-    path: "${BASELINE_DIR}/redesign-learning"
-- tapOn:
-    id: learning.more_menu
+    id: knowledge.more_menu
 - extendedWaitUntil:
     visible:
       id: more.screen

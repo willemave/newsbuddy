@@ -11,18 +11,6 @@ import Observation
 enum RootTab: String, Hashable, CaseIterable {
     case briefing
     case knowledge
-    case learning
-
-    var logName: String {
-        switch self {
-        case .briefing:
-            return "briefing"
-        case .knowledge:
-            return "knowledge"
-        case .learning:
-            return "learning"
-        }
-    }
 }
 
 @MainActor
@@ -58,7 +46,7 @@ final class TabCoordinatorViewModel {
 
         let restoredTab = self.storageKey
             .flatMap { defaults.string(forKey: $0) }
-            .flatMap(RootTab.init(rawValue:))
+            .flatMap { $0 == "learning" ? RootTab.knowledge : RootTab(rawValue: $0) }
         self.selectedTab = initialTab ?? restoredTab ?? .briefing
     }
 

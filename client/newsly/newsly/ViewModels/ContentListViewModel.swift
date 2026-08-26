@@ -72,13 +72,23 @@ final class ContentListViewModel {
         feed.phase == .loadingMore
     }
 
+    var hasMoreContent: Bool {
+        feed.hasMore
+    }
+
     var errorMessage: String? {
         if let actionErrorMessage {
             return actionErrorMessage
         }
-        guard case .error(let message) = feed.phase else { return nil }
-        return message
+        return loadErrorMessage
     }
+
+    var loadErrorMessage: String? {
+        initialLoadErrorMessage ?? loadMoreErrorMessage
+    }
+
+    private(set) var initialLoadErrorMessage: String?
+    private(set) var loadMoreErrorMessage: String?
 
     var hasActionError: Bool {
         actionErrorMessage != nil
@@ -108,7 +118,7 @@ final class ContentListViewModel {
     @ObservationIgnored
     private let readStateCache: ReadStateCache
 
-    private var actionErrorMessage: String?
+    private(set) var actionErrorMessage: String?
     @ObservationIgnored
     private var contentMutations: [Int: VersionedContentMutation] = [:]
     @ObservationIgnored
@@ -141,7 +151,9 @@ final class ContentListViewModel {
     }
 
     func loadMoreContent() async {
+        loadMoreErrorMessage = nil
         await feed.loadNextPage()
+        loadMoreErrorMessage = currentFeedErrorMessage
         refreshReadyContentIDs()
     }
     
@@ -191,10 +203,13 @@ final class ContentListViewModel {
 
     func loadKnowledgeLibrary(query: String? = nil) async {
         actionErrorMessage = nil
+        initialLoadErrorMessage = nil
+        loadMoreErrorMessage = nil
         mode = .knowledgeLibrary
         let trimmedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines)
         knowledgeQuery = trimmedQuery?.isEmpty == false ? trimmedQuery : nil
         await feed.loadInitial()
+        initialLoadErrorMessage = currentFeedErrorMessage
         refreshReadyContentIDs()
     }
 
@@ -202,6 +217,8 @@ final class ContentListViewModel {
         mode = .knowledgeLibrary
         knowledgeQuery = nil
         actionErrorMessage = nil
+        initialLoadErrorMessage = nil
+        loadMoreErrorMessage = nil
         feed.reset()
         refreshReadyContentIDs()
     }
@@ -212,8 +229,11 @@ final class ContentListViewModel {
 
     func loadRecentlyRead() async {
         actionErrorMessage = nil
+        initialLoadErrorMessage = nil
+        loadMoreErrorMessage = nil
         mode = .recentlyRead
         await feed.loadInitial()
+        initialLoadErrorMessage = currentFeedErrorMessage
         refreshReadyContentIDs()
     }
 
@@ -331,5 +351,10 @@ final class ContentListViewModel {
         }
         guard readyContentIDs != updatedIDs else { return }
         readyContentIDs = updatedIDs
+    }
+
+    private var currentFeedErrorMessage: String? {
+        guard case .error(let message) = feed.phase else { return nil }
+        return message
     }
 }

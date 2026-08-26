@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -55,6 +55,7 @@ from app.services.agent_toolset import (
     AGENT_VM_SYSTEM_INSTRUCTIONS,
     AgentToolPolicy,
     AgentToolsetConfig,
+    register_agent_knowledge_search_tool,
     register_agent_vm_tools,
 )
 from app.services.agent_vm_runtime import AgentVmError
@@ -78,7 +79,7 @@ from app.services.chat_partial_stream import (
     build_final_text_event_stream_handler as _build_final_text_event_stream_handler,
 )
 from app.services.chat_tool_progress import (
-    agent_vm_tool_log_context,
+    agent_tool_log_context,
     numeric_tool_payload_value,
     publish_tool_progress,
     tool_event_status,
@@ -95,7 +96,6 @@ from app.services.chat_turn_runtime import extract_tool_names as _extract_tool_n
 from app.services.chat_turn_runtime import get_or_create_cached_agent as _get_or_create_cached_agent
 from app.services.chat_turn_runtime import log_chat_usage as _log_chat_usage
 from app.services.exa_client import exa_search
-from app.services.knowledge_search import search_knowledge as search_knowledge_hits
 from app.services.lazy_agent_vm import LazyAgentVmRuntime
 from app.services.llm_models import (
     DEFAULT_MODEL,
@@ -166,7 +166,7 @@ def _assistant_vm_session(deps: AssistantDeps):
     return runtime.get_session()
 
 
-def _log_assistant_vm_tool(
+def _log_assistant_tool(
     deps: AssistantDeps,
     event: str,
     payload: dict[str, object],
@@ -174,7 +174,7 @@ def _log_assistant_vm_tool(
     publish_tool_progress(deps.tool_progress_writer, event=event, payload=payload)
     status = tool_event_status(event, payload)
     logger.info(
-        "Assistant VM tool event",
+        "Assistant agent tool event",
         extra=build_log_extra(
             component="assistant_turn",
             operation=event,
@@ -183,7 +183,7 @@ def _log_assistant_vm_tool(
             session_id=deps.session_id,
             user_id=deps.user_id,
             duration_ms=numeric_tool_payload_value(payload, "duration_ms"),
-            context_data=agent_vm_tool_log_context(
+            context_data=agent_tool_log_context(
                 payload,
                 sandbox_acquired=bool(deps.vm_runtime and deps.vm_runtime.acquired),
             ),
@@ -209,31 +209,6 @@ def _build_submit_content_request(
         chat_initial_message=None,
         save_to_knowledge_and_mark_read=False,
     )
-
-
-def _format_knowledge_hits(hits: Sequence[object], query: str) -> str:
-    """Serialize saved-knowledge hits for the assistant tool."""
-
-    if not hits:
-        return f'No matching saved knowledge was found for "{query}".'
-
-    lines = [f'Found {len(hits)} saved knowledge items for "{query}":']
-    for idx, hit in enumerate(hits, start=1):
-        title = getattr(hit, "title", "Untitled")
-        source = getattr(hit, "source", None) or "unknown"
-        url = getattr(hit, "url", "")
-        content_type = getattr(hit, "content_type", "unknown")
-        summary = (getattr(hit, "summary", None) or "").strip()
-        transcript_excerpt = (getattr(hit, "transcript_excerpt", None) or "").strip()
-        lines.append(
-            f"{idx}. [{getattr(hit, 'content_id', '?')}] {title} | source={source} "
-            f"| type={content_type} | url={url}"
-        )
-        if summary:
-            lines.append(f"   summary: {summary[:320]}")
-        if transcript_excerpt:
-            lines.append(f"   transcript_excerpt: {transcript_excerpt[:220]}")
-    return "\n".join(lines)
 
 
 def _format_content_hits(
@@ -506,27 +481,17 @@ def _create_assistant_agent(
         )
         return result.model_dump(mode="json")
 
-    @agent.tool(name="search_knowledge")
-    def search_knowledge_tool(
-        ctx: RunContext[AssistantDeps],
-        query: str,
-        limit: int = 5,
-    ) -> str:
-        """Search knowledge-saved user content for the current user."""
-        normalized_limit = max(1, min(limit, 10))
-        with ctx.deps.session_factory() as db:
-            hits = search_knowledge_hits(
-                db=db,
-                user_id=ctx.deps.user_id,
-                query=query,
-                limit=normalized_limit,
-            )
-        return _format_knowledge_hits(hits, query)
+    register_agent_knowledge_search_tool(
+        agent,
+        session_factory_getter=lambda deps: deps.session_factory,
+        user_id_getter=lambda deps: deps.user_id,
+        log_event=_log_assistant_tool,
+    )
 
     register_agent_vm_tools(
         agent,
         session_getter=_assistant_vm_session,
-        log_event=_log_assistant_vm_tool,
+        log_event=_log_assistant_tool,
         config=AgentToolsetConfig(
             feature="assistant_chat",
             operation_prefix="assistant.tool",

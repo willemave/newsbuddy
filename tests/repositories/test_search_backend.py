@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy import select, text
+
 from app.models.contracts import ContentStatus, ContentType
 from app.models.db import Content, ContentStatusEntry
+from app.repositories.content_search_expressions import (
+    CONTENT_SEARCH_DOCUMENT_SQL,
+    content_search_document_expression,
+    content_search_expressions,
+)
 from app.repositories.search_repository import (
     search_content_page,
 )
@@ -132,3 +139,66 @@ def test_postgres_search_matches_summary_title_metadata(db_session, test_user) -
 
     assert rows
     assert rows[0][0].id == metadata_match.id
+
+
+def test_content_search_index_sql_covers_the_canonical_weighted_document() -> None:
+    normalized = " ".join(CONTENT_SEARCH_DOCUMENT_SQL.split())
+
+    assert "content_metadata -> 'summary' ->> 'title'" in normalized
+    assert "'A'" in normalized
+    assert "COALESCE(title, '')" in normalized
+    assert "'B'" in normalized
+    assert "COALESCE(source, '')" in normalized
+    assert "'C'" in normalized
+    assert "COALESCE(search_text, '')" in normalized
+    assert "'D'" in normalized
+
+
+def test_runtime_search_document_is_the_canonical_index_expression() -> None:
+    assert " ".join(str(content_search_document_expression()).split()) == " ".join(
+        CONTENT_SEARCH_DOCUMENT_SQL.split()
+    )
+
+
+def test_postgres_search_predicate_uses_search_indexes(db_session) -> None:
+    """The exact runtime predicate must remain indexable, including typo matching."""
+    db_session.execute(
+        text(
+            "CREATE INDEX test_contents_search_document_gin "
+            f"ON contents USING GIN ({CONTENT_SEARCH_DOCUMENT_SQL})"
+        )
+    )
+    db_session.execute(
+        text(
+            "CREATE INDEX test_contents_summary_title_trgm ON contents USING GIN "
+            "((COALESCE(content_metadata -> 'summary' ->> 'title', '')) "
+            "public.gin_trgm_ops)"
+        )
+    )
+    db_session.execute(
+        text(
+            "CREATE INDEX test_contents_title_trgm "
+            "ON contents USING GIN (title public.gin_trgm_ops)"
+        )
+    )
+    db_session.execute(
+        text(
+            "CREATE INDEX test_contents_source_trgm "
+            "ON contents USING GIN (source public.gin_trgm_ops)"
+        )
+    )
+    db_session.execute(text("SET LOCAL enable_seqscan = off"))
+
+    statement = select(Content.id).where(content_search_expressions("framwork").matches)
+    compiled = statement.compile(dialect=db_session.bind.dialect)
+    raw_connection = db_session.connection().connection.driver_connection
+    with raw_connection.cursor() as cursor:
+        cursor.execute("EXPLAIN " + str(compiled), compiled.params)
+        plan = "\n".join(row[0] for row in cursor.fetchall())
+
+    assert "Seq Scan" not in plan
+    assert "BitmapOr" in plan
+    assert "test_contents_search_document_gin" in plan
+    assert "test_contents_summary_title_trgm" in plan
+    assert "test_contents_title_trgm" in plan
+    assert "test_contents_source_trgm" in plan

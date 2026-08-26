@@ -187,23 +187,17 @@ axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/01_knowledge_ui.json"
 axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/01_knowledge.png" >/dev/null
 assert_id "knowledge.screen" "$OUTPUT_DIR/01_knowledge_ui.json"
 
-echo "Navigating to Learning tab..."
-axe tap --id "tab.learning" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
-axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/02_learning_ui.json"
-axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/02_learning.png" >/dev/null
-assert_id "learning.screen" "$OUTPUT_DIR/02_learning_ui.json"
-
 echo "Opening More sheet..."
-axe tap --id "learning.more_menu" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
-axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/03_more_ui.json"
-axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/03_more.png" >/dev/null
-assert_id "more.screen" "$OUTPUT_DIR/03_more_ui.json"
+axe tap --id "knowledge.more_menu" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
+axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/02_more_ui.json"
+axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/02_more.png" >/dev/null
+assert_id "more.screen" "$OUTPUT_DIR/02_more_ui.json"
 
 echo "Opening Search from More..."
 axe tap --id "more.search" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
-axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/04_search_ui.json"
-axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/04_search.png" >/dev/null
-assert_id "search.input" "$OUTPUT_DIR/04_search_ui.json"
+axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/03_search_ui.json"
+axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/03_search.png" >/dev/null
+assert_id "search.input" "$OUTPUT_DIR/03_search_ui.json"
 
 echo "Done. Artifacts written to:"
 echo "  $OUTPUT_DIR"
