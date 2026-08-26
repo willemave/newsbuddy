@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -20,7 +21,9 @@ logger = get_logger(__name__)
 
 MAX_SUMMARY_COMMENTS = 200
 MAX_SUMMARY_LINKS = 50
-DISCUSSION_SUMMARY_MATERIAL_COMMENT_THRESHOLD = 10
+DISCUSSION_SUMMARY_MATERIAL_COMMENT_THRESHOLD = 25
+DISCUSSION_SUMMARY_MIN_INTERVAL = timedelta(hours=6)
+DISCUSSION_SUMMARY_MAX_INTERVAL = timedelta(hours=24)
 MAX_INCREMENTAL_SUMMARY_UPDATES = 4
 
 
@@ -118,6 +121,7 @@ def plan_discussion_summary(
     summary_input: DiscussionSummaryInput,
     previous_raw_sha: str | None,
     current_raw_sha: str,
+    now: datetime,
 ) -> DiscussionSummaryPlan:
     if summary_input.comment_count == 0:
         return DiscussionSummaryPlan(
@@ -134,7 +138,10 @@ def plan_discussion_summary(
             mode=DiscussionSummaryPlanMode.NONE,
         )
 
-    if row.summary_seen_input_sha256 == summary_input.input_sha256:
+    summary_age = now - row.summary_generated_at if row.summary_generated_at is not None else None
+    if row.summary_seen_input_sha256 == summary_input.input_sha256 and (
+        summary_age is None or summary_age < DISCUSSION_SUMMARY_MAX_INTERVAL
+    ):
         return DiscussionSummaryPlan(
             mode=DiscussionSummaryPlanMode.NONE,
         )
@@ -156,7 +163,13 @@ def plan_discussion_summary(
         previous_fingerprints=previous_fingerprints,
         summary_input=summary_input,
     )
-    if len(changed_comments) <= DISCUSSION_SUMMARY_MATERIAL_COMMENT_THRESHOLD:
+    minimum_interval_elapsed = summary_age is None or summary_age >= DISCUSSION_SUMMARY_MIN_INTERVAL
+    maximum_interval_elapsed = (
+        summary_age is not None and summary_age >= DISCUSSION_SUMMARY_MAX_INTERVAL
+    )
+    materially_changed = len(changed_comments) > DISCUSSION_SUMMARY_MATERIAL_COMMENT_THRESHOLD
+    force_stale_update = bool(changed_comments) and maximum_interval_elapsed
+    if not force_stale_update and not (materially_changed and minimum_interval_elapsed):
         return DiscussionSummaryPlan(
             mode=DiscussionSummaryPlanMode.TRACK_SEEN,
             changed_comments=changed_comments,

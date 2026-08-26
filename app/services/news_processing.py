@@ -16,7 +16,10 @@ from app.models.metadata.summaries import NewsSummary
 from app.services.briefing.events import enqueue_news_item_for_briefing_if_ready
 from app.services.llm_summarization import ContentSummarizer, get_content_summarizer
 from app.services.news_article_bodies import get_news_item_article_body_resolver
-from app.services.news_relations import reconcile_news_item_relation
+from app.services.news_relations import (
+    find_exact_related_representatives,
+    reconcile_news_item_relation,
+)
 from app.services.news_relevant_links import (
     NEWS_ARTICLE_RELEVANT_LINKS_KEY,
     select_news_article_relevant_links,
@@ -29,6 +32,9 @@ from app.utils.url_utils import normalize_http_url
 logger = get_logger(__name__)
 
 MAX_DISCUSSION_SNIPPETS = 5
+MAX_NEWS_ARTICLE_BODY_CHARS = 48_000
+NEWS_ARTICLE_BODY_TRUNCATION_MARKER = "\n\n[... middle of article body omitted ...]\n\n"
+NEWS_ARTICLE_BODY_HEAD_RATIO = 0.75
 
 
 @dataclass(frozen=True)
@@ -79,6 +85,10 @@ def _has_materialized_summary(
     summary_text: str | None,
 ) -> bool:
     return bool(key_points or summary_text)
+
+
+def _has_usable_summary(summary: NewsSummary | None) -> bool:
+    return bool(summary and (summary.title or summary.key_points or summary.summary))
 
 
 def _extract_existing_summary(item: NewsItem) -> NewsSummary | None:
@@ -177,7 +187,7 @@ def _build_processing_prompt(
 
     excerpt = _clean_string(raw_metadata.get("excerpt"))
     if article_body_text:
-        lines.extend(["", "Article body:", article_body_text])
+        lines.extend(["", "Article body:", _bound_article_body(article_body_text)])
     if excerpt:
         lines.extend(["", "Excerpt:", excerpt])
 
@@ -187,6 +197,65 @@ def _build_processing_prompt(
         lines.extend(f"- {snippet}" for snippet in discussion_snippets)
 
     return "\n".join(lines)
+
+
+def _bound_article_body(article_body_text: str) -> str:
+    """Keep the beginning and conclusion within an approximate 12k-token budget."""
+    if len(article_body_text) <= MAX_NEWS_ARTICLE_BODY_CHARS:
+        return article_body_text
+
+    available_chars = MAX_NEWS_ARTICLE_BODY_CHARS - len(NEWS_ARTICLE_BODY_TRUNCATION_MARKER)
+    head_chars = int(available_chars * NEWS_ARTICLE_BODY_HEAD_RATIO)
+    tail_chars = available_chars - head_chars
+    return (
+        article_body_text[:head_chars].rstrip()
+        + NEWS_ARTICLE_BODY_TRUNCATION_MARKER
+        + article_body_text[-tail_chars:].lstrip()
+    )
+
+
+def _find_reusable_exact_summary(
+    db: Session,
+    *,
+    item: NewsItem,
+) -> tuple[NewsSummary | None, int | None]:
+    for representative in find_exact_related_representatives(db, item=item):
+        summary = _extract_existing_summary(representative)
+        if _has_usable_summary(summary):
+            return summary, representative.id
+    return None, None
+
+
+def _select_relevant_links_for_representative(
+    *,
+    item: NewsItem,
+    article_body_text: str | None,
+) -> None:
+    if item.representative_news_item_id is not None or not article_body_text:
+        return
+
+    raw_metadata = dict(item.raw_metadata or {})
+    if isinstance(raw_metadata.get(NEWS_ARTICLE_RELEVANT_LINKS_KEY), list):
+        return
+
+    article_relevant_links = select_news_article_relevant_links(
+        article_body_text,
+        source_url=item.article_url or item.canonical_story_url,
+        title=get_news_article_title(raw_metadata) or clean_title(item.article_title),
+        usage_persist={
+            "feature": "news_relevant_links",
+            "operation": "news_processing.select_article_links",
+            "source": "queue",
+            "user_id": item.owner_user_id,
+            "metadata": {
+                "news_item_id": item.id,
+                "source_type": item.source_type,
+            },
+        },
+    )
+    if article_relevant_links:
+        raw_metadata[NEWS_ARTICLE_RELEVANT_LINKS_KEY] = article_relevant_links
+        item.raw_metadata = raw_metadata
 
 
 def _fallback_summary(item: NewsItem, raw_metadata: dict[str, Any]) -> NewsSummary:
@@ -349,40 +418,29 @@ def process_news_item(
     db.refresh(item)
 
     try:
-        article_body_resolver = get_news_item_article_body_resolver()
-        article_body_text = article_body_resolver.resolve_text(db, news_item=item)
-        if article_body_text and not isinstance(
-            raw_metadata.get(NEWS_ARTICLE_RELEVANT_LINKS_KEY),
-            list,
-        ):
-            article_relevant_links = select_news_article_relevant_links(
-                article_body_text,
-                source_url=item.article_url or item.canonical_story_url,
-                title=get_news_article_title(raw_metadata) or clean_title(item.article_title),
-                usage_persist={
-                    "feature": "news_relevant_links",
-                    "operation": "news_processing.select_article_links",
-                    "source": "queue",
-                    "user_id": item.owner_user_id,
-                    "metadata": {
-                        "news_item_id": item.id,
-                        "source_type": item.source_type,
-                    },
-                },
-            )
-            if article_relevant_links:
-                raw_metadata[NEWS_ARTICLE_RELEVANT_LINKS_KEY] = article_relevant_links
-
+        article_body_text: str | None = None
         summary_to_persist = _extract_existing_summary(item)
-        used_existing_summary = bool(
-            summary_to_persist
-            and (
-                summary_to_persist.title
-                or summary_to_persist.key_points
-                or summary_to_persist.summary
-            )
-        )
+        used_existing_summary = _has_usable_summary(summary_to_persist)
         if not used_existing_summary:
+            exact_summary, representative_id = _find_reusable_exact_summary(db, item=item)
+            if exact_summary is not None:
+                summary_to_persist = exact_summary
+                used_existing_summary = True
+                logger.info(
+                    "Reusing summary from exact news representative",
+                    extra={
+                        "component": "news_processing",
+                        "operation": "process_news_item.reuse_exact_summary",
+                        "item_id": str(news_item_id),
+                        "context_data": {"representative_news_item_id": representative_id},
+                    },
+                )
+
+        if not used_existing_summary:
+            article_body_text = get_news_item_article_body_resolver().resolve_text(
+                db,
+                news_item=item,
+            )
             prompt = _build_processing_prompt(
                 item,
                 raw_metadata,
@@ -421,6 +479,20 @@ def process_news_item(
             raw_metadata=raw_metadata,
             summary=summary_to_persist or _fallback_summary(item, raw_metadata),
         )
+        persisted_metadata = dict(item.raw_metadata or {})
+        if item.representative_news_item_id is None and not isinstance(
+            persisted_metadata.get(NEWS_ARTICLE_RELEVANT_LINKS_KEY),
+            list,
+        ):
+            if article_body_text is None:
+                article_body_text = get_news_item_article_body_resolver().resolve_text(
+                    db,
+                    news_item=item,
+                )
+            _select_relevant_links_for_representative(
+                item=item,
+                article_body_text=article_body_text,
+            )
         enqueue_news_item_for_briefing_if_ready(db, news_item_id=news_item_id)
         db.commit()
         return NewsItemProcessingResult(

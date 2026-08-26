@@ -652,7 +652,7 @@ def test_refresh_news_item_discussion_skips_small_comment_delta(
     small_delta_payload = _fake_hn_payload(
         external_id="124",
         discussion_url=discussion_url,
-        extra_comments=_extra_hn_comments(discussion_url=discussion_url, count=10),
+        extra_comments=_extra_hn_comments(discussion_url=discussion_url, count=25),
     )
     payloads = [
         _fake_hn_payload(external_id="124", discussion_url=discussion_url),
@@ -708,10 +708,10 @@ def test_refresh_news_item_discussion_skips_small_comment_delta(
     assert third.success is True
     assert third.summarized is False
     assert summarizer.content_types == ["discussion_summary"]
-    assert row.fetched_comment_count == 12
+    assert row.fetched_comment_count == 27
     assert row.summary_comment_count == 2
     assert row.summary_input_sha256 == previous_summary_input_sha256
-    assert row.summary_seen_comment_count == 12
+    assert row.summary_seen_comment_count == 27
     assert row.summary_seen_input_sha256 == seen_input_sha256
     assert row.summary_seen_input_sha256 != row.summary_input_sha256
 
@@ -734,7 +734,7 @@ def test_refresh_news_item_discussion_merges_large_comment_delta(
         _fake_hn_payload(
             external_id="125",
             discussion_url=discussion_url,
-            extra_comments=_extra_hn_comments(discussion_url=discussion_url, count=11),
+            extra_comments=_extra_hn_comments(discussion_url=discussion_url, count=26),
         ),
     ]
 
@@ -754,6 +754,13 @@ def test_refresh_news_item_discussion_merges_large_comment_delta(
         gateway=cast(ObjectStorageGateway, gateway),
         summarizer=cast(ContentSummarizer, summarizer),
     )
+    row = (
+        db_session.query(NewsItemDiscussion)
+        .filter(NewsItemDiscussion.news_item_id == item.id)
+        .one()
+    )
+    row.summary_generated_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=7)
+    db_session.commit()
     second = refresh_news_item_discussion(
         db_session,
         news_item_id=item.id,
@@ -761,19 +768,15 @@ def test_refresh_news_item_discussion_merges_large_comment_delta(
         gateway=cast(ObjectStorageGateway, gateway),
         summarizer=cast(ContentSummarizer, summarizer),
     )
-    row = (
-        db_session.query(NewsItemDiscussion)
-        .filter(NewsItemDiscussion.news_item_id == item.id)
-        .one()
-    )
+    db_session.refresh(row)
 
     assert first.summarized is True
     assert second.summarized is True
     assert summarizer.content_types == ["discussion_summary", "discussion_summary_merge"]
-    assert "Additional material comment 13" in summarizer.prompts[-1]
-    assert row.summary_comment_count == 13
+    assert "Additional material comment 28" in summarizer.prompts[-1]
+    assert row.summary_comment_count == 28
     assert row.summary_seen_input_sha256 == row.summary_input_sha256
-    assert row.summary_seen_comment_count == 13
+    assert row.summary_seen_comment_count == 28
     assert row.summary_incremental_update_count == 1
 
 
@@ -795,7 +798,7 @@ def test_refresh_news_item_discussion_falls_back_to_full_summary_when_merge_fail
         _fake_hn_payload(
             external_id="126",
             discussion_url=discussion_url,
-            extra_comments=_extra_hn_comments(discussion_url=discussion_url, count=11),
+            extra_comments=_extra_hn_comments(discussion_url=discussion_url, count=26),
         ),
     ]
 
@@ -815,6 +818,13 @@ def test_refresh_news_item_discussion_falls_back_to_full_summary_when_merge_fail
         gateway=cast(ObjectStorageGateway, gateway),
         summarizer=cast(ContentSummarizer, summarizer),
     )
+    row = (
+        db_session.query(NewsItemDiscussion)
+        .filter(NewsItemDiscussion.news_item_id == item.id)
+        .one()
+    )
+    row.summary_generated_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=7)
+    db_session.commit()
     second = refresh_news_item_discussion(
         db_session,
         news_item_id=item.id,
@@ -822,11 +832,7 @@ def test_refresh_news_item_discussion_falls_back_to_full_summary_when_merge_fail
         gateway=cast(ObjectStorageGateway, gateway),
         summarizer=cast(ContentSummarizer, summarizer),
     )
-    row = (
-        db_session.query(NewsItemDiscussion)
-        .filter(NewsItemDiscussion.news_item_id == item.id)
-        .one()
-    )
+    db_session.refresh(row)
 
     assert first.summarized is True
     assert second.success is True

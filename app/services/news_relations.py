@@ -512,6 +512,27 @@ def exact_relation_key(item: NewsItem) -> tuple[str, str] | None:
     return None
 
 
+def find_exact_related_representatives(
+    db: Session,
+    *,
+    item: NewsItem,
+) -> list[NewsItem]:
+    """Return ready representatives with the same definitive relation key."""
+    exact_key = exact_relation_key(item)
+    if exact_key is None:
+        return []
+
+    settings = get_settings()
+    lookback_floor = _utcnow_naive() - timedelta(days=settings.news_list_related_lookback_days)
+    candidates = list_exact_relation_candidates(
+        db,
+        item=item,
+        lookback_floor=lookback_floor,
+        exact_key=exact_key,
+    )
+    return [candidate for candidate in candidates if exact_relation_key(candidate) == exact_key]
+
+
 def select_best_evidence_item(items: list[NewsItem]) -> NewsItem:
     """Choose the cluster member with the richest display evidence."""
 
@@ -678,34 +699,20 @@ def find_related_representatives(
     settings = get_settings()
     lookback_floor = _utcnow_naive() - timedelta(days=settings.news_list_related_lookback_days)
 
-    exact_key = exact_relation_key(item)
-    if exact_key is not None:
-        exact_candidates = list_exact_relation_candidates(
-            db,
-            item=item,
-            lookback_floor=lookback_floor,
-            exact_key=exact_key,
-        )
-        accepted_exact = [
-            candidate
-            for candidate in exact_candidates
-            if exact_relation_key(candidate) == exact_key
-        ]
-        if accepted_exact:
-            exact_trace: dict[str, Any] | None = None
-            if _decision_trace_sink is not None:
-                exact_trace = {
-                    "item_id": _require_news_item_id(item),
-                    "item_title": _relation_primary_title(item),
-                    "candidate_count": len(exact_candidates),
-                    "path": "exact",
-                    "decisions": [],
-                    "accepted_ids": [
-                        _require_news_item_id(candidate) for candidate in accepted_exact
-                    ],
-                }
-            _emit_decision_trace(exact_trace)
-            return accepted_exact
+    accepted_exact = find_exact_related_representatives(db, item=item)
+    if accepted_exact:
+        exact_trace: dict[str, Any] | None = None
+        if _decision_trace_sink is not None:
+            exact_trace = {
+                "item_id": _require_news_item_id(item),
+                "item_title": _relation_primary_title(item),
+                "candidate_count": len(accepted_exact),
+                "path": "exact",
+                "decisions": [],
+                "accepted_ids": [_require_news_item_id(candidate) for candidate in accepted_exact],
+            }
+        _emit_decision_trace(exact_trace)
+        return accepted_exact
 
     item_tokens = match_tokens(item)
     candidates = list_ranked_relation_candidates(

@@ -910,8 +910,8 @@ def refresh_news_item_discussion(
         summary_input=summary_input,
         previous_raw_sha=previous_sha,
         current_raw_sha=raw_sha,
+        now=now,
     )
-
     if summary_input.comment_count == 0 and row.summary is None:
         row.summary_status = "not_ready"
     elif summary_plan.mode == DiscussionSummaryPlanMode.TRACK_SUMMARIZED:
@@ -924,7 +924,7 @@ def refresh_news_item_discussion(
     elif summary_plan.mode == DiscussionSummaryPlanMode.TRACK_SEEN:
         store_seen_summary_tracking(row=row, summary_input=summary_input)
         logger.info(
-            "Skipping discussion summary update below material comment threshold",
+            "Coalescing discussion summary update until cadence gate is met",
             extra={
                 "component": "news_item_discussions",
                 "operation": "refresh.summarize.skip",

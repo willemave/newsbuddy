@@ -7,6 +7,7 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import httpx
+import pytest
 
 from app.http_client.robust_http_client import RobustHttpClient
 from app.models.contracts import ContentType
@@ -563,6 +564,86 @@ def test_process_news_item_reuses_generated_short_summary(db_session) -> None:
     assert item.summary_text == "Generated summary text."
 
 
+def test_process_news_item_reuses_exact_representative_before_paid_work(
+    db_session,
+    monkeypatch,
+) -> None:
+    shared_url = "https://example.com/exact-reused-story"
+    representative = NewsItem(
+        ingest_key="news-item-exact-representative",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="exact-representative-1",
+        article_url=shared_url,
+        article_title="Canonical story title",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=5001",
+        summary_title="Canonical generated title",
+        summary_key_points=["Canonical point"],
+        summary_text="Canonical summary text.",
+        raw_metadata={
+            "summary": {
+                "title": "Canonical generated title",
+                "article_url": shared_url,
+                "key_points": ["Canonical point"],
+                "summary": "Canonical summary text.",
+            },
+            "summary_kind": "short_news",
+            "summary_version": 1,
+        },
+        status="ready",
+    )
+    duplicate = NewsItem(
+        ingest_key="news-item-exact-duplicate",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="exact-duplicate-1",
+        article_url=shared_url,
+        article_title="Syndicated version of the same story",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=5002",
+        raw_metadata={"excerpt": "Duplicate excerpt"},
+        status="new",
+    )
+    db_session.add_all([representative, duplicate])
+    db_session.commit()
+    db_session.refresh(representative)
+    db_session.refresh(duplicate)
+
+    monkeypatch.setattr(
+        news_processing_module,
+        "get_news_item_article_body_resolver",
+        lambda: pytest.fail("exact duplicates must not resolve the article body"),
+    )
+    monkeypatch.setattr(
+        news_processing_module,
+        "select_news_article_relevant_links",
+        lambda *_args, **_kwargs: pytest.fail("exact duplicates must not rank article links"),
+    )
+
+    result = process_news_item(
+        db_session,
+        news_item_id=_require_id(duplicate.id),
+        summarizer=_summarizer(
+            lambda *_args, **_kwargs: pytest.fail("exact duplicates must not be summarized")
+        ),
+    )
+
+    db_session.refresh(duplicate)
+    assert result.success is True
+    assert result.used_existing_summary is True
+    assert result.generated_summary is False
+    assert duplicate.status == "ready"
+    assert duplicate.representative_news_item_id == representative.id
+    assert duplicate.summary_title == "Canonical generated title"
+    assert duplicate.summary_key_points == ["Canonical point"]
+    assert duplicate.summary_text == "Canonical summary text."
+
+
 def test_process_news_item_persists_article_relevant_links(db_session, monkeypatch) -> None:
     item = _relevant_links_news_item(
         ingest_key="news-item-relevant-links",
@@ -654,6 +735,66 @@ def test_process_news_item_does_not_persist_empty_article_relevant_links(
     db_session.refresh(item)
     assert result.success is True
     assert NEWS_ARTICLE_RELEVANT_LINKS_KEY not in _metadata(item.raw_metadata)
+
+
+def test_process_news_item_skips_link_ranking_after_relation_suppression(
+    db_session,
+    monkeypatch,
+) -> None:
+    representative = _relevant_links_news_item(
+        ingest_key="news-item-post-cluster-representative",
+        source_external_id="post-cluster-representative-1",
+        article_url="https://example.com/representative-story",
+        article_title="Representative story",
+        discussion_url="https://news.ycombinator.com/item?id=5101",
+    )
+    representative.status = "ready"
+    duplicate = _relevant_links_news_item(
+        ingest_key="news-item-post-cluster-duplicate",
+        source_external_id="post-cluster-duplicate-1",
+        article_url="https://other.example.com/duplicate-story",
+        article_title="Duplicate story",
+        discussion_url="https://news.ycombinator.com/item?id=5102",
+    )
+    db_session.add_all([representative, duplicate])
+    db_session.commit()
+    db_session.refresh(representative)
+    db_session.refresh(duplicate)
+
+    monkeypatch.setattr(
+        news_processing_module,
+        "get_news_item_article_body_resolver",
+        lambda: _article_body_resolver("Article body with a supporting link."),
+    )
+
+    def _suppress_during_reconciliation(db, *, news_item_id: int):
+        target = db.query(NewsItem).filter(NewsItem.id == news_item_id).one()
+        target.representative_news_item_id = representative.id
+        db.flush()
+        return representative
+
+    monkeypatch.setattr(
+        news_processing_module,
+        "reconcile_news_item_relation",
+        _suppress_during_reconciliation,
+    )
+    monkeypatch.setattr(
+        news_processing_module,
+        "select_news_article_relevant_links",
+        lambda *_args, **_kwargs: pytest.fail("suppressed items must not rank article links"),
+    )
+
+    result = process_news_item(
+        db_session,
+        news_item_id=_require_id(duplicate.id),
+        summarizer=_summarizer(lambda *_args, **_kwargs: _short_news_summary(duplicate)),
+    )
+
+    db_session.refresh(duplicate)
+    assert result.success is True
+    assert result.generated_summary is True
+    assert duplicate.representative_news_item_id == representative.id
+    assert NEWS_ARTICLE_RELEVANT_LINKS_KEY not in _metadata(duplicate.raw_metadata)
 
 
 def test_process_news_item_fills_missing_summary_text_from_existing_key_point(
@@ -1535,3 +1676,63 @@ def test_process_news_item_includes_resolved_article_body_in_prompt(
     assert "Full extracted article body for prompt grounding." in prompt
     assert "Excerpt:" in prompt
     assert item.summary_text == "Body-informed summary."
+
+
+def test_process_news_item_bounds_article_body_while_preserving_conclusion(
+    db_session,
+    monkeypatch,
+) -> None:
+    item = NewsItem(
+        ingest_key="news-item-bounded-article-body",
+        visibility_scope="global",
+        platform="hackernews",
+        source_type="hackernews",
+        source_label="Hacker News",
+        source_external_id="bounded-article-body-1",
+        article_url="https://example.com/bounded-story",
+        article_title="Bounded article body",
+        article_domain="example.com",
+        discussion_url="https://news.ycombinator.com/item?id=5201",
+        raw_metadata={"excerpt": "Fallback excerpt."},
+        status="new",
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    article_body = (
+        "ARTICLE-BEGIN\n"
+        + ("a" * 40_000)
+        + "\nMIDDLE-SHOULD-BE-OMITTED\n"
+        + ("z" * 40_000)
+        + "\nARTICLE-END"
+    )
+    monkeypatch.setattr(
+        news_processing_module,
+        "get_news_item_article_body_resolver",
+        lambda: _article_body_resolver(article_body),
+    )
+    monkeypatch.setattr(
+        news_processing_module,
+        "select_news_article_relevant_links",
+        lambda *_args, **_kwargs: [],
+    )
+    captured: dict[str, str] = {}
+
+    def _summarize(prompt, **_kwargs):
+        captured["prompt"] = prompt
+        return _short_news_summary(item)
+
+    result = process_news_item(
+        db_session,
+        news_item_id=_require_id(item.id),
+        summarizer=_summarizer(_summarize),
+    )
+
+    assert result.success is True
+    prompt = captured["prompt"]
+    assert "ARTICLE-BEGIN" in prompt
+    assert "ARTICLE-END" in prompt
+    assert "MIDDLE-SHOULD-BE-OMITTED" not in prompt
+    assert news_processing_module.NEWS_ARTICLE_BODY_TRUNCATION_MARKER.strip() in prompt
+    assert len(prompt) < news_processing_module.MAX_NEWS_ARTICLE_BODY_CHARS + 1_000
