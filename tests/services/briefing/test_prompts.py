@@ -17,7 +17,8 @@ def test_briefing_layout_prompt_sections_render(tier: str) -> None:
     assert f"`{tier}` tier" in system_prompt
     assert "Never use em dashes" in system_prompt
     assert "Never open by naming the lens or counting its unread sources" in system_prompt
-    assert "roughly four to ten words" in system_prompt
+    if tier == "news":
+        assert "roughly four to ten words" in system_prompt
     assert "newsly://briefing/" in system_prompt
     assert "news://briefing/" not in system_prompt
     assert "Lens: AI desk" in user_prompt
@@ -34,11 +35,15 @@ def test_deep_tier_prompts_demand_substantive_treatment(tier: str) -> None:
         lens_title="AI desk",
         source_payload_json="[]",
     )
+    normalized_system_prompt = " ".join(system_prompt.split())
 
     assert "`figure`" in system_prompt
     assert "`suggested_quotes` as a separate top-level array" in system_prompt
     assert "not verbatim quotations or citations" in system_prompt
-    assert "using only its `suggestion_id`" in " ".join(system_prompt.split())
+    assert "using only its `suggestion_id`" in normalized_system_prompt
+    assert "exact provided `title`" in system_prompt
+    assert "`source_name` is present" in normalized_system_prompt
+    assert "Never invent" in system_prompt
     assert "target 3-5 sentences" in user_prompt
 
 

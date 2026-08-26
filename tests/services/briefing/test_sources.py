@@ -225,6 +225,7 @@ def test_list_unread_longform_sources_builds_rich_briefing_context(
     article = content_factory(
         content_type=ContentType.ARTICLE,
         title="Deep article",
+        source="MIT Technology Review",
         content_metadata={
             "summary": {
                 "title": "Deep article",
@@ -260,6 +261,7 @@ def test_list_unread_longform_sources_builds_rich_briefing_context(
     )
 
     assert len(sources) == 1
+    assert sources[0].source_name == "MIT Technology Review"
     context = sources[0].briefing_context
     assert context is not None
     assert "Narrative: The article argues" in context

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -594,9 +595,15 @@ def test_parse_composer_layout_json_rejects_missing_or_cross_type_fields(content
 
 
 def test_source_payload_includes_briefing_context_when_available() -> None:
-    payload = _source_payload(_source_with_context("Long-form source detail."))
+    source = replace(
+        _source_with_context("Long-form source detail."),
+        source_name="Example Review",
+    )
+    payload = _source_payload(source)
 
     assert payload["briefing_context"] == "Long-form source detail."
+    assert payload["title"] == "A useful article"
+    assert payload["source_name"] == "Example Review"
 
 
 def _source(*, content_id: int = 1) -> BriefingSource:

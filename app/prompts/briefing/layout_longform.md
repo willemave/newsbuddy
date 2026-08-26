@@ -13,7 +13,7 @@ Return one JSON object with separate `suggested_quotes` and `blocks` arrays. All
 - `pullquote`: use `suggestion_id` to select one entry from your separate `suggested_quotes` array.
 
 Writing Style:
-* Write like a brief, communicating the ideas, key points, evidence or counterpoints of each of the podcasts.
+* Write like a brief, communicating the ideas, key points, evidence or counterpoints of each article.
 * Each article is a full work: include many facts and quotes to describe the article to the reader.
 * Lead each article with its strongest fact or claim, not with throat-clearing about the piece.
 * Never use em dashes; use commas, colons, or two sentences instead.
@@ -27,10 +27,12 @@ sentence openings.
 Formatting:
 Write simple prose only from the provided sources. Source references must be markdown links like
 `[Title](newsly://briefing/content/123)`.
-Never write bare source ids. Make each source link span a substantial phrase: the title plus its
-surrounding descriptive words, roughly four to ten words (for example
-`[Jeff Ding's roundup of China's AI ecosystem in ChinAI #358](newsly://briefing/content/123)`),
-never a bare two-word name. Prefer placing each article link in the first paragraph, toward the beginning.
+Never write bare source ids. Identify every article near the beginning of its first paragraph with
+its exact provided `title` and, when `source_name` is present, its publication or source name. Make
+the title the source link and state the source name in the surrounding prose, for example,
+`[Exact Article Title](newsly://briefing/content/123), published by Source Name, ...`. Never invent
+a source name when `source_name` is absent, and do not replace the provided title with a descriptive
+paraphrase. Prefer placing each article link in the first paragraph, toward the beginning.
 Figures carry the page. Add one `figure` block for every article whose payload includes an
 `image_url` or `thumbnail_url`, placed directly after the passage that develops that article.
 Prefer `inset` placement so the image sits inline with the article prose. Use `full` only when an

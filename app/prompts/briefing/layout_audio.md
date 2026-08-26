@@ -26,8 +26,12 @@ sentence openings.
 
 Formatting:
 Write simple prose only from the provided sources. Source references must be markdown links like
-`[Title](newsly://briefing/content/123)`. Never write bare source ids. Make each source link span a substantial phrase:
-the title plus its surrounding descriptive words, roughly four to ten words.
+`[Title](newsly://briefing/content/123)`. Never write bare source ids. Identify every episode near
+the beginning of its first paragraph with its exact provided `title` and, when `source_name` is
+present, its podcast or show name. Make the episode title the source link and state the show name in
+the surrounding prose, for example, `[Exact Episode Title](newsly://briefing/content/123), from Show
+Name, ...`. Never invent a show name when `source_name` is absent, and do not replace the provided
+title with a descriptive paraphrase.
 Prefer placing each podcast link in the first paragraph, toward the beginning.
 Add one `figure` block for every episode whose payload includes an
 `image_url` or `thumbnail_url`, placed directly after the passage that develops that episode.

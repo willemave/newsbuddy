@@ -79,6 +79,7 @@ class BriefingSource:
     thumbnail_url: str | None
     published_at: datetime | None
     content_type: ContentType | None
+    source_name: str | None = None
     topic_slug: str | None = None
     topic_title: str | None = None
     briefing_context: str | None = None
@@ -240,6 +241,7 @@ def sources_for_keys(
                     Content.url,
                     Content.source_url,
                     Content.title,
+                    Content.source,
                     Content.content_metadata,
                     Content.created_at,
                     Content.publication_date,
@@ -640,6 +642,7 @@ def _source_from_content(
         thumbnail_url=build_thumbnail_url(content_id, version=image_version),
         published_at=content.publication_date or content.created_at,
         content_type=content_type,
+        source_name=_clean_string(content.source) or _clean_string(metadata.get("source")),
         briefing_context=briefing_context,
     )
 

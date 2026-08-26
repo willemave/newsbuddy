@@ -34,7 +34,7 @@ from app.services.prompt_library import render_prompt
 from app.services.vendor_costs import extract_usage_from_result, record_vendor_usage_out_of_band
 from app.services.vendor_usage import record_model_usage
 
-PROMPT_VERSION = "briefing-v5"
+PROMPT_VERSION = "briefing-v6"
 MAX_COMPOSE_ATTEMPTS = 4
 LAYOUT_PROMPTS_BY_TIER = {
     "audio": "briefing/layout_audio",
@@ -605,6 +605,7 @@ def _source_payload(source: BriefingSource) -> dict[str, Any]:
         "kind": source.kind,
         "id": source.id,
         "title": source.title,
+        "source_name": source.source_name,
         "summary": source.summary,
         "key_points": source.key_points,
         "url": source.url,
