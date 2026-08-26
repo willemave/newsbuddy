@@ -236,6 +236,7 @@ struct BriefingLensPageView: View, Equatable {
 
     @State private var isPinned = false
     @State private var containerHeight: CGFloat = 0
+    @State private var viewportMaxY: CGFloat = 0
     @State private var hasReportedFirstPassage = false
 
     private static let topAnchor = "briefing.lens.top"
@@ -333,7 +334,7 @@ struct BriefingLensPageView: View, Equatable {
                             Color.clear
                                 .frame(
                                     height: briefingTrailingReadClearance(
-                                        containerHeight: containerHeight,
+                                        viewportMaxY: viewportMaxY,
                                         readBoundaryY: readBoundaryY
                                     )
                                 )
@@ -365,6 +366,11 @@ struct BriefingLensPageView: View, Equatable {
                     .bottomScreenEdgeFade(fadeHeight: 32)
                     .refreshable {
                         await onRefresh()
+                    }
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.frame(in: .named(briefingReadCoordinateSpaceName)).maxY
+                    } action: { _, maxY in
+                        viewportMaxY = max(maxY, 0)
                     }
                     .onScrollGeometryChange(for: ScrollProbe.self) { geometry in
                         let offset = geometry.contentOffset.y + geometry.contentInsets.top

@@ -18,13 +18,14 @@ func briefingSegmentHasPassedReadBoundary(
     return frame.maxY < readBoundaryY
 }
 
+/// Both positions must use the Briefing read-tracking coordinate space.
 func briefingTrailingReadClearance(
-    containerHeight: CGFloat,
+    viewportMaxY: CGFloat,
     readBoundaryY: CGFloat?
 ) -> CGFloat {
     let minimumClearance: CGFloat = 24
-    guard containerHeight > 0, let readBoundaryY else { return minimumClearance }
-    return max(containerHeight - readBoundaryY + 1, minimumClearance)
+    guard viewportMaxY > 0, let readBoundaryY else { return minimumClearance }
+    return max(viewportMaxY - readBoundaryY + 1, minimumClearance)
 }
 
 struct BriefingReadBoundaryTracker {
