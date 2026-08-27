@@ -40,15 +40,66 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
         }
     }
 
+    func testInitialLoadPublishesOneMergedSnapshotAfterAllSourcesFinish() async {
+        let saved = makeSaved(id: 31, activityDate: now)
+        let narration = makeNarration(id: 32, activityDate: now.addingTimeInterval(-60))
+        let store = makeStore(
+            saved: [saved],
+            narrations: [narration],
+            savedLoadDelayNanoseconds: 500_000_000
+        )
+
+        XCTAssertTrue(store.isLoading)
+        XCTAssertTrue(store.timeline.isEmpty)
+
+        let load = Task { await store.load() }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(store.narrations.episodes.map(\.id), [narration.id])
+        XCTAssertTrue(store.savedContent.contents.isEmpty)
+        XCTAssertTrue(store.timeline.isEmpty)
+        XCTAssertTrue(store.isLoading)
+
+        await load.value
+
+        XCTAssertEqual(store.timeline.map(\.id), ["saved-31", "narration-32"])
+        XCTAssertFalse(store.isLoading)
+    }
+
+    func testCancelledInitialLoadStaysLoadingUntilAReloadCompletes() async {
+        let saved = makeSaved(id: 41, activityDate: now)
+        let store = makeStore(
+            saved: [saved],
+            savedLoadDelayNanoseconds: 500_000_000
+        )
+
+        let cancelledLoad = Task { await store.load() }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        cancelledLoad.cancel()
+        await cancelledLoad.value
+
+        XCTAssertTrue(store.isLoading)
+        XCTAssertTrue(store.timeline.isEmpty)
+
+        await store.load()
+
+        XCTAssertEqual(store.timeline.map(\.id), ["saved-41"])
+        XCTAssertFalse(store.isLoading)
+    }
+
     private func makeStore(
         saved: [ContentSummary] = [],
         chatLoadFails: Bool = false,
         decks: [LearningDeck] = [],
-        narrations: [AudioEpisode] = []
+        narrations: [AudioEpisode] = [],
+        savedLoadDelayNanoseconds: UInt64 = 0
     ) -> KnowledgeTimelineViewModel {
         KnowledgeTimelineViewModel(
             savedContent: ContentListViewModel(
-                contentService: KnowledgeTimelineContentService(contents: saved)
+                contentService: KnowledgeTimelineContentService(
+                    contents: saved,
+                    loadDelayNanoseconds: savedLoadDelayNanoseconds
+                )
             ),
             chats: KnowledgeChatViewModel(
                 chatService: KnowledgeTimelineChatService(loadFails: chatLoadFails)
@@ -182,9 +233,11 @@ private final class KnowledgeTimelineChatService: KnowledgeChatServicing {
 private final class KnowledgeTimelineContentService: ContentSummaryListServicing {
     private enum Failure: Error { case unused }
     let contents: [ContentSummary]
+    let loadDelayNanoseconds: UInt64
 
-    init(contents: [ContentSummary]) {
+    init(contents: [ContentSummary], loadDelayNanoseconds: UInt64) {
         self.contents = contents
+        self.loadDelayNanoseconds = loadDelayNanoseconds
     }
 
     func fetchKnowledgeLibrary(
@@ -192,7 +245,8 @@ private final class KnowledgeTimelineContentService: ContentSummaryListServicing
         cursor: String?,
         limit: Int
     ) async throws -> ContentListResponse {
-        ContentListResponse(
+        try await Task.sleep(nanoseconds: loadDelayNanoseconds)
+        return ContentListResponse(
             contents: contents,
             availableDates: [],
             contentTypes: [],

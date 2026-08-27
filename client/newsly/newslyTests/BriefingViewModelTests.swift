@@ -446,6 +446,47 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.orderedLenses.first?.unreadSourceCount, 0)
     }
 
+    func testRapidSegmentMarksDoNotCancelInFlightPersistence() async {
+        let service = MockBriefingService()
+        let summary = makeLensSummary(key: "today", segmentCount: 2)
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [summary]), etag: "v1")
+        ]
+        service.lensResponses["today"] = makeLens(
+            key: "today",
+            segments: [
+                makeSegment(id: 10, sourceKeys: ["content:1"]),
+                makeSegment(id: 11, sourceKeys: ["news:2"]),
+            ]
+        )
+        service.markReadDelaysNanoseconds = [700_000_000, 0]
+        service.readMarkResponses = [
+            APIBriefingReadMarkResponse(marked: 1, retired: 0, version: 2),
+            APIBriefingReadMarkResponse(marked: 1, retired: 0, version: 3),
+        ]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+
+        viewModel.markSourcesSeen(["content:1"])
+        await waitForBriefingCondition(timeoutNanoseconds: 1_000_000_000) {
+            service.markReadCalls.count == 1
+        }
+        viewModel.markSourcesSeen(["news:2"])
+
+        await waitForBriefingCondition(timeoutNanoseconds: 1_800_000_000) {
+            service.markReadCalls.count == 2
+                && !viewModel.tasks.isRunning(.readPersistence)
+        }
+        XCTAssertEqual(
+            service.markReadCalls,
+            [["content:1"], ["news:2"]]
+        )
+        XCTAssertEqual(service.markReadCancellationCount, 0)
+        XCTAssertEqual(viewModel.index?.version, 3)
+    }
+
     func testConcurrentIndexLoadsShareInFlightRequest() async {
         let service = MockBriefingService()
         service.fetchIndexDelayNanoseconds = 100_000_000

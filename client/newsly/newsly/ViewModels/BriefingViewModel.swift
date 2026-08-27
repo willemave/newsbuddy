@@ -21,7 +21,8 @@ private enum BriefingDestination: Equatable {
 final class BriefingViewModel {
     enum TaskKey: Hashable {
         case lens(String)
-        case readFlush
+        case readDebounce
+        case readPersistence
         case snapshotSave
     }
 
@@ -247,7 +248,6 @@ final class BriefingViewModel {
         await indexSynchronizer.refresh(
             prepare: { [weak self] in
                 self?.cancelBackgroundLensLoads()
-                self?.tasks.cancel(.readFlush)
                 await self?.flushPendingReadMarks()
             },
             onIndexResult: { [weak self] result in
@@ -364,7 +364,6 @@ final class BriefingViewModel {
             $0.key == lensKey && $0.unreadSourceCount > 0
         }) else { return }
 
-        tasks.cancel(.readFlush)
         await flushPendingReadMarks()
         let response = try await service.markLensRead(key: lensKey)
 
@@ -653,61 +652,90 @@ final class BriefingViewModel {
     private func scheduleReadFlush(
         delayNanoseconds: UInt64 = briefingReadFlushDebounceNanoseconds
     ) {
-        tasks.runReplacing(.readFlush) { [weak self] in
+        tasks.runReplacing(.readDebounce) { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: delayNanoseconds)
             } catch {
                 return
             }
-            await self?.flushPendingReadMarks()
+            self?.startReadPersistence()
         }
     }
 
     private func flushPendingReadMarks() async {
-        let keys = Array(pendingReadKeys).sorted()
-        pendingReadKeys.removeAll()
-        guard !keys.isEmpty else { return }
-        do {
-            let acceptedVersion = index?.version
-            let response = try await service.markRead(sourceKeys: keys)
-            indexSynchronizer.cancelIndexLoad()
-            if let acceptedVersion,
-               response.retired == 0,
-               response.version == acceptedVersion + 1 {
-                readVersionCompatibility = ReadVersionCompatibility(
-                    oldestCompatibleVersion: min(
-                        readVersionCompatibility?.oldestCompatibleVersion ?? acceptedVersion,
-                        acceptedVersion
-                    ),
-                    currentVersion: response.version
-                )
-                fastForwardLoadedBriefing(to: response.version)
-                scheduleSnapshotSave()
+        tasks.cancel(.readDebounce)
+        if let persistence = tasks.task(for: .readPersistence) {
+            await persistence.value
+        }
+        tasks.cancel(.readDebounce)
+        guard !pendingReadKeys.isEmpty else { return }
+        let persistence = tasks.runReplacing(.readPersistence) { [weak self] in
+            await self?.drainPendingReadMarks()
+        }
+        await persistence.value
+    }
+
+    private func startReadPersistence() {
+        guard !pendingReadKeys.isEmpty,
+              !tasks.isRunning(.readPersistence) else { return }
+        tasks.runReplacing(.readPersistence) { [weak self] in
+            await self?.drainPendingReadMarks()
+        }
+    }
+
+    /// Drain batches in order. A new scroll may reset the debounce timer, but
+    /// it must never cancel a request that may already have reached the server.
+    private func drainPendingReadMarks() async {
+        while !pendingReadKeys.isEmpty {
+            let keys = Array(pendingReadKeys).sorted()
+            pendingReadKeys.removeAll()
+            do {
+                try await persistReadMarks(keys)
+            } catch {
+                pendingReadKeys.formUnion(keys)
+                scheduleReadFlush(delayNanoseconds: briefingReadFlushRetryNanoseconds)
                 return
             }
-
-            readVersionCompatibility = nil
-            markCachedLensesStale(containing: keys)
-            if var currentIndex = index {
-                currentIndex = APIBriefingIndexResponse(
-                    version: response.version,
-                    mastheadTitle: currentIndex.mastheadTitle,
-                    mastheadDeck: currentIndex.mastheadDeck,
-                    generatedAt: currentIndex.generatedAt,
-                    lenses: currentIndex.lenses,
-                    firstRun: currentIndex.firstRun
-                )
-                index = currentIndex
-                orderedLenses = firstRun == nil
-                    ? Self.sortedLenses(currentIndex.lenses)
-                    : currentIndex.lenses
-            }
-            scheduleSnapshotSave()
-            await refreshIndex()
-        } catch {
-            pendingReadKeys.formUnion(keys)
-            scheduleReadFlush(delayNanoseconds: briefingReadFlushRetryNanoseconds)
         }
+    }
+
+    private func persistReadMarks(_ keys: [String]) async throws {
+        let acceptedVersion = index?.version
+        let response = try await service.markRead(sourceKeys: keys)
+        indexSynchronizer.cancelIndexLoad()
+        if let acceptedVersion,
+           response.retired == 0,
+           response.version == acceptedVersion + 1 {
+            readVersionCompatibility = ReadVersionCompatibility(
+                oldestCompatibleVersion: min(
+                    readVersionCompatibility?.oldestCompatibleVersion ?? acceptedVersion,
+                    acceptedVersion
+                ),
+                currentVersion: response.version
+            )
+            fastForwardLoadedBriefing(to: response.version)
+            scheduleSnapshotSave()
+            return
+        }
+
+        readVersionCompatibility = nil
+        markCachedLensesStale(containing: keys)
+        if var currentIndex = index {
+            currentIndex = APIBriefingIndexResponse(
+                version: response.version,
+                mastheadTitle: currentIndex.mastheadTitle,
+                mastheadDeck: currentIndex.mastheadDeck,
+                generatedAt: currentIndex.generatedAt,
+                lenses: currentIndex.lenses,
+                firstRun: currentIndex.firstRun
+            )
+            index = currentIndex
+            orderedLenses = firstRun == nil
+                ? Self.sortedLenses(currentIndex.lenses)
+                : currentIndex.lenses
+        }
+        scheduleSnapshotSave()
+        await refreshIndex()
     }
 
     private func fastForwardLoadedBriefing(to version: Int) {

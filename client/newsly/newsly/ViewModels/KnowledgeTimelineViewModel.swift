@@ -63,6 +63,8 @@ final class KnowledgeTimelineViewModel {
     let narrations: CustomNarrationLibraryViewModel
     private(set) var timeline: [KnowledgeTimelineItem] = []
     private(set) var groupedTimeline: [KnowledgeTimelineDayGroup] = []
+    private var coalescedLoadDepth = 0
+    private var hasFinishedInitialLoad = false
 
     init(
         savedContent: ContentListViewModel,
@@ -79,7 +81,12 @@ final class KnowledgeTimelineViewModel {
     }
 
     var isLoading: Bool {
-        chats.isLoading || savedContent.isLoading || decks.isLoading || narrations.isLoading
+        !hasFinishedInitialLoad
+            || coalescedLoadDepth > 0
+            || chats.isLoading
+            || savedContent.isLoading
+            || decks.isLoading
+            || narrations.isLoading
     }
 
     var isLoadingMore: Bool {
@@ -120,12 +127,13 @@ final class KnowledgeTimelineViewModel {
     }
 
     func load() async {
+        coalescedLoadDepth += 1
+        defer { finishCoalescedLoad(completed: !Task.isCancelled) }
         async let savedLoad: Void = savedContent.loadKnowledgeLibrary()
         async let chatLoad: Void = chats.loadChats()
         async let narrationLoad: Void = narrations.load()
         async let deckLoad: Void = decks.load()
         _ = await (savedLoad, chatLoad, narrationLoad, deckLoad)
-        refreshTimelineProjection()
     }
 
     func loadNextPage() async {
@@ -185,10 +193,25 @@ final class KnowledgeTimelineViewModel {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.refreshTimelineProjection()
+                if self.coalescedLoadDepth == 0 {
+                    self.refreshTimelineProjection()
+                }
                 self.observeTimelineSources()
             }
         }
+    }
+
+    private func finishCoalescedLoad(completed: Bool) {
+        guard coalescedLoadDepth > 0 else { return }
+        if completed {
+            hasFinishedInitialLoad = true
+        }
+        if coalescedLoadDepth == 1 {
+            // Publish the merged result while loading is still true so the UI
+            // cannot flash an empty or single-source timeline between states.
+            refreshTimelineProjection()
+        }
+        coalescedLoadDepth -= 1
     }
 
     private func refreshTimelineProjection() {

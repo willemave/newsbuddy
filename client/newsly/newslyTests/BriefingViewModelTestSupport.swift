@@ -30,7 +30,9 @@ final class MockBriefingService: BriefingServicing {
     var markLensReadKeys: [String] = []
     var events: [String] = []
     var readMarkResponse = APIBriefingReadMarkResponse(marked: 0, retired: 0, version: 1)
+    var readMarkResponses: [APIBriefingReadMarkResponse] = []
     var lensReadMarkResponse = APIBriefingReadMarkResponse(marked: 0, retired: 0, version: 1)
+    var markReadDelaysNanoseconds: [UInt64] = []
     var markReadWaitsForResume = false
     var markReadError: Error?
     var markLensReadError: Error?
@@ -53,6 +55,7 @@ final class MockBriefingService: BriefingServicing {
     var narrationLensKeys: [String] = []
     var narrationFetchEpisodeGroupIDs: [String] = []
     private(set) var narrationCancellationCount = 0
+    private(set) var markReadCancellationCount = 0
     var firstRunCompletionFailuresRemaining = 0
     private(set) var firstRunCompletionCount = 0
 
@@ -131,6 +134,15 @@ final class MockBriefingService: BriefingServicing {
     func markRead(sourceKeys: [String]) async throws -> APIBriefingReadMarkResponse {
         markReadCalls.append(sourceKeys)
         events.append("markRead:\(sourceKeys.joined(separator: ","))")
+        if !markReadDelaysNanoseconds.isEmpty {
+            let delay = markReadDelaysNanoseconds.removeFirst()
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch {
+                markReadCancellationCount += 1
+                throw error
+            }
+        }
         if markReadWaitsForResume {
             await withCheckedContinuation { continuation in
                 markReadContinuation = continuation
@@ -138,6 +150,9 @@ final class MockBriefingService: BriefingServicing {
         }
         if let markReadError {
             throw markReadError
+        }
+        if !readMarkResponses.isEmpty {
+            return readMarkResponses.removeFirst()
         }
         return readMarkResponse
     }

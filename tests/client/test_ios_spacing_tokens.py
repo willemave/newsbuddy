@@ -348,15 +348,22 @@ def test_knowledge_timeline_projection_stays_out_of_render_path() -> None:
 def test_knowledge_timeline_rows_keep_the_compact_learning_shape() -> None:
     timeline_rows = (VIEWS_ROOT / "KnowledgeTimelineRows.swift").read_text()
     saved_rows = (VIEWS_ROOT / "KnowledgeView.swift").read_text()
+    artwork = timeline_rows.split("struct KnowledgeTimelineArtwork: View {", 1)[1].split(
+        "/// Breathing dot", 1
+    )[0]
+    placeholder = artwork.split("} placeholder: {", 1)[1].split("}", 1)[0]
 
-    assert "private let size: CGFloat = 40" in timeline_rows
+    assert "static let size: CGFloat = 40" in timeline_rows
     assert "private let imageSize = CGSize(width: 40, height: 40)" in saved_rows
     assert "Text(title)" in timeline_rows
     assert "Text(content.displayTitle)" in saved_rows
     assert timeline_rows.count(".lineLimit(1)") >= 3
     assert saved_rows.count(".lineLimit(1)") >= 3
-    assert ".padding(.vertical, 6)" in timeline_rows
-    assert ".padding(.vertical, 6)" in saved_rows
+    assert ".padding(.vertical, 8)" in timeline_rows
+    assert ".padding(.vertical, 8)" in saved_rows
+    assert "fallbackArtwork" in placeholder
+    assert ".transaction { $0.animation = nil }" in artwork
+    assert "ProgressView" not in artwork
 
 
 def test_chat_messages_use_single_parameterized_bubble_surface() -> None:

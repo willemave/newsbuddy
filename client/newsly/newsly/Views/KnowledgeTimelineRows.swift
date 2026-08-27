@@ -223,12 +223,11 @@ struct KnowledgeTimelineArtwork: View {
                 CachedAsyncImage(url: imageURL, targetSize: CGSize(width: size, height: size)) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
-                    ProgressView().controlSize(.small)
+                    fallbackArtwork
                 }
+                .transaction { $0.animation = nil }
             } else {
-                Image(systemName: icon)
-                    .font(.appSymbol(size: 16))
-                    .foregroundStyle(Color.onSurfaceSecondary)
+                fallbackArtwork
             }
         }
         .frame(width: size, height: size)
@@ -246,6 +245,13 @@ struct KnowledgeTimelineArtwork: View {
                     .accessibilityIdentifier(ifPresent: busyAccessibilityIdentifier)
             }
         }
+    }
+
+    private var fallbackArtwork: some View {
+        Image(systemName: icon)
+            .font(.appSymbol(size: 16))
+            .foregroundStyle(Color.onSurfaceSecondary)
+            .accessibilityHidden(true)
     }
 }
 
