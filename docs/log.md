@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-26 — `main` — Stabilize Share Extension release verification
+
+- **Status:** Complete locally; release validation in progress.
+- **Scope:** AXe remote-surface inspection for keyboard-shifted Share Extension forms.
+- **Decisions:** Resolve the current control and submit-button frames semantically from a bounded set of remote accessibility points; do not encode one post-keyboard sheet position as authoritative.
+- **Changes:** Added candidate-point polling and accessibility-frame center resolution, switched the Create Deck and Chat Share flows to inspect and submit at the resolved controls, and made the pristine-Safari education popover close by its unique semantic button rather than its unreliable icon identifier.
+- **Validation:** Ruff and 11 AXe harness unit tests passed; the focused Create Deck and Chat Share flows each passed end-to-end against the live local API and queue on an iPhone 17 Pro simulator running iOS 26.5. The complete pristine-simulator run passed 39/40; its sole failure was the first Safari education popover ignoring an identifier-based close tap, while every Newsly scenario and all later Share modes passed. After stabilizing the delayed education-popover transition, the focused Add to Briefing flow passed from pristine Safari state.
+- **Remaining:** Repeat the complete release gates on the final commit before push.
+- **Commits:** Uncommitted.
+
 ### 2026-08-25 — `main` — Knowledge tab visual design pass
 
 - **Status:** Complete

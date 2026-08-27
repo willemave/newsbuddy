@@ -52,6 +52,7 @@ from tests.ios_e2e.axe_harness import (
     AxeHarnessError,
     AxeRunner,
     AxeStateExpectation,
+    element_center,
     tree_has_id,
 )
 from tests.support.feed_subscription_test_helpers import stub_feed_validator
@@ -206,24 +207,30 @@ def _open_share_extension(
             timeout_seconds=15,
         )
 
-    first_run_deadline = time.monotonic() + 5
+    first_run_deadline = time.monotonic() + 8
+    toolbar_visible_since: float | None = None
     while True:
         safari_tree = axe_runner.describe_ui()
         if tree_has_id(safari_tree, "xmark.circle.fill"):
-            axe_runner.tap_id(
-                "xmark.circle.fill",
+            axe_runner.tap_label(
+                "Close",
+                element_type="Button",
                 name=f"{path_name}_safari_ready",
                 expectation=AxeStateExpectation(ids=("MoreMenuButton",)),
                 timeout_seconds=15,
             )
             break
         if tree_has_id(safari_tree, "MoreMenuButton"):
-            axe_runner.capture_until(
-                name=f"{path_name}_safari_ready",
-                expectation=AxeStateExpectation(ids=("MoreMenuButton",)),
-                timeout_seconds=15,
-            )
-            break
+            toolbar_visible_since = toolbar_visible_since or time.monotonic()
+            if time.monotonic() - toolbar_visible_since >= 1:
+                axe_runner.capture_until(
+                    name=f"{path_name}_safari_ready",
+                    expectation=AxeStateExpectation(ids=("MoreMenuButton",)),
+                    timeout_seconds=15,
+                )
+                break
+        else:
+            toolbar_visible_since = None
         if time.monotonic() >= first_run_deadline:
             axe_runner.capture_until(
                 name=f"{path_name}_safari_ready",
@@ -485,20 +492,21 @@ def test_share_extension_modes_reach_live_api_and_queue(
         timeout_seconds=5,
     )
 
+    shifted_sheet_points = tuple((200.0, float(y)) for y in range(180, 721, 20))
+
     if mode == LlmTaskMode.CHAT:
         axe_runner.tap_point(
             *action_point,
             name=f"{path_name}_selected",
-            inspection_point=(200, 550),
+            inspection_points=shifted_sheet_points,
             expectation=AxeStateExpectation(
                 ids=("share.chat.prompt",),
                 enabled_ids=("share.chat.prompt",),
             ),
         )
-        disabled_submit = axe_runner.capture_point_until(
+        disabled_submit = axe_runner.capture_points_until(
             name=f"{path_name}_requires_prompt",
-            x=200,
-            y=670,
+            points=shifted_sheet_points,
             expectation=AxeStateExpectation(ids=("share.submit",), texts=(submit_label,)),
             timeout_seconds=5,
         )
@@ -506,17 +514,15 @@ def test_share_extension_modes_reach_live_api_and_queue(
         axe_runner.type_text(
             chat_initial_message,
             name=f"{path_name}_prompt_typed",
-            inspection_point=(200, 550),
+            inspection_points=shifted_sheet_points,
             expectation=AxeStateExpectation(
                 ids=("share.chat.prompt",),
                 id_values={"share.chat.prompt": chat_initial_message},
             ),
         )
-        submit_point = (200.0, 670.0)
-        axe_runner.capture_point_until(
+        submit_ready = axe_runner.capture_points_until(
             name=f"{path_name}_submit_ready",
-            x=submit_point[0],
-            y=submit_point[1],
+            points=shifted_sheet_points,
             expectation=AxeStateExpectation(
                 ids=("share.submit",),
                 texts=(submit_label,),
@@ -524,6 +530,7 @@ def test_share_extension_modes_reach_live_api_and_queue(
             ),
             timeout_seconds=5,
         )
+        submit_point = element_center(submit_ready.tree, "share.submit")
     elif mode == LlmTaskMode.PRESENTATION:
         axe_runner.tap_point(
             *action_point,
@@ -538,7 +545,7 @@ def test_share_extension_modes_reach_live_api_and_queue(
             200,
             610,
             name=f"{path_name}_instructions_focused",
-            inspection_point=(200, 610),
+            inspection_points=shifted_sheet_points,
             expectation=AxeStateExpectation(
                 ids=("share.deck.instructions",),
                 enabled_ids=("share.deck.instructions",),
@@ -547,17 +554,15 @@ def test_share_extension_modes_reach_live_api_and_queue(
         axe_runner.type_text(
             deck_instructions,
             name=f"{path_name}_instructions_typed",
-            inspection_point=(200, 610),
+            inspection_points=shifted_sheet_points,
             expectation=AxeStateExpectation(
                 ids=("share.deck.instructions",),
                 id_values={"share.deck.instructions": deck_instructions},
             ),
         )
-        submit_point = (200.0, 695.0)
-        axe_runner.capture_point_until(
+        submit_ready = axe_runner.capture_points_until(
             name=f"{path_name}_submit_ready",
-            x=submit_point[0],
-            y=submit_point[1],
+            points=shifted_sheet_points,
             expectation=AxeStateExpectation(
                 ids=("share.submit",),
                 texts=(submit_label,),
@@ -565,6 +570,7 @@ def test_share_extension_modes_reach_live_api_and_queue(
             ),
             timeout_seconds=5,
         )
+        submit_point = element_center(submit_ready.tree, "share.submit")
     else:
         submit_point = (200.0, 520.0)
         axe_runner.tap_point(

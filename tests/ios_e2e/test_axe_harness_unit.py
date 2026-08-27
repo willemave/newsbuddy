@@ -6,6 +6,7 @@ from tests.ios_e2e.axe_harness import (
     AxeHarnessError,
     _is_system_open_confirmation,
     _swipe_up_coordinates,
+    element_center,
 )
 
 
@@ -72,3 +73,21 @@ def test_swipe_up_coordinates_honor_offset_application_frame() -> None:
 def test_swipe_up_coordinates_reject_missing_or_invalid_application_frame(tree: object) -> None:
     with pytest.raises(AxeHarnessError, match="no usable Application frame"):
         _swipe_up_coordinates(tree)
+
+
+def test_element_center_uses_identified_element_frame() -> None:
+    tree = {
+        "children": [
+            {
+                "AXUniqueId": "target",
+                "frame": {"x": 10, "y": 20, "width": 80, "height": 40},
+            }
+        ]
+    }
+
+    assert element_center(tree, "target") == (50.0, 40.0)
+
+
+def test_element_center_rejects_missing_element() -> None:
+    with pytest.raises(AxeHarnessError, match="found 0"):
+        element_center([], "target")

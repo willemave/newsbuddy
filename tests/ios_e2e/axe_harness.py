@@ -270,6 +270,7 @@ class AxeRunner:
         name: str,
         timeout_seconds: float = 10,
         inspection_point: tuple[float, float] | None = None,
+        inspection_points: tuple[tuple[float, float], ...] | None = None,
         pre_delay_seconds: float = 0.25,
         post_delay_seconds: float = 0.05,
     ) -> AxeCapturedState:
@@ -278,6 +279,8 @@ class AxeRunner:
         Coordinate dispatch is reserved for system/extension surfaces whose
         remote accessibility subtree is omitted from AXe's full-tree output.
         """
+        if inspection_point is not None and inspection_points is not None:
+            raise AxeHarnessError("Provide either inspection_point or inspection_points, not both")
         self._run(
             [
                 self.axe_binary,
@@ -294,6 +297,13 @@ class AxeRunner:
                 self.udid,
             ]
         )
+        if inspection_points is not None:
+            return self.capture_points_until(
+                name=name,
+                points=inspection_points,
+                expectation=expectation,
+                timeout_seconds=timeout_seconds,
+            )
         if inspection_point is not None:
             return self.capture_point_until(
                 name=name,
@@ -316,12 +326,22 @@ class AxeRunner:
         name: str,
         timeout_seconds: float = 10,
         inspection_point: tuple[float, float] | None = None,
+        inspection_points: tuple[tuple[float, float], ...] | None = None,
     ) -> AxeCapturedState:
         """Type through AXe HID, then capture and assert the resulting value."""
+        if inspection_point is not None and inspection_points is not None:
+            raise AxeHarnessError("Provide either inspection_point or inspection_points, not both")
         self._run(
             [self.axe_binary, "type", "--stdin", "--udid", self.udid],
             input_text=text,
         )
+        if inspection_points is not None:
+            return self.capture_points_until(
+                name=name,
+                points=inspection_points,
+                expectation=expectation,
+                timeout_seconds=timeout_seconds,
+            )
         if inspection_point is not None:
             return self.capture_point_until(
                 name=name,
@@ -461,6 +481,46 @@ class AxeRunner:
             )
         return captured
 
+    def capture_points_until(
+        self,
+        *,
+        name: str,
+        points: tuple[tuple[float, float], ...],
+        expectation: AxeStateExpectation,
+        timeout_seconds: float,
+        poll_seconds: float = 0.15,
+    ) -> AxeCapturedState:
+        """Poll candidate points for a remote surface whose layout can shift."""
+        if not points:
+            raise AxeHarnessError("At least one inspection point is required")
+
+        deadline = time.monotonic() + timeout_seconds
+        last_tree: Any = {}
+        failures: list[str] = []
+
+        while True:
+            for point in points:
+                try:
+                    last_tree = self.describe_ui(point=point)
+                    failures = _expectation_failures(last_tree, expectation)
+                except AxeHarnessError as exc:
+                    last_tree = {}
+                    failures = [str(exc)]
+                if not failures:
+                    break
+            if not failures or time.monotonic() >= deadline:
+                break
+            time.sleep(poll_seconds)
+
+        captured = self._persist_capture(name=name, tree=last_tree)
+        if failures:
+            raise AxeHarnessError(
+                f"AXe candidate-point state did not satisfy {expectation.describe()} after "
+                f"{name}: {'; '.join(failures)}. UI: {captured.ui_path}. "
+                f"Screenshot: {captured.screenshot_path}"
+            )
+        return captured
+
     def describe_ui(self, *, point: tuple[float, float] | None = None) -> Any:
         command = [self.axe_binary, "describe-ui"]
         if point is not None:
@@ -548,6 +608,24 @@ def tree_text(tree: Any) -> str:
             if isinstance(value, str) and value:
                 values.append(value)
     return "\n".join(values)
+
+
+def element_center(tree: Any, identifier: str) -> tuple[float, float]:
+    """Return the center of one identified accessibility element."""
+    matches = [node for node in _iter_nodes(tree) if node.get("AXUniqueId") == identifier]
+    if len(matches) != 1:
+        raise AxeHarnessError(
+            f"Expected exactly one AX element with id={identifier!r}; found {len(matches)}"
+        )
+    frame = matches[0].get("frame")
+    if not isinstance(frame, dict) or not all(
+        isinstance(frame.get(key), (int, float)) for key in ("x", "y", "width", "height")
+    ):
+        raise AxeHarnessError(f"AX element with id={identifier!r} has no usable frame")
+    return (
+        float(frame["x"]) + float(frame["width"]) / 2,
+        float(frame["y"]) + float(frame["height"]) / 2,
+    )
 
 
 def _is_system_open_confirmation(tree: Any) -> bool:
