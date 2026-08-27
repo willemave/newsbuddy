@@ -81,6 +81,7 @@ final class BriefingViewModel {
     private var sourceByKey: [String: APIBriefingSource] = [:]
     private var lensKeysBySourceKey: [String: Set<String>] = [:]
     var readVersionCompatibility: ReadVersionCompatibility?
+    private var staleReadReconciliationVersions: Range<Int>?
     private var headerPinnedLensKeys: Set<String> = []
     /// The news category to return to when the reader re-enters the news tier.
     private var lastNewsLensKey: String?
@@ -341,8 +342,6 @@ final class BriefingViewModel {
             isCategoryStripExpanded = expanded
         }
     }
-
-
     func markSegmentSeen(_ segment: APIBriefingSegment) {
         markSourcesSeen(segment.sourceKeys)
     }
@@ -446,10 +445,9 @@ final class BriefingViewModel {
 
     private func applyValidatedIndexResult(_ result: BriefingIndexFetchResult) {
         if case .value(let response, _) = result,
-           let currentVersion = index?.version,
-           response.version < currentVersion {
+           staleReadReconciliationVersions?.contains(response.version) == true {
             briefingRefreshLogger.info(
-                "Stale index response discarded | response_version=\(response.version, privacy: .public) current_version=\(currentVersion, privacy: .public)"
+                "Pre-mutation index response discarded | response_version=\(response.version, privacy: .public)"
             )
             return
         }
@@ -747,6 +745,10 @@ final class BriefingViewModel {
                 : currentIndex.lenses
         }
         scheduleSnapshotSave()
+        if let acceptedVersion, acceptedVersion < response.version {
+            staleReadReconciliationVersions = acceptedVersion..<response.version
+        }
+        defer { staleReadReconciliationVersions = nil }
         await refreshIndex()
     }
 

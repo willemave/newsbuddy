@@ -760,7 +760,7 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.source(for: "content:1")?.read, true)
     }
 
-    func testReadReconciliationRejectsIndexOlderThanAcceptedMutation() async {
+    func testReadReconciliationRejectsPreMutationIndexVersion() async {
         let service = MockBriefingService()
         let segment = makeSegment(sourceKeys: ["content:1"])
         let unreadSummary = makeLensSummary(
