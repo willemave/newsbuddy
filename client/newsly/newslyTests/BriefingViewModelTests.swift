@@ -725,6 +725,79 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertEqual(later?.unreadSourceCount, 2)
     }
 
+    func testMarkSegmentSeenRejectsOlderInFlightIndexResponse() async {
+        let service = MockBriefingService()
+        let segment = makeSegment(sourceKeys: ["content:1"])
+        let unreadSummary = makeLensSummary(
+            key: "today",
+            segmentCount: 1,
+            unreadSourceCount: 2
+        )
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [unreadSummary]), etag: "etag-1"),
+            .value(makeIndex(version: 1, lenses: [unreadSummary]), etag: "etag-1")
+        ]
+        service.lensResponses["today"] = makeLens(
+            key: "today",
+            version: 1,
+            segments: [segment]
+        )
+        service.fetchIndexWaitRequestIndices = [1]
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+
+        let refresh = Task { await viewModel.refreshIndex() }
+        await waitForBriefingCondition { service.indexEtags.count == 2 }
+        viewModel.markSegmentSeen(segment)
+        XCTAssertEqual(viewModel.newsUnreadSourceCount, 1)
+
+        service.resumeIndexRequest(at: 1)
+        await refresh.value
+
+        XCTAssertEqual(viewModel.newsUnreadSourceCount, 1)
+        XCTAssertEqual(viewModel.source(for: "content:1")?.read, true)
+    }
+
+    func testReadReconciliationRejectsIndexOlderThanAcceptedMutation() async {
+        let service = MockBriefingService()
+        let segment = makeSegment(sourceKeys: ["content:1"])
+        let unreadSummary = makeLensSummary(
+            key: "today",
+            segmentCount: 1,
+            unreadSourceCount: 2
+        )
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [unreadSummary]), etag: "etag-1"),
+            .value(makeIndex(version: 1, lenses: [unreadSummary]), etag: "etag-1")
+        ]
+        service.lensResponses["today"] = makeLens(
+            key: "today",
+            version: 1,
+            segments: [segment]
+        )
+        service.readMarkResponse = APIBriefingReadMarkResponse(
+            marked: 1,
+            retired: 1,
+            version: 2
+        )
+        let viewModel = BriefingViewModel(service: service)
+
+        await viewModel.loadIndexIfNeeded()
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+        viewModel.markSegmentSeen(segment)
+        await waitForBriefingCondition(timeoutNanoseconds: 1_000_000_000) {
+            service.markReadCalls.count == 1
+                && service.indexEtags.count == 2
+                && !viewModel.tasks.isRunning(.readPersistence)
+        }
+
+        XCTAssertEqual(viewModel.index?.version, 2)
+        XCTAssertEqual(viewModel.newsUnreadSourceCount, 1)
+        XCTAssertEqual(viewModel.source(for: "content:1")?.read, true)
+    }
+
     func testOptimisticUnreadCountFloorsAtZero() async {
         let service = MockBriefingService()
         let segment = makeSegment(sourceKeys: ["content:1", "news:2"])

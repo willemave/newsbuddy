@@ -41,6 +41,10 @@ final class BriefingIndexSynchronizer {
 
     private var isActive = false
     private var loadMode: LoadMode?
+    /// Separates the network task lifetime from delivery of its result. A task
+    /// can finish and clear itself before the awaiting caller resumes; a later
+    /// cancellation must still prevent that completed response from publishing.
+    private var indexLoadGeneration = 0
     private(set) var etag: String?
     private(set) var refreshPhase: RefreshPhase = .idle {
         didSet {
@@ -88,6 +92,7 @@ final class BriefingIndexSynchronizer {
     }
 
     func cancelIndexLoad() {
+        indexLoadGeneration += 1
         tasks.cancel(.index)
         loadMode = nil
     }
@@ -104,6 +109,8 @@ final class BriefingIndexSynchronizer {
         }
 
         loadMode = requestedMode
+        indexLoadGeneration += 1
+        let generation = indexLoadGeneration
         var result: BriefingIndexFetchResult?
         var loadError: Error?
         let startedAt = Date()
@@ -112,19 +119,29 @@ final class BriefingIndexSynchronizer {
             guard let self else { return }
             do {
                 let fetched = try await service.fetchIndex(ifNoneMatch: force ? nil : etag)
-                guard tasks.isCurrent(token), !Task.isCancelled else { return }
+                guard generation == indexLoadGeneration,
+                      tasks.isCurrent(token),
+                      !Task.isCancelled else { return }
                 result = fetched
                 updateETag(from: fetched)
                 logIndexLoad(fetched, token: token, priorETag: priorETag, startedAt: startedAt)
             } catch {
-                guard tasks.isCurrent(token) else { return }
+                guard generation == indexLoadGeneration,
+                      tasks.isCurrent(token) else { return }
                 loadError = error
             }
-            if tasks.isCurrent(token) {
+            if generation == indexLoadGeneration, tasks.isCurrent(token) {
                 loadMode = nil
             }
         }
         await task.value
+
+        guard generation == indexLoadGeneration else {
+            briefingIndexLogger.info(
+                "Index result discarded | generation=\(generation, privacy: .public) reason=cancelled_or_replaced"
+            )
+            return nil
+        }
 
         if let loadError {
             throw loadError

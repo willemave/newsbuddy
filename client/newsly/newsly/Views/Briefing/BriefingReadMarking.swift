@@ -6,7 +6,10 @@ func briefingPinnedReadBoundaryY(
     expandedChromeHeight: CGFloat,
     collapsibleChromeHeight: CGFloat
 ) -> CGFloat? {
-    guard expandedChromeHeight > 0 else { return nil }
+    guard expandedChromeHeight.isFinite,
+          collapsibleChromeHeight.isFinite,
+          expandedChromeHeight > 0,
+          collapsibleChromeHeight >= 0 else { return nil }
     return max(expandedChromeHeight - collapsibleChromeHeight, 0)
 }
 
@@ -14,18 +17,31 @@ func briefingSegmentHasPassedReadBoundary(
     frame: CGRect,
     readBoundaryY: CGFloat?
 ) -> Bool {
-    guard let readBoundaryY else { return false }
+    guard let readBoundaryY,
+          readBoundaryY.isFinite,
+          frame.maxY.isFinite else { return false }
     return frame.maxY < readBoundaryY
 }
 
-/// Both positions must use the Briefing read-tracking coordinate space.
+/// `ScrollGeometry.containerSize` excludes the top content inset that places
+/// the pager beneath expanded chrome. Add that stable inset back so the final
+/// segment can cross the boundary without measuring the scroll view's frame.
 func briefingTrailingReadClearance(
-    viewportMaxY: CGFloat,
+    containerHeight: CGFloat,
+    topContentInset: CGFloat,
     readBoundaryY: CGFloat?
 ) -> CGFloat {
     let minimumClearance: CGFloat = 24
-    guard viewportMaxY > 0, let readBoundaryY else { return minimumClearance }
-    return max(viewportMaxY - readBoundaryY + 1, minimumClearance)
+    guard containerHeight.isFinite,
+          containerHeight > 0,
+          topContentInset.isFinite,
+          topContentInset >= 0,
+          let readBoundaryY,
+          readBoundaryY.isFinite else { return minimumClearance }
+    return max(
+        containerHeight + topContentInset - readBoundaryY + 1,
+        minimumClearance
+    )
 }
 
 struct BriefingReadBoundaryTracker {

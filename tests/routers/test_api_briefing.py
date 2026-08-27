@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from sqlalchemy import event, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.settings import get_settings
 from app.models.contracts import ContentClassification, ContentType, TaskType
@@ -636,6 +636,7 @@ def test_briefing_lens_rejects_invalid_and_cross_lens_cursors(
 def test_briefing_read_mark_response_reports_retirement_count(
     client: TestClient,
     db_session: Session,
+    db_session_factory: sessionmaker[Session],
     test_user: User,
     content_factory,
     status_entry_factory,
@@ -653,13 +654,25 @@ def test_briefing_read_mark_response_reports_retirement_count(
     )
     lens = client.get("/api/briefing/lenses/articles").json()
 
+    source_key = lens["sources"][0]["source_key"]
+    segment_id = lens["segments"][0]["id"]
     response = client.post(
         "/api/briefing/read-marks",
-        json={"source_keys": [lens["sources"][0]["source_key"]]},
+        json={"source_keys": [source_key]},
     )
 
     assert response.status_code == 200
     assert response.json() == {"marked": 1, "retired": 1, "version": 2}
+    with db_session_factory() as observer:
+        persisted_version = observer.execute(
+            select(BriefingState.version).where(BriefingState.user_id == test_user.id)
+        ).scalar_one()
+        persisted_segment_status = observer.execute(
+            select(BriefingSegment.status).where(BriefingSegment.id == segment_id)
+        ).scalar_one()
+
+    assert persisted_version == 2
+    assert persisted_segment_status == "retired"
 
 
 def test_briefing_lens_read_marks_every_source_in_the_category(

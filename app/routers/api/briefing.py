@@ -141,6 +141,11 @@ def mark_read(
         user_id=require_user_id(current_user),
         source_keys=request.source_keys,
     )
+    # The client immediately reconciles against GET /briefing. The normal
+    # request-scoped dependency commits after the response is sent, which can
+    # expose the previous version to that GET, so make this mutation visible
+    # before returning its accepted version.
+    db.commit()
     return BriefingReadMarkResponse(
         marked=result.marked,
         retired=result.retired,
@@ -164,6 +169,7 @@ def mark_lens_read(
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Briefing lens not found")
+    db.commit()
     return BriefingReadMarkResponse(
         marked=result.marked,
         retired=result.retired,

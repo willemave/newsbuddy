@@ -351,6 +351,10 @@ final class BriefingViewModel {
         let unreadKeys = uniqueBriefingSourceKeys(sourceKeys)
             .filter { source(for: $0)?.read == false }
         guard !unreadKeys.isEmpty else { return }
+        // A lifecycle refresh may already have fetched the pre-read index but
+        // not published it yet. Invalidate that delivery before changing local
+        // state so it cannot immediately restore stale unread counters.
+        indexSynchronizer.cancelIndexLoad()
         // Optimistic: grey-out and chip counters react as the reader scrolls,
         // before the debounced network flush. The server tolerates stale keys,
         // and failed flushes re-queue, so local state stays eventually consistent.
@@ -441,6 +445,14 @@ final class BriefingViewModel {
     }
 
     private func applyValidatedIndexResult(_ result: BriefingIndexFetchResult) {
+        if case .value(let response, _) = result,
+           let currentVersion = index?.version,
+           response.version < currentVersion {
+            briefingRefreshLogger.info(
+                "Stale index response discarded | response_version=\(response.version, privacy: .public) current_version=\(currentVersion, privacy: .public)"
+            )
+            return
+        }
         lastValidatedAt = now()
         applyIndexResult(result)
         scheduleSnapshotSave()

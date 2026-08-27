@@ -22,6 +22,21 @@ final class BriefingReadMarkingTests: XCTestCase {
         )
     }
 
+    func testPinnedReadBoundaryRejectsNonFiniteGeometry() {
+        XCTAssertNil(
+            briefingPinnedReadBoundaryY(
+                expandedChromeHeight: .infinity,
+                collapsibleChromeHeight: 160
+            )
+        )
+        XCTAssertNil(
+            briefingPinnedReadBoundaryY(
+                expandedChromeHeight: 220,
+                collapsibleChromeHeight: .nan
+            )
+        )
+    }
+
     func testSegmentBottomJustBeforePinnedBoundaryHasNotPassed() {
         let frame = CGRect(x: 0, y: -19.5, width: 100, height: 100)
 
@@ -54,31 +69,65 @@ final class BriefingReadMarkingTests: XCTestCase {
         )
     }
 
-    func testTrailingClearanceLetsFinalSegmentPassPinnedBoundary() {
-        XCTAssertEqual(
-            briefingTrailingReadClearance(
-                viewportMaxY: 800,
+    func testSegmentDoesNotPassWithNonFiniteGeometry() {
+        XCTAssertFalse(
+            briefingSegmentHasPassedReadBoundary(
+                frame: CGRect(x: 0, y: -.infinity, width: 100, height: 100),
                 readBoundaryY: 80
-            ),
-            721
+            )
+        )
+        XCTAssertFalse(
+            briefingSegmentHasPassedReadBoundary(
+                frame: CGRect(x: 0, y: -100, width: 100, height: 100),
+                readBoundaryY: .nan
+            )
         )
     }
 
-    func testTrailingClearanceUsesViewportBottomInReadCoordinateSpace() {
+    func testTrailingClearanceLetsFinalSegmentPassPinnedBoundary() {
         XCTAssertEqual(
             briefingTrailingReadClearance(
-                viewportMaxY: 800,
-                readBoundaryY: 100
+                containerHeight: 800,
+                topContentInset: 220,
+                readBoundaryY: 80
             ),
-            701
+            941
         )
     }
 
     func testTrailingClearanceUsesMinimumBeforeGeometryIsAvailable() {
         XCTAssertEqual(
             briefingTrailingReadClearance(
-                viewportMaxY: 0,
+                containerHeight: 0,
+                topContentInset: 0,
                 readBoundaryY: nil
+            ),
+            24
+        )
+    }
+
+    func testTrailingClearanceUsesMinimumForNonFiniteGeometry() {
+        XCTAssertEqual(
+            briefingTrailingReadClearance(
+                containerHeight: .infinity,
+                topContentInset: 220,
+                readBoundaryY: 80
+            ),
+            24
+        )
+        XCTAssertEqual(
+            briefingTrailingReadClearance(
+                containerHeight: 800,
+                topContentInset: 220,
+                readBoundaryY: .nan
+            ),
+            24
+        )
+        XCTAssertEqual(
+            briefingTrailingReadClearance(
+                containerHeight: 800,
+                topContentInset: .nan,
+                readBoundaryY: 80
             ),
             24
         )

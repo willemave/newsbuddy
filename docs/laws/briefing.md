@@ -22,9 +22,9 @@ B10. Server state remains authoritative. Local snapshots support cold starts, an
 
 B11. A segment becomes read only after it was visible and its full rendered body passes above the readable viewport boundary. Initial offscreen geometry never marks it read.
 
-B12. Reading a segment marks its full source batch once, and the segment retires when every source is read. Marking a lens read covers every active source and canonical duplicate representative.
+B12. Reading a segment marks its full source batch once, and the segment retires when every source is read. Marking a lens read covers every active source and canonical duplicate representative. A successful read-mutation response is durable and visible to the next Briefing index read.
 
-B13. Read-only styling preserves scroll position. Replacing the ordered document resets the lens to the top without interrupting the readable view during refresh.
+B13. Read-only styling preserves scroll position and cannot be reversed by an older in-flight index response. Replacing the ordered document resets the lens to the top without interrupting the readable view during refresh.
 
 B14. Links, figures, discussions, and citations resolve to sources owned by their segment, while invalid references are repaired or rejected before publication. Article and podcast passages identify each work by its title and its available publication or show name. Pullquotes are editorial callouts and never claim to be source quotations, while Dig Deeper uses the selected passage with user-visible support.
 
