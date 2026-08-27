@@ -202,15 +202,36 @@ def _open_share_extension(
         axe_runner.tap_id(
             "NotNowButton",
             name=f"{path_name}_safari_ready",
-            expectation=AxeStateExpectation(texts=("More",)),
+            expectation=AxeStateExpectation(texts=("Safari",)),
             timeout_seconds=15,
         )
-    else:
-        axe_runner.capture_until(
-            name=f"{path_name}_safari_ready",
-            expectation=AxeStateExpectation(texts=("More",)),
-            timeout_seconds=15,
-        )
+
+    first_run_deadline = time.monotonic() + 5
+    while True:
+        safari_tree = axe_runner.describe_ui()
+        if tree_has_id(safari_tree, "xmark.circle.fill"):
+            axe_runner.tap_id(
+                "xmark.circle.fill",
+                name=f"{path_name}_safari_ready",
+                expectation=AxeStateExpectation(ids=("MoreMenuButton",)),
+                timeout_seconds=15,
+            )
+            break
+        if tree_has_id(safari_tree, "MoreMenuButton"):
+            axe_runner.capture_until(
+                name=f"{path_name}_safari_ready",
+                expectation=AxeStateExpectation(ids=("MoreMenuButton",)),
+                timeout_seconds=15,
+            )
+            break
+        if time.monotonic() >= first_run_deadline:
+            axe_runner.capture_until(
+                name=f"{path_name}_safari_ready",
+                expectation=AxeStateExpectation(ids=("MoreMenuButton",)),
+                timeout_seconds=15,
+            )
+            break
+        time.sleep(0.1)
 
     axe_runner.tap_label(
         "More",

@@ -126,6 +126,7 @@ class AxeRunner:
             name=name,
             expectation=expectation,
             timeout_seconds=timeout_seconds,
+            accept_open_url_confirmation=True,
         )
 
     def tap_id(
@@ -377,6 +378,7 @@ class AxeRunner:
         expectation: AxeStateExpectation,
         timeout_seconds: float,
         poll_seconds: float = 0.15,
+        accept_open_url_confirmation: bool = False,
     ) -> AxeCapturedState:
         """Poll fresh AX trees, persist the terminal tree/screenshot, and assert."""
         deadline = time.monotonic() + timeout_seconds
@@ -385,6 +387,24 @@ class AxeRunner:
 
         while True:
             last_tree = self.describe_ui()
+            if accept_open_url_confirmation and _is_system_open_confirmation(last_tree):
+                self._run(
+                    [
+                        self.axe_binary,
+                        "tap",
+                        "--label",
+                        "Open",
+                        "--element-type",
+                        "Button",
+                        "--wait-timeout",
+                        "2",
+                        "--post-delay",
+                        "0.05",
+                        "--udid",
+                        self.udid,
+                    ]
+                )
+                continue
             failures = _expectation_failures(last_tree, expectation)
             if not failures or time.monotonic() >= deadline:
                 break
@@ -528,6 +548,24 @@ def tree_text(tree: Any) -> str:
             if isinstance(value, str) and value:
                 values.append(value)
     return "\n".join(values)
+
+
+def _is_system_open_confirmation(tree: Any) -> bool:
+    """Return whether iOS is asking to open a custom URL in Newsbuddy."""
+    nodes = list(_iter_nodes(tree))
+    has_prompt = any(
+        node.get("type") == "StaticText"
+        and isinstance(node.get("AXLabel"), str)
+        and node["AXLabel"].startswith("Open in “Newsbuddy”?")
+        for node in nodes
+    )
+    has_open_button = any(
+        node.get("type") == "Button"
+        and node.get("AXLabel") == "Open"
+        and node.get("enabled") is True
+        for node in nodes
+    )
+    return has_prompt and has_open_button
 
 
 def _swipe_up_coordinates(tree: Any) -> tuple[float, float, float, float]:

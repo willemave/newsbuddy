@@ -2,7 +2,39 @@ from __future__ import annotations
 
 import pytest
 
-from tests.ios_e2e.axe_harness import AxeHarnessError, _swipe_up_coordinates
+from tests.ios_e2e.axe_harness import (
+    AxeHarnessError,
+    _is_system_open_confirmation,
+    _swipe_up_coordinates,
+)
+
+
+def test_system_open_confirmation_requires_prompt_and_enabled_open_button() -> None:
+    tree = [
+        {"type": "StaticText", "AXLabel": "Open in “Newsbuddy”?"},
+        {"type": "Button", "AXLabel": "Cancel", "enabled": True},
+        {"type": "Button", "AXLabel": "Open", "enabled": True},
+    ]
+
+    assert _is_system_open_confirmation(tree) is True
+
+
+@pytest.mark.parametrize(
+    "tree",
+    [
+        [{"type": "Button", "AXLabel": "Open", "enabled": True}],
+        [
+            {"type": "StaticText", "AXLabel": "Open in “Other App”?"},
+            {"type": "Button", "AXLabel": "Open", "enabled": True},
+        ],
+        [
+            {"type": "StaticText", "AXLabel": "Open in “Newsbuddy”?"},
+            {"type": "Button", "AXLabel": "Open", "enabled": False},
+        ],
+    ],
+)
+def test_system_open_confirmation_rejects_unrelated_or_incomplete_trees(tree: object) -> None:
+    assert _is_system_open_confirmation(tree) is False
 
 
 def test_swipe_up_coordinates_scale_to_phone_application_frame() -> None:

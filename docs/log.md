@@ -1021,3 +1021,14 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** PostgreSQL integration tests reproduce the exact production failure, a concurrent old-app write during index build, a valid replacement left before rename, and cleanup after retry exhaustion. Focused migration/model/admin/search tests, Ruff, and mypy pass. All 91 focused native iOS tests pass on iPhone 17 Pro, iOS 26.4.1, and all 72 client source contracts pass. The definitive full backend suite passes with 2,863 passed and 40 skipped; the only earlier failures were two independently reproduced stale Learning Deck assertions, whose contracts now match the current product law.
 - **Remaining:** The release workflow must prove the production migration and live health; no direct production data repair is planned.
 - **Commits:** Recorded in the topical release series following `452001b9`.
+
+### 2026-08-26 — `main` — Accept clean-simulator URL confirmations in iOS release tests
+
+- **Status:** Complete locally; release validation in progress.
+- **Scope:** AXe iOS release harness handling for custom URL launches on a newly created iOS 26.5 simulator.
+- **Evidence:** The complete release gate reached an iOS-owned `Open in “Newsbuddy”?` confirmation after `simctl openurl`. Because the harness only waited for the app expectation, the alert remained above later tests and caused unrelated launch assertions to fail. Once accepted, a clean Safari profile also showed its one-time `items in the More menu` popover above the toolbar.
+- **Changes:** Detect the exact Newsbuddy system confirmation during URL assertions and tap its enabled `Open` button before resuming the existing product-state check. Dismiss Safari's identified first-run popover before opening its More menu. Added focused detector tests for the valid URL prompt and unrelated, incomplete, or disabled states.
+- **Decisions:** Keep all product assertions and release flows unchanged; handle only the one-time OS-owned confirmation at the URL boundary.
+- **Validation:** Focused unit, full Python, native iOS, and complete clean-simulator UI release gates pending on the resulting commit.
+- **Remaining:** Commit the harness fix, rerun every release gate, then push and verify the production deployment.
+- **Commits:** Recorded in the topical release series following `6a93f1e9`.
