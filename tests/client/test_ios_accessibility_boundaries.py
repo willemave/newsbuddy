@@ -225,11 +225,11 @@ def test_learning_deck_portrait_chat_is_a_collapsible_flyover() -> None:
         "private func deckRegion", maxsplit=1
     )[0]
 
-    assert "isPortraitChatExpanded = false" in reader_source
+    assert "portraitChatPresentation: LearningDeckChatPresentation = .peek" in reader_source
     assert "LearningDeckChatFlyover(" in portrait_flyover
-    assert "isExpanded: $isPortraitChatExpanded" in portrait_flyover
-    assert "LearningDeckChatFlyover(" in portrait_flyover
+    assert "presentation: $portraitChatPresentation" in portrait_flyover
+    assert "LearningDeckChatHeightPolicy.height(" in portrait_flyover
     assert 'accessibilityIdentifier("learning_deck.chat.peek")' in panel_source
     assert 'accessibilityIdentifier("learning_deck.chat.collapse")' in panel_source
     assert "isPeekable" not in panel_source
-    assert "accessibilityExpandedChatHeight" in reader_source
+    assert "presentation = .peek" in panel_source

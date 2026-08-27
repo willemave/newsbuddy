@@ -232,8 +232,10 @@ def test_public_share_route_serves_latest_artifact_and_disable_revokes(
     shared = client.get(share_url)
     assert shared.status_code == 200
     assert "Shared Learning Deck" in shared.text
-    assert 'data-newsly-learning-deck-controls="controls"' in shared.text
-    assert "data-newsly-learning-deck-fullscreen" in shared.text
+    assert 'data-newsly-learning-deck-controls="style"' in shared.text
+    assert 'data-newsly-learning-deck-controls="script"' in shared.text
+    assert 'data-newsly-learning-deck-controls="controls"' not in shared.text
+    assert "data-newsly-learning-deck-fullscreen" not in shared.text
     assert "data-newsly-learning-deck-next" not in shared.text
     assert "data-newsly-learning-deck-prev" not in shared.text
     notes = client.get(f"{share_url.rstrip('/')}/source-notes")
@@ -247,7 +249,7 @@ def test_public_share_route_serves_latest_artifact_and_disable_revokes(
     private_url = client.post(f"/api/learning/decks/{deck_id}/viewer-url").json()["url"]
     private = client.get(private_url)
     assert private.status_code == 200
-    assert "data-newsly-learning-deck-fullscreen" in private.text
+    assert "data-newsly-learning-deck-fullscreen" not in private.text
     assert "data-newsly-learning-deck-next" not in private.text
     assert "data-newsly-learning-deck-prev" not in private.text
     private_asset = client.get(f"{private_url.rstrip('/')}/assets/theme.css")
