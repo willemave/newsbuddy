@@ -89,6 +89,9 @@ final class BriefingScrollReadTracker {
     private var containerHeight: CGFloat = 0
     private var hasViewportSample = false
     private var readBoundaryY: CGFloat?
+    /// Keeps passage recoverable when viewport, boundary, and lazy-row frame
+    /// callbacks arrive in any order. Reset when this page stops tracking.
+    private var minimumObservedScrollOffset: CGFloat?
 
     func updateConfiguration(
         _ configuration: BriefingReadTrackingConfiguration
@@ -102,6 +105,9 @@ final class BriefingScrollReadTracker {
         pruneRemovedSegments()
         if !isEnabled {
             visibleSegmentIDs.removeAll()
+            minimumObservedScrollOffset = nil
+        } else if hasViewportSample {
+            rememberMinimumScrollOffset(scrollOffset)
         }
         return evaluate()
     }
@@ -130,11 +136,13 @@ final class BriefingScrollReadTracker {
         documentGeneration: Int
     ) -> [Int] {
         guard prepareDocument(generation: documentGeneration) else { return [] }
-        let previousOffset = hasViewportSample ? self.scrollOffset : nil
         self.scrollOffset = scrollOffset
         self.containerHeight = containerHeight
         hasViewportSample = true
-        return evaluate(sweepFrom: previousOffset)
+        if isEnabled {
+            rememberMinimumScrollOffset(scrollOffset)
+        }
+        return evaluate()
     }
 
     private func prepareDocument(generation: Int) -> Bool {
@@ -150,7 +158,13 @@ final class BriefingScrollReadTracker {
         scrollOffset = 0
         containerHeight = 0
         hasViewportSample = false
+        minimumObservedScrollOffset = nil
         return true
+    }
+
+    private func rememberMinimumScrollOffset(_ offset: CGFloat) {
+        guard offset.isFinite else { return }
+        minimumObservedScrollOffset = min(minimumObservedScrollOffset ?? offset, offset)
     }
 
     private func pruneRemovedSegments() {
@@ -160,7 +174,7 @@ final class BriefingScrollReadTracker {
         markedSegmentIDs.formIntersection(validIDs)
     }
 
-    private func evaluate(sweepFrom previousOffset: CGFloat? = nil) -> [Int] {
+    private func evaluate() -> [Int] {
         guard isEnabled else { return [] }
 
         var newlyRead: [Int] = []
@@ -174,7 +188,7 @@ final class BriefingScrollReadTracker {
                       readBoundaryY: readBoundaryY
                   ) else { continue }
 
-            let sweptThroughViewport = previousOffset.map {
+            let sweptThroughViewport = minimumObservedScrollOffset.map {
                 scrollSweepIncludesSegment(
                     frame,
                     from: $0,

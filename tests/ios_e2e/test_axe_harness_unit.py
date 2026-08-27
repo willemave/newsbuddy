@@ -62,6 +62,28 @@ def test_swipe_up_coordinates_honor_offset_application_frame() -> None:
     assert _swipe_up_coordinates(tree) == (225.0, 765.6, 225.0, 253.0)
 
 
+def test_swipe_up_coordinates_support_incremental_drag_distance() -> None:
+    tree = [
+        {
+            "type": "Application",
+            "frame": {"x": 0, "y": 0, "width": 402, "height": 874},
+        }
+    ]
+
+    assert _swipe_up_coordinates(tree, distance_fraction=0.18) == (
+        201.0,
+        699.2,
+        201.0,
+        541.88,
+    )
+
+
+@pytest.mark.parametrize("distance_fraction", [0, -0.1, 0.8, 1])
+def test_swipe_up_coordinates_reject_invalid_distance(distance_fraction: float) -> None:
+    with pytest.raises(ValueError, match="Swipe distance"):
+        _swipe_up_coordinates([], distance_fraction=distance_fraction)
+
+
 @pytest.mark.parametrize(
     "tree",
     [

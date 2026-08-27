@@ -362,9 +362,16 @@ class AxeRunner:
         expectation: AxeStateExpectation,
         name: str,
         timeout_seconds: float = 5,
+        distance_fraction: float = 0.55,
+        duration_seconds: float = 0.35,
     ) -> AxeCapturedState:
         """Scroll the current app frame and prove it remained on the expected path."""
-        start_x, start_y, end_x, end_y = _swipe_up_coordinates(self.describe_ui())
+        if duration_seconds <= 0:
+            raise ValueError("Swipe duration must be positive")
+        start_x, start_y, end_x, end_y = _swipe_up_coordinates(
+            self.describe_ui(),
+            distance_fraction=distance_fraction,
+        )
         self._run(
             [
                 self.axe_binary,
@@ -378,7 +385,7 @@ class AxeRunner:
                 "--end-y",
                 str(end_y),
                 "--duration",
-                "0.35",
+                str(duration_seconds),
                 "--post-delay",
                 "0.1",
                 "--udid",
@@ -646,8 +653,14 @@ def _is_system_open_confirmation(tree: Any) -> bool:
     return has_prompt and has_open_button
 
 
-def _swipe_up_coordinates(tree: Any) -> tuple[float, float, float, float]:
+def _swipe_up_coordinates(
+    tree: Any,
+    *,
+    distance_fraction: float = 0.55,
+) -> tuple[float, float, float, float]:
     """Return a stable vertical swipe scaled to the visible application frame."""
+    if not 0 < distance_fraction < 0.8:
+        raise ValueError("Swipe distance must be between zero and 0.8")
     for node in _iter_nodes(tree):
         if node.get("type") != "Application":
             continue
@@ -663,11 +676,12 @@ def _swipe_up_coordinates(tree: Any) -> tuple[float, float, float, float]:
         if width <= 0 or height <= 0:
             continue
         center_x = x + width * 0.5
+        start_y = y + height * 0.8
         return (
             round(center_x, 3),
-            round(y + height * 0.8, 3),
+            round(start_y, 3),
             round(center_x, 3),
-            round(y + height * 0.25, 3),
+            round(start_y - height * distance_fraction, 3),
         )
     raise AxeHarnessError("AX tree has no usable Application frame for swipe geometry")
 

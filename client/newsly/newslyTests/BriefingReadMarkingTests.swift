@@ -198,6 +198,314 @@ final class BriefingReadMarkingTests: XCTestCase {
         )
     }
 
+    func testIncrementalScrollMarksOnlyAfterStrictBoundaryPassage() {
+        let tracker = configuredReadTracker(segmentIDs: [1])
+        XCTAssertEqual(
+            tracker.updateFrame(
+                CGRect(x: 0, y: 100, width: 100, height: 100),
+                for: 1,
+                documentGeneration: 1
+            ),
+            []
+        )
+
+        for offset in [0.0, 70.0, 120.0, 139.5, 140.0] {
+            XCTAssertEqual(
+                tracker.updateViewport(
+                    scrollOffset: offset,
+                    containerHeight: 580,
+                    documentGeneration: 1
+                ),
+                [],
+                "Offset \(offset) must not pass the strict boundary"
+            )
+        }
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 140.5,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            [1]
+        )
+    }
+
+    func testLateLayoutExpansionDelaysReadUntilExpandedBodyPasses() {
+        let tracker = configuredReadTracker(segmentIDs: [1])
+        XCTAssertEqual(
+            tracker.updateFrame(
+                CGRect(x: 0, y: 100, width: 100, height: 100),
+                for: 1,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateFrame(
+                CGRect(x: 0, y: 100, width: 100, height: 300),
+                for: 1,
+                documentGeneration: 1
+            ),
+            []
+        )
+
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 140.5,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 340,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 340.5,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            [1]
+        )
+    }
+
+    func testScrollBeforeBoundaryMeasurementMarksWhenBoundaryArrives() {
+        let tracker = BriefingScrollReadTracker()
+        XCTAssertEqual(
+            tracker.updateConfiguration(
+                BriefingReadTrackingConfiguration(
+                    documentGeneration: 1,
+                    segmentIDs: [1],
+                    isEnabled: true,
+                    readBoundaryY: nil
+                )
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: -220,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateFrame(
+                CGRect(x: 0, y: 100, width: 100, height: 100),
+                for: 1,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 180,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+
+        XCTAssertEqual(
+            tracker.updateConfiguration(makeReadConfiguration(segmentIDs: [1])),
+            [1]
+        )
+    }
+
+    func testBoundaryBeforeLateFrameStillRecoversPriorTraversal() {
+        let tracker = BriefingScrollReadTracker()
+        XCTAssertEqual(
+            tracker.updateConfiguration(
+                BriefingReadTrackingConfiguration(
+                    documentGeneration: 1,
+                    segmentIDs: [1],
+                    isEnabled: true,
+                    readBoundaryY: nil
+                )
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: -220,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 180,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateConfiguration(makeReadConfiguration(segmentIDs: [1])),
+            []
+        )
+
+        XCTAssertEqual(
+            tracker.updateFrame(
+                CGRect(x: 0, y: 100, width: 100, height: 100),
+                for: 1,
+                documentGeneration: 1
+            ),
+            [1]
+        )
+    }
+
+    func testBoundaryBeforeUsableViewportStillRecoversPriorTraversal() {
+        let tracker = BriefingScrollReadTracker()
+        XCTAssertEqual(
+            tracker.updateConfiguration(
+                BriefingReadTrackingConfiguration(
+                    documentGeneration: 1,
+                    segmentIDs: [1],
+                    isEnabled: true,
+                    readBoundaryY: nil
+                )
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: -220,
+                containerHeight: 0,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateFrame(
+                CGRect(x: 0, y: 100, width: 100, height: 100),
+                for: 1,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 180,
+                containerHeight: 0,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateConfiguration(makeReadConfiguration(segmentIDs: [1])),
+            []
+        )
+
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 180,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            [1]
+        )
+    }
+
+    func testLateBoundaryWithoutTraversalDoesNotMarkInitiallyPastSegment() {
+        let tracker = BriefingScrollReadTracker()
+        XCTAssertEqual(
+            tracker.updateConfiguration(
+                BriefingReadTrackingConfiguration(
+                    documentGeneration: 1,
+                    segmentIDs: [1],
+                    isEnabled: true,
+                    readBoundaryY: nil
+                )
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 180,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateFrame(
+                CGRect(x: 0, y: 100, width: 100, height: 100),
+                for: 1,
+                documentGeneration: 1
+            ),
+            []
+        )
+
+        XCTAssertEqual(
+            tracker.updateConfiguration(makeReadConfiguration(segmentIDs: [1])),
+            []
+        )
+    }
+
+    func testDisablingBeforeBoundaryMeasurementClearsPriorTraversal() {
+        let tracker = BriefingScrollReadTracker()
+        XCTAssertEqual(
+            tracker.updateConfiguration(
+                BriefingReadTrackingConfiguration(
+                    documentGeneration: 1,
+                    segmentIDs: [1],
+                    isEnabled: true,
+                    readBoundaryY: nil
+                )
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: -220,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateFrame(
+                CGRect(x: 0, y: 100, width: 100, height: 100),
+                for: 1,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 180,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateConfiguration(
+                BriefingReadTrackingConfiguration(
+                    documentGeneration: 1,
+                    segmentIDs: [1],
+                    isEnabled: false,
+                    readBoundaryY: nil
+                )
+            ),
+            []
+        )
+
+        XCTAssertEqual(
+            tracker.updateConfiguration(makeReadConfiguration(segmentIDs: [1])),
+            []
+        )
+    }
+
     func testInitialGeometryAlreadyPastBoundaryNeverMarksRead() {
         let tracker = configuredReadTracker(segmentIDs: [1], scrollOffset: 180)
 
@@ -328,6 +636,45 @@ final class BriefingReadMarkingTests: XCTestCase {
         XCTAssertEqual(
             tracker.updateConfiguration(makeReadConfiguration(segmentIDs: [1])),
             []
+        )
+    }
+
+    func testReenabledVisibleSegmentCanMarkOnLaterPassage() {
+        let tracker = configuredReadTracker(segmentIDs: [1])
+        XCTAssertEqual(
+            tracker.updateFrame(
+                CGRect(x: 0, y: 100, width: 100, height: 100),
+                for: 1,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateConfiguration(
+                makeReadConfiguration(segmentIDs: [1], isEnabled: false)
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 0,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            []
+        )
+        XCTAssertEqual(
+            tracker.updateConfiguration(makeReadConfiguration(segmentIDs: [1])),
+            []
+        )
+
+        XCTAssertEqual(
+            tracker.updateViewport(
+                scrollOffset: 140.5,
+                containerHeight: 580,
+                documentGeneration: 1
+            ),
+            [1]
         )
     }
 
