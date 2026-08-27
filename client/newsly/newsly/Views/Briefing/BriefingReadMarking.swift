@@ -1,7 +1,5 @@
 import Foundation
 
-let briefingReadCoordinateSpaceName = "briefing.read-tracking"
-
 func briefingPinnedReadBoundaryY(
     expandedChromeHeight: CGFloat,
     collapsibleChromeHeight: CGFloat
@@ -13,14 +11,34 @@ func briefingPinnedReadBoundaryY(
     return max(expandedChromeHeight - collapsibleChromeHeight, 0)
 }
 
-func briefingSegmentHasPassedReadBoundary(
-    frame: CGRect,
+struct BriefingSegmentViewportState: Equatable {
+    let isVisible: Bool
+    let hasPassedReadBoundary: Bool
+}
+
+func briefingSegmentViewportState(
+    contentFrame: CGRect,
+    scrollOffset: CGFloat,
+    containerHeight: CGFloat,
     readBoundaryY: CGFloat?
-) -> Bool {
+) -> BriefingSegmentViewportState? {
     guard let readBoundaryY,
           readBoundaryY.isFinite,
-          frame.maxY.isFinite else { return false }
-    return frame.maxY < readBoundaryY
+          contentFrame.minY.isFinite,
+          contentFrame.maxY.isFinite,
+          contentFrame.height.isFinite,
+          contentFrame.height > 0,
+          scrollOffset.isFinite,
+          containerHeight.isFinite,
+          containerHeight > 0 else { return nil }
+
+    let screenMinY = contentFrame.minY - scrollOffset
+    let screenMaxY = contentFrame.maxY - scrollOffset
+    let viewportMaxY = containerHeight
+    return BriefingSegmentViewportState(
+        isVisible: screenMaxY > readBoundaryY && screenMinY < viewportMaxY,
+        hasPassedReadBoundary: screenMaxY < readBoundaryY
+    )
 }
 
 /// `ScrollGeometry.containerSize` excludes the top content inset that places
@@ -44,31 +62,150 @@ func briefingTrailingReadClearance(
     )
 }
 
-struct BriefingReadBoundaryTracker {
-    private var hasObservedBeforeBoundary = false
-    private var didMark = false
-
-    mutating func update(hasPassedBoundary: Bool, isEnabled: Bool) -> Bool {
-        guard isEnabled else {
-            hasObservedBeforeBoundary = false
-            return false
-        }
-        guard !didMark else { return false }
-
-        if !hasPassedBoundary {
-            hasObservedBeforeBoundary = true
-            return false
-        }
-
-        guard hasObservedBeforeBoundary else { return false }
-        didMark = true
-        return true
-    }
-}
-
-struct BriefingLensContentIdentity: Hashable {
+struct BriefingLensContentIdentity: Hashable, Sendable {
     let lensKey: String
     let generation: Int
+}
+
+struct BriefingReadTrackingConfiguration: Equatable {
+    let documentGeneration: Int
+    let segmentIDs: [Int]
+    let isEnabled: Bool
+    let readBoundaryY: CGFloat?
+}
+
+/// Owns read passage at the scroll-view level. Segment frames are measured in
+/// the content's stable coordinate space, so a lazy row can be recycled before
+/// its full body crosses the pinned boundary without losing the crossing.
+@MainActor
+final class BriefingScrollReadTracker {
+    private var documentGeneration: Int?
+    private var segmentIDs: [Int] = []
+    private var framesBySegmentID: [Int: CGRect] = [:]
+    private var visibleSegmentIDs: Set<Int> = []
+    private var markedSegmentIDs: Set<Int> = []
+    private var isEnabled = false
+    private var scrollOffset: CGFloat = 0
+    private var containerHeight: CGFloat = 0
+    private var hasViewportSample = false
+    private var readBoundaryY: CGFloat?
+
+    func updateConfiguration(
+        _ configuration: BriefingReadTrackingConfiguration
+    ) -> [Int] {
+        guard prepareDocument(generation: configuration.documentGeneration) else {
+            return []
+        }
+        segmentIDs = configuration.segmentIDs
+        isEnabled = configuration.isEnabled
+        readBoundaryY = configuration.readBoundaryY
+        pruneRemovedSegments()
+        if !isEnabled {
+            visibleSegmentIDs.removeAll()
+        }
+        return evaluate()
+    }
+
+    func updateFrame(
+        _ frame: CGRect,
+        for segmentID: Int,
+        documentGeneration: Int
+    ) -> [Int] {
+        guard prepareDocument(generation: documentGeneration) else { return [] }
+        guard frame.minY.isFinite,
+              frame.maxY.isFinite,
+              frame.height.isFinite,
+              frame.height > 0 else {
+            framesBySegmentID.removeValue(forKey: segmentID)
+            visibleSegmentIDs.remove(segmentID)
+            return []
+        }
+        framesBySegmentID[segmentID] = frame
+        return evaluate()
+    }
+
+    func updateViewport(
+        scrollOffset: CGFloat,
+        containerHeight: CGFloat,
+        documentGeneration: Int
+    ) -> [Int] {
+        guard prepareDocument(generation: documentGeneration) else { return [] }
+        let previousOffset = hasViewportSample ? self.scrollOffset : nil
+        self.scrollOffset = scrollOffset
+        self.containerHeight = containerHeight
+        hasViewportSample = true
+        return evaluate(sweepFrom: previousOffset)
+    }
+
+    private func prepareDocument(generation: Int) -> Bool {
+        if let documentGeneration {
+            guard generation >= documentGeneration else { return false }
+            guard generation != documentGeneration else { return true }
+        }
+        documentGeneration = generation
+        segmentIDs = []
+        framesBySegmentID = [:]
+        visibleSegmentIDs = []
+        markedSegmentIDs = []
+        scrollOffset = 0
+        containerHeight = 0
+        hasViewportSample = false
+        return true
+    }
+
+    private func pruneRemovedSegments() {
+        let validIDs = Set(segmentIDs)
+        framesBySegmentID = framesBySegmentID.filter { validIDs.contains($0.key) }
+        visibleSegmentIDs.formIntersection(validIDs)
+        markedSegmentIDs.formIntersection(validIDs)
+    }
+
+    private func evaluate(sweepFrom previousOffset: CGFloat? = nil) -> [Int] {
+        guard isEnabled else { return [] }
+
+        var newlyRead: [Int] = []
+        for segmentID in segmentIDs {
+            guard !markedSegmentIDs.contains(segmentID),
+                  let frame = framesBySegmentID[segmentID],
+                  let state = briefingSegmentViewportState(
+                      contentFrame: frame,
+                      scrollOffset: scrollOffset,
+                      containerHeight: containerHeight,
+                      readBoundaryY: readBoundaryY
+                  ) else { continue }
+
+            let sweptThroughViewport = previousOffset.map {
+                scrollSweepIncludesSegment(
+                    frame,
+                    from: $0,
+                    to: scrollOffset
+                )
+            } ?? false
+            if state.isVisible || sweptThroughViewport {
+                visibleSegmentIDs.insert(segmentID)
+            }
+            guard state.hasPassedReadBoundary,
+                  visibleSegmentIDs.remove(segmentID) != nil else { continue }
+            markedSegmentIDs.insert(segmentID)
+            newlyRead.append(segmentID)
+        }
+        return newlyRead
+    }
+
+    private func scrollSweepIncludesSegment(
+        _ frame: CGRect,
+        from previousOffset: CGFloat,
+        to currentOffset: CGFloat
+    ) -> Bool {
+        guard currentOffset > previousOffset,
+              let readBoundaryY,
+              readBoundaryY.isFinite,
+              containerHeight.isFinite,
+              containerHeight > 0 else { return false }
+        let entryOffset = frame.minY - containerHeight
+        let passageOffset = frame.maxY - readBoundaryY
+        return currentOffset > entryOffset && previousOffset < passageOffset
+    }
 }
 
 enum BriefingLensDocumentGenerationPolicy {

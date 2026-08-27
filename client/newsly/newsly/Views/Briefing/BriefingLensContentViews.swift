@@ -237,6 +237,7 @@ struct BriefingLensPageView: View, Equatable {
     @State private var isPinned = false
     @State private var containerHeight: CGFloat = 0
     @State private var hasReportedFirstPassage = false
+    @State private var readTracker = BriefingScrollReadTracker()
 
     private static let topAnchor = "briefing.lens.top"
 
@@ -264,13 +265,30 @@ struct BriefingLensPageView: View, Equatable {
             && lhs.topContentInset == rhs.topContentInset
     }
 
-    /// The scroll facts the chrome cares about. `collapse` is clamped to the
-    /// collapsible chrome height, so it only streams updates during the
-    /// collapse window and stays constant while reading below it.
+    /// One scroll observer owns both chrome movement and read passage. The
+    /// exact offset feeds a non-observable tracker, so steady scrolling does
+    /// not invalidate the page unless a segment actually becomes read.
     private struct ScrollProbe: Equatable {
         var collapse: CGFloat = 0
         var step = 0
         var containerHeight: CGFloat = 0
+        var readOffset: CGFloat = 0
+    }
+
+    private var contentIdentity: BriefingLensContentIdentity {
+        BriefingLensContentIdentity(
+            lensKey: lensKey,
+            generation: documentGeneration
+        )
+    }
+
+    private var readTrackingConfiguration: BriefingReadTrackingConfiguration {
+        BriefingReadTrackingConfiguration(
+            documentGeneration: documentGeneration,
+            segmentIDs: renderModel?.segments.map(\.id) ?? [],
+            isEnabled: isReadTrackingEnabled,
+            readBoundaryY: readBoundaryY
+        )
     }
 
     /// Guarantees every page can scroll far enough to fully collapse the
@@ -319,13 +337,11 @@ struct BriefingLensPageView: View, Equatable {
                                         onFirstPassageVisible()
                                     }
                                     .id(segment.id)
-                                    .briefingSegmentReadMarker(
-                                        isEnabled: isReadTrackingEnabled,
-                                        readBoundaryY: readBoundaryY,
-                                        onBoundaryPassed: {
-                                            onMarkSegmentSeen(segment)
-                                        }
-                                    )
+                                    .onGeometryChange(for: CGRect.self) { proxy in
+                                        proxy.frame(in: .named(contentIdentity))
+                                    } action: { _, frame in
+                                        recordSegmentFrame(frame, segmentID: segment.id)
+                                    }
                                 }
                                 .padding(.horizontal, Spacing.appHorizontalMargin)
                             }
@@ -348,6 +364,7 @@ struct BriefingLensPageView: View, Equatable {
                         }
                         .padding(.top, 4)
                         .frame(minHeight: minContentHeight, alignment: .top)
+                        .coordinateSpace(name: contentIdentity)
                     }
                     .scrollsToTopOnRequest(
                         scrollToTopRequest,
@@ -355,12 +372,7 @@ struct BriefingLensPageView: View, Equatable {
                         using: proxy,
                         isEnabled: shouldScrollToTop
                     )
-                    .id(
-                        BriefingLensContentIdentity(
-                            lensKey: lensKey,
-                            generation: documentGeneration
-                        )
-                    )
+                    .id(contentIdentity)
                     .contentMargins(.top, topContentInset)
                     .contentMargins(.bottom, 40)
                     .bottomScreenEdgeFade(fadeHeight: 32)
@@ -369,17 +381,24 @@ struct BriefingLensPageView: View, Equatable {
                     }
                     .onScrollGeometryChange(for: ScrollProbe.self) { geometry in
                         let offset = geometry.contentOffset.y + geometry.contentInsets.top
-                        // Pixel-align so the chrome never lands on sub-pixel
-                        // heights (text shimmer), then clamp to the collapse
-                        // window so steady reading streams no updates at all.
+                        // Pixel-align the chrome to prevent text shimmer. Read
+                        // passage uses the raw content offset so it stays in
+                        // the same coordinate system as the stored row frames.
                         let scale = max(displayScale, 1)
                         let pixelAligned = (offset * scale).rounded() / scale
                         return ScrollProbe(
                             collapse: min(max(pixelAligned, 0), collapsibleChromeHeight),
                             step: Int((offset / Self.scrollStep).rounded(.down)),
-                            containerHeight: geometry.containerSize.height
+                            containerHeight: geometry.containerSize.height,
+                            readOffset: geometry.contentOffset.y
                         )
                     } action: { oldProbe, probe in
+                        updateReadViewport(probe)
+                        guard oldProbe.collapse != probe.collapse
+                                || oldProbe.step != probe.step
+                                || oldProbe.containerHeight != probe.containerHeight else {
+                            return
+                        }
                         if probe.step > oldProbe.step, probe.step >= 1 {
                             onScrolledDown()
                         }
@@ -420,6 +439,9 @@ struct BriefingLensPageView: View, Equatable {
         .onChange(of: documentGeneration) { _, _ in
             hasReportedFirstPassage = false
         }
+        .onChange(of: readTrackingConfiguration, initial: true) { _, configuration in
+            updateReadConfiguration(configuration)
+        }
     }
 
     @ViewBuilder
@@ -442,6 +464,44 @@ struct BriefingLensPageView: View, Equatable {
                 .frame(maxWidth: .infinity)
                 .accessibilityLabel("Loading more briefing stories")
                 .accessibilityIdentifier("briefing.lens_continuation_loading.\(lensKey)")
+        }
+    }
+
+    private func recordSegmentFrame(_ frame: CGRect, segmentID: Int) {
+        markSegmentsSeen(
+            readTracker.updateFrame(
+                frame,
+                for: segmentID,
+                documentGeneration: documentGeneration
+            )
+        )
+    }
+
+    private func updateReadViewport(_ probe: ScrollProbe) {
+        markSegmentsSeen(
+            readTracker.updateViewport(
+                scrollOffset: probe.readOffset,
+                containerHeight: probe.containerHeight,
+                documentGeneration: documentGeneration
+            )
+        )
+    }
+
+    private func updateReadConfiguration(
+        _ configuration: BriefingReadTrackingConfiguration
+    ) {
+        markSegmentsSeen(readTracker.updateConfiguration(configuration))
+    }
+
+    private func markSegmentsSeen(_ segmentIDs: [Int]) {
+        guard !segmentIDs.isEmpty, let renderModel else { return }
+        let segmentsByID = Dictionary(
+            uniqueKeysWithValues: renderModel.segments.map { ($0.id, $0.segment) }
+        )
+        for segmentID in segmentIDs {
+            if let segment = segmentsByID[segmentID] {
+                onMarkSegmentSeen(segment)
+            }
         }
     }
 }
@@ -662,55 +722,6 @@ private struct BriefingSegmentView: View {
 
     private func source(for block: APIBriefingBlock) -> APIBriefingSource? {
         block.sourceKey.flatMap { model.sourcesByKey[$0] }
-    }
-}
-
-private struct BriefingSegmentReadMarker: ViewModifier {
-    let isEnabled: Bool
-    let readBoundaryY: CGFloat?
-    let onBoundaryPassed: () -> Void
-
-    @State private var tracker = BriefingReadBoundaryTracker()
-    @State private var hasPassedBoundary = false
-
-    func body(content: Content) -> some View {
-        content
-            .onGeometryChange(for: Bool.self) { proxy in
-                briefingSegmentHasPassedReadBoundary(
-                    frame: proxy.frame(in: .named(briefingReadCoordinateSpaceName)),
-                    readBoundaryY: readBoundaryY
-                )
-            } action: { _, passed in
-                hasPassedBoundary = passed
-                markReadIfNeeded(hasPassedBoundary: passed, isEnabled: isEnabled)
-            }
-            .onChange(of: isEnabled, initial: true) { _, enabled in
-                markReadIfNeeded(hasPassedBoundary: hasPassedBoundary, isEnabled: enabled)
-            }
-    }
-
-    private func markReadIfNeeded(hasPassedBoundary: Bool, isEnabled: Bool) {
-        guard tracker.update(
-            hasPassedBoundary: hasPassedBoundary,
-            isEnabled: isEnabled
-        ) else { return }
-        onBoundaryPassed()
-    }
-}
-
-private extension View {
-    func briefingSegmentReadMarker(
-        isEnabled: Bool,
-        readBoundaryY: CGFloat?,
-        onBoundaryPassed: @escaping () -> Void
-    ) -> some View {
-        modifier(
-            BriefingSegmentReadMarker(
-                isEnabled: isEnabled,
-                readBoundaryY: readBoundaryY,
-                onBoundaryPassed: onBoundaryPassed
-            )
-        )
     }
 }
 

@@ -235,7 +235,6 @@ struct BriefingView: View {
 
             headerChrome
         }
-        .coordinateSpace(name: briefingReadCoordinateSpaceName)
     }
 
     @ViewBuilder
