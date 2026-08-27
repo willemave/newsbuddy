@@ -55,11 +55,11 @@ from app.services.x_bookmark_destinations import (
     repair_x_bookmark_destinations,
 )
 from app.utils.image_urls import build_content_image_url, build_thumbnail_url
+from app.utils.json_sanitization import sanitize_json_value
 
 DEFAULT_ROW_LIMIT = 200
 MAX_ROW_LIMIT = 1000
 ESCAPED_NUL_JSON_PATTERN = r"%\\u0000%"
-_ALLOWED_CONTROL_CHARACTERS = {"\n", "\r", "\t"}
 ADMIN_IMAGE_REPAIR_PAYLOAD = {"source": "admin.fix.regenerate-images", "manual": True}
 
 
@@ -1194,31 +1194,8 @@ def _select_malformed_content_rows(
 
 def _sanitize_json_text(raw_json: str) -> str:
     parsed = json.loads(raw_json)
-    sanitized = _sanitize_json_value(parsed)
+    sanitized = sanitize_json_value(parsed)
     return json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-
-
-def _sanitize_json_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            _strip_disallowed_control_characters(str(key)): _sanitize_json_value(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_sanitize_json_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_sanitize_json_value(item) for item in value]
-    if isinstance(value, str):
-        return _strip_disallowed_control_characters(value)
-    return value
-
-
-def _strip_disallowed_control_characters(value: str) -> str:
-    return "".join(
-        character
-        for character in value
-        if ord(character) >= 32 or character in _ALLOWED_CONTROL_CHARACTERS
-    )
 
 
 def _iter_logs(context: RemoteContext, *, source: str) -> Iterator[dict[str, Any]]:

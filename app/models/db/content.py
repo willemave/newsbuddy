@@ -17,6 +17,7 @@ from app.models.contracts import (
     ContentStatus,
 )
 from app.models.db.common import _utcnow
+from app.models.db.json_types import SanitizedJSON
 from app.utils.summary_utils import extract_short_summary
 
 
@@ -48,7 +49,7 @@ class Content(Base):
     # Type-specific data stored as JSON
     # For articles: author, content, publish_date, source, internal_links
     # For podcasts: audio_url, transcript, duration, episode_number
-    content_metadata = Column(JSON, default=dict, nullable=False)
+    content_metadata = Column(SanitizedJSON(), default=dict, nullable=False)
     search_text = Column(Text, nullable=True)
 
     # Common timestamps
