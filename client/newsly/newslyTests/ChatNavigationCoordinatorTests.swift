@@ -112,4 +112,17 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.presentedRoute, requestedRoute)
         XCTAssertNil(coordinator.queuedRoute)
     }
+
+    func testContentDetailRouteCarriesNavigationReplacementIntentUntilPresentation() {
+        let coordinator = ChatNavigationCoordinator.shared
+        coordinator.clear()
+        let route = ChatSessionRoute(sessionId: 42)
+
+        coordinator.openReplacingCurrentNavigation(route)
+
+        XCTAssertEqual(coordinator.queuedRoute, route)
+        XCTAssertTrue(coordinator.queuedRouteReplacesCurrentNavigation)
+        XCTAssertTrue(coordinator.beginPresentation(route, replacingPresented: true))
+        XCTAssertFalse(coordinator.queuedRouteReplacesCurrentNavigation)
+    }
 }

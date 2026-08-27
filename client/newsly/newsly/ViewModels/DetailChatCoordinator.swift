@@ -22,7 +22,7 @@ protocol DetailChatServicing: AnyObject {
 
 @MainActor
 protocol ChatRouteOpening: AnyObject {
-    func open(_ route: ChatSessionRoute)
+    func openReplacingCurrentNavigation(_ route: ChatSessionRoute)
 }
 
 extension ChatService: DetailChatServicing {}
@@ -201,7 +201,7 @@ final class DetailChatCoordinator {
 
     func open(_ route: ChatSessionRoute) {
         chatSessionManager.stopTracking(sessionId: route.sessionId)
-        chatRouter.open(route)
+        chatRouter.openReplacingCurrentNavigation(route)
     }
 
     private func performChatStart(

@@ -106,6 +106,7 @@ def test_voice_dictation_view_models_use_event_coordinator() -> None:
 
 def test_chat_route_queue_is_acknowledged_only_after_root_presentation() -> None:
     content_source = (APP_ROOT / "ContentView.swift").read_text()
+    content_detail_source = (APP_ROOT / "Views/ContentDetailView.swift").read_text()
     coordinator_source = (APP_ROOT / "Services/ChatNavigationCoordinator.swift").read_text()
     root_tabs_source = (APP_ROOT / "Views/RootTabs.swift").read_text()
 
@@ -118,6 +119,7 @@ def test_chat_route_queue_is_acknowledged_only_after_root_presentation() -> None
     assert begin < presentation
     assert "let presentedRoute = chatNavigation.presentedRoute" in content_source
     assert "chatNavigation.acknowledgePresented(presentedRoute)" in content_source
+    assert "chatNavigation.queuedRouteReplacesCurrentNavigation" in content_source
     knowledge_call = content_source[
         content_source.index("KnowledgeTab(") : content_source.index(
             ".environment(", content_source.index("KnowledgeTab(")
@@ -141,6 +143,18 @@ def test_chat_route_queue_is_acknowledged_only_after_root_presentation() -> None
     assert knowledge_path_change.count("drainPendingChatRoute()") == 1
     assert knowledge_path_change.index("drainPendingChatRoute()") > knowledge_path_change.index(
         "chatNavigation.acknowledgePresented(presentedRoute)"
+    )
+    detail_handoff = content_detail_source[
+        content_detail_source.index("private func openGlobalChat") : content_detail_source.index(
+            "private func requestInitialCommentsScrollIfNeeded",
+            content_detail_source.index("private func openGlobalChat"),
+        )
+    ]
+    assert "chatCoordinator.open(route)" in detail_handoff
+    assert "dismiss()" not in detail_handoff
+    assert (
+        "chatRouter.openReplacingCurrentNavigation(route)"
+        in (APP_ROOT / "ViewModels/DetailChatCoordinator.swift").read_text()
     )
 
 

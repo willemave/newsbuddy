@@ -215,10 +215,13 @@ struct ContentView: View {
         }
         let replacesBackgroundChat = chatNavigation.presentedRoute != nil
             && tabCoordinator.selectedTab != .knowledge
-        guard knowledgePath.isEmpty || replacesBackgroundChat else { return }
+        let replacesActiveNavigation = chatNavigation.queuedRouteReplacesCurrentNavigation
+        guard knowledgePath.isEmpty || replacesBackgroundChat || replacesActiveNavigation else {
+            return
+        }
         guard chatNavigation.beginPresentation(
             route,
-            replacingPresented: replacesBackgroundChat
+            replacingPresented: replacesBackgroundChat || replacesActiveNavigation
         ) else { return }
         logger.info("[Navigation] openChatSession sessionId=\(route.sessionId, privacy: .public)")
         presentChatSession(route)

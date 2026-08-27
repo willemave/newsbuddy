@@ -642,7 +642,6 @@ struct ContentDetailView: View {
     private func openGlobalChat(_ route: ChatSessionRoute?) {
         guard let route else { return }
         activeSheet = nil
-        dismiss()
         chatCoordinator.open(route)
     }
 
