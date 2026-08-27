@@ -309,6 +309,7 @@ struct KnowledgeSavedRow: View {
             }
             .frame(width: imageSize.width, height: imageSize.height)
         }
+        .transaction { $0.animation = nil }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)

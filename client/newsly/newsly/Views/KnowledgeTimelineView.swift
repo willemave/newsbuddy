@@ -19,6 +19,7 @@ struct KnowledgeView: View {
     @State private var settings = AppSettings.shared
     @State private var composerText = ""
     @State private var deckReaderDestination: LearningDeckReaderDestination?
+    @State private var showsInitialLoadingIndicator = false
     @FocusState private var isComposerFocused: Bool
 
     private static let topAnchor = "knowledge.top"
@@ -49,6 +50,10 @@ struct KnowledgeView: View {
 
     private var trimmedComposerText: String {
         composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isWaitingForInitialTimeline: Bool {
+        viewModel.isLoading && viewModel.timeline.isEmpty
     }
 
     var body: some View {
@@ -101,6 +106,9 @@ struct KnowledgeView: View {
             async let screenLoad: Void = viewModel.load()
             async let voiceRefresh: Void = viewModel.chats.checkAndRefreshVoiceDictation()
             _ = await (screenLoad, voiceRefresh)
+        }
+        .task(id: isWaitingForInitialTimeline) {
+            await updateInitialLoadingIndicator()
         }
         .task(id: viewModel.chats.hasActiveChatWork) {
             await viewModel.chats.pollActiveChatWork()
@@ -193,15 +201,17 @@ struct KnowledgeView: View {
     private var timelineContent: some View {
         let items = viewModel.timeline
         if viewModel.isLoading && items.isEmpty {
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text("Loading knowledge")
-                    .font(.terracottaBodyMedium)
-                    .foregroundStyle(Color.onSurfaceSecondary)
+            if showsInitialLoadingIndicator {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading knowledge")
+                        .font(.terracottaBodyMedium)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                }
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.vertical, 20)
+                .appListRow()
             }
-            .padding(.horizontal, Spacing.appHorizontalMargin)
-            .padding(.vertical, 20)
-            .appListRow()
         } else if items.isEmpty {
             EmptyStateView(
                 icon: "books.vertical",
@@ -239,6 +249,21 @@ struct KnowledgeView: View {
                 .appListRow()
             }
         }
+    }
+
+    private func updateInitialLoadingIndicator() async {
+        guard isWaitingForInitialTimeline else {
+            showsInitialLoadingIndicator = false
+            return
+        }
+        showsInitialLoadingIndicator = false
+        do {
+            try await Task.sleep(for: .milliseconds(250))
+        } catch {
+            return
+        }
+        guard isWaitingForInitialTimeline, !Task.isCancelled else { return }
+        showsInitialLoadingIndicator = true
     }
 
     @ViewBuilder
