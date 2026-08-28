@@ -41,6 +41,8 @@ DEFAULT_RUNWARE_INFOGRAPHIC_MODEL = RUNWARE_INFOGRAPHIC_MODEL_SPEC
 RUNWARE_API_URL = "https://api.runware.ai/v1"
 RUNWARE_INFOGRAPHIC_WIDTH = 1024
 RUNWARE_INFOGRAPHIC_HEIGHT = 576
+RUNWARE_SEEDREAM_INFOGRAPHIC_WIDTH = 2848
+RUNWARE_SEEDREAM_INFOGRAPHIC_HEIGHT = 1600
 RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT = load_prompt("images/infographic#runware_negative")
 RUNWARE_INLINE_RETRY_ATTEMPTS = 2
 
@@ -882,21 +884,7 @@ class ImageGenerationService:
                     "Authorization": f"Bearer {self.runware_api_key}",
                     "Content-Type": "application/json",
                 },
-                json=[
-                    {
-                        "taskType": "imageInference",
-                        "taskUUID": task_uuid,
-                        "includeCost": True,
-                        "outputType": "URL",
-                        "outputFormat": "PNG",
-                        "positivePrompt": prompt,
-                        "negativePrompt": RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
-                        "model": model,
-                        "numberResults": 1,
-                        "width": RUNWARE_INFOGRAPHIC_WIDTH,
-                        "height": RUNWARE_INFOGRAPHIC_HEIGHT,
-                    }
-                ],
+                json=[_build_runware_inference_request(prompt, model, task_uuid)],
                 timeout=180,
             )
         except requests.RequestException as exc:
@@ -952,6 +940,31 @@ class ImageGenerationService:
         with Image.open(BytesIO(image_bytes)) as img:
             img.verify()
         return image_bytes
+
+
+def _build_runware_inference_request(
+    prompt: str,
+    model: str,
+    task_uuid: str,
+) -> dict[str, Any]:
+    is_seedream = model == DEFAULT_RUNWARE_INFOGRAPHIC_MODEL
+    request: dict[str, Any] = {
+        "taskType": "imageInference",
+        "taskUUID": task_uuid,
+        "includeCost": True,
+        "outputType": "URL",
+        "outputFormat": "PNG",
+        "positivePrompt": prompt,
+        "model": model,
+        "numberResults": 1,
+        "width": RUNWARE_SEEDREAM_INFOGRAPHIC_WIDTH if is_seedream else RUNWARE_INFOGRAPHIC_WIDTH,
+        "height": (
+            RUNWARE_SEEDREAM_INFOGRAPHIC_HEIGHT if is_seedream else RUNWARE_INFOGRAPHIC_HEIGHT
+        ),
+    }
+    if not is_seedream:
+        request["negativePrompt"] = RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT
+    return request
 
 
 def _resolve_image_models(primary_model: str, fallback_model: str | None) -> list[str]:

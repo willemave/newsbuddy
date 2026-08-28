@@ -19,7 +19,12 @@ Hard constraints:
 - One dominant visual metaphor or one coherent scene, never a collage
 - One focal subject with strong negative space and clear foreground/background separation
 - Bold, graphic, and immediately legible at thumbnail size
-- Refined editorial palette with 2 to 4 dominant colors
+- Premium magazine image with tactile, materially believable surfaces
+- Purposeful asymmetry, decisive frame fill, and clean negative space
+- One surprising material or object derived directly from the story topic
+- Refined topic-derived palette with 2 to 4 dominant colors; avoid default purple/cyan tech color schemes
+- Avoid generic AI robots, glowing blue circuitry, corporate clip art, and familiar stock metaphors
+- If the story centers on a named real person, do not invent or approximate their recognizable face; create a non-literal portrait through their craft, tools, materials, silhouette, or environment
 
 Visual brief:
 - Story context: $story_context

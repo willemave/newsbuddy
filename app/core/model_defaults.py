@@ -19,4 +19,4 @@ DEEP_RESEARCH_MODEL_NAME = "o4-mini-deep-research-2025-06-26"
 DEEP_RESEARCH_MODEL_SPEC = f"deep_research:{DEEP_RESEARCH_MODEL_NAME}"
 
 IMAGE_GENERATION_MODEL_NAME = "gemini-3.1-flash-image-preview"
-RUNWARE_INFOGRAPHIC_MODEL_SPEC = "runware:101@1"
+RUNWARE_INFOGRAPHIC_MODEL_SPEC = "bytedance:seedream@5.0-lite"

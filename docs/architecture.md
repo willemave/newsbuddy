@@ -1211,9 +1211,9 @@ Stored output lands in `content_discussions` for long-form/legacy content and `n
 
 ### 10.9 Image generation
 
-`app/services/image_generation.py` uses Google Gemini and optional Runware generation to create:
+`app/services/image_generation.py` uses Google Gemini and Runware generation to create:
 
-- editorial infographics for articles and podcasts
+- 2K Seedream editorial images for articles and podcasts, with Google available as a configured fallback
 - news thumbnails
 - derivative resized assets
 

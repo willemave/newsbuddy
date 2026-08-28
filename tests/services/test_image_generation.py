@@ -200,8 +200,23 @@ def test_build_infographic_prompt_builds_long_gemini_editorial_style() -> None:
     assert "Visual metaphor:" in prompt
     assert "Scene direction:" in prompt
     assert "Supporting cues:" in prompt
+    assert "tactile, materially believable surfaces" in prompt
+    assert "avoid default purple/cyan tech color schemes" in prompt
+    assert "do not invent or approximate their recognizable face" in prompt
     assert "Story title:" not in prompt
     assert "Description:" not in prompt
+
+
+def test_seedream_infographic_uses_native_2k_size_without_negative_prompt() -> None:
+    assert image_generation.DEFAULT_RUNWARE_INFOGRAPHIC_MODEL == "bytedance:seedream@5.0-lite"
+    request = image_generation._build_runware_inference_request(
+        prompt="Editorial image",
+        model=image_generation.DEFAULT_RUNWARE_INFOGRAPHIC_MODEL,
+        task_uuid="5df57572-cf78-4fd3-9e16-d0a1cc5325fd",
+    )
+    assert request["width"] == image_generation.RUNWARE_SEEDREAM_INFOGRAPHIC_WIDTH
+    assert request["height"] == image_generation.RUNWARE_SEEDREAM_INFOGRAPHIC_HEIGHT
+    assert "negativePrompt" not in request
 
 
 def test_generate_infographic_uses_runware_provider(

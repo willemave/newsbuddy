@@ -607,6 +607,7 @@ def _resolve_unit_pricing(*, provider: str, model: str) -> UnitPricing | None:
         "x:posts.read": UnitPricing(resource_usd=settings.x_posts_read_cost_usd),
         "x:users.read": UnitPricing(resource_usd=settings.x_users_read_cost_usd),
         "runware:runware:101@1": UnitPricing(request_usd=0.0038),
+        "runware:bytedance:seedream@5.0-lite": UnitPricing(request_usd=0.035),
         "firecrawl:scrape-v2": UnitPricing(resource_usd=settings.firecrawl_credit_cost_usd),
         "elevenlabs:eleven_flash_v2_5": UnitPricing(resource_usd=50.00 / 1_000_000),
     }

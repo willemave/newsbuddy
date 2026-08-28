@@ -336,7 +336,7 @@ class Settings(BaseSettings):
     google_cloud_location: str = "global"
     image_generation_model: str = IMAGE_GENERATION_MODEL_NAME
     image_generation_fallback_model: str | None = None
-    infographic_generation_provider: Literal["google", "runware"] = "google"
+    infographic_generation_provider: Literal["google", "runware"] = "runware"
     infographic_generation_model: str | None = None
     infographic_generation_fallback_model: str | None = None
     runware_api_key: str | None = None
