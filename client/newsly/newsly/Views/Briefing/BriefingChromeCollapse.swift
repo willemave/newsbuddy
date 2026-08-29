@@ -19,6 +19,10 @@ final class BriefingChromeCollapseModel {
         guard collapseByLens[key] != value else { return }
         collapseByLens[key] = value
     }
+
+    func resetCollapse(forLens key: String) {
+        collapseByLens.removeValue(forKey: key)
+    }
 }
 
 /// Hosts one collapsible piece of the briefing header. The content keeps its

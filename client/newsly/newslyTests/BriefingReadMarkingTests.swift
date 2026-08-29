@@ -846,6 +846,17 @@ final class BriefingReadMarkingTests: XCTestCase {
         )
     }
 
+    func testDocumentReplacementResetsOnlyTheReplacedLensCollapse() {
+        let chromeCollapse = BriefingChromeCollapseModel()
+        chromeCollapse.setCollapse(120, forLens: "podcasts")
+        chromeCollapse.setCollapse(80, forLens: "articles")
+
+        chromeCollapse.resetCollapse(forLens: "podcasts")
+
+        XCTAssertEqual(chromeCollapse.collapse(forLens: "podcasts"), 0)
+        XCTAssertEqual(chromeCollapse.collapse(forLens: "articles"), 80)
+    }
+
     func testDocumentGenerationPolicyPreservesOnlyEqualOrAppendedIDs() {
         XCTAssertTrue(
             BriefingLensDocumentGenerationPolicy.preservesGeneration(

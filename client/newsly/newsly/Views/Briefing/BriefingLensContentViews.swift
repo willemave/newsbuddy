@@ -437,7 +437,7 @@ struct BriefingLensPageView: View, Equatable {
             }
         }
         .onChange(of: documentGeneration) { _, _ in
-            hasReportedFirstPassage = false
+            resetPresentationForDocumentReplacement()
         }
         .onChange(of: readTrackingConfiguration, initial: true) { _, configuration in
             updateReadConfiguration(configuration)
@@ -491,6 +491,13 @@ struct BriefingLensPageView: View, Equatable {
         _ configuration: BriefingReadTrackingConfiguration
     ) {
         markSegmentsSeen(readTracker.updateConfiguration(configuration))
+    }
+
+    private func resetPresentationForDocumentReplacement() {
+        hasReportedFirstPassage = false
+        chromeCollapse.resetCollapse(forLens: lensKey)
+        isPinned = false
+        onSetHeaderPinned(false)
     }
 
     private func markSegmentsSeen(_ segmentIDs: [Int]) {
