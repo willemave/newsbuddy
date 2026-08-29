@@ -15,6 +15,7 @@ def test_responsive_layout_profile_owns_prompt_and_viewer_values() -> None:
     assert prompt_values == {
         "responsive_layout_meta_tag": ('<meta name="newsly-deck-layout" content="responsive-v2">'),
         "responsive_layout_version": "responsive-v2",
+        "reveal_cdn_base_url": "https://cdn.jsdelivr.net/npm/reveal.js@6.0.1",
         "portrait_canvas": "720 × 1280",
         "landscape_canvas": "1280 × 720",
     }

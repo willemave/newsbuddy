@@ -61,6 +61,7 @@ extension LearningDeck {
             shareEnabled: apiResponse.shareEnabled,
             viewerAvailable: apiResponse.viewerAvailable,
             sourceNotesAvailable: apiResponse.sourceNotesAvailable,
+            thumbnailURL: apiResponse.thumbnailUrl,
             latestSuccessfulRunId: apiResponse.latestSuccessfulRunId,
             latestRun: apiResponse.latestRun.map(LearningDeckRun.init(apiResponse:)),
             createdAt: apiResponse.createdAt,

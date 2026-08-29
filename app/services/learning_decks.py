@@ -27,7 +27,10 @@ from app.models.contracts import (
 )
 from app.models.db import LearningDeck, LearningDeckRun, LlmTask, User
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
-from app.services.learning_deck_artifacts import delete_learning_deck_objects
+from app.services.learning_deck_artifacts import (
+    LEARNING_DECK_THUMBNAIL_PATH,
+    delete_learning_deck_objects,
+)
 from app.services.learning_deck_common import (
     ACTIVE_RUN_STATUSES,
     LearningDeckError,
@@ -354,6 +357,10 @@ def present_learning_deck(db: Session, deck: LearningDeck) -> LearningDeckRespon
         share_enabled=bool(deck.share_enabled),
         viewer_available=bool(deck.deck_object_key and successful_attempt_id),
         source_notes_available=bool(deck.source_notes_html_object_key and successful_attempt_id),
+        thumbnail_url=_learning_deck_thumbnail_url(
+            deck,
+            successful_attempt_id=successful_attempt_id,
+        ),
         latest_successful_run_id=successful_attempt_id,
         latest_run=(
             _present_learning_deck_task(latest_task)
@@ -365,6 +372,21 @@ def present_learning_deck(db: Session, deck: LearningDeck) -> LearningDeckRespon
         created_at=require_datetime_value(deck.created_at, "Learning Deck created_at"),
         updated_at=deck.updated_at,
     )
+
+
+def _learning_deck_thumbnail_url(
+    deck: LearningDeck,
+    *,
+    successful_attempt_id: int | None,
+) -> str | None:
+    if not successful_attempt_id or not deck.artifact_storage_prefix:
+        return None
+    thumbnail_key = f"{deck.artifact_storage_prefix}/{LEARNING_DECK_THUMBNAIL_PATH}"
+    if thumbnail_key not in coerce_string_list(deck.artifact_object_keys):
+        return None
+    user_id = require_int_value(deck.user_id, "Learning Deck user id")
+    token, _expires_at = build_private_learning_deck_token(deck=deck, user_id=user_id)
+    return f"/learning/signed/{token}/assets/thumbnail.png"
 
 
 def present_learning_deck_run(run: LearningDeckRun) -> LearningDeckRunResponse:
@@ -616,6 +638,8 @@ def _public_learning_deck_error_message(
     if not error_message:
         return None
     public_errors = {
+        "agent_execution_failed": "Learning Deck generation failed. Please try again.",
+        "artifact_contract_failed": "Learning Deck validation failed. Please try again.",
         "source_not_found": "Source content no longer exists",
         "source_processing_failed": "Source content processing failed. Please try again.",
         "source_text_unavailable": "Source content does not have readable text",

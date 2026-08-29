@@ -212,6 +212,11 @@ def test_public_share_route_serves_latest_artifact_and_disable_revokes(
         text=".reveal { color: rgb(20 20 20); }",
         content_type="text/css",
     )
+    gateway.put_bytes(
+        key="learning/deck/assets/thumbnail.png",
+        data=b"deck-thumbnail",
+        content_type="image/png",
+    )
     task.status = "completed"
     deck.latest_successful_task_id = task.id
     deck.artifact_storage_prefix = "learning/deck"
@@ -221,8 +226,19 @@ def test_public_share_route_serves_latest_artifact_and_disable_revokes(
         "learning/deck/index.html",
         "learning/deck/source-notes.html",
         "learning/deck/assets/theme.css",
+        "learning/deck/assets/thumbnail.png",
     ]
     db_session.commit()
+
+    deck_list = client.get("/api/learning/decks")
+    assert deck_list.status_code == 200
+    thumbnail_url = deck_list.json()["decks"][0]["thumbnail_url"]
+    assert thumbnail_url.startswith("/learning/signed/")
+    assert thumbnail_url.endswith("/assets/thumbnail.png")
+    thumbnail = client.get(thumbnail_url)
+    assert thumbnail.status_code == 200
+    assert thumbnail.content == b"deck-thumbnail"
+    assert thumbnail.headers["content-type"] == "image/png"
 
     share_response = client.post(f"/api/learning/decks/{deck_id}/share")
     assert share_response.status_code == 200

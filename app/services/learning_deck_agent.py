@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import monotonic
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from pydantic_ai import Agent, UsageLimits
 from pydantic_ai.settings import ModelSettings
@@ -86,6 +86,26 @@ class LearningDeckAgentExecutionError(RuntimeError):
         self.sandbox_provider = sandbox_provider
         self.sandbox_id = sandbox_id
         self.error_type = error_type
+
+
+def _raise_agent_failure(
+    error: Exception,
+    *,
+    agent_log_events: list[dict[str, Any]],
+    sandbox: AgentVmSession,
+) -> NoReturn:
+    error_type = (
+        "artifact_contract_failed"
+        if isinstance(error, LearningDeckArtifactError) and error.repairable
+        else "agent_execution_failed"
+    )
+    raise LearningDeckAgentExecutionError(
+        str(error),
+        agent_log_events=agent_log_events,
+        sandbox_provider=sandbox.provider,
+        sandbox_id=sandbox.sandbox_id,
+        error_type=error_type,
+    ) from error
 
 
 @dataclass
@@ -236,6 +256,12 @@ def run_learning_deck_agent(
                 "artifact_validation_failed",
                 _artifact_error_log_payload(first_error),
             )
+            if not isinstance(first_error, LearningDeckArtifactError) or not first_error.repairable:
+                _raise_agent_failure(
+                    first_error,
+                    agent_log_events=agent_log_events,
+                    sandbox=sandbox,
+                )
             try:
                 repair_result = agent.run_sync(
                     _artifact_repair_prompt(first_error, sandbox),
@@ -275,13 +301,11 @@ def run_learning_deck_agent(
                     "artifact_repair_failed",
                     _artifact_error_log_payload(repair_error),
                 )
-                raise LearningDeckAgentExecutionError(
-                    str(repair_error),
+                _raise_agent_failure(
+                    repair_error,
                     agent_log_events=agent_log_events,
-                    sandbox_provider=sandbox.provider,
-                    sandbox_id=sandbox.sandbox_id,
-                    error_type="artifact_contract_failed",
-                ) from repair_error
+                    sandbox=sandbox,
+                )
 
         return LearningDeckAgentResult(
             index_html=index_html,
@@ -353,6 +377,7 @@ def _read_and_validate_required_artifacts(
             f"Required output file is missing: {', '.join(missing)}",
             report={"missing": missing},
             backend_errors=backend_errors,
+            repairable=True,
         )
 
     index_html = artifacts[OUTPUT_INDEX_HTML]
@@ -386,11 +411,8 @@ def _append_browser_validation_event(
     _append_agent_log_event(agent_log_events, event_type, browser_validation)
 
 
-def _artifact_repair_prompt(error: Exception, sandbox: AgentVmSession) -> str:
-    if isinstance(error, LearningDeckArtifactError):
-        report = error.report or {"validation_error": str(error)}
-    else:
-        report = {"validation_error": "Generated artifact validation failed unexpectedly"}
+def _artifact_repair_prompt(error: LearningDeckArtifactError, sandbox: AgentVmSession) -> str:
+    report = error.report or {"validation_error": str(error)}
     try:
         output_files = sandbox.list_files("output")[:50]
     except Exception:  # noqa: BLE001

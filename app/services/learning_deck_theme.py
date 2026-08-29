@@ -492,7 +492,9 @@ Do not center body text, and do not wrap every slide in a card.
 ### Reveal requirements (still your job)
 
 - Load Reveal core CSS + JS and the highlight, notes, and markdown plugins from
-  the allowed Reveal CDN, then call `Reveal.initialize(...)`.
+  `$reveal_cdn_base_url`, then call `Reveal.initialize(...)`. Keep every Reveal
+  asset under that exact versioned base URL; unversioned or different Reveal
+  runtimes are rejected.
 - Put `$responsive_layout_meta_tag` in the document `<head>` so the
   hosted viewer selects the responsive portrait canvas.
 - Include a `<style>` block (it can be minimal — the house theme is layered on at

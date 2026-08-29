@@ -302,6 +302,105 @@ def test_generate_infographic_uses_runware_provider(
     UUID(str(payload[0]["taskUUID"]))
 
 
+def test_generate_learning_deck_thumbnail_uses_direct_square_runware_request(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    {
+                        "imageURL": "https://example.com/deck-thumbnail.png",
+                        "cost": 0.0012,
+                    }
+                ]
+            }
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+        return DummyResponse()
+
+    monkeypatch.setattr(
+        image_generation,
+        "get_settings",
+        lambda: SimpleNamespace(
+            google_cloud_project=None,
+            google_cloud_location="global",
+            google_api_key=None,
+            image_generation_model=image_generation.DEFAULT_IMAGE_GENERATION_MODEL,
+            image_generation_fallback_model=None,
+            infographic_generation_provider="google",
+            infographic_generation_model="runware:101@1",
+            infographic_generation_fallback_model=None,
+            runware_api_key="runware-key",
+        ),
+    )
+    monkeypatch.setattr(image_generation.requests, "post", fake_post)
+    monkeypatch.setattr(
+        image_generation.ImageGenerationService,
+        "_download_file",
+        lambda self, url: b"deck-thumbnail-png",
+    )
+    usage_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        image_generation,
+        "record_vendor_usage_out_of_band",
+        lambda **kwargs: usage_calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        image_generation,
+        "get_news_thumbnails_dir",
+        lambda: tmp_path / "news_thumbnails",
+    )
+    monkeypatch.setattr(
+        image_generation,
+        "get_content_images_dir",
+        lambda: tmp_path / "content",
+    )
+    monkeypatch.setattr(
+        image_generation,
+        "get_thumbnails_dir",
+        lambda: tmp_path / "thumbnails",
+    )
+
+    result = image_generation.ImageGenerationService().generate_learning_deck_thumbnail(
+        deck_id=41,
+        task_id=82,
+        user_id=7,
+        source_content_id=123,
+        title="Distributed Systems",
+        source_title="A practical guide to consensus",
+        source_notes_md=(
+            "# Sources\n\nA leader coordinates replicas while quorum prevents split brain."
+        ),
+        interests_prompt="Focus on failure recovery",
+    )
+
+    assert result == b"deck-thumbnail-png"
+    payload = cast(list[dict[str, object]], captured["json"])
+    request = payload[0]
+    assert request["model"] == "recraft:v4.1@0"
+    assert request["width"] == image_generation.RUNWARE_LEARNING_DECK_THUMBNAIL_SIZE
+    assert request["height"] == image_generation.RUNWARE_LEARNING_DECK_THUMBNAIL_SIZE
+    assert "negativePrompt" not in request
+    assert "Distributed Systems" in str(request["positivePrompt"])
+    assert "Render the deck title exactly once" in str(request["positivePrompt"])
+    assert "failure recovery" in str(request["positivePrompt"])
+    assert usage_calls[0]["feature"] == "learning_deck_thumbnail"
+    assert usage_calls[0]["operation"] == "learning_deck.thumbnail"
+    assert usage_calls[0]["task_id"] == 82
+    assert usage_calls[0]["content_id"] == 123
+    assert usage_calls[0]["user_id"] == 7
+
+
 def test_generate_infographic_falls_back_to_google_when_runware_rejected(
     monkeypatch,
     tmp_path: Path,

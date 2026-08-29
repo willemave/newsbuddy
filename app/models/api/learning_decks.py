@@ -62,6 +62,7 @@ class LearningDeckResponse(BaseModel):
     share_enabled: bool = False
     viewer_available: bool = False
     source_notes_available: bool = False
+    thumbnail_url: str | None = None
     latest_successful_run_id: int | None = None
     latest_run: LearningDeckRunResponse | None = None
     created_at: UTCDateTime

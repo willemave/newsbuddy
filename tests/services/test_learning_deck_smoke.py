@@ -30,6 +30,10 @@ def test_learning_deck_smoke_matrix_article_github_arxiv_url_and_failed_rerun(
         "app.services.learning_deck_artifacts.get_object_storage_gateway",
         lambda: gateway,
     )
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation._generate_thumbnail_best_effort",
+        lambda **_kwargs: None,
+    )
 
     article = content_factory(
         content_type=ContentType.ARTICLE,
@@ -195,7 +199,7 @@ def _index_html(title: str) -> str:
       <section>Architecture</section>
     </div>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/reveal.js/dist/reveal.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@6.0.1/dist/reveal.js"></script>
   <script>Reveal.initialize();</script>
 </body>
 </html>

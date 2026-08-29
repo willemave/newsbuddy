@@ -14,6 +14,7 @@ from app.services.learning_deck_layout import RESPONSIVE_LEARNING_DECK_LAYOUT
 from app.services.learning_deck_viewer import with_learning_deck_navigation_controls
 
 BROWSER_VALIDATION_RESULT_PREFIX = "NEWSLY_BROWSER_VALIDATION="
+BROWSER_VALIDATION_FAILURE_PREFIX = "NEWSLY_BROWSER_VALIDATION_FAILURE="
 VALIDATION_VIEWER_PATH = "output/.newsly-viewer-validation.html"
 
 
@@ -96,40 +97,52 @@ def validate_learning_deck_in_browser(
     result = sandbox.execute_bash(_browser_validation_command(), timeout_seconds=30)
 
     if result.exit_code != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or "unknown browser error"
-        raise LearningDeckArtifactError(f"Browser validation failed: {detail}")
+        output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+        report = _parse_browser_validation_failure(output)
+        if report is None:
+            detail = result.stderr.strip() or result.stdout.strip() or "unknown browser error"
+            report = {"phase": "validator_process", "reason": detail[:4000]}
+            repairable = False
+        else:
+            detail = str(report.get("reason") or "browser validation failed")
+            phase = report.get("phase")
+            if phase:
+                detail = f"{detail} during {phase}"
+            repairable = report["repairable"] is True
+        raise LearningDeckArtifactError(
+            f"Browser validation failed: {detail}",
+            report=report,
+            repairable=repairable,
+        )
     return parse_browser_validation_outcome(result.stdout)
 
 
 def parse_browser_validation_outcome(stdout: str) -> dict[str, Any]:
     """Parse and enforce the typed browser-validation result contract."""
-    payload = next(
-        (
-            line.removeprefix(BROWSER_VALIDATION_RESULT_PREFIX)
-            for line in reversed(stdout.splitlines())
-            if line.startswith(BROWSER_VALIDATION_RESULT_PREFIX)
-        ),
-        None,
-    )
+    payload = _prefixed_payload(stdout, BROWSER_VALIDATION_RESULT_PREFIX)
     if payload is None:
         raise LearningDeckArtifactError(
-            "Browser validation failed: validator did not report a structured outcome"
+            "Browser validation failed: validator did not report a structured outcome",
+            repairable=False,
         )
     try:
         raw_outcome = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise LearningDeckArtifactError(
-            "Browser validation failed: validator reported malformed JSON"
+            "Browser validation failed: validator reported malformed JSON",
+            repairable=False,
         ) from exc
     if not isinstance(raw_outcome, dict) or raw_outcome.get("status") != "passed":
         raise LearningDeckArtifactError(
-            "Browser validation failed: validator did not report a passing outcome"
+            "Browser validation failed: validator did not report a passing outcome",
+            repairable=False,
         )
     try:
         outcome = BrowserValidationOutcome.model_validate(raw_outcome)
     except ValidationError as exc:
         raise LearningDeckArtifactError(
-            "Browser validation failed: validator reported an incomplete passing outcome"
+            "Browser validation failed: validator reported an incomplete passing outcome",
+            repairable=False,
         ) from exc
 
     expected_layout = RESPONSIVE_LEARNING_DECK_LAYOUT
@@ -152,9 +165,42 @@ def parse_browser_validation_outcome(stdout: str) -> dict[str, Any]:
         or outcome.landscape.overflow_slides
     ):
         raise LearningDeckArtifactError(
-            "Browser validation failed: validator reported an incomplete passing outcome"
+            "Browser validation failed: validator reported an incomplete passing outcome",
+            repairable=False,
         )
     return outcome.model_dump(mode="json")
+
+
+def _parse_browser_validation_failure(output: str) -> dict[str, Any] | None:
+    payload = _prefixed_payload(output, BROWSER_VALIDATION_FAILURE_PREFIX)
+    if payload is None:
+        return None
+    try:
+        report = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(report, dict):
+        return None
+    if (
+        not isinstance(report.get("phase"), str)
+        or not report["phase"]
+        or not isinstance(report.get("reason"), str)
+        or not report["reason"]
+        or not isinstance(report.get("repairable"), bool)
+    ):
+        return None
+    return report
+
+
+def _prefixed_payload(output: str, prefix: str) -> str | None:
+    return next(
+        (
+            line.removeprefix(prefix)
+            for line in reversed(output.splitlines())
+            if line.startswith(prefix)
+        ),
+        None,
+    )
 
 
 def browser_validation_unavailable(sandbox: AgentVmSession) -> dict[str, Any] | None:
@@ -188,18 +234,21 @@ def _browser_validation_command() -> str:
         "path": VALIDATION_VIEWER_PATH,
         "layout": layout.version,
         "portrait": {
+            "name": "portrait",
             "className": "newsly-learning-deck-portrait",
             "viewport": {"width": 390, "height": 844},
             "canvas": {"width": layout.portrait.width, "height": layout.portrait.height},
         },
         "landscape": {
+            "name": "landscape",
             "className": "newsly-learning-deck-landscape",
             "viewport": {"width": 844, "height": 390},
             "canvas": {"width": layout.landscape.width, "height": layout.landscape.height},
         },
     }
     node_command = Template(_BROWSER_VALIDATION_COMMAND_TEMPLATE).substitute(
-        validation_config=json.dumps(validation_config, separators=(",", ":"))
+        validation_config=json.dumps(validation_config, separators=(",", ":")),
+        failure_prefix=BROWSER_VALIDATION_FAILURE_PREFIX,
     )
     return f"trap 'rm -f -- {VALIDATION_VIEWER_PATH}' EXIT\n{node_command}"
 
@@ -252,8 +301,85 @@ const { chromium } = require('playwright');
       }
     });
 
+    const normalizeIndices = indices => ({
+      h: indices?.h ?? 0,
+      v: indices?.v ?? 0,
+      f: indices?.f ?? -1,
+    });
+    const readRevealDiagnostics = async () => {
+      try {
+        return await page.evaluate(() => {
+          const reveal = window.Reveal;
+          const indices = reveal && typeof reveal.getIndices === 'function'
+            ? reveal.getIndices()
+            : null;
+          const config = reveal && typeof reveal.getConfig === 'function'
+            ? reveal.getConfig()
+            : null;
+          const currentSlide = reveal && typeof reveal.getCurrentSlide === 'function'
+            ? reveal.getCurrentSlide()
+            : null;
+          return {
+            present: Boolean(reveal),
+            ready: Boolean(
+              reveal && typeof reveal.isReady === 'function' && reveal.isReady()
+            ),
+            current_slide_id: currentSlide?.id || null,
+            indices: indices ? {
+              h: indices.h ?? 0,
+              v: indices.v ?? 0,
+              f: indices.f ?? -1,
+            } : null,
+            config: config ? {
+              width: config.width,
+              height: config.height,
+              view: config.view,
+              scroll_activation_width: config.scrollActivationWidth,
+            } : null,
+            scroll_view_active: Boolean(
+              reveal && typeof reveal.isScrollView === 'function' && reveal.isScrollView()
+            ),
+            document_classes: Array.from(document.documentElement.classList),
+          };
+        });
+      } catch (error) {
+        return { diagnostic_error: String(error) };
+      }
+    };
+    const failValidation = async (phase, reason, context = {}) => {
+      const error = new Error(reason);
+      error.newslyValidationReport = {
+        phase,
+        reason,
+        repairable: true,
+        context,
+        page_errors: pageErrors,
+        failed_requests: failedRequests,
+        failed_responses: failedResponses,
+        reveal: await readRevealDiagnostics(),
+      };
+      throw error;
+    };
+    const waitForCondition = async (phase, predicate, argument, context = {}) => {
+      try {
+        await page.waitForFunction(predicate, argument);
+      } catch (error) {
+        if (error?.name !== 'TimeoutError') throw error;
+        await failValidation(phase, 'browser condition timed out', {
+          ...context,
+          timeout_error: String(error),
+        });
+      }
+    };
+    const ensureNoRuntimeFailures = async phase => {
+      if (pageErrors.length || failedRequests.length || failedResponses.length) {
+        await failValidation(phase, 'browser runtime or asset load failure');
+      }
+    };
+
     await page.goto(deckUrl, { waitUntil: 'load' });
-    await page.waitForFunction(() => Boolean(
+    await ensureNoRuntimeFailures('page_load');
+    await waitForCondition('reveal_ready', () => Boolean(
       window.Reveal &&
       typeof window.Reveal.isReady === 'function' &&
       window.Reveal.isReady() &&
@@ -266,35 +392,42 @@ const { chromium } = require('playwright');
       return marker ? marker.getAttribute('content') : null;
     });
     if (responsiveLayout !== validationConfig.layout) {
-      throw new Error(JSON.stringify({
-        reason: 'responsive layout metadata is missing',
+      await failValidation('responsive_layout', 'responsive layout metadata is missing', {
         responsive_layout: responsiveLayout,
-      }));
+      });
     }
 
-    const waitForViewerLayout = spec => page.waitForFunction(expected => {
+    const waitForViewerLayout = spec => waitForCondition('viewer_layout', expected => {
       const reveal = window.Reveal;
       if (!reveal || !reveal.isReady()) return false;
       const config = reveal.getConfig();
+      const scrollViewActive = typeof reveal.isScrollView === 'function' &&
+        reveal.isScrollView();
       return config.width === expected.canvas.width &&
         config.height === expected.canvas.height &&
+        !scrollViewActive &&
         document.documentElement.classList.contains(expected.className);
-    }, spec);
+    }, spec, {
+      orientation: spec.name,
+      expected_canvas: spec.canvas,
+      expected_class: spec.className,
+    });
 
     const settleLayout = () => page.evaluate(() => new Promise(resolve => {
       window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
     }));
 
-    const readDeckState = () => page.evaluate(() => {
-      const reveal = window.Reveal;
-      const currentSlide = reveal.getCurrentSlide();
-      const indices = reveal.getIndices();
-      return {
-        current_slide_exists: Boolean(currentSlide),
-        indices: { h: indices.h, v: indices.v, f: indices.f ?? -1 },
-        slide_count: reveal.getTotalSlides(),
-      };
-    });
+    const readDeckState = async () => {
+      const state = await page.evaluate(() => {
+        const reveal = window.Reveal;
+        return {
+          current_slide_exists: Boolean(reveal.getCurrentSlide()),
+          indices: reveal.getIndices(),
+          slide_count: reveal.getTotalSlides(),
+        };
+      });
+      return { ...state, indices: normalizeIndices(state.indices) };
+    };
 
     const inspectCurrentSlide = () => page.evaluate(() => {
       const reveal = window.Reveal;
@@ -328,7 +461,7 @@ const { chromium } = require('playwright');
         rect => rect.bottom > slideRect.bottom + tolerance
       )) reasons.push('bottom');
       return {
-        key: slide.id || [indices.h, indices.v].join('.'),
+        key: slide.id || [indices.h ?? 0, indices.v ?? 0].join('.'),
         reasons: Array.from(new Set(reasons)),
         vertical_occupancy: slideRect.height > 0
           ? Math.max(0, contentBottom - contentTop) / slideRect.height
@@ -340,18 +473,29 @@ const { chromium } = require('playwright');
       await page.setViewportSize(spec.viewport);
       await waitForViewerLayout(spec);
       await settleLayout();
-      const slideIndices = await page.evaluate(() => window.Reveal.getSlides().map(slide => {
-        const indices = window.Reveal.getIndices(slide);
-        return { h: indices.h, v: indices.v, f: -1 };
+      await ensureNoRuntimeFailures('orientation_layout');
+      const targets = (await page.evaluate(() => window.Reveal.getSlides().map(slide => ({
+        id: slide.id || null,
+        indices: window.Reveal.getIndices(slide),
+      })))).map(slide => ({
+        id: slide.id,
+        indices: { ...normalizeIndices(slide.indices), f: -1 },
       }));
       const measurements = [];
-      for (const indices of slideIndices) {
-        await page.evaluate(target => window.Reveal.slide(target.h, target.v, target.f), indices);
-        await page.waitForFunction(target => {
+      for (const target of targets) {
+        await page.evaluate(indices => {
+          window.Reveal.slide(indices.h, indices.v, indices.f);
+        }, target.indices);
+        await waitForCondition('slide_navigation', expected => {
           const current = window.Reveal.getIndices();
-          return current.h === target.h && current.v === target.v;
-        }, indices);
+          return (current.h ?? 0) === expected.h && (current.v ?? 0) === expected.v;
+        }, target.indices, {
+          orientation: spec.name,
+          target_slide_id: target.id,
+          target_indices: target.indices,
+        });
         await settleLayout();
+        await ensureNoRuntimeFailures('slide_render');
         measurements.push(await inspectCurrentSlide());
       }
       const occupancies = measurements.map(item => item.vertical_occupancy);
@@ -371,13 +515,13 @@ const { chromium } = require('playwright');
 
     const portrait = await inspectOrientation(validationConfig.portrait);
     await page.evaluate(() => window.Reveal.slide(0, 0, -1));
-    await page.waitForFunction(() => {
+    await waitForCondition('navigation_reset', () => {
       const indices = window.Reveal.getIndices();
-      return indices.h === 0 && indices.v === 0;
+      return (indices.h ?? 0) === 0 && (indices.v ?? 0) === 0;
     });
     const initial = await readDeckState();
     if (!initial.current_slide_exists || initial.slide_count < 1) {
-      throw new Error(JSON.stringify({ reason: 'current slide unavailable', initial }));
+      await failValidation('deck_state', 'current slide unavailable', { initial });
     }
 
     const sameIndices = (left, right) =>
@@ -394,35 +538,34 @@ const { chromium } = require('playwright');
         await page.waitForTimeout(100);
         afterPrevious = await readDeckState();
         if (!sameIndices(initial.indices, afterPrevious.indices)) {
-          throw new Error(JSON.stringify({
-            reason: 'single-slide navigation was not stable',
-            initial,
-            afterNext,
-            afterPrevious,
-          }));
+          await failValidation(
+            'single_slide_navigation',
+            'single-slide navigation was not stable',
+            { initial, afterNext, afterPrevious }
+          );
         }
         navigation = 'single_slide_stable';
       } else {
-        await page.waitForFunction(expected => {
+        await waitForCondition('single_slide_fragment_return', expected => {
           const current = window.Reveal.getIndices();
-          return current.h === expected.h && current.v === expected.v &&
+          return (current.h ?? 0) === expected.h && (current.v ?? 0) === expected.v &&
             (current.f ?? -1) === expected.f;
         }, initial.indices);
         afterPrevious = await readDeckState();
         navigation = 'single_slide_fragment_round_trip';
       }
     } else {
-      await page.waitForFunction(previous => {
+      await waitForCondition('navigation_next', previous => {
         const current = window.Reveal.getIndices();
         const fragment = current.f ?? -1;
-        return current.h !== previous.h || current.v !== previous.v ||
+        return (current.h ?? 0) !== previous.h || (current.v ?? 0) !== previous.v ||
           fragment !== previous.f;
       }, initial.indices);
       afterNext = await readDeckState();
       await page.evaluate(() => window.Reveal.prev());
-      await page.waitForFunction(expected => {
+      await waitForCondition('navigation_previous', expected => {
         const current = window.Reveal.getIndices();
-        return current.h === expected.h && current.v === expected.v &&
+        return (current.h ?? 0) === expected.h && (current.v ?? 0) === expected.v &&
           (current.f ?? -1) === expected.f;
       }, initial.indices);
       afterPrevious = await readDeckState();
@@ -431,20 +574,12 @@ const { chromium } = require('playwright');
 
     const landscape = await inspectOrientation(validationConfig.landscape);
     await page.waitForTimeout(250);
-    if (pageErrors.length || failedRequests.length || failedResponses.length) {
-      throw new Error(JSON.stringify({
-        reason: 'browser runtime or asset load failure',
-        page_errors: pageErrors,
-        failed_requests: failedRequests,
-        failed_responses: failedResponses,
-      }));
-    }
+    await ensureNoRuntimeFailures('validation_complete');
     if (portrait.overflow_slides.length || landscape.overflow_slides.length) {
-      throw new Error(JSON.stringify({
-        reason: 'slide content overflows the hosted viewer canvas',
+      await failValidation('slide_overflow', 'slide content overflows the hosted viewer canvas', {
         portrait_overflow: portrait.overflow_slides,
         landscape_overflow: landscape.overflow_slides,
-      }));
+      });
     }
 
     const outcome = {
@@ -466,5 +601,13 @@ const { chromium } = require('playwright');
   } finally {
     if (browser) await browser.close();
   }
-})().catch(error => { console.error(error); process.exit(1); });
+})().catch(error => {
+  const report = error?.newslyValidationReport || {
+    phase: 'validator_internal',
+    reason: String(error),
+    repairable: false,
+  };
+  console.error('$failure_prefix' + JSON.stringify(report));
+  process.exit(1);
+});
 NODE"""

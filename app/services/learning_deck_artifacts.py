@@ -20,7 +20,10 @@ from app.services.gateways.object_storage_gateway import (
     ObjectStorageGateway,
     get_object_storage_gateway,
 )
-from app.services.learning_deck_layout import RESPONSIVE_LEARNING_DECK_LAYOUT
+from app.services.learning_deck_layout import (
+    LEARNING_DECK_REVEAL_VERSION,
+    RESPONSIVE_LEARNING_DECK_LAYOUT,
+)
 
 ALLOWED_EXTERNAL_SCRIPT_PACKAGES = frozenset(
     {
@@ -40,6 +43,7 @@ ALLOWED_SCRIPT_CDN_HOSTS = frozenset(
 HTML_CONTENT_TYPE = "text/html; charset=utf-8"
 MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8"
 JSONL_CONTENT_TYPE = "application/x-ndjson; charset=utf-8"
+LEARNING_DECK_THUMBNAIL_PATH = "assets/thumbnail.png"
 
 
 class LearningDeckArtifactError(ValueError):
@@ -51,10 +55,12 @@ class LearningDeckArtifactError(ValueError):
         *,
         report: dict[str, Any] | None = None,
         backend_errors: list[dict[str, str]] | None = None,
+        repairable: bool = False,
     ) -> None:
         super().__init__(message)
         self.report = dict(report or {})
         self.backend_errors = list(backend_errors or [])
+        self.repairable = repairable
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,7 @@ class StoredLearningDeckArtifact:
     source_notes_object_key: str
     source_notes_html_object_key: str
     artifact_object_keys: list[str]
+    thumbnail_object_key: str | None = None
 
 
 def validate_learning_deck_artifact(
@@ -102,6 +109,13 @@ def validate_learning_deck_artifact(
             continue
         errors.append(f"index.html contains disallowed script source: {script_src}")
 
+    for stylesheet_href in _stylesheet_hrefs(index_html):
+        if _is_reveal_cdn_url(stylesheet_href) and not _is_supported_reveal_url(stylesheet_href):
+            errors.append(
+                "index.html must pin Reveal.js stylesheets to version "
+                f"{LEARNING_DECK_REVEAL_VERSION}: {stylesheet_href}"
+            )
+
     if not re.search(r"(?im)^#{1,3}\s+source", source_notes_md):
         errors.append("source-notes.md must include a source section")
     _append_secret_and_host_path_errors(
@@ -114,6 +128,7 @@ def validate_learning_deck_artifact(
         raise LearningDeckArtifactError(
             "; ".join(errors),
             report={"invalid": errors},
+            repairable=True,
         )
 
 
@@ -247,6 +262,11 @@ def store_learning_deck_artifact(
         source_notes_object_key=notes_key,
         source_notes_html_object_key=notes_html_key,
         artifact_object_keys=object_keys,
+        thumbnail_object_key=(
+            f"{prefix}/{LEARNING_DECK_THUMBNAIL_PATH}"
+            if LEARNING_DECK_THUMBNAIL_PATH in (extra_assets or {})
+            else None
+        ),
     )
 
 
@@ -381,7 +401,28 @@ def _is_allowed_external_script_url(src: str) -> bool:
     if host not in ALLOWED_SCRIPT_CDN_HOSTS:
         return False
     package = _cdn_package_name(host=host, path=parsed.path)
+    if package == "reveal.js":
+        return _is_supported_reveal_url(src)
     return package in ALLOWED_EXTERNAL_SCRIPT_PACKAGES
+
+
+def _is_supported_reveal_url(src: str) -> bool:
+    parsed = urlparse(src.strip().lower())
+    versioned_package = f"reveal.js@{LEARNING_DECK_REVEAL_VERSION}"
+    if parsed.netloc == "cdn.jsdelivr.net":
+        return parsed.path.startswith(f"/npm/{versioned_package}/")
+    if parsed.netloc == "unpkg.com":
+        return parsed.path.startswith(f"/{versioned_package}/")
+    return False
+
+
+def _is_reveal_cdn_url(src: str) -> bool:
+    parsed = urlparse(src.strip().lower())
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc in ALLOWED_SCRIPT_CDN_HOSTS
+        and _cdn_package_name(host=parsed.netloc, path=parsed.path) == "reveal.js"
+    )
 
 
 def _cdn_package_name(*, host: str, path: str) -> str | None:
@@ -424,22 +465,10 @@ def _has_custom_visual_style(index_html: str) -> bool:
         normalized = href.strip().lower()
         if not normalized:
             continue
-        if _is_reveal_stylesheet_url(normalized):
+        if _is_reveal_cdn_url(normalized):
             continue
         return True
     return False
-
-
-def _is_reveal_stylesheet_url(href: str) -> bool:
-    if _is_local_artifact_path(href):
-        return False
-    parsed = urlparse(href)
-    if parsed.scheme != "https":
-        return False
-    host = parsed.netloc.lower()
-    if host not in ALLOWED_SCRIPT_CDN_HOSTS:
-        return False
-    return _cdn_package_name(host=host, path=parsed.path) == "reveal.js"
 
 
 def _sanitize_source_notes_html(html: str) -> str:

@@ -242,6 +242,48 @@ def test_present_learning_deck_hides_source_pipeline_internals(
     )
 
 
+@pytest.mark.parametrize(
+    ("error_type", "internal_message", "public_message"),
+    [
+        (
+            "artifact_contract_failed",
+            "page.waitForFunction: Timeout 10000ms exceeded at [stdin]:49:16",
+            "Learning Deck validation failed. Please try again.",
+        ),
+        (
+            "agent_execution_failed",
+            "E2B command transport closed unexpectedly",
+            "Learning Deck generation failed. Please try again.",
+        ),
+    ],
+)
+def test_present_learning_deck_hides_generation_internals(
+    db_session,
+    test_user,
+    content_factory,
+    error_type,
+    internal_message,
+    public_message,
+) -> None:
+    content = _create_visible_article(db_session, test_user, content_factory)
+    deck = create_or_rerun_learning_deck(
+        db_session,
+        current_user=test_user,
+        content_id=content.id,
+    )
+    task = db_session.query(LlmTask).filter_by(id=deck.latest_task_id).one()
+    task.status = LlmTaskStatus.FAILED.value
+    task.workflow_state = LlmWorkflowState.FAILED.value
+    task.error_type = error_type
+    task.error_message = internal_message
+    db_session.commit()
+
+    response = present_learning_deck(db_session, deck)
+
+    assert response.latest_run is not None
+    assert response.latest_run.error_message == public_message
+
+
 def test_present_learning_deck_keeps_completed_legacy_run_renderable(
     db_session,
     test_user,

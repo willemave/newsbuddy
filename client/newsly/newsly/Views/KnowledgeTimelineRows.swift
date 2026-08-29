@@ -67,6 +67,8 @@ struct KnowledgeDeckTimelineRow: View {
     var body: some View {
         KnowledgeTimelineRow(
             icon: "rectangle.on.rectangle",
+            imageURL: ServerImageURL.resolve(deck.thumbnailURL),
+            imageCacheIdentifier: deck.thumbnailCacheIdentifier,
             isBusy: deck.hasActiveLatestRun,
             busyAccessibilityIdentifier: deck.hasActiveLatestRun
                 ? "knowledge.deck.\(deck.id).preparing"
@@ -149,6 +151,7 @@ struct KnowledgeTimelineInlineError: View {
 struct KnowledgeTimelineRow<Accessory: View>: View {
     let icon: String
     var imageURL: URL? = nil
+    var imageCacheIdentifier: String? = nil
     var isBusy = false
     var busyAccessibilityIdentifier: String?
     let title: String
@@ -161,6 +164,7 @@ struct KnowledgeTimelineRow<Accessory: View>: View {
             KnowledgeTimelineArtwork(
                 icon: icon,
                 imageURL: imageURL,
+                imageCacheIdentifier: imageCacheIdentifier,
                 isBusy: isBusy,
                 busyAccessibilityIdentifier: busyAccessibilityIdentifier
             )
@@ -210,6 +214,7 @@ struct KnowledgeTimelineRowDivider: View {
 struct KnowledgeTimelineArtwork: View {
     let icon: String
     var imageURL: URL? = nil
+    var imageCacheIdentifier: String? = nil
     var isBusy = false
     var busyAccessibilityIdentifier: String?
 
@@ -220,7 +225,11 @@ struct KnowledgeTimelineArtwork: View {
         ZStack {
             Color.surfaceSecondary
             if let imageURL {
-                CachedAsyncImage(url: imageURL, targetSize: CGSize(width: size, height: size)) { image in
+                CachedAsyncImage(
+                    url: imageURL,
+                    cacheIdentifier: imageCacheIdentifier,
+                    targetSize: CGSize(width: size, height: size)
+                ) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
                     fallbackArtwork

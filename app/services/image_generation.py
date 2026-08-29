@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 import requests
 from google import genai
@@ -21,10 +20,14 @@ from google.genai.types import GenerateContentConfig, ImageConfig
 from PIL import Image
 
 from app.core.logging import get_logger
-from app.core.model_defaults import IMAGE_GENERATION_MODEL_NAME, RUNWARE_INFOGRAPHIC_MODEL_SPEC
+from app.core.model_defaults import (
+    IMAGE_GENERATION_MODEL_NAME,
+    RUNWARE_LEARNING_DECK_THUMBNAIL_MODEL_SPEC,
+)
 from app.core.settings import get_settings
 from app.models.contracts import ContentType
 from app.models.domain.content import ContentData
+from app.services import runware_image_generation as runware
 from app.services.google_usage import extract_google_usage_details
 from app.services.prompt_library import load_prompt, render_prompt
 from app.services.vendor_costs import record_vendor_usage_out_of_band
@@ -37,14 +40,17 @@ from app.utils.image_paths import (
 logger = get_logger(__name__)
 
 DEFAULT_IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODEL_NAME
-DEFAULT_RUNWARE_INFOGRAPHIC_MODEL = RUNWARE_INFOGRAPHIC_MODEL_SPEC
-RUNWARE_API_URL = "https://api.runware.ai/v1"
-RUNWARE_INFOGRAPHIC_WIDTH = 1024
-RUNWARE_INFOGRAPHIC_HEIGHT = 576
-RUNWARE_SEEDREAM_INFOGRAPHIC_WIDTH = 2848
-RUNWARE_SEEDREAM_INFOGRAPHIC_HEIGHT = 1600
-RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT = load_prompt("images/infographic#runware_negative")
-RUNWARE_INLINE_RETRY_ATTEMPTS = 2
+DEFAULT_RUNWARE_INFOGRAPHIC_MODEL = runware.DEFAULT_RUNWARE_INFOGRAPHIC_MODEL
+DEFAULT_RUNWARE_LEARNING_DECK_THUMBNAIL_MODEL = RUNWARE_LEARNING_DECK_THUMBNAIL_MODEL_SPEC
+RUNWARE_API_URL = runware.RUNWARE_API_URL
+RUNWARE_INFOGRAPHIC_WIDTH = runware.RUNWARE_INFOGRAPHIC_WIDTH
+RUNWARE_INFOGRAPHIC_HEIGHT = runware.RUNWARE_INFOGRAPHIC_HEIGHT
+RUNWARE_SEEDREAM_INFOGRAPHIC_WIDTH = runware.RUNWARE_SEEDREAM_INFOGRAPHIC_WIDTH
+RUNWARE_SEEDREAM_INFOGRAPHIC_HEIGHT = runware.RUNWARE_SEEDREAM_INFOGRAPHIC_HEIGHT
+RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT = runware.RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT
+RUNWARE_LEARNING_DECK_THUMBNAIL_SIZE = runware.RUNWARE_LEARNING_DECK_THUMBNAIL_SIZE
+RUNWARE_INLINE_RETRY_ATTEMPTS = runware.RUNWARE_INLINE_RETRY_ATTEMPTS
+RunwareGenerationError = runware.RunwareGenerationError
 
 # Image size settings
 INFOGRAPHIC_IMAGE_SIZE = "512"
@@ -62,29 +68,6 @@ class ImageGenerationResult:
     success: bool
     error_message: str | None = None
     thumbnail_path: str | None = None
-
-
-class RunwareGenerationError(RuntimeError):
-    """Structured Runware failure that can drive local retries and fallback."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: str | None = None,
-        parameter: str | None = None,
-        status_code: int | None = None,
-        task_uuid: str | None = None,
-        retryable: bool = True,
-        fallback_allowed: bool = True,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.parameter = parameter
-        self.status_code = status_code
-        self.task_uuid = task_uuid
-        self.retryable = retryable
-        self.fallback_allowed = fallback_allowed
 
 
 # ============================================================================
@@ -344,6 +327,23 @@ def _build_infographic_prompt(content: ContentData) -> str:
         visual_metaphor=visual_brief["visual_metaphor"],
         scene_direction=visual_brief["scene_direction"],
         supporting_cues=visual_brief["supporting_cues"],
+    )
+
+
+def _build_learning_deck_thumbnail_prompt(
+    *,
+    title: str,
+    source_title: str | None,
+    source_notes_md: str,
+    interests_prompt: str | None,
+) -> str:
+    """Build a compact editorial-cover brief for one deck thumbnail."""
+    return render_prompt(
+        "images/learning_deck_thumbnail#user",
+        title=_clamp_text(title, max_chars=180),
+        source_title=_clamp_text(source_title or title, max_chars=180),
+        interests=_clamp_text(interests_prompt or "No additional focus.", max_chars=240),
+        deck_context=_clamp_text(source_notes_md, max_chars=1_800),
     )
 
 
@@ -701,6 +701,52 @@ class ImageGenerationService:
                 error_message=str(e),
             )
 
+    def generate_learning_deck_thumbnail(
+        self,
+        *,
+        deck_id: int,
+        task_id: int,
+        user_id: int,
+        source_content_id: int | None,
+        title: str,
+        source_title: str | None,
+        source_notes_md: str,
+        interests_prompt: str | None,
+    ) -> bytes:
+        """Generate one direct square Learning Deck thumbnail through Runware."""
+        prompt = _build_learning_deck_thumbnail_prompt(
+            title=title,
+            source_title=source_title,
+            source_notes_md=source_notes_md,
+            interests_prompt=interests_prompt,
+        )
+        image_bytes, resolved_model = self._generate_runware_image(
+            models=[DEFAULT_RUNWARE_LEARNING_DECK_THUMBNAIL_MODEL],
+            prompt=prompt,
+            content_id=source_content_id,
+            item_id=deck_id,
+            task_id=task_id,
+            user_id=user_id,
+            feature="learning_deck_thumbnail",
+            operation="learning_deck.thumbnail",
+            image_type="learning_deck_thumbnail",
+            width=RUNWARE_LEARNING_DECK_THUMBNAIL_SIZE,
+            height=RUNWARE_LEARNING_DECK_THUMBNAIL_SIZE,
+            negative_prompt=None,
+        )
+        logger.info(
+            "Generated Learning Deck thumbnail for deck %s using %s",
+            deck_id,
+            resolved_model,
+            extra={
+                "component": "learning_decks",
+                "operation": "generate_thumbnail",
+                "item_id": deck_id,
+                "user_id": user_id,
+            },
+        )
+        return image_bytes
+
     def _generate_google_infographic_bytes(
         self,
         *,
@@ -789,132 +835,54 @@ class ImageGenerationService:
         prompt: str,
         content_id: int,
     ) -> tuple[bytes, str]:
-        if not self.runware_api_key:
-            raise ValueError("RUNWARE_API_KEY not configured for infographic generation.")
+        return self._generate_runware_image(
+            models=self.infographic_models,
+            prompt=prompt,
+            content_id=content_id,
+            item_id=content_id,
+            task_id=None,
+            user_id=None,
+            feature="image_generation",
+            operation="image_generation.infographic",
+            image_type="infographic",
+            width=RUNWARE_INFOGRAPHIC_WIDTH,
+            height=RUNWARE_INFOGRAPHIC_HEIGHT,
+            negative_prompt=RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT,
+        )
 
-        last_error: RunwareGenerationError | None = None
-        for model in self.infographic_models:
-            for attempt in range(RUNWARE_INLINE_RETRY_ATTEMPTS):
-                task_uuid = str(uuid4())
-                try:
-                    payload = self._post_runware_inference(
-                        prompt=prompt,
-                        model=model,
-                        task_uuid=task_uuid,
-                    )
-                    data = payload.get("data") or []
-                    if not data:
-                        raise RunwareGenerationError(
-                            "Runware did not return inference data.",
-                            task_uuid=task_uuid,
-                            retryable=False,
-                            fallback_allowed=True,
-                        )
-                    result = cast(dict[str, Any], data[0])
-                    image_url = (
-                        result.get("imageURL") or result.get("imageUrl") or result.get("image_url")
-                    )
-                    if not isinstance(image_url, str) or not image_url:
-                        raise RunwareGenerationError(
-                            "Runware did not return an image URL.",
-                            task_uuid=task_uuid,
-                            retryable=False,
-                            fallback_allowed=True,
-                        )
-
-                    image_bytes = self._download_file(image_url)
-                    record_vendor_usage_out_of_band(
-                        provider="runware",
-                        model=model,
-                        feature="image_generation",
-                        operation="image_generation.infographic",
-                        source="queue",
-                        usage={"request_count": 1},
-                        content_id=content_id,
-                        metadata={
-                            "image_type": "infographic",
-                            "provider": "runware",
-                            "response_cost_usd": result.get("cost"),
-                            "image_url": image_url,
-                            "task_uuid": task_uuid,
-                            "inline_attempt": attempt + 1,
-                        },
-                    )
-                    return image_bytes, model
-                except RunwareGenerationError as exc:
-                    last_error = exc
-                    logger.warning(
-                        "Runware infographic attempt failed for content %s",
-                        content_id,
-                        extra={
-                            "component": "image_generation",
-                            "operation": "generate_infographic.runware",
-                            "item_id": content_id,
-                            "context_data": {
-                                "model": model,
-                                "attempt": attempt + 1,
-                                "task_uuid": exc.task_uuid or task_uuid,
-                                "status_code": exc.status_code,
-                                "code": exc.code,
-                                "parameter": exc.parameter,
-                                "retryable": exc.retryable,
-                                "error_message": str(exc),
-                            },
-                        },
-                    )
-                    if exc.retryable and attempt + 1 < RUNWARE_INLINE_RETRY_ATTEMPTS:
-                        continue
-                    break
-
-        if last_error is not None:
-            raise last_error
-        raise RuntimeError("No infographic generation models configured.")
-
-    def _post_runware_inference(
+    def _generate_runware_image(
         self,
         *,
+        models: list[str],
         prompt: str,
-        model: str,
-        task_uuid: str,
-    ) -> dict[str, Any]:
-        try:
-            response = requests.post(
-                RUNWARE_API_URL,
-                headers={
-                    "Authorization": f"Bearer {self.runware_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=[_build_runware_inference_request(prompt, model, task_uuid)],
-                timeout=180,
-            )
-        except requests.RequestException as exc:
-            raise RunwareGenerationError(
-                f"Runware request failed: {exc}",
-                task_uuid=task_uuid,
-                retryable=True,
-                fallback_allowed=True,
-            ) from exc
-
-        try:
-            payload = cast(dict[str, Any], response.json())
-        except ValueError as exc:
-            raise RunwareGenerationError(
-                "Runware returned a non-JSON response.",
-                status_code=response.status_code,
-                task_uuid=task_uuid,
-                retryable=response.status_code >= 500,
-                fallback_allowed=response.status_code >= 400,
-            ) from exc
-
-        errors = payload.get("errors") or []
-        if response.status_code >= 400 or errors:
-            raise _build_runware_generation_error(
-                errors[0] if errors else None,
-                status_code=response.status_code,
-                task_uuid=task_uuid,
-            )
-
-        return payload
+        content_id: int | None,
+        item_id: int,
+        task_id: int | None,
+        user_id: int | None,
+        feature: str,
+        operation: str,
+        image_type: str,
+        width: int,
+        height: int,
+        negative_prompt: str | None,
+    ) -> tuple[bytes, str]:
+        return runware.generate_runware_image(
+            api_key=self.runware_api_key,
+            models=models,
+            prompt=prompt,
+            content_id=content_id,
+            item_id=item_id,
+            task_id=task_id,
+            user_id=user_id,
+            feature=feature,
+            operation=operation,
+            image_type=image_type,
+            width=width,
+            height=height,
+            negative_prompt=negative_prompt,
+            download_file=self._download_file,
+            record_usage=record_vendor_usage_out_of_band,
+        )
 
     def _google_is_configured(self) -> bool:
         return bool(self.google_cloud_project or self.google_api_key)
@@ -943,28 +911,16 @@ class ImageGenerationService:
 
 
 def _build_runware_inference_request(
+    *,
     prompt: str,
     model: str,
     task_uuid: str,
 ) -> dict[str, Any]:
-    is_seedream = model == DEFAULT_RUNWARE_INFOGRAPHIC_MODEL
-    request: dict[str, Any] = {
-        "taskType": "imageInference",
-        "taskUUID": task_uuid,
-        "includeCost": True,
-        "outputType": "URL",
-        "outputFormat": "PNG",
-        "positivePrompt": prompt,
-        "model": model,
-        "numberResults": 1,
-        "width": RUNWARE_SEEDREAM_INFOGRAPHIC_WIDTH if is_seedream else RUNWARE_INFOGRAPHIC_WIDTH,
-        "height": (
-            RUNWARE_SEEDREAM_INFOGRAPHIC_HEIGHT if is_seedream else RUNWARE_INFOGRAPHIC_HEIGHT
-        ),
-    }
-    if not is_seedream:
-        request["negativePrompt"] = RUNWARE_INFOGRAPHIC_NEGATIVE_PROMPT
-    return request
+    return runware.build_runware_infographic_request(
+        prompt=prompt,
+        model=model,
+        task_uuid=task_uuid,
+    )
 
 
 def _resolve_image_models(primary_model: str, fallback_model: str | None) -> list[str]:
@@ -985,34 +941,6 @@ def _normalize_model_name(model: str | None) -> str | None:
         return None
     normalized = model.strip()
     return normalized or None
-
-
-def _build_runware_generation_error(
-    error: dict[str, Any] | None,
-    *,
-    status_code: int | None,
-    task_uuid: str,
-) -> RunwareGenerationError:
-    error = error or {}
-    message = str(error.get("message") or "Runware request failed.")
-    code = error.get("code")
-    parameter = error.get("parameter")
-    retryable = bool(
-        (status_code or 0) >= 500
-        or status_code == 429
-        or parameter == "taskUUID"
-        or "taskuuid" in message.lower()
-    )
-    fallback_allowed = bool((status_code or 0) >= 400 or parameter == "taskUUID")
-    return RunwareGenerationError(
-        f"Runware error: {message}",
-        code=str(code) if code is not None else None,
-        parameter=str(parameter) if parameter is not None else None,
-        status_code=status_code,
-        task_uuid=task_uuid,
-        retryable=retryable,
-        fallback_allowed=fallback_allowed,
-    )
 
 
 def _is_model_unavailable_error(exc: Exception) -> bool:

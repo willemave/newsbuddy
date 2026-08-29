@@ -17,7 +17,10 @@ from app.services.learning_deck_agent import (
     LearningDeckAgentExecutionError,
     LearningDeckAgentResult,
 )
-from app.services.learning_deck_artifacts import StoredLearningDeckArtifact
+from app.services.learning_deck_artifacts import (
+    LEARNING_DECK_THUMBNAIL_PATH,
+    StoredLearningDeckArtifact,
+)
 from app.services.learning_deck_task_generation import (
     LearningDeckGenerationWaiting,
     run_learning_deck_task,
@@ -29,6 +32,14 @@ from app.services.learning_decks import (
 )
 from app.services.llm_tasks import LlmTaskError, utcnow
 from tests.support.builders import create_content_status_entry_row
+
+
+@pytest.fixture(autouse=True)
+def _disable_real_learning_deck_thumbnail_generation(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation._generate_thumbnail_best_effort",
+        lambda **_kwargs: None,
+    )
 
 
 def _create_task(db_session, test_user, content_factory):
@@ -243,15 +254,24 @@ def test_learning_deck_llm_task_publishes_and_drives_api_projection(
         deck_object_key="learning/1/1/index.html",
         source_notes_object_key="learning/1/1/source-notes.md",
         source_notes_html_object_key="learning/1/1/source-notes.html",
-        artifact_object_keys=["learning/1/1/index.html"],
+        artifact_object_keys=[
+            "learning/1/1/index.html",
+            "learning/1/1/assets/thumbnail.png",
+        ],
+        thumbnail_object_key="learning/1/1/assets/thumbnail.png",
     )
+    captured_assets: dict[str, tuple[bytes, str]] = {}
     monkeypatch.setattr(
         "app.services.learning_deck_task_generation.run_learning_deck_agent",
         lambda **_kwargs: agent_result,
     )
     monkeypatch.setattr(
         "app.services.learning_deck_task_generation.store_learning_deck_artifact",
-        lambda **_kwargs: stored,
+        lambda **kwargs: captured_assets.update(kwargs["extra_assets"]) or stored,
+    )
+    monkeypatch.setattr(
+        "app.services.learning_deck_task_generation._generate_thumbnail_best_effort",
+        lambda **_kwargs: b"thumbnail-png",
     )
 
     result = run_learning_deck_task(db_session, llm_task_id=task.id)
@@ -266,12 +286,21 @@ def test_learning_deck_llm_task_publishes_and_drives_api_projection(
     assert response.latest_run.id == task.id
     assert response.latest_run.interests_prompt == "Focus on topology"
     assert response.viewer_available is True
+    assert response.thumbnail_url is not None
+    assert response.thumbnail_url.startswith("/learning/signed/")
+    assert response.thumbnail_url.endswith("/assets/thumbnail.png")
+    assert captured_assets[LEARNING_DECK_THUMBNAIL_PATH] == (
+        b"thumbnail-png",
+        "image/png",
+    )
     output_json = result.output_json
     artifact_manifest = result.artifact_manifest
     assert isinstance(output_json, dict)
     assert isinstance(artifact_manifest, dict)
     assert output_json["browser_validation"] == agent_result.browser_validation
+    assert output_json["thumbnail_object_key"] == stored.thumbnail_object_key
     assert artifact_manifest["browser_validation"] == agent_result.browser_validation
+    assert artifact_manifest["thumbnail_object_key"] == stored.thumbnail_object_key
 
 
 def test_learning_deck_llm_task_retires_previous_artifact_bundle(

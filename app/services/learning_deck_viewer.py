@@ -9,7 +9,6 @@ from app.services.learning_deck_artifacts import has_responsive_learning_deck_la
 from app.services.learning_deck_layout import learning_deck_viewer_profiles_json
 
 NAVIGATION_CONTROLS_MARKER = "data-newsly-learning-deck-controls"
-REVEAL_SLIDE_MODE_PATCH_MARKER = "__newslySlideModePatched"
 
 
 def with_learning_deck_navigation_controls(data: bytes) -> bytes:
@@ -21,7 +20,6 @@ def with_learning_deck_navigation_controls(data: bytes) -> bytes:
     if NAVIGATION_CONTROLS_MARKER in html:
         return data
 
-    html = with_reveal_slide_mode_patch(html)
     injected_html = learning_deck_navigation_controls_html(
         responsive_layout=has_responsive_learning_deck_layout(html)
     )
@@ -29,25 +27,6 @@ def with_learning_deck_navigation_controls(data: bytes) -> bytes:
     if match is None:
         return f"{html}\n{injected_html}".encode()
     return f"{html[: match.start()]}\n{injected_html}\n{html[match.start() :]}".encode()
-
-
-def with_reveal_slide_mode_patch(html: str) -> str:
-    """Patch generated Reveal initialization to keep phone viewers in slide mode."""
-    if REVEAL_SLIDE_MODE_PATCH_MARKER in html:
-        return html
-    patch = f"""if (window.Reveal && !window.Reveal.{REVEAL_SLIDE_MODE_PATCH_MARKER}) {{
-    window.Reveal.{REVEAL_SLIDE_MODE_PATCH_MARKER} = true;
-    window.Reveal.__newslyOriginalInitialize = window.Reveal.initialize.bind(window.Reveal);
-    window.Reveal.initialize = function (config) {{
-      return window.Reveal.__newslyOriginalInitialize(Object.assign(
-        {{}},
-        config || {{}},
-        {{ view: "slide", scrollActivationWidth: null }}
-      ));
-    }};
-  }}
-  """
-    return re.sub(r"\bReveal\.initialize\s*\(", patch + "Reveal.initialize(", html, count=1)
 
 
 @cache
@@ -154,6 +133,8 @@ def learning_deck_navigation_controls_html(*, responsive_layout: bool = False) -
         isResponsiveDeck
       );
       return {{
+        controls: true,
+        progress: false,
         width: canvas.width,
         height: canvas.height,
         margin: canvas.margin,
@@ -166,17 +147,9 @@ def learning_deck_navigation_controls_html(*, responsive_layout: bool = False) -
     }}
 
     function applyFit() {{
-      if (typeof reveal.configure === "function") {{
-        reveal.configure(fitConfig());
-      }}
-      if (
-        reveal.scrollView &&
-        typeof reveal.scrollView.deactivate === "function"
-      ) {{
-        reveal.scrollView.deactivate();
-      }}
-      if (typeof reveal.layout === "function") {{
-        reveal.layout();
+      reveal.configure(fitConfig());
+      if (typeof reveal.toggleScrollView === "function") {{
+        reveal.toggleScrollView(false);
       }}
     }}
     var fitAnimationFrame = null;
@@ -187,19 +160,9 @@ def learning_deck_navigation_controls_html(*, responsive_layout: bool = False) -
         applyFit();
       }});
     }}
-    if (typeof reveal.configure === "function") {{
-      reveal.configure({{
-        controls: true,
-        progress: false,
-        minScale: 0.05,
-        maxScale: 3,
-        view: "slide",
-        scrollActivationWidth: null
-      }});
-    }}
+    reveal.configure(fitConfig());
     if (typeof reveal.on === "function") {{
       reveal.on("ready", scheduleFit);
-      reveal.on("slidechanged", scheduleFit);
     }}
     scheduleFit();
     window.setTimeout(scheduleFit, 250);

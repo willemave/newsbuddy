@@ -57,6 +57,44 @@ final class ImageCacheServiceTests: XCTestCase {
         XCTAssertLessThanOrEqual(requests.snapshot.peakConcurrentCount, 2)
     }
 
+    func testStableIdentifierReusesImageAcrossRotatingSignedURLs() async throws {
+        let fixture = makePNGData()
+        let requests = LockedRequestMetrics()
+        ImageCacheURLProtocol.requestHandler = { request in
+            requests.beginRequest()
+            defer { requests.endRequest() }
+            return Self.response(for: request, data: fixture)
+        }
+
+        let (cache, session, directory) = try makeCache()
+        defer {
+            session.invalidateAndCancel()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let firstURL = URL(string: "https://images.example.test/signed/first/thumbnail.png")!
+        let refreshedURL = URL(
+            string: "https://images.example.test/signed/refreshed/thumbnail.png"
+        )!
+        let cacheIdentifier = "learning-deck:41:attempt:82"
+
+        let first = await cache.image(
+            for: firstURL,
+            downloadIfMissing: true,
+            targetPixelSize: 128,
+            cacheIdentifier: cacheIdentifier
+        )
+        let refreshed = await cache.image(
+            for: refreshedURL,
+            downloadIfMissing: true,
+            targetPixelSize: 128,
+            cacheIdentifier: cacheIdentifier
+        )
+
+        XCTAssertNotNil(first)
+        XCTAssertNotNil(refreshed)
+        XCTAssertEqual(requests.snapshot.requestCount, 1)
+    }
+
     func testTargetPixelSizeUsesStableBuckets() {
         XCTAssertNil(ImageRequestSizing.targetPixelSize(for: nil, scale: 2))
         XCTAssertEqual(

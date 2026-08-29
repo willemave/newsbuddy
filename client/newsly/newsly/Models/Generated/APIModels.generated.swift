@@ -6026,6 +6026,7 @@ struct APILearningDeckResponse: Codable {
     let shareEnabled: Bool
     let viewerAvailable: Bool
     let sourceNotesAvailable: Bool
+    let thumbnailUrl: String?
     let latestSuccessfulRunId: Int?
     let latestRun: APILearningDeckRunResponse?
     let createdAt: Date
@@ -6043,6 +6044,7 @@ struct APILearningDeckResponse: Codable {
         shareEnabled: Bool = false,
         viewerAvailable: Bool = false,
         sourceNotesAvailable: Bool = false,
+        thumbnailUrl: String? = nil,
         latestSuccessfulRunId: Int? = nil,
         latestRun: APILearningDeckRunResponse? = nil,
         createdAt: Date,
@@ -6059,6 +6061,7 @@ struct APILearningDeckResponse: Codable {
         self.shareEnabled = shareEnabled
         self.viewerAvailable = viewerAvailable
         self.sourceNotesAvailable = sourceNotesAvailable
+        self.thumbnailUrl = thumbnailUrl
         self.latestSuccessfulRunId = latestSuccessfulRunId
         self.latestRun = latestRun
         self.createdAt = createdAt
@@ -6077,6 +6080,7 @@ struct APILearningDeckResponse: Codable {
         case shareEnabled = "share_enabled"
         case viewerAvailable = "viewer_available"
         case sourceNotesAvailable = "source_notes_available"
+        case thumbnailUrl = "thumbnail_url"
         case latestSuccessfulRunId = "latest_successful_run_id"
         case latestRun = "latest_run"
         case createdAt = "created_at"
@@ -6096,6 +6100,7 @@ struct APILearningDeckResponse: Codable {
         shareEnabled = try container.decode(Bool.self, forKey: .shareEnabled)
         viewerAvailable = try container.decode(Bool.self, forKey: .viewerAvailable)
         sourceNotesAvailable = try container.decode(Bool.self, forKey: .sourceNotesAvailable)
+        thumbnailUrl = try container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
         latestSuccessfulRunId = try container.decodeIfPresent(Int.self, forKey: .latestSuccessfulRunId)
         latestRun = try container.decodeIfPresent(APILearningDeckRunResponse.self, forKey: .latestRun)
         let createdAtRaw = try container.decode(String.self, forKey: .createdAt)
@@ -6126,6 +6131,7 @@ struct APILearningDeckResponse: Codable {
         try container.encode(shareEnabled, forKey: .shareEnabled)
         try container.encode(viewerAvailable, forKey: .viewerAvailable)
         try container.encode(sourceNotesAvailable, forKey: .sourceNotesAvailable)
+        try container.encodeIfPresent(thumbnailUrl, forKey: .thumbnailUrl)
         try container.encodeIfPresent(latestSuccessfulRunId, forKey: .latestSuccessfulRunId)
         try container.encodeIfPresent(latestRun, forKey: .latestRun)
         try container.encode(ServerDate.format(createdAt), forKey: .createdAt)

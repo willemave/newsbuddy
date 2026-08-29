@@ -17,6 +17,7 @@ final class LearningDeckAPIMappingTests: XCTestCase {
             shareEnabled: true,
             viewerAvailable: false,
             sourceNotesAvailable: true,
+            thumbnailUrl: "/learning/signed/token/assets/thumbnail.png",
             latestSuccessfulRunId: 6,
             latestRun: APILearningDeckRunResponse(
                 id: 7,
@@ -51,6 +52,8 @@ final class LearningDeckAPIMappingTests: XCTestCase {
         XCTAssertEqual(deck.updatedAt, updatedAt)
         XCTAssertTrue(deck.shareEnabled)
         XCTAssertTrue(deck.sourceNotesAvailable)
+        XCTAssertEqual(deck.thumbnailURL, "/learning/signed/token/assets/thumbnail.png")
+        XCTAssertEqual(deck.thumbnailCacheIdentifier, "learning-deck:41:attempt:6")
     }
 
     func testMappingPreservesUnknownContractValues() {

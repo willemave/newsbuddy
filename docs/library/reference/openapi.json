@@ -3911,7 +3911,7 @@
                 "type": "null"
               }
             ],
-            "description": "ISO timestamp when the user saved this content to the knowledge library",
+            "description": "ISO timestamp of the user's save",
             "title": "Knowledge Saved At"
           },
           "news_article_url": {
@@ -5529,6 +5529,17 @@
                 "type": "null"
               }
             ]
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
           },
           "title": {
             "title": "Title",

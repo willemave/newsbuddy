@@ -41,6 +41,7 @@ class LearningDeckLayoutProfile:
 
 
 LEARNING_DECK_PHONE_BREAKPOINT = 700
+LEARNING_DECK_REVEAL_VERSION = "6.0.1"
 LEARNING_DECK_DESKTOP_CANVAS = LearningDeckCanvas(width=1280, height=720, margin=0.025)
 RESPONSIVE_LEARNING_DECK_LAYOUT = LearningDeckLayoutProfile(
     meta_name="newsly-deck-layout",
@@ -61,6 +62,9 @@ def learning_deck_prompt_values() -> dict[str, str]:
     return {
         "responsive_layout_meta_tag": RESPONSIVE_LEARNING_DECK_LAYOUT.meta_tag,
         "responsive_layout_version": RESPONSIVE_LEARNING_DECK_LAYOUT.version,
+        "reveal_cdn_base_url": (
+            f"https://cdn.jsdelivr.net/npm/reveal.js@{LEARNING_DECK_REVEAL_VERSION}"
+        ),
         "portrait_canvas": RESPONSIVE_LEARNING_DECK_LAYOUT.portrait.label,
         "landscape_canvas": RESPONSIVE_LEARNING_DECK_LAYOUT.landscape.label,
     }

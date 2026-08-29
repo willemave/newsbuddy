@@ -3057,7 +3057,7 @@
             "type": "string"
           },
           "knowledge_saved_at": {
-            "description": "ISO timestamp when the user saved this content to the knowledge library",
+            "description": "ISO timestamp of the user's save",
             "nullable": true,
             "title": "Knowledge Saved At",
             "type": "string"
@@ -4301,6 +4301,11 @@
           "status": {
             "$ref": "#/components/schemas/LearningDeckStatus",
             "nullable": true
+          },
+          "thumbnail_url": {
+            "nullable": true,
+            "title": "Thumbnail Url",
+            "type": "string"
           },
           "title": {
             "title": "Title",

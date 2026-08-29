@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from app.services.learning_deck_agent import LEARNING_DECK_DESIGN_BRIEF, LEARNING_DECK_SYSTEM_PROMPT
 from app.services.learning_deck_theme import (
     DECK_DESIGN_GUIDE,
@@ -16,12 +18,12 @@ from app.services.learning_deck_viewer import (
 _SAMPLE_DECK = (
     b"<!doctype html><html><head>"
     b'<meta name="newsly-deck-layout" content="responsive-v2">'
-    b'<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js/dist/reveal.css">'
+    b'<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@6.0.1/dist/reveal.css">'
     b"<style>.reveal { color: red; }</style></head><body>"
     b'<div class="reveal"><div class="slides">'
     b"<section><h2>Hello</h2><ul><li>One</li></ul></section>"
     b"</div></div>"
-    b'<script src="https://cdn.jsdelivr.net/npm/reveal.js/dist/reveal.js"></script>'
+    b'<script src="https://cdn.jsdelivr.net/npm/reveal.js@6.0.1/dist/reveal.js"></script>'
     b"<script>Reveal.initialize();</script></body></html>"
 )
 
@@ -44,6 +46,8 @@ def test_design_guide_documents_house_classes() -> None:
         assert token in DECK_DESIGN_GUIDE
     # The agent brief embeds the house guide so slides are authored with the classes.
     assert DECK_DESIGN_GUIDE.splitlines()[0] in LEARNING_DECK_DESIGN_BRIEF
+    assert "https://cdn.jsdelivr.net/npm/reveal.js@6.0.1" in DECK_DESIGN_GUIDE
+    assert "unversioned or different" in DECK_DESIGN_GUIDE
 
 
 def test_generation_prompt_documents_rich_react_diagram_authoring() -> None:
@@ -80,11 +84,12 @@ def test_viewer_markup_carries_theme_and_uses_reveal_navigation() -> None:
     assert "data-newsly-learning-deck-next" not in markup
     assert "controls: true" in markup
     assert "progress: false" in markup
-    assert "scrollActivationWidth: null" in markup  # keep Reveal 5 in slide mode on phones
+    assert "scrollActivationWidth: null" in markup
+    assert "reveal.toggleScrollView(false)" in markup
+    assert "reveal.scrollView" not in markup
     assert 'view: "slide"' in markup
     assert "minScale: 0.05" in markup and "maxScale: 3" in markup
     assert 'window.addEventListener("resize", scheduleFit)' in markup
-    assert 'reveal.on("slidechanged", scheduleFit)' in markup
     assert "backdrop-filter" not in markup  # glassmorphism removed
 
 
@@ -92,11 +97,26 @@ def test_augmented_deck_injects_theme_once_and_is_idempotent() -> None:
     augmented = with_learning_deck_navigation_controls(_SAMPLE_DECK).decode()
     assert f'id="{DECK_THEME_STYLE_ID}"' in augmented
     assert augmented.count(f'id="{DECK_THEME_STYLE_ID}"') == 1
-    assert "__newslySlideModePatched" in augmented
     assert "isResponsiveDeck = true" in augmented
     assert augmented.index(DECK_THEME_STYLE_ID) < augmented.lower().index("</body>")
     again = with_learning_deck_navigation_controls(augmented.encode()).decode()
     assert again == augmented
+
+
+@pytest.mark.parametrize(
+    "initializer",
+    [
+        "Reveal.initialize({ hash: true });",
+        "window.Reveal.initialize({ hash: true });",
+        "var result = window.Reveal.initialize({ hash: true });",
+    ],
+)
+def test_augmented_deck_preserves_generated_reveal_initialization(initializer: str) -> None:
+    deck = _SAMPLE_DECK.replace(b"Reveal.initialize();", initializer.encode())
+
+    augmented = with_learning_deck_navigation_controls(deck).decode()
+
+    assert f"<script>{initializer}</script>" in augmented
 
 
 def test_unmarked_stored_deck_keeps_legacy_viewer_fit() -> None:

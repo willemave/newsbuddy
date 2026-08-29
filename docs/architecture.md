@@ -949,9 +949,13 @@ Host-managed Exa search remains a separate product tool and no Exa or Newsly
 credential enters the VM. Writes are restricted to the task directory below `/data/workspace`;
 reads may also address the credential-free corpus below `/data`. Traversal and foreign absolute
 paths fail visibly, results are structured and bounded, bash is capped at 300 seconds, and the
-agent request limit defaults to eight. Learning Deck output is validated automatically; a missing
-or invalid artifact gets one focused repair turn before a typed terminal failure, and validation
-guidance names only contract-relative paths.
+Learning Deck agent is bounded by its execution deadline rather than a fixed model request count.
+Learning Deck output is validated automatically against the same injected viewer shell that clients
+receive. External Reveal assets are pinned to the supported runtime, authored scripts are not
+rewritten, and in-page failures retain structured phase and Reveal-state diagnostics. A missing or
+invalid generated artifact gets one focused repair turn; malformed validator reports and process or
+internal failures bypass the model repair path. Validation guidance names only contract-relative
+paths.
 
 Article chat, contextual-assistant library routes, and council branches hold a
 `LazyAgentVmRuntime`: constructing the turn and registering conditional schemas performs no E2B

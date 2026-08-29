@@ -25,6 +25,7 @@ enum ImageRequestSizing {
 struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     let url: URL?
     let thumbnailUrl: URL?
+    let cacheIdentifier: String?
     let scale: CGFloat
     let targetSize: CGSize?
     @ViewBuilder let content: (Image) -> Content
@@ -37,6 +38,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     init(
         url: URL?,
         thumbnailUrl: URL? = nil,
+        cacheIdentifier: String? = nil,
         targetSize: CGSize? = nil,
         scale: CGFloat = 2.0,
         @ViewBuilder content: @escaping (Image) -> Content,
@@ -44,6 +46,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     ) {
         self.url = url
         self.thumbnailUrl = thumbnailUrl
+        self.cacheIdentifier = cacheIdentifier
         self.targetSize = targetSize
         self.scale = scale
         self.content = content
@@ -69,7 +72,13 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         let urlKey = url?.absoluteString ?? "nil"
         let thumbKey = thumbnailUrl?.absoluteString ?? "nil"
         let sizeKey = targetPixelSize.map(String.init) ?? "original"
-        return "\(urlKey)|\(thumbKey)|\(sizeKey)"
+        return "\(urlKey)|\(thumbKey)|\(cacheIdentifier ?? "default")|\(sizeKey)"
+    }
+
+    private var presentationKey: String {
+        let sourceKey = cacheIdentifier ?? url?.absoluteString ?? "nil"
+        let sizeKey = targetPixelSize.map(String.init) ?? "original"
+        return "\(sourceKey)|\(sizeKey)"
     }
 
     private var targetPixelSize: Int? {
@@ -78,7 +87,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
 
     private func loadImage() async {
         await MainActor.run {
-            let newKey = requestKey
+            let newKey = presentationKey
             if activeURLKey != newKey {
                 loadedImage = nil
                 thumbnailImage = nil
@@ -90,7 +99,11 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
 
         let targetPixelSize = targetPixelSize
 
-        if let cached = await ImageCacheService.shared.image(for: url, targetPixelSize: targetPixelSize) {
+        if let cached = await ImageCacheService.shared.image(
+            for: url,
+            targetPixelSize: targetPixelSize,
+            cacheIdentifier: cacheIdentifier
+        ) {
             if Task.isCancelled { return }
             await MainActor.run {
                 loadedImage = cached
@@ -102,7 +115,8 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             if let thumbImage = await ImageCacheService.shared.image(
                 for: thumbnailUrl,
                 downloadIfMissing: true,
-                targetPixelSize: targetPixelSize
+                targetPixelSize: targetPixelSize,
+                cacheIdentifier: cacheIdentifier.map { "\($0).thumbnail" }
             ) {
                 if Task.isCancelled { return }
                 await MainActor.run {
@@ -116,7 +130,8 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         if let image = await ImageCacheService.shared.image(
             for: url,
             downloadIfMissing: true,
-            targetPixelSize: targetPixelSize
+            targetPixelSize: targetPixelSize,
+            cacheIdentifier: cacheIdentifier
         ) {
             if Task.isCancelled { return }
             await MainActor.run {
@@ -133,6 +148,7 @@ extension CachedAsyncImage where Placeholder == ProgressView<EmptyView, EmptyVie
     init(
         url: URL?,
         thumbnailUrl: URL? = nil,
+        cacheIdentifier: String? = nil,
         targetSize: CGSize? = nil,
         scale: CGFloat = 2.0,
         @ViewBuilder content: @escaping (Image) -> Content
@@ -140,6 +156,7 @@ extension CachedAsyncImage where Placeholder == ProgressView<EmptyView, EmptyVie
         self.init(
             url: url,
             thumbnailUrl: thumbnailUrl,
+            cacheIdentifier: cacheIdentifier,
             targetSize: targetSize,
             scale: scale,
             content: content,
@@ -150,10 +167,17 @@ extension CachedAsyncImage where Placeholder == ProgressView<EmptyView, EmptyVie
 
 extension CachedAsyncImage where Content == Image, Placeholder == ProgressView<EmptyView, EmptyView> {
     /// Creates a CachedAsyncImage that displays the image directly.
-    init(url: URL?, thumbnailUrl: URL? = nil, targetSize: CGSize? = nil, scale: CGFloat = 2.0) {
+    init(
+        url: URL?,
+        thumbnailUrl: URL? = nil,
+        cacheIdentifier: String? = nil,
+        targetSize: CGSize? = nil,
+        scale: CGFloat = 2.0
+    ) {
         self.init(
             url: url,
             thumbnailUrl: thumbnailUrl,
+            cacheIdentifier: cacheIdentifier,
             targetSize: targetSize,
             scale: scale,
             content: { $0 },

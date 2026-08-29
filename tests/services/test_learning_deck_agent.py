@@ -180,6 +180,38 @@ class _BrowserValidationFailureSandbox(_FakeSandbox):
         return SimpleNamespace(exit_code=1, stdout="", stderr="ReferenceError: broken deck")
 
 
+class _StructuredBrowserValidationFailureSandbox(_BrowserValidationFailureSandbox):
+    def __init__(self, report: dict[str, Any] | None = None) -> None:
+        super().__init__()
+        self.report = (
+            report
+            if report is not None
+            else {
+                "phase": "reveal_ready",
+                "reason": "browser runtime or asset load failure",
+                "repairable": True,
+                "page_errors": ["SyntaxError: unexpected token"],
+            }
+        )
+
+    def run_command(
+        self,
+        _command: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> SimpleNamespace:
+        del timeout_seconds
+        self.commands.append(_command)
+        return SimpleNamespace(
+            exit_code=1,
+            stdout="",
+            stderr=(
+                learning_deck_browser_validation.BROWSER_VALIDATION_FAILURE_PREFIX
+                + json.dumps(self.report)
+            ),
+        )
+
+
 class _RepairingAgent(_FakeAgent):
     calls = 0
     request_limits: list[int | None] = []
@@ -539,6 +571,14 @@ def test_learning_deck_browser_validation_runs_when_capabilities_are_present() -
     assert "page.on('pageerror'" in browser_command
     assert "page.on('requestfailed'" in browser_command
     assert "response.status() >= 400" in browser_command
+    assert "v: indices?.v ?? 0" in browser_command
+    assert "(current.v ?? 0) === expected.v" in browser_command
+    assert "target_slide_id: target.id" in browser_command
+    assert "reveal.isScrollView()" in browser_command
+    assert "scroll_view_active" in browser_command
+    assert "phase: 'validator_internal'" in browser_command
+    assert "error?.name !== 'TimeoutError'" in browser_command
+    assert learning_deck_browser_validation.BROWSER_VALIDATION_FAILURE_PREFIX in browser_command
     viewer_html = sandbox.files[learning_deck_browser_validation.VALIDATION_VIEWER_PATH]
     assert f'id="{DECK_THEME_STYLE_ID}"' in viewer_html
     assert "isResponsiveDeck = true" in viewer_html
@@ -580,19 +620,56 @@ def test_browser_validation_returns_actionable_skip_for_missing_capabilities() -
     assert sandbox.commands == []
 
 
-def test_learning_deck_browser_validation_rejects_render_failures_when_available() -> None:
+def test_learning_deck_browser_validation_rejects_unstructured_process_failure() -> None:
     sandbox = _BrowserValidationFailureSandbox()
 
     with pytest.raises(
         learning_deck_agent.LearningDeckArtifactError,
         match="Browser validation failed: ReferenceError: broken deck",
-    ):
+    ) as exc_info:
         learning_deck_agent._validate_artifact_in_browser(
             cast(Any, sandbox),
             index_html=_valid_deck_html(),
         )
 
+    assert exc_info.value.repairable is False
+    assert exc_info.value.report == {
+        "phase": "validator_process",
+        "reason": "ReferenceError: broken deck",
+    }
     assert sum("require('playwright')" in command for command in sandbox.commands) == 1
+
+
+def test_browser_validation_preserves_structured_failure_diagnostics() -> None:
+    sandbox = _StructuredBrowserValidationFailureSandbox()
+
+    with pytest.raises(
+        learning_deck_agent.LearningDeckArtifactError,
+        match="browser runtime or asset load failure during reveal_ready",
+    ) as exc_info:
+        learning_deck_agent._validate_artifact_in_browser(
+            cast(Any, sandbox),
+            index_html=_valid_deck_html(),
+        )
+
+    assert exc_info.value.repairable is True
+    assert exc_info.value.report["phase"] == "reveal_ready"
+    assert exc_info.value.report["page_errors"] == ["SyntaxError: unexpected token"]
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        {},
+        {"phase": "reveal_ready", "reason": "timed out"},
+        {"phase": 1, "reason": "timed out", "repairable": True},
+        {"phase": "reveal_ready", "reason": "timed out", "repairable": "yes"},
+    ],
+)
+def test_browser_validation_rejects_malformed_failure_reports(report: dict[str, Any]) -> None:
+    output = learning_deck_browser_validation.BROWSER_VALIDATION_FAILURE_PREFIX + json.dumps(report)
+
+    assert learning_deck_browser_validation._parse_browser_validation_failure(output) is None
 
 
 @pytest.mark.parametrize(
@@ -619,11 +696,15 @@ def test_browser_validation_rejects_invalid_structured_outcomes(
     stdout: str,
     expected_error: str,
 ) -> None:
-    with pytest.raises(learning_deck_agent.LearningDeckArtifactError, match=expected_error):
+    with pytest.raises(
+        learning_deck_agent.LearningDeckArtifactError, match=expected_error
+    ) as exc_info:
         learning_deck_agent._parse_browser_validation_outcome(stdout)
 
+    assert exc_info.value.repairable is False
 
-def test_browser_validation_rejects_reported_slide_overflow() -> None:
+
+def test_browser_validation_rejects_inconsistent_passing_overflow_outcome() -> None:
     outcome = _browser_validation_outcome()
     outcome["portrait"]["overflow_slides"] = ["intro: bottom"]
     stdout = learning_deck_browser_validation.BROWSER_VALIDATION_RESULT_PREFIX + json.dumps(outcome)
@@ -631,8 +712,59 @@ def test_browser_validation_rejects_reported_slide_overflow() -> None:
     with pytest.raises(
         learning_deck_agent.LearningDeckArtifactError,
         match="reported an incomplete passing outcome",
-    ):
+    ) as exc_info:
         learning_deck_agent._parse_browser_validation_outcome(stdout)
+
+    assert exc_info.value.repairable is False
+
+
+@pytest.mark.parametrize("structured", [False, True])
+def test_learning_deck_agent_does_not_repair_validator_failures(
+    test_user,
+    vendor_usage_db,
+    monkeypatch,
+    structured: bool,
+) -> None:
+    del vendor_usage_db
+    sandbox = (
+        _StructuredBrowserValidationFailureSandbox(
+            {
+                "phase": "validator_internal",
+                "reason": "execution context was destroyed",
+                "repairable": False,
+            }
+        )
+        if structured
+        else _BrowserValidationFailureSandbox()
+    )
+    _RepairingAgent.calls = 0
+    _RepairingAgent.request_limits = []
+    monkeypatch.setattr(learning_deck_agent, "Agent", _RepairingAgent)
+    monkeypatch.setattr(
+        learning_deck_agent,
+        "build_pydantic_model",
+        lambda _model_spec: (object(), {}),
+    )
+    monkeypatch.setattr(learning_deck_agent, "resolve_model_provider", lambda _model_spec: "openai")
+
+    with pytest.raises(LearningDeckAgentExecutionError) as exc_info:
+        learning_deck_agent.run_learning_deck_agent(
+            source_snapshot={"source_kind": "content", "source_title": "Source"},
+            interests_prompt=None,
+            user_id=test_user.id,
+            run_id=94,
+            sandbox_factory=lambda _user_id, _run_id: cast(Any, sandbox),
+        )
+
+    assert _RepairingAgent.calls == 1
+    assert exc_info.value.error_type == "agent_execution_failed"
+    assert any(
+        event["event_type"] == "artifact_validation_failed"
+        for event in exc_info.value.agent_log_events
+    )
+    assert not any(
+        event["event_type"] == "artifact_repair_failed" for event in exc_info.value.agent_log_events
+    )
 
 
 def test_learning_deck_agent_repairs_missing_required_artifacts_once(

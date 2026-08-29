@@ -7,6 +7,7 @@ from typing import Any, NoReturn
 
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger
 from app.models.contracts import (
     ContentStatus,
     LearningDeckSourceKind,
@@ -23,6 +24,7 @@ from app.services.learning_deck_agent import (
     run_learning_deck_agent,
 )
 from app.services.learning_deck_artifacts import (
+    LEARNING_DECK_THUMBNAIL_PATH,
     LearningDeckArtifactError,
     delete_learning_deck_objects,
     render_source_notes_html,
@@ -42,6 +44,8 @@ from app.services.llm_tasks import (
     set_llm_task_status,
     utcnow,
 )
+
+logger = get_logger(__name__)
 
 TERMINAL_LLM_TASK_STATUSES = {
     LlmTaskStatus.COMPLETED.value,
@@ -155,8 +159,25 @@ def run_learning_deck_task(
                 db,
                 task,
                 "lease_lost",
+                "Queue lease was lost before Learning Deck thumbnail generation",
+            )
+        thumbnail_png = _generate_thumbnail_best_effort(
+            deck=deck,
+            task=task,
+            source_snapshot=source_snapshot,
+            source_notes_md=result.source_notes_md,
+            interests_prompt=interests_prompt,
+        )
+        if ensure_lease is not None and not ensure_lease():
+            _fail_task(
+                db,
+                task,
+                "lease_lost",
                 "Queue lease was lost before Learning Deck publication",
             )
+        extra_assets = dict(result.assets)
+        if thumbnail_png is not None:
+            extra_assets[LEARNING_DECK_THUMBNAIL_PATH] = (thumbnail_png, "image/png")
         stored = store_learning_deck_artifact(
             user_id=user_id,
             deck_id=deck_id,
@@ -164,7 +185,7 @@ def run_learning_deck_task(
             index_html=result.index_html,
             source_notes_md=result.source_notes_md,
             source_notes_html=source_notes_html,
-            extra_assets=result.assets,
+            extra_assets=extra_assets,
         )
     except LearningDeckAgentExecutionError as exc:
         db.rollback()
@@ -203,6 +224,7 @@ def run_learning_deck_task(
             "deck_object_key": stored.deck_object_key,
             "source_notes_object_key": stored.source_notes_object_key,
             "source_notes_html_object_key": stored.source_notes_html_object_key,
+            "thumbnail_object_key": stored.thumbnail_object_key,
             "artifact_object_keys": stored.artifact_object_keys,
             "browser_validation": result.browser_validation,
         },
@@ -211,6 +233,7 @@ def run_learning_deck_task(
             "deck_object_key": stored.deck_object_key,
             "source_notes_object_key": stored.source_notes_object_key,
             "source_notes_html_object_key": stored.source_notes_html_object_key,
+            "thumbnail_object_key": stored.thumbnail_object_key,
             "artifact_object_keys": stored.artifact_object_keys,
             "browser_validation": result.browser_validation,
         },
@@ -223,6 +246,56 @@ def run_learning_deck_task(
         source_metadata=result.source_metadata_updates,
     )
     return task
+
+
+def _generate_thumbnail_best_effort(
+    *,
+    deck: LearningDeck,
+    task: LlmTask,
+    source_snapshot: dict[str, Any],
+    source_notes_md: str,
+    interests_prompt: str | None,
+) -> bytes | None:
+    """Generate optional deck artwork without making the deck artifact depend on it."""
+    deck_id = require_int_value(deck.id, "Learning Deck id")
+    user_id = require_int_value(task.user_id, "LLM task user id")
+    task_id = require_llm_task_id(task)
+    source_content_id = source_snapshot.get("source_content_id")
+    if not isinstance(source_content_id, int):
+        source_content_id = None
+    source_title = source_snapshot.get("source_title")
+    if not isinstance(source_title, str):
+        source_title = None
+
+    try:
+        from app.services.image_generation import get_image_generation_service
+
+        return get_image_generation_service().generate_learning_deck_thumbnail(
+            deck_id=deck_id,
+            task_id=task_id,
+            user_id=user_id,
+            source_content_id=source_content_id,
+            title=str(deck.title),
+            source_title=source_title,
+            source_notes_md=source_notes_md,
+            interests_prompt=interests_prompt,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Learning Deck thumbnail generation failed; publishing the deck without new artwork",
+            extra={
+                "component": "learning_decks",
+                "operation": "generate_thumbnail",
+                "item_id": deck_id,
+                "user_id": user_id,
+                "context_data": {
+                    "task_id": task_id,
+                    "failure_class": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+            },
+        )
+        return None
 
 
 def _set_status(

@@ -1077,6 +1077,35 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** The physical iOS 27 device has not exercised Build 202, and this callback-order hardening is newer than Build 202. A subsequent Xcode Cloud build is still required before device acceptance. No production deployment or iOS distribution was performed for this follow-up.
 - **Commits:** This commit.
 
+### 2026-08-27 — `main` — Keep Briefing chrome aligned after document replacement
+
+- **Status:** Complete locally; not committed or distributed.
+- **Scope:** iOS Briefing cold-resume and refresh layout after an ordered Lens document is replaced.
+- **Evidence:** A replacement increments the Lens document generation and gives its `ScrollView` a new identity, intentionally returning it to offset zero, while the view-owned chrome model and view-model pinned flag retained the previous fully collapsed state. The new page therefore applied the full expanded-header content inset beneath a still-collapsed overlay, leaving a persistent blank band above the first passage.
+- **Changes:** Reset the replaced Lens's collapse amount and pinned flag at its document-generation boundary, without changing other Lens positions or ordinary background/tab-return behavior. Added focused coverage that the reset is Lens-local.
+- **Decisions:** Preserve law B13's top reset for an ordered-document replacement and preserve scroll position when no replacement occurs; synchronize the header to that existing reset rather than removing the document identity boundary.
+- **Validation:** All 35 `BriefingReadMarkingTests` and all 45 `BriefingViewModelTests`/`BriefingViewModelRetentionTests` passed after cleanup. The app rebuilt and launched on the authenticated iOS 26.5 Newsly Regression simulator, where the Podcast page rendered its first passage directly beneath the expanded chrome with no blank band. A lock/unlock cycle from a fully collapsed Podcast page preserved its correct scroll position without introducing a blank band. `git diff --check` passed.
+- **Remaining:** No commit, push, production mutation, or iOS distribution performed.
+
+### 2026-08-28 — `main` — Harden Learning Deck browser validation
+
+- **Status:** Complete locally; not committed or deployed.
+- **Scope:** Learning Deck viewer injection, Reveal runtime contract, browser-validation diagnostics, repair ownership, and public failure presentation.
+- **Evidence:** Production deck 24 had two failed generation attempts whose artifacts reached browser validation but timed out while comparing horizontal Reveal indices with an omitted vertical index. The viewer also rewrote the first textual `Reveal.initialize(...)` occurrence, which corrupted qualified and assignment-form initializers. A clean browser canary then exposed that the unversioned Reveal CDN had advanced to 6.0.1 and activated mobile scroll view before the viewer configured slide mode.
+- **Changes:** Removed generated-script rewriting; switched the viewer to Reveal's public scroll-view API; normalized all slide indices; pinned newly generated external Reveal assets to 6.0.1; and added phase, orientation, target-slide, runtime, request, response, and Reveal-state diagnostics. Repair ownership now defaults closed and only generated-artifact failures explicitly opt into one model repair; malformed reports and process/internal failures stop without spending a repair call. Viewer fitting follows initialization and viewport changes without reconfiguring on every slide transition. Public responses now hide agent and validator internals.
+- **Decisions:** Validate the exact hosted viewer shell, preserve authored scripts byte-for-byte, make the supported Reveal runtime explicit, and keep detailed reports in internal task logs. Existing stored decks remain viewable through the public viewer configuration path.
+- **Validation:** Ruff and mypy passed on the touched Python scope; all 93 focused Learning Deck service/router regressions passed after cleanup. A fresh clean E2B Chromium run of the production validator passed a two-slide assignment-form initializer in portrait and landscape, checked both slides without overflow, and completed a next/previous round trip. Replaying the two retained failed artifacts produced structured, repairable slide-overflow reports instead of opaque timeouts. `git diff --check` passed.
+- **Remaining:** No commit, push, deployment, production task retry, or stored-artifact mutation performed.
+
+### 2026-08-28 — `main` — Add generated Learning Deck thumbnails to Knowledge
+
+- **Status:** Complete locally; not committed or deployed.
+- **Scope:** Runware thumbnail generation, Learning Deck artifact publication and API projection, stable signed-image caching, and compact Knowledge deck artwork.
+- **Changes:** Generate one direct 1024×1024 typographic deck cover from the completed deck title and source notes with Recraft V4.1 through Runware; publish it as `assets/thumbnail.png` in the successful artifact bundle; expose a private signed thumbnail URL; and render it in the existing 40-point Knowledge artwork slot. Added a stable cache identity keyed by deck and successful attempt so rotating signed URLs do not clear or redownload unchanged artwork. Thumbnail failure remains non-blocking and the existing feature icon remains the fallback. Extracted the shared Runware request, retry, and usage-recording path into its own service so `image_generation.py` remains below the repository module-size guardrail.
+- **Decisions:** Keep the thumbnail inside the existing immutable artifact bundle rather than adding database state or an SVG composition path. Give thumbnails their own Recraft model and native dimensions, independent of the infographic provider/model, and do not fall back to another paid image provider when Runware is unavailable.
+- **Validation:** Ruff passed on the touched backend and test scope; all 62 focused Learning Deck image, artifact, generation, service, router, and smoke tests and all 47 relevant iOS source-contract tests passed; all seven focused `ImageCacheServiceTests` and `LearningDeckAPIMappingTests` passed on iPhone 17 Pro Max, iOS 26.4. Public contracts were regenerated and checked. After the Runware extraction, the module-size guardrail, Ruff, mypy, and all seven focused image-generation tests passed again.
+- **Remaining:** A four-model Runware comparison on the local DeepSpec deck selected Recraft V4.1 for its exact typography, deck-cover hierarchy, simple system mark, and 40-point legibility; the four successful requests cost $0.1495 total. Broader visual consistency across varied deck topics remains to be observed. No commit, push, deployment, production generation, or stored-artifact mutation performed.
+
 ### 2026-08-28 — `main` — Select Seedream for article and podcast images
 
 - **Status:** Complete; committed and pushed to `main`.

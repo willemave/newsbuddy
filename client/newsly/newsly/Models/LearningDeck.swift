@@ -190,6 +190,7 @@ struct LearningDeck: Identifiable {
     let shareEnabled: Bool
     let viewerAvailable: Bool
     let sourceNotesAvailable: Bool
+    let thumbnailURL: String?
     let latestSuccessfulRunId: Int?
     let latestRun: LearningDeckRun?
     let createdAt: Date
@@ -207,6 +208,7 @@ struct LearningDeck: Identifiable {
         shareEnabled: Bool,
         viewerAvailable: Bool,
         sourceNotesAvailable: Bool,
+        thumbnailURL: String? = nil,
         latestSuccessfulRunId: Int?,
         latestRun: LearningDeckRun?,
         createdAt: Date,
@@ -223,6 +225,7 @@ struct LearningDeck: Identifiable {
         self.shareEnabled = shareEnabled
         self.viewerAvailable = viewerAvailable
         self.sourceNotesAvailable = sourceNotesAvailable
+        self.thumbnailURL = thumbnailURL
         self.latestSuccessfulRunId = latestSuccessfulRunId
         self.latestRun = latestRun
         self.createdAt = createdAt
@@ -245,6 +248,11 @@ struct LearningDeck: Identifiable {
 
     var hasActiveLatestRun: Bool {
         latestRun?.status.isActive == true
+    }
+
+    var thumbnailCacheIdentifier: String? {
+        guard thumbnailURL != nil, let latestSuccessfulRunId else { return nil }
+        return "learning-deck:\(id):attempt:\(latestSuccessfulRunId)"
     }
 
     var latestNote: String? {
