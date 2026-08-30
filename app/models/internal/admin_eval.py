@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.model_defaults import (
     CHEAP_MODEL_SPEC,
-    FAST_MODEL_SPEC,
     OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
     SMART_ANTHROPIC_MODEL_SPEC,
     SMART_MODEL_SPEC,
@@ -22,14 +21,12 @@ LongformTemplate = Literal[
 
 EVAL_MODEL_SPECS: dict[str, str] = {
     "cheap": CHEAP_MODEL_SPEC,
-    "fast": FAST_MODEL_SPEC,
     "smart_openai": SMART_MODEL_SPEC,
     "smart_claude": SMART_ANTHROPIC_MODEL_SPEC,
     "openrouter_deepseek_flash": OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
 }
 EVAL_MODEL_LABELS: dict[str, str] = {
     "cheap": "Cheap",
-    "fast": "Fast",
     "smart_openai": "Smart OpenAI",
     "smart_claude": "Smart Claude",
     "openrouter_deepseek_flash": "OpenRouter DeepSeek V4 Flash",

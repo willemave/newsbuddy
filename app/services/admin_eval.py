@@ -626,9 +626,6 @@ def _resolve_model_availability(
         if provider in {"google", "google-gla"} and not settings.google_api_key:
             skipped.append({"alias": alias, "reason": "GOOGLE_API_KEY not configured"})
             continue
-        if provider == "cerebras" and not settings.cerebras_api_key:
-            skipped.append({"alias": alias, "reason": "CEREBRAS_API_KEY not configured"})
-            continue
         if provider == "openrouter" and not settings.openrouter_api_key:
             skipped.append({"alias": alias, "reason": "OPENROUTER_API_KEY not configured"})
             continue

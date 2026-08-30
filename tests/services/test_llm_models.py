@@ -20,7 +20,6 @@ def _settings(**kwargs):
         google_api_key=kwargs.get("google_api_key"),
         google_cloud_project=kwargs.get("google_cloud_project"),
         google_cloud_location=kwargs.get("google_cloud_location", "global"),
-        cerebras_api_key=kwargs.get("cerebras_api_key"),
         openrouter_api_key=kwargs.get("openrouter_api_key"),
         openrouter_ignored_providers=kwargs.get("openrouter_ignored_providers", []),
     )

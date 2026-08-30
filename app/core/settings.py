@@ -143,7 +143,6 @@ class ProviderSettingsView(BaseModel):
     infographic_generation_model: str | None
     infographic_generation_fallback_model: str | None
     runware_api_key_configured: bool
-    cerebras_api_key_configured: bool
     exa_api_key_configured: bool
     elevenlabs_api_key_configured: bool
     elevenlabs_tts_voice_id_configured: bool
@@ -340,7 +339,6 @@ class Settings(BaseSettings):
     infographic_generation_model: str | None = None
     infographic_generation_fallback_model: str | None = None
     runware_api_key: str | None = None
-    cerebras_api_key: str | None = None
     exa_api_key: str | None = None
     elevenlabs_api_key: str | None = Field(
         default=None,
@@ -672,7 +670,6 @@ class Settings(BaseSettings):
             infographic_generation_model=self.infographic_generation_model,
             infographic_generation_fallback_model=self.infographic_generation_fallback_model,
             runware_api_key_configured=bool(self.runware_api_key),
-            cerebras_api_key_configured=bool(self.cerebras_api_key),
             exa_api_key_configured=bool(self.exa_api_key),
             elevenlabs_api_key_configured=bool(self.elevenlabs_api_key),
             elevenlabs_tts_voice_id_configured=bool(self.elevenlabs_tts_voice_id),

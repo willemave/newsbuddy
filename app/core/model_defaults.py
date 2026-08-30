@@ -1,6 +1,5 @@
 """Central model tier defaults for LLM-backed features."""
 
-FAST_MODEL_SPEC = "cerebras:zai-glm-4.7"
 OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC = "openrouter:deepseek/deepseek-v4-flash"
 
 PDF_EXTRACTION_MODEL_NAME = "gpt-5.6-luna"

@@ -10,14 +10,12 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models.openai import (
-    OpenAIChatModel,
     OpenAIResponsesModel,
     OpenAIResponsesModelSettings,
     ReasoningEffort,
 )
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.providers.cerebras import CerebrasProvider
 from pydantic_ai.providers.google import BaseGoogleProvider, GoogleProvider
 from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -28,7 +26,6 @@ from sqlalchemy.orm import Session
 from app.core.model_defaults import (
     DEEP_RESEARCH_MODEL_NAME,
     DEEP_RESEARCH_MODEL_SPEC,
-    FAST_MODEL_SPEC,
     OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
     SMART_ANTHROPIC_MODEL_SPEC,
     SMART_MODEL_SPEC,
@@ -43,7 +40,6 @@ class LLMProvider(StrEnum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
-    CEREBRAS = "cerebras"
     OPENROUTER = "openrouter"
     DEEP_RESEARCH = "deep_research"
 
@@ -53,7 +49,6 @@ PROVIDER_PREFIXES: dict[str, str] = {
     LLMProvider.OPENAI.value: "openai",
     LLMProvider.ANTHROPIC.value: "anthropic",
     LLMProvider.GOOGLE.value: "google",
-    LLMProvider.CEREBRAS.value: "cerebras",
     LLMProvider.OPENROUTER.value: "openrouter",
     LLMProvider.DEEP_RESEARCH.value: "deep_research",
 }
@@ -61,7 +56,6 @@ PROVIDER_PREFIXES: dict[str, str] = {
 PROVIDER_DEFAULTS: dict[str, str] = {
     LLMProvider.OPENAI.value: SMART_MODEL_SPEC,
     LLMProvider.ANTHROPIC.value: SMART_ANTHROPIC_MODEL_SPEC,
-    LLMProvider.CEREBRAS.value: FAST_MODEL_SPEC,
     LLMProvider.OPENROUTER.value: OPENROUTER_DEEPSEEK_FLASH_MODEL_SPEC,
     LLMProvider.DEEP_RESEARCH.value: DEEP_RESEARCH_MODEL_SPEC,
 }
@@ -167,7 +161,6 @@ def resolve_effective_api_key(
         LLMProvider.OPENAI.value: settings.openai_api_key,
         LLMProvider.ANTHROPIC.value: settings.anthropic_api_key,
         LLMProvider.GOOGLE.value: settings.google_api_key,
-        LLMProvider.CEREBRAS.value: settings.cerebras_api_key,
         LLMProvider.OPENROUTER.value: settings.openrouter_api_key
         or os.getenv("OPENROUTER_API_KEY"),
     }
@@ -279,18 +272,6 @@ def build_pydantic_model(
                 anthropic_cache_messages=True,
             ),
         )
-
-    if provider_prefix == "cerebras" or model_spec.startswith("cerebras:"):
-        resolved_api_key = api_key_override or settings.cerebras_api_key
-        if not resolved_api_key:
-            raise ValueError("CEREBRAS_API_KEY not configured in settings.")
-        model_to_use = (
-            model_name
-            if provider_prefix
-            else (model_spec.split(":", 1)[1] if ":" in model_spec else model_spec)
-        )
-        cerebras_provider = CerebrasProvider(api_key=resolved_api_key)
-        return OpenAIChatModel(model_to_use, provider=cerebras_provider), None
 
     if (
         provider_prefix == "openai"

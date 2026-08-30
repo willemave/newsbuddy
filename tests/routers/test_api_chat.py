@@ -1471,6 +1471,7 @@ def test_different_llm_providers(client: TestClient, db_session: Session) -> Non
     ("payload", "expected_error"),
     [
         ({"llm_provider": "google"}, "Input should be"),
+        ({"llm_provider": "cerebras"}, "Input should be"),
         (
             {"llm_provider": "openai", "llm_model_hint": "google:gemini-3.1-flash-lite-preview"},
             "Google models are not available for chat sessions",

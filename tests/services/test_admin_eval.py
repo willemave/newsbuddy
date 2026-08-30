@@ -155,7 +155,6 @@ def test_run_admin_eval_uses_news_title_focus_and_cost(db_session, monkeypatch):
             openai_api_key="test-openai",
             anthropic_api_key="test-anthropic",
             google_api_key="test-google",
-            cerebras_api_key="test-cerebras",
             openrouter_api_key="test-openrouter",
         )
 
@@ -217,7 +216,6 @@ def test_run_admin_eval_skips_unavailable_models(db_session, monkeypatch):
             openai_api_key=None,
             anthropic_api_key=None,
             google_api_key=None,
-            cerebras_api_key=None,
             openrouter_api_key=None,
         )
 
@@ -225,14 +223,14 @@ def test_run_admin_eval_skips_unavailable_models(db_session, monkeypatch):
 
     request = AdminEvalRunRequest(
         content_types=["article"],
-        models=["smart_openai", "cheap", "smart_claude", "fast", "openrouter_deepseek_flash"],
+        models=["smart_openai", "cheap", "smart_claude", "openrouter_deepseek_flash"],
         sample_size=1,
         recent_pool_size=10,
     )
 
     result = run_admin_eval(db_session, request)
     assert result["available_models"] == []
-    assert len(result["skipped_models"]) == 5
+    assert len(result["skipped_models"]) == 4
 
 
 def test_run_admin_eval_disables_model_after_first_hard_error(db_session, monkeypatch):
@@ -272,12 +270,11 @@ def test_run_admin_eval_disables_model_after_first_hard_error(db_session, monkey
             openai_api_key="test-openai",
             anthropic_api_key="test-anthropic",
             google_api_key="test-google",
-            cerebras_api_key="test-cerebras",
             openrouter_api_key="test-openrouter",
         )
 
     def fake_get_basic_agent(model_spec: str, _output_type, _system_prompt: str):  # noqa: ANN001
-        if "cerebras" in model_spec:
+        if "openrouter" in model_spec:
             return _BadAgent()
         return _GoodAgent()
 
@@ -289,7 +286,7 @@ def test_run_admin_eval_disables_model_after_first_hard_error(db_session, monkey
 
     request = AdminEvalRunRequest(
         content_types=["article"],
-        models=["fast", "cheap"],
+        models=["openrouter_deepseek_flash", "cheap"],
         sample_size=2,
         recent_pool_size=10,
         seed=1,
@@ -301,6 +298,6 @@ def test_run_admin_eval_disables_model_after_first_hard_error(db_session, monkey
     assert call_count["bad"] == 1
     assert call_count["good"] == 2
     assert any(
-        item["alias"] == "fast" and "disabled_after_error" in item["reason"]
+        item["alias"] == "openrouter_deepseek_flash" and "disabled_after_error" in item["reason"]
         for item in result["skipped_models"]
     )

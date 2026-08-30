@@ -494,7 +494,6 @@ class LLMProvider(StrEnum):
 
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
-    CEREBRAS = "cerebras"
     OPENROUTER = "openrouter"
     DEEP_RESEARCH = "deep_research"
 

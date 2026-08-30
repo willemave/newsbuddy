@@ -380,7 +380,7 @@ A few of the engineering decisions that make Newsbuddy interesting:
 
 - **One API spec, three clients, zero drift.** The FastAPI app is the single source of truth: it exports an OpenAPI schema that generates _both_ the Swift iOS client and the Go CLI. A local contract check regenerates every artifact and diffs it against what's committed, making drift between the server, app, and CLI visible.
 
-- **Content-aware model routing.** Each piece of content picks its own model — cheap-and-fast for short news, stronger models for long-form articles and podcasts — across OpenAI, Anthropic, Google Gemini, Cerebras, OpenRouter, and DeepSeek. Provider errors and context-limit overflows fall back automatically, and users can bring their own (encrypted) API keys.
+- **Content-aware model routing.** Each piece of content picks its own model — cheap-and-fast for short news, stronger models for long-form articles and podcasts — across OpenAI, Anthropic, Google Gemini, OpenRouter, and DeepSeek. Provider errors and context-limit overflows fall back automatically, and users can bring their own (encrypted) API keys.
 
 - **Structured outputs, never string-scraping.** Classification, summaries, editorial briefs, and discussion digests are all generated as validated Pydantic schemas through pydantic-ai, then stored as JSON — the pipeline never parses free-form text out of a model response.
 
@@ -406,7 +406,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the full system referen
 |-------|-------------|
 | **Backend** | Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, Alembic |
 | **Async & queue** | PostgreSQL-backed queue (`SKIP LOCKED`, `LISTEN`/`NOTIFY`), Supervisor, cron scheduler |
-| **AI / LLM** | pydantic-ai · OpenAI, Anthropic Claude, Google Gemini, Cerebras, OpenRouter, DeepSeek · Exa search · local SentenceTransformers + Qwen reranker |
+| **AI / LLM** | pydantic-ai · OpenAI, Anthropic Claude, Google Gemini, OpenRouter, DeepSeek · Exa search · local SentenceTransformers + Qwen reranker |
 | **Ingestion & media** | crawl4ai, trafilatura, Firecrawl, feedparser, yt-dlp, Whisper, Gemini + Runware images |
 | **CLI** | Go, Cobra, registry-generated API models, `newsbuddy` binary |
 | **iOS** | SwiftUI, Apple Sign In, Share Extension |

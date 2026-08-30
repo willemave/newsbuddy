@@ -505,7 +505,6 @@ def _append_secret_and_host_path_errors(
         settings.anthropic_api_key,
         settings.google_api_key,
         settings.openrouter_api_key,
-        settings.cerebras_api_key,
         settings.exa_api_key,
         settings.llm_task_sandbox_e2b_api_key,
     ]
