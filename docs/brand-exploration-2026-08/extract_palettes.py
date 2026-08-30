@@ -97,12 +97,20 @@ def extract(path: Path) -> dict[str, str | list[str]]:
 
 
 def main() -> None:
-    result: dict[str, dict[str, str | list[str]]] = {}
-    for path in sorted(IMAGES.glob("*.png")):
-        result[path.stem] = extract(path)
-        print(path.stem, result[path.stem])
-    (ROOT / "palettes.json").write_text(json.dumps(result, indent=2))
-    (ROOT / "palettes.js").write_text("window.PALETTES = " + json.dumps(result, indent=2) + ";\n")
+    # Each image set gets its own palette file; the site switches between them.
+    sets = {"v1": (IMAGES, "PALETTES"), "v2": (ROOT / "images_v2", "PALETTES_V2")}
+    for name, (folder, global_name) in sets.items():
+        if not folder.is_dir():
+            continue
+        result: dict[str, dict[str, str | list[str]]] = {}
+        for path in sorted(folder.glob("*.png")):
+            result[path.stem] = extract(path)
+            print(name, path.stem, result[path.stem])
+        suffix = "" if name == "v1" else f"_{name}"
+        (ROOT / f"palettes{suffix}.json").write_text(json.dumps(result, indent=2))
+        (ROOT / f"palettes{suffix}.js").write_text(
+            f"window.{global_name} = " + json.dumps(result, indent=2) + ";\n"
+        )
 
 
 if __name__ == "__main__":

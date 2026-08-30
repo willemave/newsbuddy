@@ -4,6 +4,7 @@ Usage: uv run python docs/brand-exploration-2026-08/generate_logos.py [concept_i
 Run with no args to generate all pending concepts (skips files that already exist).
 """
 
+import argparse
 import base64
 import json
 import sys
@@ -159,7 +160,11 @@ def load_env() -> dict[str, str]:
 ENV = load_env()
 
 
-def gen_runware(prompt: str, out: Path) -> None:
+DEFAULT_RUNWARE_MODEL = "bytedance:seedream@5.0-lite"
+DEFAULT_OPENROUTER_MODEL = "openai/gpt-5.4-image-2"
+
+
+def gen_runware(prompt: str, out: Path, model: str = DEFAULT_RUNWARE_MODEL) -> None:
     req: dict[str, str | bool | int] = {
         "taskType": "imageInference",
         "taskUUID": str(uuid4()),
@@ -167,7 +172,7 @@ def gen_runware(prompt: str, out: Path) -> None:
         "outputType": "URL",
         "outputFormat": "PNG",
         "positivePrompt": prompt,
-        "model": "bytedance:seedream@5.0-lite",
+        "model": model,
         "numberResults": 1,
         "width": 2048,
         "height": 2048,
@@ -186,12 +191,12 @@ def gen_runware(prompt: str, out: Path) -> None:
     print(f"  cost: ${payload['data'][0].get('cost')}")
 
 
-def gen_openrouter(prompt: str, out: Path) -> None:
+def gen_openrouter(prompt: str, out: Path, model: str = DEFAULT_OPENROUTER_MODEL) -> None:
     r = requests.post(
         OPENROUTER_URL,
         headers={"Authorization": f"Bearer {ENV['OPENROUTER_API_KEY']}"},
         json={
-            "model": "openai/gpt-5.4-image-2",
+            "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "modalities": ["image", "text"],
         },
@@ -209,20 +214,37 @@ def gen_openrouter(prompt: str, out: Path) -> None:
 
 
 def main() -> None:
-    only = set(sys.argv[1:])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("ids", nargs="*", help="concept ids to regenerate (default: all pending)")
+    parser.add_argument(
+        "--runware-model",
+        help="route every concept through this Runware model instead of the per-concept provider",
+    )
+    parser.add_argument("--out", default="images", help="output directory (default: images)")
+    args = parser.parse_args()
+
+    out_dir = ROOT / args.out
+    out_dir.mkdir(exist_ok=True)
+    only = set(args.ids)
     failures = []
     for cid, provider, palette, concept in CONCEPTS:
         if only and cid not in only:
             continue
-        out = IMAGES / f"{cid}.png"
+        out = out_dir / f"{cid}.png"
         if out.exists() and not only:
             print(f"skip {cid} (exists)")
             continue
         prompt = STYLE_BASE + concept + f" Color palette: {palette}. Square 1:1 composition."
-        print(f"gen {cid} via {provider} ...")
+        label = args.runware_model or provider
+        print(f"gen {cid} via {label} ...")
         try:
             t = time.time()
-            (gen_runware if provider == "runware" else gen_openrouter)(prompt, out)
+            if args.runware_model:
+                gen_runware(prompt, out, args.runware_model)
+            elif provider == "runware":
+                gen_runware(prompt, out)
+            else:
+                gen_openrouter(prompt, out)
             print(f"  ok in {time.time() - t:.0f}s -> {out.name}")
         except Exception as exc:  # noqa: BLE001
             failures.append((cid, str(exc)[:300]))

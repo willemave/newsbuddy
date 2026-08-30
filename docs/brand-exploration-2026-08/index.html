@@ -213,6 +213,19 @@
 
   .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.7s ease, transform 0.7s ease; }
   .reveal.in { opacity: 1; transform: none; }
+
+  .modelswitch { margin-top: 30px; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .modelswitch .switch-label {
+    font-size: 11.5px; letter-spacing: 0.18em; text-transform: uppercase;
+    font-weight: 700; color: var(--ink-soft); margin-right: 4px;
+  }
+  .modelswitch button {
+    font-family: inherit; font-size: 13px; font-weight: 700; color: var(--ink-soft);
+    background: rgba(255,255,255,0.5); border: 1px solid var(--line);
+    border-radius: 99px; padding: 7px 17px; cursor: pointer; transition: all 0.2s;
+  }
+  .modelswitch button:hover { border-color: var(--accent); color: var(--ink); }
+  .modelswitch button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 </style>
 </head>
 <body>
@@ -223,8 +236,13 @@
   <h1>Newsbuddy,<br>but make it <em>washi</em>.</h1>
   <p class="lede">Sixteen logo &amp; app-icon directions exploring a Japanese-leaning aesthetic for the Newsly&nbsp;→&nbsp;Newsbuddy rebrand: abstract, pastel, and friendly — each with a small extracted color kit and a mock of how that kit would flow through the briefing UI.</p>
   <div class="meta">
-    <span><b>Models</b> — Seedream 5.0 Lite (Runware) · GPT Image 2 (OpenRouter)</span>
     <span><b>Doctrine</b> — one accent + neutrals per kit</span>
+    <span><b>Palettes</b> — extracted per image, re-themed live below</span>
+  </div>
+  <div class="modelswitch">
+    <span class="switch-label">Model set</span>
+    <button data-set="v1" class="on">Seedream 5.0 Lite + GPT Image 2</button>
+    <button data-set="v2">Nano Banana Pro</button>
   </div>
 </header>
 
@@ -244,6 +262,7 @@
 </footer>
 
 <script src="palettes.js"></script>
+<script src="palettes_v2.js"></script>
 <script>
 const CONCEPTS = [
   ["01-enso-paper",  "Ensō &amp; Paper",     "seedream", "A single brush circle — the daily ritual — with a folded page tucked into its opening. The most 'zen' of the set."],
@@ -264,7 +283,10 @@ const CONCEPTS = [
   ["16-asanoha-burst","Asanoha Burst",       "seedream", "The hemp-leaf star with its core folding open like a paper. Geometric, pattern-ready."],
 ];
 
-const P = window.PALETTES || {};
+const SETS = {
+  v1: { palettes: window.PALETTES || {},    dir: "images",    tag: id => CONCEPTS.find(c => c[0] === id)[2] === "seedream" ? "Seedream 5.0 Lite" : "GPT Image 2" },
+  v2: { palettes: window.PALETTES_V2 || {}, dir: "images_v2", tag: () => "Nano Banana Pro" },
+};
 
 function mix(hex, hex2, t) {
   const a = hex.match(/\w\w/g).map(x => parseInt(x, 16));
@@ -285,6 +307,12 @@ const TABS = [
 const grid = document.getElementById("overview-grid");
 const main = document.getElementById("concepts");
 
+function render(setName) {
+const SET = SETS[setName];
+const P = SET.palettes;
+grid.innerHTML = "";
+main.innerHTML = "";
+
 CONCEPTS.forEach(([id, title, model, desc], idx) => {
   const pal = P[id];
   if (!pal) return;
@@ -298,7 +326,7 @@ CONCEPTS.forEach(([id, title, model, desc], idx) => {
   const onAccent = luma(strong) > 0.55 ? mix(strong, "#000000", 0.72) : "#ffffff";
 
   grid.insertAdjacentHTML("beforeend", `
-    <a href="#c-${id}"><div class="tile"><img src="images/${id}.png" alt="${title}"></div>
+    <a href="#c-${id}"><div class="tile"><img src="${SET.dir}/${id}.png" alt="${title}"></div>
     <div class="cap"><b>${num}</b>${title}</div></a>`);
 
   const swatches = [bg, ...pal.swatches].slice(0, 5).map(hx =>
@@ -317,16 +345,16 @@ CONCEPTS.forEach(([id, title, model, desc], idx) => {
     <div class="concept-head">
       <span class="concept-num">№ ${num}</span>
       <h2>${title}</h2>
-      <span class="model-tag">${model === "seedream" ? "Seedream 5.0" : "GPT Image 2"}</span>
+      <span class="model-tag">${SET.tag(id)}</span>
     </div>
     <p class="desc">${desc}</p>
     <div class="concept-body">
       <div class="art-col">
-        <div class="main-art"><img src="images/${id}.png" alt="${title} logo" loading="lazy"></div>
+        <div class="main-art"><img src="${SET.dir}/${id}.png" alt="${title} logo" loading="lazy"></div>
         <div class="icon-row">
-          <div class="homerow"><div class="ic lg"><img src="images/${id}.png" alt="" loading="lazy"></div>App Store</div>
-          <div class="homerow"><div class="ic md"><img src="images/${id}.png" alt="" loading="lazy"></div>Home</div>
-          <div class="homerow"><div class="ic sm"><img src="images/${id}.png" alt="" loading="lazy"></div>Settings</div>
+          <div class="homerow"><div class="ic lg"><img src="${SET.dir}/${id}.png" alt="" loading="lazy"></div>App Store</div>
+          <div class="homerow"><div class="ic md"><img src="${SET.dir}/${id}.png" alt="" loading="lazy"></div>Home</div>
+          <div class="homerow"><div class="ic sm"><img src="${SET.dir}/${id}.png" alt="" loading="lazy"></div>Settings</div>
         </div>
         <div class="palette">${swatches}</div>
         <div class="role-row">
@@ -363,7 +391,7 @@ CONCEPTS.forEach(([id, title, model, desc], idx) => {
             <div class="unread"></div>
           </div>
           <div class="buddy-bubble">
-            <div class="avatar"><img src="images/${id}.png" alt="" loading="lazy"></div>
+            <div class="avatar"><img src="${SET.dir}/${id}.png" alt="" loading="lazy"></div>
             <div class="msg">Two stories left in today's briefing — the housing one connects to what you read Tuesday.</div>
           </div>
           <div class="tabbar">${tabs}</div>
@@ -384,6 +412,17 @@ const io = new IntersectionObserver(es => es.forEach(e => {
   if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
 }), { threshold: 0.08 });
 document.querySelectorAll(".reveal").forEach(el => io.observe(el));
+}
+
+document.querySelectorAll(".modelswitch button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".modelswitch button").forEach(b => b.classList.remove("on"));
+    btn.classList.add("on");
+    render(btn.dataset.set);
+  });
+});
+
+render("v1");
 </script>
 </body>
 </html>

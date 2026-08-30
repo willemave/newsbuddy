@@ -48,6 +48,16 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** Awaiting direction pick; regenerate any concept with `uv run python docs/brand-exploration-2026-08/generate_logos.py <id>` then rerun `extract_palettes.py`.
 - **Commits:** `87f6191` (`docs(brand): add Newsbuddy logo exploration`).
 
+### 2026-08-29 — `main` — Brand exploration: image model bake-off (follow-up)
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** The first pass used Seedream 5.0 **Lite** — the `.env` default and cheapest tier — rather than a surveyed best model. Surveyed the Runware catalog via `modelSearch` plus OpenRouter's image models, then bake-offed six candidates on two concepts. Nano Banana Pro (`google:4@2`) won clearly; Recraft V4.1 Pro underperformed despite being design-marketed and is the most expensive at $0.21/image. Kept both image sets rather than replacing v1: Nano Banana Pro wins on the geometric/abstract marks, but v1 holds up better on some character marks (mochi, lantern, tsuki).
+- **Changes:** `bakeoff.py` (new); `generate_logos.py` parametrized with `--runware-model`/`--out`; `extract_palettes.py` emits per-set palette files; `index.html` gained a model-set toggle that re-renders marks, palettes, and phone mocks.
+- **Validation:** 16/16 v2 generations succeeded at $0.138 each (~$2.21 total); both toggle branches verified via headless Chrome; `ruff check` clean.
+- **Remaining:** Recraft/Ideogram require fixed 2048² dimensions — handled in `bakeoff.py` only, not in `generate_logos.py`. Vector/SVG output for the winning mark is still unexplored.
+- **Commits:** This brand bake-off follow-up commit.
+
 ### 2026-08-29 — `main` — Remove Cerebras integration
 
 - **Status:** Complete locally and committed; not pushed or deployed.
