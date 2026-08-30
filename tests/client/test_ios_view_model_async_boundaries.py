@@ -136,7 +136,7 @@ def test_chat_route_queue_is_acknowledged_only_after_root_presentation() -> None
     assert "private func pushSession(_ route: ChatSessionRoute)" not in root_tabs_source
     knowledge_path_change = content_source[
         content_source.index(".onChange(of: knowledgePath.count)") : content_source.index(
-            ".onChange(of: scenePhase)"
+            ".onChange(of: lifecycle.phase)"
         )
     ]
     assert "if oldValue > 0, newValue == 0" in knowledge_path_change

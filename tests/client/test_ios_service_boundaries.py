@@ -6,21 +6,31 @@ SERVICES_ROOT = REPO_ROOT / "client/newsly/newsly/Services"
 
 def test_network_services_use_timeout_session_and_single_auth_decoder_setup() -> None:
     api_client_source = (SERVICES_ROOT / "APIClient.swift").read_text()
+    api_client_app_source = (SERVICES_ROOT / "Networking/APIClient+App.swift").read_text()
+    session_policy_source = (
+        SERVICES_ROOT / "Networking/URLSession+NewslyDefault.swift"
+    ).read_text()
     auth_source = (SERVICES_ROOT / "AuthenticationService.swift").read_text()
 
-    assert "static let newslyDefault: URLSession" in api_client_source
-    assert "configuration.timeoutIntervalForRequest = 30" in api_client_source
-    assert "configuration.timeoutIntervalForResource = 60" in api_client_source
+    assert "static let newslyDefault: URLSession" in session_policy_source
+    assert "configuration.waitsForConnectivity = true" in session_policy_source
+    assert "configuration.timeoutIntervalForRequest = 30" in session_policy_source
+    assert "configuration.timeoutIntervalForResource = 60" in session_policy_source
+    assert "private let transport: HTTPTransport" in api_client_source
+    assert "transport: HTTPTransport" in api_client_source
+    assert "session: URLSession = .newslyDefault" in api_client_app_source
+    assert "session: .newslyDefault" in api_client_app_source
+    assert "timeoutIntervalForRequest" not in api_client_source
 
     for service_path in SERVICES_ROOT.glob("*.swift"):
         assert "URLSession.shared" not in service_path.read_text(), service_path
 
-    assert "private enum AuthenticationResponseDecoder" in auth_source
-    assert auth_source.count("JSONDecoder()") == 1
-    assert auth_source.count("dateDecodingStrategy = .iso8601") == 1
+    assert "decoding: .iso8601" in auth_source
+    assert "JSONDecoder()" not in auth_source
+    assert api_client_source.count("dateDecodingStrategy = .iso8601") == 1
 
 
-def test_share_extension_compiles_only_its_minimal_transport_boundary() -> None:
+def test_share_extension_compiles_the_target_neutral_transport_boundary_only() -> None:
     project_source = (REPO_ROOT / "client/newsly/newsly.xcodeproj/project.pbxproj").read_text()
     extension_membership = project_source.split(
         'E637D39E2EF99E2B004CD1F1 /* Exceptions for "newsly" folder in "ShareExtension" target */',
@@ -29,21 +39,49 @@ def test_share_extension_compiles_only_its_minimal_transport_boundary() -> None:
     share_controller_source = (
         REPO_ROOT / "client/newsly/ShareExtension/ShareViewController.swift"
     ).read_text()
+    share_transport_source = (
+        REPO_ROOT / "client/newsly/newsly/Shared/ShareExtensionTransport.swift"
+    ).read_text()
 
-    assert "Shared/ShareExtensionTransport.swift" in extension_membership
-    assert "Shared/ServerConfigurationDefaults.swift" in extension_membership
-    assert "Services/KeychainManager.swift" in extension_membership
-    for main_app_dependency in [
-        "Services/APIClient.swift",
-        "Services/AppSettings.swift",
-        "Services/TokenRefreshService.swift",
+    for shared_transport_dependency in [
         "Models/Generated/APIContracts.generated.swift",
         "Models/Generated/APIModels.generated.swift",
+        "Services/APIClient.swift",
+        "Services/KeychainManager.swift",
+        "Services/Networking/APIRequestTypes.swift",
+        "Services/Networking/ClientFailure.swift",
+        "Services/Networking/CredentialEnvelope.swift",
+        "Services/Networking/CredentialSession.swift",
+        "Services/Networking/CredentialStore.swift",
+        "Services/Networking/HTTPTransport.swift",
+        "Services/Networking/RefreshAttemptStore.swift",
+        "Services/Networking/RefreshTokenExchange.swift",
+        "Services/Networking/RequestRecoveryPolicy.swift",
+        "Shared/ServerConfigurationDefaults.swift",
+        "Shared/ShareExtensionTransport.swift",
     ]:
-        assert main_app_dependency not in extension_membership
+        assert shared_transport_dependency in extension_membership
+
+    for app_only_dependency in [
+        "App/AppLifecycle.swift",
+        "App/AppRuntime.swift",
+        "App/AuthenticatedSession.swift",
+        "Services/AppSettings.swift",
+        "Services/TokenRefreshService.swift",
+        "Services/Networking/APIClient+App.swift",
+        "Services/Networking/CredentialSession+App.swift",
+        "Services/Networking/URLSession+NewslyDefault.swift",
+    ]:
+        assert app_only_dependency not in extension_membership
 
     assert "ShareExtensionTransport.shared.requestVoid(" in share_controller_source
     assert "APIClient.shared" not in share_controller_source
+    assert "private let client: APIClient" in share_transport_source
+    assert (
+        "let credentialSession = credentialSession ?? CredentialSession(" in share_transport_source
+    )
+    assert "client = APIClient(" in share_transport_source
+    assert "APIClient.shared" not in share_transport_source
 
 
 def test_share_extension_exposes_four_recoverable_outcome_actions() -> None:
@@ -82,10 +120,14 @@ def test_share_extension_exposes_four_recoverable_outcome_actions() -> None:
     assert "&& !submissionState.isSubmitting" not in source
 
 
-def test_auth_refresh_is_split_from_keychain_storage() -> None:
+def test_credential_session_is_split_from_keychain_storage() -> None:
     keychain_source = (SERVICES_ROOT / "KeychainManager.swift").read_text()
     auth_error_source = (SERVICES_ROOT / "AuthError.swift").read_text()
-    token_refresh_source = (SERVICES_ROOT / "TokenRefreshService.swift").read_text()
+    credential_session_source = (SERVICES_ROOT / "Networking/CredentialSession.swift").read_text()
+    credential_session_app_source = (
+        SERVICES_ROOT / "Networking/CredentialSession+App.swift"
+    ).read_text()
+    api_client_app_source = (SERVICES_ROOT / "Networking/APIClient+App.swift").read_text()
     openai_source = (SERVICES_ROOT / "OpenAIService.swift").read_text()
     speech_source = (SERVICES_ROOT / "SpeechTranscribing.swift").read_text()
     auth_view_model_source = (
@@ -149,6 +191,9 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
         REPO_ROOT / "client/newsly/newsly/Views/RecentlyReadView.swift"
     ).read_text()
     app_chrome_source = (REPO_ROOT / "client/newsly/newsly/Shared/AppChrome.swift").read_text()
+    root_dependency_factory_source = (
+        REPO_ROOT / "client/newsly/newsly/App/RootDependencyFactory.swift"
+    ).read_text()
     badge_stats_source = (SERVICES_ROOT / "BadgeStatsStore.swift").read_text()
 
     assert "final class KeychainManager" in keychain_source
@@ -156,7 +201,7 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "private let accessGroupLock = NSLock()" in keychain_source
     assert "private var accessGroup: String?" in keychain_source
     assert "func configure(accessGroup: String?)" in keychain_source
-    assert "private func currentAccessGroup() -> String?" in keychain_source
+    assert "func currentAccessGroup() -> String?" in keychain_source
     assert keychain_source.count("accessGroupLock.lock()") == 2
     assert keychain_source.count("defer { accessGroupLock.unlock() }") == 2
     assert "let configuredAccessGroup = currentAccessGroup()" in keychain_source
@@ -168,39 +213,55 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "enum AuthError" in auth_error_source
     assert "var userFacingMessage" in auth_error_source
 
-    assert "protocol TokenRefreshing" in token_refresh_source
-    assert "func accessToken() async throws -> String" in token_refresh_source
-    assert "final class TokenRefreshService" in token_refresh_source
-    assert "private actor RefreshCoordinator" in token_refresh_source
+    assert not (SERVICES_ROOT / "TokenRefreshService.swift").exists()
+    assert "TokenRefreshing" not in api_client_app_source
+    assert "LegacyCredentialSessionAdapter" not in api_client_app_source
+    assert "private actor CredentialRefreshCoordinator" in credential_session_source
+    assert (
+        "private let refreshCoordinator: CredentialRefreshCoordinator" in credential_session_source
+    )
+    assert "func setTerminalHandler(" in credential_session_source
+    assert "terminalHandler:" not in credential_session_app_source
 
     assert "AuthTokenStore" not in openai_source
     assert "KeychainManager.shared" not in openai_source
-    assert "private let tokenRefresher: TokenRefreshing" in openai_source
-    assert "tokenRefresher: TokenRefreshing = TokenRefreshService.shared" in openai_source
-    assert "tokenRefresher.accessToken()" in openai_source
-    assert "tokenRefresher.refreshAccessToken()" in openai_source
+    assert "private let credentialSession: any CredentialSessionProviding" in openai_source
+    assert (
+        "credentialSession: any CredentialSessionProviding = CredentialSession.shared"
+        in openai_source
+    )
+    assert "credentialSession.accessToken(for: .required)" in openai_source
+    assert "apiClient.requestHTTP(" in openai_source
+    assert "authentication: .required" in openai_source
+    assert "refreshAfterRejection(" not in openai_source
 
     assert "KeychainManager.shared" not in speech_source
-    assert "TokenRefreshService.shared.hasStoredCredentialMaterial" in speech_source
+    assert "CredentialSession.shared.hasStoredCredentialMaterial" in speech_source
 
-    assert "authenticationRequiredObserver" in auth_view_model_source
+    assert "authenticationRequiredObserver" not in auth_view_model_source
+    assert "forName: .authenticationRequired" not in auth_view_model_source
+    assert "credentialSession?.setTerminalHandler" in auth_view_model_source
+    assert "handleTerminalCredentialEvent" in auth_view_model_source
+    assert "private let authService: any AuthenticationServicing" in auth_view_model_source
+    assert "private let userCache: any AuthenticatedUserCaching" in auth_view_model_source
+    assert "private let credentialStorage: any CredentialMaterialStoring" in auth_view_model_source
     assert (
-        "NotificationCenter.default.removeObserver(authenticationRequiredObserver)"
+        "userCache ?? KeychainAuthenticatedUserCache(tokenStore: tokenStore)"
         in auth_view_model_source
     )
-    assert "forName: .authenticationRequired" in auth_view_model_source
-    assert "private let authService: any AuthenticationServicing" in auth_view_model_source
-    assert "private let tokenStore: any AuthTokenStore" in auth_view_model_source
+    assert "CredentialStorageFactory.make(tokenStore: tokenStore)" in auth_view_model_source
     assert "AuthenticationService.shared" not in auth_view_model_source
     assert "KeychainManager.shared" not in auth_view_model_source
-    assert "static func makeAuthenticationViewModel()" in app_chrome_source
-    assert "AuthenticationService.shared" in app_chrome_source
-    assert "KeychainManager.shared" in app_chrome_source
+    assert "enum RootDependencyFactory" in root_dependency_factory_source
+    assert "RootDependencyFactory" not in app_chrome_source
+    assert "static func makeAuthenticationViewModel()" in root_dependency_factory_source
+    assert "AuthenticationService.shared" in root_dependency_factory_source
+    assert "KeychainManager.shared" in root_dependency_factory_source
     assert "protocol ChatSessionsServicing" in chat_sessions_view_model_source
     assert "private let chatService: any ChatSessionsServicing" in chat_sessions_view_model_source
     assert "ChatService.shared" not in chat_sessions_view_model_source
-    assert "static func makeChatSessionsViewModel()" in app_chrome_source
-    assert "ChatService.shared" in app_chrome_source
+    assert "static func makeChatSessionsViewModel()" in root_dependency_factory_source
+    assert "ChatService.shared" in root_dependency_factory_source
     assert "protocol ContentSummaryListServicing" in content_list_view_model_source
     assert (
         "private let contentService: any ContentSummaryListServicing"
@@ -259,30 +320,38 @@ def test_auth_refresh_is_split_from_keychain_storage() -> None:
     assert "protocol DetailChatServicing" in detail_chat_coordinator_source
     assert "protocol ContentDiscussionServicing" in discussion_summary_coordinator_source
     assert "protocol PodcastAudioEpisodeServicing" in podcast_audio_controller_source
-    assert "static func makeContentDetailViewModel(" in app_chrome_source
-    assert "static func makeDetailChatCoordinator()" in app_chrome_source
-    assert "static func makeDiscussionSummaryCoordinator()" in app_chrome_source
-    assert "static func makePodcastAudioController()" in app_chrome_source
+    assert "static func makeContentDetailViewModel(" in root_dependency_factory_source
+    assert "static func makeDetailChatCoordinator(" in root_dependency_factory_source
+    assert "chatSessionManager: ActiveChatSessionManager" in root_dependency_factory_source
+    assert "chatRouter: any ChatRouteOpening" in root_dependency_factory_source
+    assert "static func makeDiscussionSummaryCoordinator()" in root_dependency_factory_source
+    assert "static func makePodcastAudioController()" in root_dependency_factory_source
     assert "RootDependencyFactory.makeContentDetailViewModel(" in content_detail_view_source
-    assert "RootDependencyFactory.makeDetailChatCoordinator()" in content_detail_view_source
+    assert "RootDependencyFactory.makeDetailChatCoordinator(" in content_detail_view_source
+    assert "chatSessionManager: activeChatSessionManager" in content_detail_view_source
+    assert "chatRouter: chatNavigation" in content_detail_view_source
     assert "RootDependencyFactory.makeDiscussionSummaryCoordinator()" in content_detail_view_source
     assert "RootDependencyFactory.makePodcastAudioController()" in content_detail_view_source
     assert "protocol ScraperSettingsServicing" in scraper_settings_view_model_source
     assert "private let service: any ScraperSettingsServicing" in scraper_settings_view_model_source
     assert "ScraperConfigService.shared" not in scraper_settings_view_model_source
-    assert "static func makeScraperSettingsViewModel(" in app_chrome_source
-    assert "service: ScraperConfigService.shared" in app_chrome_source
-    assert "contentService: ContentService.shared" in app_chrome_source
-    assert "static func makeContentListViewModel(" in app_chrome_source
-    assert "static func makeCustomNarrationLibraryViewModel(" in app_chrome_source
-    assert "static func makeSubmissionStatusViewModel(" in app_chrome_source
-    assert "static func makeOnboardingViewModel(user: User)" in app_chrome_source
-    assert "makeDiscoveryPersonalizeViewModel" not in app_chrome_source
-    assert "static func makeLearningDecksViewModel()" in app_chrome_source
-    assert "static func makeLearningDeckReaderViewModel(" in app_chrome_source
-    assert "static func makeLearningDeckFocusRecorder()" in app_chrome_source
-    assert "static func makeTweetSuggestionsViewModel()" in app_chrome_source
-    assert "[Notification.Name.authDidLogOut, .authenticationRequired]" in badge_stats_source
+    assert "static func makeScraperSettingsViewModel(" in root_dependency_factory_source
+    assert "service: ScraperConfigService.shared" in root_dependency_factory_source
+    assert "contentService: ContentService.shared" in root_dependency_factory_source
+    assert "static func makeContentListViewModel(" in root_dependency_factory_source
+    assert "makeCustomNarrationLibraryViewModel" not in root_dependency_factory_source
+    assert "static func makeSubmissionStatusViewModel(" in root_dependency_factory_source
+    assert "static func makeOnboardingViewModel(user: User)" in root_dependency_factory_source
+    assert "makeDiscoveryPersonalizeViewModel" not in root_dependency_factory_source
+    assert "makeLearningDecksViewModel" not in root_dependency_factory_source
+    assert "makeKnowledgeChatViewModel" not in root_dependency_factory_source
+    assert "makeKnowledgeTimelineViewModel" not in root_dependency_factory_source
+    assert "makeTabCoordinator" not in root_dependency_factory_source
+    assert "static func makeLearningDeckReaderViewModel(" in root_dependency_factory_source
+    assert "static func makeLearningDeckFocusRecorder()" in root_dependency_factory_source
+    assert "static func makeTweetSuggestionsViewModel()" in root_dependency_factory_source
+    assert "forName: .authDidLogOut" in badge_stats_source
+    assert ".authenticationRequired" not in badge_stats_source
 
 
 def test_view_models_do_not_read_service_singletons_directly() -> None:
@@ -326,6 +395,12 @@ def test_image_cache_has_periodic_cleanup_and_error_logging() -> None:
 
 def test_active_chat_polling_is_lifecycle_gated() -> None:
     active_chat_source = (SERVICES_ROOT / "ActiveChatSessionManager.swift").read_text()
+    app_lifecycle_source = (REPO_ROOT / "client/newsly/newsly/App/AppLifecycle.swift").read_text()
+    app_runtime_source = (REPO_ROOT / "client/newsly/newsly/App/AppRuntime.swift").read_text()
+    authenticated_session_source = (
+        REPO_ROOT / "client/newsly/newsly/App/AuthenticatedSession.swift"
+    ).read_text()
+    app_source = (REPO_ROOT / "client/newsly/newsly/newslyApp.swift").read_text()
     content_view_source = (REPO_ROOT / "client/newsly/newsly/ContentView.swift").read_text()
     active_chat_tests = (
         REPO_ROOT / "client/newsly/newslyTests/ActiveChatSessionManagerTests.swift"
@@ -335,7 +410,17 @@ def test_active_chat_polling_is_lifecycle_gated() -> None:
     assert "func setPollingSuspended(_ isSuspended: Bool)" in active_chat_source
     assert "restartPollingForActiveSessions()" in active_chat_source
     assert "guard startsPolling, !isPollingSuspended" in active_chat_source
-    assert "chatSessionManager.setPollingSuspended(scenePhase != .active)" in content_view_source
+    assert "final class AppLifecycle" in app_lifecycle_source
+    assert "func record(_ newPhase: Phase)" in app_lifecycle_source
+    assert "func record(_ phase: AppLifecycle.Phase)" in app_runtime_source
+    assert "authenticatedSession?.synchronize(with: lifecycle)" in app_runtime_source
+    assert "func synchronize(with lifecycle: AppLifecycle)" in authenticated_session_source
+    assert "activeChatSessionManager.setPollingSuspended(false)" in authenticated_session_source
+    assert "activeChatSessionManager.setPollingSuspended(true)" in authenticated_session_source
+    assert "@Environment(\\.scenePhase) private var scenePhase" in app_source
+    assert "runtime.record(AppLifecycle.Phase(newPhase))" in app_source
+    assert "scenePhase" not in content_view_source
+    assert "setPollingSuspended" not in content_view_source
     assert (
         "testLifecycleSuspensionPausesAndResumesPollingWithoutDroppingTrackedSession"
         in active_chat_tests
@@ -344,6 +429,10 @@ def test_active_chat_polling_is_lifecycle_gated() -> None:
 
 def test_badge_stats_store_owns_counts_and_scene_phase_gated_refresh() -> None:
     badge_store_source = (SERVICES_ROOT / "BadgeStatsStore.swift").read_text()
+    authenticated_session_source = (
+        REPO_ROOT / "client/newsly/newsly/App/AuthenticatedSession.swift"
+    ).read_text()
+    app_source = (REPO_ROOT / "client/newsly/newsly/newslyApp.swift").read_text()
     content_view_source = (REPO_ROOT / "client/newsly/newsly/ContentView.swift").read_text()
     badge_store_tests = (
         REPO_ROOT / "client/newsly/newslyTests/BadgeStatsStoreTests.swift"
@@ -355,16 +444,24 @@ def test_badge_stats_store_owns_counts_and_scene_phase_gated_refresh() -> None:
     assert "guard !isRefreshSuspended else { return }" in badge_store_source
     assert "guard hasActiveProcessing, !isRefreshSuspended" in badge_store_source
     assert "private func stopAndReset()" in badge_store_source
-    assert "UIApplication.didBecomeActiveNotification" in badge_store_source
-    assert "UIApplication.didEnterBackgroundNotification" in badge_store_source
+    assert "import UIKit" not in badge_store_source
+    assert "UIApplication.didBecomeActiveNotification" not in badge_store_source
+    assert "UIApplication.didEnterBackgroundNotification" not in badge_store_source
+    assert "func synchronize(with lifecycle: AppLifecycle)" in authenticated_session_source
+    assert "badgeStatsStore.activate()" in authenticated_session_source
+    assert "badgeStatsStore.suspend()" in authenticated_session_source
+    assert "@Environment(\\.scenePhase) private var scenePhase" in app_source
+    assert "runtime.record(AppLifecycle.Phase(newPhase))" in app_source
     assert not (SERVICES_ROOT / "BadgeStatsRefreshCoordinator.swift").exists()
     assert not (SERVICES_ROOT / "UnreadCountService.swift").exists()
     assert not (SERVICES_ROOT / "ProcessingCountService.swift").exists()
 
-    assert "await BadgeStatsStore.shared.refreshStats()" in content_view_source
+    assert "await BadgeStatsStore.shared.refreshStats()" not in content_view_source
     assert "badgeStatsStore.setRefreshSuspended" not in content_view_source
+    assert "session.badgeStatsStore" in content_view_source
     assert "testSimultaneousRefreshesShareOneRequest" in badge_store_tests
-    assert "testBackgroundSuspendsAndForegroundRefreshes" in badge_store_tests
+    assert "testSuspendStopsRefreshesAndActivateRefreshes" in badge_store_tests
+    assert "testStoreStartsSuspendedAndWaitsForActivation" in badge_store_tests
     assert "testAuthenticationResetClearsCountsAndScheduledRefresh" in badge_store_tests
 
 

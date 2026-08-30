@@ -11,6 +11,47 @@ import os.log
 private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDetailView")
 
 struct ContentDetailView: View {
+    @Environment(ActiveChatSessionManager.self) private var activeChatSessionManager
+    @Environment(ChatNavigationCoordinator.self) private var chatNavigation
+
+    private let contentId: Int
+    private let contentType: APIContentType?
+    private let allContentIds: [Int]
+    private let navigationSurface: ContentDetailNavigationSurface
+    private let initialScrollTarget: ContentDetailScrollTarget?
+    private let readStateCache: ReadStateCache?
+
+    init(
+        contentId: Int,
+        contentType: APIContentType? = nil,
+        allContentIds: [Int] = [],
+        navigationSurface: ContentDetailNavigationSurface = .direct,
+        initialScrollTarget: ContentDetailScrollTarget? = nil,
+        readStateCache: ReadStateCache? = nil
+    ) {
+        self.contentId = contentId
+        self.contentType = contentType
+        self.allContentIds = allContentIds
+        self.navigationSurface = navigationSurface
+        self.initialScrollTarget = initialScrollTarget
+        self.readStateCache = readStateCache
+    }
+
+    var body: some View {
+        ContentDetailContentView(
+            contentId: contentId,
+            contentType: contentType,
+            allContentIds: allContentIds,
+            navigationSurface: navigationSurface,
+            initialScrollTarget: initialScrollTarget,
+            readStateCache: readStateCache,
+            activeChatSessionManager: activeChatSessionManager,
+            chatNavigation: chatNavigation
+        )
+    }
+}
+
+private struct ContentDetailContentView: View {
     private static let scrollChromeStep: CGFloat = 4
 
     @Namespace private var readerTransitionNamespace
@@ -19,6 +60,7 @@ struct ContentDetailView: View {
     private var initialContentType: APIContentType? { navigationContext.initialContentType }
     private var allContentIds: [Int] { navigationContext.contentIds }
     @State private var viewModel: ContentDetailViewModel
+    @Environment(AppLifecycle.self) private var lifecycle
     @Environment(ReadingStateStore.self) private var readingStateStore
     @Environment(\.dismiss) private var dismiss
     @State private var chatCoordinator: DetailChatCoordinator
@@ -40,6 +82,7 @@ struct ContentDetailView: View {
     @State private var discussionCoordinator: DiscussionSummaryCoordinator
     @State private var pendingScrollTarget: ContentDetailScrollTarget?
     @State private var detailScrollOffsetY: CGFloat = 0
+    @State private var handledActivationGeneration: UInt64?
     // Transcript/Full Article collapsed state
     @State private var isTranscriptExpanded: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -49,7 +92,9 @@ struct ContentDetailView: View {
         allContentIds: [Int] = [],
         navigationSurface: ContentDetailNavigationSurface = .direct,
         initialScrollTarget: ContentDetailScrollTarget? = nil,
-        readStateCache: ReadStateCache? = nil
+        readStateCache: ReadStateCache? = nil,
+        activeChatSessionManager: ActiveChatSessionManager,
+        chatNavigation: ChatNavigationCoordinator
     ) {
         let readStateCache = readStateCache ?? ReadStateCache()
         let context = ContentDetailNavigationContext(
@@ -68,7 +113,12 @@ struct ContentDetailView: View {
                 readStateCache: readStateCache
             )
         )
-        self._chatCoordinator = State(initialValue: RootDependencyFactory.makeDetailChatCoordinator())
+        self._chatCoordinator = State(
+            initialValue: RootDependencyFactory.makeDetailChatCoordinator(
+                chatSessionManager: activeChatSessionManager,
+                chatRouter: chatNavigation
+            )
+        )
         self._podcastAudioController = State(initialValue: RootDependencyFactory.makePodcastAudioController())
         self._discussionCoordinator = State(initialValue: RootDependencyFactory.makeDiscussionSummaryCoordinator())
         self._pendingScrollTarget = State(initialValue: context.initialScrollTarget)
@@ -216,6 +266,9 @@ struct ContentDetailView: View {
             viewModel.updateContentId(idToLoad, contentType: initialContentType)
             await viewModel.loadContent()
         }
+        .onChange(of: lifecycle.phase, initial: true) { _, newPhase in
+            handleLifecyclePhase(newPhase)
+        }
         .onChange(of: currentIndex) { _, _ in
             pendingScrollTarget = nil
         }
@@ -267,6 +320,7 @@ struct ContentDetailView: View {
                 "[DetailNavigation] disappear surface=\(navigationSurfaceName, privacy: .public) contentId=\(contentIdLogValue(at: currentIndex), privacy: .public) index=\(currentIndex, privacy: .public)"
             )
             podcastAudioController.stopIfSpeaking(forContentId: viewModel.content?.id)
+            viewModel.suspendAutomaticReads()
             readingStateStore.clear()
         }
         .alert(item: $activeAlert) { alert in
@@ -359,6 +413,26 @@ struct ContentDetailView: View {
                 }
             )
             .ignoresSafeArea()
+        }
+    }
+
+    private func handleLifecyclePhase(_ phase: AppLifecycle.Phase) {
+        switch phase {
+        case .inactive:
+            break
+        case .background:
+            viewModel.suspendAutomaticReads()
+        case .active:
+            guard let generation = lifecycle.activation?.generation else { return }
+            guard let previousGeneration = handledActivationGeneration else {
+                handledActivationGeneration = generation
+                return
+            }
+            guard generation != previousGeneration else { return }
+            handledActivationGeneration = generation
+            Task {
+                await viewModel.revalidateContent()
+            }
         }
     }
 

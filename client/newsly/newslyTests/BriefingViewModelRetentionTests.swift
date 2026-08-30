@@ -65,6 +65,57 @@ final class BriefingViewModelRetentionTests: XCTestCase {
         XCTAssertEqual(viewModel.documentGeneration(for: "today"), 0)
     }
 
+    func testReactivationClearsCompletedInactiveFailureForProtectedLens() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(
+                makeIndex(lenses: [makeLensSummary(key: "today", segmentCount: 2)]),
+                etag: "etag-1"
+            )
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(
+                key: "today",
+                segments: [makeSegment(id: 10, sourceKeys: ["content:1"])],
+                nextCursor: "today-page-2",
+                hasMore: true
+            )
+        ]
+        service.fetchLensWaitRequestIndices = [1]
+        service.fetchLensErrorsByRequestIndex[1] = URLError(.networkConnectionLost)
+        let viewModel = BriefingViewModel(service: service)
+
+        viewModel.setActive(true)
+        await waitForBriefingCondition {
+            service.fetchLensRequests.count == 2
+                && viewModel.selectedLens?.segments.map(\.id) == [10]
+        }
+        // Isolate the narrow race: read retirement protects the visible document
+        // while the already-started continuation still owns failure publication.
+        viewModel.mutateLensState("today") { state in
+            state.staleness = .readRetirement
+        }
+
+        viewModel.setActive(false)
+        XCTAssertTrue(viewModel.lensStates["today"]?.retainsReadRetirement == true)
+        XCTAssertTrue(viewModel.isLensReplacementProtected("today"))
+        XCTAssertTrue(viewModel.tasks.isRunning(.lens("today")))
+
+        service.resumeLensRequest(at: 1)
+        await waitForBriefingCondition {
+            viewModel.lensContinuationErrors["today"] != nil
+                && !viewModel.tasks.isRunning(.lens("today"))
+        }
+        XCTAssertFalse(viewModel.isActive)
+        XCTAssertNotNil(viewModel.lensContinuationErrors["today"])
+
+        viewModel.setActive(true)
+
+        XCTAssertNil(viewModel.lensContinuationErrors["today"])
+        XCTAssertEqual(viewModel.selectedLens?.segments.map(\.id), [10])
+        XCTAssertEqual(service.fetchLensRequests.map(\.cursor), [nil, "today-page-2"])
+    }
+
     func testRetirementArrivingAfterExpiryEvictsWithoutOffscreenFetch() async {
         let service = MockBriefingService()
         let scheduler = MockBriefingLensRetentionScheduler()

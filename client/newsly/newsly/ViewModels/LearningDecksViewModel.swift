@@ -40,6 +40,8 @@ final class LearningDecksViewModel {
     private var mutationRevision = 0
     @ObservationIgnored
     private var deckMutations: [Int: VersionedLearningDeckMutation] = [:]
+    @ObservationIgnored
+    private var activeLoadRequestID: UUID?
 
     init(
         service: any LearningDeckServicing,
@@ -62,25 +64,46 @@ final class LearningDecksViewModel {
     }
 
     func load() async {
-        guard !isLoading else { return }
+        guard activeLoadRequestID == nil else { return }
+        let requestID = UUID()
         let requestStartRevision = mutationRevision
+        activeLoadRequestID = requestID
         isLoading = true
         loadErrorMessage = nil
-        defer { isLoading = false }
+        defer {
+            if activeLoadRequestID == requestID {
+                activeLoadRequestID = nil
+                isLoading = false
+            }
+        }
 
         do {
             let response = try await service.listDecks()
-            guard !Task.isCancelled else { return }
+            guard activeLoadRequestID == requestID, !Task.isCancelled else { return }
             decks = reconcileLoadedDecks(
                 response.decks,
                 requestStartRevision: requestStartRevision
             )
             decks.forEach(startPollingIfNeeded)
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
+            guard activeLoadRequestID == requestID, !Task.isCancelled else { return }
             loadErrorMessage = error.localizedDescription
         }
+    }
+
+    func suspendAutomaticObservation() {
+        tasks.cancelAll()
+    }
+
+    func cancelListRead() {
+        activeLoadRequestID = nil
+        isLoading = false
+    }
+
+    func resumeAutomaticObservation() {
+        decks.forEach(startPollingIfNeeded)
     }
 
     func clearError() {
@@ -107,7 +130,7 @@ final class LearningDecksViewModel {
             upsert(deck)
             errorMessage = nil
             return deck
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return nil
         } catch {
             errorMessage = error.localizedDescription
@@ -121,7 +144,7 @@ final class LearningDecksViewModel {
                 let latest = try await service.fetchDeck(id: deck.id)
                 upsert(latest)
                 errorMessage = nil
-            } catch where isNetworkCancellation(error) {
+            } catch where ClientFailure.classify(error) == .cancelled {
                 return
             } catch {
                 errorMessage = error.localizedDescription
@@ -146,7 +169,7 @@ final class LearningDecksViewModel {
                 let url = try await request(deck.id)
                 errorMessage = nil
                 return url
-            } catch where isNetworkCancellation(error) {
+            } catch where ClientFailure.classify(error) == .cancelled {
                 return nil
             } catch {
                 errorMessage = error.localizedDescription
@@ -165,7 +188,7 @@ final class LearningDecksViewModel {
                 upsert(latest)
                 errorMessage = nil
                 return shareResponse.shareURL
-            } catch where isNetworkCancellation(error) {
+            } catch where ClientFailure.classify(error) == .cancelled {
                 return nil
             } catch {
                 errorMessage = error.localizedDescription
@@ -205,7 +228,7 @@ final class LearningDecksViewModel {
                 upsert(replacement)
                 errorMessage = nil
                 return replacement
-            } catch where isNetworkCancellation(error) {
+            } catch where ClientFailure.classify(error) == .cancelled {
                 return nil
             } catch {
                 errorMessage = error.localizedDescription
@@ -221,7 +244,7 @@ final class LearningDecksViewModel {
                 await statusRegistry.invalidate(deckId: deck.id)
                 removeDeck(id: deck.id)
                 errorMessage = nil
-            } catch where isNetworkCancellation(error) {
+            } catch where ClientFailure.classify(error) == .cancelled {
                 return
             } catch {
                 errorMessage = error.localizedDescription
@@ -316,7 +339,7 @@ final class LearningDecksViewModel {
             )
             upsert(latest, startsPolling: false)
             errorMessage = nil
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch LearningDeckStatusRegistryError.timeout {
             return

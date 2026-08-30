@@ -70,7 +70,7 @@ final class ShareExtensionTransportTests: XCTestCase {
                     for: request,
                     statusCode: 200,
                     data: Data(
-                        #"{"access_token":"fresh-access","refresh_token":"fresh-refresh"}"#.utf8
+                        #"{"access_token":"fresh-access","refresh_token":"fresh-refresh","token_type":"bearer"}"#.utf8
                     )
                 )
             default:
@@ -161,7 +161,7 @@ final class ShareExtensionTransportTests: XCTestCase {
                     for: request,
                     statusCode: 200,
                     data: Data(
-                        #"{"access_token":"fresh-access","refresh_token":"fresh-refresh"}"#.utf8
+                        #"{"access_token":"fresh-access","refresh_token":"fresh-refresh","token_type":"bearer"}"#.utf8
                     )
                 )
             }
@@ -186,6 +186,43 @@ final class ShareExtensionTransportTests: XCTestCase {
         XCTAssertEqual(refreshCounter.value, 1)
         XCTAssertEqual(tokenStore.getToken(key: .accessToken), "fresh-access")
         XCTAssertEqual(tokenStore.getToken(key: .refreshToken), "fresh-refresh")
+    }
+
+    func testRefreshResponseLossRetriesWithSamePersistedAttempt() async throws {
+        let tokenStore = ShareTransportTokenStore(
+            accessToken: nil,
+            refreshToken: "refresh-token"
+        )
+        let transport = makeTransport(
+            tokenStore: tokenStore,
+            refreshRetryDelaysNanoseconds: [0]
+        )
+        let attemptIDs = ShareLockedValues<String>()
+        let refreshCounter = ShareLockedCounter()
+
+        ShareTransportURLProtocol.requestHandler = { request in
+            if request.url?.path == "/auth/refresh" {
+                refreshCounter.increment()
+                attemptIDs.append(try XCTUnwrap(Self.refreshAttemptID(in: request)))
+                if refreshCounter.value == 1 {
+                    throw URLError(.networkConnectionLost)
+                }
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    data: Data(
+                        #"{"access_token":"fresh-access","refresh_token":"fresh-refresh","token_type":"bearer"}"#.utf8
+                    )
+                )
+            }
+            return Self.response(for: request, statusCode: 204, data: Data())
+        }
+
+        try await transport.requestVoid("/api/share-actions", body: Data("{}".utf8))
+
+        XCTAssertEqual(refreshCounter.value, 2)
+        XCTAssertEqual(Set(attemptIDs.values).count, 1)
+        XCTAssertNil(tokenStore.getToken(key: .refreshAttempt))
     }
 
     func testPermissionFailureDoesNotRefresh() async {
@@ -335,12 +372,16 @@ final class ShareExtensionTransportTests: XCTestCase {
         XCTAssertFalse(state.begin(hasValidURL: true))
     }
 
-    private func makeTransport(tokenStore: ShareTransportTokenStore) -> ShareExtensionTransport {
+    private func makeTransport(
+        tokenStore: ShareTransportTokenStore,
+        refreshRetryDelaysNanoseconds: [UInt64] = [250_000_000]
+    ) -> ShareExtensionTransport {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ShareTransportURLProtocol.self]
         return ShareExtensionTransport(
             session: URLSession(configuration: configuration),
             tokenStore: tokenStore,
+            refreshRetryDelaysNanoseconds: refreshRetryDelaysNanoseconds,
             baseURLProvider: { URL(string: "https://api.example.com") }
         )
     }
@@ -383,9 +424,17 @@ final class ShareExtensionTransportTests: XCTestCase {
         }
         return data
     }
+
+    private static func refreshAttemptID(in request: URLRequest) -> String? {
+        guard let body = bodyData(from: request),
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return nil
+        }
+        return json["attempt_id"] as? String
+    }
 }
 
-private final class ShareTransportTokenStore: AuthTokenStore {
+private final class ShareTransportTokenStore: AuthTokenStore, RefreshAttemptPersisting {
     private let lock = NSLock()
     private var storage: [KeychainManager.KeychainKey: String]
 
@@ -411,6 +460,20 @@ private final class ShareTransportTokenStore: AuthTokenStore {
     func clearAll() {
         lock.withLock { storage.removeAll() }
     }
+
+    func readRefreshAttempt() -> RefreshAttemptPersistenceRead {
+        lock.withLock {
+            storage[.refreshAttempt].map(RefreshAttemptPersistenceRead.value) ?? .missing
+        }
+    }
+
+    func persistRefreshAttempt(_ encodedEnvelope: String) throws {
+        lock.withLock { storage[.refreshAttempt] = encodedEnvelope }
+    }
+
+    func deleteRefreshAttempt() {
+        lock.withLock { _ = storage.removeValue(forKey: .refreshAttempt) }
+    }
 }
 
 private final class ShareLockedCounter {
@@ -423,6 +486,19 @@ private final class ShareLockedCounter {
 
     func increment() {
         lock.withLock { count += 1 }
+    }
+}
+
+private final class ShareLockedValues<Value> {
+    private let lock = NSLock()
+    private var storage: [Value] = []
+
+    var values: [Value] {
+        lock.withLock { storage }
+    }
+
+    func append(_ value: Value) {
+        lock.withLock { storage.append(value) }
     }
 }
 

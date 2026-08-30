@@ -92,11 +92,9 @@ final class CLILinkService {
             )
         )
         return try await client.request(
-            APIRequestDescriptor(
-                path: APIEndpoints.cliLinkApprove(sessionID: payload.sessionID),
-                method: "POST",
-                body: body
-            )
+            APIEndpoints.cliLinkApprove(sessionID: payload.sessionID),
+            method: .post,
+            body: body
         )
     }
 }

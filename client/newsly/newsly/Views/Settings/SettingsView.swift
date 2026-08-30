@@ -19,6 +19,7 @@ private enum SettingsSheetDestination: String, Identifiable {
 
 struct SettingsView: View {
     @Environment(AuthenticationViewModel.self) private var authViewModel
+    @Environment(BadgeStatsStore.self) private var badgeStatsStore
     private let scrollToCouncilOnAppear: Bool
     private let cliLinkService = CLILinkService()
     private let feedbackService = FeedbackService.shared
@@ -279,7 +280,7 @@ struct SettingsView: View {
         do {
             if let response = try await ContentService.shared.markAllAsRead(contentType: target.rawValue) {
                 if response.markedCount > 0 {
-                    await BadgeStatsStore.shared.refreshStats()
+                    await badgeStatsStore.refreshStats()
                     alertMessage = "Marked \(response.markedCount) \(target.description(for: response.markedCount)) as read."
                 } else {
                     alertMessage = "No unread \(target.description(for: 0)) found."
@@ -287,8 +288,6 @@ struct SettingsView: View {
             } else {
                 alertMessage = "No unread \(target.description(for: 0)) found."
             }
-        } catch let apiError as APIError {
-            alertMessage = "Failed to mark as read: \(apiError.localizedDescription)"
         } catch {
             alertMessage = "Failed to mark as read: \(error.localizedDescription)"
         }

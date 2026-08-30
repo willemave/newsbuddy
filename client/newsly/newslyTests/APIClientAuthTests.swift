@@ -19,14 +19,13 @@ final class APIClientAuthTests: XCTestCase {
             accessToken: nil,
             refreshToken: "refresh-token"
         )
-        let refresher = MockTokenRefresher(
+        let refresher = MockCredentialSession(
             tokenStore: tokenStore,
             result: .success("fresh-access-token")
         )
         let client = APIClient(
             session: session,
-            tokenStore: tokenStore,
-            tokenRefresher: refresher
+            credentialSession: refresher
         )
 
         MockURLProtocol.requestHandler = { request in
@@ -46,7 +45,7 @@ final class APIClientAuthTests: XCTestCase {
             )
         }
 
-        try await client.requestVoid("/protected", method: "POST", body: Data("{}".utf8))
+        try await client.requestVoid("/protected", method: .post, body: Data("{}".utf8))
 
         XCTAssertEqual(refresher.refreshCallCount, 1)
         XCTAssertEqual(tokenStore.getToken(key: .accessToken), "fresh-access-token")
@@ -58,14 +57,13 @@ final class APIClientAuthTests: XCTestCase {
             accessToken: "stale-access-token",
             refreshToken: "refresh-token"
         )
-        let refresher = MockTokenRefresher(
+        let refresher = MockCredentialSession(
             tokenStore: tokenStore,
             result: .success("fresh-access-token")
         )
         let client = APIClient(
             session: session,
-            tokenStore: tokenStore,
-            tokenRefresher: refresher
+            credentialSession: refresher
         )
         var seenHeaders: [String?] = []
 
@@ -95,44 +93,142 @@ final class APIClientAuthTests: XCTestCase {
             )
         }
 
-        try await client.requestVoid("/protected", method: "POST", body: Data("{}".utf8))
+        try await client.requestVoid("/protected", method: .post, body: Data("{}".utf8))
 
         XCTAssertEqual(seenHeaders, ["Bearer stale-access-token", "Bearer fresh-access-token"])
         XCTAssertEqual(refresher.refreshCallCount, 1)
     }
 
-    func testRequestThrowsUnauthorizedWhenRefreshUnavailable() async {
-        let logoutExpectation = expectation(description: "terminal refresh failure posts logout notification")
-        logoutExpectation.assertForOverFulfill = false
-        let observer = NotificationCenter.default.addObserver(
-            forName: .authDidLogOut,
-            object: nil,
-            queue: nil
-        ) { _ in
-            logoutExpectation.fulfill()
-        }
-        defer {
-            NotificationCenter.default.removeObserver(observer)
-        }
-
+    func testOptInSafeReadRetriesConnectivityFailureAndSucceeds() async throws {
         let session = makeSession()
-        let tokenStore = MockTokenStore(
-            accessToken: nil,
-            refreshToken: nil
-        )
-        let refresher = MockTokenRefresher(
+        let tokenStore = MockTokenStore(accessToken: nil, refreshToken: nil)
+        let refresher = MockCredentialSession(
             tokenStore: tokenStore,
-            result: .failure(AuthError.noRefreshToken)
+            result: .failure(ClientFailure.authenticationRequired)
         )
         let client = APIClient(
             session: session,
-            tokenStore: tokenStore,
-            tokenRefresher: refresher
+            credentialSession: refresher
         )
+        let requestCounter = LockedCounter()
 
         MockURLProtocol.requestHandler = { request in
-            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            requestCounter.increment()
+            if requestCounter.value == 1 {
+                throw URLError(.networkConnectionLost)
+            }
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data()
+            )
+        }
 
+        try await client.requestVoid(
+            "/briefing",
+            method: .get,
+            recoveryPolicy: RequestRecoveryPolicy(
+                connectivityRetryDelaysNanoseconds: [0]
+            ),
+            authentication: .none
+        )
+
+        XCTAssertEqual(requestCounter.value, 2)
+        XCTAssertEqual(refresher.refreshCallCount, 0)
+    }
+
+    func testSafeReadPolicyDefaultsOff() async {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(accessToken: nil, refreshToken: nil)
+        let refresher = MockCredentialSession(
+            tokenStore: tokenStore,
+            result: .failure(ClientFailure.authenticationRequired)
+        )
+        let client = APIClient(
+            session: session,
+            credentialSession: refresher
+        )
+        let requestCounter = LockedCounter()
+        MockURLProtocol.requestHandler = { _ in
+            requestCounter.increment()
+            throw URLError(.notConnectedToInternet)
+        }
+
+        do {
+            try await client.requestVoid(
+                "/unmigrated",
+                method: .get,
+                authentication: .none
+            )
+            XCTFail("Expected a network failure")
+        } catch {
+            XCTAssertEqual(
+                ClientFailure.classify(error),
+                .connectivity(.notConnectedToInternet)
+            )
+        }
+
+        XCTAssertEqual(requestCounter.value, 1)
+    }
+
+    func testSafeReadPolicyNeverRetriesPost() async {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(accessToken: nil, refreshToken: nil)
+        let refresher = MockCredentialSession(
+            tokenStore: tokenStore,
+            result: .failure(ClientFailure.authenticationRequired)
+        )
+        let client = APIClient(
+            session: session,
+            credentialSession: refresher
+        )
+        let requestCounter = LockedCounter()
+        MockURLProtocol.requestHandler = { _ in
+            requestCounter.increment()
+            throw URLError(.networkConnectionLost)
+        }
+
+        do {
+            try await client.requestVoid(
+                "/command",
+                method: .post,
+                recoveryPolicy: RequestRecoveryPolicy(
+                    connectivityRetryDelaysNanoseconds: [0, 0]
+                ),
+                authentication: .none
+            )
+            XCTFail("Expected a network failure")
+        } catch {
+            XCTAssertEqual(
+                ClientFailure.classify(error),
+                .connectivity(.networkConnectionLost)
+            )
+        }
+
+        XCTAssertEqual(requestCounter.value, 1)
+    }
+
+    func testSafeReadDoesNotRetryAmbiguousRefreshFailure() async {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(
+            accessToken: "stale-access-token",
+            refreshToken: "refresh-token"
+        )
+        let refresher = MockCredentialSession(
+            tokenStore: tokenStore,
+            result: .failure(ClientFailure.connectivity(.networkConnectionLost))
+        )
+        let client = APIClient(
+            session: session,
+            credentialSession: refresher
+        )
+        let requestCounter = LockedCounter()
+        MockURLProtocol.requestHandler = { request in
+            requestCounter.increment()
             return (
                 HTTPURLResponse(
                     url: try XCTUnwrap(request.url),
@@ -140,32 +236,213 @@ final class APIClientAuthTests: XCTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!,
-                Data(#"{"detail":"not authenticated"}"#.utf8)
+                Data(#"{"detail":"token expired"}"#.utf8)
             )
         }
 
         do {
-            try await client.requestVoid("/protected", method: "GET")
-            XCTFail("Expected unauthorized error")
-        } catch let error as APIError {
-            guard case .unauthorized = error else {
-                return XCTFail("Unexpected APIError: \(error)")
+            try await client.requestVoid(
+                "/protected",
+                method: .get,
+                recoveryPolicy: RequestRecoveryPolicy(
+                    connectivityRetryDelaysNanoseconds: [0, 0]
+                )
+            )
+            XCTFail("Expected refresh connectivity failure")
+        } catch {
+            XCTAssertEqual(
+                ClientFailure.classify(error),
+                .connectivity(.networkConnectionLost)
+            )
+        }
+
+        XCTAssertEqual(requestCounter.value, 1)
+        XCTAssertEqual(refresher.refreshCallCount, 1)
+    }
+
+    func testPermission403DoesNotRefreshCredentials() async {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(
+            accessToken: "access-token",
+            refreshToken: "refresh-token"
+        )
+        let refresher = MockCredentialSession(
+            tokenStore: tokenStore,
+            result: .success("fresh-access-token")
+        )
+        let client = APIClient(
+            session: session,
+            credentialSession: refresher
+        )
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 403,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"detail":"permission denied"}"#.utf8)
+            )
+        }
+
+        do {
+            try await client.requestVoid("/private-resource", method: .get)
+            XCTFail("Expected permission failure")
+        } catch let error as ClientFailure {
+            guard case .http(let statusCode, _) = error else {
+                return XCTFail("Unexpected ClientFailure: \(error)")
             }
+            XCTAssertEqual(statusCode, 403)
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
 
-        XCTAssertEqual(refresher.refreshCallCount, 1)
-        await fulfillment(of: [logoutExpectation], timeout: 1)
+        XCTAssertEqual(refresher.refreshCallCount, 0)
     }
 
-    func testTokenRefreshServicePersistsRotatedTokens() async throws {
+    func testConditionalReadPreservesHeadersAndAllowed304() async throws {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(accessToken: nil, refreshToken: nil)
+        let refresher = MockCredentialSession(
+            tokenStore: tokenStore,
+            result: .failure(ClientFailure.authenticationRequired)
+        )
+        let client = APIClient(
+            session: session,
+            credentialSession: refresher
+        )
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "If-None-Match"), "v1")
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 304,
+                    httpVersion: nil,
+                    headerFields: ["ETag": "v1"]
+                )!,
+                Data()
+            )
+        }
+
+        let (_, response) = try await client.requestHTTP(
+            "/briefing",
+            headers: ["If-None-Match": "v1"],
+            allowedStatusCodes: [304],
+            recoveryPolicy: .safeRead,
+            authentication: .none
+        )
+
+        XCTAssertEqual(response.statusCode, 304)
+        XCTAssertEqual(response.value(forHTTPHeaderField: "ETag"), "v1")
+    }
+
+    func testISO8601ResponsePolicyMatchesAuthenticationDates() async throws {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(accessToken: nil, refreshToken: nil)
+        let client = APIClient(
+            session: session,
+            credentialSession: MockCredentialSession(
+                tokenStore: tokenStore,
+                result: .failure(ClientFailure.authenticationRequired)
+            )
+        )
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"created_at":"2026-08-29T12:34:56Z"}"#.utf8)
+            )
+        }
+
+        let response: APIISODateFixture = try await client.request(
+            "/auth/date-fixture",
+            authentication: .none,
+            decoding: .iso8601
+        )
+
+        XCTAssertEqual(response.createdAt, ISO8601DateFormatter().date(from: "2026-08-29T12:34:56Z"))
+    }
+
+    func testDecodingFailureEmitsClientFailureWithEndpoint() async {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(accessToken: nil, refreshToken: nil)
+        let client = APIClient(
+            session: session,
+            credentialSession: MockCredentialSession(
+                tokenStore: tokenStore,
+                result: .failure(ClientFailure.authenticationRequired)
+            )
+        )
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"created_at":42}"#.utf8)
+            )
+        }
+
+        do {
+            let _: APIISODateFixture = try await client.request(
+                "/auth/date-fixture",
+                authentication: .none,
+                decoding: .iso8601
+            )
+            XCTFail("Expected decoding failure")
+        } catch let failure as ClientFailure {
+            XCTAssertEqual(failure, .decoding(endpoint: "/auth/date-fixture"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testRequiredRequestWithoutCredentialsFailsLocally() async {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(
+            accessToken: nil,
+            refreshToken: nil
+        )
+        let refresher = MockCredentialSession(
+            tokenStore: tokenStore,
+            result: .failure(ClientFailure.authenticationRequired)
+        )
+        let client = APIClient(
+            session: session,
+            credentialSession: refresher
+        )
+
+        let requestCount = LockedCounter()
+        MockURLProtocol.requestHandler = { _ in
+            requestCount.increment()
+            throw URLError(.badServerResponse)
+        }
+
+        do {
+            try await client.requestVoid("/protected", method: .get)
+            XCTFail("Expected unauthorized error")
+        } catch {
+            XCTAssertEqual(ClientFailure.classify(error), .authenticationRequired)
+        }
+
+        XCTAssertEqual(refresher.refreshCallCount, 0)
+        XCTAssertEqual(requestCount.value, 0)
+    }
+
+    func testCredentialSessionPersistsRotatedTokens() async throws {
         let session = makeSession()
         let tokenStore = MockTokenStore(
             accessToken: "old-access",
             refreshToken: "old-refresh"
         )
-        let service = TokenRefreshService(
+        let service = makeCredentialSession(
             session: session,
             tokenStore: tokenStore
         )
@@ -181,24 +458,114 @@ final class APIClientAuthTests: XCTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!,
-                Data(#"{"access_token":"new-access","refresh_token":"new-refresh"}"#.utf8)
+                Data(#"{"access_token":"new-access","refresh_token":"new-refresh","token_type":"bearer"}"#.utf8)
             )
         }
 
-        let refreshed = try await service.refreshAccessToken()
+        let refreshed = try await service.refreshAfterRejection(rejectedAccessToken: nil)
 
         XCTAssertEqual(refreshed, "new-access")
         XCTAssertEqual(tokenStore.getToken(key: .accessToken), "new-access")
         XCTAssertEqual(tokenStore.getToken(key: .refreshToken), "new-refresh")
+        XCTAssertNil(tokenStore.getToken(key: .refreshAttempt))
     }
 
-    func testTokenRefreshServiceDoesNotDeleteCredentialsWhenRefreshExpires() async {
+    func testRefreshRetriesAmbiguousResponseLossWithSameAttemptID() async throws {
         let session = makeSession()
         let tokenStore = MockTokenStore(
             accessToken: "old-access",
             refreshToken: "old-refresh"
         )
-        let service = TokenRefreshService(
+        let service = makeCredentialSession(
+            session: session,
+            tokenStore: tokenStore,
+            retryDelaysNanoseconds: [0]
+        )
+        let requestCounter = LockedCounter()
+        let attemptIDs = LockedValues<String>()
+
+        MockURLProtocol.requestHandler = { request in
+            requestCounter.increment()
+            attemptIDs.append(try XCTUnwrap(Self.refreshAttemptID(in: request)))
+            if requestCounter.value == 1 {
+                throw URLError(.networkConnectionLost)
+            }
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"access_token":"new-access","refresh_token":"new-refresh","token_type":"bearer"}"#.utf8)
+            )
+        }
+
+        let accessToken = try await service.refreshAfterRejection(rejectedAccessToken: nil)
+
+        XCTAssertEqual(accessToken, "new-access")
+        XCTAssertEqual(requestCounter.value, 2)
+        XCTAssertEqual(Set(attemptIDs.values).count, 1)
+    }
+
+    func testRefreshAttemptSurvivesProcessRecreationAfterAmbiguousFailure() async throws {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(
+            accessToken: "old-access",
+            refreshToken: "old-refresh"
+        )
+        let firstService = makeCredentialSession(
+            session: session,
+            tokenStore: tokenStore,
+            retryDelaysNanoseconds: []
+        )
+        let attemptIDs = LockedValues<String>()
+
+        MockURLProtocol.requestHandler = { request in
+            attemptIDs.append(try XCTUnwrap(Self.refreshAttemptID(in: request)))
+            throw URLError(.networkConnectionLost)
+        }
+        do {
+            _ = try await firstService.refreshAfterRejection(rejectedAccessToken: nil)
+            XCTFail("Expected ambiguous refresh failure")
+        } catch {
+            XCTAssertEqual(
+                ClientFailure.classify(error),
+                .connectivity(.networkConnectionLost)
+            )
+        }
+
+        let secondService = makeCredentialSession(
+            session: session,
+            tokenStore: tokenStore,
+            retryDelaysNanoseconds: []
+        )
+        MockURLProtocol.requestHandler = { request in
+            attemptIDs.append(try XCTUnwrap(Self.refreshAttemptID(in: request)))
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"access_token":"new-access","refresh_token":"new-refresh","token_type":"bearer"}"#.utf8)
+            )
+        }
+
+        _ = try await secondService.refreshAfterRejection(rejectedAccessToken: nil)
+
+        XCTAssertEqual(attemptIDs.values.count, 2)
+        XCTAssertEqual(Set(attemptIDs.values).count, 1)
+    }
+
+    func testCredentialSessionDoesNotDeleteCredentialsWhenRefreshExpires() async {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(
+            accessToken: "old-access",
+            refreshToken: "old-refresh"
+        )
+        let service = makeCredentialSession(
             session: session,
             tokenStore: tokenStore
         )
@@ -216,14 +583,10 @@ final class APIClientAuthTests: XCTestCase {
         }
 
         do {
-            _ = try await service.refreshAccessToken()
+            _ = try await service.refreshAfterRejection(rejectedAccessToken: nil)
             XCTFail("Expected refreshTokenExpired error")
-        } catch let error as AuthError {
-            guard case .refreshTokenExpired = error else {
-                return XCTFail("Unexpected AuthError: \(error)")
-            }
         } catch {
-            XCTFail("Unexpected error: \(error)")
+            XCTAssertEqual(ClientFailure.classify(error), .authenticationExpired)
         }
 
         XCTAssertEqual(tokenStore.getToken(key: .accessToken), "old-access")
@@ -236,7 +599,7 @@ final class APIClientAuthTests: XCTestCase {
             accessToken: "old-access",
             refreshToken: "old-refresh"
         )
-        let service = TokenRefreshService(session: session, tokenStore: tokenStore)
+        let service = makeCredentialSession(session: session, tokenStore: tokenStore)
 
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(
@@ -257,7 +620,7 @@ final class APIClientAuthTests: XCTestCase {
             )
         }
 
-        let accessToken = try await service.refreshAccessToken()
+        let accessToken = try await service.refreshAfterRejection(rejectedAccessToken: nil)
 
         XCTAssertEqual(accessToken, "winner-access")
         XCTAssertEqual(tokenStore.getToken(key: .accessToken), "winner-access")
@@ -317,7 +680,7 @@ final class APIClientAuthTests: XCTestCase {
             accessToken: "old-access",
             refreshToken: "old-refresh"
         )
-        let service = TokenRefreshService(session: session, tokenStore: tokenStore)
+        let service = makeCredentialSession(session: session, tokenStore: tokenStore)
         let requestCounter = LockedCounter()
 
         MockURLProtocol.requestHandler = { request in
@@ -341,11 +704,11 @@ final class APIClientAuthTests: XCTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!,
-                Data(#"{"access_token":"final-access","refresh_token":"final-refresh"}"#.utf8)
+                Data(#"{"access_token":"final-access","refresh_token":"final-refresh","token_type":"bearer"}"#.utf8)
             )
         }
 
-        let accessToken = try await service.refreshAccessToken()
+        let accessToken = try await service.refreshAfterRejection(rejectedAccessToken: nil)
 
         XCTAssertEqual(accessToken, "final-access")
         XCTAssertEqual(requestCounter.value, 2)
@@ -358,7 +721,7 @@ final class APIClientAuthTests: XCTestCase {
             accessToken: "old-access",
             refreshToken: "old-refresh"
         )
-        let service = TokenRefreshService(
+        let service = makeCredentialSession(
             session: session,
             tokenStore: tokenStore
         )
@@ -378,12 +741,12 @@ final class APIClientAuthTests: XCTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!,
-                Data(#"{"access_token":"new-access","refresh_token":"new-refresh"}"#.utf8)
+                Data(#"{"access_token":"new-access","refresh_token":"new-refresh","token_type":"bearer"}"#.utf8)
             )
         }
 
         let refreshTasks = (0..<12).map { _ in
-            Task { try await service.refreshAccessToken() }
+            Task { try await service.refreshAfterRejection(rejectedAccessToken: nil) }
         }
         await fulfillment(of: [requestStarted], timeout: 1)
         try? await Task.sleep(nanoseconds: 50_000_000)
@@ -428,12 +791,41 @@ final class APIClientAuthTests: XCTestCase {
         return URLSession(configuration: configuration)
     }
 
+    private func makeCredentialSession(
+        session: URLSession,
+        tokenStore: MockTokenStore,
+        retryDelaysNanoseconds: [UInt64] = [250_000_000, 750_000_000]
+    ) -> CredentialSession {
+        let lockURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "api-client-auth-\(UUID().uuidString).lock"
+        )
+        return CredentialSession(
+            storage: TokenStoreCredentialStorage(tokenStore: tokenStore),
+            exchange: RefreshTokenExchange(
+                transport: HTTPTransport(session: session),
+                baseURLProvider: { URL(string: "https://api.example.com") },
+                retryDelaysNanoseconds: retryDelaysNanoseconds
+            ),
+            processLock: AuthRefreshProcessLock(fileURLProvider: { lockURL }),
+            attemptStore: KeychainRefreshAttemptStore(persistence: tokenStore),
+            cooldownSeconds: 0
+        )
+    }
+
     private static func refreshToken(in request: URLRequest) -> String? {
         guard let body = bodyData(from: request),
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: String] else {
             return nil
         }
         return json["refresh_token"]
+    }
+
+    private static func refreshAttemptID(in request: URLRequest) -> String? {
+        guard let body = bodyData(from: request),
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return nil
+        }
+        return json["attempt_id"] as? String
     }
 
     private static func bodyData(from request: URLRequest) -> Data? {
@@ -455,6 +847,14 @@ final class APIClientAuthTests: XCTestCase {
             data.append(buffer, count: count)
         }
         return data
+    }
+}
+
+private struct APIISODateFixture: Decodable {
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
     }
 }
 
@@ -480,7 +880,7 @@ private actor APIAuthAsyncGate {
     }
 }
 
-private final class MockTokenStore: AuthTokenStore {
+private final class MockTokenStore: AuthTokenStore, RefreshAttemptPersisting {
     private let lock = NSLock()
     private var storage: [KeychainManager.KeychainKey: String]
 
@@ -510,9 +910,23 @@ private final class MockTokenStore: AuthTokenStore {
     func clearAll() {
         lock.withLock { storage.removeAll() }
     }
+
+    func readRefreshAttempt() -> RefreshAttemptPersistenceRead {
+        lock.withLock {
+            storage[.refreshAttempt].map(RefreshAttemptPersistenceRead.value) ?? .missing
+        }
+    }
+
+    func persistRefreshAttempt(_ encodedEnvelope: String) throws {
+        lock.withLock { storage[.refreshAttempt] = encodedEnvelope }
+    }
+
+    func deleteRefreshAttempt() {
+        lock.withLock { _ = storage.removeValue(forKey: .refreshAttempt) }
+    }
 }
 
-private final class MockTokenRefresher: TokenRefreshing {
+private final class MockCredentialSession: CredentialSessionProviding {
     private let tokenStore: MockTokenStore
     private let result: Result<String, Error>
     private(set) var refreshCallCount = 0
@@ -528,15 +942,19 @@ private final class MockTokenRefresher: TokenRefreshing {
         return !(accessToken?.isEmpty ?? true) || !(refreshToken?.isEmpty ?? true)
     }
 
-    func accessToken() async throws -> String {
+    func accessToken(for authentication: RequestAuthentication) async throws -> String? {
+        guard authentication != .none else { return nil }
         if let token = tokenStore.getToken(key: .accessToken) {
             return token
         }
-
-        return try await refreshAccessToken()
+        guard tokenStore.getToken(key: .refreshToken)?.isEmpty == false else {
+            throw ClientFailure.authenticationRequired
+        }
+        return try await refreshAfterRejection(rejectedAccessToken: nil)
     }
 
-    func refreshAccessToken() async throws -> String {
+    func refreshAfterRejection(rejectedAccessToken: String?) async throws -> String {
+        _ = rejectedAccessToken
         refreshCallCount += 1
 
         switch result {
@@ -593,6 +1011,19 @@ private final class LockedCounter: @unchecked Sendable {
 
     func increment() {
         lock.withLock { count += 1 }
+    }
+}
+
+private final class LockedValues<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [Value] = []
+
+    var values: [Value] {
+        lock.withLock { storage }
+    }
+
+    func append(_ value: Value) {
+        lock.withLock { storage.append(value) }
     }
 }
 

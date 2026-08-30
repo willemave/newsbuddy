@@ -34,10 +34,22 @@ final class KnowledgeChatViewModel {
         let session: ChatSessionSummary
     }
 
-    var sessions: [ChatSessionSummary] = []
-    var isLoading = false
-    var isLoadingMore = false
-    var hasMoreSessions = false
+    var sessions: [ChatSessionSummary] {
+        get { feed.items }
+        set { feed.replaceItems(newValue) }
+    }
+
+    var isLoading: Bool {
+        feed.isRequestInFlight && feed.phase != .loadingMore
+    }
+
+    var isLoadingMore: Bool {
+        feed.phase == .loadingMore
+    }
+
+    var hasMoreSessions: Bool {
+        feed.hasMore
+    }
     var isCreatingSession = false
     private(set) var loadErrorMessage: String?
     var errorMessage: String?
@@ -56,7 +68,7 @@ final class KnowledgeChatViewModel {
     @ObservationIgnored
     private let refreshTranscriptionAvailability: () async -> Bool
     @ObservationIgnored
-    private var nextCursor: String?
+    private var feed: PaginatedFeed<ChatSessionSummary>!
     @ObservationIgnored
     private let historyPageLimit = 20
     @ObservationIgnored
@@ -91,41 +103,25 @@ final class KnowledgeChatViewModel {
         self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
         self.voiceDictationAvailable = initialVoiceDictationAvailable
         self.activeChatPollIntervalNanoseconds = activeChatPollIntervalNanoseconds
+        feed = PaginatedFeed(loadPageWithGeneration: { [weak self] cursor, generation in
+            guard let self else {
+                return Page(items: [], nextCursor: nil, hasMore: false)
+            }
+            return try await self.loadHistoryPage(cursor: cursor, generation: generation)
+        })
     }
 
     func loadChats() async {
-        guard !isLoading else { return }
-        let requestStartRevision = sessionMutationRevision
-        isLoading = true
-        beginSessionListRequest()
-        defer {
-            isLoading = false
-            finishSessionListRequest()
-        }
+        guard !feed.isRequestInFlight else { return }
 
         loadErrorMessage = nil
         hasLoadMoreError = false
+        await feed.refresh()
+        loadErrorMessage = feedErrorMessage
+    }
 
-        do {
-            let response = try await chatService.listSessionsPage(
-                contentId: nil,
-                newsItemId: nil,
-                limit: historyPageLimit,
-                cursor: nil
-            )
-            sessions = reconcileInitialSessions(
-                response.sessions,
-                requestStartRevision: requestStartRevision
-            )
-            nextCursor = response.meta.nextCursor
-            hasMoreSessions = response.meta.hasMore
-        } catch where isNetworkCancellation(error) {
-            return
-        } catch {
-            nextCursor = nil
-            hasMoreSessions = false
-            loadErrorMessage = error.localizedDescription
-        }
+    func cancelAutomaticRead() {
+        feed.cancelRequestRetainingState()
     }
 
     func clearError() {
@@ -147,33 +143,13 @@ final class KnowledgeChatViewModel {
     }
 
     func loadMoreSessions() async {
-        guard !isLoading, !isLoadingMore, hasMoreSessions, let cursor = nextCursor else {
+        guard !feed.isRequestInFlight, hasMoreSessions, feed.nextCursor != nil else {
             return
         }
 
-        isLoadingMore = true
         hasLoadMoreError = false
-        beginSessionListRequest()
-        defer {
-            isLoadingMore = false
-            finishSessionListRequest()
-        }
-
-        do {
-            let response = try await chatService.listSessionsPage(
-                contentId: nil,
-                newsItemId: nil,
-                limit: historyPageLimit,
-                cursor: cursor
-            )
-            appendUniqueSessions(visibleSessions(response.sessions))
-            nextCursor = response.meta.nextCursor
-            hasMoreSessions = response.meta.hasMore
-        } catch where isNetworkCancellation(error) {
-            return
-        } catch {
-            hasLoadMoreError = true
-        }
+        await feed.loadNextPage()
+        hasLoadMoreError = feedErrorMessage != nil
     }
 
     func startChat(message: String) async -> ChatSessionRoute? {
@@ -192,9 +168,9 @@ final class KnowledgeChatViewModel {
             try await chatService.deleteSession(sessionId: session.id)
             deletedSessionIDs.insert(session.id)
             locallyCreatedSessions.removeValue(forKey: session.id)
-            sessions.removeAll { $0.id == session.id }
+            feed.replaceItems(sessions.filter { $0.id != session.id })
             discardSettledDeletionTombstones()
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             errorMessage = error.localizedDescription
@@ -255,7 +231,7 @@ final class KnowledgeChatViewModel {
                 initialUserMessageTimestamp: response.userMessage.timestamp,
                 pendingMessageId: response.messageId
             )
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return nil
         } catch {
             errorMessage = error.localizedDescription
@@ -272,13 +248,6 @@ final class KnowledgeChatViewModel {
         )
     }
 
-    private func appendUniqueSessions(_ newSessions: [ChatSessionSummary]) {
-        var seenIds = Set(sessions.map(\.id))
-        for session in newSessions where seenIds.insert(session.id).inserted {
-            sessions.append(session)
-        }
-    }
-
     private func prependSession(_ session: ChatSessionSummary) {
         deletedSessionIDs.remove(session.id)
         sessionMutationRevision &+= 1
@@ -286,8 +255,45 @@ final class KnowledgeChatViewModel {
             revision: sessionMutationRevision,
             session: session
         )
-        sessions.removeAll { $0.id == session.id }
-        sessions.insert(session, at: 0)
+        var updatedSessions = sessions.filter { $0.id != session.id }
+        updatedSessions.insert(session, at: 0)
+        feed.replaceItems(updatedSessions)
+    }
+
+    private var feedErrorMessage: String? {
+        guard case .error(let message) = feed.phase else { return nil }
+        return message
+    }
+
+    private func loadHistoryPage(
+        cursor: String?,
+        generation: Int
+    ) async throws -> Page<ChatSessionSummary> {
+        let requestStartRevision = sessionMutationRevision
+        beginSessionListRequest()
+        defer { finishSessionListRequest() }
+
+        let response = try await chatService.listSessionsPage(
+            contentId: nil,
+            newsItemId: nil,
+            limit: historyPageLimit,
+            cursor: cursor
+        )
+        let loadedSessions: [ChatSessionSummary]
+        if cursor == nil, feed.isCurrentRequest(generation) {
+            loadedSessions = reconcileInitialSessions(
+                response.sessions,
+                requestStartRevision: requestStartRevision
+            )
+        } else {
+            loadedSessions = visibleSessions(response.sessions)
+        }
+
+        return Page(
+            items: loadedSessions,
+            nextCursor: response.meta.nextCursor,
+            hasMore: response.meta.hasMore
+        )
     }
 
     private func reconcileInitialSessions(

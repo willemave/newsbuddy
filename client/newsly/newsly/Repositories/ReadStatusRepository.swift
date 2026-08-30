@@ -60,7 +60,7 @@ final class ReadStatusRepository: ReadStatusRepositoryType {
         do {
             let _: BulkMarkReadResponse = try await client.request(
                 endpoint.path,
-                method: "POST",
+                method: .post,
                 body: body
             )
             logger.info("[ReadStatus] markRead success | ids=\(ids, privacy: .public)")

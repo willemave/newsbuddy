@@ -10,21 +10,21 @@ struct ChatDependencies {
     var messageCompletionRegistry: ChatMessageCompletionRegistry
     var transcriptionService: any SpeechTranscribing
     var activeSessionManager: ActiveChatSessionManager
-    var authService: any AuthenticationServicing
-    var tokenStore: any AuthTokenStore
     var refreshTranscriptionAvailability: () async -> Bool
     var setBackendTranscriptionAvailable: (Bool) -> Void
 
     @MainActor
     static var live: ChatDependencies {
-        let activeSessionManager = ActiveChatSessionManager.shared
+        live(activeSessionManager: .shared)
+    }
+
+    @MainActor
+    static func live(activeSessionManager: ActiveChatSessionManager) -> ChatDependencies {
         return ChatDependencies(
             chatService: ChatService.shared,
             messageCompletionRegistry: activeSessionManager.messageCompletionRegistry,
             transcriptionService: SpeechTranscriberFactory.makeVoiceDictationTranscriber(),
             activeSessionManager: activeSessionManager,
-            authService: AuthenticationService.shared,
-            tokenStore: KeychainManager.shared,
             refreshTranscriptionAvailability: {
                 await OpenAIService.shared.refreshTranscriptionAvailability()
             },

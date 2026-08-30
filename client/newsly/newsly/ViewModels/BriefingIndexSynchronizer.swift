@@ -196,7 +196,7 @@ final class BriefingIndexSynchronizer {
                 baselineVersion: response.version,
                 onIndexResult: onIndexResult
             )
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             briefingIndexLogger.info("Manual Briefing refresh cancelled")
             if tasks.isCurrent(token) {
                 refreshPhase = .idle
@@ -240,7 +240,7 @@ final class BriefingIndexSynchronizer {
                     )
                     refreshPhase = .idle
                     return
-                } catch where isNetworkCancellation(error) {
+                } catch where ClientFailure.classify(error) == .cancelled {
                     guard tasks.isCurrent(token) else { return }
                     briefingIndexLogger.info(
                         "Refresh poll cancelled | polls=\(pollCount, privacy: .public)"

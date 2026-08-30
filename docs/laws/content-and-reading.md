@@ -23,3 +23,5 @@ C10. Search returns only user-visible material and remains useful when an option
 C11. Discussions, links, images, and other enrichment may improve an item without changing its canonical identity.
 
 C12. Processing state remains truthful, and every displayed item retains enough provenance to trace its origin.
+
+C13. Lifecycle cancellation is not a content failure. A backgrounded read resumes or revalidates when its still-visible route becomes active; readable content remains visible while automatic revalidation is in flight or fails transiently, and a result from a suspended or replaced request generation never publishes.

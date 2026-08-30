@@ -21,19 +21,12 @@ private enum ChatSessionSheetDestination: Identifiable {
 }
 
 struct ChatSessionView: View {
-    @Environment(AuthenticationViewModel.self) private var authViewModel
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.persistentBottomChromeInset) private var persistentBottomChromeInset
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var viewModel: ChatSessionViewModel
-    let onShowHistory: (() -> Void)?
-    @FocusState private var isInputFocused: Bool
-    @State private var activeSheet: ChatSessionSheetDestination?
-    @State private var scrollToBottomRequest = 0
-    @State private var edgeBackDragOffset: CGFloat = 0
-    @State private var edgeBackSwipeFeedbackTrigger = 0
+    @Environment(AppLifecycle.self) private var lifecycle
+    @Environment(ActiveChatSessionManager.self) private var activeSessionManager
+
     private let route: ChatSessionRoute
-    private let dependencies: ChatDependencies
+    private let dependencies: ChatDependencies?
+    private let onShowHistory: (() -> Void)?
     private let onClose: (() -> Void)?
 
     @MainActor
@@ -43,10 +36,59 @@ struct ChatSessionView: View {
         onShowHistory: (() -> Void)? = nil,
         onClose: (() -> Void)? = nil
     ) {
-        let resolvedDependencies = dependencies ?? .live
         self.route = route
-        self.dependencies = resolvedDependencies
-        _viewModel = State(initialValue: ChatSessionViewModel(route: route, dependencies: resolvedDependencies))
+        self.dependencies = dependencies
+        self.onShowHistory = onShowHistory
+        self.onClose = onClose
+    }
+
+    var body: some View {
+        ChatSessionContent(
+            route: route,
+            lifecycle: lifecycle,
+            dependencies: dependencies ?? .live(activeSessionManager: activeSessionManager),
+            onShowHistory: onShowHistory,
+            onClose: onClose
+        )
+    }
+}
+
+private struct ChatSessionContent: View {
+    @Environment(AuthenticationViewModel.self) private var authViewModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.persistentBottomChromeInset) private var persistentBottomChromeInset
+
+    private let lifecycle: AppLifecycle
+    private let route: ChatSessionRoute
+    private let dependencies: ChatDependencies
+    private let onShowHistory: (() -> Void)?
+    private let onClose: (() -> Void)?
+
+    @State private var viewModel: ChatSessionViewModel
+    @FocusState private var isInputFocused: Bool
+    @State private var activeSheet: ChatSessionSheetDestination?
+    @State private var scrollToBottomRequest = 0
+    @State private var edgeBackDragOffset: CGFloat = 0
+    @State private var edgeBackSwipeFeedbackTrigger = 0
+
+    @MainActor
+    init(
+        route: ChatSessionRoute,
+        lifecycle: AppLifecycle,
+        dependencies: ChatDependencies,
+        onShowHistory: (() -> Void)? = nil,
+        onClose: (() -> Void)? = nil
+    ) {
+        self.route = route
+        self.lifecycle = lifecycle
+        self.dependencies = dependencies
+        _viewModel = State(
+            initialValue: ChatSessionViewModel(
+                lifecycle: lifecycle,
+                route: route,
+                dependencies: dependencies
+            )
+        )
         self.onShowHistory = onShowHistory
         self.onClose = onClose
     }
@@ -85,12 +127,11 @@ struct ChatSessionView: View {
                     isInputFocused = true
                 }
             }
-            .onChange(of: scenePhase) { _, newPhase in
-                viewModel.handleScenePhaseChange(newPhase)
-                guard newPhase == .active else { return }
-                Task {
-                    await viewModel.refreshAfterForegroundIfNeeded()
-                }
+            .onChange(of: lifecycle.phase) { _, _ in
+                viewModel.handleLifecyclePhaseChange()
+            }
+            .task(id: lifecycle.activation?.generation) {
+                await viewModel.resumeAfterActivationIfNeeded()
             }
             .onDisappear {
                 viewModel.handleDisappear()
@@ -275,7 +316,7 @@ struct ChatSessionView: View {
     }
 }
 
-private extension ChatSessionView {
+private extension ChatSessionContent {
     func switchProvider(_ provider: ChatModelProvider) {
         Task { await switchToProvider(provider) }
     }

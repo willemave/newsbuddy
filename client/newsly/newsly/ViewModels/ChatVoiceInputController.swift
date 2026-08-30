@@ -25,10 +25,6 @@ final class ChatVoiceInputController {
     @ObservationIgnored
     private let voiceCoordinator: VoiceDictationCoordinator
     @ObservationIgnored
-    private let authService: any AuthenticationServicing
-    @ObservationIgnored
-    private let tokenStore: any AuthTokenStore
-    @ObservationIgnored
     private let refreshAvailability: () async -> Bool
     @ObservationIgnored
     private let setBackendAvailability: (Bool) -> Void
@@ -47,15 +43,11 @@ final class ChatVoiceInputController {
 
     init(
         transcriptionService: any SpeechTranscribing,
-        authService: any AuthenticationServicing,
-        tokenStore: any AuthTokenStore,
         refreshAvailability: @escaping () async -> Bool,
         setBackendAvailability: @escaping (Bool) -> Void,
         initiallyAvailable: Bool
     ) {
         self.voiceCoordinator = VoiceDictationCoordinator(transcriber: transcriptionService)
-        self.authService = authService
-        self.tokenStore = tokenStore
         self.refreshAvailability = refreshAvailability
         self.setBackendAvailability = setBackendAvailability
         self.isAvailable = initiallyAvailable
@@ -75,17 +67,9 @@ final class ChatVoiceInputController {
             return
         }
 
-        do {
-            if !hasAuthToken {
-                _ = try await authService.refreshAccessToken()
-            }
-            isAvailable = await refreshAvailability()
-        } catch {
-            chatVoiceLogger.debug(
-                "Token refresh for voice dictation failed: \(error.localizedDescription)"
-            )
+        isAvailable = await refreshAvailability()
+        if !isAvailable {
             setBackendAvailability(false)
-            isAvailable = false
         }
     }
 
@@ -181,16 +165,6 @@ final class ChatVoiceInputController {
         voiceCoordinator.cancel()
         isActionInFlight = false
         resetCaptureState()
-    }
-
-    private var hasAuthToken: Bool {
-        if let accessToken = tokenStore.getToken(key: .accessToken), !accessToken.isEmpty {
-            return true
-        }
-        if let refreshToken = tokenStore.getToken(key: .refreshToken), !refreshToken.isEmpty {
-            return true
-        }
-        return false
     }
 
     private func apply(_ state: SpeechTranscriptionState) {

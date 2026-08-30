@@ -61,6 +61,7 @@ struct BriefingTab: View {
 struct KnowledgeTab: View {
     @Binding var path: NavigationPath
     let scrollToTopRequest: Int
+    let isSelectedRootTab: Bool
     @Namespace private var chatTransitionNamespace
     let viewModel: KnowledgeTimelineViewModel
     let readStateCache: ReadStateCache
@@ -73,6 +74,7 @@ struct KnowledgeTab: View {
         NavigationStack(path: $path) {
             KnowledgeView(
                 scrollToTopRequest: scrollToTopRequest,
+                isVisible: isSelectedRootTab && path.isEmpty,
                 onSelectContent: pushContent,
                 onSelectSession: onSelectSession,
                 onSearch: { path.append(KnowledgeSearchRoute()) },

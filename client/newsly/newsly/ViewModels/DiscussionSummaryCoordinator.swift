@@ -63,7 +63,7 @@ final class DiscussionSummaryCoordinator {
                 return
             }
             payload = discussion
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             discussionSummaryLogger.debug(

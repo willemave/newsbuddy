@@ -213,6 +213,21 @@ final class ContentListViewModel {
         refreshReadyContentIDs()
     }
 
+    /// Revalidates the first Knowledge page while preserving the current list.
+    func revalidateKnowledgeLibrary() async {
+        initialLoadErrorMessage = nil
+        loadMoreErrorMessage = nil
+        mode = .knowledgeLibrary
+        knowledgeQuery = nil
+        await feed.refresh()
+        initialLoadErrorMessage = currentFeedErrorMessage
+        refreshReadyContentIDs()
+    }
+
+    func cancelAutomaticRead() {
+        feed.cancelRequestRetainingState()
+    }
+
     func clearKnowledgeLibrary() {
         mode = .knowledgeLibrary
         knowledgeQuery = nil

@@ -15,11 +15,11 @@ private enum MoreRoute: Hashable {
 
 struct MoreView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(BadgeStatsStore.self) private var badgeStatsStore
 
     let submissionsViewModel: SubmissionStatusViewModel
     let readStateCache: ReadStateCache
     let showsDismissButton: Bool
-    @State private var badgeStatsStore = BadgeStatsStore.shared
 
     init(
         submissionsViewModel: SubmissionStatusViewModel,
@@ -173,4 +173,5 @@ struct MoreView: View {
 
 #Preview {
     MoreView(submissionsViewModel: RootDependencyFactory.makeSubmissionStatusViewModel())
+        .environment(BadgeStatsStore())
 }

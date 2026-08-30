@@ -326,7 +326,7 @@ final class OnboardingViewModel {
             onboardingVoiceLogger.info(
                 "Onboarding audio capture started | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt))"
             )
-        } catch is CancellationError {
+        } catch where ClientFailure.classify(error) == .cancelled {
             onboardingVoiceLogger.debug(
                 "Onboarding audio capture start cancelled | elapsedMs=\(onboardingVoiceElapsedMilliseconds(since: startedAt))"
             )

@@ -77,19 +77,28 @@ final class ActiveChatSessionManager {
 
     init(
         messageCompletionRegistry: ChatMessageCompletionRegistry? = nil,
-        startsPolling: Bool = true
+        startsPolling: Bool = true,
+        observesAuthenticationNotifications: Bool = true
     ) {
         self.messageCompletionRegistry = messageCompletionRegistry
             ?? Self.sharedMessageCompletionRegistry
         self.startsPolling = startsPolling
-        authDidLogOutObserver = NotificationCenter.default.addObserver(
-            forName: .authDidLogOut,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.reset()
+        if observesAuthenticationNotifications {
+            authDidLogOutObserver = NotificationCenter.default.addObserver(
+                forName: .authDidLogOut,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.reset()
+                }
             }
+        }
+    }
+
+    deinit {
+        if let authDidLogOutObserver {
+            NotificationCenter.default.removeObserver(authDidLogOutObserver)
         }
     }
 
@@ -236,7 +245,7 @@ final class ActiveChatSessionManager {
         do {
             _ = try await messageCompletionRegistry.waitForCompletion(messageId: messageId)
             handleCompletion(sessionId: sessionId, messageId: messageId)
-        } catch is CancellationError {
+        } catch where ClientFailure.classify(error) == .cancelled {
             logger.info("Polling cancelled for session \(sessionId)")
         } catch ChatServiceError.processingFailed(let message) {
             handleFailure(sessionId: sessionId, messageId: messageId, error: message)

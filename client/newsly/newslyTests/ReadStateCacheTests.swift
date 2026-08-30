@@ -84,8 +84,7 @@ final class ReadStateCacheTests: XCTestCase {
 
     private func makeBadgeStatsStore() -> BadgeStatsStore {
         BadgeStatsStore(
-            notificationCenter: NotificationCenter(),
-            isApplicationActive: { true }
+            notificationCenter: NotificationCenter()
         )
     }
 }

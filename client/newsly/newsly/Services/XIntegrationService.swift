@@ -303,7 +303,7 @@ private struct LiveXIntegrationAPIClient: XIntegrationAPIClientProtocol {
         let body = try JSONEncoder().encode(XOAuthStartRequest())
         return try await client.request(
             APIEndpoints.xIntegrationOAuthStart,
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -312,13 +312,13 @@ private struct LiveXIntegrationAPIClient: XIntegrationAPIClientProtocol {
         let body = try JSONEncoder().encode(XOAuthExchangeRequest(code: code, state: state))
         return try await client.request(
             APIEndpoints.xIntegrationOAuthExchange,
-            method: "POST",
+            method: .post,
             body: body
         )
     }
 
     func disconnect() async throws {
-        try await client.requestVoid(APIEndpoints.xIntegrationConnection, method: "DELETE")
+        try await client.requestVoid(APIEndpoints.xIntegrationConnection, method: .delete)
     }
 }
 

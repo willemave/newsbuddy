@@ -3,6 +3,13 @@ import XCTest
 @testable import newsly
 
 @MainActor
+private func makeActiveLifecycle() -> AppLifecycle {
+    let lifecycle = AppLifecycle()
+    lifecycle.record(.active)
+    return lifecycle
+}
+
+@MainActor
 final class ChatSessionViewModelTests: XCTestCase {
     func testDefaultChatDictationUsesRecordThenTranscribeService() {
         let service = ChatDependencies.live.transcriptionService as AnyObject
@@ -13,6 +20,7 @@ final class ChatSessionViewModelTests: XCTestCase {
     func testToggleVoiceRecordingStartsRecordingOnFirstTap() async {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Ignored")
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(transcriptionService: transcriptionService),
             initialVoiceDictationAvailable: true
@@ -30,6 +38,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Final transcript")
         let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: transcriptionService,
@@ -52,6 +61,7 @@ final class ChatSessionViewModelTests: XCTestCase {
     func testToggleVoiceRecordingIgnoresTapWhileTranscribing() async {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Ignored")
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(transcriptionService: transcriptionService),
             initialVoiceDictationAvailable: true
@@ -74,6 +84,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Final transcript")
         let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: transcriptionService,
@@ -98,6 +109,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "second thought")
         let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: transcriptionService,
@@ -119,6 +131,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Auto transcript")
         let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: transcriptionService,
@@ -145,6 +158,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Maximum transcript")
         let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: transcriptionService,
@@ -167,6 +181,7 @@ final class ChatSessionViewModelTests: XCTestCase {
     func testEmptyVoiceTranscriptShowsRetryableActionError() async {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "   ")
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(transcriptionService: transcriptionService),
             initialVoiceDictationAvailable: true
@@ -183,6 +198,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Ignored")
         let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: transcriptionService,
@@ -208,6 +224,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         let transcriptionService = MockChatSpeechTranscriber(transcript: "Auto transcript")
         let chatService = makeSuccessfulVoiceSendService()
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: transcriptionService,
@@ -292,6 +309,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             }
         )
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
@@ -397,6 +415,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             sleep: { _ in }
         )
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
@@ -428,6 +447,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             throw ChatServiceError.timeout
         })
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
@@ -439,6 +459,154 @@ final class ChatSessionViewModelTests: XCTestCase {
 
         XCTAssertNotNil(viewModel.loadErrorMessage)
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testInactiveInterruptionDoesNotSuspendAcceptedPolling() async {
+        let completionGate = AsyncGate()
+        let lifecycle = makeActiveLifecycle()
+        let chatService = MockChatSessionService(
+            sendMessageHandler: { sessionId, message in
+                SendChatMessageResponse(
+                    sessionId: sessionId,
+                    userMessage: Self.message(
+                        id: 101,
+                        role: .user,
+                        content: message,
+                        status: .processing
+                    ),
+                    messageId: 501,
+                    status: .processing
+                )
+            },
+            messageStatusHandler: { messageId in
+                await completionGate.wait()
+                return MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: 201,
+                        role: .assistant,
+                        content: "Completed through interruption",
+                        status: .completed
+                    )
+                )
+            }
+        )
+        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
+        let viewModel = ChatSessionViewModel(
+            lifecycle: lifecycle,
+            route: ChatSessionRoute(session: Self.session(
+                contentId: 7,
+                articleTitle: "Tracked Article"
+            )),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService,
+                activeSessionManager: activeSessionManager
+            )
+        )
+
+        viewModel.performSendMessage(text: "Keep polling")
+        let didStartPolling = await waitUntil {
+            chatService.messageStatusCallCount > 0 && viewModel.isSending
+        }
+
+        lifecycle.record(.inactive)
+        viewModel.handleLifecyclePhaseChange()
+        lifecycle.record(.active)
+        viewModel.handleLifecyclePhaseChange()
+
+        XCTAssertTrue(didStartPolling)
+        XCTAssertTrue(viewModel.isSending)
+        XCTAssertNil(activeSessionManager.getSession(forContentId: 7))
+
+        await completionGate.open()
+        let didComplete = await waitUntil {
+            viewModel.timeline.contains { $0.message.content == "Completed through interruption" }
+                && !viewModel.isSending
+        }
+
+        XCTAssertTrue(didComplete)
+        XCTAssertEqual(chatService.sentMessages.map(\.message), ["Keep polling"])
+        XCTAssertEqual(lifecycle.activation?.generation, 1)
+    }
+
+    func testBackgroundPreservesPreAckSendAndActivationReconcilesWithoutResend() async {
+        let acknowledgementGate = AsyncGate()
+        let lifecycle = makeActiveLifecycle()
+        let chatService = MockChatSessionService(
+            getSessionHandler: { _ in
+                ChatSessionDetail(
+                    session: Self.session(
+                        contentId: 7,
+                        articleTitle: "Tracked Article"
+                    ),
+                    messages: [
+                        Self.message(id: 101, role: .user, content: "One send", status: .completed),
+                        Self.message(id: 201, role: .assistant, content: "Reconciled reply", status: .completed),
+                    ]
+                )
+            },
+            sendMessageHandler: { sessionId, message in
+                await acknowledgementGate.wait()
+                return SendChatMessageResponse(
+                    sessionId: sessionId,
+                    userMessage: Self.message(
+                        id: 101,
+                        role: .user,
+                        content: message,
+                        status: .processing
+                    ),
+                    messageId: 501,
+                    status: .processing
+                )
+            }
+        )
+        let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
+        let viewModel = ChatSessionViewModel(
+            lifecycle: lifecycle,
+            route: ChatSessionRoute(session: Self.session(
+                contentId: 7,
+                articleTitle: "Tracked Article"
+            )),
+            dependencies: .test(
+                transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
+                chatService: chatService,
+                activeSessionManager: activeSessionManager
+            )
+        )
+
+        viewModel.performSendMessage(text: "One send")
+        let didStartSend = await waitUntil {
+            chatService.sentMessages.count == 1 && viewModel.isSending
+        }
+
+        lifecycle.record(.inactive)
+        viewModel.handleLifecyclePhaseChange()
+        lifecycle.record(.background)
+        viewModel.handleLifecyclePhaseChange()
+
+        XCTAssertTrue(didStartSend)
+        XCTAssertTrue(viewModel.isSending, "A pre-ack command must survive backgrounding")
+        XCTAssertNil(activeSessionManager.getSession(forContentId: 7))
+
+        await acknowledgementGate.open()
+        let didHandOffAcceptedTurn = await waitUntil {
+            activeSessionManager.getSession(forContentId: 7)?.messageId == 501
+                && !viewModel.isSending
+        }
+        XCTAssertTrue(didHandOffAcceptedTurn)
+
+        lifecycle.record(.inactive)
+        viewModel.handleLifecyclePhaseChange()
+        lifecycle.record(.active)
+        viewModel.handleLifecyclePhaseChange()
+        await viewModel.resumeAfterActivationIfNeeded()
+
+        XCTAssertEqual(chatService.sentMessages.map(\.message), ["One send"])
+        XCTAssertTrue(viewModel.timeline.contains { $0.message.content == "Reconciled reply" })
+        XCTAssertNil(activeSessionManager.getSession(forContentId: 7))
+        XCTAssertEqual(lifecycle.activation?.generation, 2)
     }
 
     func testQueuedSendResumesAfterForegroundWhenActiveSendFailsWhileInactive() async {
@@ -456,7 +624,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             sendMessageHandler: { sessionId, message in
                 if message == "First" {
                     await firstSendGate.wait()
-                    throw APIError.networkError(URLError(.networkConnectionLost))
+                    throw ClientFailure.connectivity(.networkConnectionLost)
                 }
                 return SendChatMessageResponse(
                     sessionId: sessionId,
@@ -485,6 +653,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             }
         )
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
@@ -520,6 +689,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             throw CancellationError()
         })
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(session: Self.session(activeChildSessionId: 200)),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
@@ -570,6 +740,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             return detail
         })
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(session: Self.session(activeChildSessionId: 200)),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
@@ -613,6 +784,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         )
         let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(session: Self.session(
                 contentId: 7,
                 articleTitle: "Tracked Article"
@@ -670,6 +842,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         )
         let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(session: Self.session(
                 contentId: 7,
                 articleTitle: "Tracked Article"
@@ -704,9 +877,10 @@ final class ChatSessionViewModelTests: XCTestCase {
 
     func testSendMessageSurfacesTransportErrorWhenNotCancelled() async {
         let chatService = MockChatSessionService(sendMessageHandler: { _, _ in
-            throw APIError.networkError(URLError(.networkConnectionLost))
+            throw ClientFailure.connectivity(.networkConnectionLost)
         })
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
@@ -731,6 +905,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         )
         let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(
                 session: session,
                 initialUserMessageText: "Track this",
@@ -759,6 +934,7 @@ final class ChatSessionViewModelTests: XCTestCase {
         })
         let activeSessionManager = ActiveChatSessionManager(startsPolling: false)
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(session: Self.session(
                 contentId: 7,
                 articleTitle: "Tracked Article"
@@ -800,6 +976,7 @@ final class ChatSessionViewModelTests: XCTestCase {
             )
         })
         let viewModel = ChatSessionViewModel(
+            lifecycle: makeActiveLifecycle(),
             route: ChatSessionRoute(sessionId: 42),
             dependencies: .test(
                 transcriptionService: MockChatSpeechTranscriber(transcript: "Ignored"),
@@ -932,8 +1109,6 @@ private extension ChatDependencies {
                     messageCompletionRegistry: registry,
                     startsPolling: false
                 ),
-            authService: AuthenticationService.shared,
-            tokenStore: KeychainManager.shared,
             refreshTranscriptionAvailability: {
                 transcriptionService.isAvailable
             },

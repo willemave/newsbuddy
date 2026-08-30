@@ -183,8 +183,6 @@ final class TweetSuggestionsVoiceTests: XCTestCase {
             contentService: content,
             twitterService: TweetSharingStub(),
             transcriptionService: speech,
-            authService: AuthenticationService.shared,
-            tokenStore: TweetTokenStoreStub(),
             refreshTranscriptionAvailability: { true },
             setBackendTranscriptionAvailable: { _ in }
         )
@@ -377,11 +375,4 @@ private final class TweetSharingStub: TweetSharing {
     func share(tweet: String, completion: ((Bool) -> Void)?) {
         completion?(true)
     }
-}
-
-private final class TweetTokenStoreStub: AuthTokenStore {
-    func getToken(key: KeychainManager.KeychainKey) -> String? { "token" }
-    func saveToken(_ token: String, key: KeychainManager.KeychainKey) {}
-    func deleteToken(key: KeychainManager.KeychainKey) {}
-    func clearAll() {}
 }

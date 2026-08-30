@@ -82,7 +82,7 @@ class ContentService {
 
         return try await client.request(
             APIEndpoints.submitContent,
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -142,7 +142,11 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(APIEndpoints.contentList, queryItems: queryItems)
+        return try await client.request(
+            APIEndpoints.contentList,
+            queryItems: queryItems,
+            recoveryPolicy: .safeRead
+        )
     }
 
     func fetchSubmissionStatusList(
@@ -165,13 +169,17 @@ class ContentService {
     }
 
     func fetchContentDetail(id: Int) async throws -> ContentDetail {
-        let endpoint = APIRequestDescriptor<ContentDetail>(path: APIEndpoints.contentDetail(id: id))
-        return try await client.request(endpoint)
+        try await client.request(
+            APIEndpoints.contentDetail(id: id),
+            recoveryPolicy: .safeRead
+        )
     }
 
     func fetchNewsItemDetail(id: Int) async throws -> ContentDetail {
-        let endpoint = APIRequestDescriptor<ContentDetail>(path: APIEndpoints.newsItem(id: id))
-        return try await client.request(endpoint)
+        try await client.request(
+            APIEndpoints.newsItem(id: id),
+            recoveryPolicy: .safeRead
+        )
     }
 
     func fetchNewsItemList(
@@ -188,7 +196,11 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(APIEndpoints.newsItems, queryItems: queryItems)
+        return try await client.request(
+            APIEndpoints.newsItems,
+            queryItems: queryItems,
+            recoveryPolicy: .safeRead
+        )
     }
 
     func fetchContentBody(
@@ -201,11 +213,11 @@ class ContentService {
         } else {
             APIEndpoints.contentBody(id: id)
         }
-        let endpoint = APIRequestDescriptor<ContentBody>(
-            path: path,
-            queryItems: [URLQueryItem(name: "variant", value: variant)]
+        return try await client.request(
+            path,
+            queryItems: [URLQueryItem(name: "variant", value: variant)],
+            recoveryPolicy: .safeRead
         )
-        return try await client.request(endpoint)
     }
 
     func fetchContentDiscussion(id: Int, contentType: APIContentType? = nil) async throws -> ContentDiscussion {
@@ -214,8 +226,7 @@ class ContentService {
         } else {
             APIEndpoints.contentDiscussion(id: id)
         }
-        let endpoint = APIRequestDescriptor<ContentDiscussion>(path: path)
-        return try await client.request(endpoint)
+        return try await client.request(path)
     }
 
     func trackContentInteraction(
@@ -263,7 +274,7 @@ class ContentService {
         do {
             let response: TrackContentInteractionResponse = try await client.request(
                 APIEndpoints.analytics,
-                method: "POST",
+                method: .post,
                 body: body
             )
             logger.info(
@@ -299,7 +310,7 @@ class ContentService {
         let body = try JSONEncoder().encode(DownloadMoreRequest(count: count))
         return try await client.request(
             APIEndpoints.downloadMoreFromSeries(id: contentId),
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -314,7 +325,7 @@ class ContentService {
             } else {
                 let _: APIMarkReadResponse = try await client.request(
                     APIEndpoints.markContentRead(id: id),
-                    method: "POST"
+                    method: .post
                 )
             }
             logger.info("[ContentService] markContentAsRead success | id=\(id)")
@@ -329,7 +340,7 @@ class ContentService {
     func markContentAsUnread(id: Int) async throws {
         let _: APIMarkUnreadResponse = try await client.request(
             APIEndpoints.markContentUnread(id: id),
-            method: "DELETE"
+            method: .delete
         )
     }
     
@@ -351,7 +362,7 @@ class ContentService {
         do {
             let response: BulkMarkReadResponse = try await client.request(
                 APIEndpoints.bulkMarkRead,
-                method: "POST",
+                method: .post,
                 body: body
             )
             logger.info("[ContentService] bulkMarkAsRead success | markedCount=\(response.markedCount) failedIds=\(response.failedIds, privacy: .public)")
@@ -380,7 +391,7 @@ class ContentService {
         do {
             let response: BulkMarkReadResponse = try await client.request(
                 APIEndpoints.newsItemsMarkRead,
-                method: "POST",
+                method: .post,
                 body: body
             )
             logger.info("[ContentService] bulkMarkNewsItemsAsRead success | markedCount=\(response.markedCount) failedIds=\(response.failedIds, privacy: .public)")
@@ -441,12 +452,12 @@ class ContentService {
     }
     
     func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
-        try await client.request(APIEndpoints.saveToKnowledge(id: id), method: "POST")
+        try await client.request(APIEndpoints.saveToKnowledge(id: id), method: .post)
     }
 
     @discardableResult
     func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
-        try await client.request(APIEndpoints.removeFromKnowledge(id: id), method: "DELETE")
+        try await client.request(APIEndpoints.removeFromKnowledge(id: id), method: .delete)
     }
 
     func fetchKnowledgeLibrary(
@@ -466,7 +477,11 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(APIEndpoints.knowledgeLibraryList, queryItems: queryItems)
+        return try await client.request(
+            APIEndpoints.knowledgeLibraryList,
+            queryItems: queryItems,
+            recoveryPolicy: .safeRead
+        )
     }
 
     func fetchRecentlyReadList(
@@ -491,7 +506,11 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(APIEndpoints.recentlyReadList, queryItems: queryItems)
+        return try await client.request(
+            APIEndpoints.recentlyReadList,
+            queryItems: queryItems,
+            recoveryPolicy: .safeRead
+        )
     }
 
     func getChatGPTUrl(id: Int) async throws -> String {
@@ -512,14 +531,14 @@ class ContentService {
     func convertNewsToArticle(id: Int) async throws -> ConvertNewsResponse {
         return try await client.request(
             APIEndpoints.convertNewsToArticle(id: id),
-            method: "POST"
+            method: .post
         )
     }
 
     func convertNewsItemToArticle(id: Int) async throws -> ConvertNewsResponse {
         return try await client.request(
             APIEndpoints.convertNewsItemToArticle(id: id),
-            method: "POST"
+            method: .post
         )
     }
 
@@ -539,7 +558,7 @@ class ContentService {
 
         return try await client.request(
             APIEndpoints.tweetSuggestions(id: id),
-            method: "POST",
+            method: .post,
             body: body
         )
     }

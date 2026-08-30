@@ -1,4 +1,3 @@
-import UIKit
 import XCTest
 @testable import newsly
 
@@ -10,10 +9,10 @@ final class BadgeStatsStoreTests: XCTestCase {
         let store = BadgeStatsStore(
             fetchStats: { try await source.fetch() },
             scheduler: scheduler,
-            notificationCenter: NotificationCenter(),
-            isApplicationActive: { true }
+            notificationCenter: NotificationCenter()
         )
 
+        store.activate()
         let firstRefresh = Task { await store.refreshStats() }
         let didStartFirstRefresh = await waitForBadgeCondition { source.callCount == 1 }
         XCTAssertTrue(didStartFirstRefresh)
@@ -35,7 +34,7 @@ final class BadgeStatsStoreTests: XCTestCase {
         XCTAssertEqual(store.longFormCount, 2)
     }
 
-    func testBackgroundSuspendsAndForegroundRefreshes() async {
+    func testSuspendStopsRefreshesAndActivateRefreshes() async {
         let notificationCenter = NotificationCenter()
         let scheduler = RecordingBadgeStatsRefreshScheduler()
         let source = SequencedBadgeStatsSource(responses: [
@@ -45,47 +44,40 @@ final class BadgeStatsStoreTests: XCTestCase {
         let store = BadgeStatsStore(
             fetchStats: { try await source.fetch() },
             scheduler: scheduler,
-            notificationCenter: notificationCenter,
-            isApplicationActive: { true }
+            notificationCenter: notificationCenter
         )
 
+        store.activate()
         await store.refreshStats()
         XCTAssertEqual(source.callCount, 1)
         XCTAssertEqual(scheduler.scheduledIntervals, [5])
         XCTAssertTrue(scheduler.hasScheduledRefresh)
 
-        notificationCenter.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-        let didCancelScheduledRefresh = await waitForBadgeCondition {
-            !scheduler.hasScheduledRefresh
-        }
-        XCTAssertTrue(didCancelScheduledRefresh)
+        store.suspend()
+        XCTAssertFalse(scheduler.hasScheduledRefresh)
 
         await store.refreshStats()
         XCTAssertEqual(source.callCount, 1, "Suspended stores must not issue requests")
 
-        notificationCenter.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        store.activate()
         let didRefreshOnForeground = await waitForBadgeCondition { source.callCount == 2 }
         XCTAssertTrue(didRefreshOnForeground)
         XCTAssertEqual(store.longFormCount, 4)
         XCTAssertFalse(scheduler.hasScheduledRefresh)
     }
 
-    func testStoreCreatedWhileInactiveWaitsForForegroundNotification() async {
-        let notificationCenter = NotificationCenter()
+    func testStoreStartsSuspendedAndWaitsForActivation() async {
         let source = SequencedBadgeStatsSource(responses: [makeBadgeStats(article: 6)])
-        var isApplicationActive = false
         let store = BadgeStatsStore(
             fetchStats: { try await source.fetch() },
             scheduler: RecordingBadgeStatsRefreshScheduler(),
-            notificationCenter: notificationCenter,
-            isApplicationActive: { isApplicationActive }
+            notificationCenter: NotificationCenter()
         )
 
         await store.refreshStats()
         XCTAssertEqual(source.callCount, 0)
 
-        isApplicationActive = true
-        notificationCenter.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        store.activate()
         let didRefresh = await waitForBadgeCondition { source.callCount == 1 }
 
         XCTAssertTrue(didRefresh)
@@ -101,10 +93,10 @@ final class BadgeStatsStoreTests: XCTestCase {
         let store = BadgeStatsStore(
             fetchStats: { try await source.fetch() },
             scheduler: scheduler,
-            notificationCenter: notificationCenter,
-            isApplicationActive: { true }
+            notificationCenter: notificationCenter
         )
 
+        store.activate()
         await store.refreshStats()
         XCTAssertEqual(store.longFormCount, 5)
         XCTAssertEqual(store.processingCount, 1)
@@ -131,10 +123,10 @@ final class BadgeStatsStoreTests: XCTestCase {
                 try responses.removeFirst().get()
             },
             scheduler: scheduler,
-            notificationCenter: NotificationCenter(),
-            isApplicationActive: { true }
+            notificationCenter: NotificationCenter()
         )
 
+        store.activate()
         await store.refreshStats()
         XCTAssertTrue(scheduler.hasScheduledRefresh)
 
@@ -152,9 +144,9 @@ final class BadgeStatsStoreTests: XCTestCase {
         let store = BadgeStatsStore(
             fetchStats: { makeBadgeStats(article: 1, podcast: 1) },
             scheduler: RecordingBadgeStatsRefreshScheduler(),
-            notificationCenter: NotificationCenter(),
-            isApplicationActive: { true }
+            notificationCenter: NotificationCenter()
         )
+        store.activate()
         await store.refreshStats()
 
         store.decrementArticleCount(by: 3)

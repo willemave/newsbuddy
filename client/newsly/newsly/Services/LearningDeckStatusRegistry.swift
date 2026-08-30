@@ -204,7 +204,7 @@ actor LearningDeckStatusRegistry {
                     finish(deckId: deckId, generation: generation, result: .success(deck))
                     return
                 }
-            } catch is CancellationError {
+            } catch where ClientFailure.classify(error) == .cancelled {
                 return
             } catch {
                 guard isRetryableLearningDeckStatusError(error) else {
@@ -224,7 +224,7 @@ actor LearningDeckStatusRegistry {
             }
             do {
                 try await sleep(policy.delaysNanoseconds[requestIndex])
-            } catch is CancellationError {
+            } catch where ClientFailure.classify(error) == .cancelled {
                 return
             } catch {
                 finish(deckId: deckId, generation: generation, result: .failure(error))
@@ -261,19 +261,20 @@ actor LearningDeckStatusRegistry {
 }
 
 private func isRetryableLearningDeckStatusError(_ error: Error) -> Bool {
-    guard let apiError = error as? APIError else {
-        return true
-    }
-    switch apiError {
-    case .invalidURL, .decodingError, .unauthorized:
+    switch ClientFailure.classify(error) {
+    case .cancelled,
+         .authenticationRequired,
+         .authenticationExpired,
+         .invalidRequest,
+         .decoding:
         return false
-    case .httpError(let statusCode, _):
+    case .http(let statusCode, _):
         return statusCode == 408
             || statusCode == 409
             || statusCode == 425
             || statusCode == 429
             || statusCode >= 500
-    case .noData, .networkError, .unknown:
+    case .connectivity, .invalidResponse, .unexpected:
         return true
     }
 }

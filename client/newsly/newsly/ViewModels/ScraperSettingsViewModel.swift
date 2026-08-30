@@ -114,7 +114,7 @@ final class ScraperSettingsViewModel {
                 requestStartRevision: requestStartRevision
             )
             return true
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return false
         } catch {
             logger.error("Failed to load scraper configs: \(error.localizedDescription, privacy: .public)")

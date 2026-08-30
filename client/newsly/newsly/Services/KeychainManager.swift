@@ -23,6 +23,9 @@ final class KeychainManager: AuthTokenStore {
         case accessToken = "accessToken"
         case refreshToken = "refreshToken"
         case userId = "userId"
+        case cachedUser = "cachedUser"
+        case refreshAttempt = "refreshAttempt"
+        case credentialEnvelope = "credentialEnvelope"
     }
 
     /// Optional configuration for shared keychain access (e.g., extensions).
@@ -36,7 +39,14 @@ final class KeychainManager: AuthTokenStore {
 
     /// Save a token to the keychain
     func saveToken(_ token: String, key: KeychainKey) {
-        guard let data = token.data(using: .utf8) else { return }
+        _ = saveTokenReportingStatus(token, key: key)
+    }
+
+    /// Writes every secure compatibility leg and reports whether all Keychain
+    /// writes succeeded. Credential envelope publication uses this to avoid
+    /// declaring a partially written pair committed.
+    func saveTokenReportingStatus(_ token: String, key: KeychainKey) -> Bool {
+        guard let data = token.data(using: .utf8) else { return false }
 
         let configuredAccessGroup = currentAccessGroup()
         let primaryStatus = upsertToken(data, account: key.rawValue, accessGroup: configuredAccessGroup)
@@ -44,8 +54,9 @@ final class KeychainManager: AuthTokenStore {
             logger.error("[Keychain] Save failed | account=\(key.rawValue, privacy: .public) status=\(primaryStatus)")
         }
 
+        var legacyStatus = errSecSuccess
         if configuredAccessGroup != nil {
-            let legacyStatus = upsertToken(data, account: key.rawValue, accessGroup: nil)
+            legacyStatus = upsertToken(data, account: key.rawValue, accessGroup: nil)
             if legacyStatus != errSecSuccess {
                 logger.error("[Keychain] Legacy save failed | account=\(key.rawValue, privacy: .public) status=\(legacyStatus)")
             }
@@ -56,6 +67,7 @@ final class KeychainManager: AuthTokenStore {
         } else {
             clearMirroredTokenFromSharedDefaults(account: key.rawValue)
         }
+        return primaryStatus == errSecSuccess && legacyStatus == errSecSuccess
     }
 
     /// Retrieve a token from the keychain
@@ -73,11 +85,31 @@ final class KeychainManager: AuthTokenStore {
             return legacyToken
         }
 
-        if let mirroredToken = mirroredTokenFromSharedDefaults(key: key) {
+        // Once an envelope exists, its token pair is the secure fallback. A
+        // plaintext mirror must never resurrect an older credential after the
+        // split Keychain values have been removed.
+        let envelopeToken: String?
+        if key == .accessToken || key == .refreshToken,
+           let envelope = decodedCredentialEnvelope() {
+            envelopeToken = key == .accessToken
+                ? envelope.tokens.accessToken
+                : envelope.tokens.refreshToken
+        } else {
+            envelopeToken = nil
+        }
+        let mirroredToken = mirroredTokenFromSharedDefaults(key: key)
+        if let fallback = CredentialFallbackPolicy.token(
+            envelope: envelopeToken,
+            plaintextMirror: mirroredToken
+        ) {
             if configuredAccessGroup != nil {
-                saveToken(mirroredToken, key: key)
+                // Only legacy mirror restoration self-heals here. Envelope
+                // reconciliation is serialized by CredentialSession.
+                if envelopeToken == nil {
+                    saveToken(fallback, key: key)
+                }
             }
-            return mirroredToken
+            return fallback
         }
 
         return nil
@@ -85,23 +117,46 @@ final class KeychainManager: AuthTokenStore {
 
     /// Delete a specific token from the keychain
     func deleteToken(key: KeychainKey) {
-        deleteToken(account: key.rawValue)
+        _ = deleteTokenReportingStatus(key: key)
+    }
+
+    /// Deletes every secure copy plus its App Group compatibility mirror and
+    /// reports failure instead of treating a best-effort `SecItemDelete` as a
+    /// completed logout.
+    func deleteTokenReportingStatus(key: KeychainKey) -> Bool {
+        deleteTokenReportingStatus(account: key.rawValue)
     }
 
     /// Delete a legacy token entry by account name.
     func deleteLegacyToken(named account: String) {
-        deleteToken(account: account)
+        _ = deleteTokenReportingStatus(account: account)
     }
 
-    private func deleteToken(account: String) {
+    private func deleteTokenReportingStatus(account: String) -> Bool {
+        var succeeded = true
         if let accessGroup = currentAccessGroup() {
-            deleteToken(account: account, accessGroup: accessGroup)
+            succeeded = deletionSucceeded(
+                deleteToken(account: account, accessGroup: accessGroup),
+                account: account,
+                location: "access-group"
+            ) && succeeded
         }
-        deleteToken(account: account, accessGroup: nil)
+        succeeded = deletionSucceeded(
+            deleteToken(account: account, accessGroup: nil),
+            account: account,
+            location: "legacy"
+        ) && succeeded
         clearMirroredTokenFromSharedDefaults(account: account)
+        if SharedContainer.userDefaults.object(forKey: account) != nil {
+            logger.error(
+                "[Keychain] App Group mirror delete failed | account=\(account, privacy: .public)"
+            )
+            succeeded = false
+        }
+        return succeeded
     }
 
-    private func currentAccessGroup() -> String? {
+    func currentAccessGroup() -> String? {
         accessGroupLock.lock()
         defer { accessGroupLock.unlock() }
         return accessGroup
@@ -112,7 +167,7 @@ final class KeychainManager: AuthTokenStore {
         SharedContainer.userDefaults.synchronize()
     }
 
-    private func mirroredTokenFromSharedDefaults(key: KeychainKey) -> String? {
+    func mirroredTokenFromSharedDefaults(key: KeychainKey) -> String? {
         guard shouldMirrorToSharedDefaults(key: key) else { return nil }
         return SharedContainer.userDefaults.string(forKey: key.rawValue)
     }
@@ -131,33 +186,76 @@ final class KeychainManager: AuthTokenStore {
     }
 
     private func upsertToken(_ data: Data, account: String, accessGroup: String?) -> OSStatus {
-        var query: [String: Any] = baseQuery(account: account, accessGroup: accessGroup)
-        query[kSecValueData as String] = data
-        // Allow background refreshes after first unlock so timers/URLSession tasks can read tokens
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        let query = baseQuery(account: account, accessGroup: accessGroup)
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            // Allow background refreshes after first unlock so timers and
+            // URLSession work can read credentials.
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+        ]
+        let updateStatus = SecItemUpdate(
+            query as CFDictionary,
+            attributes as CFDictionary
+        )
+        guard updateStatus == errSecItemNotFound else { return updateStatus }
 
-        SecItemDelete(baseQuery(account: account, accessGroup: accessGroup) as CFDictionary)
-        return SecItemAdd(query as CFDictionary, nil)
+        var insertion = query
+        for (key, value) in attributes {
+            insertion[key] = value
+        }
+        return SecItemAdd(insertion as CFDictionary, nil)
     }
 
     private func queryToken(account: String, accessGroup: String?) -> String? {
+        guard case .value(let value) = rawToken(
+            account: account,
+            accessGroup: accessGroup
+        ) else {
+            return nil
+        }
+        return value
+    }
+
+    enum RawTokenRead {
+        case value(String)
+        case missing
+        case unavailable
+    }
+
+    func rawToken(account: String, accessGroup: String?) -> RawTokenRead {
         var query = baseQuery(account: account, accessGroup: accessGroup)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound {
+            return .missing
+        }
         guard status == errSecSuccess,
               let data = result as? Data,
               let token = String(data: data, encoding: .utf8) else {
-            return nil
+            return .unavailable
         }
-
-        return token
+        return .value(token)
     }
 
-    private func deleteToken(account: String, accessGroup: String?) {
+    private func deleteToken(account: String, accessGroup: String?) -> OSStatus {
         SecItemDelete(baseQuery(account: account, accessGroup: accessGroup) as CFDictionary)
+    }
+
+    private func deletionSucceeded(
+        _ status: OSStatus,
+        account: String,
+        location: String
+    ) -> Bool {
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            logger.error(
+                "[Keychain] Delete failed | account=\(account, privacy: .public) location=\(location, privacy: .public) status=\(status)"
+            )
+            return false
+        }
+        return true
     }
 
     private func baseQuery(account: String, accessGroup: String?) -> [String: Any] {
@@ -179,7 +277,36 @@ final class KeychainManager: AuthTokenStore {
         deleteToken(key: .accessToken)
         deleteToken(key: .refreshToken)
         deleteToken(key: .userId)
+        deleteToken(key: .cachedUser)
+        deleteToken(key: .refreshAttempt)
+        deleteToken(key: .credentialEnvelope)
         deleteLegacyToken(named: "openaiApiKey")
+    }
+
+    func decodedCredentialEnvelope() -> CredentialEnvelope? {
+        let accessGroup = currentAccessGroup()
+        let encoded: String?
+        if let accessGroup,
+           case .value(let value) = rawToken(
+               account: KeychainKey.credentialEnvelope.rawValue,
+               accessGroup: accessGroup
+           ) {
+            encoded = value
+        } else if case .value(let value) = rawToken(
+            account: KeychainKey.credentialEnvelope.rawValue,
+            accessGroup: nil
+        ) {
+            encoded = value
+        } else {
+            encoded = nil
+        }
+        guard let encoded,
+              let data = Data(base64Encoded: encoded),
+              let envelope = try? JSONDecoder().decode(CredentialEnvelope.self, from: data),
+              envelope.tokens.isComplete else {
+            return nil
+        }
+        return envelope
     }
 }
 
@@ -187,5 +314,13 @@ protocol AuthTokenStore: AnyObject {
     func getToken(key: KeychainManager.KeychainKey) -> String?
     func saveToken(_ token: String, key: KeychainManager.KeychainKey)
     func deleteToken(key: KeychainManager.KeychainKey)
+    func deleteTokenReportingStatus(key: KeychainManager.KeychainKey) -> Bool
     func clearAll()
+}
+
+extension AuthTokenStore {
+    func deleteTokenReportingStatus(key: KeychainManager.KeychainKey) -> Bool {
+        deleteToken(key: key)
+        return getToken(key: key) == nil
+    }
 }

@@ -631,11 +631,6 @@ final class VoiceDictationService: NSObject, SpeechTranscribing {
             case .invalidResponse, .serverError:
                 throw VoiceDictationError.transcriptionFailed(error.localizedDescription)
             }
-        } catch let apiError as APIError {
-            logger.error(
-                "Voice transcription API error | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) bytes=\(audioSizeBytes) error=\(apiError.localizedDescription, privacy: .public)"
-            )
-            throw VoiceDictationError.transcriptionFailed(apiError.localizedDescription)
         } catch {
             logger.error(
                 "Voice transcription unexpected error | elapsedMs=\(voiceElapsedMilliseconds(since: startedAt)) bytes=\(audioSizeBytes) error=\(error.localizedDescription, privacy: .public)"

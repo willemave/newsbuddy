@@ -10,16 +10,23 @@ import UIKit
 
 @main
 struct newslyApp: App {
-    @State private var authViewModel = RootDependencyFactory.makeAuthenticationViewModel()
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var runtime: AppRuntime
     @State private var cliLinkAlertMessage: String?
 
     private let cliLinkService = CLILinkService()
 
     init() {
+        KeychainManager.shared.configure(accessGroup: SharedContainer.keychainAccessGroup)
         AppChrome.configure()
-        if let accessGroup = SharedContainer.keychainAccessGroup {
-            KeychainManager.shared.configure(accessGroup: accessGroup)
-        }
+        let authenticationController = RootDependencyFactory.makeAuthenticationViewModel()
+        self._runtime = State(
+            initialValue: AppRuntime(authenticationController: authenticationController)
+        )
+    }
+
+    private var authViewModel: AuthenticationController {
+        runtime.authenticationController
     }
 
     var body: some Scene {
@@ -27,13 +34,30 @@ struct newslyApp: App {
             Group {
                 switch authViewModel.authState {
                 case .authenticated(let user):
-                    AuthenticatedRootView(user: user)
-                        .environment(authViewModel)
+                    if let session = runtime.authenticatedSession,
+                       session.user.id == user.id {
+                        AuthenticatedRootView(session: session)
+                            .environment(authViewModel)
+                    } else {
+                        LoadingView()
+                    }
                 case .unauthenticated:
                     LandingView()
                         .environment(authViewModel)
                 case .loading:
                     LoadingView()
+                }
+            }
+            .environment(runtime.lifecycle)
+            .onChange(of: scenePhase, initial: true) { _, newPhase in
+                runtime.record(AppLifecycle.Phase(newPhase))
+            }
+            .onChange(of: authViewModel.authState, initial: true) { _, authState in
+                switch authState {
+                case .authenticated(let user):
+                    runtime.establishSession(for: user)
+                case .loading, .unauthenticated:
+                    runtime.clearAuthenticatedSession()
                 }
             }
             .onOpenURL { url in
@@ -95,6 +119,21 @@ struct newslyApp: App {
             } catch {
                 cliLinkAlertMessage = error.localizedDescription
             }
+        }
+    }
+}
+
+private extension AppLifecycle.Phase {
+    init(_ scenePhase: ScenePhase) {
+        switch scenePhase {
+        case .active:
+            self = .active
+        case .inactive:
+            self = .inactive
+        case .background:
+            self = .background
+        @unknown default:
+            self = .inactive
         }
     }
 }

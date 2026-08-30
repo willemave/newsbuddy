@@ -1,8 +1,7 @@
 import Foundation
+import UIKit
 
-let speechAppDidEnterBackgroundNotification = Notification.Name(
-    "UIApplicationDidEnterBackgroundNotification"
-)
+let speechAppDidEnterBackgroundNotification = UIApplication.didEnterBackgroundNotification
 
 enum SpeechTranscriptionState: Equatable {
     case idle
@@ -156,7 +155,7 @@ protocol SpeechTranscribing: AnyObject {
 
 extension SpeechTranscribing {
     var isAvailable: Bool {
-        TokenRefreshService.shared.hasStoredCredentialMaterial
+        CredentialSession.shared.hasStoredCredentialMaterial
             && AppSettings.shared.backendTranscriptionAvailable
     }
 }

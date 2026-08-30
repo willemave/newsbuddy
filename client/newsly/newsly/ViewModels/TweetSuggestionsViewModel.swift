@@ -68,10 +68,6 @@ final class TweetSuggestionsViewModel {
     @ObservationIgnored
     private let voiceCoordinator: VoiceDictationCoordinator
     @ObservationIgnored
-    private let authService: any AuthenticationServicing
-    @ObservationIgnored
-    private let tokenStore: any AuthTokenStore
-    @ObservationIgnored
     private let refreshTranscriptionAvailability: () async -> Bool
     @ObservationIgnored
     private let setBackendTranscriptionAvailable: (Bool) -> Void
@@ -94,16 +90,12 @@ final class TweetSuggestionsViewModel {
         contentService: any TweetSuggestionContentServicing,
         twitterService: any TweetSharing,
         transcriptionService: any SpeechTranscribing,
-        authService: any AuthenticationServicing,
-        tokenStore: any AuthTokenStore,
         refreshTranscriptionAvailability: @escaping () async -> Bool,
         setBackendTranscriptionAvailable: @escaping (Bool) -> Void
     ) {
         self.contentService = contentService
         self.twitterService = twitterService
         self.voiceCoordinator = VoiceDictationCoordinator(transcriber: transcriptionService)
-        self.authService = authService
-        self.tokenStore = tokenStore
         self.refreshTranscriptionAvailability = refreshTranscriptionAvailability
         self.setBackendTranscriptionAvailable = setBackendTranscriptionAvailable
     }
@@ -131,23 +123,15 @@ final class TweetSuggestionsViewModel {
         await generateSuggestions()
     }
 
-    /// Check voice dictation availability and attempt token refresh if auth is stale.
+    /// Check voice dictation availability. The shared credential session acquires
+    /// or refreshes credentials as part of the availability request.
     private func checkAndRefreshVoiceDictation() async {
-        do {
-            if !hasVoiceAuthToken {
-                logger.info("🎤 Voice dictation unavailable, attempting session refresh...")
-                _ = try await authService.refreshAccessToken()
-            }
-            voiceDictationAvailable = await refreshTranscriptionAvailability()
-            if voiceDictationAvailable {
-                logger.info("🎤 Voice dictation available")
-            } else {
-                logger.warning("🎤 Voice dictation unavailable because backend transcription is disabled")
-            }
-        } catch {
-            logger.warning("🎤 Token refresh failed: \(error.localizedDescription)")
+        voiceDictationAvailable = await refreshTranscriptionAvailability()
+        if voiceDictationAvailable {
+            logger.info("🎤 Voice dictation available")
+        } else {
+            logger.warning("🎤 Voice dictation unavailable because backend transcription is disabled")
             setBackendTranscriptionAvailable(false)
-            voiceDictationAvailable = false
         }
     }
 
@@ -411,13 +395,4 @@ final class TweetSuggestionsViewModel {
         }
     }
 
-    private var hasVoiceAuthToken: Bool {
-        if let accessToken = tokenStore.getToken(key: .accessToken), !accessToken.isEmpty {
-            return true
-        }
-        if let refreshToken = tokenStore.getToken(key: .refreshToken), !refreshToken.isEmpty {
-            return true
-        }
-        return false
-    }
 }

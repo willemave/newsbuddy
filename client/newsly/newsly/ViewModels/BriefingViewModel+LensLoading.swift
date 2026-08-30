@@ -138,7 +138,7 @@ extension BriefingViewModel {
                 guard self.tasks.isCurrent(token), !Task.isCancelled else {
                     return
                 }
-                guard !isNetworkCancellation(error) else {
+                guard ClientFailure.classify(error) != .cancelled else {
                     self.mutateLensState(key) { $0.loadPhase = .idle }
                     return
                 }
@@ -169,12 +169,15 @@ extension BriefingViewModel {
     }
 
     func resumeSelectedLensLoadOnReactivation(key: String) {
-        if tasks.isRunning(.lens(key)) {
+        let wasRunning = tasks.isRunning(.lens(key))
+        if wasRunning {
             tasks.cancel(.lens(key))
-            mutateLensState(key) { state in
-                state.loadPhase = .idle
-                state.failure = nil
-            }
+        }
+        mutateLensState(key) { state in
+            state.loadPhase = .idle
+            state.failure = nil
+        }
+        if wasRunning {
             BriefingPerformance.logger.info(
                 "Replacing in-flight selected Lens load after activation | key=\(key, privacy: .public)"
             )

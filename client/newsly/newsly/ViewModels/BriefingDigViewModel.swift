@@ -109,7 +109,7 @@ final class BriefingDigViewModel {
                 self.state = loaded
             } catch {
                 guard self.tasks.isCurrent(token), !Task.isCancelled else { return }
-                if !isNetworkCancellation(error) {
+                if ClientFailure.classify(error) != .cancelled {
                     self.state = .error("Couldn't dig into that just now. Try again.")
                 }
             }

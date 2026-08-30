@@ -127,7 +127,8 @@ final class LearningDeckService {
 
     func listDecks() async throws -> LearningDeckListResponse {
         let response: APILearningDeckListResponse = try await client.request(
-            APIEndpoints.learningDecks
+            APIEndpoints.learningDecks,
+            recoveryPolicy: .safeRead
         )
         return LearningDeckListResponse(
             decks: response.decks.map(LearningDeck.init(apiResponse:))
@@ -136,7 +137,8 @@ final class LearningDeckService {
 
     func fetchDeck(id: Int) async throws -> LearningDeck {
         let response: APILearningDeckResponse = try await client.request(
-            APIEndpoints.learningDeck(id: id)
+            APIEndpoints.learningDeck(id: id),
+            recoveryPolicy: .safeRead
         )
         return LearningDeck(apiResponse: response)
     }
@@ -156,7 +158,7 @@ final class LearningDeckService {
         let body = try JSONEncoder().encode(request)
         let response: APILearningDeckResponse = try await client.request(
             APIEndpoints.learningDecks,
-            method: "POST",
+            method: .post,
             body: body
         )
         return LearningDeck(apiResponse: response)
@@ -165,7 +167,7 @@ final class LearningDeckService {
     func retryDeck(deckId: Int) async throws -> LearningDeck {
         let response: APILearningDeckResponse = try await client.request(
             APIEndpoints.learningDeckRetry(id: deckId),
-            method: "POST"
+            method: .post
         )
         return LearningDeck(apiResponse: response)
     }
@@ -181,10 +183,10 @@ final class LearningDeckService {
     private func deckURL(endpoint: String) async throws -> URL {
         let response: APILearningDeckUrlResponse = try await client.request(
             endpoint,
-            method: "POST"
+            method: .post
         )
         guard let apiBaseURL = URL(string: AppSettings.shared.baseURL) else {
-            throw APIError.invalidURL
+            throw ClientFailure.invalidRequest
         }
         return try LearningDeckURLValidator.validate(response.url, apiBaseURL: apiBaseURL)
     }
@@ -192,7 +194,7 @@ final class LearningDeckService {
     func enableShare(deckId: Int) async throws -> LearningDeckShareResponse {
         let response: APILearningDeckShareResponse = try await client.request(
             APIEndpoints.learningDeckShare(id: deckId),
-            method: "POST"
+            method: .post
         )
         return LearningDeckShareResponse(apiResponse: response)
     }
@@ -200,7 +202,7 @@ final class LearningDeckService {
     func disableShare(deckId: Int) async throws -> LearningDeckShareResponse {
         let response: APILearningDeckShareResponse = try await client.request(
             APIEndpoints.learningDeckShare(id: deckId),
-            method: "DELETE"
+            method: .delete
         )
         return LearningDeckShareResponse(apiResponse: response)
     }
@@ -208,7 +210,7 @@ final class LearningDeckService {
     func deleteDeck(deckId: Int) async throws {
         try await client.requestVoid(
             APIEndpoints.learningDeck(id: deckId),
-            method: "DELETE"
+            method: .delete
         )
     }
 }

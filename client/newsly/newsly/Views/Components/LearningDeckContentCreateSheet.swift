@@ -40,7 +40,7 @@ struct LearningDeckContentCreateSheet: View {
                 onOpenDeck(deck, nil)
             }
             return true
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return false
         } catch {
             onNotice("Learning Deck", error.localizedDescription)

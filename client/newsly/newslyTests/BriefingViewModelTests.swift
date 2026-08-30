@@ -524,14 +524,11 @@ final class BriefingViewModelTests: XCTestCase {
     func testInitialIndexFailureIsFatalWithoutSnapshot() async {
         let service = MockBriefingService()
         service.indexError = URLError(.notConnectedToInternet)
-        let viewModel = BriefingViewModel(
-            service: service,
-            initialIndexRetryDelays: [0, 0]
-        )
+        let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
 
-        XCTAssertEqual(service.indexEtags.count, 3)
+        XCTAssertEqual(service.indexEtags.count, 1)
         guard case .error = viewModel.state else {
             return XCTFail("Expected initial index failure to be fatal")
         }
@@ -539,15 +536,8 @@ final class BriefingViewModelTests: XCTestCase {
 
     func testInitialIndexDoesNotRetryDefinitiveFailure() async {
         let service = MockBriefingService()
-        service.indexError = APIError.decodingError(
-            DecodingError.dataCorrupted(
-                .init(codingPath: [], debugDescription: "Invalid fixture")
-            )
-        )
-        let viewModel = BriefingViewModel(
-            service: service,
-            initialIndexRetryDelays: [0, 0]
-        )
+        service.indexError = ClientFailure.decoding(endpoint: "/briefing")
+        let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
 
@@ -557,22 +547,21 @@ final class BriefingViewModelTests: XCTestCase {
         }
     }
 
-    func testInitialIndexRetriesTransientTransportFailure() async {
+    func testInitialIndexLeavesTransportRetryToServiceBoundary() async {
         let service = MockBriefingService()
         service.indexErrors = [URLError(.networkConnectionLost), nil]
         service.indexResults = [
             .value(makeIndex(lenses: [makeLensSummary(key: "today")]), etag: "briefing-v1")
         ]
         service.lensResponses["today"] = makeLens(key: "today")
-        let viewModel = BriefingViewModel(
-            service: service,
-            initialIndexRetryDelays: [0]
-        )
+        let viewModel = BriefingViewModel(service: service)
 
         await viewModel.loadIndexIfNeeded()
 
-        XCTAssertEqual(service.indexEtags.count, 2)
-        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(service.indexEtags.count, 1)
+        guard case .error = viewModel.state else {
+            return XCTFail("Expected the service failure to be published after its retry budget")
+        }
     }
 
     func testFreshIndexSkipsLifecycleRevalidationUntilIntervalExpires() async {

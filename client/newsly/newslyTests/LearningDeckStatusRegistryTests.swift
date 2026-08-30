@@ -148,6 +148,46 @@ final class LearningDeckStatusRegistryTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    func testWrappedConnectivityFailureRetriesThroughClientFailureVocabulary() async throws {
+        let source = ConnectivityThenReadyLearningDeckStatusSource()
+        let delays = LearningDeckDelayRecorder()
+        let registry = LearningDeckStatusRegistry(
+            fetchDeck: { try await source.fetch(deckId: $0) },
+            policy: LearningDeckStatusPollingPolicy(delaysNanoseconds: [1]),
+            sleep: { delay in await delays.record(delay) }
+        )
+
+        let deck = try await registry.waitUntilTerminal(deckId: 41)
+
+        XCTAssertTrue(deck.viewerAvailable)
+        let callCount = await source.callCount
+        let recordedDelays = await delays.values
+        XCTAssertEqual(callCount, 2)
+        XCTAssertEqual(recordedDelays, [1])
+    }
+
+    func testTerminalAuthenticationFailureDoesNotRetry() async {
+        let source = TerminalAuthLearningDeckStatusSource()
+        let delays = LearningDeckDelayRecorder()
+        let registry = LearningDeckStatusRegistry(
+            fetchDeck: { try await source.fetch(deckId: $0) },
+            policy: LearningDeckStatusPollingPolicy(delaysNanoseconds: [1]),
+            sleep: { delay in await delays.record(delay) }
+        )
+
+        do {
+            _ = try await registry.waitUntilTerminal(deckId: 41)
+            XCTFail("Expected authentication failure")
+        } catch {
+            XCTAssertEqual(ClientFailure.classify(error), .authenticationExpired)
+        }
+
+        let callCount = await source.callCount
+        let recordedDelays = await delays.values
+        XCTAssertEqual(callCount, 1)
+        XCTAssertTrue(recordedDelays.isEmpty)
+    }
 }
 
 private enum LearningDeckRegistryTestError: Error {
@@ -183,6 +223,31 @@ private actor AlwaysActiveLearningDeckStatusSource {
     func fetch(deckId: Int) -> LearningDeck {
         callCount += 1
         return makeRegistryDeck(id: deckId, status: .generating)
+    }
+}
+
+private actor ConnectivityThenReadyLearningDeckStatusSource {
+    private(set) var callCount = 0
+
+    func fetch(deckId: Int) throws -> LearningDeck {
+        callCount += 1
+        if callCount == 1 {
+            throw AuthError.networkError(URLError(.networkConnectionLost))
+        }
+        return makeRegistryDeck(
+            id: deckId,
+            status: .completed,
+            viewerAvailable: true
+        )
+    }
+}
+
+private actor TerminalAuthLearningDeckStatusSource {
+    private(set) var callCount = 0
+
+    func fetch(deckId _: Int) throws -> LearningDeck {
+        callCount += 1
+        throw AuthError.refreshTokenExpired
     }
 }
 

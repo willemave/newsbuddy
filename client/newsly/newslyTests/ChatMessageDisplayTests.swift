@@ -360,7 +360,7 @@ final class ChatMessageDisplayTests: XCTestCase {
         )
         let model = AssistantFeedOptionActionModel(
             service: MockAssistantFeedSubscriptionService(
-                result: .failure(APIError.httpError(statusCode: 400, detail: nil))
+                result: .failure(ClientFailure.http(statusCode: 400, detail: nil))
             )
         )
 
@@ -382,7 +382,7 @@ final class ChatMessageDisplayTests: XCTestCase {
             isSubscribed: true
         )
         let service = MockAssistantFeedSubscriptionService(
-            result: .failure(APIError.httpError(statusCode: 500, detail: nil))
+            result: .failure(ClientFailure.http(statusCode: 500, detail: nil))
         )
         let model = AssistantFeedOptionActionModel(service: service)
 

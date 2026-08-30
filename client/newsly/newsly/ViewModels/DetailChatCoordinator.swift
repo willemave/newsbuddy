@@ -170,7 +170,7 @@ final class DetailChatCoordinator {
                 )
             )
             return ChatSessionRoute(assistantTurn: response)
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return nil
         } catch {
             toastPresenter.showError("Failed to dig deeper: \(error.localizedDescription)")
@@ -215,7 +215,7 @@ final class DetailChatCoordinator {
 
         do {
             return try await operation()
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return nil
         } catch {
             chatError = error.localizedDescription

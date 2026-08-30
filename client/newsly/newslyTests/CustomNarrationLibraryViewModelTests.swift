@@ -42,6 +42,35 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+    func testAutomaticObservationPausesAndResumesFromRetainedEpisode() async {
+        let processing = makeEpisode(id: 41, status: .processing)
+        let completed = makeEpisode(id: 41, status: .completed)
+        let service = MockCustomNarrationLibraryService(
+            listResponses: [[processing]],
+            fetchResponses: [completed]
+        )
+        let viewModel = makeViewModel(
+            service: service,
+            pollingIntervalNanoseconds: 50_000_000,
+            pollingAttemptLimit: 2
+        )
+
+        await viewModel.load()
+        viewModel.suspendAutomaticObservation()
+        try? await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertTrue(service.fetchedEpisodeIDs.isEmpty)
+        XCTAssertEqual(viewModel.episodes.first?.status, .processing)
+
+        viewModel.resumeAutomaticObservation()
+
+        let didComplete = await waitUntil {
+            viewModel.episodes.first?.status == .completed
+        }
+        XCTAssertTrue(didComplete)
+        XCTAssertEqual(service.fetchedEpisodeIDs, [41])
+    }
+
     func testRetryReplacesFailedEpisodeAndUsesBackgroundDelivery() async {
         let failed = makeEpisode(
             id: 41,
@@ -92,6 +121,7 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
 
     private func makeViewModel(
         service: MockCustomNarrationLibraryService,
+        pollingIntervalNanoseconds: UInt64 = 1_000_000,
         pollingAttemptLimit: Int = 2
     ) -> CustomNarrationLibraryViewModel {
         let defaults = UserDefaults(suiteName: "CustomNarrationTests.\(UUID().uuidString)")!
@@ -112,15 +142,14 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
                         newsCrawlCount: 0
                     )
                 )
-            },
-            isApplicationActive: { false }
+            }
         )
         return CustomNarrationLibraryViewModel(
             playbackService: playback,
             audioService: service,
             badgeStatsStore: badgeStore,
             toastPresenter: NoopNarrationToastPresenter(),
-            pollingIntervalNanoseconds: 1_000_000,
+            pollingIntervalNanoseconds: pollingIntervalNanoseconds,
             pollingAttemptLimit: pollingAttemptLimit
         )
     }

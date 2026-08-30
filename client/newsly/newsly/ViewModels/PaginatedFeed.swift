@@ -9,6 +9,7 @@ import Observation
 enum LoadPhase: Equatable {
     case idle
     case initialLoading
+    case empty
     case loaded
     case loadingMore
     case error(String)
@@ -33,6 +34,7 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
     private(set) var phase: LoadPhase
     private(set) var nextCursor: String?
     private(set) var hasMore: Bool
+    private(set) var isRequestInFlight = false
 
     @ObservationIgnored
     private let loadPage: (_ cursor: String?, _ generation: Int) async throws -> Page<Item>
@@ -45,6 +47,9 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
 
     @ObservationIgnored
     private var requestTask: Task<Page<Item>, Error>?
+
+    @ObservationIgnored
+    private var phaseBeforeRequest: LoadPhase?
 
     convenience init(
         items: [Item] = [],
@@ -116,16 +121,38 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
 
     func replaceItems(_ newItems: [Item]) {
         items = newItems
+        switch phase {
+        case .empty, .loaded:
+            phase = newItems.isEmpty ? .empty : .loaded
+        case .idle, .initialLoading, .loadingMore, .error:
+            break
+        }
     }
 
     func reset() {
         requestGeneration += 1
         requestTask?.cancel()
         requestTask = nil
+        phaseBeforeRequest = nil
+        isRequestInFlight = false
         items.removeAll()
         phase = .idle
         nextCursor = nil
         hasMore = true
+    }
+
+    /// Stops an obsolete automatic read without discarding readable state.
+    ///
+    /// Incrementing the generation also fences a loader that ignores task
+    /// cancellation, so a replacement activation can start immediately.
+    func cancelRequestRetainingState() {
+        guard requestTask != nil else { return }
+        requestGeneration += 1
+        requestTask?.cancel()
+        requestTask = nil
+        isRequestInFlight = false
+        phase = phaseBeforeRequest ?? (items.isEmpty ? .idle : .loaded)
+        phaseBeforeRequest = nil
     }
 
     func isCurrentRequest(_ generation: Int) -> Bool {
@@ -146,7 +173,9 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         let generation = requestGeneration
         requestTask?.cancel()
         let previousPhase = phase
+        phaseBeforeRequest = previousPhase
         phase = loadingPhase
+        isRequestInFlight = true
 
         if case .replace(let clearExistingItems, _) = mode, clearExistingItems {
             items.removeAll()
@@ -169,16 +198,22 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
             guard generation == requestGeneration else { return }
 
             apply(page: page, mode: mode)
-            phase = .loaded
+            phase = items.isEmpty ? .empty : .loaded
             requestTask = nil
-        } catch is CancellationError {
+            phaseBeforeRequest = nil
+            isRequestInFlight = false
+        } catch where ClientFailure.classify(error) == .cancelled {
             guard generation == requestGeneration else { return }
             phase = previousPhase
             requestTask = nil
+            phaseBeforeRequest = nil
+            isRequestInFlight = false
         } catch {
             guard generation == requestGeneration else { return }
             phase = .error(error.localizedDescription)
             requestTask = nil
+            phaseBeforeRequest = nil
+            isRequestInFlight = false
         }
     }
 

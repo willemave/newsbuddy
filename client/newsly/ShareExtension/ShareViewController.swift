@@ -92,9 +92,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
         view.backgroundColor = .systemBackground
 
-        if let accessGroup = SharedContainer.keychainAccessGroup {
-            KeychainManager.shared.configure(accessGroup: accessGroup)
-        }
+        KeychainManager.shared.configure(accessGroup: SharedContainer.keychainAccessGroup)
 
         configureLayout()
         configureOptions()
@@ -554,7 +552,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         do {
             try await ShareExtensionTransport.shared.requestVoid(
                 "/api/share-actions",
-                method: "POST",
+                method: .post,
                 body: requestBody
             )
         } catch let error as ShareExtensionTransportError {

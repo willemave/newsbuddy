@@ -1,6 +1,13 @@
 import XCTest
 @testable import newsly
 
+@MainActor
+private func makeActiveLearningDeckLifecycle() -> AppLifecycle {
+    let lifecycle = AppLifecycle()
+    lifecycle.record(.active)
+    return lifecycle
+}
+
 final class LearningDeckURLValidatorTests: XCTestCase {
     func testAcceptsSameOriginRemoteHTTPSURL() throws {
         let apiBaseURL = URL(string: "https://racknerd.example.com:443")!
@@ -236,6 +243,7 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
         let active = makeLearningDeck(runStatus: .generating)
         let service = MockLearningDeckService(fetchResults: [.success(active)])
         let viewModel = LearningDeckReaderViewModel(
+            lifecycle: makeActiveLearningDeckLifecycle(),
             deck: active,
             chatService: NoopLearningDeckReaderChatService(),
             messageCompletionRegistry: ChatMessageCompletionRegistry(
@@ -333,6 +341,7 @@ final class LearningDeckReaderReliabilityTests: XCTestCase {
         service: MockLearningDeckService
     ) -> LearningDeckReaderViewModel {
         LearningDeckReaderViewModel(
+            lifecycle: makeActiveLearningDeckLifecycle(),
             deck: deck,
             chatService: NoopLearningDeckReaderChatService(),
             messageCompletionRegistry: ChatMessageCompletionRegistry(

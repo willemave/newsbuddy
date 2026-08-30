@@ -35,11 +35,29 @@ extension ScraperConfigService: DetectedFeedSubscribing {}
 @MainActor
 @Observable
 final class ContentDetailViewModel {
+    struct ContentKey: Hashable {
+        let id: Int
+        let contentType: APIContentType?
+    }
+
+    enum InitialLoadPhase: Equatable {
+        case idle
+        case loading
+        case failure(String)
+    }
+
+    enum RevalidationPhase: Equatable {
+        case idle
+        case refreshing
+        case failure(String)
+    }
+
     private enum TaskKey: Hashable {
-        case sourceBody(Int)
-        case readerBody(Int)
-        case markRead(Int)
-        case trackOpened(Int)
+        case primary(ContentKey)
+        case sourceBody(ContentKey)
+        case readerBody(ContentKey)
+        case markRead(ContentKey)
+        case trackOpened(ContentKey)
     }
 
     var content: ContentDetail?
@@ -47,8 +65,8 @@ final class ContentDetailViewModel {
     var readerBody: ContentBody?
     var isLoadingReaderBody = false
     var readerErrorMessage: String?
-    var isLoading = false
-    var errorMessage: String?
+    private(set) var initialLoadPhase: InitialLoadPhase = .idle
+    private(set) var revalidationPhase: RevalidationPhase = .idle
     // Indicates if the item was already marked as read when it was fetched
     var wasAlreadyReadWhenLoaded: Bool = false
 
@@ -59,6 +77,14 @@ final class ContentDetailViewModel {
     private var linkSubmissionRevision = 0
 
     var feedSubscriptionSuccess: Bool { feedSubscriptionSuccessMessage != nil }
+    var isLoading: Bool {
+        content == nil && initialLoadPhase == .loading
+    }
+    var errorMessage: String? {
+        guard content == nil,
+              case .failure(let message) = initialLoadPhase else { return nil }
+        return message
+    }
 
     @ObservationIgnored
     private let contentService: any ContentDetailServicing
@@ -76,6 +102,10 @@ final class ContentDetailViewModel {
     private var contentId: Int = 0
     @ObservationIgnored
     private var contentType: APIContentType?
+
+    private var currentContentKey: ContentKey {
+        ContentKey(id: contentId, contentType: contentType)
+    }
     
     init(
         contentId: Int = 0,
@@ -111,10 +141,7 @@ final class ContentDetailViewModel {
     }
     
     func updateContentId(_ newId: Int, contentType newContentType: APIContentType? = nil) {
-        let previousContentId = contentId
-        tasks.cancel(.sourceBody(previousContentId))
-        tasks.cancel(.readerBody(previousContentId))
-        tasks.cancel(.markRead(previousContentId))
+        tasks.cancelAll()
         self.contentId = newId
         if let newContentType {
             self.contentType = newContentType
@@ -125,8 +152,8 @@ final class ContentDetailViewModel {
         self.readerBody = nil
         self.isLoadingReaderBody = false
         self.readerErrorMessage = nil
-        self.errorMessage = nil
-        self.isLoading = true
+        self.initialLoadPhase = .loading
+        self.revalidationPhase = .idle
         self.isSubscribingToFeed = false
         self.feedSubscriptionSuccessMessage = nil
         self.feedSubscriptionError = nil
@@ -134,12 +161,57 @@ final class ContentDetailViewModel {
     }
     
     func loadContent() async {
-        let requestedContentId = contentId
-        let requestedContentType = contentType
-        logger.info("[ContentDetail] loadContent started | contentId=\(requestedContentId)")
-        isLoading = true
-        errorMessage = nil
-        contentBody = nil
+        let key = currentContentKey
+        let taskKey = TaskKey.primary(key)
+        if let existingTask = tasks.task(for: taskKey) {
+            await existingTask.value
+            return
+        }
+
+        let isRevalidation = content?.id == key.id
+        if isRevalidation {
+            revalidationPhase = .refreshing
+        } else {
+            initialLoadPhase = .loading
+        }
+        logger.info("[ContentDetail] loadContent started | contentId=\(key.id)")
+
+        let task = tasks.runReplacing(taskKey) { [weak self] token in
+            guard let self else { return }
+            await self.performPrimaryLoad(
+                key: key,
+                isRevalidation: isRevalidation,
+                token: token
+            )
+        }
+        await task.value
+    }
+
+    func revalidateContent() async {
+        await loadContent()
+    }
+
+    func suspendAutomaticReads() {
+        tasks.cancel(.primary(currentContentKey))
+        if let content {
+            let concreteKey = ContentKey(id: content.id, contentType: content.contentType)
+            tasks.cancel(.sourceBody(concreteKey))
+            tasks.cancel(.readerBody(concreteKey))
+        }
+        if content == nil {
+            initialLoadPhase = .idle
+        }
+        revalidationPhase = .idle
+        isLoadingReaderBody = false
+    }
+
+    private func performPrimaryLoad(
+        key: ContentKey,
+        isRevalidation: Bool,
+        token: TaskBag<TaskKey>.Token
+    ) async {
+        let requestedContentId = key.id
+        let requestedContentType = key.contentType
 
         do {
             logger.debug("[ContentDetail] Fetching content detail | contentId=\(requestedContentId) contentType=\(requestedContentType?.rawValue ?? "nil", privacy: .public)")
@@ -150,53 +222,62 @@ final class ContentDetailViewModel {
                 fetched = try await contentService.fetchContentDetail(id: requestedContentId)
             }
 
-            guard contentId == requestedContentId,
-                  contentType == requestedContentType else {
+            guard tasks.isCurrent(token), currentContentKey == key else {
                 logger.debug(
                     "[ContentDetail] Ignoring stale content detail | requestedId=\(requestedContentId) currentId=\(self.contentId)"
                 )
                 return
             }
 
+            let isFirstWinningLoad = content?.id != fetched.id
             content = fetched
             logger.info("[ContentDetail] Content fetched | contentId=\(requestedContentId) type=\(fetched.contentType.rawValue, privacy: .public) isRead=\(fetched.isRead) title=\(fetched.displayTitle, privacy: .public)")
 
             // Capture read state as returned by the server BEFORE any auto-marking
-            wasAlreadyReadWhenLoaded = fetched.isRead
+            if isFirstWinningLoad {
+                wasAlreadyReadWhenLoaded = fetched.isRead
+            }
             logger.debug("[ContentDetail] wasAlreadyReadWhenLoaded=\(fetched.isRead) | contentId=\(requestedContentId)")
 
-            // Render immediately once the main detail payload arrives.
-            isLoading = false
+            initialLoadPhase = .idle
+            revalidationPhase = .idle
 
-            tasks.runReplacing(.trackOpened(fetched.id)) { [weak self] in
-                guard let self else { return }
-                await self.trackOpenedInteraction(for: fetched)
-            }
-
-            if fetched.bodyAvailable && fetched.contentType != .news {
-                tasks.runReplacing(.sourceBody(fetched.id)) { [weak self] in
+            let fetchedKey = ContentKey(id: fetched.id, contentType: fetched.contentType)
+            if isFirstWinningLoad {
+                tasks.runReplacing(.trackOpened(fetchedKey)) { [weak self] in
                     guard let self else { return }
-                    await self.loadContentBody(for: fetched)
+                    await self.trackOpenedInteraction(for: fetched)
+                }
+
+                tasks.runReplacing(.markRead(fetchedKey)) { [weak self] in
+                    guard let self else { return }
+                    await self.markFetchedContentAsReadIfNeeded(fetched)
                 }
             }
 
-            tasks.runReplacing(.markRead(fetched.id)) { [weak self] in
-                guard let self else { return }
-                await self.markFetchedContentAsReadIfNeeded(fetched)
+            if fetched.bodyAvailable,
+               fetched.contentType != .news,
+               contentBody?.contentId != fetched.id {
+                tasks.runReplacing(.sourceBody(fetchedKey)) { [weak self] token in
+                    guard let self else { return }
+                    await self.loadContentBody(for: fetched, token: token)
+                }
             }
-        } catch where isNetworkCancellation(error) {
-            guard contentId == requestedContentId,
-                  contentType == requestedContentType else { return }
-            isLoading = false
-            if !Task.isCancelled, content == nil {
-                errorMessage = "Couldn't load this item. Please try again."
+        } catch where ClientFailure.classify(error) == .cancelled {
+            guard tasks.isCurrent(token), currentContentKey == key else { return }
+            if isRevalidation {
+                revalidationPhase = .idle
+            } else {
+                initialLoadPhase = .idle
             }
         } catch {
-            guard contentId == requestedContentId,
-                  contentType == requestedContentType else { return }
+            guard tasks.isCurrent(token), currentContentKey == key else { return }
             logger.error("[ContentDetail] Error loading content | contentId=\(requestedContentId) error=\(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-            isLoading = false
+            if isRevalidation, content != nil {
+                revalidationPhase = .failure(error.localizedDescription)
+            } else {
+                initialLoadPhase = .failure(error.localizedDescription)
+            }
         }
         logger.debug("[ContentDetail] loadContent completed | contentId=\(requestedContentId)")
     }
@@ -209,7 +290,8 @@ final class ContentDetailViewModel {
     func loadReaderBody(for content: ContentDetail, force: Bool = false) async {
         guard canShowReader(for: content) else { return }
         guard force || readerBody == nil else { return }
-        let taskKey = TaskKey.readerBody(content.id)
+        let contentKey = ContentKey(id: content.id, contentType: content.contentType)
+        let taskKey = TaskKey.readerBody(contentKey)
         if !force, let existingTask = tasks.task(for: taskKey) {
             await existingTask.value
             return
@@ -225,46 +307,55 @@ final class ContentDetailViewModel {
                 }
             }
 
-            await self.performReaderBodyLoad(for: content)
+            await self.performReaderBodyLoad(for: content, token: token)
         }
         await task.value
     }
 
-    private func performReaderBodyLoad(for content: ContentDetail) async {
+    private func performReaderBodyLoad(
+        for content: ContentDetail,
+        token: TaskBag<TaskKey>.Token
+    ) async {
         do {
             let body = try await fetchReaderBody(for: content)
-            guard self.contentId == content.id,
+            guard tasks.isCurrent(token),
+                  self.contentId == content.id,
                   self.content?.id == content.id,
                   self.content?.contentType == content.contentType else {
                 logger.debug("[ContentDetail] Ignoring stale reader body | requestedId=\(content.id) currentId=\(self.contentId)")
                 return
             }
             readerBody = body
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
-            guard self.contentId == content.id else { return }
+            guard tasks.isCurrent(token), self.contentId == content.id else { return }
             logger.error("[ContentDetail] Failed to fetch reader body | contentId=\(content.id) error=\(error.localizedDescription)")
             readerErrorMessage = error.localizedDescription
         }
     }
 
-    private func loadContentBody(for fetched: ContentDetail) async {
+    private func loadContentBody(
+        for fetched: ContentDetail,
+        token: TaskBag<TaskKey>.Token
+    ) async {
         do {
             let body = try await contentService.fetchContentBody(
                 id: fetched.id,
                 variant: "source",
                 contentType: fetched.contentType
             )
-            guard self.contentId == fetched.id,
-                  self.contentType == fetched.contentType else {
+            guard tasks.isCurrent(token),
+                  self.contentId == fetched.id,
+                  self.content?.contentType == fetched.contentType else {
                 logger.debug("[ContentDetail] Ignoring stale content body | requestedId=\(fetched.id) currentId=\(self.contentId)")
                 return
             }
             contentBody = body
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
+            guard tasks.isCurrent(token) else { return }
             logger.error("[ContentDetail] Failed to fetch content body | contentId=\(fetched.id) error=\(error.localizedDescription)")
         }
     }
@@ -279,7 +370,7 @@ final class ContentDetailViewModel {
             if !renderedBody.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return renderedBody
             }
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             throw error
         } catch {
             logger.debug("[ContentDetail] Rendered reader body unavailable, falling back to source | contentId=\(content.id) error=\(error.localizedDescription)")
@@ -290,7 +381,8 @@ final class ContentDetailViewModel {
             return sourceBody
         }
 
-        if let sourceTask = tasks.task(for: .sourceBody(content.id)) {
+        let contentKey = ContentKey(id: content.id, contentType: content.contentType)
+        if let sourceTask = tasks.task(for: .sourceBody(contentKey)) {
             await sourceTask.value
             if let sourceBody = contentBody,
                sourceBody.contentId == content.id {
@@ -334,7 +426,7 @@ final class ContentDetailViewModel {
             }
 
             content?.isRead = true
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             logger.error("[ContentDetail] Failed to mark content as read | contentId=\(fetched.id) error=\(error.localizedDescription)")
@@ -356,7 +448,7 @@ final class ContentDetailViewModel {
             logger.debug(
                 "[ContentDetail] Open interaction tracked | contentId=\(fetched.id) recorded=\(response.recorded)"
             )
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             logger.error(
@@ -388,7 +480,7 @@ final class ContentDetailViewModel {
             }
         } catch {
             content?.isSavedToKnowledge = currentContent.isSavedToKnowledge
-            errorMessage = "Failed to update knowledge save"
+            toastPresenter.showError("Failed to update knowledge save")
         }
     }
 

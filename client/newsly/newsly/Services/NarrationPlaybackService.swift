@@ -193,7 +193,7 @@ final class NarrationPlaybackService {
                 "Streaming narration resource ready | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt))"
             )
             try playAudioStream(resource, for: target, onFinished: onFinished)
-        } catch is CancellationError {
+        } catch where ClientFailure.classify(error) == .cancelled {
             throw CancellationError()
         } catch {
             narrationPlaybackLogger.error(

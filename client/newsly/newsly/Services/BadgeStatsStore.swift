@@ -6,7 +6,6 @@
 import Foundation
 import Observation
 import os.log
-import UIKit
 
 private let badgeStatsLogger = Logger(subsystem: "com.newsly", category: "BadgeStats")
 
@@ -47,7 +46,7 @@ private final class BadgeStatsRefreshScheduler: BadgeStatsRefreshScheduling {
 
 /// The single source of truth for unread and processing badge state.
 ///
-/// The store coalesces callers onto one request, owns lifecycle-driven refreshes,
+/// The store coalesces callers onto one request, accepts explicit lifecycle input,
 /// and only keeps a retry timer alive while server-side processing is active.
 @MainActor
 @Observable
@@ -72,15 +71,13 @@ final class BadgeStatsStore {
     @ObservationIgnored
     private let notificationCenter: NotificationCenter
     @ObservationIgnored
-    private let isApplicationActive: @MainActor () -> Bool
-    @ObservationIgnored
     private let refreshInterval: TimeInterval
     @ObservationIgnored
     private var refreshTask: Task<Void, Never>?
     @ObservationIgnored
     private var refreshGeneration = 0
     @ObservationIgnored
-    private var lifecycleObservers: [NSObjectProtocol] = []
+    private var authenticationObservers: [NSObjectProtocol] = []
     @ObservationIgnored
     private var isRefreshSuspended: Bool
 
@@ -93,24 +90,31 @@ final class BadgeStatsStore {
         },
         scheduler: (any BadgeStatsRefreshScheduling)? = nil,
         notificationCenter: NotificationCenter = .default,
-        isApplicationActive: @escaping @MainActor () -> Bool = {
-            UIApplication.shared.applicationState == .active
-        },
         refreshInterval: TimeInterval = 5
     ) {
         self.fetchStats = fetchStats
         self.scheduler = scheduler ?? BadgeStatsRefreshScheduler()
         self.notificationCenter = notificationCenter
-        self.isApplicationActive = isApplicationActive
         self.refreshInterval = refreshInterval
-        self.isRefreshSuspended = !isApplicationActive()
-        installLifecycleObservers()
+        self.isRefreshSuspended = true
+        installAuthenticationObservers()
     }
 
     deinit {
-        for observer in lifecycleObservers {
+        for observer in authenticationObservers {
             notificationCenter.removeObserver(observer)
         }
+    }
+
+    func activate() {
+        setRefreshSuspended(false)
+        Task { @MainActor [weak self] in
+            await self?.refreshStats()
+        }
+    }
+
+    func suspend() {
+        setRefreshSuspended(true)
     }
 
     func refreshStats() async {
@@ -211,45 +215,22 @@ final class BadgeStatsStore {
 
     private func scheduleNextRefresh(hasActiveProcessing: Bool) {
         scheduler.cancelRefresh()
-        guard hasActiveProcessing, !isRefreshSuspended, isApplicationActive() else { return }
+        guard hasActiveProcessing, !isRefreshSuspended else { return }
         scheduler.scheduleRefresh(after: refreshInterval) { [weak self] in
             await self?.refreshStats()
         }
     }
 
-    private func installLifecycleObservers() {
-        lifecycleObservers.append(notificationCenter.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
+    private func installAuthenticationObservers() {
+        authenticationObservers.append(notificationCenter.addObserver(
+            forName: .authDidLogOut,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.setRefreshSuspended(false)
-                await self?.refreshStats()
+                self?.stopAndReset()
             }
         })
-
-        lifecycleObservers.append(notificationCenter.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.setRefreshSuspended(true)
-            }
-        })
-
-        for notificationName in [Notification.Name.authDidLogOut, .authenticationRequired] {
-            lifecycleObservers.append(notificationCenter.addObserver(
-                forName: notificationName,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in
-                    self?.stopAndReset()
-                }
-            })
-        }
     }
 
     private func cancelRefreshTask() {

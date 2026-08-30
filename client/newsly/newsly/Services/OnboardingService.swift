@@ -35,7 +35,7 @@ final class OnboardingService {
         do {
             let response: OnboardingAudioDiscoverResponse = try await client.request(
                 APIEndpoints.onboardingAudioDiscover,
-                method: "POST",
+                method: .post,
                 body: body
             )
             onboardingServiceLogger.info(
@@ -58,7 +58,7 @@ final class OnboardingService {
         let queryItems = [URLQueryItem(name: "run_id", value: String(runId))]
         let response: OnboardingDiscoveryStatusResponse = try await client.request(
             APIEndpoints.onboardingDiscoveryStatus,
-            method: "GET",
+            method: .get,
             queryItems: queryItems
         )
         onboardingServiceLogger.info(
@@ -71,7 +71,7 @@ final class OnboardingService {
         let body = try JSONEncoder().encode(request)
         return try await client.request(
             APIEndpoints.onboardingComplete,
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -79,7 +79,7 @@ final class OnboardingService {
     func markTutorialComplete() async throws -> OnboardingTutorialResponse {
         try await client.request(
             APIEndpoints.onboardingTutorialComplete,
-            method: "POST"
+            method: .post
         )
     }
 }

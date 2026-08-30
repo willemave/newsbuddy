@@ -13,16 +13,13 @@ private enum LearningDeckReaderLayout {
 }
 
 struct LearningDeckReaderView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var viewModel: LearningDeckReaderViewModel
-    @State private var webController = LearningDeckReaderWebController()
-    @State private var portraitChatPresentation: LearningDeckChatPresentation = .peek
-    @State private var showLandscapeChat = false
+    @Environment(AppLifecycle.self) private var lifecycle
+    @Environment(ActiveChatSessionManager.self) private var activeSessionManager
 
-    let deck: LearningDeck
-    let viewerURL: URL?
-    let onClose: (() -> Void)?
+    private let deck: LearningDeck
+    private let viewerURL: URL?
+    private let onClose: (() -> Void)?
+    private let chatService: (any LearningDeckReaderChatServicing)?
 
     @MainActor
     init(
@@ -34,9 +31,53 @@ struct LearningDeckReaderView: View {
         self.deck = deck
         self.viewerURL = viewerURL
         self.onClose = onClose
+        self.chatService = chatService
+    }
+
+    var body: some View {
+        LearningDeckReaderContent(
+            deck: deck,
+            viewerURL: viewerURL,
+            lifecycle: lifecycle,
+            activeSessionManager: activeSessionManager,
+            onClose: onClose,
+            chatService: chatService
+        )
+    }
+}
+
+private struct LearningDeckReaderContent: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private let lifecycle: AppLifecycle
+    private let deck: LearningDeck
+    private let viewerURL: URL?
+    private let onClose: (() -> Void)?
+
+    @State private var viewModel: LearningDeckReaderViewModel
+    @State private var webController = LearningDeckReaderWebController()
+    @State private var portraitChatPresentation: LearningDeckChatPresentation = .peek
+    @State private var showLandscapeChat = false
+
+    @MainActor
+    init(
+        deck: LearningDeck,
+        viewerURL: URL?,
+        lifecycle: AppLifecycle,
+        activeSessionManager: ActiveChatSessionManager,
+        onClose: (() -> Void)? = nil,
+        chatService: (any LearningDeckReaderChatServicing)? = nil
+    ) {
+        self.deck = deck
+        self.viewerURL = viewerURL
+        self.lifecycle = lifecycle
+        self.onClose = onClose
         _viewModel = State(
             initialValue: RootDependencyFactory.makeLearningDeckReaderViewModel(
                 deck: deck,
+                lifecycle: lifecycle,
+                activeSessionManager: activeSessionManager,
                 chatService: chatService
             )
         )
@@ -60,9 +101,14 @@ struct LearningDeckReaderView: View {
             viewModel.handleAppear()
             viewModel.prepareViewer(initialURL: viewerURL)
         }
+        .onChange(of: lifecycle.phase) { _, _ in
+            viewModel.handleLifecyclePhaseChange(initialViewerURL: viewerURL)
+        }
+        .task(id: lifecycle.activation?.generation) {
+            viewModel.resumeAfterActivationIfNeeded(initialViewerURL: viewerURL)
+        }
         .onDisappear {
             viewModel.handleDisappear()
-            viewModel.cancelViewerResolution()
         }
         .sheet(isPresented: $showLandscapeChat) {
             LearningDeckChatPanel(

@@ -161,7 +161,7 @@ final class PodcastAudioController {
             podcastAudioLogger.info(
                 "Playback requested | contentId=\(content.id) episodeId=\(episode.id) elapsedMs=\(self.elapsedMilliseconds(since: startedAt))"
             )
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             podcastAudioLogger.error(

@@ -7,8 +7,6 @@ final class ChatVoiceInputControllerTests: XCTestCase {
         let transcriber = NoSpeechChatTranscriber()
         let controller = ChatVoiceInputController(
             transcriptionService: transcriber,
-            authService: AuthenticationService.shared,
-            tokenStore: KeychainManager.shared,
             refreshAvailability: { true },
             setBackendAvailability: { _ in },
             initiallyAvailable: true

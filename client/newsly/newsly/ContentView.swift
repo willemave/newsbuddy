@@ -8,17 +8,17 @@ import SwiftUI
 private let logger = Logger(subsystem: "com.newsly", category: "ContentView")
 
 struct ContentView: View {
-    private let authenticatedUserID: Int?
+    @Environment(AppLifecycle.self) private var lifecycle
 
-    @State private var tabCoordinator: TabCoordinatorViewModel
-    @State private var knowledgeViewModel: KnowledgeTimelineViewModel
+    private let session: AuthenticatedSession
+    private let tabCoordinator: TabCoordinatorViewModel
+    private let knowledgeViewModel: KnowledgeTimelineViewModel
+    private let readingStateStore: ReadingStateStore
+    private let readStateCache: ReadStateCache
+    private let submissionStatusViewModel: SubmissionStatusViewModel
+    private let chatNavigation: ChatNavigationCoordinator
 
-    @State private var readingStateStore: ReadingStateStore
-    @State private var readStateCache: ReadStateCache
-    @State private var submissionStatusViewModel: SubmissionStatusViewModel
     @State private var settings = AppSettings.shared
-    @State private var chatSessionManager = ActiveChatSessionManager.shared
-    @State private var chatNavigation = ChatNavigationCoordinator.shared
     @State private var e2eRouteInjector = E2ERouteInjector()
     @State private var briefingPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
@@ -26,25 +26,16 @@ struct ContentView: View {
     @State private var showMoreSheet = false
     @State private var isMoreSheetActive = false
     @State private var compactTabBarHeight: CGFloat = 0
-    @Environment(\.scenePhase) private var scenePhase
 
     @MainActor
-    init(userId: Int? = nil, tabCoordinator: TabCoordinatorViewModel? = nil) {
-        self.authenticatedUserID = userId
-        let readStateCache = ReadStateCache()
-        _readingStateStore = State(initialValue: ReadingStateStore(userId: userId))
-        _readStateCache = State(initialValue: readStateCache)
-        _tabCoordinator = State(
-            initialValue: tabCoordinator ?? RootDependencyFactory.makeTabCoordinator(userID: userId)
-        )
-        _knowledgeViewModel = State(
-            initialValue: RootDependencyFactory.makeKnowledgeTimelineViewModel(
-                readStateCache: readStateCache
-            )
-        )
-        _submissionStatusViewModel = State(
-            initialValue: RootDependencyFactory.makeSubmissionStatusViewModel()
-        )
+    init(session: AuthenticatedSession) {
+        self.session = session
+        self.tabCoordinator = session.tabCoordinator
+        self.knowledgeViewModel = session.knowledgeViewModel
+        self.readingStateStore = session.readingStateStore
+        self.readStateCache = session.readStateCache
+        self.submissionStatusViewModel = session.submissionStatusViewModel
+        self.chatNavigation = session.chatNavigation
     }
 
     var body: some View {
@@ -65,6 +56,7 @@ struct ContentView: View {
                 KnowledgeTab(
                     path: $knowledgePath,
                     scrollToTopRequest: tabCoordinator.scrollToTopRequest(for: .knowledge),
+                    isSelectedRootTab: tabCoordinator.selectedTab == .knowledge,
                     viewModel: knowledgeViewModel,
                     readStateCache: readStateCache,
                     readingStateStore: readingStateStore,
@@ -118,9 +110,11 @@ struct ContentView: View {
         .dynamicTypeSize(appTextSize)
         .environment(readingStateStore)
         .environment(readStateCache)
+        .environment(session.badgeStatsStore)
+        .environment(session.activeChatSessionManager)
+        .environment(session.chatNavigation)
         .onAppear {
             AppChrome.configure(textSize: appTextSize)
-            chatSessionManager.setPollingSuspended(scenePhase != .active)
             updateBriefingActivity()
             applyE2ERoutesIfNeeded()
             drainPendingChatRoute()
@@ -144,8 +138,7 @@ struct ContentView: View {
                 drainPendingChatRoute()
             }
         }
-        .onChange(of: scenePhase) { _, newPhase in
-            chatSessionManager.setPollingSuspended(newPhase != .active)
+        .onChange(of: lifecycle.phase) { _, newPhase in
             updateBriefingActivity()
             if newPhase == .active {
                 applyE2ERoutesIfNeeded()
@@ -156,7 +149,6 @@ struct ContentView: View {
             drainPendingChatRoute()
         }
         .task {
-            await BadgeStatsStore.shared.refreshStats()
             await submissionStatusViewModel.load()
         }
         .onDisappear {
@@ -173,10 +165,20 @@ struct ContentView: View {
     }
 
     private func updateBriefingActivity() {
-        let isActive = authenticatedUserID != nil
-            && tabCoordinator.selectedTab == .briefing
-            && scenePhase == .active
-        tabCoordinator.briefingVM.setActive(isActive)
+        let isBriefingVisible = tabCoordinator.selectedTab == .briefing
+
+        switch lifecycle.phase {
+        case .active:
+            tabCoordinator.briefingVM.setActive(isBriefingVisible)
+        case .inactive:
+            // Preserve selected-Lens work through a temporary interruption, but
+            // still deactivate when the user leaves the Briefing tab.
+            if !isBriefingVisible {
+                tabCoordinator.briefingVM.setActive(false)
+            }
+        case .background:
+            tabCoordinator.briefingVM.setActive(false)
+        }
     }
 
     private func selectRootTab(_ tab: RootTab) {

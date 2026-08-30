@@ -7,7 +7,6 @@
 
 import Foundation
 import Observation
-import SwiftUI
 import os
 
 private let logger = Logger(subsystem: "com.newsly", category: "ChatSessionViewModel")
@@ -53,6 +52,7 @@ final class ChatSessionViewModel {
     private let messageCompletionRegistry: ChatMessageCompletionRegistry
     private let voiceInput: ChatVoiceInputController
     private let activeSessionManager: ActiveChatSessionManager
+    private let lifecycle: AppLifecycle
     private let timelineReconciler = ChatTimelineReconciler()
     let sessionId: Int
     private let initialPendingMessageId: Int?
@@ -71,11 +71,14 @@ final class ChatSessionViewModel {
     @ObservationIgnored
     private let tasks = TaskBag<ChatSessionTaskKey>()
     @ObservationIgnored
-    private var isViewActive = true
+    private var isRouteVisible = true
+    @ObservationIgnored
+    private var isViewActive: Bool
     @ObservationIgnored
     private var needsForegroundTranscriptRefresh = false
 
     init(
+        lifecycle: AppLifecycle,
         route: ChatSessionRoute,
         dependencies: ChatDependencies,
         initialVoiceDictationAvailable: Bool = false,
@@ -86,13 +89,13 @@ final class ChatSessionViewModel {
         self.messageCompletionRegistry = dependencies.messageCompletionRegistry
         self.voiceInput = ChatVoiceInputController(
             transcriptionService: dependencies.transcriptionService,
-            authService: dependencies.authService,
-            tokenStore: dependencies.tokenStore,
             refreshAvailability: dependencies.refreshTranscriptionAvailability,
             setBackendAvailability: dependencies.setBackendTranscriptionAvailable,
             initiallyAvailable: initialVoiceDictationAvailable
         )
         self.activeSessionManager = dependencies.activeSessionManager
+        self.lifecycle = lifecycle
+        self.isViewActive = lifecycle.phase == .active
         self.sessionId = route.sessionId
         self.session = route.session
         self.initialPendingMessageId = route.pendingMessageId
@@ -113,8 +116,8 @@ final class ChatSessionViewModel {
     }
 
     func handleAppear() {
-        isViewActive = true
-        startQueuedSendDrainIfPossible()
+        isRouteVisible = true
+        resumeVisibleRouteWorkIfPossible()
     }
 
     func performSendMessage(text overrideText: String? = nil) {
@@ -421,6 +424,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     }
 
     func handleDisappear() {
+        isRouteVisible = false
         prepareForInactiveView()
         tasks.cancel(.startCouncil)
         tasks.cancel(.retryCouncil)
@@ -441,18 +445,31 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
         voiceInput.reset()
     }
 
-    func handleScenePhaseChange(_ phase: ScenePhase) {
-        switch phase {
+    func handleLifecyclePhaseChange() {
+        switch lifecycle.phase {
         case .active:
-            handleAppear()
-        case .inactive, .background:
-            prepareForInactiveView()
-        @unknown default:
+            resumeVisibleRouteWorkIfPossible()
+        case .inactive:
             break
+        case .background:
+            guard isRouteVisible else { return }
+            prepareForInactiveView()
         }
     }
 
-    func refreshAfterForegroundIfNeeded() async {
+    func resumeAfterActivationIfNeeded() async {
+        guard isRouteVisible, lifecycle.phase == .active else { return }
+        resumeVisibleRouteWorkIfPossible()
+        await refreshAfterForegroundIfNeeded()
+    }
+
+    private func resumeVisibleRouteWorkIfPossible() {
+        guard isRouteVisible, lifecycle.phase == .active else { return }
+        isViewActive = true
+        startQueuedSendDrainIfPossible()
+    }
+
+    private func refreshAfterForegroundIfNeeded() async {
         guard needsForegroundTranscriptRefresh else { return }
         needsForegroundTranscriptRefresh = false
         activeSessionManager.stopTracking(sessionId: sessionId)
@@ -869,7 +886,7 @@ Find counterbalancing arguments online for \(subject). Use the exa_web_search to
     }
 
     private func isCancelledOperation(_ error: Error) -> Bool {
-        Task.isCancelled || isNetworkCancellation(error)
+        Task.isCancelled || ClientFailure.classify(error) == .cancelled
     }
 
     // MARK: - Voice Dictation

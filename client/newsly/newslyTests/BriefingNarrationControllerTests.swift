@@ -233,7 +233,7 @@ final class BriefingNarrationControllerTests: XCTestCase {
         do {
             _ = try await cancelledWaiter.value
             XCTFail("Expected cancelled waiter to throw")
-        } catch where isNetworkCancellation(error) {}
+        } catch where ClientFailure.classify(error) == .cancelled {}
         let completed = try await activeWaiter.value
 
         XCTAssertEqual(completed.chapters.first?.id, 42)
@@ -256,7 +256,7 @@ final class BriefingNarrationControllerTests: XCTestCase {
                 _ = try await waiter.value
                 return false
             } catch {
-                return isNetworkCancellation(error)
+                return ClientFailure.classify(error) == .cancelled
             }
         }
         waiter.cancel()

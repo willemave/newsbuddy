@@ -33,7 +33,7 @@ final class ChatNavigationCoordinator {
         return navigationReplacementRoutes.contains(queuedRoute)
     }
 
-    private init() {}
+    init() {}
 
     func open(_ route: ChatSessionRoute) {
         guard presentedRoute != route, !pendingRoutes.contains(route) else { return }

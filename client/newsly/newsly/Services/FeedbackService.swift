@@ -40,7 +40,7 @@ final class FeedbackService {
         let body = try JSONEncoder().encode(request)
         try await client.requestVoid(
             APIEndpoints.feedback,
-            method: "POST",
+            method: .post,
             body: body
         )
     }

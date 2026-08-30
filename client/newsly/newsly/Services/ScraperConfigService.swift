@@ -77,7 +77,7 @@ class ScraperConfigService {
             isActive: isActive
         )
         let body = try JSONEncoder().encode(payload)
-        return try await client.request(APIEndpoints.scraperConfigs, method: "POST", body: body)
+        return try await client.request(APIEndpoints.scraperConfigs, method: .post, body: body)
     }
 
     func updateConfig(
@@ -90,11 +90,11 @@ class ScraperConfigService {
         let configBody = (feedURL != nil || limit != nil) ? ScraperConfigBody(feedURL: feedURL, limit: limit) : nil
         let payload = UpdateScraperConfigPayload(displayName: displayName, config: configBody, isActive: isActive)
         let body = try JSONEncoder().encode(payload)
-        return try await client.request(APIEndpoints.scraperConfig(id: configId), method: "PUT", body: body)
+        return try await client.request(APIEndpoints.scraperConfig(id: configId), method: .put, body: body)
     }
 
     func deleteConfig(configId: Int) async throws {
-        try await client.requestVoid(APIEndpoints.scraperConfig(id: configId), method: "DELETE")
+        try await client.requestVoid(APIEndpoints.scraperConfig(id: configId), method: .delete)
     }
 
     /// Subscribe to a detected feed.
@@ -109,7 +109,7 @@ class ScraperConfigService {
             displayName: displayName
         )
         let body = try JSONEncoder().encode(payload)
-        return try await client.request(APIEndpoints.subscribeFeed, method: "POST", body: body)
+        return try await client.request(APIEndpoints.subscribeFeed, method: .post, body: body)
     }
 }
 

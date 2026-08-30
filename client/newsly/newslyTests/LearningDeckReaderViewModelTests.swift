@@ -2,6 +2,13 @@ import XCTest
 @testable import newsly
 
 @MainActor
+private func makeActiveLifecycle() -> AppLifecycle {
+    let lifecycle = AppLifecycle()
+    lifecycle.record(.active)
+    return lifecycle
+}
+
+@MainActor
 final class LearningDeckReaderViewModelTests: XCTestCase {
     func testHandleDisappearKeepsPreAckSendAliveAndResumesPollingAfterAppear() async {
         let ackGate = AsyncGate()
@@ -25,6 +32,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             }
         )
         let viewModel = LearningDeckReaderViewModel(
+            lifecycle: makeActiveLifecycle(),
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
@@ -74,6 +82,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             }
         )
         let viewModel = LearningDeckReaderViewModel(
+            lifecycle: makeActiveLifecycle(),
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
@@ -94,6 +103,124 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
         XCTAssertEqual(userItem?.message.content, "Keep this")
         XCTAssertEqual(userItem?.pendingMessageId, 501)
         XCTAssertFalse(userItem?.message.hasFailed ?? true)
+    }
+
+    func testInactiveInterruptionDoesNotPauseAcceptedDeckPolling() async {
+        let completionGate = AsyncGate()
+        let lifecycle = makeActiveLifecycle()
+        let chatService = MockLearningDeckReaderChatService(
+            createAssistantTurnHandler: { message, _, _ in
+                Self.assistantTurnResponse(message: message)
+            },
+            messageStatusHandler: { messageId in
+                await completionGate.wait()
+                return MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: 201,
+                        role: .assistant,
+                        content: "Completed through interruption",
+                        status: .completed
+                    )
+                )
+            }
+        )
+        let viewModel = LearningDeckReaderViewModel(
+            lifecycle: lifecycle,
+            deck: Self.deck(),
+            chatService: chatService,
+            messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
+            deckService: LearningDeckService.shared
+        )
+
+        viewModel.performSendMessage(text: "Keep polling")
+        let didStartPolling = await waitUntil {
+            chatService.messageStatusCallCount > 0 && viewModel.isSending
+        }
+
+        lifecycle.record(.inactive)
+        viewModel.handleLifecyclePhaseChange(initialViewerURL: nil)
+        lifecycle.record(.active)
+        viewModel.handleLifecyclePhaseChange(initialViewerURL: nil)
+
+        XCTAssertTrue(didStartPolling)
+        XCTAssertTrue(viewModel.isSending)
+
+        await completionGate.open()
+        let didComplete = await waitUntil {
+            viewModel.timeline.contains { $0.message.content == "Completed through interruption" }
+                && !viewModel.isSending
+        }
+
+        XCTAssertTrue(didComplete)
+        XCTAssertEqual(chatService.createdTurns.map(\.message), ["Keep polling"])
+        XCTAssertEqual(lifecycle.activation?.generation, 1)
+    }
+
+    func testBackgroundPreservesPreAckDeckSendAndActivationResumesWithoutResend() async {
+        let acknowledgementGate = AsyncGate()
+        let lifecycle = makeActiveLifecycle()
+        let chatService = MockLearningDeckReaderChatService(
+            createAssistantTurnHandler: { message, _, _ in
+                await acknowledgementGate.wait()
+                return Self.assistantTurnResponse(message: message)
+            },
+            messageStatusHandler: { messageId in
+                MessageStatusResponse(
+                    messageId: messageId,
+                    status: .completed,
+                    assistantMessage: Self.message(
+                        id: 201,
+                        role: .assistant,
+                        content: "Resumed reply",
+                        status: .completed
+                    )
+                )
+            }
+        )
+        let viewModel = LearningDeckReaderViewModel(
+            lifecycle: lifecycle,
+            deck: Self.deck(),
+            chatService: chatService,
+            messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
+            deckService: LearningDeckService.shared
+        )
+
+        viewModel.performSendMessage(text: "One deck send")
+        let didStartSend = await waitUntil {
+            chatService.createdTurns.count == 1 && viewModel.isSending
+        }
+
+        lifecycle.record(.inactive)
+        viewModel.handleLifecyclePhaseChange(initialViewerURL: nil)
+        lifecycle.record(.background)
+        viewModel.handleLifecyclePhaseChange(initialViewerURL: nil)
+
+        XCTAssertTrue(didStartSend)
+        XCTAssertTrue(viewModel.isSending, "A pre-ack deck command must survive backgrounding")
+
+        await acknowledgementGate.open()
+        let didStoreAcceptedMessage = await waitUntil {
+            viewModel.timeline.first?.pendingMessageId == 501 && !viewModel.isSending
+        }
+        XCTAssertTrue(didStoreAcceptedMessage)
+        XCTAssertEqual(chatService.messageStatusCallCount, 0)
+
+        lifecycle.record(.inactive)
+        viewModel.handleLifecyclePhaseChange(initialViewerURL: nil)
+        lifecycle.record(.active)
+        viewModel.handleLifecyclePhaseChange(initialViewerURL: nil)
+        viewModel.resumeAfterActivationIfNeeded(initialViewerURL: nil)
+
+        let didResume = await waitUntil {
+            viewModel.timeline.contains { $0.message.content == "Resumed reply" }
+                && !viewModel.isSending
+        }
+        XCTAssertTrue(didResume)
+        XCTAssertEqual(chatService.createdTurns.map(\.message), ["One deck send"])
+        XCTAssertEqual(chatService.messageStatusCallCount, 1)
+        XCTAssertEqual(lifecycle.activation?.generation, 2)
     }
 
     func testMessagesQueuedDuringDeckAgentTurnDrainInFIFOOrder() async {
@@ -132,6 +259,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             }
         )
         let viewModel = LearningDeckReaderViewModel(
+            lifecycle: makeActiveLifecycle(),
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: ChatMessageCompletionRegistry(statusService: chatService),
@@ -205,6 +333,7 @@ final class LearningDeckReaderViewModelTests: XCTestCase {
             sleep: { _ in }
         )
         let viewModel = LearningDeckReaderViewModel(
+            lifecycle: makeActiveLifecycle(),
             deck: Self.deck(),
             chatService: chatService,
             messageCompletionRegistry: registry,

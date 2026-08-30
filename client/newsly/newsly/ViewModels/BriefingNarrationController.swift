@@ -204,7 +204,7 @@ final class BriefingNarrationController {
             ) { [audioEpisodeService] in
                 try await audioEpisodeService.streamResource(for: episode)
             }
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             guard self.playbackIntentID == playbackIntentID else { return }
@@ -304,7 +304,7 @@ final class BriefingNarrationController {
                 return
             }
             storeNarration(refreshed, for: lensKey)
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             briefingNarrationLogger.error(
@@ -388,7 +388,7 @@ final class BriefingNarrationController {
             }
 
             return .failed(AudioEpisodeServiceError.preparationTimedOut, cachedNarration: current)
-        } catch let error where isNetworkCancellation(error) {
+        } catch let error where ClientFailure.classify(error) == .cancelled {
             return .failed(error, cachedNarration: cachedNarration)
         } catch {
             return .failed(error, cachedNarration: current)

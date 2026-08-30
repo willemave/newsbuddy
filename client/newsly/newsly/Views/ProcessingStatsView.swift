@@ -8,10 +8,10 @@
 import SwiftUI
 
 struct ProcessingStatsView: View {
+    @Environment(BadgeStatsStore.self) private var badgeStatsStore
     @State private var sourcesViewModel = RootDependencyFactory.makeScraperSettingsViewModel(
         filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
     )
-    @State private var badgeStatsStore = BadgeStatsStore.shared
 
     var body: some View {
         List {
@@ -260,4 +260,5 @@ struct ProcessingStatsView: View {
     NavigationStack {
         ProcessingStatsView()
     }
+    .environment(BadgeStatsStore())
 }

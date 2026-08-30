@@ -114,7 +114,7 @@ final class CustomNarrationLibraryViewModel {
                 requestStartRevision: requestStartRevision
             )
             episodes.forEach(startPollingIfNeeded)
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             guard activeLoadRequestID == requestID, !Task.isCancelled else { return }
@@ -122,12 +122,21 @@ final class CustomNarrationLibraryViewModel {
         }
     }
 
-    func clearError() {
-        errorMessage = nil
+    func suspendAutomaticObservation() {
+        tasks.cancelAll()
     }
 
-    func cancelPolling() {
-        tasks.cancelAll()
+    func cancelListRead() {
+        activeLoadRequestID = nil
+        isLoading = false
+    }
+
+    func resumeAutomaticObservation() {
+        episodes.forEach(startPollingIfNeeded)
+    }
+
+    func clearError() {
+        errorMessage = nil
     }
 
     func isPlaying(_ episode: AudioEpisode) -> Bool {
@@ -175,7 +184,7 @@ final class CustomNarrationLibraryViewModel {
                 }
             )
             await markReadSourcesLocallyIfNeeded(episode)
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             errorMessage = error.localizedDescription
@@ -199,7 +208,7 @@ final class CustomNarrationLibraryViewModel {
             removeEpisode(id: episode.id)
             upsert(replacement)
             errorMessage = nil
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             errorMessage = error.localizedDescription
@@ -215,7 +224,7 @@ final class CustomNarrationLibraryViewModel {
             let response = try await audioService.enableEpisodeShare(id: episode.id)
             errorMessage = nil
             return response
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return nil
         } catch {
             errorMessage = error.localizedDescription
@@ -228,7 +237,7 @@ final class CustomNarrationLibraryViewModel {
         do {
             let latest = try await audioService.fetchEpisode(id: episode.id)
             upsert(latest)
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             errorMessage = error.localizedDescription
@@ -327,7 +336,7 @@ final class CustomNarrationLibraryViewModel {
                 guard !Task.isCancelled else { return }
                 upsert(current, startsPolling: false)
                 lastFetchError = nil
-            } catch where isNetworkCancellation(error) {
+            } catch where ClientFailure.classify(error) == .cancelled {
                 return
             } catch {
                 lastFetchError = error

@@ -100,7 +100,7 @@ final class AudioEpisodeService {
         do {
             let episode: AudioEpisode = try await client.request(
                 APIEndpoints.fastNewsAudioEpisode,
-                method: "POST",
+                method: .post,
                 queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
             )
             audioEpisodeLogger.info(
@@ -126,7 +126,7 @@ final class AudioEpisodeService {
         do {
             let episode: AudioEpisode = try await client.request(
                 APIEndpoints.contentCouncilAudioEpisode(id: contentId),
-                method: "POST",
+                method: .post,
                 queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
             )
             audioEpisodeLogger.info(
@@ -152,7 +152,7 @@ final class AudioEpisodeService {
         do {
             let episode: AudioEpisode = try await client.request(
                 APIEndpoints.newsItemAudioEpisode(id: newsItemId),
-                method: "POST",
+                method: .post,
                 queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
             )
             audioEpisodeLogger.info(
@@ -188,7 +188,7 @@ final class AudioEpisodeService {
         do {
             let episode: AudioEpisode = try await client.request(
                 APIEndpoints.customNarrationAudioEpisodes,
-                method: "POST",
+                method: .post,
                 body: body,
                 queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
             )
@@ -208,7 +208,7 @@ final class AudioEpisodeService {
         let startedAt = Date()
         let response: AudioEpisodeShareResponse = try await client.request(
             APIEndpoints.audioEpisodeShare(id: id),
-            method: "POST"
+            method: .post
         )
         audioEpisodeLogger.info(
             "Enable episode share completed | episodeId=\(id) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasPageUrl=\(response.sharePageUrl != nil) hasAudioUrl=\(response.shareAudioUrl != nil)"
@@ -220,7 +220,8 @@ final class AudioEpisodeService {
         let startedAt = Date()
         let episodes: [AudioEpisode] = try await client.request(
             APIEndpoints.customNarrationAudioEpisodes,
-            queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+            queryItems: [URLQueryItem(name: "limit", value: String(limit))],
+            recoveryPolicy: .safeRead
         )
         audioEpisodeLogger.info(
             "Fetch custom narrations completed | count=\(episodes.count) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
@@ -230,7 +231,10 @@ final class AudioEpisodeService {
 
     func fetchEpisode(id: Int) async throws -> AudioEpisode {
         let startedAt = Date()
-        let episode: AudioEpisode = try await client.request(APIEndpoints.audioEpisode(id: id))
+        let episode: AudioEpisode = try await client.request(
+            APIEndpoints.audioEpisode(id: id),
+            recoveryPolicy: .safeRead
+        )
         audioEpisodeLogger.info(
             "Fetch episode completed | episodeId=\(id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt))"
         )
@@ -239,9 +243,10 @@ final class AudioEpisodeService {
 
     func fetchEpisodeAudio(id: Int) async throws -> Data {
         let startedAt = Date()
-        let data = try await client.requestData(
+        let (data, _) = try await client.requestHTTP(
             APIEndpoints.audioEpisodeAudio(id: id),
-            accept: "audio/mpeg"
+            accept: "audio/mpeg",
+            recoveryPolicy: .safeRead
         )
         audioEpisodeLogger.info(
             "Fetch episode audio completed | episodeId=\(id) bytes=\(data.count) elapsedMs=\(elapsedMilliseconds(since: startedAt))"

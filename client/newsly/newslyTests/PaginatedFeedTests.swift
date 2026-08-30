@@ -21,6 +21,18 @@ final class PaginatedFeedTests: XCTestCase {
         XCTAssertEqual(feed.phase, .loaded)
     }
 
+    func testSuccessfulEmptyLoadUsesEmptyPhase() async {
+        let feed = PaginatedFeed<TestFeedItem> { _ in
+            Page(items: [], nextCursor: nil, hasMore: false)
+        }
+
+        await feed.loadInitial()
+
+        XCTAssertTrue(feed.items.isEmpty)
+        XCTAssertEqual(feed.phase, .empty)
+        XCTAssertFalse(feed.isRequestInFlight)
+    }
+
     func testLoadNextPageAppendsAndSkipsDuplicateIDs() async {
         let loader = SequencePageLoader([
             Page(items: [TestFeedItem(id: 1), TestFeedItem(id: 2)], nextCursor: "next", hasMore: true),
@@ -86,6 +98,32 @@ final class PaginatedFeedTests: XCTestCase {
 
         XCTAssertEqual(feed.items.map(\.id), [2])
         XCTAssertEqual(feed.phase, .loaded)
+    }
+
+    func testSupersededFailureDoesNotOverwriteNewerResult() async {
+        let loader = ControlledResultPageLoader()
+        let feed = PaginatedFeed<TestFeedItem>(loadPage: loader.loadPage)
+
+        let firstLoad = Task { await feed.loadInitial() }
+        await loader.waitForPendingRequestCount(1)
+
+        let secondLoad = Task { await feed.loadInitial() }
+        await loader.waitForPendingRequestCount(2)
+
+        loader.resolveRequest(
+            at: 1,
+            with: .success(
+                Page(items: [TestFeedItem(id: 2)], nextCursor: nil, hasMore: false)
+            )
+        )
+        await secondLoad.value
+
+        loader.resolveRequest(at: 0, with: .failure(TestPageError.failed))
+        await firstLoad.value
+
+        XCTAssertEqual(feed.items.map(\.id), [2])
+        XCTAssertEqual(feed.phase, .loaded)
+        XCTAssertFalse(feed.isRequestInFlight)
     }
 
     func testLoadNextPageIgnoresDuplicateTriggerWhileLoading() async {
@@ -158,6 +196,61 @@ final class PaginatedFeedTests: XCTestCase {
         XCTAssertEqual(feed.items, [])
         XCTAssertEqual(feed.phase, .idle)
     }
+
+    func testCancelRequestRetainsItemsAndFencesLateResult() async {
+        let loader = ControlledPageLoader()
+        let feed = PaginatedFeed<TestFeedItem>(
+            items: [TestFeedItem(id: 1)],
+            phase: .loaded,
+            loadPage: loader.loadPage
+        )
+
+        let obsolete = Task { await feed.refresh() }
+        await loader.waitForPendingRequestCount(1)
+        feed.cancelRequestRetainingState()
+
+        XCTAssertEqual(feed.items.map(\.id), [1])
+        XCTAssertEqual(feed.phase, .loaded)
+        XCTAssertFalse(feed.isRequestInFlight)
+
+        let replacement = Task { await feed.refresh() }
+        await loader.waitForPendingRequestCount(2)
+        loader.resolveRequest(
+            at: 1,
+            with: Page(items: [TestFeedItem(id: 2)], nextCursor: nil, hasMore: false)
+        )
+        await replacement.value
+
+        loader.resolveRequest(
+            at: 0,
+            with: Page(items: [TestFeedItem(id: 3)], nextCursor: nil, hasMore: false)
+        )
+        await obsolete.value
+
+        XCTAssertEqual(feed.items.map(\.id), [2])
+        XCTAssertEqual(feed.phase, .loaded)
+        XCTAssertFalse(feed.isRequestInFlight)
+    }
+
+    func testNestedCancellationKeepsLoadedItemsAndPagination() async {
+        let feed = PaginatedFeed<TestFeedItem>(
+            items: [TestFeedItem(id: 1)],
+            phase: .loaded,
+            nextCursor: "next",
+            hasMore: true,
+            loadPage: { _ in
+                throw AuthError.networkError(URLError(.cancelled))
+            }
+        )
+
+        await feed.refresh()
+
+        XCTAssertEqual(feed.items.map(\.id), [1])
+        XCTAssertEqual(feed.nextCursor, "next")
+        XCTAssertTrue(feed.hasMore)
+        XCTAssertEqual(feed.phase, .loaded)
+        XCTAssertFalse(feed.isRequestInFlight)
+    }
 }
 
 private struct TestFeedItem: Identifiable, Equatable, Sendable {
@@ -217,6 +310,48 @@ private final class ControlledPageLoader {
                 return
             }
             try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(pendingRequests.count, expectedCount, file: file, line: line)
+    }
+}
+
+private enum TestPageError: Error {
+    case failed
+}
+
+@MainActor
+private final class ControlledResultPageLoader {
+    private struct PendingRequest {
+        let continuation: CheckedContinuation<Page<TestFeedItem>, Error>
+    }
+
+    private var pendingRequests: [PendingRequest] = []
+
+    func loadPage(cursor _: String?) async throws -> Page<TestFeedItem> {
+        try await withCheckedThrowingContinuation { continuation in
+            pendingRequests.append(PendingRequest(continuation: continuation))
+        }
+    }
+
+    func resolveRequest(
+        at index: Int,
+        with result: Result<Page<TestFeedItem>, Error>
+    ) {
+        let request = pendingRequests.remove(at: index)
+        request.continuation.resume(with: result)
+    }
+
+    func waitForPendingRequestCount(
+        _ expectedCount: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<50 {
+            if pendingRequests.count == expectedCount {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(10))
         }
 
         XCTAssertEqual(pendingRequests.count, expectedCount, file: file, line: line)

@@ -15,9 +15,14 @@ private enum AuthenticatedPresentationState {
 
 struct AuthenticatedRootView: View {
     @Environment(AuthenticationViewModel.self) private var authViewModel
-    let user: User
+    let session: AuthenticatedSession
 
     @State private var presentationState: AuthenticatedPresentationState = .deciding
+
+    private var user: User {
+        session.user
+    }
+
     var body: some View {
         Group {
             switch presentationState {
@@ -36,7 +41,7 @@ struct AuthenticatedRootView: View {
                     presentationState = .content
                 }
             case .content:
-                ContentView(userId: user.id)
+                ContentView(session: session)
                     .id(user.id)
                     .environment(authViewModel)
                     .withToast()

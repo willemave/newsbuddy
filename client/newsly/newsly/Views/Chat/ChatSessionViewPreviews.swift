@@ -6,6 +6,18 @@
 import SwiftUI
 
 #if DEBUG
+@MainActor
+private func makeChatPreviewLifecycle() -> AppLifecycle {
+    let lifecycle = AppLifecycle()
+    lifecycle.record(.active)
+    return lifecycle
+}
+
+@MainActor
+private func makeChatPreviewSessionManager() -> ActiveChatSessionManager {
+    ActiveChatSessionManager(startsPolling: false)
+}
+
 #Preview {
     NavigationStack {
         ChatSessionView(route: ChatSessionRoute(session: ChatSessionSummary(
@@ -30,5 +42,7 @@ import SwiftUI
             lastMessageRole: nil
         )))
     }
+    .environment(makeChatPreviewLifecycle())
+    .environment(makeChatPreviewSessionManager())
 }
 #endif

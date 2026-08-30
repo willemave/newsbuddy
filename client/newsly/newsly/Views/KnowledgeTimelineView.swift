@@ -7,7 +7,10 @@ import Foundation
 import SwiftUI
 
 struct KnowledgeView: View {
+    @Environment(AppLifecycle.self) private var lifecycle
+
     let scrollToTopRequest: Int
+    let isVisible: Bool
     let onSelectContent: (ContentDetailRoute) -> Void
     let onSelectSession: (ChatSessionRoute) -> Void
     let onSearch: () -> Void
@@ -26,6 +29,7 @@ struct KnowledgeView: View {
 
     init(
         scrollToTopRequest: Int = 0,
+        isVisible: Bool = true,
         onSelectContent: @escaping (ContentDetailRoute) -> Void,
         onSelectSession: @escaping (ChatSessionRoute) -> Void,
         onSearch: @escaping () -> Void,
@@ -35,6 +39,7 @@ struct KnowledgeView: View {
         chatTransitionNamespace: Namespace.ID? = nil
     ) {
         self.scrollToTopRequest = scrollToTopRequest
+        self.isVisible = isVisible
         self.onSelectContent = onSelectContent
         self.onSelectSession = onSelectSession
         self.onSearch = onSearch
@@ -81,7 +86,7 @@ struct KnowledgeView: View {
             .onPaginationThresholdReached {
                 await viewModel.loadNextPage()
             }
-            .refreshable { await viewModel.load() }
+            .refreshable { await viewModel.forceReload() }
             .topScreenEdgeFade()
             .bottomScreenEdgeFade()
             .scrollsToTopOnRequest(
@@ -102,16 +107,32 @@ struct KnowledgeView: View {
             .dynamicTypeSize(contentTextSize)
             .ignoresSafeArea()
         }
-        .task {
-            async let screenLoad: Void = viewModel.load()
+        .task(id: activationTaskID) {
+            guard isVisible,
+                  lifecycle.phase == .active,
+                  let activation = lifecycle.activation else {
+                return
+            }
+            async let screenLoad: Void = viewModel.activate(activation)
             async let voiceRefresh: Void = viewModel.chats.checkAndRefreshVoiceDictation()
             _ = await (screenLoad, voiceRefresh)
         }
         .task(id: isWaitingForInitialTimeline) {
             await updateInitialLoadingIndicator()
         }
-        .task(id: viewModel.chats.hasActiveChatWork) {
+        .task(id: activeWorkObservationID) {
+            guard activeWorkObservationID.shouldObserve else { return }
             await viewModel.chats.pollActiveChatWork()
+        }
+        .onChange(of: lifecycle.phase) { _, phase in
+            if phase == .background {
+                viewModel.suspendAutomaticReads()
+            }
+        }
+        .onChange(of: isVisible) { _, isVisible in
+            if !isVisible {
+                viewModel.suspendAutomaticReads()
+            }
         }
         .onChange(of: viewModel.chats.completedVoiceRoute) { _, route in
             guard let route else { return }
@@ -119,8 +140,37 @@ struct KnowledgeView: View {
             onSelectSession(route)
         }
         .onDisappear {
+            viewModel.suspendAutomaticReads()
             viewModel.cancelTransientWork()
         }
+    }
+
+    private struct ActivationTaskID: Hashable {
+        let generation: UInt64?
+        let isVisible: Bool
+    }
+
+    private var activationTaskID: ActivationTaskID {
+        ActivationTaskID(
+            generation: lifecycle.activation?.generation,
+            isVisible: isVisible
+        )
+    }
+
+    private struct ActiveWorkObservationID: Hashable {
+        let automaticReadsEnabled: Bool
+        let hasActiveWork: Bool
+
+        var shouldObserve: Bool {
+            automaticReadsEnabled && hasActiveWork
+        }
+    }
+
+    private var activeWorkObservationID: ActiveWorkObservationID {
+        ActiveWorkObservationID(
+            automaticReadsEnabled: viewModel.automaticReadsEnabled,
+            hasActiveWork: viewModel.chats.hasActiveChatWork
+        )
     }
 
     private var composer: some View {

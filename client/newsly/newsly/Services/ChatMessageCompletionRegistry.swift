@@ -318,7 +318,7 @@ actor ChatMessageCompletionRegistry {
                     continue
                 }
 
-            } catch is CancellationError {
+            } catch where ClientFailure.classify(error) == .cancelled {
                 return
             } catch {
                 finish(

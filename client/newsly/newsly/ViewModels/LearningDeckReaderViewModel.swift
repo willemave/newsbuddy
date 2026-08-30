@@ -120,15 +120,19 @@ final class LearningDeckReaderViewModel {
     private let messageCompletionRegistry: ChatMessageCompletionRegistry
     private let deckService: any LearningDeckServicing
     private let deckStatusRegistry: LearningDeckStatusRegistry
+    private let lifecycle: AppLifecycle
 
     @ObservationIgnored
     private let tasks = TaskBag<LearningDeckReaderTaskKey>()
     @ObservationIgnored
-    private var isViewActive = true
+    private var isRouteVisible = true
+    @ObservationIgnored
+    private var isViewActive: Bool
     @ObservationIgnored
     private var sendQueue = PendingSendQueue()
 
     init(
+        lifecycle: AppLifecycle,
         deck: LearningDeck,
         chatService: any LearningDeckReaderChatServicing,
         messageCompletionRegistry: ChatMessageCompletionRegistry,
@@ -141,6 +145,8 @@ final class LearningDeckReaderViewModel {
         self.chatService = chatService
         self.messageCompletionRegistry = messageCompletionRegistry
         self.deckService = deckService
+        self.lifecycle = lifecycle
+        self.isViewActive = lifecycle.phase == .active
         self.deckStatusRegistry = deckStatusRegistry ?? LearningDeckStatusRegistry(
             statusService: deckService,
             policy: .fixed(
@@ -159,6 +165,10 @@ final class LearningDeckReaderViewModel {
     func prepareViewer(initialURL: URL?) {
         if let initialURL {
             resolvedViewerURL = initialURL
+            guard isViewActive else {
+                isResolvingViewer = false
+                return
+            }
             if deck.hasActiveLatestRun, !tasks.isRunning(.viewer) {
                 startViewerResolution()
             } else {
@@ -166,6 +176,7 @@ final class LearningDeckReaderViewModel {
             }
             return
         }
+        guard isViewActive else { return }
         guard resolvedViewerURL == nil, !tasks.isRunning(.viewer) else { return }
         startViewerResolution()
     }
@@ -217,9 +228,13 @@ final class LearningDeckReaderViewModel {
             applyGenerationStatus(retried)
             viewerFailureKind = nil
             isRetryingGeneration = false
+            guard isViewActive else {
+                isResolvingViewer = false
+                return
+            }
             isResolvingViewer = true
             await resolveViewerLoop()
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             isRetryingGeneration = false
             isResolvingViewer = false
         } catch {
@@ -250,7 +265,7 @@ final class LearningDeckReaderViewModel {
                 isResolvingViewer = false
                 viewerFailureKind = generationFailed(latest) ? .generation : .viewerResolution
             }
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             isResolvingViewer = false
         } catch LearningDeckStatusRegistryError.timeout {
             isResolvingViewer = false
@@ -296,18 +311,64 @@ final class LearningDeckReaderViewModel {
     }
 
     func handleAppear() {
+        isRouteVisible = true
+        resumeVisibleRouteWorkIfPossible()
+    }
+
+    func handleDisappear() {
+        isRouteVisible = false
+        isViewActive = false
+        cancelViewerResolution()
+
+        if pendingForegroundMessageId != nil {
+            tasks.cancel(.send)
+            isSending = false
+            thinkingStartedAt = nil
+        }
+    }
+
+    func handleLifecyclePhaseChange(initialViewerURL: URL?) {
+        switch lifecycle.phase {
+        case .active:
+            let shouldResumeViewer = !isViewActive
+            resumeVisibleRouteWorkIfPossible()
+            if shouldResumeViewer, isViewActive {
+                prepareViewer(initialURL: initialViewerURL)
+            }
+        case .inactive:
+            break
+        case .background:
+            guard isRouteVisible else { return }
+            suspendVisibleRouteForBackground()
+        }
+    }
+
+    func resumeAfterActivationIfNeeded(initialViewerURL: URL?) {
+        guard isRouteVisible, lifecycle.phase == .active else { return }
+        resumeVisibleRouteWorkIfPossible()
+        prepareViewer(initialURL: initialViewerURL)
+    }
+
+    private func resumeVisibleRouteWorkIfPossible() {
+        guard isRouteVisible, lifecycle.phase == .active else { return }
         isViewActive = true
         resumeAcceptedSendIfNeeded()
         startQueuedSendDrainIfPossible()
     }
 
-    func handleDisappear() {
+    private func suspendVisibleRouteForBackground() {
         isViewActive = false
 
         if pendingForegroundMessageId != nil {
             tasks.cancel(.send)
             isSending = false
             thinkingStartedAt = nil
+        }
+
+        // A generation retry is a command. Let its acknowledgement finish, then
+        // defer status observation until the route is active again.
+        if !isRetryingGeneration {
+            cancelViewerResolution()
         }
     }
 
@@ -412,7 +473,7 @@ final class LearningDeckReaderViewModel {
                 )
             )
             clearPendingMessageId(for: .local(localId))
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             if pendingMessageId(for: .local(localId)) == nil {
                 removeTimelineItem(id: .local(localId))
             }
@@ -471,7 +532,7 @@ final class LearningDeckReaderViewModel {
                 )
             )
             clearPendingMessageId(forPendingMessageId: messageId)
-        } catch where isNetworkCancellation(error) {
+        } catch where ClientFailure.classify(error) == .cancelled {
             return
         } catch {
             removePartialAssistantMessage(messageId: messageId)

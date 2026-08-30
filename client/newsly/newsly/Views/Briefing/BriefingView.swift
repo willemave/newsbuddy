@@ -106,6 +106,7 @@ struct BriefingView: View {
                 ErrorView(message: message) {
                     Task { await viewModel.loadIndexIfNeeded() }
                 }
+                .accessibilityIdentifier("briefing.blocking_error")
             case .loaded:
                 briefingContent
             }

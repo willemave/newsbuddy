@@ -206,7 +206,7 @@ struct LearningDeckWebView: UIViewRepresentable {
         }
 
         private func recordFailure(_ error: Error, in webView: WKWebView) {
-            guard !isNetworkCancellation(error) else { return }
+            guard ClientFailure.classify(error) != .cancelled else { return }
             let nsError = error as NSError
             let failingURL = nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL
             controller.markFailed(error: error, url: failingURL ?? webView.url)

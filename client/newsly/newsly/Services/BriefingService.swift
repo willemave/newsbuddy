@@ -62,8 +62,9 @@ final class LiveBriefingService: BriefingServicing {
         let networkStartedAt = Date()
         let (data, response) = try await apiClient.requestHTTP(
             APIEndpoints.briefing,
-            additionalHeaders: headers.isEmpty ? nil : headers,
-            additionalAllowedStatusCodes: [304]
+            headers: headers.isEmpty ? nil : headers,
+            allowedStatusCodes: [304],
+            recoveryPolicy: .safeRead
         )
         if response.statusCode == 304 {
             briefingServiceLogger.info(
@@ -100,7 +101,8 @@ final class LiveBriefingService: BriefingServicing {
         let (data, response) = try await apiClient.requestHTTP(
             APIEndpoints.briefingLens(encodedKey),
             queryItems: queryItems.isEmpty ? nil : queryItems,
-            additionalAllowedStatusCodes: [409]
+            allowedStatusCodes: [409],
+            recoveryPolicy: .safeRead
         )
         if response.statusCode == 409 {
             throw BriefingLensFetchError.staleCursor
@@ -113,7 +115,7 @@ final class LiveBriefingService: BriefingServicing {
             )
             return lens
         } catch {
-            throw APIError.decodingError(error)
+            throw ClientFailure.decoding(endpoint: APIEndpoints.briefingLens(encodedKey))
         }
     }
 
@@ -121,7 +123,7 @@ final class LiveBriefingService: BriefingServicing {
         let body = try encoder.encode(APIBriefingReadMarkRequest(sourceKeys: sourceKeys))
         return try await apiClient.request(
             APIEndpoints.briefingReadMarks,
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -130,12 +132,12 @@ final class LiveBriefingService: BriefingServicing {
         let encodedKey = key.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? key
         return try await apiClient.request(
             APIEndpoints.briefingLensReadMarks(encodedKey),
-            method: "POST"
+            method: .post
         )
     }
 
     func requestRefresh() async throws -> APIBriefingRefreshResponse {
-        try await apiClient.request(APIEndpoints.briefingRefresh, method: "POST")
+        try await apiClient.request(APIEndpoints.briefingRefresh, method: .post)
     }
 
     func completeFirstRun() async throws {
@@ -146,7 +148,7 @@ final class LiveBriefingService: BriefingServicing {
         let body = try encoder.encode(APIBriefingDigSearchRequest(fragment: fragment))
         return try await apiClient.request(
             APIEndpoints.briefingDigSearch,
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -165,7 +167,7 @@ final class LiveBriefingService: BriefingServicing {
         )
         return try await apiClient.request(
             APIEndpoints.briefingDigSummarize,
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -174,7 +176,7 @@ final class LiveBriefingService: BriefingServicing {
         let body = try encoder.encode(APIBriefingNarrationRequest(lensKey: lensKey))
         return try await apiClient.request(
             APIEndpoints.briefingNarration,
-            method: "POST",
+            method: .post,
             body: body
         )
     }

@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class ContentDetailViewModelTests: XCTestCase {
-    func testInitialTransportCancellationShowsRetryAndNextLoadSucceeds() async throws {
+    func testInitialTransportCancellationIsSilentAndNextLoadSucceeds() async throws {
         let detail = try Self.articleDetail(id: 42)
         let service = CancelledThenSuccessfulContentDetailService(detail: detail)
         let viewModel = makeViewModel(contentService: service)
@@ -13,13 +13,85 @@ final class ContentDetailViewModelTests: XCTestCase {
 
         XCTAssertFalse(viewModel.isLoading)
         XCTAssertNil(viewModel.content)
-        XCTAssertEqual(viewModel.errorMessage, "Couldn't load this item. Please try again.")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.initialLoadPhase, .idle)
 
         await viewModel.loadContent()
 
         XCTAssertEqual(viewModel.content?.id, detail.id)
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(service.fetchCount, 2)
+    }
+
+    func testConcurrentLoadsCoalesceAndCommitDependentWorkOnce() async throws {
+        let detail = try Self.articleDetail(id: 42)
+        let gate = ContentDetailAsyncGate()
+        let service = BlockingContentDetailService(detail: detail, gate: gate)
+        let viewModel = makeViewModel(contentService: service)
+        viewModel.updateContentId(detail.id, contentType: detail.contentType)
+
+        let first = Task { await viewModel.loadContent() }
+        await waitUntil { service.fetchCount == 1 }
+        let second = Task { await viewModel.loadContent() }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        XCTAssertEqual(service.fetchCount, 1)
+
+        await gate.open()
+        await first.value
+        await second.value
+        await waitUntil { service.trackOpenedCount == 1 }
+
+        XCTAssertEqual(viewModel.content?.id, detail.id)
+        XCTAssertEqual(service.fetchCount, 1)
+        XCTAssertEqual(service.trackOpenedCount, 1)
+    }
+
+    func testRevalidationFailureRetainsReadableContent() async throws {
+        let detail = try Self.articleDetail(id: 42)
+        let service = SequencedContentDetailService(
+            detailResults: [
+                .success(detail),
+                .failure(URLError(.notConnectedToInternet)),
+            ]
+        )
+        let viewModel = makeViewModel(contentService: service)
+        viewModel.updateContentId(detail.id, contentType: detail.contentType)
+
+        await viewModel.loadContent()
+        await viewModel.revalidateContent()
+
+        XCTAssertEqual(viewModel.content?.id, detail.id)
+        XCTAssertNil(viewModel.errorMessage)
+        guard case .failure = viewModel.revalidationPhase else {
+            return XCTFail("Expected a nonblocking revalidation failure")
+        }
+        XCTAssertEqual(service.fetchCount, 2)
+        XCTAssertEqual(service.trackOpenedCount, 1)
+    }
+
+    func testLateResultForReplacedContentKeyCannotPublish() async throws {
+        let firstDetail = try Self.articleDetail(id: 42)
+        let secondDetail = try Self.articleDetail(id: 99)
+        let firstGate = ContentDetailAsyncGate()
+        let service = ReplacingContentDetailService(
+            firstDetail: firstDetail,
+            secondDetail: secondDetail,
+            firstGate: firstGate
+        )
+        let viewModel = makeViewModel(contentService: service)
+        viewModel.updateContentId(firstDetail.id, contentType: firstDetail.contentType)
+
+        let firstLoad = Task { await viewModel.loadContent() }
+        await waitUntil { service.requestedIDs == [firstDetail.id] }
+        viewModel.updateContentId(secondDetail.id, contentType: secondDetail.contentType)
+        await viewModel.loadContent()
+        XCTAssertEqual(viewModel.content?.id, secondDetail.id)
+
+        await firstGate.open()
+        await firstLoad.value
+
+        XCTAssertEqual(viewModel.content?.id, secondDetail.id)
+        XCTAssertEqual(service.requestedIDs, [firstDetail.id, secondDetail.id])
     }
 
     func testReaderFallbackReusesLoadedSourceBody() async throws {
@@ -62,6 +134,59 @@ final class ContentDetailViewModelTests: XCTestCase {
         XCTAssertEqual(service.sourceRequestCount, 1)
         XCTAssertEqual(service.sourceCancellationCount, 1)
         XCTAssertNil(viewModel.contentBody)
+    }
+
+    func testUnspecifiedTypeHintPublishesFetchedSourceBody() async throws {
+        let detail = try Self.articleDetail(id: 42)
+        let service = BodyRecordingContentDetailService(detail: detail)
+        let viewModel = makeViewModel(contentService: service)
+        viewModel.updateContentId(detail.id)
+
+        await viewModel.loadContent()
+        await waitUntil { viewModel.contentBody != nil }
+
+        XCTAssertEqual(viewModel.contentBody?.contentId, detail.id)
+        XCTAssertEqual(viewModel.contentBody?.text, "Source body")
+    }
+
+    func testSuspensionFencesNonCooperativeReaderBodyResult() async throws {
+        let detail = try Self.articleDetail(id: 42)
+        let gate = ContentDetailAsyncGate()
+        let service = SequencedReaderBodyContentDetailService(firstGate: gate)
+        let viewModel = makeViewModel(contentService: service)
+        viewModel.updateContentId(detail.id, contentType: detail.contentType)
+        viewModel.content = detail
+
+        let load = Task { await viewModel.loadReaderBody(for: detail) }
+        await waitUntil { service.requestCount == 1 }
+        viewModel.suspendAutomaticReads()
+        await gate.open()
+        await load.value
+
+        XCTAssertNil(viewModel.readerBody)
+        XCTAssertNil(viewModel.readerErrorMessage)
+        XCTAssertFalse(viewModel.isLoadingReaderBody)
+    }
+
+    func testForcedReaderBodyReplacementFencesNonCooperativeOlderResult() async throws {
+        let detail = try Self.articleDetail(id: 42)
+        let gate = ContentDetailAsyncGate()
+        let service = SequencedReaderBodyContentDetailService(firstGate: gate)
+        let viewModel = makeViewModel(contentService: service)
+        viewModel.updateContentId(detail.id, contentType: detail.contentType)
+        viewModel.content = detail
+
+        let first = Task { await viewModel.loadReaderBody(for: detail) }
+        await waitUntil { service.requestCount == 1 }
+        await viewModel.loadReaderBody(for: detail, force: true)
+
+        XCTAssertEqual(viewModel.readerBody?.text, "new reader body")
+
+        await gate.open()
+        await first.value
+
+        XCTAssertEqual(viewModel.readerBody?.text, "new reader body")
+        XCTAssertNil(viewModel.readerErrorMessage)
     }
 
     func testAddRelevantLinkToReadLaterMarksLinkAsAddedOnSuccess() async {
@@ -113,7 +238,9 @@ final class ContentDetailViewModelTests: XCTestCase {
     func testDetectedFeedSubscriptionDoesNotExposeBackendError() async throws {
         let detail = try Self.articleDetail(id: 42, includesDetectedFeed: true)
         let subscriber = StubDetectedFeedSubscriber(
-            result: .failure(APIError.httpError(statusCode: 500, detail: "secret backend detail"))
+            result: .failure(
+                ClientFailure.http(statusCode: 500, detail: "secret backend detail")
+            )
         )
         let viewModel = ContentDetailViewModel(
             contentId: detail.id,
@@ -577,6 +704,40 @@ private final class BodyRecordingContentDetailService: StubContentDetailService 
     }
 }
 
+@MainActor
+private final class SequencedReaderBodyContentDetailService: StubContentDetailService {
+    private let firstGate: ContentDetailAsyncGate
+    private(set) var requestCount = 0
+
+    init(firstGate: ContentDetailAsyncGate) {
+        self.firstGate = firstGate
+    }
+
+    override func fetchContentBody(
+        id: Int,
+        variant: String,
+        contentType: APIContentType?
+    ) async throws -> ContentBody {
+        XCTAssertEqual(variant, "rendered")
+        let requestIndex = requestCount
+        requestCount += 1
+        if requestIndex == 0 {
+            // This continuation deliberately ignores task cancellation so the
+            // view model's generation fence, rather than cooperative transport,
+            // is what protects publication.
+            await firstGate.wait()
+        }
+        return ContentBody(
+            contentId: id,
+            variant: variant,
+            kind: "article",
+            format: "markdown",
+            text: requestIndex == 0 ? "old reader body" : "new reader body",
+            updatedAt: nil
+        )
+    }
+}
+
 private final class CancelledThenSuccessfulContentDetailService: StubContentDetailService {
     private let detail: ContentDetail
     private(set) var fetchCount = 0
@@ -619,6 +780,141 @@ private final class CancelledThenSuccessfulContentDetailService: StubContentDeta
             interactionId: "interaction-\(contentId)",
             analyticsInteractionId: nil
         )
+    }
+}
+
+private actor ContentDetailAsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending {
+            waiter.resume()
+        }
+    }
+}
+
+private class RecordingContentDetailService: StubContentDetailService {
+    private let stateLock = NSLock()
+    private var recordedTrackOpenedCount = 0
+
+    var trackOpenedCount: Int {
+        stateLock.withLock { recordedTrackOpenedCount }
+    }
+
+    override func fetchContentBody(
+        id: Int,
+        variant: String,
+        contentType: APIContentType?
+    ) async throws -> ContentBody {
+        ContentBody(
+            contentId: id,
+            variant: variant,
+            kind: "article",
+            format: "markdown",
+            text: "Source body",
+            updatedAt: nil
+        )
+    }
+
+    override func trackContentOpened(
+        contentId: Int,
+        surface: String,
+        contextData: [String: Any]
+    ) async throws -> TrackContentInteractionResponse {
+        stateLock.withLock { recordedTrackOpenedCount += 1 }
+        return TrackContentInteractionResponse(
+            status: "ok",
+            recorded: true,
+            interactionId: "interaction-\(contentId)",
+            analyticsInteractionId: nil
+        )
+    }
+}
+
+private final class BlockingContentDetailService: RecordingContentDetailService {
+    private let detail: ContentDetail
+    private let gate: ContentDetailAsyncGate
+    private let stateLock = NSLock()
+    private var recordedFetchCount = 0
+
+    init(detail: ContentDetail, gate: ContentDetailAsyncGate) {
+        self.detail = detail
+        self.gate = gate
+    }
+
+    var fetchCount: Int {
+        stateLock.withLock { recordedFetchCount }
+    }
+
+    override func fetchContentDetail(id: Int) async throws -> ContentDetail {
+        stateLock.withLock { recordedFetchCount += 1 }
+        await gate.wait()
+        return detail
+    }
+}
+
+private final class SequencedContentDetailService: RecordingContentDetailService {
+    private let stateLock = NSLock()
+    private var detailResults: [Result<ContentDetail, Error>]
+    private var recordedFetchCount = 0
+
+    init(detailResults: [Result<ContentDetail, Error>]) {
+        self.detailResults = detailResults
+    }
+
+    var fetchCount: Int {
+        stateLock.withLock { recordedFetchCount }
+    }
+
+    override func fetchContentDetail(id: Int) async throws -> ContentDetail {
+        let result = stateLock.withLock { () -> Result<ContentDetail, Error> in
+            recordedFetchCount += 1
+            return detailResults.removeFirst()
+        }
+        return try result.get()
+    }
+}
+
+private final class ReplacingContentDetailService: RecordingContentDetailService {
+    private let firstDetail: ContentDetail
+    private let secondDetail: ContentDetail
+    private let firstGate: ContentDetailAsyncGate
+    private let stateLock = NSLock()
+    private var recordedIDs: [Int] = []
+
+    init(
+        firstDetail: ContentDetail,
+        secondDetail: ContentDetail,
+        firstGate: ContentDetailAsyncGate
+    ) {
+        self.firstDetail = firstDetail
+        self.secondDetail = secondDetail
+        self.firstGate = firstGate
+    }
+
+    var requestedIDs: [Int] {
+        stateLock.withLock { recordedIDs }
+    }
+
+    override func fetchContentDetail(id: Int) async throws -> ContentDetail {
+        stateLock.withLock { recordedIDs.append(id) }
+        if id == firstDetail.id {
+            await firstGate.wait()
+            return firstDetail
+        }
+        return secondDetail
     }
 }
 

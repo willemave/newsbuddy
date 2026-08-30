@@ -282,7 +282,7 @@ final class KnowledgeChatViewModelTests: XCTestCase {
                         hasMore: true
                     )
                 ),
-                .failure(APIError.networkError(URLError(.cancelled))),
+                .failure(ClientFailure.cancelled),
             ],
             turnResponses: []
         )
@@ -295,6 +295,47 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2])
         XCTAssertTrue(viewModel.hasMoreSessions)
         XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testRefreshKeepsCurrentSessionsVisibleWhileLoading() async {
+        let chatService = MockKnowledgeChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 1)],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 2)],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+            ],
+            turnResponses: []
+        )
+        let viewModel = KnowledgeChatViewModel(chatService: chatService)
+        await viewModel.loadChats()
+
+        chatService.pauseNextPageResponse()
+        let refreshTask = Task { await viewModel.loadChats() }
+        defer {
+            refreshTask.cancel()
+            chatService.resumePageResponse()
+        }
+        await chatService.waitForPageResponsePause()
+
+        XCTAssertTrue(viewModel.isLoading)
+        XCTAssertEqual(viewModel.sessions.map(\.id), [1])
+
+        chatService.resumePageResponse()
+        await refreshTask.value
+
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertEqual(viewModel.sessions.map(\.id), [2])
     }
 
     func testLoadMoreAppendsUniqueSessions() async {
@@ -324,6 +365,46 @@ final class KnowledgeChatViewModelTests: XCTestCase {
 
         XCTAssertEqual(chatService.requestedPageCursors, [nil, "next-page"])
         XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2, 3])
+        XCTAssertFalse(viewModel.hasMoreSessions)
+        XCTAssertFalse(viewModel.hasLoadMoreError)
+    }
+
+    func testNestedCancellationDuringLoadMoreKeepsCursorForRetry() async {
+        let chatService = MockKnowledgeChatService(
+            pageResponses: [
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 1)],
+                        nextCursor: "next-page",
+                        hasMore: true
+                    )
+                ),
+                .failure(
+                    AuthError.networkError(URLError(.cancelled))
+                ),
+                .success(
+                    makeSessionListResponse(
+                        sessions: [makeSession(id: 2)],
+                        nextCursor: nil,
+                        hasMore: false
+                    )
+                ),
+            ],
+            turnResponses: []
+        )
+        let viewModel = KnowledgeChatViewModel(chatService: chatService)
+
+        await viewModel.loadChats()
+        await viewModel.loadMoreSessions()
+
+        XCTAssertEqual(viewModel.sessions.map(\.id), [1])
+        XCTAssertTrue(viewModel.hasMoreSessions)
+        XCTAssertFalse(viewModel.hasLoadMoreError)
+
+        await viewModel.loadMoreSessions()
+
+        XCTAssertEqual(chatService.requestedPageCursors, [nil, "next-page", "next-page"])
+        XCTAssertEqual(viewModel.sessions.map(\.id), [1, 2])
         XCTAssertFalse(viewModel.hasMoreSessions)
         XCTAssertFalse(viewModel.hasLoadMoreError)
     }

@@ -274,22 +274,10 @@ struct DebugMenuView: View {
             showingAlert = true
             return
         }
-
-        // Save tokens to keychain
-        KeychainManager.shared.saveToken(normalizedAccessToken, key: .accessToken)
-        // Also save to shared UserDefaults for extension access
-        SharedContainer.userDefaults.set(normalizedAccessToken, forKey: "accessToken")
-        SharedContainer.userDefaults.synchronize()  // Force sync to disk
-        print("🔐 [Main] Saved token to SharedDefaults (group: \(SharedContainer.appGroupId ?? "nil"))")
-        print("🔐 [Main] Verify read back: \(SharedContainer.userDefaults.string(forKey: "accessToken")?.prefix(20) ?? "nil")...")
-        // Debug: Print container path
-        if let groupId = SharedContainer.appGroupId {
-            let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupId)
-            print("🔐 [Main] Container URL: \(containerURL?.path ?? "nil")")
-        }
-
-        if !normalizedRefreshToken.isEmpty {
-            KeychainManager.shared.saveToken(normalizedRefreshToken, key: .refreshToken)
+        guard !normalizedRefreshToken.isEmpty else {
+            alertMessage = "Refresh token required"
+            showingAlert = true
+            return
         }
 
         showingTokenInput = false
@@ -300,6 +288,12 @@ struct DebugMenuView: View {
         Task {
             do {
                 authViewModel.authState = .loading
+                try await CredentialSession.shared.publishLegacyCandidate(
+                    tokens: CredentialTokens(
+                        accessToken: normalizedAccessToken,
+                        refreshToken: normalizedRefreshToken
+                    )
+                )
                 let user = try await AuthenticationService.shared.getCurrentUser()
 
                 if shouldResetOnboarding {
@@ -321,7 +315,6 @@ struct DebugMenuView: View {
                     }
                 } else {
                     await MainActor.run {
-                        KeychainManager.shared.saveToken(String(user.id), key: .userId)
                         authViewModel.authState = .authenticated(user)
                         forceOnboardingAfterTokenSave = false
                     }

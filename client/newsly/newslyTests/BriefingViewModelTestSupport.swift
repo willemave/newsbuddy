@@ -369,7 +369,6 @@ extension BriefingViewModel {
         firstRunCompletionRetryDelay: UInt64 = 1_000_000,
         lensRetentionScheduler: (any BriefingLensRetentionScheduling)? = nil,
         indexFreshnessInterval: TimeInterval = 15 * 60,
-        initialIndexRetryDelays: [UInt64] = [],
         now: @escaping () -> Date = { AppClock.now }
     ) {
         self.init(
@@ -381,7 +380,6 @@ extension BriefingViewModel {
             firstRunCompletionRetryDelay: firstRunCompletionRetryDelay,
             lensRetentionScheduler: lensRetentionScheduler,
             indexFreshnessInterval: indexFreshnessInterval,
-            initialIndexRetryDelays: initialIndexRetryDelays,
             now: now
         )
     }

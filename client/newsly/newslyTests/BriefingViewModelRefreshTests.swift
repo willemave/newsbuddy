@@ -62,7 +62,7 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         XCTAssertLessThan(markReadIndex!, refreshIndex!)
     }
 
-    func testWrappedCancelledManualRefreshKeepsReadyContent() async {
+    func testCancelledManualRefreshKeepsReadyContent() async {
         let service = MockBriefingService()
         service.indexResults = [
             .value(makeIndex(lenses: [makeLensSummary(key: "today")]), etag: "etag-1")
@@ -71,7 +71,7 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         let viewModel = BriefingViewModel(service: service)
         viewModel.setActive(true)
         await waitForBriefingCondition { viewModel.selectedLens != nil }
-        service.refreshError = APIError.networkError(URLError(.cancelled))
+        service.refreshError = ClientFailure.cancelled
 
         await viewModel.pullToRefresh()
 

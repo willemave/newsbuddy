@@ -2,7 +2,7 @@
 
 > Canonical architecture reference for the FastAPI backend, DB-backed processing pipeline, discovery and chat systems, and the SwiftUI iOS client.
 
-**Last Reviewed:** 2026-05-19
+**Last Reviewed:** 2026-08-29
 **Repository Root:** `news_app/`
 **Use:** Cross-boundary architecture reference. For canonical product behavior, use `docs/laws/`.
 **Primary Runtime:** Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, pydantic-ai
@@ -305,7 +305,7 @@ X sync and YouTube configuration paths exist outside the default scheduled scrap
 - worker limits
   - max workers, timeouts, retry limits, checkout timeout
 - external providers
-  - OpenAI, Anthropic, Google, Cerebras, OpenRouter, Exa, Firecrawl, Runware
+  - OpenAI, Anthropic, Google, OpenRouter, Exa, Firecrawl, Runware
 - observability
   - structured logs and per-vendor usage records
 - discovery and onboarding
@@ -1310,11 +1310,9 @@ Capabilities:
 - persist onboarding lanes and suggestions
 - complete onboarding by creating user scraper configs, aggregator subscriptions, and feed memberships
 
-Primary/default onboarding model today:
-
-- `cerebras:zai-glm-4.7`
-
-Fallbacks are defined for discovery and audio plan generation.
+The onboarding LLM stages use `openrouter:deepseek/deepseek-v4-flash-0731`, pinned to Wafer Fast
+with provider fallbacks disabled, reasoning disabled, required-parameter enforcement, denied data
+collection, and zero-data-retention routing. No model fallbacks are configured.
 
 ### 12.3 Discovery boundaries
 
@@ -1530,24 +1528,316 @@ Top-level app bootstrap:
 
 Primary layers:
 
+- `App/`
+  - process and authenticated-user lifetime owners, lifecycle facts, and transitional root construction
 - `Models/`
   - API-facing and UI-facing model types, including generated API contracts
 - `Repositories/`
   - content and read-status repository wrappers
 - `Services/`
-  - API client, auth, chat, onboarding, narration, audio episodes, transcription, X integration, image cache, notifications
+  - API client, auth, chat, onboarding, narration, audio episodes, transcription, X integration, and image cache
+- `Services/Networking/`
+  - raw HTTP transport, credential storage/session, refresh exchange, failure classification, and recovery policy
 - `ViewModels/`
   - feature-level state and pagination
 - `Views/`
   - authenticated root, Briefing, unified Knowledge, search, detail, chat, onboarding, settings, sources, and shared dictation views
 - `Shared/`
-  - app chrome, state stores, shared container utilities
+  - app chrome, state stores, and shared container utilities
 
-### 17.2 Auth model
+### 17.2 Runtime ownership and composition
 
-The iOS app authenticates with Apple Sign In against `/auth/apple`, stores credentials in Keychain, and boots the authenticated shell from `AuthenticationViewModel`. Settings exposes in-app account deletion, which performs fresh Apple authorization before calling `DELETE /auth/me`.
+The app distinguishes process, authenticated-user, and route lifetimes:
 
-### 17.3 Client features visible from code structure
+```mermaid
+flowchart TD
+  App["newslyApp"] --> Runtime["AppRuntime: process lifetime"]
+  Runtime --> Lifecycle["AppLifecycle"]
+  Runtime --> Auth["AuthenticationController"]
+  Auth -->|authenticated user| Session["AuthenticatedSession: one user lifetime"]
+  Session --> Roots["Briefing, Knowledge, badges, chat manager, tab and read state"]
+  Roots --> Routes["Route-owned detail, chat, search, and deck reader models"]
+```
+
+`newslyApp` configures the shared Keychain access group before constructing the
+runtime. `AppRuntime` retains `AppLifecycle`, the process authentication
+controller, and at most one `AuthenticatedSession`. Re-authentication for the
+same user updates the existing session. An account change or logout detaches the
+old session before constructing or displaying another one.
+
+`AuthenticatedSession` owns root state whose useful lifetime is exactly one
+authenticated account:
+
+- `BadgeStatsStore` and its processing-aware polling;
+- `ActiveChatSessionManager` and its completion registry;
+- root tab selection and the user-scoped state held by the currently
+  process-shared chat navigation coordinator;
+- `ReadingStateStore` and `ReadStateCache`;
+- the root Briefing and Knowledge models;
+- submission-status state.
+
+Detaching the session suspends badge and chat polling, clears chat and
+navigation ownership, and deactivates Briefing. Route models remain owned by
+their views and receive their exact dependencies rather than the runtime as a
+service locator.
+
+Composition is still in a staged cutover. `RootDependencyFactory` now lives in
+`App/` and is explicitly limited to construction helpers, but several helpers
+and session initializers still bridge existing `.shared` domain services. New
+root state belongs in `AuthenticatedSession`; new route models should prefer
+direct initializer injection. Process-global, user-neutral facilities such as
+image and audio playback caches may remain shared. `APIClient` and
+`CredentialSession` are process-scoped shared instances today rather than
+fields constructed by `AppRuntime`; moving their construction into the runtime
+remains the final dependency-ownership cutover.
+
+### 17.3 Process lifecycle and warm resume
+
+`newslyApp` owns the only product-level SwiftUI `scenePhase` observer and writes
+the result to `AppLifecycle`. The lifecycle value records facts; it has no
+feature registry, network calls, selected-tab state, or global refresh method.
+
+The semantic transitions are:
+
+- the first transition to active creates activation generation 1 with kind
+  `initialLaunch`;
+- a real background-to-active transition increments the generation and records
+  `warmResume`, the activation time, and background duration;
+- inactive-to-active without an intervening background records an interruption
+  return for diagnostics but does not increment the generation;
+- duplicate phase notifications are ignored.
+
+The process launch ID, PID, phase transition, generation, transition kind, and
+background duration are logged together so a wake can be reconstructed from one
+stream.
+
+`AppRuntime` forwards lifecycle facts once to the current
+`AuthenticatedSession`. True background suspends badge polling and the global
+chat manager. A new activation generation resumes each once. `.inactive` alone
+does neither. `ContentView` combines lifecycle phase with tab visibility for
+Briefing: leaving the tab or entering true background deactivates it, while a
+short system interruption preserves selected-Lens work.
+
+Visible Content Detail, Knowledge, chat, and Learning Deck reader routes consume
+the shared lifecycle through environment or initializer injection. They do not
+observe `scenePhase` themselves. Feature request generations still fence network
+results; the lifecycle generation supplies trigger context and does not replace
+request identity. Audio-session interruptions remain an audio-subsystem concern,
+and voice capture uses the typed UIKit background notification for its OS-level
+cleanup.
+
+Warm resume and cold relaunch are separate flows. Warm resume retains the
+process and its models. Cold relaunch constructs a new runtime, restores a
+locally confirmed authentication shell where possible, restores feature
+snapshots such as Briefing, and then validates server state.
+
+### 17.4 Reads, revalidation, commands, and observation
+
+The client uses distinct names and ownership rules for four kinds of work:
+
+- **Load** obtains the first readable value.
+- **Revalidate** performs a safe read while retaining an existing value.
+- **Command** submits a mutation once.
+- **Observe** follows durable server work after a command returned its identity.
+
+Readable state and request activity remain separate. An initial read with no
+value may show loading and then a blocking retry after its recovery budget is
+exhausted. Revalidation keeps the existing value during work and recoverable
+failure. Cancellation, route replacement, or lifecycle suspension returns to the
+prior phase without publishing an error.
+
+`TaskBag` is the standard owner for keyed view-model tasks. Ordinary reads use a
+typed resource key, coalesce callers for the same key, replace work for a new
+key, and generation-fence both success and failure. Dependent effects such as
+open tracking, read marking, or body loading commit once inside the winning
+generation so coalesced callers cannot repeat them.
+
+Cancellation follows work ownership, not whichever coalesced waiter happens to
+end first. A lifecycle-owned automatic read may be cancelled on background; if
+an explicit refresh joins and promotes that work, cancellation of the lifecycle
+waiter cannot cancel the shared task. Secondary body reads also carry the
+`TaskBag` token through their final publication guard so non-cooperative
+transport completion cannot overwrite a newer generation.
+
+`PaginatedFeed` separately owns collection phase, cursor, `hasMore`, request
+generation, replacement merge, and append semantics. Its load phase includes
+idle, initial loading, empty, loaded, loading more, and error. Paging remains
+separate from the ordinary retained-value pattern.
+
+Current adopters and specialized boundaries:
+
+- Content Detail has typed content identity, separate initial and revalidation
+  phases, retained-value revalidation, silent cancellation, and exactly-once
+  primary-load effects.
+- Knowledge uses a five-minute freshness policy. A visible first activation
+  loads all four sources; a fresh warm resume skips network work; a stale warm
+  resume runs one coalesced four-source revalidation. The existing timeline
+  remains published until the aggregate barrier completes, and source errors
+  remain independent.
+- Briefing retains its snapshot, ETag, Lens assembly, read reconciliation,
+  document-retention, command, and version-observation state machines. Common
+  lifecycle and transport policy simplify their inputs rather than replacing
+  them.
+- Chat and Learning Deck commands remain single-attempt. Once accepted, their
+  registries can pause observation in the background and resume from durable IDs
+  without resending the command.
+
+Deck and narration list reconciliation still differs enough that no shared
+`ReadResource` was extracted. Their remaining loading flags stay explicit and
+feature local.
+
+### 17.5 HTTP transport and recovery
+
+The main client stack is intentionally shallow:
+
+```text
+feature view model
+  -> domain service
+      -> APIClient
+          -> HTTPTransport -> configured URLSession
+          -> CredentialSession
+              -> RefreshTokenExchange -> HTTPTransport
+```
+
+`HTTPTransport` only executes a prepared `URLRequest` and returns data plus an
+`HTTPURLResponse`. It owns no bearer attachment, decoding, retry, presentation,
+or endpoint policy. `RefreshTokenExchange` is the one unauthenticated refresh
+operation over that transport, which prevents a credential-session-to-client
+dependency cycle.
+
+`APIClient` owns URL construction, request headers and body, authentication
+mode, response status handling, bearer rejection and one original-request
+replay, response-detail parsing, standard or ISO-8601 decoding, and opt-in
+safe-read recovery. `ImageCacheService` remains independent because it fetches
+public media and does not handle user credentials.
+
+The public request surface has three path-based operations: decoded
+`request`, raw `requestHTTP`, and `requestVoid`. All three take the typed
+`HTTPMethod` value and the same request-policy inputs. ETag and multipart
+callers use headers and allowed status codes directly; there is no descriptor
+or raw-data compatibility overload. `authorizedMediaResource` remains a small
+media-specific helper because AVFoundation needs a URL and headers rather than
+a decoded response.
+
+Safe-read recovery is explicit at each migrated call site. Only typed `GET` and
+`HEAD` requests can retry selected connectivity failures, using the shared
+approximately 250 ms and 750 ms budget with bounded jitter. One budget spans the
+original resource request and its one authentication replay. Credential
+acquisition and refresh do not consume or restart that resource budget. Commands
+are never generically reissued after an ambiguous transport failure, and the
+client does not use reachability as a gate. The main app session enables
+`waitsForConnectivity` with a 30-second request timeout and a 60-second resource
+timeout. A command may wait for its first connection within those URLSession
+deadlines, but `APIClient` still sends it at most once. The extension uses its
+own session and a shorter refresh-retry budget.
+
+`ClientFailure` provides the flat transport vocabulary: cancellation,
+connectivity, missing or terminal authentication, invalid request/response,
+HTTP, decoding, and unexpected failure. `APIClient` emits this type directly.
+The recursive classifier still normalizes Foundation URL errors and the
+transitional auth-layer `AuthError`, so wake-time connectivity and cancellation
+have one meaning throughout feature code. The old `APIError`, descriptor,
+raw-data, and cancellation-helper paths have been removed.
+
+Authenticated backend calls in `AuthenticationService` use `APIClient`.
+`OpenAIService` builds the multipart body and sends it through
+`requestHTTP`, so transcription shares bearer recovery, response-detail
+handling, and failure normalization with other requests. The service retains
+only multipart encoding and transcription-specific presentation mapping.
+
+### 17.6 Authentication and cold-session restoration
+
+`AuthenticationController` is process scoped and owned by `AppRuntime`. The
+source file retains `AuthenticationViewModel` as a compatibility type alias for
+presentation call sites. The controller is the canonical runtime owner of
+authentication state and the cached user profile. The debug-only destructive
+Keychain reset remains an explicit escape hatch that clears all durable auth
+material at once.
+
+On process launch:
+
+1. Configure the Keychain access group.
+2. Inspect credential material and the cached user profile.
+3. Publish a cached authenticated shell synchronously only when its identity
+   matches confirmed local credential state.
+4. Validate `/auth/me` asynchronously through `APIClient` with ISO-8601 date
+   decoding.
+5. Keep the cached shell for transient connectivity or server failure, and clear
+   it after definitive credential rejection.
+
+`CredentialSession` owns access-token acquisition, in-process single-flight
+refresh, the existing app-group process lock, cross-process credential re-read,
+one terminal event per credential generation, and publication ordering. Sign-in
+and debug-session token pairs now publish through the same credential path as
+refresh. `/auth/me` binds validated legacy loose credentials to the returned
+user identity.
+
+Explicit logout deletes credential material under the same cross-process lock
+held by refresh exchange and publication. If refresh is already in flight,
+logout waits for that publication and then removes it. Authentication work is
+cancelled and request-generation fenced; new sign-in, debug login, or launch
+restoration waits for the pending clear. Terminal events identify the confirmed
+user and credential generation, so an old rejection cannot clear a newer
+account publication. The UI may enter signed-out state immediately, but if the
+shared lock or secure storage is unavailable the client logs the failed clear
+and never bypasses serialization.
+
+New builds store one `CredentialEnvelope` containing the token pair, user ID,
+and credential generation. During the mixed-version window, publication also
+writes the legacy split keys refresh-token-first so already-distributed app and
+extension builds continue to converge. Production storage distinguishes missing
+Keychain items from unavailable access and reconciles the access-group,
+no-access-group, and App Group mirror paths while holding the process lock. Once
+a valid envelope exists, a stale plaintext mirror cannot become authoritative
+again. A matching or safely incomplete legacy copy is repaired from the
+envelope; a coherent two-leg takeover waits for server identity validation; and
+an interrupted one-leg publication fails unavailable without overwriting either
+token leg. This prevents both old-access/new-refresh rotation residue and
+new-access/old-refresh sign-in residue from being mistaken for an atomic pair.
+
+`CredentialSession` delivers a terminal credential-generation event directly
+to `AuthenticationController`; there is no authentication-required notification
+bridge or token-refresh facade. `AuthenticationService` routes sign-in, debug
+sign-in, `/auth/me`, profile updates, and account deletion through the shared
+client, and callers do not pre-refresh before making an authenticated request.
+The older `authDidLogOut` notification remains narrowly scoped to two global
+store observers until those stores are fully constructed inside the session
+composition graph.
+
+The iOS app authenticates with Apple Sign In against `/auth/apple`. Settings
+exposes in-app account deletion, which performs fresh Apple authorization before
+calling `DELETE /auth/me`.
+
+### 17.7 Replay-safe refresh rotation
+
+Refresh-token rotation is replay-safe for a single client attempt without
+turning refresh into a generally retryable command.
+
+Before sending `/auth/refresh`, the app or extension persists an attempt UUID
+keyed by a fingerprint of the current refresh token. Ambiguous response loss or
+process recreation reuses that same ID. The attempt is cleared only after the
+replacement pair is published or the server definitively rejects the old
+credential.
+
+The exchange fails closed before network I/O unless the attempt record can be
+written to secure storage and read back byte-for-byte. This makes the replay ID
+a durable precondition rather than a best-effort side write.
+
+The backend serializes rotation by old-token hash with a PostgreSQL transaction
+advisory lock. In the same transaction that consumes the old token, it stores
+the optional attempt ID and an encrypted replacement pair for at most ten
+minutes and no longer than the old token's expiry. Repeating the same token and
+attempt returns the stored pair. A different attempt, a legacy request without
+an ID after consumption, or an expired replay record is rejected. Corrupt replay
+material fails closed with a service-unavailable response and never mints a
+second pair.
+
+The optional `attempt_id` and token response are canonical Pydantic contracts
+and generate as `APIRefreshTokenRequest` and `APIAccessTokenResponse` for Swift.
+Both client processes use those generated wire models. Legacy clients may omit
+the attempt ID and retain one-time rotation behavior during the rollout window.
+
+### 17.8 Client features visible from code structure
 
 The client has dedicated flows for:
 
@@ -1574,7 +1864,7 @@ when a source collection changes, and owns screen-level loading, pagination, and
 recovery. The root view renders that stored projection and does not maintain parallel revision
 counters or its own timeline cache.
 
-### 17.4 Generated API contracts
+### 17.9 Generated API contracts
 
 The canonical public HTTP contract is the checked-in OpenAPI export:
 
@@ -1598,7 +1888,9 @@ Supporting scripts:
 
 OpenAPI is authoritative for the public wire format. `app/models/contracts_registry.py` is the reviewed generated-client surface for Swift and Go artifacts. Checked-in generated artifacts must be regenerated from the supporting scripts rather than edited manually.
 
-The iOS runtime still uses hand-written `APIClient`, `APIEndpoints`, services, and domain DTOs for networking. Generated Swift contracts are consumed as canonical wire models and bridged into app-facing models. The Go CLI uses generated API models with a hand-written HTTP runtime client.
+The iOS runtime uses the hand-written `APIClient`, `APIEndpoints`, services, and
+domain DTOs around canonical generated wire models. The Go CLI uses generated
+API models with a hand-written HTTP runtime client.
 
 Contract evolution rules live in `docs/initiatives/typed-contracts-2026-06/20-contract-policy.md`.
 
@@ -1624,6 +1916,21 @@ The extension:
 - maps Create Deck to `presentation`; legacy content, links, and feed modes remain backend-only for older clients and queued tasks
 - can submit a chat-start request that saves the item to Knowledge, processes it normally, and uses the typed share-sheet message as the first content-linked chat turn
 - applies platform hints for X, YouTube, podcast hosts, and other known URL shapes
+
+The extension configures the same Keychain access group before reading
+credentials. Its networking target compiles a deliberately small shared subset:
+`APIClient`, `HTTPTransport`, `CredentialSession`, `RefreshTokenExchange`,
+generated refresh contracts, credential storage, and the existing cross-process
+refresh lock. It uses a shorter single retry delay for the replay-safe refresh
+exchange because extension execution time is constrained.
+
+`ShareExtensionTransport` is now a thin target-local adapter. It constructs the
+shared networking core with the extension session policy, delegates submission
+to `APIClient.requestVoid`, and maps `ClientFailure` into the extension's small
+presentation error vocabulary. Request construction, bearer rejection, the
+canonical 403 heuristic, detail parsing, refresh coalescing, replay-attempt
+storage, and token publication all use the same implementations as the app;
+there is no duplicate extension auth or refresh stack.
 
 ## 19. Admin UI
 

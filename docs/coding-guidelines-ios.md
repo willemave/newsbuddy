@@ -17,31 +17,78 @@ These conventions apply to the SwiftUI app and share extension under
 - Mark task handles, services, caches, delegates, loggers, and other non-UI
   implementation details with `@ObservationIgnored`.
 - Prefer injected dependencies in `init` over hidden singleton lookups. The root
-  dependency factory is the place to bridge singletons into feature view models.
+  `AuthenticatedSession` owns user-scoped stores. `RootDependencyFactory` is a
+  transitional bridge for unmigrated route construction; do not add user-scoped
+  lifetime or service-locator behavior to it.
 
-## Load Phases
+## Async State, Lifecycle, And Work Ownership
 
-Use one UI-loading vocabulary for new async state:
+Use `LoadPhase` for paginated or collection-shaped UI state:
 
 ```swift
 enum LoadPhase: Equatable {
     case idle
     case initialLoading
+    case empty
     case loaded
     case loadingMore
-    case empty
     case error(String)
 }
 ```
 
-- Use `error(String)` for user-facing state. Convert `Error` values to display
-  strings at the boundary where the async operation is handled.
-- Keep pagination truth separate from display state: cursor, `hasMore`, and
-  request-generation guards belong in the pagination model, not scattered across
-  views.
-- When touching legacy surfaces, migrate local variants such as `LoadingState`,
-  nested `LoadState`, and boolean `isLoading`/`errorMessage` pairs toward
-  `LoadPhase` instead of adding another shape.
+Keep pagination truth separate from presentation state. The cursor, `hasMore`,
+request generation, replacement merge, and append rules belong in
+`PaginatedFeed`, not in the view. Convert `Error` values to display strings only
+at the presentation boundary.
+
+A non-paginated read that can retain a value needs independent state rather than
+a single loading enum:
+
+- the readable value and its typed resource key;
+- an initial-load phase used only while no readable value exists;
+- a separate revalidation activity or failure while a readable value remains.
+
+An initial failure may replace an empty loading surface with a blocking retry.
+A revalidation failure keeps the current value and, when useful, reports a
+nonblocking message. Cancellation or key replacement restores the prior phase
+and never produces an error. Do not force Content Detail, Briefing, or another
+retained-value screen into `LoadPhase` when that would conflate value presence
+with request activity.
+
+Use `TaskBag` for view-model-owned work. Key each ordinary read by resource
+identity, coalesce callers for the same key, cancel and replace a different key,
+and fence both success and failure with the request generation. Commit dependent
+effects such as tracking, read marks, or body loading once inside the winning
+generation; every caller awaiting the coalesced task must not repeat them. Keep
+request-start mutation revisions and feature reconciliation with the feature.
+Pass the winning token into secondary reads and check it before publishing even
+when the current transport normally cooperates with cancellation. When several
+callers await one task, cancellation belongs to the task owner rather than an
+arbitrary waiter. In particular, a lifecycle waiter must not cancel a shared
+read after an explicit user refresh has promoted it to continue independently.
+
+`AppLifecycle.activation.generation` identifies initial activation and true warm
+resume. Visible screens may use it as a `.task(id:)` input to decide whether a
+resource is stale. It does not replace a feature request generation, and an
+inactive-to-active interruption without background does not start routine
+revalidation. On true background, suspend obsolete automatic reads and pollers;
+on activation, resume only visible or process-owned work under its existing
+coalescing rules.
+
+Name server work by what it does:
+
+- A **load** obtains the first readable value.
+- A **revalidation** reads server state while retaining the current value.
+- A **command** submits a mutation once. Generic transport policy must not retry
+  it after an ambiguous failure.
+- An **observation** polls or subscribes after the command returned a durable
+  identity. Backgrounding may pause observation, and foregrounding resumes from
+  that identity without resending the command.
+
+When touching legacy surfaces, migrate boolean loading/error pairs and local
+list phases toward these rules. Keep specialized state machines for Briefing,
+chat, Learning Deck generation, audio, and WebKit when their domain phases do not
+fit an ordinary read.
 
 ## View Structure
 

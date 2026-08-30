@@ -89,7 +89,8 @@ class ChatService {
                 contentId: contentId,
                 newsItemId: newsItemId,
                 limit: limit
-            )
+            ),
+            recoveryPolicy: .safeRead
         )
     }
 
@@ -100,17 +101,17 @@ class ChatService {
         limit: Int = 25,
         cursor: String? = nil
     ) async throws -> ChatSessionListResponse {
-        let descriptor = APIRequestDescriptor<ChatSessionListResponse>(
-            path: APIEndpoints.chatSessionsList,
+        return try await client.request(
+            APIEndpoints.chatSessionsList,
             queryItems: sessionListQueryItems(
                 contentId: contentId,
                 newsItemId: newsItemId,
                 limit: limit,
                 cursor: cursor
             ),
-            headers: ["Cache-Control": "no-cache"]
+            headers: ["Cache-Control": "no-cache"],
+            recoveryPolicy: .safeRead
         )
-        return try await client.request(descriptor)
     }
 
     /// Create a new chat session
@@ -136,7 +137,7 @@ class ChatService {
 
         let response: CreateChatSessionResponse = try await client.request(
             APIEndpoints.chatSessions,
-            method: "POST",
+            method: .post,
             body: body
         )
 
@@ -145,7 +146,10 @@ class ChatService {
 
     /// Get session details with message history
     func getSession(id: Int) async throws -> ChatSessionDetail {
-        return try await client.request(APIEndpoints.chatSession(id: id))
+        return try await client.request(
+            APIEndpoints.chatSession(id: id),
+            recoveryPolicy: .safeRead
+        )
     }
 
     /// Check if a session exists for the given content
@@ -182,7 +186,7 @@ class ChatService {
 
         return try await client.request(
             APIEndpoints.chatSession(id: sessionId),
-            method: "PATCH",
+            method: .patch,
             body: body
         )
     }
@@ -191,7 +195,7 @@ class ChatService {
     func deleteSession(sessionId: Int) async throws {
         try await client.requestVoid(
             APIEndpoints.chatSession(id: sessionId),
-            method: "DELETE"
+            method: .delete
         )
     }
 
@@ -209,7 +213,7 @@ class ChatService {
 
         return try await client.request(
             APIEndpoints.chatMessages(sessionId: sessionId),
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -228,7 +232,7 @@ class ChatService {
         let body = try JSONEncoder().encode(request)
         return try await client.request(
             APIEndpoints.assistantTurns,
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -246,7 +250,7 @@ class ChatService {
     ) async throws -> ChatMessage {
         let response: InitialSuggestionsResponse = try await client.request(
             APIEndpoints.chatInitialSuggestions(sessionId: sessionId),
-            method: "POST"
+            method: .post
         )
 
         return ChatMessage(
@@ -266,7 +270,7 @@ class ChatService {
         let body = try JSONEncoder().encode(request)
         return try await client.request(
             APIEndpoints.chatCouncilStart(sessionId: sessionId),
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -280,7 +284,7 @@ class ChatService {
         let body = try JSONEncoder().encode(request)
         return try await client.request(
             APIEndpoints.chatCouncilSelect(sessionId: sessionId),
-            method: "POST",
+            method: .post,
             body: body
         )
     }
@@ -294,7 +298,7 @@ class ChatService {
         let body = try JSONEncoder().encode(request)
         return try await client.request(
             APIEndpoints.chatCouncilRetry(sessionId: sessionId),
-            method: "POST",
+            method: .post,
             body: body
         )
     }

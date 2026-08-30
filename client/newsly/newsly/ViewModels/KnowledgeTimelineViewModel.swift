@@ -5,6 +5,25 @@
 
 import Foundation
 import Observation
+import os.log
+
+private let knowledgeLifecycleLogger = Logger(
+    subsystem: "com.newsly",
+    category: "KnowledgeLifecycle"
+)
+
+struct KnowledgeFreshnessPolicy: Equatable {
+    let revalidationInterval: TimeInterval
+
+    static let standard = KnowledgeFreshnessPolicy(
+        revalidationInterval: 5 * 60
+    )
+
+    func shouldRevalidate(lastValidatedAt: Date?, at date: Date) -> Bool {
+        guard let lastValidatedAt else { return true }
+        return date.timeIntervalSince(lastValidatedAt) >= revalidationInterval
+    }
+}
 
 enum KnowledgeTimelineFailure: Identifiable {
     case savedLoad
@@ -63,26 +82,51 @@ final class KnowledgeTimelineViewModel {
     let narrations: CustomNarrationLibraryViewModel
     private(set) var timeline: [KnowledgeTimelineItem] = []
     private(set) var groupedTimeline: [KnowledgeTimelineDayGroup] = []
-    private var coalescedLoadDepth = 0
+    private(set) var automaticReadsEnabled = false
+    private(set) var lastValidatedAt: Date?
+    private(set) var lastHandledActivationGeneration: UInt64?
+    private var isAggregateReadInFlight = false
+    private var holdsPublicationBarrier = false
     private var hasFinishedInitialLoad = false
+
+    @ObservationIgnored
+    private let freshnessPolicy: KnowledgeFreshnessPolicy
+    @ObservationIgnored
+    private let now: () -> Date
+    @ObservationIgnored
+    private var aggregateReadTask: Task<Bool, Never>?
+    @ObservationIgnored
+    private var aggregateReadGeneration = 0
+    @ObservationIgnored
+    private var aggregateReadMayContinueInBackground = false
+    @ObservationIgnored
+    private var automaticReadContextIsActive = false
 
     init(
         savedContent: ContentListViewModel,
         chats: KnowledgeChatViewModel,
         decks: LearningDecksViewModel,
-        narrations: CustomNarrationLibraryViewModel
+        narrations: CustomNarrationLibraryViewModel,
+        freshnessPolicy: KnowledgeFreshnessPolicy = .standard,
+        now: @escaping () -> Date = Date.init
     ) {
         self.savedContent = savedContent
         self.chats = chats
         self.decks = decks
         self.narrations = narrations
+        self.freshnessPolicy = freshnessPolicy
+        self.now = now
         refreshTimelineProjection()
         observeTimelineSources()
     }
 
+    deinit {
+        aggregateReadTask?.cancel()
+    }
+
     var isLoading: Bool {
         !hasFinishedInitialLoad
-            || coalescedLoadDepth > 0
+            || isAggregateReadInFlight
             || chats.isLoading
             || savedContent.isLoading
             || decks.isLoading
@@ -126,14 +170,79 @@ final class KnowledgeTimelineViewModel {
         return result
     }
 
-    func load() async {
-        coalescedLoadDepth += 1
-        defer { finishCoalescedLoad(completed: !Task.isCancelled) }
-        async let savedLoad: Void = savedContent.loadKnowledgeLibrary()
-        async let chatLoad: Void = chats.loadChats()
-        async let narrationLoad: Void = narrations.load()
-        async let deckLoad: Void = decks.load()
-        _ = await (savedLoad, chatLoad, narrationLoad, deckLoad)
+    /// Activates the visible Knowledge root for one process activation.
+    /// Repeated calls for the same generation are no-ops.
+    func activate(_ activation: AppLifecycle.Activation) async {
+        automaticReadContextIsActive = true
+
+        guard lastHandledActivationGeneration != activation.generation
+                || holdsPublicationBarrier else {
+            knowledgeLifecycleLogger.debug(
+                "Activation skipped | generation=\(activation.generation, privacy: .public) reason=already_handled"
+            )
+            enableAutomaticObservation()
+            return
+        }
+
+        let needsInitialLoad = !hasFinishedInitialLoad
+        if !needsInitialLoad,
+           !holdsPublicationBarrier,
+           !freshnessPolicy.shouldRevalidate(
+               lastValidatedAt: lastValidatedAt,
+               at: activation.occurredAt
+           ) {
+            lastHandledActivationGeneration = activation.generation
+            knowledgeLifecycleLogger.info(
+                "Activation skipped | generation=\(activation.generation, privacy: .public) reason=fresh"
+            )
+            enableAutomaticObservation()
+            return
+        }
+
+        knowledgeLifecycleLogger.info(
+            "Activation read started | generation=\(activation.generation, privacy: .public) initial=\(needsInitialLoad, privacy: .public)"
+        )
+        automaticReadsEnabled = false
+        let completed = await runAggregateRead(
+            isInitial: needsInitialLoad,
+            mayContinueInBackground: false
+        )
+        guard completed, automaticReadContextIsActive else { return }
+        lastHandledActivationGeneration = activation.generation
+        knowledgeLifecycleLogger.info(
+            "Activation read finished | generation=\(activation.generation, privacy: .public) validated=\(self.sourceLoadsSucceeded, privacy: .public)"
+        )
+        enableAutomaticObservation()
+    }
+
+    /// Explicit user refresh. Unlike lifecycle work, it is not cancelled just
+    /// because the app crosses a background boundary after the gesture began.
+    func forceReload() async {
+        _ = await runAggregateRead(
+            isInitial: !hasFinishedInitialLoad,
+            mayContinueInBackground: true
+        )
+    }
+
+    /// Cancels only automatic reads and observation. Commands and accepted
+    /// server work keep their existing durable ownership.
+    func suspendAutomaticReads() {
+        let hadAutomaticWork = automaticReadContextIsActive
+            || automaticReadsEnabled
+            || aggregateReadTask != nil
+        if hadAutomaticWork {
+            knowledgeLifecycleLogger.info("Automatic reads suspended")
+        }
+        automaticReadContextIsActive = false
+        automaticReadsEnabled = false
+        decks.suspendAutomaticObservation()
+        narrations.suspendAutomaticObservation()
+
+        guard aggregateReadTask != nil,
+              !aggregateReadMayContinueInBackground else {
+            return
+        }
+        cancelAggregateRead(generation: aggregateReadGeneration)
     }
 
     func loadNextPage() async {
@@ -160,7 +269,7 @@ final class KnowledgeTimelineViewModel {
     func recover(_ failure: KnowledgeTimelineFailure) async {
         switch failure {
         case .savedLoad:
-            await savedContent.loadKnowledgeLibrary()
+            await savedContent.revalidateKnowledgeLibrary()
         case .savedAction:
             savedContent.clearActionError()
         case .chatsLoad:
@@ -181,7 +290,6 @@ final class KnowledgeTimelineViewModel {
 
     func cancelTransientWork() {
         chats.cancelVoiceRecording()
-        narrations.cancelPolling()
     }
 
     private func observeTimelineSources() {
@@ -193,7 +301,7 @@ final class KnowledgeTimelineViewModel {
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if self.coalescedLoadDepth == 0 {
+                if !self.holdsPublicationBarrier {
                     self.refreshTimelineProjection()
                 }
                 self.observeTimelineSources()
@@ -201,17 +309,134 @@ final class KnowledgeTimelineViewModel {
         }
     }
 
-    private func finishCoalescedLoad(completed: Bool) {
-        guard coalescedLoadDepth > 0 else { return }
+    private func runAggregateRead(
+        isInitial: Bool,
+        mayContinueInBackground: Bool
+    ) async -> Bool {
+        if let aggregateReadTask {
+            if mayContinueInBackground {
+                aggregateReadMayContinueInBackground = true
+            }
+            return await awaitAggregateRead(
+                aggregateReadTask,
+                generation: aggregateReadGeneration
+            )
+        }
+
+        aggregateReadGeneration &+= 1
+        let generation = aggregateReadGeneration
+        isAggregateReadInFlight = true
+        holdsPublicationBarrier = true
+        aggregateReadMayContinueInBackground = mayContinueInBackground
+        cancelObsoleteChildReads()
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            let completed = await self.performSourceRead(isInitial: isInitial)
+            return self.finishAggregateRead(
+                generation: generation,
+                completed: completed
+            )
+        }
+        aggregateReadTask = task
+
+        return await awaitAggregateRead(task, generation: generation)
+    }
+
+    private func awaitAggregateRead(
+        _ task: Task<Bool, Never>,
+        generation: Int
+    ) async -> Bool {
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelAggregateRead(generation: generation)
+            }
+        }
+    }
+
+    private func finishAggregateRead(
+        generation: Int,
+        completed: Bool
+    ) -> Bool {
+        guard generation == aggregateReadGeneration else { return false }
+
+        aggregateReadTask = nil
+        aggregateReadMayContinueInBackground = false
+        isAggregateReadInFlight = false
+
         if completed {
             hasFinishedInitialLoad = true
+            if sourceLoadsSucceeded {
+                lastValidatedAt = now()
+            }
         }
-        if coalescedLoadDepth == 1 {
-            // Publish the merged result while loading is still true so the UI
-            // cannot flash an empty or single-source timeline between states.
-            refreshTimelineProjection()
+
+        // Publish all four source results in one commit. This remains true for
+        // partial success and keeps the K13 initial-load barrier intact.
+        holdsPublicationBarrier = false
+        refreshTimelineProjection()
+        return completed
+    }
+
+    private func cancelAggregateRead(generation: Int) {
+        guard generation == aggregateReadGeneration,
+              aggregateReadTask != nil,
+              !aggregateReadMayContinueInBackground else {
+            return
         }
-        coalescedLoadDepth -= 1
+        aggregateReadGeneration &+= 1
+        aggregateReadTask?.cancel()
+        aggregateReadTask = nil
+        aggregateReadMayContinueInBackground = false
+        isAggregateReadInFlight = false
+        cancelObsoleteChildReads()
+        // Initial publication remains all-or-nothing. Once a prior aggregate
+        // exists, however, cancellation must not leave ordinary source
+        // observation suppressed until some future successful refresh.
+        holdsPublicationBarrier = !hasFinishedInitialLoad
+        knowledgeLifecycleLogger.debug(
+            "Aggregate read cancelled | generation=\(generation, privacy: .public)"
+        )
+    }
+
+    private func cancelObsoleteChildReads() {
+        savedContent.cancelAutomaticRead()
+        chats.cancelAutomaticRead()
+        decks.cancelListRead()
+        narrations.cancelListRead()
+    }
+
+    private func enableAutomaticObservation() {
+        guard automaticReadContextIsActive else { return }
+        automaticReadsEnabled = true
+        decks.resumeAutomaticObservation()
+        narrations.resumeAutomaticObservation()
+    }
+
+    private func performSourceRead(isInitial: Bool) async -> Bool {
+        async let savedLoad: Void = loadSavedContent(isInitial: isInitial)
+        async let chatLoad: Void = chats.loadChats()
+        async let narrationLoad: Void = narrations.load()
+        async let deckLoad: Void = decks.load()
+        _ = await (savedLoad, chatLoad, narrationLoad, deckLoad)
+        return !Task.isCancelled
+    }
+
+    private func loadSavedContent(isInitial: Bool) async {
+        if isInitial {
+            await savedContent.loadKnowledgeLibrary()
+        } else {
+            await savedContent.revalidateKnowledgeLibrary()
+        }
+    }
+
+    private var sourceLoadsSucceeded: Bool {
+        savedContent.initialLoadErrorMessage == nil
+            && chats.loadErrorMessage == nil
+            && decks.loadErrorMessage == nil
+            && narrations.loadErrorMessage == nil
     }
 
     private func refreshTimelineProjection() {
