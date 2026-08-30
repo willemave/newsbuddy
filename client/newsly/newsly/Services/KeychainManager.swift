@@ -46,6 +46,9 @@ final class KeychainManager: AuthTokenStore {
     /// writes succeeded. Credential envelope publication uses this to avoid
     /// declaring a partially written pair committed.
     func saveTokenReportingStatus(_ token: String, key: KeychainKey) -> Bool {
+        if E2ETestLaunch.isEnabled {
+            return saveE2EToken(token, account: key.rawValue)
+        }
         guard let data = token.data(using: .utf8) else { return false }
 
         let configuredAccessGroup = currentAccessGroup()
@@ -72,6 +75,9 @@ final class KeychainManager: AuthTokenStore {
 
     /// Retrieve a token from the keychain
     func getToken(key: KeychainKey) -> String? {
+        if E2ETestLaunch.isEnabled {
+            return e2eToken(account: key.rawValue)
+        }
         let configuredAccessGroup = currentAccessGroup()
         if let accessGroup = configuredAccessGroup,
            let token = queryToken(account: key.rawValue, accessGroup: accessGroup) {
@@ -133,6 +139,10 @@ final class KeychainManager: AuthTokenStore {
     }
 
     private func deleteTokenReportingStatus(account: String) -> Bool {
+        if E2ETestLaunch.isEnabled {
+            SharedContainer.userDefaults.removeObject(forKey: account)
+            return SharedContainer.userDefaults.object(forKey: account) == nil
+        }
         var succeeded = true
         if let accessGroup = currentAccessGroup() {
             succeeded = deletionSucceeded(
@@ -223,6 +233,10 @@ final class KeychainManager: AuthTokenStore {
     }
 
     func rawToken(account: String, accessGroup: String?) -> RawTokenRead {
+        if E2ETestLaunch.isEnabled {
+            guard let token = e2eToken(account: account) else { return .missing }
+            return .value(token)
+        }
         var query = baseQuery(account: account, accessGroup: accessGroup)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -238,6 +252,19 @@ final class KeychainManager: AuthTokenStore {
             return .unavailable
         }
         return .value(token)
+    }
+
+    /// The native release gate builds without code signing, so Simulator
+    /// Keychain calls cannot succeed. Explicit DEBUG E2E launches use the app's
+    /// sandboxed defaults to exercise credential rotation and process-relaunch
+    /// persistence without weakening fail-closed behavior in normal builds.
+    private func saveE2EToken(_ token: String, account: String) -> Bool {
+        SharedContainer.userDefaults.set(token, forKey: account)
+        return SharedContainer.userDefaults.string(forKey: account) == token
+    }
+
+    private func e2eToken(account: String) -> String? {
+        SharedContainer.userDefaults.string(forKey: account)
     }
 
     private func deleteToken(account: String, accessGroup: String?) -> OSStatus {

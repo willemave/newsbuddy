@@ -27,6 +27,17 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-29 — `main` — Preserve authenticated UI coverage in unsigned release builds
+
+- **Status:** Complete locally and committed; release validation in progress.
+- **Scope:** DEBUG E2E credential persistence used by the native iOS release gate.
+- **Evidence:** The required `CODE_SIGNING_ALLOWED=NO` XCTest run passed 617 tests but both authenticated lifecycle UI tests reached the landing screen. Simulator logs showed every Keychain write and delete failing with `-34018` because the unsigned app has no Keychain entitlement.
+- **Decisions:** Keep production and ordinary DEBUG launches on fail-closed Keychain storage. Only an explicit `newslyE2EEnabled` launch may use the app sandbox's durable defaults so process-relaunch and refresh-rotation coverage remain executable without signing.
+- **Changes:** Routed credential-envelope, legacy-token, cached-user, and refresh-attempt reads, writes, and deletes through standard defaults for explicit E2E launches; normal builds retain the existing Keychain path unchanged.
+- **Validation:** Both previously failing authenticated lifecycle UI tests passed under the exact unsigned release command. `git diff --check` passed.
+- **Remaining:** Rerun the complete Python, native iOS, and Maestro release gates on the resulting commit before push.
+- **Commits:** This release-gate correction commit.
+
 ### 2026-08-29 — `main` — Newsbuddy logo/brand exploration site
 
 - **Status:** Complete
