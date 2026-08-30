@@ -1,0 +1,170 @@
+window.PALETTES = {
+  "01-enso-paper": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#b2a99a",
+      "#e7cdbb"
+    ],
+    "accent": "#e7cdbb",
+    "accent_strong": "#ce8756",
+    "ink": "#564d3f"
+  },
+  "02-origami-crane": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#7ea64c",
+      "#d6c79d"
+    ],
+    "accent": "#d6c79d",
+    "accent_strong": "#bc9d46",
+    "ink": "#394d1f"
+  },
+  "03-hinomaru-fold": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#f46c09",
+      "#ef8e40"
+    ],
+    "accent": "#f46c09",
+    "accent_strong": "#f46c09",
+    "ink": "#712f00"
+  },
+  "04-mochi-buddy": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#fecbad",
+      "#c0a191"
+    ],
+    "accent": "#fecbad",
+    "accent_strong": "#fe7a2b",
+    "ink": "#634434"
+  },
+  "05-kamon-news": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#4c607b",
+      "#808fa0",
+      "#adb4bb",
+      "#cbcecd"
+    ],
+    "accent": "#4c607b",
+    "accent_strong": "#4c607b",
+    "ink": "#4c607b"
+  },
+  "06-seigaiha-n": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#98d5e4",
+      "#75c2d8",
+      "#bee3e6"
+    ],
+    "accent": "#98d5e4",
+    "accent_strong": "#32b6d7",
+    "ink": "#1a657b"
+  },
+  "07-torii-bubble": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#a8a49f",
+      "#f37e6e",
+      "#d29186"
+    ],
+    "accent": "#f37e6e",
+    "accent_strong": "#f32003",
+    "ink": "#9c1402"
+  },
+  "08-daruma-reader": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#e27268",
+      "#e89588"
+    ],
+    "accent": "#e27268",
+    "accent_strong": "#e27268",
+    "ink": "#841910"
+  },
+  "09-washi-bubble": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#d0c5d7"
+    ],
+    "accent": "#d0c5d7",
+    "accent_strong": "#9578a7",
+    "ink": "#614970"
+  },
+  "10-sumie-bird": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#7c7873",
+      "#d3bd94",
+      "#e5d7bf",
+      "#9c9487"
+    ],
+    "accent": "#e5d7bf",
+    "accent_strong": "#c7a05e",
+    "ink": "#383633"
+  },
+  "11-hanko-seal": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#fd6b55",
+      "#f9b39f"
+    ],
+    "accent": "#fd6b55",
+    "accent_strong": "#fd6b55",
+    "ink": "#981300"
+  },
+  "12-lantern-glow": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#8a6b77",
+      "#c39283",
+      "#f2c89d"
+    ],
+    "accent": "#f2c89d",
+    "accent_strong": "#f18c26",
+    "ink": "#3f2f35"
+  },
+  "13-shiba-buddy": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#dcb285",
+      "#e5ceb3",
+      "#b18e6c"
+    ],
+    "accent": "#dcb285",
+    "accent_strong": "#ca7e2c",
+    "ink": "#563f29"
+  },
+  "14-wave-page": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#eedbbe",
+      "#afd2b3"
+    ],
+    "accent": "#eedbbe",
+    "accent_strong": "#dca44e",
+    "ink": "#3a7241"
+  },
+  "15-tsuki-fold": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#4e70a1",
+      "#fee8b7",
+      "#c6c0ae"
+    ],
+    "accent": "#fee8b7",
+    "accent_strong": "#ffbf32",
+    "ink": "#4e70a1"
+  },
+  "16-asanoha-burst": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#8daa84",
+      "#f4b2a0"
+    ],
+    "accent": "#f4b2a0",
+    "accent_strong": "#f45225",
+    "ink": "#3c5235"
+  }
+};

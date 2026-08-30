@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Newsbuddy — Brand Exploration · August 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;600;800&family=Zen+Maru+Gothic:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f7f1e6;
+    --paper-deep: #efe6d6;
+    --ink: #3a352e;
+    --ink-soft: #857c6e;
+    --line: #e0d5c2;
+    --accent: #d98a7f;
+    --radius-icon: 22.4%;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Zen Maru Gothic", sans-serif;
+    line-height: 1.6;
+    /* subtle washi grain */
+    background-image:
+      radial-gradient(ellipse 1200px 800px at 80% -10%, rgba(217,138,127,0.07), transparent),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.4 0 0 0 0 0.36 0 0 0 0 0.3 0 0 0 0.035 0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  ::selection { background: #f4cfc8; }
+
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 0 32px; }
+
+  /* ---------- hero ---------- */
+  header.hero { padding: 96px 0 64px; position: relative; overflow: hidden; }
+  .hero .jp {
+    font-family: "Shippori Mincho", serif;
+    position: absolute; right: -8px; top: 30px;
+    font-size: 190px; line-height: 0.95; color: rgba(58,53,46,0.055);
+    writing-mode: vertical-rl; pointer-events: none; user-select: none;
+  }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-soft); font-weight: 700;
+  }
+  .kicker::before { content: ""; width: 34px; height: 2px; background: var(--accent); }
+  h1 {
+    font-family: "Shippori Mincho", serif;
+    font-size: clamp(44px, 7vw, 84px);
+    font-weight: 800; line-height: 1.05; letter-spacing: -0.01em;
+    margin: 18px 0 22px; max-width: 14ch;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .hero p.lede { max-width: 60ch; font-size: 17px; color: var(--ink-soft); }
+  .hero .meta { margin-top: 28px; display: flex; gap: 26px; flex-wrap: wrap; font-size: 13.5px; color: var(--ink-soft); }
+  .hero .meta b { color: var(--ink); font-weight: 700; }
+
+  /* ---------- overview grid ---------- */
+  section.overview { padding: 26px 0 70px; }
+  .sec-title {
+    font-family: "Shippori Mincho", serif; font-size: 27px; font-weight: 600;
+    display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px;
+  }
+  .sec-title .jp-small { font-size: 15px; color: var(--ink-soft); font-weight: 500; }
+  .sec-sub { color: var(--ink-soft); font-size: 15px; margin-bottom: 30px; max-width: 66ch; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 22px;
+  }
+  .grid a { text-decoration: none; color: inherit; text-align: center; display: block; }
+  .grid .tile {
+    aspect-ratio: 1; border-radius: var(--radius-icon); overflow: hidden;
+    box-shadow: 0 1px 2px rgba(58,53,46,0.10), 0 10px 24px -12px rgba(58,53,46,0.22);
+    transition: transform 0.25s cubic-bezier(.3,1.4,.4,1), box-shadow 0.25s;
+    border: 1px solid rgba(58,53,46,0.06);
+  }
+  .grid a:hover .tile { transform: translateY(-4px) scale(1.03); box-shadow: 0 2px 3px rgba(58,53,46,0.10), 0 18px 34px -12px rgba(58,53,46,0.30); }
+  .grid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .grid .cap { margin-top: 10px; font-size: 12.5px; color: var(--ink-soft); font-weight: 500; }
+  .grid .cap b { display: block; color: var(--ink); font-weight: 700; font-size: 13px; }
+
+  /* ---------- concept sections ---------- */
+  .concept {
+    padding: 66px 0;
+    border-top: 1px solid var(--line);
+  }
+  .concept-head { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; }
+  .concept-num {
+    font-family: "Shippori Mincho", serif; font-size: 15px; font-weight: 600;
+    color: var(--c-accent-strong, var(--accent)); letter-spacing: 0.12em;
+  }
+  .concept h2 { font-family: "Shippori Mincho", serif; font-size: 34px; font-weight: 600; }
+  .concept .model-tag {
+    font-size: 11.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-soft); border: 1px solid var(--line); border-radius: 99px; padding: 3px 12px;
+    background: rgba(255,255,255,0.45);
+  }
+  .concept .desc { color: var(--ink-soft); max-width: 68ch; font-size: 15.5px; margin-bottom: 34px; }
+
+  .concept-body {
+    display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 44px; align-items: start;
+  }
+  @media (max-width: 900px) { .concept-body { grid-template-columns: 1fr; } }
+
+  .art-col .main-art {
+    border-radius: 20px; overflow: hidden; border: 1px solid rgba(58,53,46,0.08);
+    box-shadow: 0 14px 40px -18px rgba(58,53,46,0.28);
+    background: #fff;
+  }
+  .art-col .main-art img { width: 100%; display: block; }
+
+  .icon-row { display: flex; align-items: flex-end; gap: 22px; margin-top: 26px; }
+  .icon-row .ic { border-radius: var(--radius-icon); overflow: hidden; box-shadow: 0 6px 18px -8px rgba(58,53,46,0.35); border: 1px solid rgba(58,53,46,0.07); }
+  .icon-row img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .ic.lg { width: 116px; height: 116px; }
+  .ic.md { width: 72px; height: 72px; }
+  .ic.sm { width: 44px; height: 44px; }
+  .icon-row .homerow { display: flex; flex-direction: column; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-soft); font-weight: 500; }
+
+  .palette { display: flex; gap: 0; margin-top: 26px; border-radius: 14px; overflow: hidden; border: 1px solid rgba(58,53,46,0.10); height: 74px; }
+  .palette .sw { flex: 1; position: relative; cursor: pointer; transition: flex 0.25s; }
+  .palette .sw:hover { flex: 1.7; }
+  .palette .sw span {
+    position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%);
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
+    padding: 2px 7px; border-radius: 6px; background: rgba(255,255,255,0.82); color: #3a352e;
+    white-space: nowrap; font-family: "Zen Kaku Gothic New", monospace;
+  }
+  .role-row { display: flex; gap: 18px; margin-top: 12px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
+  .role-row .role { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+  .role-row .dot { width: 12px; height: 12px; border-radius: 4px; border: 1px solid rgba(58,53,46,0.15); }
+
+  /* ---------- phone mock ---------- */
+  .phone-col { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+  .phone {
+    width: 300px; border-radius: 44px; padding: 12px;
+    background: #2e2a25;
+    box-shadow: 0 24px 60px -20px rgba(46,42,37,0.5), inset 0 0 0 2px #4a443c;
+  }
+  .screen {
+    border-radius: 34px; overflow: hidden;
+    background: var(--c-bg, #faf6ee);
+    color: var(--c-ink, #3a352e);
+    font-family: "Zen Kaku Gothic New", "Zen Maru Gothic", sans-serif;
+  }
+  .statusbar { display: flex; justify-content: space-between; padding: 12px 22px 4px; font-size: 11px; font-weight: 700; color: var(--c-ink); }
+  .app-head { padding: 12px 20px 4px; }
+  .app-head .day { font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; color: var(--c-accent-strong); }
+  .app-head h3 { font-family: "Shippori Mincho", serif; font-size: 23px; font-weight: 800; color: var(--c-ink); line-height: 1.2; margin-top: 2px; }
+  .app-head .progress { margin-top: 10px; height: 4px; border-radius: 4px; background: var(--c-tint-2); overflow: hidden; }
+  .app-head .progress i { display: block; height: 100%; width: 62%; border-radius: 4px; background: var(--c-accent-strong); }
+
+  .hero-card { margin: 14px 16px 0; border-radius: 18px; overflow: hidden; background: var(--c-card, #fff); box-shadow: 0 6px 18px -10px rgba(58,53,46,0.25); }
+  .hero-card .img { height: 92px; background: linear-gradient(120deg, var(--c-tint-1), var(--c-tint-2) 55%, var(--c-tint-3)); position: relative; }
+  .hero-card .img::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(circle at 78% 30%, var(--c-accent) 0 16px, transparent 17px),
+                radial-gradient(circle at 78% 30%, var(--c-accent-soft) 22px, transparent 23px);
+    opacity: 0.85;
+  }
+  .hero-card .pad { padding: 12px 14px 14px; }
+  .chip { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--c-accent-strong); background: var(--c-tint-1); padding: 3px 9px; border-radius: 99px; }
+  .hero-card h4 { font-size: 14.5px; line-height: 1.35; font-weight: 700; margin-top: 7px; color: var(--c-ink); }
+  .hero-card p { font-size: 11px; color: var(--c-ink-soft); margin-top: 4px; }
+
+  .row-card { display: flex; align-items: center; gap: 11px; margin: 10px 16px 0; padding: 10px 12px; border-radius: 14px; background: var(--c-card); }
+  .row-card .thumb { width: 40px; height: 40px; border-radius: 11px; flex-shrink: 0; background: linear-gradient(135deg, var(--c-tint-2), var(--c-tint-1)); position: relative; }
+  .row-card .thumb::after { content: ""; position: absolute; inset: 12px; border-radius: 50%; background: var(--c-accent); opacity: 0.8; }
+  .row-card .tx { min-width: 0; flex: 1; }
+  .row-card .tx b { display: block; font-size: 12px; line-height: 1.35; font-weight: 700; color: var(--c-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-card .tx span { font-size: 10px; color: var(--c-ink-soft); }
+  .row-card .unread { width: 8px; height: 8px; border-radius: 50%; background: var(--c-accent-strong); flex-shrink: 0; }
+  .row-card.read { opacity: 0.62; }
+  .row-card.read .unread { background: transparent; border: 1.5px solid var(--c-ink-soft); width: 7px; height: 7px; }
+
+  .buddy-bubble { margin: 14px 16px 0; display: flex; gap: 9px; align-items: flex-end; }
+  .buddy-bubble .avatar { width: 30px; height: 30px; border-radius: 50%; overflow: hidden; flex-shrink: 0; border: 2px solid var(--c-tint-1); }
+  .buddy-bubble .avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .buddy-bubble .msg {
+    background: var(--c-tint-1); color: var(--c-ink);
+    font-size: 11.5px; line-height: 1.45; padding: 9px 12px; border-radius: 15px 15px 15px 4px;
+  }
+
+  .tabbar {
+    display: flex; justify-content: space-around; align-items: center;
+    margin-top: 16px; padding: 11px 8px 20px; border-top: 1px solid var(--c-tint-2);
+    background: color-mix(in srgb, var(--c-card) 72%, transparent);
+  }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; color: var(--c-ink-soft); }
+  .tab svg { width: 20px; height: 20px; }
+  .tab.active { color: var(--c-accent-strong); }
+
+  .comp-strip { width: 300px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .btn-primary {
+    font-family: inherit; font-size: 12.5px; font-weight: 700; color: var(--c-on-accent, #fff);
+    background: var(--c-accent-strong); border: none; border-radius: 12px; padding: 9px 18px;
+  }
+  .btn-ghost {
+    font-family: inherit; font-size: 12.5px; font-weight: 700; color: var(--c-accent-strong);
+    background: var(--c-tint-1); border: none; border-radius: 12px; padding: 9px 18px;
+  }
+  .tag-chip { font-size: 11px; font-weight: 700; color: var(--c-ink); background: var(--c-tint-2); border-radius: 99px; padding: 5px 13px; }
+  .toggle { width: 40px; height: 24px; border-radius: 99px; background: var(--c-accent-strong); position: relative; }
+  .toggle::after { content: ""; position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+  .comp-note { font-size: 11.5px; color: var(--ink-soft); width: 100%; text-align: center; }
+
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid var(--line); padding: 54px 0 80px; margin-top: 40px; color: var(--ink-soft); font-size: 14px; }
+  footer .jp-foot { font-family: "Shippori Mincho", serif; font-size: 20px; color: var(--ink); margin-bottom: 8px; }
+
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.7s ease, transform 0.7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+</style>
+</head>
+<body>
+
+<header class="hero wrap">
+  <div class="jp">新聞の友</div>
+  <div class="kicker">Brand Exploration · 2026-08-29</div>
+  <h1>Newsbuddy,<br>but make it <em>washi</em>.</h1>
+  <p class="lede">Sixteen logo &amp; app-icon directions exploring a Japanese-leaning aesthetic for the Newsly&nbsp;→&nbsp;Newsbuddy rebrand: abstract, pastel, and friendly — each with a small extracted color kit and a mock of how that kit would flow through the briefing UI.</p>
+  <div class="meta">
+    <span><b>Models</b> — Seedream 5.0 Lite (Runware) · GPT Image 2 (OpenRouter)</span>
+    <span><b>Doctrine</b> — one accent + neutrals per kit</span>
+  </div>
+</header>
+
+<section class="overview wrap">
+  <div class="sec-title">All sixteen at icon size <span class="jp-small">一覧</span></div>
+  <p class="sec-sub">The honest test: how each mark survives the squircle at home-screen scale. Click any tile to jump to its full treatment.</p>
+  <div class="grid" id="overview-grid"></div>
+</section>
+
+<main class="wrap" id="concepts"></main>
+
+<footer>
+  <div class="wrap">
+    <div class="jp-foot">おわり</div>
+    Generated with Seedream 5.0 Lite &amp; GPT Image 2 · palettes extracted per-image with median-cut quantization · regenerate with <code>generate_logos.py</code> + <code>extract_palettes.py</code>.
+  </div>
+</footer>
+
+<script src="palettes.js"></script>
+<script>
+const CONCEPTS = [
+  ["01-enso-paper",  "Ensō &amp; Paper",     "seedream", "A single brush circle — the daily ritual — with a folded page tucked into its opening. The most 'zen' of the set."],
+  ["02-origami-crane","Origami Crane",       "seedream", "A crane folded from newsprint. Classic Japanese symbol of care, abstracted to a handful of facets."],
+  ["03-hinomaru-fold","Hinomaru Fold",       "seedream", "The rising-sun disc with one quadrant peeling back like a turning page. Flag-simple, reads at any size."],
+  ["04-mochi-buddy", "Mochi Buddy",          "gpt-image","The cuddliest option: a round mochi blob peeking over its morning paper. Pure Newsbuddy personality."],
+  ["05-kamon-news",  "Kamon Crest",          "seedream", "A family-crest seal built from three folded pages in rotational symmetry. Formal, editorial, ownable."],
+  ["06-seigaiha-n",  "Seigaiha Wave",        "seedream", "The classic overlapping wave-crest pattern, front wave curling into a broadsheet."],
+  ["07-torii-bubble","Torii Bubble",         "gpt-image","A torii gate that doubles as a speech bubble — news as a threshold you pass through daily."],
+  ["08-daruma-reader","Daruma Reader",       "gpt-image","A serene daruma with a paper glyph for a belly mark. Persistence and daily habit, embodied."],
+  ["09-washi-bubble","Washi Bubble",         "seedream", "A speech bubble folded from washi paper — conversation and newsprint in one crease."],
+  ["10-sumie-bird",  "Sumi-e Bird",          "gpt-image","A messenger bird in two or three ink strokes, carrying the news. Quietest, most literary mark."],
+  ["11-hanko-seal",  "Hanko Seal",           "seedream", "A stamped seal impression with a pinwheel of folded corners. Feels like a maker's mark."],
+  ["12-lantern-glow","Lantern Glow",         "gpt-image","A chochin lantern whose ribs read as lines of text. Warmth and evening-briefing energy."],
+  ["13-shiba-buddy", "Shiba Buddy",          "gpt-image","A minimal shiba face wearing a folded newspaper hat. The mascot-forward direction."],
+  ["14-wave-page",   "Wave &amp; Page",      "seedream", "A Hokusai curl whose foam becomes fluttering pages. The most dynamic composition."],
+  ["15-tsuki-fold",  "Tsuki Fold",           "gpt-image","A crescent moon curled from a sheet of paper, asleep. Perfect for the night-before briefing."],
+  ["16-asanoha-burst","Asanoha Burst",       "seedream", "The hemp-leaf star with its core folding open like a paper. Geometric, pattern-ready."],
+];
+
+const P = window.PALETTES || {};
+
+function mix(hex, hex2, t) {
+  const a = hex.match(/\w\w/g).map(x => parseInt(x, 16));
+  const b = hex2.match(/\w\w/g).map(x => parseInt(x, 16));
+  return "#" + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, "0")).join("");
+}
+function luma(hex) {
+  const [r,g,b] = hex.match(/\w\w/g).map(x => parseInt(x,16)/255);
+  return 0.2126*r + 0.7152*g + 0.0722*b;
+}
+
+const TABS = [
+  ["Briefing", "M4 5h12v2.5H4zM4 9h12v1.8H4zM4 12.2h8v1.8H4z"],
+  ["Library",  "M4 4h3.5v12H4zM9 4h3.5v12H9zM14 5l2.8 10.6-2.4.6L11.6 5.7z"],
+  ["Buddy",    "M10 3a6 6 0 016 6c0 3.3-2.7 6-6 6-.8 0-1.6-.2-2.3-.5L4 16l1.6-3.2A6 6 0 1110 3z"],
+];
+
+const grid = document.getElementById("overview-grid");
+const main = document.getElementById("concepts");
+
+CONCEPTS.forEach(([id, title, model, desc], idx) => {
+  const pal = P[id];
+  if (!pal) return;
+  const num = String(idx + 1).padStart(2, "0");
+  const bg = pal.bg, accent = pal.accent, strong = pal.accent_strong, ink = pal.ink;
+  const card = mix(bg, "#ffffff", 0.55);
+  const tint1 = mix(accent, bg, 0.72);
+  const tint2 = mix(accent, bg, 0.85);
+  const tint3 = mix(bg, "#ffffff", 0.3);
+  const inkSoft = mix(ink, bg, 0.45);
+  const onAccent = luma(strong) > 0.55 ? mix(strong, "#000000", 0.72) : "#ffffff";
+
+  grid.insertAdjacentHTML("beforeend", `
+    <a href="#c-${id}"><div class="tile"><img src="images/${id}.png" alt="${title}"></div>
+    <div class="cap"><b>${num}</b>${title}</div></a>`);
+
+  const swatches = [bg, ...pal.swatches].slice(0, 5).map(hx =>
+    `<div class="sw" style="background:${hx}" title="${hx}"><span>${hx}</span></div>`).join("");
+
+  const tabs = TABS.map(([name, d], i) => `
+    <div class="tab ${i === 0 ? "active" : ""}">
+      <svg viewBox="0 0 20 20" fill="currentColor"><path d="${d}"/></svg>${name}
+    </div>`).join("");
+
+  main.insertAdjacentHTML("beforeend", `
+  <section class="concept reveal" id="c-${id}" style="
+      --c-bg:${bg}; --c-card:${card}; --c-ink:${ink}; --c-ink-soft:${inkSoft};
+      --c-accent:${accent}; --c-accent-strong:${strong}; --c-accent-soft:${mix(accent, bg, 0.5)};
+      --c-tint-1:${tint1}; --c-tint-2:${tint2}; --c-tint-3:${tint3}; --c-on-accent:${onAccent};">
+    <div class="concept-head">
+      <span class="concept-num">№ ${num}</span>
+      <h2>${title}</h2>
+      <span class="model-tag">${model === "seedream" ? "Seedream 5.0" : "GPT Image 2"}</span>
+    </div>
+    <p class="desc">${desc}</p>
+    <div class="concept-body">
+      <div class="art-col">
+        <div class="main-art"><img src="images/${id}.png" alt="${title} logo" loading="lazy"></div>
+        <div class="icon-row">
+          <div class="homerow"><div class="ic lg"><img src="images/${id}.png" alt="" loading="lazy"></div>App Store</div>
+          <div class="homerow"><div class="ic md"><img src="images/${id}.png" alt="" loading="lazy"></div>Home</div>
+          <div class="homerow"><div class="ic sm"><img src="images/${id}.png" alt="" loading="lazy"></div>Settings</div>
+        </div>
+        <div class="palette">${swatches}</div>
+        <div class="role-row">
+          <span class="role"><i class="dot" style="background:${bg}"></i>surface</span>
+          <span class="role"><i class="dot" style="background:${accent}"></i>accent</span>
+          <span class="role"><i class="dot" style="background:${strong}"></i>accent-strong</span>
+          <span class="role"><i class="dot" style="background:${ink}"></i>ink</span>
+        </div>
+      </div>
+      <div class="phone-col">
+        <div class="phone"><div class="screen">
+          <div class="statusbar"><span>9:41</span><span>●●●</span></div>
+          <div class="app-head">
+            <div class="day">Friday · August 29</div>
+            <h3>Your Morning Briefing</h3>
+            <div class="progress"><i></i></div>
+          </div>
+          <div class="hero-card">
+            <div class="img"></div>
+            <div class="pad">
+              <span class="chip">Top story</span>
+              <h4>Markets steady as chip supply talks resume in Osaka</h4>
+              <p>7 min read · 3 sources</p>
+            </div>
+          </div>
+          <div class="row-card">
+            <div class="thumb"></div>
+            <div class="tx"><b>Council approves riverfront housing plan</b><span>Local · 4 min</span></div>
+            <div class="unread"></div>
+          </div>
+          <div class="row-card read">
+            <div class="thumb"></div>
+            <div class="tx"><b>The quiet comeback of the paper notebook</b><span>Culture · 6 min</span></div>
+            <div class="unread"></div>
+          </div>
+          <div class="buddy-bubble">
+            <div class="avatar"><img src="images/${id}.png" alt="" loading="lazy"></div>
+            <div class="msg">Two stories left in today's briefing — the housing one connects to what you read Tuesday.</div>
+          </div>
+          <div class="tabbar">${tabs}</div>
+        </div></div>
+        <div class="comp-strip">
+          <button class="btn-primary">Start briefing</button>
+          <button class="btn-ghost">Save for later</button>
+          <span class="tag-chip">Technology</span>
+          <div class="toggle"></div>
+          <div class="comp-note">Buttons, chips &amp; toggles in this kit</div>
+        </div>
+      </div>
+    </div>
+  </section>`);
+});
+
+const io = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+}), { threshold: 0.08 });
+document.querySelectorAll(".reveal").forEach(el => io.observe(el));
+</script>
+</body>
+</html>
