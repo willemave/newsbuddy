@@ -14,6 +14,9 @@ from app.services.onboarding import (
     AUDIO_PLAN_MODEL,
     DISCOVERY_FALLBACK_MODELS,
     FAST_DISCOVER_MODEL,
+    ONBOARDING_PRIMARY_MODEL,
+    PROFILE_MODEL,
+    VOICE_PARSE_MODEL,
     fast_discover,
 )
 from app.services.onboarding.internal_models import (
@@ -32,13 +35,63 @@ from app.services.onboarding.llm_plans import (
 def test_default_onboarding_fallback_order() -> None:
     assert DISCOVERY_FALLBACK_MODELS == ()
     assert AUDIO_PLAN_FALLBACK_MODELS == ()
+    expected_model = "openrouter:deepseek/deepseek-v4-flash-0731"
+    assert expected_model == ONBOARDING_PRIMARY_MODEL
+    assert expected_model == PROFILE_MODEL
+    assert expected_model == FAST_DISCOVER_MODEL
+    assert expected_model == VOICE_PARSE_MODEL
+    assert expected_model == AUDIO_PLAN_MODEL
+
+
+@pytest.mark.asyncio
+async def test_audio_plan_pins_wafer_with_private_fail_closed_routing(monkeypatch) -> None:
+    observed_settings: dict[str, object] = {}
+
+    class SuccessAgent:
+        async def run(self, _prompt, model_settings=None):  # noqa: ANN001
+            observed_settings.update(model_settings)
+            return SimpleNamespace(
+                data=_AudioPlanOutput(
+                    topic_summary="AI engineering",
+                    inferred_topics=["AI engineering"],
+                    lanes=[
+                        _AudioLane(
+                            name="AI engineering",
+                            goal="Find practical engineering sources",
+                            target="feeds",
+                            queries=["practical AI engineering blogs and feeds"],
+                        )
+                    ],
+                )
+            )
+
+    monkeypatch.setattr(
+        "app.services.onboarding.llm_plans.get_basic_agent",
+        lambda *_args: SuccessAgent(),
+    )
+
+    await _run_audio_plan_with_fallback(prompt="test prompt", timeout_seconds=8)
+
+    assert observed_settings == {
+        "timeout": 8,
+        "openrouter_provider": {
+            "order": ["wafer/fast"],
+            "allow_fallbacks": False,
+            "require_parameters": True,
+            "data_collection": "deny",
+            "zdr": True,
+        },
+        "openrouter_reasoning": {"enabled": False, "exclude": True},
+    }
 
 
 def test_discover_generation_does_not_use_secondary_model(monkeypatch) -> None:
     attempts: list[str] = []
+    observed_settings: list[dict[str, object]] = []
 
     class FailingAgent:
         def run_sync(self, _prompt, model_settings=None):  # noqa: ANN001
+            observed_settings.append(dict(model_settings))
             raise TimeoutError("primary timeout")
 
     class SuccessAgent:
@@ -74,6 +127,19 @@ def test_discover_generation_does_not_use_secondary_model(monkeypatch) -> None:
         )
 
     assert attempts == [FAST_DISCOVER_MODEL]
+    assert observed_settings == [
+        {
+            "timeout": 12,
+            "openrouter_provider": {
+                "order": ["wafer/fast"],
+                "allow_fallbacks": False,
+                "require_parameters": True,
+                "data_collection": "deny",
+                "zdr": True,
+            },
+            "openrouter_reasoning": {"enabled": False, "exclude": True},
+        }
+    ]
 
 
 def test_fast_discover_returns_empty_when_generation_fails(monkeypatch) -> None:

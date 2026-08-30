@@ -1,9 +1,9 @@
 """Shared configuration for onboarding workflows."""
 
-from app.core.model_defaults import FAST_MODEL_SPEC
 from app.services.prompt_library import load_prompt
 
-ONBOARDING_PRIMARY_MODEL = FAST_MODEL_SPEC
+ONBOARDING_PRIMARY_MODEL = "openrouter:deepseek/deepseek-v4-flash-0731"
+ONBOARDING_PROVIDER_TAG = "wafer/fast"
 PROFILE_MODEL = ONBOARDING_PRIMARY_MODEL
 FAST_DISCOVER_MODEL = ONBOARDING_PRIMARY_MODEL
 VOICE_PARSE_MODEL = ONBOARDING_PRIMARY_MODEL

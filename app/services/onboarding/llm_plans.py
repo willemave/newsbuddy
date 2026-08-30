@@ -8,7 +8,6 @@ from typing import Any
 from app.core.logging import get_logger
 from app.models.api.onboarding import (
     OnboardingAudioDiscoverRequest,
-    OnboardingAudioLanePreview,
     OnboardingAudioLanePreviewResponse,
     OnboardingFastDiscoverRequest,
     OnboardingProfileRequest,
@@ -22,6 +21,7 @@ from app.services.onboarding.audio_plan_heuristics import (
     _fallback_audio_lane_plan,
     _normalize_audio_lane_plan_with_metadata,
 )
+from app.services.onboarding.audio_plan_preview import serialize_audio_lane_preview
 from app.services.onboarding.config import (
     AUDIO_PLAN_FALLBACK_MODELS,
     AUDIO_PLAN_MODEL,
@@ -29,7 +29,6 @@ from app.services.onboarding.config import (
     AUDIO_PLAN_TIMEOUT_SECONDS,
     DISCOVERY_FALLBACK_MODELS,
     DISCOVERY_PROMPT_MAX_WEB_RESULTS,
-    FAST_DISCOVER_EXA_RESULTS,
     FAST_DISCOVER_MODEL,
     FAST_DISCOVER_SYSTEM_PROMPT,
     ONBOARDING_PRIMARY_MODEL,
@@ -42,13 +41,13 @@ from app.services.onboarding.config import (
     VOICE_PARSE_TIMEOUT_SECONDS,
 )
 from app.services.onboarding.internal_models import (
-    _AudioLane,
     _AudioPlanOutput,
     _DiscoverOutput,
     _DiscoveryWebResult,
     _ProfileOutput,
     _VoiceParseOutput,
 )
+from app.services.onboarding.model_routing import candidate_models, onboarding_model_settings
 from app.services.onboarding.query_heuristics import (
     _build_profile_fallback_summary,
     _build_profile_queries,
@@ -92,7 +91,10 @@ def build_onboarding_profile(request: OnboardingProfileRequest) -> OnboardingPro
     try:
         prompt = _format_profile_prompt(request, results)
         agent = get_basic_agent(PROFILE_MODEL, _ProfileOutput, PROFILE_SYSTEM_PROMPT)
-        result = agent.run_sync(prompt, model_settings={"timeout": PROFILE_TIMEOUT_SECONDS})
+        result = agent.run_sync(
+            prompt,
+            model_settings=onboarding_model_settings(PROFILE_MODEL, PROFILE_TIMEOUT_SECONDS),
+        )
         output = _get_agent_output(result)
         merged_topics = _merge_topics(output.inferred_topics, request.interest_topics)
         return OnboardingProfileResponse(
@@ -157,7 +159,12 @@ def parse_onboarding_voice(request: OnboardingVoiceParseRequest) -> OnboardingVo
         prompt = _format_voice_parse_prompt(transcript, request.locale)
         agent = get_basic_agent(VOICE_PARSE_MODEL, _VoiceParseOutput, VOICE_PARSE_SYSTEM_PROMPT)
         llm_started_at = time.perf_counter()
-        result = agent.run_sync(prompt, model_settings={"timeout": VOICE_PARSE_TIMEOUT_SECONDS})
+        result = agent.run_sync(
+            prompt,
+            model_settings=onboarding_model_settings(
+                VOICE_PARSE_MODEL, VOICE_PARSE_TIMEOUT_SECONDS
+            ),
+        )
         llm_duration_ms = _duration_ms(llm_started_at)
         output = _get_agent_output(result)
     except Exception as exc:  # noqa: BLE001
@@ -235,7 +242,7 @@ async def preview_audio_lane_plan(
     return OnboardingAudioLanePreviewResponse(
         topic_summary=plan.topic_summary,
         inferred_topics=plan.inferred_topics,
-        lanes=[_serialize_audio_lane_preview(lane) for lane in plan.lanes],
+        lanes=[serialize_audio_lane_preview(lane) for lane in plan.lanes],
         used_fallback=used_fallback,
         fallback_reason=fallback_reason,
     )
@@ -298,11 +305,6 @@ def _format_audio_plan_prompt(transcript: str, locale: str | None) -> str:
     )
 
 
-def _candidate_models(primary: str, fallbacks: tuple[str, ...]) -> list[str]:
-    del fallbacks
-    return [primary]
-
-
 def _run_discover_output_with_fallback(
     *,
     prompt: str,
@@ -311,12 +313,15 @@ def _run_discover_output_with_fallback(
     item_id: str | None = None,
 ) -> _DiscoverOutput:
     last_error: Exception | None = None
-    models = _candidate_models(FAST_DISCOVER_MODEL, DISCOVERY_FALLBACK_MODELS)
+    models = candidate_models(FAST_DISCOVER_MODEL, DISCOVERY_FALLBACK_MODELS)
 
     for attempt_index, model_spec in enumerate(models, start=1):
         try:
             agent = get_basic_agent(model_spec, _DiscoverOutput, FAST_DISCOVER_SYSTEM_PROMPT)
-            result = agent.run_sync(prompt, model_settings={"timeout": timeout_seconds})
+            result = agent.run_sync(
+                prompt,
+                model_settings=onboarding_model_settings(model_spec, timeout_seconds),
+            )
             output = _get_agent_output(result)
             if attempt_index > 1:
                 logger.warning(
@@ -361,15 +366,16 @@ async def _run_audio_plan_with_fallback(
     timeout_seconds: int,
 ) -> _AudioPlanOutput:
     last_error: Exception | None = None
-    models = _candidate_models(AUDIO_PLAN_MODEL, AUDIO_PLAN_FALLBACK_MODELS)
+    models = candidate_models(AUDIO_PLAN_MODEL, AUDIO_PLAN_FALLBACK_MODELS)
 
     for attempt_index, model_spec in enumerate(models, start=1):
         try:
             agent = get_basic_agent(model_spec, _AudioPlanOutput, AUDIO_PLAN_SYSTEM_PROMPT)
+            model_settings = onboarding_model_settings(model_spec, timeout_seconds)
             if hasattr(agent, "run"):
-                result = await agent.run(prompt, model_settings={"timeout": timeout_seconds})
+                result = await agent.run(prompt, model_settings=model_settings)
             else:
-                result = agent.run_sync(prompt, model_settings={"timeout": timeout_seconds})
+                result = agent.run_sync(prompt, model_settings=model_settings)
             output = _get_agent_output(result)
             if attempt_index > 1:
                 logger.warning(
@@ -440,17 +446,6 @@ def _format_discovery_prompt(
         profile_summary=request.profile_summary,
         topics=", ".join(request.inferred_topics),
         web_results="\n".join(web_lines),
-    )
-
-
-def _serialize_audio_lane_preview(lane: _AudioLane) -> OnboardingAudioLanePreview:
-    return OnboardingAudioLanePreview(
-        name=lane.name,
-        goal=lane.goal,
-        target=lane.target,
-        queries=list(lane.queries),
-        include_social=lane.target == "reddit",
-        exa_results_per_query=FAST_DISCOVER_EXA_RESULTS,
     )
 
 

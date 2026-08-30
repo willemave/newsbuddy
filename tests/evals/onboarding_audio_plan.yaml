@@ -1,0 +1,11 @@
+suite: onboarding_audio_plan_tool_calls_v1
+cases:
+  - id: technical_and_business
+    transcript: I follow AI engineering, startup strategy, and product leadership.
+    locale: en-US
+  - id: science_and_practical_business
+    transcript: I want better biology and psychology podcasts with practical business ideas.
+    locale: en-US
+  - id: policy_and_economics
+    transcript: Help me find geopolitics analysis, macroeconomics explainers, and policy debate.
+    locale: en-US
