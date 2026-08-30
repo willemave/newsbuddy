@@ -180,7 +180,22 @@ jobs:
           printf '%s' "$GHCR_TOKEN" | ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker login '$REGISTRY' --username '$GHCR_USERNAME' --password-stdin >/dev/null"
 
           echo "→ Pulling image on remote host"
-          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker pull '$IMAGE_TAG'"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s -- "$IMAGE_TAG" <<'REMOTE_PULL'
+          set -euo pipefail
+          image_tag="$1"
+          for attempt in 1 2 3 4 5; do
+            if docker pull "$image_tag"; then
+              exit 0
+            fi
+            if [[ "$attempt" -eq 5 ]]; then
+              echo "docker pull failed after $attempt attempts" >&2
+              exit 1
+            fi
+            sleep_seconds=$((attempt * 5))
+            echo "docker pull attempt $attempt failed; retrying in ${sleep_seconds}s" >&2
+            sleep "$sleep_seconds"
+          done
+          REMOTE_PULL
 
           echo "→ Deploying inactive API slot"
           ssh "${SSH_OPTS[@]}" "$REMOTE" \
