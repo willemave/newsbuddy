@@ -140,8 +140,8 @@ final class KeychainManager: AuthTokenStore {
 
     private func deleteTokenReportingStatus(account: String) -> Bool {
         if E2ETestLaunch.isEnabled {
-            SharedContainer.userDefaults.removeObject(forKey: account)
-            return SharedContainer.userDefaults.object(forKey: account) == nil
+            e2eCredentialDefaults.removeObject(forKey: account)
+            return e2eCredentialDefaults.object(forKey: account) == nil
         }
         var succeeded = true
         if let accessGroup = currentAccessGroup() {
@@ -255,16 +255,24 @@ final class KeychainManager: AuthTokenStore {
     }
 
     /// The native release gate builds without code signing, so Simulator
-    /// Keychain calls cannot succeed. Explicit DEBUG E2E launches use the app's
-    /// sandboxed defaults to exercise credential rotation and process-relaunch
-    /// persistence without weakening fail-closed behavior in normal builds.
+    /// Keychain calls cannot succeed. Explicit DEBUG E2E launches use the App
+    /// Group defaults to exercise credential rotation, process relaunch, and
+    /// extension sharing without weakening fail-closed behavior in normal builds.
     private func saveE2EToken(_ token: String, account: String) -> Bool {
-        SharedContainer.userDefaults.set(token, forKey: account)
-        return SharedContainer.userDefaults.string(forKey: account) == token
+        e2eCredentialDefaults.set(token, forKey: account)
+        return e2eCredentialDefaults.string(forKey: account) == token
     }
 
     private func e2eToken(account: String) -> String? {
-        SharedContainer.userDefaults.string(forKey: account)
+        e2eCredentialDefaults.string(forKey: account)
+    }
+
+    private var e2eCredentialDefaults: UserDefaults {
+        guard let appGroupID = SharedContainer.appGroupId,
+              let defaults = UserDefaults(suiteName: appGroupID) else {
+            return .standard
+        }
+        return defaults
     }
 
     private func deleteToken(account: String, accessGroup: String?) -> OSStatus {

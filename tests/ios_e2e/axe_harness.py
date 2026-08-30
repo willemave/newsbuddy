@@ -83,6 +83,24 @@ class AxeRunner:
             text=True,
             check=False,
         )
+        # Simulator preference domains can survive uninstall. Clear both the
+        # app's persisted E2E launch overrides and the App Group state through
+        # which the app and Share Extension deliberately exchange credentials.
+        for defaults_domain in (self.bundle_id, "group.com.newsly"):
+            subprocess.run(
+                [
+                    "xcrun",
+                    "simctl",
+                    "spawn",
+                    self.udid,
+                    "defaults",
+                    "delete",
+                    defaults_domain,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
         self._run(["xcrun", "simctl", "keychain", self.udid, "reset"])
         self._run(["xcrun", "simctl", "install", self.udid, str(self.app_bundle_path)])
 
