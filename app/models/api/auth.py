@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.api.users import UserResponse
 from app.models.contracts import ReadingExperience
@@ -38,7 +40,21 @@ class TokenResponse(BaseModel):
 class RefreshTokenRequest(BaseModel):
     """Request schema for token refresh."""
 
-    refresh_token: str
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str = Field(..., min_length=1)
+    attempt_id: str | None = Field(default=None, min_length=36, max_length=36)
+
+    @field_validator("attempt_id")
+    @classmethod
+    def normalize_attempt_id(cls, value: str | None) -> str | None:
+        """Store one canonical UUID spelling for replay comparisons."""
+        if value is None:
+            return None
+        try:
+            return str(UUID(value))
+        except ValueError as exc:
+            raise ValueError("attempt_id must be a UUID") from exc
 
 
 class DeleteAccountRequest(BaseModel):

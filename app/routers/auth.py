@@ -37,7 +37,7 @@ from app.services.active_users import lock_active_user
 from app.services.apple_account import exchange_and_revoke_apple_authorization
 from app.services.gateways.task_queue_gateway import get_task_queue_gateway
 from app.services.queue import TaskEnqueueRequest
-from app.services.refresh_token_rotation import consume_refresh_token
+from app.services.refresh_token_rotation import RefreshTokenReplayError, rotate_refresh_token
 from app.services.x_integration import has_active_x_connection, normalize_twitter_username
 
 logger = get_logger(__name__)
@@ -357,16 +357,32 @@ def refresh_token(
     if current_user_id is None:
         raise credentials_exception
 
-    # Generate new access token AND new refresh token (token rotation)
-    if not consume_refresh_token(
-        db,
-        raw_token=request.refresh_token,
-        payload=payload,
-        user_id=current_user_id,
-    ):
+    try:
+        rotated_tokens = rotate_refresh_token(
+            db,
+            raw_token=request.refresh_token,
+            payload=payload,
+            user_id=current_user_id,
+            attempt_id=request.attempt_id,
+        )
+    except RefreshTokenReplayError as exc:
+        logger.exception(
+            "Stored token refresh replay could not be decoded",
+            extra=build_log_extra(
+                component="auth",
+                operation="refresh_token",
+                event_name="auth.refresh_token",
+                status="failed",
+                user_id=current_user_id,
+                context_data={"failure_class": "invalid_replay_payload"},
+            ),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Token refresh is temporarily unavailable",
+        ) from exc
+    if rotated_tokens is None:
         raise credentials_exception
-    access_token = create_access_token(current_user_id)
-    new_refresh_token = create_refresh_token(current_user_id)
 
     logger.info(
         "Token refresh completed",
@@ -376,13 +392,16 @@ def refresh_token(
             event_name="auth.refresh_token",
             status="completed",
             user_id=current_user_id,
-            context_data={"auth_method": "refresh_token"},
+            context_data={
+                "auth_method": "refresh_token",
+                "replayed": rotated_tokens.replayed,
+            },
         ),
     )
 
     return AccessTokenResponse(
-        access_token=access_token,
-        refresh_token=new_refresh_token,
+        access_token=rotated_tokens.access_token,
+        refresh_token=rotated_tokens.refresh_token,
     )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.sql import func
 
 from app.core.db import Base
@@ -26,5 +26,11 @@ class ConsumedRefreshToken(Base):
         nullable=False,
         server_default=func.now(),
     )
+    attempt_id = Column(String(36), nullable=True)
+    replay_payload_encrypted = Column(Text, nullable=True)
+    replay_expires_at = Column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (Index("idx_consumed_refresh_tokens_expiry", "expires_at"),)
+    __table_args__ = (
+        Index("idx_consumed_refresh_tokens_expiry", "expires_at"),
+        Index("idx_consumed_refresh_tokens_replay_expiry", "replay_expires_at"),
+    )

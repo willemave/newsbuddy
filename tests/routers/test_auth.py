@@ -1,20 +1,23 @@
 """Tests for authentication endpoints."""
 
+import hashlib
 import re
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, Event
+from threading import Barrier, Event, Lock
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.db import get_db_session
 from app.core.security import create_access_token, create_refresh_token
 from app.models.api.auth import RefreshTokenRequest
 from app.models.contracts import TaskType
-from app.models.db import ProcessingTask, User, UserIntegrationConnection
+from app.models.db import ConsumedRefreshToken, ProcessingTask, User, UserIntegrationConnection
 from app.routers import auth as auth_router
-from app.services.refresh_token_rotation import consume_refresh_token
+from app.services.refresh_token_rotation import rotate_refresh_token
 
 
 @pytest.fixture
@@ -30,6 +33,24 @@ def production_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.core.settings import get_settings
 
     monkeypatch.setattr(get_settings(), "debug", False)
+
+
+@pytest.fixture
+def isolated_db_override(db_session_factory):
+    """Give concurrent TestClient requests independent committing sessions."""
+
+    def override() -> Iterator[Session]:
+        session = db_session_factory()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    return override
 
 
 def test_apple_signin_new_user(auth_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,8 +263,208 @@ def test_refresh_token_rotation(
     assert replay.status_code == 401
 
 
+def test_refresh_token_replays_the_same_pair_for_the_same_attempt(
+    auth_client: TestClient,
+    db_session: Session,
+    user_factory,
+) -> None:
+    user = user_factory(
+        apple_id="001234.replay",
+        email="replay@icloud.com",
+        is_active=True,
+    )
+    refresh_token = create_refresh_token(user.id)
+    attempt_id = str(uuid4())
+
+    first = auth_client.post(
+        "/auth/refresh",
+        json={"refresh_token": refresh_token, "attempt_id": attempt_id},
+    )
+    replay = auth_client.post(
+        "/auth/refresh",
+        json={"refresh_token": refresh_token, "attempt_id": attempt_id.upper()},
+    )
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    assert replay.json() == first.json()
+    record = db_session.get(
+        ConsumedRefreshToken,
+        hashlib.sha256(refresh_token.encode("utf-8")).hexdigest(),
+    )
+    assert record is not None
+    assert record.attempt_id == attempt_id
+    assert record.replay_payload_encrypted is not None
+    assert first.json()["access_token"] not in record.replay_payload_encrypted
+    assert first.json()["refresh_token"] not in record.replay_payload_encrypted
+
+
+def test_refresh_token_rejects_a_different_attempt_after_rotation(
+    auth_client: TestClient,
+    user_factory,
+) -> None:
+    user = user_factory(
+        apple_id="001234.replay-mismatch",
+        email="replay-mismatch@icloud.com",
+        is_active=True,
+    )
+    refresh_token = create_refresh_token(user.id)
+
+    first = auth_client.post(
+        "/auth/refresh",
+        json={"refresh_token": refresh_token, "attempt_id": str(uuid4())},
+    )
+    mismatch = auth_client.post(
+        "/auth/refresh",
+        json={"refresh_token": refresh_token, "attempt_id": str(uuid4())},
+    )
+
+    assert first.status_code == 200
+    assert mismatch.status_code == 401
+    assert mismatch.json() == {"detail": "Invalid refresh token"}
+
+
+def test_refresh_token_same_attempt_converges_concurrently(
+    client_factory,
+    isolated_db_override,
+    user_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = user_factory(
+        apple_id="001234.concurrent-replay",
+        email="concurrent-replay@icloud.com",
+        is_active=True,
+    )
+    refresh_token = create_refresh_token(user.id)
+    attempt_id = str(uuid4())
+    barrier = Barrier(2)
+    mint_lock = Lock()
+    mint_count = 0
+    original_create_refresh_token = create_refresh_token
+
+    def counted_create_refresh_token(user_id: int) -> str:
+        nonlocal mint_count
+        with mint_lock:
+            mint_count += 1
+        return original_create_refresh_token(user_id)
+
+    monkeypatch.setattr(
+        "app.services.refresh_token_rotation.create_refresh_token",
+        counted_create_refresh_token,
+    )
+
+    def exchange(client: TestClient) -> tuple[int, dict[str, object]]:
+        barrier.wait(timeout=5)
+        response = client.post(
+            "/auth/refresh",
+            json={"refresh_token": refresh_token, "attempt_id": attempt_id},
+        )
+        return response.status_code, response.json()
+
+    with (
+        client_factory(
+            authenticate=False,
+            extra_overrides={get_db_session: isolated_db_override},
+        ) as first_client,
+        client_factory(
+            authenticate=False,
+            extra_overrides={get_db_session: isolated_db_override},
+        ) as second_client,
+        ThreadPoolExecutor(max_workers=2) as executor,
+    ):
+        futures = [
+            executor.submit(exchange, first_client),
+            executor.submit(exchange, second_client),
+        ]
+        results = [future.result(timeout=10) for future in futures]
+
+    assert [status_code for status_code, _payload in results] == [200, 200]
+    assert results[0][1] == results[1][1]
+    assert mint_count == 1
+
+
+def test_refresh_token_rejects_malformed_attempt_id(
+    auth_client: TestClient,
+    user_factory,
+) -> None:
+    user = user_factory(
+        apple_id="001234.bad-attempt",
+        email="bad-attempt@icloud.com",
+        is_active=True,
+    )
+
+    response = auth_client.post(
+        "/auth/refresh",
+        json={"refresh_token": create_refresh_token(user.id), "attempt_id": "not-a-uuid"},
+    )
+
+    assert response.status_code == 422
+    assert "body" not in response.json()
+
+
+def test_refresh_token_rejects_unknown_attempt_field(
+    auth_client: TestClient,
+    user_factory,
+) -> None:
+    user = user_factory(
+        apple_id="001234.unknown-attempt-field",
+        email="unknown-attempt-field@icloud.com",
+        is_active=True,
+    )
+
+    response = auth_client.post(
+        "/auth/refresh",
+        json={
+            "refresh_token": create_refresh_token(user.id),
+            "attemptID": str(uuid4()),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "body" not in response.json()
+
+
+def test_corrupt_refresh_replay_fails_closed_without_minting(
+    auth_client: TestClient,
+    db_session: Session,
+    user_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = user_factory(
+        apple_id="001234.corrupt-replay",
+        email="corrupt-replay@icloud.com",
+        is_active=True,
+    )
+    refresh_token = create_refresh_token(user.id)
+    attempt_id = str(uuid4())
+    first = auth_client.post(
+        "/auth/refresh",
+        json={"refresh_token": refresh_token, "attempt_id": attempt_id},
+    )
+    assert first.status_code == 200
+    record = db_session.query(ConsumedRefreshToken).one()
+    record.replay_payload_encrypted = "not-a-fernet-payload"
+    db_session.commit()
+
+    def fail_if_minted(_user_id: int) -> str:
+        raise AssertionError("A replay must not mint another refresh token")
+
+    monkeypatch.setattr(
+        "app.services.refresh_token_rotation.create_refresh_token",
+        fail_if_minted,
+    )
+    replay = auth_client.post(
+        "/auth/refresh",
+        json={"refresh_token": refresh_token, "attempt_id": attempt_id},
+    )
+
+    assert replay.status_code == 503
+    assert replay.json() == {"detail": "Token refresh is temporarily unavailable"}
+
+
 def test_refresh_token_can_only_be_consumed_once_concurrently(
     client_factory,
+    isolated_db_override,
     user_factory,
 ) -> None:
     user = user_factory(
@@ -262,8 +483,14 @@ def test_refresh_token_can_only_be_consumed_once_concurrently(
         ).status_code
 
     with (
-        client_factory(authenticate=False) as first_client,
-        client_factory(authenticate=False) as second_client,
+        client_factory(
+            authenticate=False,
+            extra_overrides={get_db_session: isolated_db_override},
+        ) as first_client,
+        client_factory(
+            authenticate=False,
+            extra_overrides={get_db_session: isolated_db_override},
+        ) as second_client,
         ThreadPoolExecutor(max_workers=2) as executor,
     ):
         futures = [
@@ -293,13 +520,13 @@ def test_refresh_rotation_holds_user_lock_until_token_is_consumed(
     release_refresh = Event()
     deletion_locked_user = Event()
 
-    def paused_consume(db, **kwargs):  # noqa: ANN001
+    def paused_rotate(db, **kwargs):  # noqa: ANN001
         refresh_locked_user.set()
         assert deletion_attempted.wait(timeout=5)
         assert release_refresh.wait(timeout=5)
-        return consume_refresh_token(db, **kwargs)
+        return rotate_refresh_token(db, **kwargs)
 
-    monkeypatch.setattr(auth_router, "consume_refresh_token", paused_consume)
+    monkeypatch.setattr(auth_router, "rotate_refresh_token", paused_rotate)
 
     def rotate_token() -> str:
         with db_session_factory() as refresh_db:
