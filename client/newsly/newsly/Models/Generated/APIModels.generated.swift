@@ -3874,25 +3874,31 @@ struct APITokenResponse: Codable {
 
 struct APIRefreshTokenRequest: Codable {
     let refreshToken: String
+    let attemptId: String?
 
     init(
-        refreshToken: String
+        refreshToken: String,
+        attemptId: String? = nil
     ) {
         self.refreshToken = refreshToken
+        self.attemptId = attemptId
     }
 
     enum CodingKeys: String, CodingKey {
         case refreshToken = "refresh_token"
+        case attemptId = "attempt_id"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         refreshToken = try container.decode(String.self, forKey: .refreshToken)
+        attemptId = try container.decodeIfPresent(String.self, forKey: .attemptId)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(refreshToken, forKey: .refreshToken)
+        try container.encodeIfPresent(attemptId, forKey: .attemptId)
     }
 }
 

@@ -148,7 +148,7 @@ references. If any feel worth keeping as recipes, move the pattern into
 `docs/library/operations/` — do not keep executable code as documentation.
 
 ### WP1.3 — One-off evals/probes/experiments
-Delete 17 zero-reference scripts: `evaluate_onboarding_cerebras.py`, `evaluate_feed_detection.py`,
+Delete zero-reference scripts including `evaluate_feed_detection.py`,
 `evaluate_youtube_equivalents.py`, `debug_anthropic_eval_failures.py`,
 `debug_firecrawl_403_urls.py`, `debug_newspaper4k_403_urls.py`,
 `probe_google_vertex_us_central1.py`, `validate_feed_discovery.py`,

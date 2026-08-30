@@ -5360,7 +5360,6 @@
         "enum": [
           "openai",
           "anthropic",
-          "cerebras",
           "openrouter",
           "deep_research"
         ],
@@ -7412,9 +7411,24 @@
         "type": "object"
       },
       "RefreshTokenRequest": {
+        "additionalProperties": false,
         "description": "Request schema for token refresh.",
         "properties": {
+          "attempt_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "minLength": 36,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          },
           "refresh_token": {
+            "minLength": 1,
             "title": "Refresh Token",
             "type": "string"
           }

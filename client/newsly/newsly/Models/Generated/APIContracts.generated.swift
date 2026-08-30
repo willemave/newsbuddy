@@ -1191,7 +1191,6 @@ enum APIChatMessageDisplayType: Codable, Equatable, Hashable {
 enum APILLMProvider: String, Codable, CaseIterable {
     case openai = "openai"
     case anthropic = "anthropic"
-    case cerebras = "cerebras"
     case openrouter = "openrouter"
     case deep_research = "deep_research"
 }
