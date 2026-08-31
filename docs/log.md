@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-31 — `main` — Install architecture guard tools in Rust CI
+
+- **Status:** Complete locally; queued for the replacement release.
+- **Scope:** `.github/workflows/quality-gate.yml`.
+- **Decisions:** Declare `ripgrep` as a Rust quality-job dependency because the architecture and iOS wire-boundary guards invoke `rg`, while GitHub's Ubuntu runner image does not guarantee it.
+- **Changes:** Install the distribution-provided `ripgrep` package before migrations and architecture validation.
+- **Validation:** The pushed quality run reached all four real jobs; both Python islands and native iOS passed, while Rust failed only because `rg` was absent. The complete local release gates are rerun on this replacement commit before push.
+- **Remaining:** None.
+- **Commits:** This commit.
+
 ### 2026-08-31 — `main` — Make the Rust quality workflow compile on GitHub
 
 - **Status:** Complete locally; queued for the replacement release.
