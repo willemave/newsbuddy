@@ -46,7 +46,11 @@ build/
 .derived-data/
 *.png
 !docs/assets/newsbuddy-hero.png
-!client/newsly/newsly/Assets.xcassets/AppIcon.appiconset/*.png
+!docs/brand-exploration-2026-08/**/*.png
+# Derived from build_assets.py; regenerate rather than track.
+docs/brand-exploration-2026-08/build_assets/
+# Every imageset, not just AppIcon — a Contents.json without its PNGs breaks the build.
+!client/newsly/newsly/Assets.xcassets/**/*.png
 !tests/ios_e2e/baselines/
 !tests/ios_e2e/baselines/**/
 !tests/ios_e2e/baselines/**/*.png
@@ -59,8 +63,6 @@ tests/ios_e2e/baselines/**/*_diff.png
 
 # Mac/Linux system files
 .DS_Store
-
-package-lock.json
 
 # Refactor backup and migration files
 .refactor-backup/
