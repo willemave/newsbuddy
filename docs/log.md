@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-31 — `main` — Left-align detail action icons and enlarge the hero
+
+- **Status:** Complete locally; queued for the current release.
+- **Scope:** `DetailActionBar.swift`, `DetailHeroHeader.swift`, `DetailDesign` constants in `ContentDetailPresentationModels.swift`.
+- **Decisions:** Pack the action icons from the leading edge instead of distributing them across the full width, so the row reads as a toolbar rather than a stretched strip. Apply the existing `actionIconOpticalInset` in both header variants so the first glyph lines up with the title margin; previously only the text-only header did this. Raise the hero from 260pt to 320pt and move `topEdgeFade` bounds with it, since those offsets are tuned to the hero height.
+- **Changes:** Dropped `.frame(maxWidth: .infinity)` from `detailActionBarSegment()`; the surrounding `HStack` already left-aligns via its own `maxWidth: .infinity, alignment: .leading`. Added a negative leading inset to the image-hero action bar and switched the text-only bar from `.horizontal` to `.leading` padding, since the trailing inset is meaningless once icons pack left.
+- **Validation:** Built and ran on iPhone 17 Pro (iOS 26.5). Checked the image hero on two saved articles and the text-only hero on a news item; icons align with the title margin in both, and the taller hero also drops the title clear of the floating back button, which previously overlapped it. Grepped for other users of the changed constants — none outside these files.
+- **Remaining:** None.
+- **Commits:** This commit.
+
 ### 2026-08-31 — `codex/rust-backend-migration` — Integrate the Rust migration with current main
 
 - **Status:** Complete locally; not pushed, deployed, or distributed.

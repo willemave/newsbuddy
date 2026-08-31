@@ -122,9 +122,9 @@ struct DetailActionBar: View {
         .textSelection(.disabled)
     }
 
-    /// The ask-the-buddy action, matching `actionIcon`'s metrics so the bar stays evenly
-    /// distributed. Kept separate because the buddy is an asset, not an SF Symbol, and
-    /// carries its own color rather than the bar's tint.
+    /// The ask-the-buddy action, matching `actionIcon`'s metrics so the left-packed bar
+    /// keeps a steady rhythm. Kept separate because the buddy is an asset, not an SF
+    /// Symbol, and carries its own color rather than the bar's tint.
     @ViewBuilder
     private func buddyActionIcon() -> some View {
         Image("BuddyMark")
@@ -186,7 +186,6 @@ struct DetailActionBar: View {
 private extension View {
     func detailActionBarSegment() -> some View {
         self
-            .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
     }
 }

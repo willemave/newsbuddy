@@ -76,6 +76,7 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
                 .appShadow(.overlayText)
 
                 actionBar(true)
+                    .padding(.leading, -DetailHeroHeaderDesign.actionIconOpticalInset)
                     .padding(.top, 2)
 
                 if showsPodcastPlaybackControls {
@@ -131,7 +132,7 @@ struct DetailHeroHeader<ActionBar: View, PodcastControls: View>: View {
 
             actionBar(false)
                 .padding(
-                    .horizontal,
+                    .leading,
                     DetailHeroHeaderDesign.headerHorizontalPadding - DetailHeroHeaderDesign.actionIconOpticalInset
                 )
                 .padding(.top, 2)
@@ -241,7 +242,7 @@ private struct DetailHeroImageAsset: Identifiable {
 
 private enum DetailHeroHeaderDesign {
     static let headerHorizontalPadding: CGFloat = Spacing.appHorizontalMargin
-    static let parallaxHeroHeight: CGFloat = 260
+    static let parallaxHeroHeight: CGFloat = 320
     static let parallaxRate: CGFloat = 0.25
     static let textOnlyTitleTopPadding: CGFloat = 18
     static let textOnlyNewsHeaderTopSpacer: CGFloat = 42
