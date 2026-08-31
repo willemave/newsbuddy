@@ -12,17 +12,16 @@ struct OnboardingProgressHeader: View {
     private let progressStepTotal = 5
 
     var body: some View {
+        // Hairline rules rather than fat capsules — the same 1px vocabulary the reader
+        // uses for its section rules and timeline separators.
         HStack(spacing: 6) {
             ForEach(0..<progressStepTotal, id: \.self) { index in
-                Capsule()
-                    .fill(
-                        index < currentStepInfo.number
-                            ? Color.onboardingText.opacity(0.55)
-                            : Color.onboardingText.opacity(0.14)
-                    )
-                    .frame(height: 4)
+                Rectangle()
+                    .fill(index < currentStepInfo.number ? Color.brandPrimary : Color.outlineVariant)
+                    .frame(height: index < currentStepInfo.number ? 2 : 1)
             }
         }
+        .frame(height: 2)
         .animation(
             AppMotion.respectingReduceMotion(reduceMotion, AppMotion.emphasized),
             value: currentStepInfo.number
@@ -35,7 +34,9 @@ struct OnboardingProgressHeader: View {
 
     private var currentStepInfo: (number: Int, label: String) {
         switch step {
-        case .intro, .choice:
+        case .intro:
+            return (1, "Say hello")
+        case .choice:
             return (1, "Choose your start")
         case .audio, .loading:
             return (2, step == .audio ? "Voice setup" : "Matching sources")

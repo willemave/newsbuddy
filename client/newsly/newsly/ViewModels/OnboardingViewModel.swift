@@ -127,7 +127,7 @@ final class OnboardingViewModel {
         case discoveryPolling
     }
 
-    var step: OnboardingStep = .choice
+    var step: OnboardingStep = .intro
     var suggestions: OnboardingFastDiscoverResponse?
     var selectedSourceKeys: Set<String> = []
     var selectedSubreddits: Set<String> = []

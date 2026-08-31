@@ -16,7 +16,6 @@ struct OnboardingAggregatorsStep: View {
                     onboardingHeaderBlock(
                         eyebrow: "FAST NEWS",
                         title: "Add news aggregators",
-                        subtitle: "Broad headline streams across tech, science, finance, politics, and media.",
                         isLeading: true,
                         titleAccessibilityIdentifier: "onboarding.aggregators.screen"
                     )

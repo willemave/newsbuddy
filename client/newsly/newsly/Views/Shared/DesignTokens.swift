@@ -112,57 +112,20 @@ extension Color {
     // Day section delimiter text (quiet grey)
     static var sectionDelimiter: Color { Color.onSurfaceTertiary }
 
-    // Onboarding and ambient illustration roles.
-    // Aligned with the reader palette (charcoal/slate + single amber accent).
-    // Separate tokens remain because onboarding paints ambient washes the
-    // reader UI never uses.
-    static var onboardingSurface: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.075, green: 0.082, blue: 0.098, alpha: 1.0)  // #131519
-                : UIColor(red: 0.957, green: 0.961, blue: 0.969, alpha: 1.0)  // #f4f5f7
-        })
-    }
-    static var onboardingText: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.898, green: 0.906, blue: 0.925, alpha: 1.0)  // #e5e7ec
-                : UIColor(red: 0.106, green: 0.118, blue: 0.141, alpha: 1.0)  // #1b1e24
-        })
-    }
+    // Onboarding roles. These now resolve straight to the reader palette — onboarding
+    // used to hardcode its own copy of the old surfaces, which is why it drifted off-brand
+    // when the palette changed.
+    static var onboardingSurface: Color { Color.surfacePrimary }
+    static var onboardingText: Color { Color.onSurface }
     static var onboardingSelectionAccent: Color {
         Color.brandPrimary
     }
-    // Ambient wash ramp: amber, bronze, cream — one hue at three intensities.
-    static var onboardingAmbientPrimary: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.369, green: 0.282, blue: 0.125, alpha: 1.0)  // #5e4820
-                : UIColor(red: 0.902, green: 0.773, blue: 0.518, alpha: 1.0)  // #e6c584
-        })
-    }
-    static var onboardingAmbientTertiary: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.478, green: 0.361, blue: 0.141, alpha: 1.0)  // #7a5c24
-                : UIColor(red: 0.831, green: 0.659, blue: 0.384, alpha: 1.0)  // #d4a862
-        })
-    }
-    static var onboardingAmbientQuaternary: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.235, green: 0.196, blue: 0.133, alpha: 1.0)  // #3c3222
-                : UIColor(red: 0.925, green: 0.875, blue: 0.765, alpha: 1.0)  // #ecdfc3
-        })
-    }
-    // Muted echo of the mascot's purple — the one cool note in the ambient wash.
-    static var onboardingAmbientMascot: Color {
-        Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.271, green: 0.216, blue: 0.427, alpha: 1.0)  // #45376d
-                : UIColor(red: 0.812, green: 0.753, blue: 0.929, alpha: 1.0)  // #cfc0ed
-        })
-    }
+    // Ambient accents. The animated watercolor wash these were built for is gone; they
+    // survive as flat palette-derived tints for the few surfaces that still use them.
+    static var onboardingAmbientPrimary: Color { Color.surfaceContainer }
+    static var onboardingAmbientTertiary: Color { Color.brandPrimary }
+    static var onboardingAmbientQuaternary: Color { Color.surfaceTertiary }
+    static var onboardingAmbientMascot: Color { Color.brandPrimaryStrong }
 }
 
 // MARK: - Typography
@@ -236,8 +199,10 @@ extension Font {
     static let editorialMeta = Font.appSans(size: 11, relativeTo: .caption2, weight: .bold)
 
     // Watercolor typography (Landing & Onboarding) follows the app title/body split.
-    static let watercolorDisplay = Font.appSerif(size: 54, relativeTo: .largeTitle, weight: .semibold)
-    static let watercolorSubtitle = Font.appSans(size: 17, relativeTo: .body)
+    // Onboarding display type, matched to the Briefing masthead scale rather than the
+    // oversized 54pt the watercolor treatment used.
+    static let onboardingDisplay = Font.appSerif(size: 40, relativeTo: .largeTitle, weight: .semibold)
+    static let onboardingSubtitle = Font.appSans(size: 16, relativeTo: .body)
 
     // Terracotta typography - title aliases use the serif family, body/labels use the sans family.
     static let terracottaDisplayLarge = Font.appSerif(size: 44, relativeTo: .largeTitle, weight: .semibold)
@@ -519,12 +484,6 @@ struct ShadowStyle {
         )
     )
 
-    static func titleGlow(_ color: Color) -> ShadowStyle {
-        ShadowStyle(
-            primary: ShadowLayer(color: color.opacity(0.6), radius: 16, x: 0, y: 0),
-            secondary: ShadowLayer(color: color.opacity(0.3), radius: 32, x: 0, y: 0)
-        )
-    }
 
     static func voiceControl(tint: Color, isActive: Bool) -> ShadowStyle {
         ShadowStyle(

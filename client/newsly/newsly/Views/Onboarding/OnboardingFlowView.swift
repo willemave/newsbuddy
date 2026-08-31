@@ -19,7 +19,7 @@ struct OnboardingFlowView: View {
 
     var body: some View {
         ZStack {
-            WatercolorBackground(energy: 0.15)
+            Color.surfacePrimary.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 OnboardingProgressHeader(
@@ -57,7 +57,10 @@ struct OnboardingFlowView: View {
     @ViewBuilder
     private var content: some View {
         switch viewModel.step {
-        case .intro, .choice:
+        case .intro:
+            OnboardingIntroStep(viewModel: viewModel)
+                .transition(screenTransition)
+        case .choice:
             OnboardingChoiceStep(viewModel: viewModel)
                 .transition(screenTransition)
         case .audio:
