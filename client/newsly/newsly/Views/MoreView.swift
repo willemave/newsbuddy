@@ -20,16 +20,18 @@ struct MoreView: View {
     let submissionsViewModel: SubmissionStatusViewModel
     let readStateCache: ReadStateCache
     let showsDismissButton: Bool
+    let dependencyFactory: RootDependencyFactory
 
     init(
         submissionsViewModel: SubmissionStatusViewModel,
-        readStateCache: ReadStateCache? = nil,
-        showsDismissButton: Bool = false
+        readStateCache: ReadStateCache,
+        showsDismissButton: Bool = false,
+        dependencyFactory: RootDependencyFactory
     ) {
-        let readStateCache = readStateCache ?? ReadStateCache()
         self.submissionsViewModel = submissionsViewModel
         self.readStateCache = readStateCache
         self.showsDismissButton = showsDismissButton
+        self.dependencyFactory = dependencyFactory
     }
 
     var body: some View {
@@ -150,14 +152,23 @@ struct MoreView: View {
         case .search:
             SearchView(
                 readStateCache: readStateCache,
-                viewModel: RootDependencyFactory.makeSearchViewModel()
+                viewModel: dependencyFactory.makeSearchViewModel()
             )
         case .recentlyRead:
-            RecentlyReadView(readStateCache: readStateCache)
+            RecentlyReadView(
+                readStateCache: readStateCache,
+                viewModel: dependencyFactory.makeContentListViewModel(
+                    readStateCache: readStateCache
+                )
+            )
         case .submissions:
             SubmissionsView(viewModel: submissionsViewModel)
         case .processing:
-            ProcessingStatsView()
+            ProcessingStatsView(
+                sourcesViewModel: dependencyFactory.makeScraperSettingsViewModel(
+                    filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
+                )
+            )
         case .settings:
             SettingsView()
         }
@@ -172,6 +183,5 @@ struct MoreView: View {
 }
 
 #Preview {
-    MoreView(submissionsViewModel: RootDependencyFactory.makeSubmissionStatusViewModel())
-        .environment(BadgeStatsStore())
+    EmptyView()
 }

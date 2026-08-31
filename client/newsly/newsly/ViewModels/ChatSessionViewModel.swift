@@ -392,28 +392,6 @@ final class ChatSessionViewModel {
         }
     }
 
-    /// Request counterbalancing arguments via web search.
-    func sendCounterArgumentsPrompt() async {
-        let subject = counterArgumentSubject()
-        let prompt = """
-Find counterbalancing arguments online for \(subject). Use the exa_web_search tool to gather opposing viewpoints, cite sources with markdown links, and compare perspectives to the current article/topic.
-"""
-        await sendMessage(text: prompt)
-    }
-
-    private func counterArgumentSubject() -> String {
-        if let topic = session?.topic, !topic.isEmpty {
-            return "\"\(topic)\""
-        }
-        if let articleTitle = session?.articleTitle, !articleTitle.isEmpty {
-            return "the article \"\(articleTitle)\""
-        }
-        if let title = session?.title, !title.isEmpty {
-            return "\"\(title)\""
-        }
-        return "this topic"
-    }
-
     /// Dig deeper into highlighted text by automatically sending a follow-up query.
     func digDeeper(into selectedText: String) async {
         let trimmed = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)

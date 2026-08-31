@@ -1,0 +1,14 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "news_item_id": {
+      "title": "News Item Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "news_item_id"
+  ],
+  "title": "NewsItemIdPayload",
+  "type": "object"
+}

@@ -11,6 +11,22 @@ import os.log
 
 private let logger = Logger(subsystem: "com.newsly", category: "ActiveChatSessionManager")
 
+@MainActor
+protocol ChatCompletionNotifying: AnyObject {
+    func showChatCompletedNotification(sessionId: Int, title: String, message: String)
+}
+
+@MainActor
+private final class NoopChatCompletionNotifier: ChatCompletionNotifying {
+    func showChatCompletedNotification(sessionId: Int, title: String, message: String) {}
+}
+
+private final class UnavailableMessageStatusService: MessageStatusFetching {
+    func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse {
+        throw CancellationError()
+    }
+}
+
 /// Represents an active chat session being polled in the background
 struct ActiveChatSession: Identifiable, Equatable {
     let id: Int  // session ID
@@ -41,13 +57,6 @@ struct ActiveChatSession: Identifiable, Equatable {
 @MainActor
 @Observable
 final class ActiveChatSessionManager {
-    private static let sharedMessageCompletionRegistry = ChatMessageCompletionRegistry(
-        statusService: ChatService.shared
-    )
-    static let shared = ActiveChatSessionManager(
-        messageCompletionRegistry: sharedMessageCompletionRegistry
-    )
-
     /// Active sessions being polled, keyed by session ID
     private(set) var activeSessions: [Int: ActiveChatSession] = [:]  // sessionId -> session
 
@@ -58,7 +67,7 @@ final class ActiveChatSessionManager {
     let messageCompletionRegistry: ChatMessageCompletionRegistry
 
     @ObservationIgnored
-    private let notificationService = LocalNotificationService.shared
+    private let notificationService: any ChatCompletionNotifying
 
     @ObservationIgnored
     private let startsPolling: Bool
@@ -76,12 +85,15 @@ final class ActiveChatSessionManager {
     private var authDidLogOutObserver: NSObjectProtocol?
 
     init(
-        messageCompletionRegistry: ChatMessageCompletionRegistry? = nil,
+        messageCompletionRegistry: ChatMessageCompletionRegistry = ChatMessageCompletionRegistry(
+            statusService: UnavailableMessageStatusService()
+        ),
+        notificationService: (any ChatCompletionNotifying)? = nil,
         startsPolling: Bool = true,
         observesAuthenticationNotifications: Bool = true
     ) {
         self.messageCompletionRegistry = messageCompletionRegistry
-            ?? Self.sharedMessageCompletionRegistry
+        self.notificationService = notificationService ?? NoopChatCompletionNotifier()
         self.startsPolling = startsPolling
         if observesAuthenticationNotifications {
             authDidLogOutObserver = NotificationCenter.default.addObserver(

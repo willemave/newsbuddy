@@ -22,6 +22,8 @@ final class LocalNotificationService: NSObject {
 
     @ObservationIgnored
     private let notificationCenter = UNUserNotificationCenter.current()
+    @ObservationIgnored
+    private var openChatRoute: ((Int) -> Void)?
 
     private override init() {
         super.init()
@@ -80,7 +82,17 @@ final class LocalNotificationService: NSObject {
             withIdentifiers: ["chat_completed_\(sessionId)"]
         )
     }
+
+    func setChatRouteHandler(_ handler: @escaping (Int) -> Void) {
+        openChatRoute = handler
+    }
+
+    func clearChatRouteHandler() {
+        openChatRoute = nil
+    }
 }
+
+extension LocalNotificationService: ChatCompletionNotifying {}
 
 // MARK: - UNUserNotificationCenterDelegate
 extension LocalNotificationService: UNUserNotificationCenterDelegate {
@@ -104,7 +116,7 @@ extension LocalNotificationService: UNUserNotificationCenterDelegate {
            let sessionId = userInfo["sessionId"] as? Int {
             logger.info("User tapped chat completion notification for session \(sessionId)")
             await MainActor.run {
-                ChatNavigationCoordinator.shared.open(ChatSessionRoute(sessionId: sessionId))
+                self.openChatRoute?(sessionId)
             }
         }
     }

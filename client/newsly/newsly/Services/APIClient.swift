@@ -184,6 +184,9 @@ final class APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method.rawValue
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (field, value) in Self.clientTelemetryHeaders() {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
         if let accept {
             request.setValue(accept, forHTTPHeaderField: "Accept")
         }
@@ -203,6 +206,22 @@ final class APIClient {
         }
         let sentAuthHeader = request.value(forHTTPHeaderField: "Authorization") != nil
         return (request, sentAuthHeader)
+    }
+
+    private static func clientTelemetryHeaders(bundle: Bundle = .main) -> [String: String] {
+        let client = bundle.bundleURL.pathExtension.lowercased() == "appex"
+            ? "ios_share_extension"
+            : "ios"
+        var headers = ["X-Newsly-Client": client]
+        if let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+           !version.isEmpty {
+            headers["X-Newsly-Client-Version"] = version
+        }
+        if let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+           !build.isEmpty {
+            headers["X-Newsly-Client-Build"] = build
+        }
+        return headers
     }
 
     private func executeRequest(
@@ -237,19 +256,20 @@ final class APIClient {
             let canRecoverAuthentication = authentication == .required || sentAuthHeader
             if canRecoverAuthentication,
                httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                let errorResponse = HTTPResponseDetail.errorResponse(from: data)
                 let detail = HTTPResponseDetail.extract(from: data)
                 guard shouldTreatAsAuthFailure(
                     statusCode: httpResponse.statusCode,
                     response: httpResponse,
-                    detail: detail,
+                    errorCode: errorResponse?.code,
                     sentAuthHeader: sentAuthHeader
                 ) else {
                     logger.error(
                         "[APIClient] Non-auth HTTP error | endpoint=\(endpoint, privacy: .public) status=\(httpResponse.statusCode) detail=\((detail ?? "n/a"), privacy: .public)"
                     )
-                    throw ClientFailure.http(
+                    throw HTTPResponseDetail.failure(
                         statusCode: httpResponse.statusCode,
-                        detail: detail
+                        data: data
                     )
                 }
 
@@ -280,9 +300,9 @@ final class APIClient {
             guard (200...299).contains(httpResponse.statusCode)
                 || additionalAllowedStatusCodes.contains(httpResponse.statusCode)
             else {
-                throw ClientFailure.http(
+                throw HTTPResponseDetail.failure(
                     statusCode: httpResponse.statusCode,
-                    detail: HTTPResponseDetail.extract(from: data)
+                    data: data
                 )
             }
 
@@ -327,7 +347,7 @@ final class APIClient {
     private func shouldTreatAsAuthFailure(
         statusCode: Int,
         response: HTTPURLResponse,
-        detail: String?,
+        errorCode: String?,
         sentAuthHeader: Bool
     ) -> Bool {
         if statusCode == 401 {
@@ -347,21 +367,13 @@ final class APIClient {
             return true
         }
 
-        guard let lowered = detail?.lowercased() else {
+        switch errorCode {
+        case "authentication_required", "authentication_expired", "invalid_credentials",
+             "invalid_token":
+            return true
+        default:
             return false
         }
-
-        let authMarkers = [
-            "not authenticated",
-            "could not validate credentials",
-            "invalid token",
-            "token expired",
-            "expired token",
-            "missing token",
-            "invalid refresh token",
-            "unauthorized"
-        ]
-        return authMarkers.contains { lowered.contains($0) }
     }
 
 }

@@ -9,9 +9,11 @@ import SwiftUI
 
 struct ProcessingStatsView: View {
     @Environment(BadgeStatsStore.self) private var badgeStatsStore
-    @State private var sourcesViewModel = RootDependencyFactory.makeScraperSettingsViewModel(
-        filterTypes: ["substack", "atom", "youtube", "podcast_rss"]
-    )
+    @State private var sourcesViewModel: ScraperSettingsViewModel
+
+    init(sourcesViewModel: ScraperSettingsViewModel) {
+        self._sourcesViewModel = State(initialValue: sourcesViewModel)
+    }
 
     var body: some View {
         List {
@@ -257,8 +259,5 @@ struct ProcessingStatsView: View {
 }
 
 #Preview {
-    NavigationStack {
-        ProcessingStatsView()
-    }
-    .environment(BadgeStatsStore())
+    EmptyView()
 }

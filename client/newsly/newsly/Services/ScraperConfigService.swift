@@ -5,39 +5,14 @@
 
 import Foundation
 
-struct CreateScraperConfigPayload: Codable {
-    let scraperType: String
-    let displayName: String?
-    let config: ScraperConfigBody
-    let isActive: Bool
+enum ScraperConfigServiceError: LocalizedError {
+    case unsupportedScraperType(String)
 
-    enum CodingKeys: String, CodingKey {
-        case scraperType = "scraper_type"
-        case displayName = "display_name"
-        case config
-        case isActive = "is_active"
-    }
-}
-
-struct UpdateScraperConfigPayload: Codable {
-    let displayName: String?
-    let config: ScraperConfigBody?
-    let isActive: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case displayName = "display_name"
-        case config
-        case isActive = "is_active"
-    }
-}
-
-struct ScraperConfigBody: Codable {
-    let feedURL: String?
-    let limit: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case feedURL = "feed_url"
-        case limit
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedScraperType(let value):
+            "Unsupported scraper type: \(value)"
+        }
     }
 }
 
@@ -70,14 +45,22 @@ class ScraperConfigService {
         limit: Int?,
         isActive: Bool
     ) async throws -> ScraperConfig {
-        let payload = CreateScraperConfigPayload(
-            scraperType: scraperType,
+        guard let typedScraperType = APIScraperType(rawValue: scraperType) else {
+            throw ScraperConfigServiceError.unsupportedScraperType(scraperType)
+        }
+        let payload = APICreateUserScraperConfig(
+            scraperType: typedScraperType,
             displayName: displayName,
-            config: ScraperConfigBody(feedURL: feedURL, limit: limit),
+            config: scraperConfig(feedURL: feedURL, limit: limit),
             isActive: isActive
         )
         let body = try JSONEncoder().encode(payload)
-        return try await client.request(APIEndpoints.scraperConfigs, method: .post, body: body)
+        let response: APIScraperConfigResponse = try await client.request(
+            APIEndpoints.scraperConfigs,
+            method: .post,
+            body: body
+        )
+        return response
     }
 
     func updateConfig(
@@ -87,10 +70,21 @@ class ScraperConfigService {
         limit: Int?,
         isActive: Bool?
     ) async throws -> ScraperConfig {
-        let configBody = (feedURL != nil || limit != nil) ? ScraperConfigBody(feedURL: feedURL, limit: limit) : nil
-        let payload = UpdateScraperConfigPayload(displayName: displayName, config: configBody, isActive: isActive)
+        let config = (feedURL != nil || limit != nil)
+            ? scraperConfig(feedURL: feedURL, limit: limit)
+            : nil
+        let payload = APIUpdateUserScraperConfig(
+            displayName: displayName,
+            config: config,
+            isActive: isActive
+        )
         let body = try JSONEncoder().encode(payload)
-        return try await client.request(APIEndpoints.scraperConfig(id: configId), method: .put, body: body)
+        let response: APIScraperConfigResponse = try await client.request(
+            APIEndpoints.scraperConfig(id: configId),
+            method: .put,
+            body: body
+        )
+        return response
     }
 
     func deleteConfig(configId: Int) async throws {
@@ -103,24 +97,28 @@ class ScraperConfigService {
         feedType: String,
         displayName: String?
     ) async throws -> ScraperConfig {
-        let payload = SubscribeFeedPayload(
-            feedURL: feedURL,
+        let payload = APISubscribeToFeedRequest(
+            feedUrl: feedURL,
             feedType: feedType,
             displayName: displayName
         )
         let body = try JSONEncoder().encode(payload)
-        return try await client.request(APIEndpoints.subscribeFeed, method: .post, body: body)
+        let response: APIScraperConfigResponse = try await client.request(
+            APIEndpoints.subscribeFeed,
+            method: .post,
+            body: body
+        )
+        return response
     }
-}
 
-struct SubscribeFeedPayload: Codable {
-    let feedURL: String
-    let feedType: String
-    let displayName: String?
-
-    enum CodingKeys: String, CodingKey {
-        case feedURL = "feed_url"
-        case feedType = "feed_type"
-        case displayName = "display_name"
+    private func scraperConfig(feedURL: String?, limit: Int?) -> [String: AnyCodable] {
+        var config: [String: AnyCodable] = [:]
+        if let feedURL {
+            config["feed_url"] = AnyCodable(feedURL)
+        }
+        if let limit {
+            config["limit"] = AnyCodable(limit)
+        }
+        return config
     }
 }

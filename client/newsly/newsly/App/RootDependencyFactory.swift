@@ -1,93 +1,193 @@
 import Foundation
+import Observation
 
-/// Transitional construction helpers for route-owned presentation models.
-/// Root authenticated stores are owned by `AuthenticatedSession`; callers
-/// should prefer exact initializer dependencies over adding new helpers here.
+/// Instance-bound construction graph for authenticated presentation state.
+///
+/// The application entry point supplies the live services once. Feature code
+/// receives this graph explicitly and never reaches through a static service
+/// locator to construct account-scoped state.
 @MainActor
-enum RootDependencyFactory {
-    static func makeAuthenticationViewModel() -> AuthenticationViewModel {
+@Observable
+final class RootDependencyFactory {
+    struct Dependencies {
+        let apiClient: APIClient
+        let authenticationService: AuthenticationService
+        let tokenStore: any AuthTokenStore
+        let credentialSession: CredentialSession
+        let chatService: ChatService
+        let contentService: ContentService
+        let scraperConfigService: ScraperConfigService
+        let toastService: ToastService
+        let briefingService: any BriefingServicing
+        let narrationPlaybackService: NarrationPlaybackService
+        let audioEpisodeService: AudioEpisodeService
+        let onboardingService: OnboardingService
+        let onboardingStateStore: OnboardingStateStore
+        let learningDeckService: LearningDeckService
+        let learningDeckStatusRegistry: LearningDeckStatusRegistry
+        let twitterShareService: TwitterShareService
+        let openAIService: OpenAIService
+        let appSettings: AppSettings
+        let xIntegrationService: XIntegrationService
+        let feedbackService: FeedbackService
+        let cliLinkService: CLILinkService
+        let localNotificationService: LocalNotificationService
+        let sharedDefaults: UserDefaults
+        let makeVoiceDictationTranscriber: @MainActor () -> any SpeechTranscribing
+        let makeChatNavigationCoordinator: @MainActor () -> ChatNavigationCoordinator
+    }
+
+    @ObservationIgnored
+    private let dependencies: Dependencies
+
+    init(dependencies: Dependencies) {
+        self.dependencies = dependencies
+    }
+
+    var authenticationService: AuthenticationService { dependencies.authenticationService }
+    var contentService: ContentService { dependencies.contentService }
+    var xIntegrationService: XIntegrationService { dependencies.xIntegrationService }
+    var feedbackService: FeedbackService { dependencies.feedbackService }
+    var cliLinkService: CLILinkService { dependencies.cliLinkService }
+    var localNotificationService: LocalNotificationService { dependencies.localNotificationService }
+    var narrationPlaybackService: NarrationPlaybackService { dependencies.narrationPlaybackService }
+    var learningDeckService: LearningDeckService { dependencies.learningDeckService }
+    var appSettings: AppSettings { dependencies.appSettings }
+    var toastService: ToastService { dependencies.toastService }
+
+    func makeAuthenticationViewModel() -> AuthenticationViewModel {
         AuthenticationViewModel(
-            authService: AuthenticationService.shared,
-            tokenStore: KeychainManager.shared,
-            credentialSession: CredentialSession.shared
+            authService: dependencies.authenticationService,
+            tokenStore: dependencies.tokenStore,
+            credentialSession: dependencies.credentialSession
         )
     }
 
-    static func makeChatSessionsViewModel() -> ChatSessionsViewModel {
-        ChatSessionsViewModel(chatService: ChatService.shared)
+    func makeAuthenticatedSession(user: User) -> AuthenticatedSession {
+        let badgeStatsStore = BadgeStatsStore(
+            fetchStats: { [apiClient = dependencies.apiClient] in
+                try await apiClient.request(APIEndpoints.badgeStats)
+            },
+            notificationCenter: NotificationCenter()
+        )
+        let completionRegistry = ChatMessageCompletionRegistry(
+            statusService: dependencies.chatService
+        )
+        let activeChatSessionManager = ActiveChatSessionManager(
+            messageCompletionRegistry: completionRegistry,
+            notificationService: dependencies.localNotificationService,
+            observesAuthenticationNotifications: false
+        )
+        let readStateCache = ReadStateCache(
+            contentReadRepository: ReadStatusRepository(client: dependencies.apiClient),
+            newsReadRepository: ReadStatusRepository(
+                client: dependencies.apiClient,
+                endpoint: .newsItems
+            ),
+            badgeStatsStore: badgeStatsStore
+        )
+        let chatNavigation = dependencies.makeChatNavigationCoordinator()
+        dependencies.localNotificationService.setChatRouteHandler {
+            [weak chatNavigation] sessionID in
+            chatNavigation?.open(ChatSessionRoute(sessionId: sessionID))
+        }
+
+        return AuthenticatedSession(
+            user: user,
+            dependencyFactory: self,
+            badgeStatsStore: badgeStatsStore,
+            activeChatSessionManager: activeChatSessionManager,
+            chatNavigation: chatNavigation,
+            readingStateStore: ReadingStateStore(
+                userId: user.id,
+                defaults: dependencies.sharedDefaults
+            ),
+            readStateCache: readStateCache,
+            tabCoordinator: makeTabCoordinator(userID: user.id),
+            knowledgeViewModel: makeKnowledgeTimelineViewModel(
+                readStateCache: readStateCache,
+                badgeStatsStore: badgeStatsStore
+            ),
+            submissionStatusViewModel: makeSubmissionStatusViewModel(),
+            detachNotificationRouting: {
+                [localNotificationService = dependencies.localNotificationService] in
+                localNotificationService.clearChatRouteHandler()
+            }
+        )
     }
 
-    static func makeContentListViewModel(
-        readStateCache: ReadStateCache? = nil
-    ) -> ContentListViewModel {
+    func makeChatSessionsViewModel() -> ChatSessionsViewModel {
+        ChatSessionsViewModel(chatService: dependencies.chatService)
+    }
+
+    func makeContentListViewModel(readStateCache: ReadStateCache) -> ContentListViewModel {
         ContentListViewModel(
-            contentService: ContentService.shared,
+            contentService: dependencies.contentService,
             readStateCache: readStateCache
         )
     }
 
-    static func makeContentDetailViewModel(
-        contentId: Int = 0,
-        contentType: APIContentType? = nil,
-        readStateCache: ReadStateCache? = nil
+    func makeContentDetailViewModel(
+        contentId: Int,
+        contentType: APIContentType?,
+        readStateCache: ReadStateCache
     ) -> ContentDetailViewModel {
         ContentDetailViewModel(
             contentId: contentId,
             contentType: contentType,
-            contentService: ContentService.shared,
-            feedSubscriptionService: ScraperConfigService.shared,
-            toastPresenter: ToastService.shared,
+            contentService: dependencies.contentService,
+            feedSubscriptionService: dependencies.scraperConfigService,
+            toastPresenter: dependencies.toastService,
             readStateCache: readStateCache
         )
     }
 
-    static func makeDetailChatCoordinator(
+    func makeDetailChatCoordinator(
         chatSessionManager: ActiveChatSessionManager,
         chatRouter: any ChatRouteOpening
     ) -> DetailChatCoordinator {
         DetailChatCoordinator(
             chatSessionManager: chatSessionManager,
-            chatService: ChatService.shared,
+            chatService: dependencies.chatService,
             chatRouter: chatRouter,
-            toastPresenter: ToastService.shared
+            toastPresenter: dependencies.toastService
         )
     }
 
-    static func makeDiscussionSummaryCoordinator() -> DiscussionSummaryCoordinator {
-        DiscussionSummaryCoordinator(contentService: ContentService.shared)
+    func makeDiscussionSummaryCoordinator() -> DiscussionSummaryCoordinator {
+        DiscussionSummaryCoordinator(contentService: dependencies.contentService)
     }
 
-    static func makePodcastAudioController() -> PodcastAudioController {
+    func makePodcastAudioController() -> PodcastAudioController {
         PodcastAudioController(
-            playbackService: NarrationPlaybackService.shared,
-            audioEpisodeService: AudioEpisodeService.shared
+            playbackService: dependencies.narrationPlaybackService,
+            audioEpisodeService: dependencies.audioEpisodeService
         )
     }
 
-    static func makeSubmissionStatusViewModel(
-        defaults: UserDefaults = SharedContainer.userDefaults
-    ) -> SubmissionStatusViewModel {
-        SubmissionStatusViewModel(defaults: defaults) { cursor in
-            try await ContentService.shared.fetchSubmissionStatusList(cursor: cursor)
+    func makeSubmissionStatusViewModel() -> SubmissionStatusViewModel {
+        SubmissionStatusViewModel(defaults: dependencies.sharedDefaults) {
+            [contentService = dependencies.contentService] cursor in
+            try await contentService.fetchSubmissionStatusList(cursor: cursor)
         }
     }
 
-    static func makeOnboardingViewModel(user: User) -> OnboardingViewModel {
+    func makeOnboardingViewModel(user: User) -> OnboardingViewModel {
         OnboardingViewModel(
             user: user,
-            service: OnboardingService.shared,
-            dictationService: SpeechTranscriberFactory.makeVoiceDictationTranscriber(),
-            onboardingStateStore: OnboardingStateStore.shared
+            service: dependencies.onboardingService,
+            dictationService: dependencies.makeVoiceDictationTranscriber(),
+            onboardingStateStore: dependencies.onboardingStateStore
         )
     }
 
-    static func makeLearningDeckReaderViewModel(
+    func makeLearningDeckReaderViewModel(
         deck: LearningDeck,
         lifecycle: AppLifecycle,
         activeSessionManager: ActiveChatSessionManager,
         chatService: (any LearningDeckReaderChatServicing)? = nil
     ) -> LearningDeckReaderViewModel {
-        let resolvedChatService = chatService ?? ChatService.shared
+        let resolvedChatService = chatService ?? dependencies.chatService
         let messageCompletionRegistry = chatService.map {
             ChatMessageCompletionRegistry(statusService: $0)
         } ?? activeSessionManager.messageCompletionRegistry
@@ -96,45 +196,117 @@ enum RootDependencyFactory {
             deck: deck,
             chatService: resolvedChatService,
             messageCompletionRegistry: messageCompletionRegistry,
-            deckService: LearningDeckService.shared,
-            deckStatusRegistry: LearningDeckStatusRegistry.shared
+            deckService: dependencies.learningDeckService,
+            deckStatusRegistry: dependencies.learningDeckStatusRegistry
         )
     }
 
-    static func makeLearningDeckFocusRecorder() -> LearningDeckFocusRecorder {
+    func makeLearningDeckFocusRecorder() -> LearningDeckFocusRecorder {
         LearningDeckFocusRecorder(
-            transcriptionService: SpeechTranscriberFactory.makeVoiceDictationTranscriber(),
+            transcriptionService: dependencies.makeVoiceDictationTranscriber(),
             refreshTranscriptionAvailability: {
-                await OpenAIService.shared.refreshTranscriptionAvailability()
+                [openAIService = dependencies.openAIService] in
+                await openAIService.refreshTranscriptionAvailability()
             }
         )
     }
 
-    static func makeTweetSuggestionsViewModel() -> TweetSuggestionsViewModel {
+    func makeTweetSuggestionsViewModel() -> TweetSuggestionsViewModel {
         TweetSuggestionsViewModel(
-            contentService: ContentService.shared,
-            twitterService: TwitterShareService.shared,
-            transcriptionService: SpeechTranscriberFactory.makeVoiceDictationTranscriber(),
+            contentService: dependencies.contentService,
+            twitterService: dependencies.twitterShareService,
+            transcriptionService: dependencies.makeVoiceDictationTranscriber(),
             refreshTranscriptionAvailability: {
-                await OpenAIService.shared.refreshTranscriptionAvailability()
+                [openAIService = dependencies.openAIService] in
+                await openAIService.refreshTranscriptionAvailability()
             },
-            setBackendTranscriptionAvailable: { isAvailable in
-                AppSettings.shared.setBackendTranscriptionAvailable(isAvailable)
+            setBackendTranscriptionAvailable: {
+                [appSettings = dependencies.appSettings] isAvailable in
+                appSettings.setBackendTranscriptionAvailable(isAvailable)
             }
         )
     }
 
-    static func makeSearchViewModel() -> SearchViewModel {
+    func makeSearchViewModel() -> SearchViewModel {
         SearchViewModel(
-            contentService: ContentService.shared,
-            scraperConfigService: ScraperConfigService.shared
+            contentService: dependencies.contentService,
+            scraperConfigService: dependencies.scraperConfigService
         )
     }
 
-    static func makeScraperSettingsViewModel(filterTypes: [String]? = nil) -> ScraperSettingsViewModel {
+    func makeScraperSettingsViewModel(
+        filterTypes: [String]? = nil
+    ) -> ScraperSettingsViewModel {
         ScraperSettingsViewModel(
             filterTypes: filterTypes,
-            service: ScraperConfigService.shared
+            service: dependencies.scraperConfigService
+        )
+    }
+
+    func makeAssistantFeedOptionActionModel() -> AssistantFeedOptionActionModel {
+        AssistantFeedOptionActionModel(
+            service: dependencies.scraperConfigService,
+            toastPresenter: dependencies.toastService
+        )
+    }
+
+    func makeChatDependencies(
+        activeSessionManager: ActiveChatSessionManager
+    ) -> ChatDependencies {
+        ChatDependencies(
+            chatService: dependencies.chatService,
+            messageCompletionRegistry: activeSessionManager.messageCompletionRegistry,
+            transcriptionService: dependencies.makeVoiceDictationTranscriber(),
+            activeSessionManager: activeSessionManager,
+            refreshTranscriptionAvailability: {
+                [openAIService = dependencies.openAIService] in
+                await openAIService.refreshTranscriptionAvailability()
+            },
+            setBackendTranscriptionAvailable: {
+                [appSettings = dependencies.appSettings] isAvailable in
+                appSettings.setBackendTranscriptionAvailable(isAvailable)
+            }
+        )
+    }
+
+    private func makeTabCoordinator(userID: Int) -> TabCoordinatorViewModel {
+        TabCoordinatorViewModel(
+            briefingVM: BriefingViewModel(
+                service: dependencies.briefingService,
+                audioEpisodeService: dependencies.audioEpisodeService,
+                playbackService: dependencies.narrationPlaybackService,
+                snapshotStore: BriefingSnapshotStore(userID: userID)
+            ),
+            userID: userID,
+            defaults: dependencies.sharedDefaults
+        )
+    }
+
+    private func makeKnowledgeTimelineViewModel(
+        readStateCache: ReadStateCache,
+        badgeStatsStore: BadgeStatsStore
+    ) -> KnowledgeTimelineViewModel {
+        KnowledgeTimelineViewModel(
+            savedContent: makeContentListViewModel(readStateCache: readStateCache),
+            chats: KnowledgeChatViewModel(
+                chatService: dependencies.chatService,
+                transcriptionService: dependencies.makeVoiceDictationTranscriber(),
+                refreshTranscriptionAvailability: {
+                    [openAIService = dependencies.openAIService] in
+                    await openAIService.refreshTranscriptionAvailability()
+                }
+            ),
+            decks: LearningDecksViewModel(
+                service: dependencies.learningDeckService,
+                statusRegistry: dependencies.learningDeckStatusRegistry
+            ),
+            narrations: CustomNarrationLibraryViewModel(
+                playbackService: dependencies.narrationPlaybackService,
+                audioService: dependencies.audioEpisodeService,
+                badgeStatsStore: badgeStatsStore,
+                toastPresenter: dependencies.toastService,
+                readStateCache: readStateCache
+            )
         )
     }
 }

@@ -1,0 +1,19 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "content_id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Content Id"
+    }
+  },
+  "title": "ContentIdPayload",
+  "type": "object"
+}

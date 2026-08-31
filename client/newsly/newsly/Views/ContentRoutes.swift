@@ -13,7 +13,8 @@ extension View {
         contentTextSize: DynamicTypeSize,
         contentTransitionNamespace: Namespace.ID? = nil,
         chatTransitionNamespace: Namespace.ID? = nil,
-        allowsChatHistory: Bool = false
+        allowsChatHistory: Bool = false,
+        dependencyFactory: RootDependencyFactory
     ) -> some View {
         navigationDestination(for: ContentDetailRoute.self) { route in
             ContentDetailView(
@@ -52,6 +53,7 @@ extension View {
                 onSelectSession: { route in
                     path.wrappedValue.append(route)
                 },
+                viewModel: dependencyFactory.makeChatSessionsViewModel(),
                 chatTransitionNamespace: chatTransitionNamespace
             )
             .dynamicTypeSize(contentTextSize)

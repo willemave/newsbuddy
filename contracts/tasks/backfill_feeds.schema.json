@@ -1,0 +1,44 @@
+{
+  "description": "Input for backfilling multiple feeds for one user.",
+  "properties": {
+    "config_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 1,
+      "title": "Config Ids",
+      "type": "array"
+    },
+    "count": {
+      "maximum": 50,
+      "minimum": 1,
+      "title": "Count",
+      "type": "integer"
+    },
+    "first_edition_run_id": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "First Edition Run Id"
+    },
+    "user_id": {
+      "exclusiveMinimum": 0,
+      "title": "User Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "user_id",
+    "config_ids",
+    "count"
+  ],
+  "title": "FeedBatchBackfillRequest",
+  "type": "object"
+}

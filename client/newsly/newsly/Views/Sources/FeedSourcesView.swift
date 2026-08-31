@@ -20,9 +20,7 @@ private enum FeedSourcesSheetDestination: Identifiable {
 }
 
 struct FeedSourcesView: View {
-    @State private var viewModel = RootDependencyFactory.makeScraperSettingsViewModel(
-        filterTypes: ["substack", "atom", "youtube"]
-    )
+    @State private var viewModel: ScraperSettingsViewModel
     @State private var activeSheet: FeedSourcesSheetDestination?
     @State private var newFeedURL: String = ""
     @State private var newFeedName: String = ""
@@ -34,6 +32,10 @@ struct FeedSourcesView: View {
         FormChoiceOption(title: "RSS/Atom", value: "atom"),
         FormChoiceOption(title: "YouTube", value: "youtube"),
     ]
+
+    init(viewModel: ScraperSettingsViewModel) {
+        self._viewModel = State(initialValue: viewModel)
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {

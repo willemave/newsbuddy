@@ -104,6 +104,14 @@ final class OpenAIService {
             switch failure {
             case .authenticationRequired, .authenticationExpired:
                 throw OpenAIServiceError.notAuthenticated
+            case .server(let statusCode, let error):
+                openAIServiceLogger.error(
+                    "Audio transcription upload HTTP error | filename=\(filename, privacy: .public) status=\(statusCode) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) code=\(error.code, privacy: .public) requestId=\(error.requestID, privacy: .public)"
+                )
+                throw OpenAIServiceError.serverError(
+                    statusCode: statusCode,
+                    message: error.message
+                )
             case .http(let statusCode, let detail):
                 openAIServiceLogger.error(
                     "Audio transcription upload HTTP error | filename=\(filename, privacy: .public) status=\(statusCode) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) detail=\(detail ?? "nil", privacy: .public)"
@@ -124,7 +132,8 @@ final class OpenAIService {
         )
 
         do {
-            let decoded = try JSONDecoder().decode(AudioTranscriptionResponse.self, from: data)
+            let apiResponse = try JSONDecoder().decode(APIAudioTranscriptionResponse.self, from: data)
+            let decoded = AudioTranscriptionResponse(api: apiResponse)
             openAIServiceLogger.info(
                 "Audio transcription decoded | filename=\(filename, privacy: .public) elapsedMs=\(openAIElapsedMilliseconds(since: startedAt)) transcriptChars=\(decoded.text.count)"
             )

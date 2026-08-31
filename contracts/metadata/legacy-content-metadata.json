@@ -1,0 +1,42 @@
+{
+  "cases": [
+    {
+      "metadata": {
+        "content_type": "html",
+        "final_url": "https://example.com/article",
+        "source": "web",
+        "summary": {
+          "bullet_points": [
+            {
+              "category": "finding",
+              "text": "A representative point"
+            }
+          ],
+          "extension_field": {
+            "preserve": true
+          },
+          "overview": "Synthetic legacy JSONB used for compatibility testing.",
+          "title": "Fixture summary"
+        },
+        "summary_kind": "long_structured",
+        "summary_version": 1
+      },
+      "name": "legacy_article_with_nested_summary"
+    },
+    {
+      "metadata": {
+        "canonical_content_id": null,
+        "publication_date": "",
+        "unknown_legacy_extension": [
+          "alpha",
+          2,
+          {
+            "nested": true
+          }
+        ]
+      },
+      "name": "legacy_null_and_unknown_extensions"
+    }
+  ],
+  "version": 1
+}

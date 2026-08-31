@@ -102,7 +102,7 @@ final class OpenAIServiceTests: XCTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!,
-                Data(#"{"text":"recovered"}"#.utf8)
+                Data(#"{"transcript":"recovered","language":null}"#.utf8)
             )
         }
 

@@ -58,23 +58,7 @@ struct CLILinkScanPayload: Equatable {
     }
 }
 
-struct CLILinkApproveRequest: Encodable {
-    let approveToken: String
-    let deviceName: String?
-
-    enum CodingKeys: String, CodingKey {
-        case approveToken = "approve_token"
-        case deviceName = "device_name"
-    }
-}
-
-struct CLILinkApproveResponse: Decodable {
-    let keyPrefix: String
-
-    enum CodingKeys: String, CodingKey {
-        case keyPrefix = "key_prefix"
-    }
-}
+typealias CLILinkApproveResponse = APICliLinkApproveResponse
 
 final class CLILinkService {
     private let client: APIClient
@@ -86,15 +70,16 @@ final class CLILinkService {
     func approve(scannedCode: String, deviceName: String? = nil) async throws -> CLILinkApproveResponse {
         let payload = try CLILinkScanPayload.parse(from: scannedCode)
         let body = try JSONEncoder().encode(
-            CLILinkApproveRequest(
+            APICliLinkApproveRequest(
                 approveToken: payload.approveToken,
                 deviceName: deviceName
             )
         )
-        return try await client.request(
+        let response: APICliLinkApproveResponse = try await client.request(
             APIEndpoints.cliLinkApprove(sessionID: payload.sessionID),
             method: .post,
             body: body
         )
+        return response
     }
 }

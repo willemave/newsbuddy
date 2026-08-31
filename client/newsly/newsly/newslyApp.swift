@@ -14,14 +14,61 @@ struct newslyApp: App {
     @State private var runtime: AppRuntime
     @State private var cliLinkAlertMessage: String?
 
-    private let cliLinkService = CLILinkService()
+    private let dependencyFactory: RootDependencyFactory
 
     init() {
         KeychainManager.shared.configure(accessGroup: SharedContainer.keychainAccessGroup)
         AppChrome.configure()
-        let authenticationController = RootDependencyFactory.makeAuthenticationViewModel()
+        let apiClient = APIClient.shared
+        let onboardingService = OnboardingService.shared
+        let dependencyFactory = RootDependencyFactory(
+            dependencies: RootDependencyFactory.Dependencies(
+                apiClient: apiClient,
+                authenticationService: AuthenticationService.shared,
+                tokenStore: KeychainManager.shared,
+                credentialSession: CredentialSession.shared,
+                chatService: ChatService.shared,
+                contentService: ContentService.shared,
+                scraperConfigService: ScraperConfigService.shared,
+                toastService: ToastService.shared,
+                briefingService: LiveBriefingService(
+                    apiClient: apiClient,
+                    completeFirstRun: {
+                        _ = try await onboardingService.markTutorialComplete()
+                    }
+                ),
+                narrationPlaybackService: NarrationPlaybackService.shared,
+                audioEpisodeService: AudioEpisodeService.shared,
+                onboardingService: onboardingService,
+                onboardingStateStore: OnboardingStateStore(
+                    defaults: SharedContainer.userDefaults
+                ),
+                learningDeckService: LearningDeckService.shared,
+                learningDeckStatusRegistry: LearningDeckStatusRegistry.shared,
+                twitterShareService: TwitterShareService.shared,
+                openAIService: OpenAIService.shared,
+                appSettings: AppSettings.shared,
+                xIntegrationService: XIntegrationService.shared,
+                feedbackService: FeedbackService.shared,
+                cliLinkService: CLILinkService(client: apiClient),
+                localNotificationService: LocalNotificationService.shared,
+                sharedDefaults: SharedContainer.userDefaults,
+                makeVoiceDictationTranscriber: {
+                    SpeechTranscriberFactory.makeVoiceDictationTranscriber()
+                },
+                makeChatNavigationCoordinator: { ChatNavigationCoordinator() }
+            )
+        )
+        self.dependencyFactory = dependencyFactory
+        let authenticationController = dependencyFactory.makeAuthenticationViewModel()
         self._runtime = State(
-            initialValue: AppRuntime(authenticationController: authenticationController)
+            initialValue: AppRuntime(
+                dependencies: AppRuntime.Dependencies(
+                    lifecycle: AppLifecycle(),
+                    authenticationController: authenticationController,
+                    makeAuthenticatedSession: dependencyFactory.makeAuthenticatedSession
+                )
+            )
         )
     }
 
@@ -49,6 +96,7 @@ struct newslyApp: App {
                 }
             }
             .environment(runtime.lifecycle)
+            .environment(dependencyFactory)
             .onChange(of: scenePhase, initial: true) { _, newPhase in
                 runtime.record(AppLifecycle.Phase(newPhase))
             }
@@ -85,7 +133,7 @@ struct newslyApp: App {
     private func handleIncomingURL(_ url: URL) {
 #if DEBUG
         if let debugLogin = DebugLoginLink(url: url) {
-            let settings = AppSettings.shared
+            let settings = dependencyFactory.appSettings
             settings.serverHost = debugLogin.serverHost
             settings.serverPort = debugLogin.serverPort
             settings.useHTTPS = debugLogin.useHTTPS
@@ -111,7 +159,7 @@ struct newslyApp: App {
             }
 
             do {
-                let response = try await cliLinkService.approve(
+                let response = try await dependencyFactory.cliLinkService.approve(
                     scannedCode: url.absoluteString,
                     deviceName: UIDevice.current.name
                 )

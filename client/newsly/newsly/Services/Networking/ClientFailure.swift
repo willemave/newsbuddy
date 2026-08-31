@@ -1,5 +1,27 @@
 import Foundation
 
+struct APIErrorMetadata: Equatable {
+    let code: String
+    let message: String
+    let retryable: Bool
+    let requestID: String
+    let detailsJSON: Data?
+
+    init(response: APIErrorResponse) {
+        code = response.code
+        message = response.message
+        retryable = response.retryable
+        requestID = response.requestId
+        if let details = response.details {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            detailsJSON = try? encoder.encode(details)
+        } else {
+            detailsJSON = nil
+        }
+    }
+}
+
 /// The transport-level failure vocabulary shared by app and extension requests.
 enum ClientFailure: Error, Equatable {
     case cancelled
@@ -8,6 +30,7 @@ enum ClientFailure: Error, Equatable {
     case authenticationExpired
     case invalidRequest
     case invalidResponse
+    case server(statusCode: Int, error: APIErrorMetadata)
     case http(statusCode: Int, detail: String?)
     case decoding(endpoint: String)
     case unexpected
@@ -66,6 +89,8 @@ extension ClientFailure: LocalizedError {
             return "The request was invalid."
         case .invalidResponse:
             return "Newsly received an invalid response."
+        case .server(_, let error):
+            return error.message
         case .http(let statusCode, let detail):
             if let detail {
                 let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)

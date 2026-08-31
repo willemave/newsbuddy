@@ -13,50 +13,32 @@ private let logger = Logger(subsystem: "com.newsly", category: "ContentService")
 typealias BulkMarkReadResponse = APIBulkMarkReadResponse
 typealias KnowledgeMutationResponse = APIKnowledgeMutationResponse
 typealias SubmitContentResponse = APIContentSubmissionResponse
+typealias TrackContentInteractionResponse = APIRecordContentInteractionResponse
+typealias DownloadMoreResponse = APIDownloadMoreResponse
 
-struct ConvertNewsResponse: Codable {
+struct ConvertNewsResponse {
     let newContentId: Int
     let alreadyExists: Bool
 
-    enum CodingKeys: String, CodingKey {
-        case newContentId = "new_content_id"
-        case alreadyExists = "already_exists"
+    init(api response: APIConvertNewsResponse) {
+        newContentId = response.newContentId
+        alreadyExists = response.alreadyExists
+    }
+
+    init(api response: APIConvertNewsItemResponse) {
+        newContentId = response.newContentId
+        alreadyExists = response.alreadyExists
     }
 }
 
-struct DownloadMoreResponse: Codable {
-    let status: String
-    let requestedCount: Int
-    let baseLimit: Int
-    let targetLimit: Int
-    let scraped: Int
-    let saved: Int
-    let duplicates: Int
-    let errors: Int
+enum ContentServiceError: LocalizedError {
+    case unsupportedInteractionType(String)
 
-    enum CodingKeys: String, CodingKey {
-        case status
-        case requestedCount = "requested_count"
-        case baseLimit = "base_limit"
-        case targetLimit = "target_limit"
-        case scraped
-        case saved
-        case duplicates
-        case errors
-    }
-}
-
-struct TrackContentInteractionResponse: Codable {
-    let status: String
-    let recorded: Bool
-    let interactionId: String
-    let analyticsInteractionId: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case recorded
-        case interactionId = "interaction_id"
-        case analyticsInteractionId = "analytics_interaction_id"
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedInteractionType(let value):
+            "Unsupported content interaction type: \(value)"
+        }
     }
 }
 
@@ -101,7 +83,11 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(APIEndpoints.searchContent, queryItems: queryItems)
+        let response: APIContentListResponse = try await client.request(
+            APIEndpoints.searchContent,
+            queryItems: queryItems
+        )
+        return ContentListResponse(api: response)
     }
 
     func searchMixed(query: String, limit: Int = 10) async throws -> MixedSearchResponse {
@@ -109,7 +95,11 @@ class ContentService {
             URLQueryItem(name: "q", value: query),
             URLQueryItem(name: "limit", value: String(limit))
         ]
-        return try await client.request(APIEndpoints.searchMixedContent, queryItems: queryItems)
+        let response: APIMixedSearchResponse = try await client.request(
+            APIEndpoints.searchMixedContent,
+            queryItems: queryItems
+        )
+        return MixedSearchResponse(api: response)
     }
 
     func fetchContentList(contentTypes: [String]? = nil,
@@ -142,11 +132,12 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(
+        let response: APIContentListResponse = try await client.request(
             APIEndpoints.contentList,
             queryItems: queryItems,
             recoveryPolicy: .safeRead
         )
+        return ContentListResponse(api: response)
     }
 
     func fetchSubmissionStatusList(
@@ -169,17 +160,19 @@ class ContentService {
     }
 
     func fetchContentDetail(id: Int) async throws -> ContentDetail {
-        try await client.request(
+        let response: APIContentDetailResponse = try await client.request(
             APIEndpoints.contentDetail(id: id),
             recoveryPolicy: .safeRead
         )
+        return try ContentDetail(api: response)
     }
 
     func fetchNewsItemDetail(id: Int) async throws -> ContentDetail {
-        try await client.request(
+        let response: APINewsItemDetailResponse = try await client.request(
             APIEndpoints.newsItem(id: id),
             recoveryPolicy: .safeRead
         )
+        return ContentDetail(api: response)
     }
 
     func fetchNewsItemList(
@@ -196,11 +189,12 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(
+        let response: APINewsItemListResponse = try await client.request(
             APIEndpoints.newsItems,
             queryItems: queryItems,
             recoveryPolicy: .safeRead
         )
+        return ContentListResponse(api: response)
     }
 
     func fetchContentBody(
@@ -213,11 +207,12 @@ class ContentService {
         } else {
             APIEndpoints.contentBody(id: id)
         }
-        return try await client.request(
+        let response: APIContentBodyResponse = try await client.request(
             path,
             queryItems: [URLQueryItem(name: "variant", value: variant)],
             recoveryPolicy: .safeRead
         )
+        return ContentBody(api: response)
     }
 
     func fetchContentDiscussion(id: Int, contentType: APIContentType? = nil) async throws -> ContentDiscussion {
@@ -226,7 +221,8 @@ class ContentService {
         } else {
             APIEndpoints.contentDiscussion(id: id)
         }
-        return try await client.request(path)
+        let response: APIContentDiscussionResponse = try await client.request(path)
+        return ContentDiscussion(api: response)
     }
 
     func trackContentInteraction(
@@ -237,32 +233,14 @@ class ContentService {
         surface: String? = nil,
         contextData: [String: Any] = [:]
     ) async throws -> TrackContentInteractionResponse {
-        struct TrackContentInteractionRequest: Codable {
-            let interactionId: String
-            let contentId: Int
-            let interactionType: String
-            let occurredAt: String
-            let surface: String?
-            let contextData: [String: AnyCodable]
-
-            enum CodingKeys: String, CodingKey {
-                case interactionId = "interaction_id"
-                case contentId = "content_id"
-                case interactionType = "interaction_type"
-                case occurredAt = "occurred_at"
-                case surface
-                case contextData = "context_data"
-            }
+        guard let typedInteraction = APIContentInteractionType(rawValue: interactionType) else {
+            throw ContentServiceError.unsupportedInteractionType(interactionType)
         }
-
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        let payload = TrackContentInteractionRequest(
+        let payload = APIRecordContentInteractionRequest(
             interactionId: interactionId.uuidString.lowercased(),
             contentId: contentId,
-            interactionType: interactionType,
-            occurredAt: formatter.string(from: occurredAt),
+            interactionType: typedInteraction,
+            occurredAt: occurredAt,
             surface: surface,
             contextData: contextData.mapValues { AnyCodable($0) }
         )
@@ -303,11 +281,7 @@ class ContentService {
     }
 
     func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse {
-        struct DownloadMoreRequest: Codable {
-            let count: Int
-        }
-
-        let body = try JSONEncoder().encode(DownloadMoreRequest(count: count))
+        let body = try JSONEncoder().encode(APIDownloadMoreRequest(count: count))
         return try await client.request(
             APIEndpoints.downloadMoreFromSeries(id: contentId),
             method: .post,
@@ -347,15 +321,7 @@ class ContentService {
     func bulkMarkAsRead(contentIds: [Int]) async throws -> BulkMarkReadResponse {
         logger.info("[ContentService] bulkMarkAsRead called | ids=\(contentIds, privacy: .public) count=\(contentIds.count)")
 
-        struct BulkMarkReadRequest: Codable {
-            let contentIds: [Int]
-
-            enum CodingKeys: String, CodingKey {
-                case contentIds = "content_ids"
-            }
-        }
-
-        let request = BulkMarkReadRequest(contentIds: contentIds)
+        let request = APIBulkMarkReadRequest(contentIds: contentIds)
         let encoder = JSONEncoder()
         let body = try encoder.encode(request)
 
@@ -376,15 +342,7 @@ class ContentService {
     func bulkMarkNewsItemsAsRead(newsItemIds: [Int]) async throws -> BulkMarkReadResponse {
         logger.info("[ContentService] bulkMarkNewsItemsAsRead called | ids=\(newsItemIds, privacy: .public) count=\(newsItemIds.count)")
 
-        struct BulkMarkReadRequest: Codable {
-            let contentIds: [Int]
-
-            enum CodingKeys: String, CodingKey {
-                case contentIds = "content_ids"
-            }
-        }
-
-        let request = BulkMarkReadRequest(contentIds: newsItemIds)
+        let request = APIBulkMarkReadRequest(contentIds: newsItemIds)
         let encoder = JSONEncoder()
         let body = try encoder.encode(request)
 
@@ -477,11 +435,12 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(
+        let response: APIContentListResponse = try await client.request(
             APIEndpoints.knowledgeLibraryList,
             queryItems: queryItems,
             recoveryPolicy: .safeRead
         )
+        return ContentListResponse(api: response)
     }
 
     func fetchRecentlyReadList(
@@ -506,40 +465,28 @@ class ContentService {
             queryItems.append(URLQueryItem(name: "cursor", value: cursor))
         }
 
-        return try await client.request(
+        let response: APIContentListResponse = try await client.request(
             APIEndpoints.recentlyReadList,
             queryItems: queryItems,
             recoveryPolicy: .safeRead
         )
-    }
-
-    func getChatGPTUrl(id: Int) async throws -> String {
-        struct ChatGPTUrlResponse: Codable {
-            let chatUrl: String
-            let truncated: Bool
-
-            enum CodingKeys: String, CodingKey {
-                case chatUrl = "chat_url"
-                case truncated
-            }
-        }
-
-        let response: ChatGPTUrlResponse = try await client.request(APIEndpoints.chatGPTUrl(id: id))
-        return response.chatUrl
+        return ContentListResponse(api: response)
     }
 
     func convertNewsToArticle(id: Int) async throws -> ConvertNewsResponse {
-        return try await client.request(
+        let response: APIConvertNewsResponse = try await client.request(
             APIEndpoints.convertNewsToArticle(id: id),
             method: .post
         )
+        return ConvertNewsResponse(api: response)
     }
 
     func convertNewsItemToArticle(id: Int) async throws -> ConvertNewsResponse {
-        return try await client.request(
+        let response: APIConvertNewsItemResponse = try await client.request(
             APIEndpoints.convertNewsItemToArticle(id: id),
             method: .post
         )
+        return ConvertNewsResponse(api: response)
     }
 
     func generateTweetSuggestions(
@@ -548,18 +495,20 @@ class ContentService {
         creativity: Int = 5,
         provider: ChatModelProvider? = nil
     ) async throws -> TweetSuggestionsResponse {
-        let request = TweetSuggestionsRequest(
+        let request = APITweetSuggestionsRequest(
             message: message,
             creativity: creativity,
-            llmProvider: provider?.rawValue
+            length: .medium,
+            llmProvider: provider.flatMap { APIUserLlmProvider(rawValue: $0.rawValue) }
         )
         let encoder = JSONEncoder()
         let body = try encoder.encode(request)
 
-        return try await client.request(
+        let response: APITweetSuggestionsResponse = try await client.request(
             APIEndpoints.tweetSuggestions(id: id),
             method: .post,
             body: body
         )
+        return TweetSuggestionsResponse(api: response)
     }
 }

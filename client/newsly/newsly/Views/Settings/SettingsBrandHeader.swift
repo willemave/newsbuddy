@@ -8,11 +8,13 @@ import SwiftUI
 struct SettingsBrandHeader: View {
     var body: some View {
         VStack(spacing: 10) {
-            Image("Mascot")
+            // The app icon itself, in the rounded-rect mask iOS gives it on the home screen.
+            Image("AppMark")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 96, height: 96)
-                .accessibilityLabel("Newsbuddy mascot")
+                .clipShape(RoundedRectangle(cornerRadius: 21.5, style: .continuous))
+                .accessibilityLabel("Newsbuddy app icon")
 
             VStack(spacing: 2) {
                 Text("Newsbuddy")

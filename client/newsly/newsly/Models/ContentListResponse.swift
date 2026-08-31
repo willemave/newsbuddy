@@ -34,14 +34,26 @@ struct ContentListResponse: Codable {
         self.meta = meta
     }
 
-    init(from decoder: Decoder) throws {
-        let response = try APIContentListResponse(from: decoder)
+    init(api response: APIContentListResponse) {
         self.init(
             contents: response.contents.map(ContentSummary.init(api:)),
             availableDates: response.availableDates,
             contentTypes: response.contentTypes.map(\.rawValue),
             meta: response.meta
         )
+    }
+
+    init(api response: APINewsItemListResponse) {
+        self.init(
+            contents: response.contents.map(ContentSummary.init(api:)),
+            availableDates: response.availableDates,
+            contentTypes: response.contentTypes.map(\.rawValue),
+            meta: response.meta
+        )
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(api: try APIContentListResponse(from: decoder))
     }
 
     var total: Int? { meta.total }

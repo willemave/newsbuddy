@@ -62,13 +62,24 @@ final class LearningDeckAPIMappingTests: XCTestCase {
             id: 41,
             title: "Future deck",
             sourceKind: .unknown("future_source"),
+            sourceUrl: nil,
+            sourceContentId: nil,
+            sourceTitle: nil,
             status: .unknown("future_status"),
+            thumbnailUrl: nil,
+            latestSuccessfulRunId: nil,
             latestRun: APILearningDeckRunResponse(
                 id: 7,
                 status: .unknown("future_run_status"),
-                createdAt: createdAt
+                interestsPrompt: nil,
+                errorMessage: nil,
+                startedAt: nil,
+                completedAt: nil,
+                createdAt: createdAt,
+                updatedAt: nil
             ),
-            createdAt: createdAt
+            createdAt: createdAt,
+            updatedAt: nil
         )
 
         let deck = LearningDeck(apiResponse: response)

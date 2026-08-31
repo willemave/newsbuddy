@@ -121,9 +121,13 @@ struct ChatComposerDock: View {
                 }
             }
         } label: {
-            Image(systemName: "plus")
-                .font(.appSymbol(size: 16, weight: .semibold))
-                .foregroundStyle(Color.onSurfaceSecondary)
+            // The buddy stands in for the menu glyph — this is where the app has a face.
+            // Rendered at original intent so it keeps its own indigo rather than tinting.
+            Image("BuddyMark")
+                .resizable()
+                .renderingMode(.original)
+                .scaledToFit()
+                .frame(width: 22, height: 22)
                 .frame(width: 44, height: 44)
                 .background(
                     Circle()

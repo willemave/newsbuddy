@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "name": "hosted_structured_output",
+      "request": {
+        "feature": "share_action",
+        "model": "fixture/provider-model",
+        "privacy_route": "zdr_required",
+        "provider": "openrouter",
+        "response_contract": "ShareActionAgentResult",
+        "tools": [
+          "execute_bash",
+          "read_file"
+        ]
+      },
+      "usage": {
+        "cached_input_tokens": 0,
+        "input_tokens": 120,
+        "output_tokens": 40,
+        "request_count": 1
+      }
+    }
+  ],
+  "version": 1
+}

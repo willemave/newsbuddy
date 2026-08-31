@@ -22,7 +22,7 @@ K10. Deleting a deck cancels active generation, revokes access, and removes arti
 
 K11. Deck chat keeps the deck visible, uses the deck's identity, and remains secondary to the reading surface.
 
-K12. Learning Deck generation may iterate for as many model and tool turns as it needs within its execution deadline. It cannot fail solely because it crossed a fixed request-count budget.
+K12. Learning Deck generation may iterate for as many model and tool turns as it needs within its execution deadline, with no application-level model-request or output-token ceiling. It cannot fail solely because it crossed either fixed budget; the execution deadline, tool-call limit, artifact size and contract checks, and browser validation remain mandatory safeguards.
 
 K13. Initial Knowledge loading publishes one merged timeline. Fast loads do not flash transient empty, partial-source, or loading states; sustained loads and independent source failures remain visible.
 

@@ -1,18 +1,150 @@
+name: newsly-dev
+
+x-newsly-environment: &newsly-environment
+  DATABASE_URL: postgresql://${POSTGRES_USER:-newsly}:${POSTGRES_PASSWORD:-newsly}@postgres:5432/${POSTGRES_DB:-newsly}
+  NEWSLY_MAINTENANCE_BARRIER_CONFIRMED: ${NEWSLY_MAINTENANCE_BARRIER_CONFIRMED:-false}
+  NEWSLY_SQLX_BASELINE_ADOPTION: ${NEWSLY_SQLX_BASELINE_ADOPTION:-false}
+  DOCUMENT_EXTRACTOR_URL: http://document-extractor:8200
+  DOCUMENT_EXTRACTOR_SHARED_SECRET: ${DOCUMENT_EXTRACTOR_SHARED_SECRET:-local-extractor-secret}
+  ENVIRONMENT: development
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:-local-development-jwt-secret}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-local-development-admin-password}
+  PUBLIC_BASE_URL: http://127.0.0.1:${PORT:-8000}
+  PORT: "8000"
+  NEWSLY_RUST_BIND_ADDR: 0.0.0.0:8000
+  NEWSLY_RUST_LOG_FORMAT: ${NEWSLY_RUST_LOG_FORMAT:-pretty}
+  YOUTUBE_PO_TOKEN_PROVIDER: ${YOUTUBE_PO_TOKEN_PROVIDER:-bgutilhttp}
+  YOUTUBE_PO_TOKEN_BASE_URL: http://bgutil-provider:4416
+
+x-newsly-app: &newsly-app
+  build:
+    context: .
+    args:
+      NEWSLY_BUILD_SHA: ${NEWSLY_BUILD_SHA:-local-development}
+  image: ${NEWSLY_IMAGE:-newsly:local}
+  init: true
+  restart: unless-stopped
+  env_file:
+    - path: ${NEWSLY_ENV_FILE:-.env}
+      required: false
+  volumes:
+    - ${NEWSLY_DATA_ROOT_HOST_PATH:-./docker/local-data}:/data
+  networks:
+    - default
+    - document-extractor-ingress
+
 services:
-  newsly:
-    build:
-      context: .
-    image: ${NEWSLY_IMAGE:-newsly:local}
-    container_name: newsly
+  postgres:
+    image: postgres:15.18-bookworm
     restart: unless-stopped
-    env_file:
-      - ${NEWSLY_ENV_FILE:-.env.docker.local}
     environment:
-      AGENT_DATA_MIRROR_ROOT: /data/agent_user_data
-      PORT: ${PORT:-8000}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-newsly}
+      POSTGRES_USER: ${POSTGRES_USER:-newsly}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-newsly}
     ports:
-      - "127.0.0.1:${PORT:-8000}:${PORT:-8000}"
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ${NEWSLY_DATA_ROOT_HOST_PATH:-./docker/local-data}:/data
+      - newsly-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  document-extractor:
+    build:
+      context: python/document_extractor
+    image: ${NEWSLY_EXTRACTOR_IMAGE:-newsly-document-extractor:local}
+    init: true
+    restart: unless-stopped
+    read_only: true
+    environment:
+      DOCUMENT_EXTRACTOR_ENVIRONMENT: development
+      DOCUMENT_EXTRACTOR_SHARED_SECRET: ${DOCUMENT_EXTRACTOR_SHARED_SECRET:-local-extractor-secret}
+    tmpfs:
+      - /tmp:size=1024m,mode=1777
+    shm_size: 1gb
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8200/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks:
+      - document-extractor-egress
+      - document-extractor-ingress
+
+  bgutil-provider:
+    image: ${BGUTIL_PROVIDER_IMAGE:-brainicism/bgutil-ytdlp-pot-provider:1.3.1}
+    init: true
+    restart: unless-stopped
+    networks:
+      - default
+
+  migrate:
+    <<: *newsly-app
+    restart: "no"
+    environment:
+      <<: *newsly-environment
+      NEWSLY_RUNTIME_MODE: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
+  api:
+    <<: *newsly-app
+    environment:
+      <<: *newsly-environment
+      NEWSLY_RUNTIME_MODE: api
+    ports:
+      - "127.0.0.1:${PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      document-extractor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  workers:
+    <<: *newsly-app
+    environment:
+      <<: *newsly-environment
+      NEWSLY_RUNTIME_MODE: workers
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      document-extractor:
+        condition: service_healthy
+      bgutil-provider:
+        condition: service_started
+    healthcheck:
+      disable: true
+    stop_grace_period: 10m
+
+  scheduler:
+    <<: *newsly-app
+    environment:
+      <<: *newsly-environment
+      NEWSLY_RUNTIME_MODE: scheduler
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+
+volumes:
+  newsly-postgres:
+
+networks:
+  document-extractor-ingress:
+    internal: true
+  document-extractor-egress:

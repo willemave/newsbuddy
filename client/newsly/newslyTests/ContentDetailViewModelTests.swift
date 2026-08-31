@@ -149,7 +149,7 @@ final class ContentDetailViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.contentBody?.text, "Source body")
     }
 
-    func testSuspensionFencesNonCooperativeReaderBodyResult() async throws {
+    func testSuspendedReaderBodyResumesWithoutRemountingReader() async throws {
         let detail = try Self.articleDetail(id: 42)
         let gate = ContentDetailAsyncGate()
         let service = SequencedReaderBodyContentDetailService(firstGate: gate)
@@ -166,6 +166,12 @@ final class ContentDetailViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.readerBody)
         XCTAssertNil(viewModel.readerErrorMessage)
         XCTAssertFalse(viewModel.isLoadingReaderBody)
+
+        await viewModel.resumeReaderBodyIfNeeded(for: detail)
+
+        XCTAssertEqual(service.requestCount, 2)
+        XCTAssertEqual(viewModel.readerBody?.text, "new reader body")
+        XCTAssertNil(viewModel.readerErrorMessage)
     }
 
     func testForcedReaderBodyReplacementFencesNonCooperativeOlderResult() async throws {
@@ -564,11 +570,15 @@ final class ContentDetailViewModelTests: XCTestCase {
         ScraperConfig(
             id: 7,
             scraperType: "feed",
+            displayName: nil,
             config: [:],
             feedUrl: "https://example.com/feed.xml",
+            limit: nil,
             isActive: true,
             createdAt: Date(),
-            subscriptionOutcome: subscriptionOutcome
+            stats: nil,
+            subscriptionOutcome: subscriptionOutcome,
+            backfillTaskId: nil
         )
     }
 }
@@ -696,7 +706,7 @@ private final class BodyRecordingContentDetailService: StubContentDetailService 
         contextData: [String: Any]
     ) async throws -> TrackContentInteractionResponse {
         TrackContentInteractionResponse(
-            status: "ok",
+            status: .success,
             recorded: true,
             interactionId: "interaction-\(contentId)",
             analyticsInteractionId: nil
@@ -775,7 +785,7 @@ private final class CancelledThenSuccessfulContentDetailService: StubContentDeta
         contextData: [String: Any]
     ) async throws -> TrackContentInteractionResponse {
         TrackContentInteractionResponse(
-            status: "ok",
+            status: .success,
             recorded: true,
             interactionId: "interaction-\(contentId)",
             analyticsInteractionId: nil
@@ -835,7 +845,7 @@ private class RecordingContentDetailService: StubContentDetailService {
     ) async throws -> TrackContentInteractionResponse {
         stateLock.withLock { recordedTrackOpenedCount += 1 }
         return TrackContentInteractionResponse(
-            status: "ok",
+            status: .success,
             recorded: true,
             interactionId: "interaction-\(contentId)",
             analyticsInteractionId: nil

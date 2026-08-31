@@ -1,0 +1,268 @@
+{
+  "r3-01-enso-card": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#c3ab92",
+      "#e5c6ad"
+    ],
+    "accent": "#e5c6ad",
+    "accent_strong": "#d08548",
+    "ink": "#664d33"
+  },
+  "r3-02-folded-pouch": {
+    "bg": "#f8f8d8",
+    "swatches": [
+      "#fec39c",
+      "#f39666"
+    ],
+    "accent": "#fec39c",
+    "accent_strong": "#ff7820",
+    "ink": "#993501"
+  },
+  "r3-03-paper-bubble": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#b08f99",
+      "#f9b6b2"
+    ],
+    "accent": "#f9b6b2",
+    "accent_strong": "#fd392d",
+    "ink": "#563942"
+  },
+  "r3-04-curled-sheet": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#efcfa6",
+      "#cd7041",
+      "#e4ab70"
+    ],
+    "accent": "#efcfa6",
+    "accent_strong": "#e89833",
+    "ink": "#652f13"
+  },
+  "r3-05-two-discs": {
+    "bg": "#f8f8d8",
+    "swatches": [
+      "#ef995d",
+      "#f8d29c",
+      "#d67d44"
+    ],
+    "accent": "#f8d29c",
+    "accent_strong": "#fea11c",
+    "ink": "#6e3510"
+  },
+  "r3-06-crease-stone": {
+    "bg": "#f8f8d8",
+    "swatches": [
+      "#e2a06d",
+      "#c06a3d",
+      "#f0c899"
+    ],
+    "accent": "#f0c899",
+    "accent_strong": "#ed9125",
+    "ink": "#5a2e17"
+  },
+  "r3-07-seal-fold": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#f5b49c",
+      "#f19072",
+      "#f3cfba"
+    ],
+    "accent": "#f19072",
+    "accent_strong": "#f13e07",
+    "ink": "#9b2804"
+  },
+  "r3-08-pouch-face": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#fec595",
+      "#d99b7b"
+    ],
+    "accent": "#fec595",
+    "accent_strong": "#ff831b",
+    "ink": "#7d3c1b"
+  },
+  "r3-09-sleeping-seal": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#d3998b",
+      "#e3bbad"
+    ],
+    "accent": "#e3bbad",
+    "accent_strong": "#cc6c4b",
+    "ink": "#773525"
+  },
+  "r3-10-paper-boat": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#bd6345",
+      "#d6bba6",
+      "#e8d5c2",
+      "#d78e6c"
+    ],
+    "accent": "#d78e6c",
+    "accent_strong": "#bb5526",
+    "ink": "#592a1a"
+  },
+  "r3-11-bookmark-face": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#f9aa9b",
+      "#ef8473",
+      "#d16c5c"
+    ],
+    "accent": "#f9aa9b",
+    "accent_strong": "#ff401b",
+    "ink": "#6f2418"
+  },
+  "r3-12-envelope-lift": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#d28f66",
+      "#e9d5bc",
+      "#d2b89e"
+    ],
+    "accent": "#d28f66",
+    "accent_strong": "#b15c28",
+    "ink": "#723b1a"
+  },
+  "r3-13-peek-curl": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#f3ba86",
+      "#f7e1be"
+    ],
+    "accent": "#f3ba86",
+    "accent_strong": "#f77e0f",
+    "ink": "#a45104"
+  },
+  "r3-14-bag-buddy": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#e4bd88",
+      "#af7d4a"
+    ],
+    "accent": "#e4bd88",
+    "accent_strong": "#db8d23",
+    "ink": "#52381d"
+  },
+  "r3-15-fold-nest": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#f3c5a7",
+      "#cc906c",
+      "#cfb493"
+    ],
+    "accent": "#f3c5a7",
+    "accent_strong": "#f07a2e",
+    "ink": "#6d3c1f"
+  },
+  "r3-16-ribbon-loop": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#f68766",
+      "#e7d4b6",
+      "#e0b999"
+    ],
+    "accent": "#f68766",
+    "accent_strong": "#f33700",
+    "ink": "#9c2300"
+  },
+  "r3-17-stack-cards": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#e67b4a",
+      "#ccad8b",
+      "#c25c38",
+      "#e1cbab"
+    ],
+    "accent": "#e67b4a",
+    "accent_strong": "#e67b4a",
+    "ink": "#5b2714"
+  },
+  "r3-18-wax-seal": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#ca7553",
+      "#aa583c"
+    ],
+    "accent": "#ca7553",
+    "accent_strong": "#ca7553",
+    "ink": "#502517"
+  },
+  "r3-19-stamped-square": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#f07963",
+      "#c86353",
+      "#eda591"
+    ],
+    "accent": "#f07963",
+    "accent_strong": "#e72906",
+    "ink": "#652419"
+  },
+  "r3-20-shelter-fold": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#eebe7d",
+      "#d9855a"
+    ],
+    "accent": "#eebe7d",
+    "accent_strong": "#ef8f0e",
+    "ink": "#763513"
+  },
+  "r3-21-cup-fold": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#e58461",
+      "#ecd9b6"
+    ],
+    "accent": "#e58461",
+    "accent_strong": "#e58461",
+    "ink": "#852c0c"
+  },
+  "r3-22-open-fold": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#f5c79e"
+    ],
+    "accent": "#f5c79e",
+    "accent_strong": "#f78622",
+    "ink": "#af5505"
+  },
+  "r3-23-disc-crease": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#932706",
+      "#da8b6d",
+      "#e7ac91",
+      "#f0d4c0"
+    ],
+    "accent": "#932706",
+    "accent_strong": "#932706",
+    "ink": "#932706"
+  },
+  "r3-24-paper-tag": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#f2b65d",
+      "#d6894f"
+    ],
+    "accent": "#f2b65d",
+    "accent_strong": "#e88b02",
+    "ink": "#713b12"
+  },
+  "r3-25-nested-fold": {
+    "bg": "#f8f8f8",
+    "swatches": [
+      "#e0755e",
+      "#eb9c89",
+      "#dad3bf",
+      "#bd3d2c"
+    ],
+    "accent": "#eb9c89",
+    "accent_strong": "#e8431c",
+    "ink": "#bd3d2c"
+  }
+}

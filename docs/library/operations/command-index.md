@@ -1,47 +1,81 @@
 # Operations Command Index
 
-Use this index as the single entrypoint for operational scripts.
+This is the current entrypoint index. Retired Python backend and bare-metal
+Supervisor commands are available only through repository history.
 
-## Deploy
+## Runtime and database
 
-- GitHub Actions [`.github/workflows/docker-racknerd-deploy.yml`](../../../.github/workflows/docker-racknerd-deploy.yml) - Supported production app deploy path.
-- `scripts/deploy/push_envs.sh` - Env-only helper to sync `.env.racknerd` to the host outside the normal GitHub deploy flow.
-- `scripts/deploy/common.sh` - Shared deploy functions (`require_option_value`, owner parsing, env sync promotion).
-- `scripts/check_and_run_migrations.sh` - Safe migration runner with settings validation.
+- `scripts/start_services.sh` — local Rust API, workers, scheduler, isolated extractor, and SQLx migration launcher.
+- `scripts/run_sqlx_migrations.sh` — apply embedded SQLx migrations or perform one-time baseline adoption.
+- `scripts/setup_local_postgres.sh` — install/start local PostgreSQL and write the local native URL.
+- `scripts/dev.sh` — background local-service convenience wrapper around `start_services.sh`.
+- `scripts/backup_database.sh` — create and retain PostgreSQL custom-format backups.
 
-## Runtime
+`start_services.sh all --local-e2e --port <PORT>` is the bounded full-stack
+profile for local end-to-end work. It constrains every process's SQLx pool,
+executes the extractor directly after a frozen `uv` sync so it remains a
+supervised child, and shuts down the complete child set if any service exits.
+Environment-specific pool settings remain available for ordinary local runs.
 
-- `scripts/start_services.sh` - Unified local runtime launcher for `all`, `server`, `workers`, `scrapers`, `watchdog`, `scheduler`, and `migrate`.
-- `scripts/start_server.sh` - API server launcher.
-- `scripts/start_workers.sh` - Queue workers launcher.
-- `scripts/start_scrapers.sh` - Scraper launcher.
-- `scripts/start_queue_watchdog.sh` - Queue watchdog launcher.
-- `scripts/workers.sh` - Worker convenience wrapper.
+## Operations and deploy
 
-## Diagnostics
+- `.github/workflows/docker-racknerd-deploy.yml` — supported exact-SHA production deploy.
+- `.github/workflows/e2b-template-publish.yml` — manual, quality-gated publication of the canonical E2B template from a current-main SHA.
+- `scripts/build_agent_vm_template.sh` — network-free template validation/dry-run and explicit E2B publication with a source receipt.
+- `scripts/deploy_blue_green.sh` — remote blue-green API and singleton worker/scheduler rollout.
+- `scripts/deploy/switch-api-slot.sh` — atomic Nginx upstream switch.
+- `scripts/deploy/push_envs.sh` — explicit env-only host sync outside an application deploy.
+- `scripts/sync_production_state.sh` — supported production-to-local state snapshot entrypoint.
+- `scripts/sync_logs_from_server.sh` and `scripts/view_remote_errors.sh` — narrow SSH log helpers.
+- `scripts/start_bgutil_provider.sh` — optional pinned YouTube proof-of-origin helper for native media testing.
 
-- `scripts/analyze_errors.py` - Analyze persisted error logs.
-- `scripts/dump_system_stats.py` - Runtime/system stats snapshot.
-- `scripts/queue_control.py` - Queue inspection and control utilities.
-- `scripts/view_remote_errors.sh` - Pull and inspect remote error logs.
-- `scripts/sync_logs_from_server.sh` - Sync remote logs locally.
+Use `newsly-admin` for ownership, health, task, usage, eval, and bounded
+read-only database-inspection operations. Use the Rust admin HTTP surface or
+container logs after narrowing a runtime issue.
 
-## Data and Backfills
+## User CLI
 
-- `scripts/backfill_summary_kind.py` - Backfill summary discriminator metadata.
-- `scripts/cancel_ineligible_generate_image_tasks.py` - Cancel pending image tasks outside visible feed rules.
-- `scripts/reset_content_processing.py` - Reset stuck/failed processing state.
-- `scripts/reset_errored_content.py` - Reset errored content records.
+- `cargo run --manifest-path rust/Cargo.toml -p newsly-cli --bin newsbuddy -- <command>` — run the authenticated user-facing CLI from source.
+- `cargo install --locked --path rust/crates/newsly-cli` — install the `newsbuddy` binary from the current checkout.
+- `cargo test --manifest-path rust/Cargo.toml -p newsly-cli` — run the CLI command, transport, config, output, polling, and library-safety tests.
 
-## Contracts and Tooling
+`newsbuddy` remains separate from the operator-only `newsly-admin` binary. Its
+external Homebrew formula is maintained in another repository and must be
+updated separately when publishing the Rust build.
 
-- `scripts/export_openapi_schema.py` - Export current OpenAPI schema to `docs/library/reference/openapi.json`.
-- `scripts/export_agent_openapi_schema.py` - Export the filtered CLI schema to `cli/openapi/agent-openapi.json`.
-- `scripts/generate_ios_contracts.py` - Generate iOS enum and model contracts from backend canonical models.
-- `scripts/generate_go_contracts.py` - Generate Go CLI model and enum contracts from backend canonical models.
-- `scripts/generate_agent_cli_artifacts.sh` - Regenerate the filtered CLI schema and generated Go contracts.
-- `scripts/regenerate_public_contracts.sh` - Regenerate all checked-in public contract artifacts.
-- `scripts/check_public_contracts.sh` - Verify all checked-in public contract artifacts are current.
-- `client/newsly/scripts/regenerate_api_contracts.sh` - One-command iOS contract regeneration workflow.
-- `scripts/check_duplicate_tests.py` - Detect duplicate test module names between roots.
-- `scripts/check_module_size_guardrails.py` - Enforce line-count guardrails for high-churn modules.
+## Contracts and guardrails
+
+- `scripts/export_openapi_schema.sh` — export Rust public OpenAPI.
+- `scripts/regenerate_public_contracts.sh` — refresh Rust OpenAPI plus generated app Swift and Share Extension artifacts.
+- `scripts/check_public_contracts.sh` — fail on public contract, agent-operation inventory, or native-client generation drift.
+- `scripts/architecture_guard.sh` — check retired-authority absence, module ratchets, formatting, and contracts.
+- `scripts/check_module_size_guardrails.sh` — enforce non-generated Swift module line limits without a project Python dependency.
+
+## iOS helpers
+
+- `scripts/codex_bootstrap.sh` — fetch locked Rust/Python-island/Node dependencies and resolve Swift packages.
+- `scripts/codex_run_ios.sh` — build, install, create a Rust debug user, and launch the current Simulator app.
+- `scripts/axe_simulator_smoke.sh` — create a Rust debug user and run a lightweight AXe Simulator smoke.
+
+Both iOS launchers accept `--api-base-url http://127.0.0.1:<PORT>`; use an
+explicit non-default port when another checkout or process owns port 8000.
+
+## Script ownership and intentional non-runtime tooling
+
+- `scripts/lib/rust_runtime.sh` is the sourced environment/origin helper for
+  Rust launchers; it is not an executable entrypoint.
+- `docker/entrypoint.sh` and `docker/supervisord.worker-programs.conf` are
+  image-private dispatch and worker-supervision configuration. API and
+  scheduler modes execute their Rust binaries directly.
+- `scripts/deploy/common.sh` is sourced only by deploy tooling.
+- `python/evals/scripts/*.py` are retained offline model/evaluation pipelines;
+  `python/document_extractor` exposes only its package console entrypoint.
+- `docs/generate_architecture.sh`, `.agents/skills/*/scripts`, and the root
+  `package.json` CSS commands are documentation, agent, and asset-build tools,
+  not backend runtimes.
+- `docs/brand-exploration-2026-08/*.{py,js}` is frozen historical design
+  tooling and is excluded from application images.
+
+There is no repository Go entrypoint, general Python backend launcher, client
+contract wrapper, or separate API/scheduler Docker wrapper. The architecture
+guard rejects those retired duplicate authorities.

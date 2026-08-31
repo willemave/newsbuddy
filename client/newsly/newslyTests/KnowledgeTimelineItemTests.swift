@@ -174,6 +174,12 @@ final class KnowledgeTimelineItemTests: XCTestCase {
             kind: .custom_narration,
             status: .completed,
             title: "Narration \(id)",
+            sourceContentId: nil,
+            durationSeconds: nil,
+            audioUrl: nil,
+            streamUrl: nil,
+            scriptText: nil,
+            errorMessage: nil,
             createdAt: activityDate.addingTimeInterval(-60),
             updatedAt: activityDate
         )

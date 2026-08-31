@@ -129,11 +129,41 @@ final class PodcastAudioControllerTests: XCTestCase {
                 id: id,
                 contentType: .article,
                 url: "https://example.test/content/\(id)",
+                sourceUrl: nil,
+                discussionUrl: nil,
+                title: nil,
                 displayTitle: "Content \(id)",
+                source: nil,
                 status: .completed,
+                errorMessage: nil,
                 retryCount: 0,
                 metadata: [:],
-                createdAt: "2026-08-07T12:00:00Z"
+                createdAt: try XCTUnwrap(ServerDate.parse("2026-08-07T12:00:00Z")),
+                updatedAt: nil,
+                processedAt: nil,
+                checkedOutBy: nil,
+                checkedOutAt: nil,
+                publicationDate: nil,
+                summary: nil,
+                shortSummary: nil,
+                summaryKind: nil,
+                summaryVersion: nil,
+                structuredSummary: nil,
+                longformArtifact: nil,
+                feedPreview: nil,
+                artifactType: nil,
+                previewBullets: nil,
+                reasonToRead: nil,
+                fullMarkdown: nil,
+                bodyKind: nil,
+                bodyFormat: nil,
+                newsArticleUrl: nil,
+                newsDiscussionUrl: nil,
+                newsKeyPoints: nil,
+                newsSummary: nil,
+                imageUrl: nil,
+                thumbnailUrl: nil,
+                detectedFeed: nil
             )
         )
     }
@@ -148,7 +178,13 @@ final class PodcastAudioControllerTests: XCTestCase {
             sourceContentIds: [contentID],
             sourceCount: 1,
             sourceTitles: ["Content \(contentID)"],
-            createdAt: Date(timeIntervalSince1970: 1_800_000_200)
+            durationSeconds: nil,
+            audioUrl: nil,
+            streamUrl: nil,
+            scriptText: nil,
+            errorMessage: nil,
+            createdAt: Date(timeIntervalSince1970: 1_800_000_200),
+            updatedAt: nil
         )
     }
 

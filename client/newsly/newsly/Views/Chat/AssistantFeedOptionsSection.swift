@@ -26,9 +26,15 @@ final class AssistantFeedOptionActionModel {
 
     @ObservationIgnored
     private let service: any AssistantFeedSubscribing
+    @ObservationIgnored
+    private let toastPresenter: any ToastPresenting
 
-    init(service: any AssistantFeedSubscribing = ScraperConfigService.shared) {
+    init(
+        service: any AssistantFeedSubscribing,
+        toastPresenter: any ToastPresenting
+    ) {
         self.service = service
+        self.toastPresenter = toastPresenter
     }
 
     func isSubscribed(_ option: AssistantFeedOption) -> Bool {
@@ -54,16 +60,16 @@ final class AssistantFeedOptionActionModel {
             subscribedOptionIds.insert(option.id)
             if config.subscriptionOutcome == .already_subscribed {
                 subscriptionLabels[option.id] = "Already subscribed"
-                ToastService.shared.show("Already subscribed", type: .info)
+                toastPresenter.show("Already subscribed", type: .info, duration: 3)
             } else if config.subscriptionOutcome == .reactivated {
                 subscriptionLabels[option.id] = "Re-enabled"
-                ToastService.shared.showSuccess("Re-enabled \(option.title)")
+                toastPresenter.showSuccess("Re-enabled \(option.title)")
             } else {
                 subscriptionLabels[option.id] = "Added"
-                ToastService.shared.showSuccess("Subscribed to \(option.title)")
+                toastPresenter.showSuccess("Subscribed to \(option.title)")
             }
         } catch {
-            ToastService.shared.showError("Couldn't subscribe. Please try again.")
+            toastPresenter.showError("Couldn't subscribe. Please try again.")
         }
     }
 }

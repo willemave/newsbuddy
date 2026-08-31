@@ -1,0 +1,24 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "message_id": {
+      "title": "Message Id",
+      "type": "integer"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "integer"
+    },
+    "user_id": {
+      "title": "User Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "user_id",
+    "session_id",
+    "message_id"
+  ],
+  "title": "ChatTurnPayload",
+  "type": "object"
+}

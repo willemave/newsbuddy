@@ -13,14 +13,9 @@ struct RecentlyReadView: View {
     @State private var viewModel: ContentListViewModel
     @State private var showingFilters = false
 
-    init(readStateCache: ReadStateCache? = nil) {
-        let readStateCache = readStateCache ?? ReadStateCache()
+    init(readStateCache: ReadStateCache, viewModel: ContentListViewModel) {
         self.readStateCache = readStateCache
-        self._viewModel = State(
-            initialValue: RootDependencyFactory.makeContentListViewModel(
-                readStateCache: readStateCache
-            )
-        )
+        self._viewModel = State(initialValue: viewModel)
     }
 
     var body: some View {
@@ -123,5 +118,5 @@ struct RecentlyReadView: View {
 }
 
 #Preview {
-    RecentlyReadView()
+    EmptyView()
 }

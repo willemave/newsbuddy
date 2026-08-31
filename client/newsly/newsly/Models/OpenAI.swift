@@ -1,6 +1,6 @@
 import Foundation
 
-struct AudioTranscriptionResponse: Codable {
+struct AudioTranscriptionResponse {
     let transcript: String
     let language: String?
 
@@ -8,28 +8,13 @@ struct AudioTranscriptionResponse: Codable {
         transcript
     }
 
-    enum CodingKeys: String, CodingKey {
-        case transcript
-        case text
-        case language
-    }
-
     init(transcript: String, language: String?) {
         self.transcript = transcript
         self.language = language
     }
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        transcript =
-            try container.decodeIfPresent(String.self, forKey: .transcript)
-            ?? container.decode(String.self, forKey: .text)
-        language = try container.decodeIfPresent(String.self, forKey: .language)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(transcript, forKey: .transcript)
-        try container.encodeIfPresent(language, forKey: .language)
+    init(api response: APIAudioTranscriptionResponse) {
+        transcript = response.transcript
+        language = response.language
     }
 }

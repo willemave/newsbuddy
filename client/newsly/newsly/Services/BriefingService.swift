@@ -38,18 +38,23 @@ protocol BriefingServicing: AnyObject {
 }
 
 final class LiveBriefingService: BriefingServicing {
+    typealias CompleteFirstRun = () async throws -> Void
+
     private let apiClient: APIClient
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private let completeFirstRunAction: CompleteFirstRun
 
     init(
-        apiClient: APIClient = .shared,
+        apiClient: APIClient,
         decoder: JSONDecoder = JSONDecoder(),
-        encoder: JSONEncoder = JSONEncoder()
+        encoder: JSONEncoder = JSONEncoder(),
+        completeFirstRun: @escaping CompleteFirstRun
     ) {
         self.apiClient = apiClient
         self.decoder = decoder
         self.encoder = encoder
+        self.completeFirstRunAction = completeFirstRun
     }
 
     func fetchIndex(ifNoneMatch etag: String?) async throws -> BriefingIndexFetchResult {
@@ -141,7 +146,7 @@ final class LiveBriefingService: BriefingServicing {
     }
 
     func completeFirstRun() async throws {
-        _ = try await OnboardingService.shared.markTutorialComplete()
+        try await completeFirstRunAction()
     }
 
     func digSearch(fragment: String) async throws -> APIBriefingDigSearchResponse {

@@ -893,20 +893,48 @@ final class BriefingReadMarkingTests: XCTestCase {
     func testBlockSourceLinkKeysPreserveOrderAndRemoveDuplicates() {
         let block = APIBriefingBlock(
             type: .passage,
+            weight: nil,
             paragraphs: [
                 APIBriefingParagraph(
                     runs: [
-                        APIBriefingRun(kind: .source_link, text: "First", sourceKey: "content:1"),
-                        APIBriefingRun(kind: .text, text: " body "),
-                        APIBriefingRun(kind: .source_link, text: "Second", sourceKey: "news:2"),
+                        APIBriefingRun(
+                            kind: .source_link,
+                            text: "First",
+                            sourceKey: "content:1",
+                            insightId: nil
+                        ),
+                        APIBriefingRun(
+                            kind: .text,
+                            text: " body ",
+                            sourceKey: nil,
+                            insightId: nil
+                        ),
+                        APIBriefingRun(
+                            kind: .source_link,
+                            text: "Second",
+                            sourceKey: "news:2",
+                            insightId: nil
+                        ),
                     ]
                 ),
                 APIBriefingParagraph(
                     runs: [
-                        APIBriefingRun(kind: .source_link, text: "First again", sourceKey: "content:1")
+                        APIBriefingRun(
+                            kind: .source_link,
+                            text: "First again",
+                            sourceKey: "content:1",
+                            insightId: nil
+                        )
                     ]
                 )
-            ]
+            ],
+            sourceKey: nil,
+            imageUrl: nil,
+            thumbnailUrl: nil,
+            caption: nil,
+            placement: nil,
+            alignment: nil,
+            text: nil
         )
 
         XCTAssertEqual(block.briefingSourceLinkKeys, ["content:1", "news:2"])
@@ -915,14 +943,26 @@ final class BriefingReadMarkingTests: XCTestCase {
     func testFallbackReadSourceKeysIncludeDirectAndInlineSourceLinks() {
         let block = APIBriefingBlock(
             type: .passage,
+            weight: nil,
             paragraphs: [
                 APIBriefingParagraph(
                     runs: [
-                        APIBriefingRun(kind: .source_link, text: "Linked", sourceKey: "news:2")
+                        APIBriefingRun(
+                            kind: .source_link,
+                            text: "Linked",
+                            sourceKey: "news:2",
+                            insightId: nil
+                        )
                     ]
                 )
             ],
-            sourceKey: "content:1"
+            sourceKey: "content:1",
+            imageUrl: nil,
+            thumbnailUrl: nil,
+            caption: nil,
+            placement: nil,
+            alignment: nil,
+            text: nil
         )
 
         XCTAssertEqual(block.briefingFallbackReadSourceKeys, ["content:1", "news:2"])

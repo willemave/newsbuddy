@@ -1,0 +1,37 @@
+[package]
+name = "newsly-account-deletion-worker"
+description = "Isolated Rust backfill worker for retry-safe Newsly account deletion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait = "=0.1.92"
+base64.workspace = true
+fernet.workspace = true
+newsly-db = { path = "../newsly-db" }
+newsly-domain = { path = "../newsly-domain" }
+newsly-e2b = { path = "../newsly-e2b" }
+newsly-queue = { path = "../newsly-queue" }
+newsly-worker = { path = "../newsly-worker" }
+object_store = { version = "=0.14.1", default-features = false, features = ["aws"] }
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "signal", "sync"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url = "=2.5.8"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "=3.27.0"

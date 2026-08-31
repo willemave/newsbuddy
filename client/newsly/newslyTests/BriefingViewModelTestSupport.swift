@@ -505,8 +505,14 @@ func makeLens(
                 id: 1,
                 title: "Long report",
                 summary: "Report summary",
+                keyPoints: nil,
+                url: nil,
+                imageUrl: nil,
+                thumbnailUrl: nil,
+                publishedAt: nil,
                 contentType: .article,
-                read: false
+                read: false,
+                discussion: nil
             ),
             APIBriefingSource(
                 sourceKey: "news:2",
@@ -514,7 +520,14 @@ func makeLens(
                 id: 2,
                 title: "News item",
                 summary: "News summary",
-                read: false
+                keyPoints: nil,
+                url: nil,
+                imageUrl: nil,
+                thumbnailUrl: nil,
+                publishedAt: nil,
+                contentType: nil,
+                read: false,
+                discussion: nil
             )
         ],
         nextCursor: nextCursor,
@@ -538,10 +551,22 @@ func makeSegment(
                 paragraphs: [
                     APIBriefingParagraph(
                         runs: [
-                            APIBriefingRun(kind: .text, text: "A useful passage.")
+                            APIBriefingRun(
+                                kind: .text,
+                                text: "A useful passage.",
+                                sourceKey: nil,
+                                insightId: nil
+                            )
                         ]
                     )
-                ]
+                ],
+                sourceKey: nil,
+                imageUrl: nil,
+                thumbnailUrl: nil,
+                caption: nil,
+                placement: nil,
+                alignment: nil,
+                text: nil
             )
         ],
         sourceKeys: sourceKeys
@@ -558,10 +583,16 @@ func makeAudioEpisode(
         kind: .briefing_narration,
         status: status,
         title: "Briefing",
+        sourceContentId: nil,
         sourceCount: 1,
         sourceTitles: ["Long report"],
+        durationSeconds: nil,
+        audioUrl: nil,
+        streamUrl: nil,
+        scriptText: nil,
         errorMessage: errorMessage,
-        createdAt: Date(timeIntervalSince1970: 1_800_000_200)
+        createdAt: Date(timeIntervalSince1970: 1_800_000_200),
+        updatedAt: nil
     )
 }
 

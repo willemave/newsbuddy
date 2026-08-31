@@ -27,6 +27,197 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-31 — detached `c77aa869` — Make Share Add Feed subscription results truthful
+
+- **Status:** Complete locally; live canary pending; not committed, pushed, deployed, or distributed.
+- **Scope:** Rust Share Action Add Feed validation/finalization, scraper-config persistence, initial feed backfill, and terminal content resubmission semantics.
+- **Decisions:** Treat the model-selected URL as a candidate only; preserve the host parser's actual RSS-versus-Atom result; perform all E2B probing before finalization; and mark an action applied only when its active config and any required backfill are durable in the same fenced transaction.
+- **Changes:** Added a typed feed-validation result while preserving the URL-only API, converted Add Feed to direct validated scraper subscription instead of indirect Content analysis, made created/reactivated/already-existing outcomes explicit, and allowed an explicit feed-subscription mutation to finalize against an older terminal Content row.
+- **Validation:** Focused workspace check passed; two Share workflow tests, the RSS subscription PostgreSQL integration test, two feed-validator tests, and the terminal-row finalizer guard test passed. Formatting and warning-denied Clippy passed for `newsly-worker`, `newsly-db`, and `newsly-e2b`. Tests made no live provider calls.
+- **Remaining:** Restart the local Rust worker and run one authenticated Share Add Feed canary, then verify the action result, active config, and backfill task against the local database.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Correct feed subscription ownership after review
+
+- **Status:** Complete locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Share Add Feed, feed-valued Add to Briefing, Chat subscribe, E2B feed classification, and terminal Content finalization.
+- **Decisions:** Keep terminal Content immutable; make the direct host-validated scraper repository the only agent-initiated subscription path; derive podcast classification from parsed audio entries and Substack classification from the effective host; and never report `subscribed: true` for mere Content-analysis queue acceptance.
+- **Changes:** Removed the terminal-Content subscription exemption recorded in the preceding entry, moved Add to Briefing feeds and Chat onto validation-before-transaction plus atomic config/backfill persistence, removed the indirect Share feed-submission helper, and omitted E2B's inapplicable `autoPauseMemory=false` create field.
+- **Validation:** All 30 `newsly-e2b` tests passed, along with four Share workflow tests, five Content finalizer tests, and the PostgreSQL direct-subscription regression covering created, reactivated, already-existing, and Add to Briefing outcomes. Live task `41` validated `https://this-week-in-rust.org/rss.xml`, completed Share Add Feed, committed active Atom config `1`, and atomically queued backfill task `1118`. The earlier homepage canary passed sandbox creation but reached the agent deadline; the direct-feed retry proved the canonical persistence path. Formatting, all-target compilation, and warning-denied Clippy passed.
+- **Remaining:** Production compatibility telemetry and the exact-SHA release/cutover gates remain; no local subscription-path work remains.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Complete the local Rust migration and product E2E gate
+
+- **Status:** Complete locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Consolidated Rust runtime and CLI, SQLx migrations, Crawl4AI extraction boundary, ingestion and model workers, direct E2B, Share Actions, chat, Learning Decks, stored audio, public contracts, and the dedicated iOS Simulator product surface.
+- **Decisions:** Retain Python only for the database-free Crawl4AI extractor and offline eval pipelines; keep exact reviewed bodyless exceptions only for audio-stream `416` responses; give Learning Deck initial and repair runs no application-level request or output-token ceiling while retaining deadlines, tool/file bounds, artifact validation, and browser validation; and keep the disposable queue's historical failed canaries visible rather than claiming a global drain.
+- **Changes:** Finished the Rust/Clap `newsbuddy` and Rust operator CLIs, direct ConnectRPC E2B layer, SQLx migration authority, generated Rust OpenAPI/Swift boundaries, canonical script launcher, fail-closed feed subscription ownership, and behavior-preserving worker module splits below the ratchets. Removed the general Python backend, Alembic, Go CLI, and backend Python test trees.
+- **Validation:** The locked PostgreSQL-enabled Rust workspace passed 360 tests across 17 packages with zero failures; one opt-in live E2B smoke and six generated ConnectRPC doctests were ignored. Workspace warning-denied Clippy, offline SQLx compilation, formatting, the 695-file architecture guard with 32 ratchets, public-contract drift, and diff checks passed. The retained Python islands passed 39 tests plus Ruff, MyPy, boundary, and package-build checks. Native iOS passed 629 unit tests and the three UI tests. Live local evidence includes five scrape runs, 123 post-fix enrichment completions, 15 extraction-summary-image chains, 97 ready News items, two-turn tool-backed chat, all four Share API modes, direct Add Feed config/backfill persistence, a Learning Deck run recording 9,442 output tokens and a signed browser-validated viewer, and authenticated ranged-audio playback. AXe produced 55 valid captures across the app, including chat, Share-driven additions, Learning Deck, and audio, against the current checkout and disposable Rust backend.
+- **Evidence:** `/tmp/newsly-final-rust-tests.log` and `/tmp/newsly-rust-e2e-axe-final/` (notably `17-chat-two-turn.png`, `38-learning-deck-viewer-live.png`, `49-audio-range-playing.png`, `50-audio-range-finished.png`, `63-share-add-feed-direct-completed.json`, `64-share-add-feed-db-proof.txt`, `65-final-runtime-counts.txt`, and `66-learning-deck-over-4k-proof.txt`).
+- **Remaining:** A Docker-capable host must build the production image and rehearse existing-database SQLx adoption before any exact-SHA deployment. Production drain/adoption, compatibility telemetry, live health/queue/cost proof, commit/push, and Apple distribution were not performed. The disposable E2B sandbox, snapshot, and template were deleted, the local Rust API was stopped, and the disposable PostgreSQL data directory was stopped and moved to Trash for recoverability; the `/tmp` evidence directory was retained.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Repair Rust Knowledge and recent-content timestamp projections
+
+- **Status:** Complete locally; not committed, pushed, deployed, or distributed.
+- **Scope:** SQLx content-feed projections and cursor ordering for Knowledge and recently read lists.
+- **Decisions:** Decode PostgreSQL `timestamptz` Knowledge-save values as typed UTC timestamps, and normalize `timestamptz` sort keys to UTC `timestamp` values at the SQL boundary so the existing cursor contract remains unchanged.
+- **Changes:** Fixed the saved/read timestamp type mismatch that made any nonempty Knowledge list fail during SQLx row decoding; applied the same correction to the latent recently-read failure; and added a PostgreSQL regression covering both projections and their exact UTC values.
+- **Validation:** Reproduced the 500 with one saved row in a disposable migrated database and isolated API, where SQLx reported `TIMESTAMPTZ` was incompatible with `NaiveDateTime`. The focused regression passes, scoped warning-denied Clippy and formatting pass, and post-fix HTTP canaries returned one valid item from both Knowledge and recently read. The isolated API was stopped and its disposable database dropped.
+- **Remaining:** Full cross-stack gates remain with the parent E2E task. Full all-target Clippy was temporarily blocked by an unrelated concurrent doc-markdown warning in `newsly-agent-runtime/src/transcript.rs`.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Consolidate scripts around the Rust runtime
+
+- **Status:** Complete locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Local runtime launch/supervision, SQLx environment loading, iOS/AXe local-origin selection, container dispatch, and the repository script inventory.
+- **Decisions:** Keep one canonical native launcher, retain Python only for the direct Crawl4AI child and offline eval pipelines, preserve narrow operations/release helpers, and force bounded database pools only when the explicit local-E2E profile is selected.
+- **Changes:** Shared dotenv/database/origin parsing in `scripts/lib/rust_runtime.sh`; made `dev.sh` forward one canonical `start_services.sh` invocation; added `--local-e2e`; replaced the extractor's `uv run` wrapper with a frozen-sync direct child; made child exit and signal handling terminate and reap peers exactly once; let iOS and AXe helpers target an explicit API origin; inlined API/scheduler Docker dispatch; and removed the unused duplicate client contract wrapper, Docker wrappers, and Claude documentation helper. The architecture guard now rejects retired Python/Go launchers and duplicate entrypoints.
+- **Validation:** Bash syntax passed for every active shell entrypoint; focused help, invalid-argument, URL parsing, dotenv normalization, retired-launcher, and script-reference checks passed. Runtime startup was intentionally left to the parent E2E lane to avoid disturbing its active disposable database, extractor, API, and worker canaries.
+- **Remaining:** Complete-stack runtime and AXe product validation continue in the parent E2E task; no production or release action was performed.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Cut the user CLI over from Go to Rust
+
+- **Status:** Complete locally; not committed, pushed, packaged in Homebrew, or deployed.
+- **Scope:** `newsly-cli`, its command/transport/config/output/polling/library tests, shared request contracts, client codegen, quality gates, repository hooks, and active CLI documentation.
+- **Decisions:** Preserve the `newsbuddy` binary, config paths and environment aliases, commands, output envelopes, QR login, and local-library manifests; keep `newsbuddy` separate from the operator-only `newsly-admin`; consume `newsly-contracts` directly instead of generating a second CLI model tree; and retire the checked CLI-specific OpenAPI copy while retaining the internal language-neutral agent operation-inventory test.
+- **Changes:** Added the Rust/Clap HTTP client with all 25 leaf commands, stable JSON/text envelopes, unauthenticated QR linking, API-key auth, compound duration parsing, shell completion, forward-compatible success decoding, typed errors, and atomic safe library sync. Removed the complete Go module, generated Go contracts and emitter, filtered checked CLI OpenAPI, Go CI/hook/settings surfaces, and obsolete artifact scripts. Split dispatcher tests out of the production module to remain below the 1,000-line guardrail and removed dead porting helpers. Documented source installation and the external Homebrew packaging boundary.
+- **Validation:** All 35 focused Rust CLI tests pass, replacing 40 Go tests without generated-model duplication. Warning-denied workspace Clippy, all 321 Rust workspace tests, locked offline all-target compilation, the architecture and 683-file module-size guards, public-contract drift, shell syntax, `newsbuddy version` and completion smokes, stale-Go searches, and `git diff --check` pass. Six generated ConnectRPC doctests remain intentionally ignored.
+- **Remaining:** Update and publish the external `willemave/newsbuddy` Homebrew formula if Homebrew distribution is desired. No repository commit, push, package publication, or deployment occurred.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Finish the authenticated iOS composition root
+
+- **Status:** Complete locally; not committed, pushed, deployed, or distributed.
+- **Scope:** `AppRuntime`, `AuthenticatedSession`, the root construction graph, authenticated app/root/settings routes, chat notification routing, and focused lifecycle/composition tests.
+- **Decisions:** Resolve live process services once in `newslyApp`; require an explicit runtime graph; make every authenticated store, coordinator, and poller an explicit session input; keep route models view-owned; and bind local-notification chat routing to the active account lifetime.
+- **Changes:** Replaced the static root factory with an instance-bound graph, removed runtime/session fallback construction and chat/navigation singletons, routed settings, onboarding, Briefing, X, CLI, assistant-feed actions, toast presentation, simulator URL normalization, and route-model dependencies through the graph, and clear notification routing during session detach.
+- **Validation:** The Debug iOS Simulator product build and complete native `build-for-testing` pass on iPhone 17 Pro, iOS 26.5. All 39 focused lifecycle, authentication restoration, chat navigation, active-session, assistant-feed, and Learning Deck chat tests pass serially with zero skips; static singleton/factory searches and scoped whitespace checks pass.
+- **Remaining:** None in implementation scope. The parent migration still owns the complete serial native and repository gates.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Finish the Rust backend migration candidate
+
+- **Status:** Complete locally; not committed, pushed, deployed, cut over, or distributed.
+- **Scope:** Final backend/client integration, generated network boundaries, Rust module cleanup, retained Python-island enforcement, and the consolidated local migration gate.
+- **Decisions:** Keep Rust as the only application, PostgreSQL, queue, provider, agent, E2B, migration, and operator authority; keep Python only for the authenticated database-free Crawl4AI extractor and offline eval package; preserve lenient decoding only in local/cache domain snapshots while requiring generated models at every HTTP boundary; and leave public-route plus `learning_deck_runs` retirement behind their production telemetry and backfill gates.
+- **Changes:** Closed the remaining Swift and Go handwritten wire shapes, added resource-specific News adapters and single-owner search cancellation, made the iOS wire guard fail closed, converted Go errors to the canonical typed envelope, split five migration hotspots into cohesive Rust modules below 1,000 lines, and removed their obsolete module-size exemptions. Finished the authenticated iOS composition root as one instance-bound graph with explicit process, account, and route dependencies.
+- **Validation:** Rust formatting and warning-denied workspace Clippy pass. The full PostgreSQL-enabled Rust workspace passes 288 tests with six generated ConnectRPC doctests intentionally ignored; locked offline compilation, SQLx prepare metadata, and a fresh throwaway-database migration pass. A Rust API smoke against the migrated throwaway database returned healthy `/health`, `/health/live`, and `/health/ready` responses, after which the process stopped and the database was dropped. Rust public-contract drift, Go tests/vet, both Compose manifests, every shell entrypoint, module-size and wire guards, and OpenAPI parity pass; parity differs from the 146-operation Python baseline only by the intentional initial-suggestions deletion and new liveness/readiness operations. The retained Python islands pass Ruff, formatting, MyPy, and 39 tests total (4 eval and 35 extractor). The complete serial native run passes all 632 tests (629 unit and 3 UI) with zero failures or skips; its result bundle is `/tmp/newsly-rust-migration-final-20260831-v2.xcresult`. Docker image builds remain unavailable because no Docker daemon is running.
+- **Remaining:** Live provider/E2B/extractor/media/object-storage canaries, existing-production-database SQLx adoption, image build, exact-SHA release workflow, deployment, and Apple distribution remain separate authorized release work.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Harden the retained Python islands
+
+- **Status:** Complete locally; not committed, pushed, or deployed.
+- **Scope:** `python/evals`, the database-free document extractor, Python authority guardrails, and their quality-gate documentation.
+- **Decisions:** Treat `python/evals` and `python/document_extractor` as the only Newsly Python package roots; retain one exact docs-only exemption for the historical brand asset generators; and remove the Python extractor HTTP client because Rust is now the only caller and its sole remaining Python consumer was its own test.
+- **Changes:** Added a locked MyPy development dependency and package configuration for eval source, scripts, and tests; made MyPy part of the attested eval CI job; fixed the duplicate-summary collection's ambiguous inferred type; made the architecture guard reject missing or additional Python islands and every Python source outside the two roots; removed the obsolete coexistence client and its six tests; and documented the local commands and design-tool exception.
+- **Validation:** Both database variables were unset for runtime checks. Evals pass Ruff, formatting, MyPy across 14 files, 4 tests, dependency-boundary inspection, and wheel/sdist builds. The extractor passes Ruff, formatting, MyPy across 8 source files, 35 tests, dependency-boundary inspection, and wheel/sdist builds. The lock is frozen-current; Bash syntax, the 27-file island/12-file docs-exemption inventory with zero unexpected Python files, Python stale-client reference search, scoped whitespace checks, and focused cleanup review pass. The complete repository architecture guard also passes, including 649 module-size checks and public-contract drift.
+- **Remaining:** None for the Python-island scope. The full cross-stack release gates remain part of the parent migration's final consolidated validation.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Canonical News client mapping and single-owner search cancellation
+
+- **Status:** Complete locally; not committed, pushed, or deployed.
+- **Scope:** iOS generated News response mapping plus local-search task ownership and cancellation fencing.
+- **Decisions:** Decode the resource-specific `APINewsItemDetailResponse` and `APINewsItemListResponse` contracts before mapping into existing client domain models. Give `SearchViewModel` sole ownership of local debounce, retry, cancellation, and stale-result fencing; the view only forwards query changes.
+- **Changes:** Added explicit News detail, summary, and list adapters that leave Content-only fields empty; added generated-wire mapping tests; replaced the view-owned search task with `TaskBag` cancel-and-replace ownership for local and mixed search; and added cancellation-ignoring race tests for replacement, retry, and short-query invalidation.
+- **Validation:** The two focused News mapping tests and three focused search ownership tests pass under `xcodebuild`; the scoped Swift files pass whitespace checks. Unrelated concurrently changing test sources were excluded from these focused runs.
+- **Remaining:** Run the complete native iOS suite after the concurrent contract and onboarding fixture changes settle.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Restore canonical E2B template publication
+
+- **Status:** Complete locally; not published or otherwise called against E2B.
+- **Scope:** `e2b.Dockerfile`, the Rust VM bootstrap input boundary, repository tooling, and the manual GitHub publication workflow.
+- **Decisions:** Keep `newsly-agent` as the single runtime alias; use the exact-pinned official E2B CLI only as build-time operator tooling; require a full tested current-main SHA and clean template inputs; and keep local check/dry-run modes network-free.
+- **Changes:** Added a shell validator/publisher and a production-environment manual workflow. Successful publication resolves the alias through E2B's JSON listing and records its template ID, source SHA, Dockerfile digest, CLI version, and image metadata as an artifact.
+- **Validation:** Local `--help`, `--check`, and `--dry-run` pass; Bash syntax, workflow YAML parsing, required Dockerfile/helper checks, Rust workspace metadata validation, and scoped whitespace checks pass. The publication command is pinned to `@e2b/cli@2.18.0` and `e2b@2.46.1` with registry-integrity checks; no credentialed or live E2B call ran.
+- **Remaining:** Configure the workflow's project-scoped E2B API-key secret and run it for the exact release SHA before production relies on the rebuilt helper image.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Reconcile final Rust migration evidence
+
+- **Status:** Local implementation and consolidated local gates complete; not committed, pushed, deployed, or cut over.
+- **Scope:** Architecture, migration implementation/summary records, active development/operations guidance, Python runtime boundary, and final local validation snapshot.
+- **Decisions:** Distinguish Newsly-owned Python from the pinned third-party Python-based `yt-dlp` executable used as a Rust-controlled subprocess; preserve `learning_deck_runs` retirement as a production-evidence-gated follow-up; and keep local validation, image availability, live canaries, production SQLx adoption, and deployment as separate facts.
+- **Changes:** Added `newsly-contract-codegen` to the workspace inventory, recorded the application-image media-tool exception, aligned active Rust check commands, and replaced obsolete consolidated-gate placeholders with the completed local evidence and explicit release gaps.
+- **Validation:** Warning-denied workspace Clippy and the full locked/offline Rust workspace tests pass. Fresh-database SQLx migration and prepare checks pass. The Python islands pass 45 tests plus Ruff, formatting, MyPy, database-boundary, and package-build checks; public-contract drift and Go test/vet pass; native iOS passes 624 unit and three UI tests; both Compose configurations and shell syntax pass. Docker image builds were unavailable because no Docker daemon is running.
+- **Remaining:** Run live provider/E2B and production-shaped integration canaries; rehearse existing-database SQLx adoption/interruption; build the production images; then perform an exact-SHA quality/deployment workflow, writer drain, production adoption, authority promotion, and post-deploy health proof if separately authorized. Retire `learning_deck_runs` only after production counts, backfill verification, and an explicit schema migration.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Make Rust task contracts authoritative
+
+- **Status:** Complete locally; not committed, deployed, or promoted.
+- **Scope:** The 25-type Rust queue enum/specification, task catalog, ownership manifest task entries, task payload-schema hashes, and fixture index.
+- **Decisions:** `TaskType::ALL` is the exhaustive inventory and `TaskSpec` is the canonical handler, queue, deduplication, and user-ownership policy. Both checked-in manifests name the concrete Rust handler type; the retired Python context-LLM flag has no replacement because provider dependencies belong to each Rust executor.
+- **Changes:** Aligned the catalog and ownership manifest, refreshed the catalog hash, and added a strict Rust corpus test that rejects unknown fields, missing/duplicate/extra task types, orphaned task payload schemas, stale schema or fixture hashes, non-Rust live ownership, and any policy divergence from `TaskSpec`.
+- **Validation:** All six `newsly-queue` unit tests and the task-corpus integration test pass; the package is rustfmt-clean, and JSON/hash/static integrity checks plus scoped `git diff --check` pass. Warning-denied focused Clippy is pending the concurrent contract-codegen crate's `Cargo.lock` update; the combined migration gate remains deferred to the requested end-of-work validation.
+- **Remaining:** Rerun warning-denied Clippy after the shared workspace lock settles, then include this corpus in the consolidated migration gate.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — detached `c77aa869` — Port generated-image work to Rust
+
+- **Status:** Implemented locally behind Python-default task ownership; not committed, deployed, or cut over.
+- **Scope:** `generate_image` provider, prompt, filesystem, queue handler/finalizer, process configuration, executable, container wiring, and processing laws.
+- **Decisions:** Preserve Runware-first generation with two inline attempts per model and configured Google fallback; keep news artwork disabled; normalize bounded provider images and their 200-pixel thumbnails outside PostgreSQL; and require the exact queue lease to revalidate the current summary fingerprint and content lifecycle before canonical file publication, metadata, status, and usage are committed. Existing durable artwork is reused unless an operator explicitly enqueues `force=true`.
+- **Changes:** Added native Runware and Gemini REST gateways, structured retry/fallback errors and usage, current long-form prompt projection, bounded PNG normalization, attempt-scoped staging and cleanup, source-change fencing, deterministic image metadata, vendor cost attribution, a standalone `newsly-image-worker`, and Docker/Supervisor coexistence wiring.
+- **Validation:** `cargo fmt --all` and focused provider/worker compile checks pass; focused unit tests and warning-denied Clippy remain to be run after the shared wiring settles. Broad PostgreSQL/provider/product gates remain deferred to the consolidated migration validation requested by the user.
+- **Remaining:** Exercise the handler against the isolated PostgreSQL queue harness and live provider canaries before promoting `generate_image` ownership from Python to Rust.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — detached `c77aa869` — Port the Briefing HTTP surface to Rust
+
+- **Status:** Implemented locally behind Python-default route ownership; not committed, deployed, or cut over.
+- **Scope:** All ten authenticated Briefing operations: conditional index reads, Lens pagination, source and Lens read marks, refresh enqueueing, Dig search/summarization, legacy single-episode narration, chaptered narration creation, and narration status.
+- **Decisions:** Preserve the user-private ETag and immutable cursor contracts, resolve historical sources only through the user's visibility rules, retire a segment only when its full source batch is read, and keep every database mutation behind the runtime write fence. Refresh and audio generation enqueue through `QueueKernel` in the owning transaction. Dig uses native Exa and Rig provider boundaries with a short ownership check before external work and a fresh fenced usage transaction afterward, so no PostgreSQL transaction spans a provider call.
+- **Changes:** Added generated-wire-compatible Briefing/audio contracts, SQLx projections and mutations, native provider gateways, Axum handlers with typed errors and truthful `304`, router/OpenAPI registration, and provider/usage presentation parity.
+- **Validation:** `cargo fmt --all`, `cargo check --locked -p newsly-db -p newsly-api`, and `cargo check --locked -p newsly-api --all-targets` pass. The exported Rust OpenAPI contains all ten canonical Briefing operation IDs, the typed `304`, and the request/schema bounds. Broad PostgreSQL, HTTP parity, provider, and product suites remain deferred to the consolidated migration gate as requested.
+- **Remaining:** Exercise all ten operations against the isolated PostgreSQL/HTTP parity harness before route promotion. `briefing_refresh` and `generate_audio_episode` remain on their independently Python-default task owners until those worker handlers are promoted.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — `main` — Isolate the retained Python document extractor
+
+- **Status:** Implemented locally; not committed or deployed.
+- **Scope:** Versioned Crawl4AI/static/PubMed extraction service, legacy Python coexistence adapter, typed Rust client, migration corpus, and local container wiring.
+- **Decisions:** Keep Python authoritative only for bounded document-extraction policy. Refuse database, queue, Newsly JWT, persistence, arbitrary crawler options, and Firecrawl credentials in that process; Rust validates URLs and owns durable workflow/usage state and paid fallback calls.
+- **Changes:** Added `python/document_extractor`, public-network validation on initial URLs, redirects, and browser requests, warm single-flight Crawl4AI ownership, discriminated request/results, a size/deadline-bounded Rust client, optional legacy strategy routing, contract schemas/goldens, isolated local/production container wiring with exact-SHA image deployment and mandatory service authentication, and a DB-unset extractor job in the attested quality gate.
+- **Validation:** 41 isolated service tests and two legacy-adapter tests pass; targeted Ruff, format, and MyPy pass; Python sdist and wheel builds pass; the Rust client passes format, check, warning-denied Clippy, and all eight crate tests; migration-contract generation/validation, both Compose manifests, workflow YAML, lockfiles, and deploy-script syntax pass. Broad product suites remain deferred to the consolidated gate.
+- **Remaining:** Build the Chromium image where a Docker daemon is available, then promote Rust content-task ownership only after shadow comparison covers publisher cleanup, access gates, feed links, PubMed delegation, fallback decisions, and browser recycle/timeouts.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — `main` — Make Codex worktree npm setup reproducible
+
+- **Status:** Complete locally; not committed.
+- **Scope:** Codex worktree bootstrap dependency installation.
+- **Decisions:** Keep `npm ci` as the deterministic setup command and track the existing valid npm lockfile instead of weakening setup to `npm install`.
+- **Changes:** Removed the `package-lock.json` ignore rule so fresh worktrees receive the dependency lockfile required by `npm ci`.
+- **Validation:** The current lockfile passes `npm ci --dry-run --ignore-scripts`; Git now exposes it as a repository addition, and the npm setup failure was reproduced as missing-lockfile `EUSAGE` in fresh Codex worktrees.
+- **Remaining:** Commit the `.gitignore`, `package-lock.json`, and log changes before expecting newly created worktrees to contain the fix.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — `main` — Remove iOS 26 deprecation warnings
+
+- **Status:** Complete locally; not committed or distributed.
+- **Scope:** Apple and X authentication presentation anchors, styled SwiftUI text composition, and the selectable `DigDeeperTextView` implementation.
+- **Decisions:** Resolve authentication anchors from the foreground connected scene and use `UIWindow(windowScene:)` only when that scene has no existing window. Preserve mixed text styling through SwiftUI `Text` interpolation. Remove the unused adaptive-color callback rather than replacing its deprecated trait observer with new lifecycle machinery; active wrappers already refresh rendered colors from SwiftUI environment changes.
+- **Changes:** Replaced detached `ASPresentationAnchor()` fallbacks, migrated the two deprecated `Text + Text` expressions, and removed the unreferenced `adaptiveTextColor` path and its `traitCollectionDidChange` override.
+- **Validation:** The app builds successfully on iPhone 17 Pro, iOS 26.5, with none of the reported deprecation warnings; the only remaining build-log warning is Xcode's App Intents metadata skip for a target without an AppIntents dependency. All 29 focused authentication, X integration, and Briefing figure/text-view tests pass serially. `git diff --check` passes.
+- **Remaining:** None for this warning cleanup. No commit, push, or iOS distribution was authorized.
+- **Commits:** Uncommitted.
+
+### 2026-08-29 — `main` — Close lifecycle and credential review findings
+
+- **Status:** Complete locally; not committed, pushed, distributed, or deployed.
+- **Scope:** iOS lifecycle restoration, Content Detail reader resumption, credential publication/logout semantics, shared onboarding model routing, and brand exploration asset tracking.
+- **Decisions:** Make recoverable authentication failure an explicit activation-consumed obligation; restart a still-presented reader body without remounting its cover; distinguish stale terminal events from deletion failures with a typed result; and journal a complete credential target plus baseline before changing any split Keychain leg so recovery never has to guess authority. Keep unjournaled divergence fail-closed. Reuse pydantic-ai's typed OpenRouter settings in one production/eval helper. Expose only the R2/R3 generated brand image folders through scoped ignore exceptions.
+- **Changes:** Wired `AppRuntime` activation to authentication retry, resumed cancelled reader-body work, added crash-recoverable credential publication, made stale terminal cleanup silent, consolidated onboarding route settings, and added focused regression coverage for the state-machine transitions and every credential write boundary.
+- **Validation:** All 625 native iOS tests pass on the Newsly Regression iOS 26.5 Simulator, including 56 focused authentication, credential-session, and Content Detail cases. All 34 focused onboarding/client architecture tests pass. Ruff, mypy, onboarding production/eval route tests, the module-size guard, current brand script lint/type/format checks, and `git diff --check` pass.
+- **Remaining:** Physical-device app/Share Extension publication-interruption testing remains appropriate for release acceptance. No commit, push, deployment, production mutation, or iOS distribution was authorized.
+- **Commits:** Uncommitted.
+
 ### 2026-08-29 — `main` — Preserve authenticated UI coverage in unsigned release builds
 
 - **Status:** Complete locally and committed; release validation in progress.
@@ -58,6 +249,88 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** 16/16 v2 generations succeeded at $0.138 each (~$2.21 total); both toggle branches verified via headless Chrome; `ruff check` clean.
 - **Remaining:** Recraft/Ideogram require fixed 2048² dimensions — handled in `bakeoff.py` only, not in `generate_logos.py`. Vector/SVG output for the winning mark is still unexplored.
 - **Commits:** This brand bake-off follow-up commit.
+
+### 2026-08-29 — `main` — Brand exploration round 2: single-glyph reduction
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Round 1 read the Japanese brief as iconography (torii, daruma, origami), which was too literal. Round 2 keeps Japanese influence as sensibility only — restraint, negative space, one warm accent — and the prompt now explicitly forbids that motif list. Each concept reduces to a single geometric glyph that must survive at 16px. 25 concepts spread 5-per-model across the pro tier (Seedream 5.0 Pro, Nano Banana Pro, Recraft V4.1 Pro, Ideogram 4.0, GPT Image 2), chosen for idea diversity rather than model comparison.
+- **Changes:** `concepts_r2.py` (concept + model registry, single source of truth), `generate_r2.py` (emits `concepts_r2.js` for the site), `gen_runware` gained a `size` param, `extract_palettes.py` covers the r2 set, `index.html` renders per-set concept lists behind a three-way round switcher with a per-set blurb.
+- **Validation:** 25/25 generated (~$3.30); `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Three Recraft outputs collide with existing marks — Lifted Quadrant reads as the Microsoft logo, Signal as the Wi-Fi glyph, and Plane is off-palette. Exclude or re-prompt before shortlisting. Vector output still unexplored. Note 2048² is the only square every model in `MODELS` accepts; Nano Banana Pro rejects 1536.
+- **Commits:** Uncommitted
+
+### 2026-08-29 — `main` — Brand exploration round 3: paper-craft objects
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Round 2's flat glyphs reduced too far. Direction rebuilt from the user's picked favorites (Ensō & Paper, Washi Bubble, Hanko Seal, the folded-paper marks, Ribbon Eyes), whose shared DNA is a tactile made object with soft shading, visible creases, and a hint of character. Two prompt corrections were needed after test renders: the first style base produced photorealistic product shots, so it now demands a flat 2D illustration and bans photography/3D; the second still drifted into three-quarter perspective, so it now requires flat-on front-facing composition. 25 concepts across the pro tier, with Recraft V4.1 Pro cut to 2 after collisions in both prior rounds.
+- **Changes:** `concepts_r3.py`; `generate_round.py` replaces the per-round scripts (`generate_r2.py` deleted) and takes a round name, loading `concepts_<round>.py` and emitting `concepts_<round>.js`; `extract_palettes.py` covers r3; `index.html` switcher extended to four sets with round 3 as default.
+- **Validation:** 25/25 generated (~$2.90); `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Envelope Lift and Wax Seal both read as generic mail icons; Card Stack came back with scenic art inside it; Ribbon Loop reads as an awareness ribbon. Exclude before shortlisting. Vector output still unexplored — no round has produced a true vector.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 4: calm, reading, knowledge
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Two corrections from round 3. Paper folding is no longer the driving concept — round 3 turned every idea into an origami variation — while the soft illustrated texture stays. And every prior round came out orange because the shared style base asked for "one warm accent"; the palette is now specified per concept and deliberately varied (sage, slate, plum, indigo, teal, moss, olive, mauve), with orange named as a color to avoid. Carried forward: the Ensō brush-ring direction with its warm-grey-plus-blush palette, and the cute bookmark from round 2's Ribbon Eyes. Recraft V4.1 Pro retired after producing the weakest tiles in all three prior rounds; 24 concepts, 6 each across the remaining four models.
+- **Changes:** `concepts_r4.py`; `extract_palettes.py` covers r4; `index.html` switcher extended to five sets with round 4 as default, hero copy and date updated.
+- **Validation:** 24/24 generated (~$2.30); extracted palettes confirm the spread (indigo `#1d2548`, teal `#2a656d`, plum `#53233a`, sage `#9ca48a`, slate `#2e435e`, olive `#c7b57e`); `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Per-concept palette specification is the mechanism that fixed color diversity — keep it in any future round. Vector output still unexplored; no round has produced a true vector, so the winning mark still needs redrawing.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 5: shortlist variations
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Convergence round rather than exploration. The three shortlisted marks — Ensō & Book (r4-01), Bookmark Buddy (r4-07), Reader (r4-21) — each rendered in eight color schemes with light form variation, holding the form recognizable so palettes compare directly. Each family stays on the model that produced its original, since the rendering character being selected for is partly the model's.
+- **Changes:** `concepts_r5.py`; `extract_palettes.py` covers r5; `index.html` switcher extended to six sets with round 5 as default; hero copy, blurb escaping and date corrected.
+- **Validation:** 24/24 generated; `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Runware credits were exhausted mid-run — the five Nano Banana Pro bookmarks were recovered by routing to `google/gemini-3-pro-image` on OpenRouter, which is the same underlying model. Runware needs a top-up at my.runware.ai/wallet before any further Seedream or Ideogram work; the OpenRouter path still works. Vector output still unexplored.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 6: darker palettes and hybrids
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Shortlist narrowed to Ensō · Charcoal, Ensō · Teal, Bookmark · Sage, Reader · Warm Grey. Round split in two: ten palettes pushed darker with the accent constrained to a minority of the mark (the style base now states this explicitly, since earlier rounds let the accent grow to half the shape), then fourteen hybrids crossing the ensō ring, book, bookmark ribbon and blob reader. Bookmark concepts now specify squared shoulders, which fixed the ghost read flagged in round 5.
+- **Changes:** `concepts_r6.py`; `extract_palettes.py` covers r6; `index.html` switcher extended to seven sets with round 6 as default, hero copy updated.
+- **Validation:** 24/24 generated; `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Runware is out of credits and needs a top-up at my.runware.ai/wallet — a single test call succeeded on residual balance, which is misleading, so verify with more than one request. This round ran entirely on OpenRouter; Seedream 5.0 Pro has no OpenRouter route, so the ensō concepts fell back to Nano Banana Pro. The two strongest results, Bookmark × Spectacles (r6-15) and Reader × Ribbon Tail (r6-16), are the same fusion reached from opposite directions. Vector output still unexplored.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 7: finalists, and an app-accurate mock
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only. No app code touched — the simulator was used read-only for reference screenshots.
+- **Decisions:** Two finalists locked: Ensō · Petrol (r6-03) and Reader × Ribbon Tail (r6-16), each rendered across twelve palettes on one model so color is the only variable. Separately, the site's phone mock was rebuilt against the real app rather than invention. The previous mock showed a card feed with thumbnails, read-time chips and unread dots; the actual Briefing has none of those. It is a continuous editorial column on a single 20pt gutter, where stories are inline underlined accent links inside running prose, figures float in the text, and read state is expressed as 0.72 opacity rather than badges. Selected pills invert to ink, not accent. The mock now uses the app's real typefaces (Lora serif + Lato sans) and its two-tab floating capsule bar (Briefing, Knowledge).
+- **Changes:** `concepts_r7.py` (palette list drives concept generation); `extract_palettes.py` covers r7; `index.html` phone mock markup and CSS fully replaced with Briefing-column + long-form-reader screens, Lora/Lato added, `TABS` corrected to the real two tabs; switcher extended to eight sets with round 7 as default. Reference screenshots saved to `app_reference/`.
+- **Validation:** 24/24 generated; `ruff check` clean; site verified via headless Chrome and over Tailscale. Reference screens captured from `org.willemaw.newsly.local` on booted sim E2D8054B against the local API.
+- **Remaining:** The Ensō family is highly consistent across all twelve palettes; the Reader family is not — Ink, Oxblood, Pine and Navy lost or distorted the ribbon tail and would need regeneration. Near-monochrome palettes (Ensō · Ink) leave inline links nearly indistinguishable from body text in the mock, which is a real legibility finding, not a mock bug. Runware still needs a top-up. Vector output still unexplored.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 8: image-to-image recolors and two-tone
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Round 7's Reader variants were wrong — re-describing an existing mark in text reliably drifts it, and the arched top and deep swallow-tail collapsed back into the round blob from round 4. Fixed at the root by switching to image-to-image: `gen_openrouter` now accepts a `reference` image, and `generate_round.py` reads an optional `REFS` mapping from the round module, so named concepts are edited rather than regenerated. Silhouettes are now held exactly and only color changes. Second half adds two-tone treatments — exactly two flat inks, all shading removed — which also serves as the print / favicon / monochrome-icon reduction.
+- **Changes:** `generate_logos.py` (`reference` param, base64 image content part), `generate_round.py` (`REFS` support), `concepts_r8.py`, `extract_palettes.py` covers r8. `index.html` gained a `.concept.twotone` mode that collapses the phone mock to two inks — cards and tints resolve to the ground, structure carried by hairline rules and outlines — applied automatically to concepts whose id contains `-2t-`.
+- **Validation:** 28/28 generated; every Reader recolor retained the arched top, swallow-tail and spectacles, confirming the image-to-image fix; `ruff check` clean; two-tone app shots verified via headless Chrome; site verified over Tailscale.
+- **Remaining:** Use image-to-image for any further variation of a chosen mark — text re-description is not reliable for this. Runware still needs a top-up (round ran on OpenRouter). Vector output still unexplored; the two-tone flats are the closest thing to a traceable source and are the best candidates to vectorize.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand direction selected; app-screen variants
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only. Design selection is recorded here; no app code changed yet.
+- **Decisions:** Direction chosen. **App icon = Ensō · Slate** (`images_r8/r8-03-enso-slate.png`, ring `#404c60`, book `#edd9b3`). **Chat and Knowledge character = Reader · Indigo** (`images_r8/r8-10-reader-indigo.png`, body `#383061`, spectacles `#d3bc78`). The two marks intentionally differ: the ensō carries the app identity, the reader appears only where the app speaks to the user. Screen backgrounds no longer derive from the generated images — those extracted grounds were far too saturated to sit behind body text — and are instead hand-set near-white per scheme.
+- **Changes:** New `app-screens.html` presenting four screens (Briefing, Reader, Chat, Knowledge) across four light schemes: Slate on cool grey (the app's real `#f4f5f7` surface), Slate on warm paper, Ink on paper, and Indigo. Chat and Knowledge screens are new — neither existed in the earlier mocks. Linked from `index.html`.
+- **Validation:** Rendered via headless Chrome; both pages verified over Tailscale.
+- **Chat/Knowledge accuracy:** Both screens were rebuilt against the real implementations after the first pass proved wrong. Chat has **no avatars and no suggested-prompt chips** — messages are bubbles on both sides (assistant left, `surfaceContainer` tint, full column width; user right, warm `chatUserBubble` `#efe7d8`, 72px left gutter; both radius 14, Lato 13), with a timestamp under each, centered process-summary capsules, a thinking bubble carrying dots + elapsed timer + status line, and a composer dock of `+` / "Message" field / mic. The tab bar is hidden on chat. Knowledge is not cards or a deck-with-progress; it is the scrolling editorial masthead ("Knowledge" in Lora 44) plus an "Ask anything…" dock, then a day-grouped timeline of flat 40×40-thumbnail rows whose type is carried entirely by a kicker (`CHAT · 3H AGO`, `DECK · 12M AGO`, `SAVED · THE VERGE · 1D AGO`), with audio rows swapping the chevron for a play circle.
+- **Open design decision:** because the real chat has no avatar slot, the chosen Reader character has nowhere to live. It is currently placed in the chat session header as the smallest change that gives it a home; putting it on every assistant message would be a real design change rather than a re-skin. Flagged prominently on the page.
+- **Remaining:** The Ink scheme carries a known constraint: body ink and accent are close enough that inline links depend on underline plus weight to separate. Vector output still unexplored — the chosen ensō is a raster brush texture and will need redrawing or tracing for a real app icon asset.
+- **Commits:** Uncommitted
 
 ### 2026-08-29 — `main` — Remove Cerebras integration
 
@@ -1207,3 +1480,203 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Decisions:** Use Seedream 5.0 Lite plus the minor anti-generic art direction as the production default. Prefer a single 2K output and persistent reuse; Runware charges the same $0.035 for 2K and 3K.
 - **Validation:** Built and browser-checked a local interactive comparison report with 24 gallery cards, four selected results, exact prompts, filters, and full-size views; all 48 optimized image assets returned successfully. Ruff passed on the touched Python scope; all 28 focused image-generation and vendor-cost tests and all 90 core settings tests passed; `git diff --check` passed.
 - **Remaining:** The report and generated evaluation assets live under `.tmp/main-image-prompt-lab-2026-08-28/` and are intentionally untracked. The ignored local deployment-environment source is aligned to Seedream, but changing live deployed environment state is separate from this code commit.
+
+### 2026-08-30 — detached `c77aa869` — Add the Rust PostgreSQL queue and worker kernel
+
+- **Status:** Implemented locally as a migration slice; no task handler has been cut over.
+- **Scope:** SQLx enqueue/dedupe/access grants, task-runtime stamping, fair `SKIP LOCKED` claims, opaque leases, renewal/finalization/cancellation fencing, retries and deferrals, expired paid-work reclaim accounting, PostgreSQL notification fan-out with polling fallback, and the connection-free Rust worker execution loop.
+- **Decisions:** Keep task executor owner/version/namespace immutable from enqueue through finalization; lock active runtime-ownership rows in the enqueue transaction; restrict Rust workers to registered handler namespaces; represent queue cancellation as terminal `failed` because the public queue status contract has no cancelled state; and keep provider handlers outside the kernel so no database transaction can cross external work.
+- **Validation:** Targeted `cargo fmt` and `cargo check -p newsly-queue -p newsly-worker --tests` passed. Generated task-catalog and queue-transition fixtures are compiled into focused Rust tests but broad execution is deferred to the consolidated migration gate as requested.
+- **Remaining:** Register concrete Rust task handlers and a process entrypoint only alongside each task-type ownership cutover; run PostgreSQL concurrency/integration fixtures and the complete Rust/Python release gate at the final validation phase.
+
+### 2026-08-30 — detached `c77aa869` — Add the first Rust content-worker slice
+
+- **Status:** Implemented locally behind Python-default task ownership; not committed, deployed, or cut over.
+- **Scope:** Rust `ANALYZE_URL` and `PROCESS_CONTENT` orchestration, the authenticated v1 Python document-extractor client, Rust-owned Firecrawl fallback, canonical body storage, SQLx content/feed/usage persistence, and the standalone content-worker process.
+- **Decisions:** Keep prepare input connection-free during all external work, then lock the exact live queue lease before publishing content state, every extractor usage event, Firecrawl usage, downstream work, and the queue transition in one transaction. Accept delegation only from PubMed resolution, reuse a sufficiently large analysis body without a second extractor call, and keep runtime ownership seeds on Python.
+- **Changes:** Registered the two handlers under a Rust-only ownership scope; added lease-loss cancellation, typed failure/retry mapping, local content-addressed body staging, analysis-time canonical overlay relinking, feed metadata/subscription and initial backfill handoff, podcast-media handoff, and `SUMMARIZE` enqueueing. Added fail-closed worker configuration, redacted diagnostics, graceful shutdown, and PostgreSQL `LISTEN/NOTIFY` wakeups with polling fallback.
+- **Validation:** Targeted formatting, warning-denied Clippy across `newsly-queue` and `newsly-worker`, package checks, and focused library/fixture tests passed. Broad PostgreSQL concurrency, extractor shadow, and product release suites remain deferred to the consolidated migration gate.
+- **Remaining:** Before ownership promotion, add S3-compatible body storage, port or isolate instruction/X-specific `ANALYZE_URL` behavior, validate/classify extractor feed links with the bounded feed runtime, and run live PostgreSQL lease/finalization plus publisher/extractor shadow canaries. Generic feed candidates currently use conservative URL heuristics and the Apple podcast handoff relies on the existing downstream resolver.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — detached `c77aa869` — Port admin API-key management to Rust
+
+- **Status:** Implemented locally behind Python-default route ownership; not committed, deployed, or cut over.
+- **Scope:** SQLx API-key generation, SHA-256-only persistence, constant-time verification helpers, display-once create results, newest-first summary queries, idempotent revocation, admin-user attribution, signed `admin_session` compatibility, form handling, server-rendered management HTML, login redirects, typed errors, route write fences, and truthful OpenAPI operations for all three existing admin routes.
+- **Decisions:** Preserve the exact `newsly_ak_<8 hex>_<32 base64url>` bearer format and both one-time plaintext response aliases; never load hashes on list paths or expose plaintext after creation; keep the existing lazy system-admin identity without issuing a no-op update on every page view; authenticate before parsing form/path input; and preserve `303` redirect behavior for missing sessions and successful revocation.
+- **Validation:** Targeted Rust formatting and `cargo check -p newsly-api` passed. The exported Rust OpenAPI contains `adminApiKeysPage`, `adminApiKeysCreate`, and `adminApiKeysRevoke` at the canonical paths, with the form body represented as `Body_adminApiKeysCreate`. Broad database and HTTP parity suites remain deferred to the consolidated migration gate as requested.
+- **Remaining:** Run cross-runtime cookie, rendered-page, PostgreSQL create/list/revoke, and API-key authentication golden fixtures before promoting any route owner to Rust.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — detached `c77aa869` — Port Learning Deck HTTP and SQL ownership to Rust
+
+- **Status:** Implemented locally behind Python-default route and task ownership; not committed, deployed, or cut over.
+- **Scope:** All nine authenticated Learning Deck operations, their generated Rust wire contracts and OpenAPI operation IDs, SQLx list/detail/create/retry/delete/share projections and mutations, queue/access handoffs, canonical-content retry recovery, signed private/share URLs, and post-commit artifact cleanup.
+- **Decisions:** Keep `llm_tasks` canonical with legacy-run read fallback; preserve one active deck attempt per user, idempotent same-deck create/retry behavior, stable share nonces, private URL expiry, safe public error projection, and immutable prepare data around external object deletion. Every state mutation verifies its route-ownership version in the same transaction and enqueues durable work before commit.
+- **Validation:** `cargo fmt --all`, `cargo check --locked -p newsly-api --all-targets`, and focused `git diff --check` passed. Broad PostgreSQL/HTTP/token parity and full release validation remain deferred to the consolidated migration gate as requested.
+- **Remaining:** Exercise the nine operations against the isolated PostgreSQL parity harness and stored legacy decks before promoting route ownership; generation remains on the Python-owned `RUN_LLM_TASK` executor until its Rust handler is cut over.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — detached `c77aa869` — Port X bookmark synchronization to Rust
+
+- **Status:** Implemented locally behind Python-default task ownership; not committed, deployed, or cut over.
+- **Scope:** Native `SYNC_INTEGRATION` execution for X, official OAuth refresh and bookmark pagination, Python-compatible Fernet credentials, SQLx integration state/ledger/usage persistence, canonical content ingestion, per-user Knowledge routing, and the standalone Twitter-queue worker process.
+- **Decisions:** Preserve the Python trigger and cooldown behavior, ten-page/five-bookmark bounds, UTC-day X resource billing deduplication, and unrecoverable OAuth-refresh classification. Commit a short immutable prepare plan before every provider call, cancel HTTP work on lease loss, then publish refreshed credentials, snapshots, ledger/checkpoints, Knowledge saves, downstream queue work, usage, sync status, and the task transition in one exact-lease transaction. Lock the active user before the connection during finalization so account deletion wins cleanly without deadlock or stale output.
+- **Changes:** Added reusable provider-layer integration-token crypto; typed X token, identity, and bookmark clients; an isolated X sync repository; a lease-aware handler/finalizer; oldest-first canonical tweet ingestion with snapshot provenance and canonical-destination ledger repair; canonical content relinking for X ledger rows; and an isolated Rust `x_sync_worker` binary scoped only to Rust-owned `sync_integration` rows on the Twitter queue.
+- **Validation:** `cargo fmt --all -- --check` and one combined `cargo check --locked -p newsly-providers -p newsly-db -p newsly-worker --all-targets` passed; worker-only Clippy also passed without warnings. Broad PostgreSQL/provider parity and product suites remain deferred to the consolidated migration gate as requested.
+- **Remaining:** Switch the Rust API integration routes to the shared provider cipher, exercise refresh rotation, reauthentication, checkpoint pagination, account deletion, duplicate canonicalization, and retry/finalization against isolated PostgreSQL and mocked X, then promote only the `sync_integration` ownership namespace after those gates pass. X-specific Rust `ANALYZE_URL` processing remains a separate content-worker cutover prerequisite; during coexistence downstream tasks continue to follow their independently stamped runtime owner.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — detached `c77aa869` — Port the remaining Content and News API operations to Rust
+
+- **Status:** Implemented locally behind Python-default route ownership; not committed, deployed, or cut over.
+- **Scope:** Native Rust implementations for Content/News article conversion, series backfill, summary narration and MP3 delivery, typed tweet suggestions, Share Action submission status projection, Content and News discussion refresh, podcast episode discovery, and sectioned mixed search.
+- **Decisions:** Preserve the existing generated wire contracts and operation IDs; keep every provider request outside a PostgreSQL transaction; re-open a fresh, ownership-fenced transaction only for final persistence and queue enqueueing; use SQLx and the queue kernel for durable writes; and degrade mixed-search provider sections independently while retaining local results.
+- **Changes:** Added typed contract, SQLx repository, provider-gateway, and Axum route modules. Article conversion now saves to Knowledge and enqueues processing plus agent-data synchronization atomically; feed backfill persists inbox entries and processing work atomically; discussion refresh persists provider results through the canonical Content/News stores; narration uses the native ElevenLabs client; and tweet generation uses the native Rig structured-output runtime.
+- **Validation:** Targeted formatting passed for the five new/extended Rust modules; `cargo check --locked -p newsly-providers --all-targets`, `cargo check --locked -p newsly-db --all-targets`, and `cargo check --locked -p newsly-api --all-targets` passed. The exported Rust OpenAPI contains 117 operations and all ten canonical operation IDs. Broad PostgreSQL/provider parity and product release suites remain deferred to the consolidated final gate as requested.
+- **Remaining:** Exercise the ten routes against isolated PostgreSQL and mocked external providers before promoting their runtime owners from Python to Rust; validate installed-client response parity through the final generated-contract gate.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — detached `c77aa869` — Port onboarding and agent onboarding to Rust
+
+- **Status:** Implemented locally behind Python-default route and task ownership; not committed, deployed, or cut over.
+- **Scope:** Native Rust implementations for profile generation, voice parsing, fast discovery, audio-discovery startup, onboarding completion, and the agent start/status/complete surface, preserving all eight public operation IDs.
+- **Decisions:** Keep the pinned onboarding model and exact privacy/provider-routing policy in the provider boundary; perform LLM, search, and feed-validation calls without a PostgreSQL transaction; re-open a fresh ownership-fenced transaction for persistence and atomic queue enqueueing; and reuse the canonical discovery, scraper-config, first-edition, inbox-seeding, image-generation, and durable task models rather than introducing a parallel onboarding store.
+- **Validation:** Focused Rust formatting and `cargo check --locked -p newsly-contracts -p newsly-providers -p newsly-db -p newsly-api --all-targets` passed. The exported Rust OpenAPI contains `buildOnboardingProfile`, `parseOnboardingVoice`, `runOnboardingFastDiscover`, `startOnboardingDiscoverAudioDiscoveryFlow`, `completeOnboardingFlow`, `startOnboarding`, `getOnboarding`, and `completeOnboarding`. Broad PostgreSQL/provider parity and product suites remain deferred to the consolidated final gate as requested.
+- **Remaining:** Exercise all eight operations against isolated PostgreSQL and mocked OpenRouter, Exa, and feed-validation dependencies before promoting their runtime owners from Python to Rust; validate generated Swift/Go contract parity in the final contract gate.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — detached `c77aa869` — Port podcast and tweet media workers to Rust
+
+- **Status:** Implemented locally behind Python-default task ownership; not committed, deployed, or cut over.
+- **Scope:** Native Rust execution for `PROCESS_PODCAST_MEDIA`, `DOWNLOAD_TWEET_VIDEO_AUDIO`, and `TRANSCRIBE_TWEET_VIDEO`, including bounded direct media downloads, allowlisted yt-dlp extraction, tolerant ffmpeg normalization, Apple Podcasts/RSS resolution, OpenAI transcription, canonical body staging, usage recording, and the standalone media-worker process.
+- **Decisions:** Commit a short immutable content snapshot before external work, make every network/provider/subprocess operation lease-aware, and publish content state, usage, downstream queue work, and task completion in one fresh exact-lease-fenced transaction. Confine tweet media reads to the configured root, reject symlinks and oversized files, and remove tweet attempt files only after the fenced transaction commits. Keep all three ownership namespaces Python-default until parity canaries pass.
+- **Validation:** `cargo check -p newsly-worker --all-targets` passed. Focused provider, SQLx mutation, and worker media suites passed with 3, 3, and 4 tests respectively; the Supervisor media stanza parsed successfully. Broad PostgreSQL/provider parity, live yt-dlp/ffmpeg/OpenAI canaries, Docker build, and the product release suites remain deferred to the consolidated final gate as requested.
+- **Remaining:** Exercise success, retry, terminal-provider, lease-loss, and fallback paths against isolated PostgreSQL and mocked or disposable providers, then promote only the three media task namespaces after the final contract/release gate.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — detached `c77aa869` — Port short-form News processing to Rust
+
+- **Status:** Implemented locally behind Python-default task ownership; not committed, deployed, or cut over.
+- **Scope:** Native `ENRICH_NEWS_ITEM_ARTICLE` and `PROCESS_NEWS_ITEM` execution, private Python document-extractor integration, Rust Firecrawl recovery and article-body storage, strict short-form summary/relevant-link contracts, hosted OpenRouter Qwen embeddings, canonical relation reconciliation, usage persistence, Briefing/Agent Data fanout, and a standalone News worker.
+- **Decisions:** Commit short immutable prepare snapshots before every external call and publish only through a fresh exact-lease-fenced transaction. Reuse local or exact-representative summaries before paid work; keep extraction failure soft; restore retrying rows to `new`; reject production local embedding/reranker configuration instead of retaining a Python fallback; and leave SentenceTransformers/reranker experiments in the offline Python eval island.
+- **Validation:** Focused Rust formatting and `cargo check -p newsly-providers -p newsly-worker` plus the standalone `news_item_worker` target passed. Focused unit/Clippy checks and broader PostgreSQL/provider parity remain in progress for this slice; the consolidated product gate remains deferred as requested.
+- **Remaining:** Exercise exact-summary reuse, extraction fallback, relation merges, candidate/source races, lease loss, retries, fanout, and usage writes against isolated PostgreSQL and mocked providers before promoting either task namespace from Python to Rust.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Cut public contract authority over to Rust
+
+- **Status:** Implemented locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Rust public OpenAPI export, filtered agent OpenAPI 3.0 projection, checked schema regeneration/drift scripts, frozen Swift/Share/Go compatibility inputs, and retirement of Python-owned contract gates.
+- **Decisions:** Make the `newsly-api` Utoipa document the single route/schema authority; fail agent export when any allowlisted CLI operation is absent; expose `--public-only` and `--go-only` Cargo-backed checks while retaining `--python-only` only as a no-Python CI alias; and keep checked client source models frozen until a schema-native emitter can represent their open-enum, lenient-decoding, default, ordering, and client-only-enum policies.
+- **Changes:** Added Rust-side agent filtering and OpenAPI 3.1-to-3.0 nullable/exclusive-bound normalization; switched all active export/regeneration/check entrypoints to Rust and shell; removed Python migration-corpus generation and legacy Pydantic/FastAPI contract-authority tests; removed the stale initial-suggestions operation; preserved all six typed Share Extension boundaries; and restored explicit `date-time` semantics for the 48-field Swift/Go compatibility union in Rust contract types.
+- **Validation:** Seven focused Rust exporter tests passed, covering all API success-response schemas and their reviewed streaming/204 exceptions, unique and stable operation IDs, canonical errors, the strict 20-operation agent projection, retired-route absence, client date semantics, and the typed Share Extension boundary. `scripts/check_public_contracts.sh` passed end to end with SQLx offline metadata; both shell exporters reproduced checked artifacts byte-for-byte; shell syntax, Rust formatting, Ruff, the Rust-snapshot iOS endpoint-parity test, and `go test ./internal/api` passed.
+- **Remaining:** Replace the dormant Pydantic-backed Swift and Go emitters with a Rust- or schema-native generator before changing frozen client model sources. Their outputs remain protected by native client compilation and fixture behavior tests, not by Python regeneration.
+
+### 2026-08-31 — detached `c77aa869` — Generate every public client boundary from Rust OpenAPI
+
+- **Status:** Implemented locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Rust/schema-native app Swift, Share Extension Swift, and Go CLI type generation; reviewed client surface and escape-hatch policy; real byte-for-byte drift checks; and client-only compatibility vocabulary represented in Utoipa instead of emitter constants.
+- **Decisions:** Keep Utoipa components as the wire-shape authority and use `contracts/client_codegen_policy.toml` only for reviewed target selection, source naming, enum openness, lenient legacy decoding, defaults OpenAPI cannot represent, discriminated-union selection, and untyped JSON allowlisting. Fail closed on missing schemas, unsupported unions, discriminator/name collisions, unregistered enum references, target-crossing references, and unreviewed arbitrary JSON. Treat a one-entry `oneOf`/`anyOf` as a transparent described-schema wrapper; only a union with an explicit null member changes nullability. In Go, represent optional scalar wire fields with pointers so explicit false and zero remain distinguishable from omission.
+- **Changes:** Added `newsly-contract-codegen`; registered task, summary-version, owned News DTO, onboarding, Council-persona input, and the open discriminated `SubmissionResult` union surfaces in the reviewed policy; replaced existence-only Swift/Share/Go checks with generated temp artifacts and byte diffs; made regeneration write and format every client boundary; moved shared client contract fixtures under `contracts/fixtures`; updated the CLI to send server-owned onboarding suggestion IDs and aggregator keys; and removed active documentation that described the client sources as frozen.
+- **Validation:** Locked generator tests passed, warning-denied focused Clippy passed, regeneration and byte-for-byte drift checks passed, and Go tests/vet passed. The generated Swift and Go sources contain typed known submission-result variants plus an unknown-case escape hatch. The app and standalone Share Extension schemes compile with signing disabled, and all 13 focused generated-contract iOS tests pass; only the pre-existing missing AppMark/BuddyMark asset warnings remain.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Align documentation with final Rust authority
+
+- **Status:** Complete locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Agent guidance, coding conventions, Rust and contract READMEs, system architecture, processing law, and the Rust migration design/implementation/summary record.
+- **Decisions:** Make Axum/Tokio/SQLx/Rig/direct E2B the sole application authority; retain Python only for the database-free Crawl4AI extractor and offline evals; preserve the iOS composition, lifecycle, credential-publication, and Share Extension invariants; and distinguish local implementation from consolidated validation and production cutover.
+- **Changes:** Replaced obsolete FastAPI/Python-coexistence architecture with the Rust modular-monolith end state, mapped the four audit blockers into Phase 0 prerequisites, separated contract redesign from telemetry-gated deletion, recorded final SQLx/contract/queue/E2B ownership, reflected removal of `app/`, `admin/`, `migrations/`, and backend `tests/`, recorded the client-owned `client/newsly/Maestro/` paths, and added explicit remaining release gates.
+- **Validation:** `git diff --check` passed for the documentation scope; Markdown fences are balanced; every local Markdown link target and authoritative runtime/client path exists; and current guidance contains no stale FastAPI, Python-default, or coexistence authority phrase. No code or product test was run for this documentation-only lane.
+- **Remaining:** Run the consolidated Rust, PostgreSQL, provider/E2B, contract, Go, iOS, Share Extension, container, exact-SHA, migration-adoption, and production deployment gates described in the summary.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Make onboarding completion run-owned
+
+- **Status:** Implemented locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Personalized iOS completion, Rust public contracts, Axum orchestration, SQLx ownership checks, and the onboarding-discovery worker contract.
+- **Decisions:** Keep persisted discovery-run and suggestion IDs through the client selection state; allow a runless request only for the explicit non-personalized path; derive feeds, titles, and subreddit names from owned server state; keep profile context server-owned instead of echoing it through completion; and revalidate the completed run plus the exact selected ID set inside the final transaction.
+- **Changes:** Added suggestion IDs to discovery status; replaced echoed source/subreddit/profile completion payloads with `discovery_run_id` and `selected_suggestion_ids`; rejected foreign, unfinished, duplicate, invalid, and cross-run selections; removed the second `onboarding_discover` enqueue from completion; retired the worker's runless profile-discovery branch; and added focused client/request and worker contract coverage.
+- **Validation:** Focused formatting and Rust compilation passed across contracts, providers, SQLx, Axum, and the worker. Two Axum request/task-law tests, four onboarding-worker tests, and one isolated PostgreSQL ownership/unfinished/cross-run selection test passed. The focused native iOS test build reached a concurrent generated-timestamp mismatch before executing tests; the contract generator owns that active mismatch. Warning-denied Clippy resolved the onboarding findings and then stopped on unrelated active worker-lane findings.
+- **Remaining:** Finish the in-progress Rust OpenAPI client regeneration, rerun the focused native onboarding tests, and include the personalized/default flows in the consolidated migration gate.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Separate canonical News response DTOs
+
+- **Status:** Implemented locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Rust-owned `NewsItemSummaryResponse`, `NewsItemDetailResponse`, and `NewsItemListResponse` contracts; canonical News presenters and route/OpenAPI response registrations; and typed Content summary-version correction.
+- **Decisions:** Keep the installed-client `contents`/date/type/pagination wrapper and the few required Content-shaped compatibility keys with truthful fixed News values, while omitting optional Content-only processing, artwork, feed, and long-form summary fields. Continue resolving News exclusively through `news_items`; do not add a Content-ID fallback. Represent Content summary versions as a typed enum whose Serde and Schemars wire value remains the JSON integers `1` and `2`.
+- **Validation:** Focused Rust formatting passed. All four `newsly-contracts` tests passed, including numeric summary-version round trips and News wrapper/bag-shape assertions. Both News presenter tests, the three affected OpenAPI exporter tests, and `cargo check -p newsly-api --all-targets --locked` passed. Warning-denied Clippy passed for `newsly-contracts`; the API-wide Clippy run remains blocked by unrelated pre-existing warnings in active migration lanes.
+- **Remaining:** Regenerate the reviewed Swift and Go contract artifacts and migrate native/CLI callsites to the new generated News types in the contract-codegen lane; then run the consolidated native-client and public-contract drift gates.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Correct final Rust-migration documentation claims
+
+- **Status:** Complete locally; not committed, pushed, deployed, or cut over.
+- **Scope:** Bounded accuracy pass across the architecture, migration implementation plan, and processing laws against the current Rust contracts and Learning Deck repository.
+- **Decisions:** Mark the submission-result work complete only after the canonical Rust union and generated client boundaries landed; retain `learning_deck_runs` as a legacy compatibility and cleanup ledger until production-count, backfill, and schema-migration gates permit retirement; and state Rust-only ownership as a post-cutover production invariant rather than a completed deployment fact.
+- **Validation:** Inspected the current Rust submission contract and Learning Deck repository plus the final authority migration; `git diff --check` passed for this documentation scope. No code or product test ran for this documentation-only pass.
+- **Remaining:** Run the consolidated migration/release gates already recorded elsewhere, and retire `learning_deck_runs` only after its production evidence and backfill gates pass.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Record the canonical submission-result boundary
+
+- **Status:** Documentation aligned with the implemented local contract; not committed, pushed, deployed, or cut over.
+- **Scope:** Rust migration architecture, implementation and summary records, the Content and Reading law, and migration-log status.
+- **Decisions:** Treat the generated discriminated `SubmissionResult` as canonical; require the temporary installed-client top-level fields to agree until telemetry permits removal; and keep `learning_deck_runs` retirement explicitly pending production counts, backfill verification, and schema migration.
+- **Validation:** Inspected the Rust contract, client-generation policy, and checked OpenAPI artifacts; documentation-only diff checks passed. Focused union/API and generation-drift evidence is recorded by the implementation lanes; this pass did not claim a full workspace or native-client gate.
+- **Remaining:** Root integration must record the final Rust, contract, Go, and native-client gate results. Live provider/E2B canaries, production SQLx adoption, deployment, compatibility telemetry, and Learning Deck legacy-ledger retirement remain separate release or post-release work.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Exercise local Rust ingestion and harden provider/finalization boundaries
+
+- **Status:** Implemented and locally validated; not committed, pushed, deployed, or distributed.
+- **Scope:** Disposable PostgreSQL/Rust API and worker canaries, the retained Crawl4AI extractor, all four Share Extension API modes, Runware request serialization, and content-finalization lock ordering.
+- **Decisions:** Serialize Runware's provider-defined `taskUUID` spelling explicitly instead of relying on camel-case derivation. Standardize submitted-user-before-content locking across submission and content finalization; revalidate attribution under the content lock and use a savepoint retry so a first-submission race does not repeat completed external work. Keep non-chat Share Action agent tasks queued rather than spending on three additional E2B/model canaries after the deterministic chat path completed.
+- **Validation:** Fresh SQLx migrations passed. The retained Python extractor had 35 tests pass, and a live public Crawl4AI extraction of `https://www.rust-lang.org/learn` returned 4,470 Markdown characters with no warning after installing its pinned Playwright Chromium runtime. The focused Rust API/extraction/provider/queue/worker suite had 161 tests pass before the fixes; afterward all 38 provider and 70 worker library tests passed, including exact Runware wire-key/UUIDv4 coverage and a real PostgreSQL concurrent lock-order regression. Warning-denied Clippy passed for both crates. The Share `chat` mode completed through API, durable queue, content submission, and chat-session creation; `add_to_briefing`, `bookmark_only`, and `presentation` each returned typed `202 queued` responses and durable `run_llm_task` rows with their worker intentionally stopped.
+- **Remaining:** Root integration still owns the consolidated full-workspace, iOS/AXe, container, deployment, and production gates. The three non-chat Share tasks require separately authorized bounded live agent/E2B execution if completion rather than API/queue acceptance is required. Two disposable databases remain available for root inspection of the original deadlock and the fixed canary until final cleanup.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Restore Rust module-size ratchets
+
+- **Status:** Complete locally; not committed, pushed, deployed, or distributed.
+- **Scope:** The image-generation provider, content-finalization repository, and namespaced iOS E2E fixture modules that exceeded their existing line-count ratchets during the Rust migration and local canary work.
+- **Decisions:** Preserve behavior and every existing limit; move inline tests into private test submodules and isolate only the E2E fixture metadata builders into a cohesive private module.
+- **Validation:** The affected provider, database, and worker crates compile across all targets. Eight image-provider tests, four fixture tests, and five content-repository tests passed, including the isolated PostgreSQL lock-order regression. Warning-denied Clippy passed for all three crates, and the complete architecture guard passed with 691 files checked, the iOS wire guard clean, and public contract artifacts current.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Preserve unbounded Learning Deck model iteration
+
+- **Status:** Implemented and locally validated; not committed, pushed, deployed, or distributed.
+- **Scope:** Newsly-owned agent request limits, the Rig execution loop, finite provider/share/chat callsites, and Learning Deck initial/repair generation.
+- **Decisions:** Represent the model-request cap as an optional positive integer; retain every existing finite cap as `Some(limit)`; and give Learning Deck generation no request-count or output-token cap while preserving its execution deadline, tool-call, artifact-size, artifact-contract, and browser-validation bounds.
+- **Validation:** Formatting and all-target compilation passed for the agent runtime, providers, and worker. All 3 agent-runtime, 41 provider, and 70 worker library tests passed against the disposable local PostgreSQL instance, including focused finite/unbounded loop tests. Warning-denied Clippy passed across all targets in the three affected crates.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Remove the Learning Deck output-token ceiling
+
+- **Status:** Implemented and locally validated; not committed, pushed, deployed, or distributed.
+- **Scope:** Initial and repair Learning Deck agent requests plus the canonical Knowledge and Learning law.
+- **Decisions:** Restore the uncapped model-output behavior of the pre-migration Learning Deck agent while retaining the execution deadline, tool-call limit, bounded file operations, artifact size and contract validation, and browser validation.
+- **Changes:** Replaced the Rust-only 4,000-token per-request ceiling with no application-level output-token limit for both generation and repair. Added a focused regression that also proves the existing unbounded request count while preserving the configured tool-call and deadline safeguards.
+- **Validation:** Focused formatting, tests, compilation, and warning-denied Clippy passed for `newsly-worker`; no live provider call ran in this lane.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Validate local Learning Deck and audio artifacts through iOS
+
+- **Status:** Implemented and locally validated; not committed, pushed, deployed, or distributed.
+- **Scope:** Rust-seeded Learning Deck and audio fixtures, private deck hosting, authenticated stored-audio delivery, and the dedicated iOS Simulator Knowledge timeline.
+- **Decisions:** Keep live generation-follow streams lengthless, but serve immutable stored audio with its exact length, a MIME-matched filename, and one standards-compliant byte range. Reject malformed, multipart, empty, and unsatisfiable ranges with `416` and `Content-Range`; advertise `206` and `416` in OpenAPI. Isolate stored-audio transport and its tests in a private module instead of increasing the API module-size ratchet.
+- **Validation:** Deck `2` detail, private viewer URL, and signed 704-byte HTML returned `200`; the deck rendered in the dedicated iPhone 17 Pro Simulator. Audio episode `3` returned a valid 16,044-byte PCM WAV. Full, `bytes=0-1`, and unsatisfiable requests returned `200`, `206` (`Content-Range: bytes 0-1/16044`), and `416` (`Content-Range: bytes */16044`) respectively. AXe showed the inline control transition from pause to play, while simulator logs recorded `readyToPlay`, first progress at 0.345 seconds, and normal end. All 7 focused range/header tests, API all-target compilation, warning-denied API Clippy, formatting, diff checks, and the module-size guard passed.
+- **Evidence:** `/tmp/newsly-rust-e2e-axe-final/38-learning-deck-viewer-live.png`, `49-audio-range-playing.png`, `50-audio-range-finished.png`, and `50-audio-range-playback-log.txt`.
+- **Commits:** Uncommitted.
+
+### 2026-08-31 — detached `c77aa869` — Bound Share feed-discovery request headroom
+
+- **Status:** Implemented and locally validated; not committed, pushed, deployed, or distributed.
+- **Scope:** Rust Share Action agent request budgeting for the `add_feed` workflow.
+- **Decisions:** Keep the configured finite request limit unchanged for every other Share mode. Give only `add_feed` four additional model requests, capped at the existing maximum of 50, because validating a publication homepage requires direct probing, feed discovery, and candidate validation beyond the six setup/direct-validation rounds observed in the local canary.
+- **Validation:** Three focused request-budget tests passed. `newsly-worker` compiled across all targets and passed warning-denied Clippy; formatting checks passed. No provider or E2B call ran in this implementation lane.
+- **Remaining:** Rebuild the local worker once and retry the failed This Week in Rust homepage Share request to confirm it completes within the new default cap of 12.
+- **Commits:** Uncommitted.

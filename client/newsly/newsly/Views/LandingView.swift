@@ -73,7 +73,7 @@ struct LandingView: View {
 
     private func titleContent(yOffset: CGFloat, glowColor: Color) -> some View {
         VStack(spacing: 24) {
-            Image("Mascot")
+            Image("BuddyMark")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 220, height: 220)
@@ -82,7 +82,7 @@ struct LandingView: View {
                     handleLogoTap()
                 }
                 #endif
-                .accessibilityLabel("Newsbuddy mascot")
+                .accessibilityLabel("Newsbuddy")
 
             VStack(spacing: 10) {
                 Text("Newsbuddy")

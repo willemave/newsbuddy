@@ -12,7 +12,7 @@ private func makeActiveLifecycle() -> AppLifecycle {
 @MainActor
 final class ChatSessionViewModelTests: XCTestCase {
     func testDefaultChatDictationUsesRecordThenTranscribeService() {
-        let service = ChatDependencies.live.transcriptionService as AnyObject
+        let service = SpeechTranscriberFactory.makeVoiceDictationTranscriber() as AnyObject
 
         XCTAssertTrue(service === VoiceDictationService.shared)
     }

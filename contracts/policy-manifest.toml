@@ -1,0 +1,1402 @@
+# Authoritative production ownership manifest consumed and validated by the Rust runtime.
+version = 2
+scope = "Rust-owned OpenAPI operations, processing task types, and E2B namespaces"
+alembic_head = "20260829_02"
+runtime_registry = "runtime_ownership"
+
+[[routes]]
+method = "GET"
+path = "/admin/"
+operation_id = "adminDashboard"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/api-keys"
+operation_id = "adminApiKeysPage"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/admin/api-keys/create"
+operation_id = "adminApiKeysCreate"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/admin/api-keys/{api_key_id}/revoke"
+operation_id = "adminApiKeysRevoke"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/errors"
+operation_id = "errorsDashboard"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/admin/errors/reset"
+operation_id = "resetErrorLogs"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/evals/summaries"
+operation_id = "adminEvalSummariesPage"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/admin/evals/summaries/run"
+operation_id = "adminEvalSummariesRun"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/feedback"
+operation_id = "adminFeedbackPage"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/llm-usage"
+operation_id = "legacyLlmUsageRedirect"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/logs"
+operation_id = "listLogs"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/logs/{filename}"
+operation_id = "viewLog"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/logs/{filename}/download"
+operation_id = "downloadLog"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/onboarding/lane-preview"
+operation_id = "onboardingLanePreviewPage"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/admin/onboarding/lane-preview"
+operation_id = "onboardingLanePreview"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/admin/vendor-usage"
+operation_id = "vendorUsageDashboard"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/agent/cli/link/start"
+operation_id = "startCliLink"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/agent/cli/link/{session_id}"
+operation_id = "pollCliLink"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/agent/cli/link/{session_id}/approve"
+operation_id = "approveCliLink"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/agent/library/file"
+operation_id = "getAgentLibraryFile"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/agent/library/manifest"
+operation_id = "getAgentLibraryManifest"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/agent/onboarding"
+operation_id = "startOnboarding"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/agent/onboarding/{run_id}"
+operation_id = "getOnboarding"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/agent/onboarding/{run_id}/complete"
+operation_id = "completeOnboarding"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/agent/search"
+operation_id = "searchAgent"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/analytics"
+operation_id = "postAnalyticsContentInteraction"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/briefing"
+operation_id = "getBriefingIndex"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/briefing/dig/search"
+operation_id = "digBriefingSearch"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/briefing/dig/summarize"
+operation_id = "digBriefingSummarize"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/briefing/lenses/{lens_key}"
+operation_id = "getBriefingLensesLens"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/briefing/lenses/{lens_key}/read-marks"
+operation_id = "markBriefingLensesLensRead"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/briefing/narration"
+operation_id = "narrationBriefing"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/briefing/narrations"
+operation_id = "chapteredBriefingNarration"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/briefing/narrations/{episode_group_id}"
+operation_id = "narrationBriefingStatus"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/briefing/read-marks"
+operation_id = "markBriefingRead"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/briefing/refresh"
+operation_id = "refreshBriefing"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/"
+operation_id = "listContents"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/audio-episodes/custom-narrations"
+operation_id = "listContentCustomNarrationAudioEpisodes"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/audio-episodes/custom-narrations"
+operation_id = "createContentCustomNarrationAudioEpisode"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/audio-episodes/fast-news"
+operation_id = "createContentFastNewsAudioEpisode"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/audio-episodes/{audio_episode_id}"
+operation_id = "getContentAudioEpisode"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/audio-episodes/{audio_episode_id}/audio"
+operation_id = "getContentAudioEpisodeAudio"
+write_semantics = true
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/audio-episodes/{audio_episode_id}/playback-finished"
+operation_id = "finishContentFinishedAudioEpisodePlayback"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/content/audio-episodes/{audio_episode_id}/share"
+operation_id = "disableContentAudioEpisodePublicShare"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/audio-episodes/{audio_episode_id}/share"
+operation_id = "enableContentAudioEpisodePublicShare"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/audio-episodes/{audio_episode_id}/stream"
+operation_id = "streamContentAudioEpisode"
+write_semantics = true
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/bulk-mark-read"
+operation_id = "bulkContentMarkRead"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/chat/assistant/turns"
+operation_id = "createContentChatAssistantTurn"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/chat/messages/{message_id}/status"
+operation_id = "getContentChatMessageStatus"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/chat/sessions"
+operation_id = "listContentChatSessions"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/chat/sessions"
+operation_id = "createContentChatSession"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/chat/sessions/list"
+operation_id = "listContentChatSessionsPage"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/content/chat/sessions/{session_id}"
+operation_id = "deleteContentChatSession"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/chat/sessions/{session_id}"
+operation_id = "getContentChatSession"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "PATCH"
+path = "/api/content/chat/sessions/{session_id}"
+operation_id = "updateContentChatSession"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/chat/sessions/{session_id}/council/retry"
+operation_id = "retryContentChatSessionsCouncilModeBranch"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/chat/sessions/{session_id}/council/select"
+operation_id = "selectContentChatSessionsCouncilModeBranch"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/chat/sessions/{session_id}/council/start"
+operation_id = "startContentChatSessionsCouncilMode"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/chat/sessions/{session_id}/messages"
+operation_id = "sendContentChatSessionsMessage"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/knowledge/list"
+operation_id = "getContentListKnowledgeLibrary"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/narration/{target_type}/{target_id}"
+operation_id = "getContentNarration"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/recently-read/list"
+operation_id = "getContentListRecentlyRead"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/scrapers/"
+operation_id = "listContentScraperConfigs"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/scrapers/"
+operation_id = "createContentScraperConfig"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/scrapers/subscribe"
+operation_id = "subscribeContentScrapersToFeed"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/content/scrapers/{config_id}"
+operation_id = "deleteContentScraperConfigEndpoint"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "PUT"
+path = "/api/content/scrapers/{config_id}"
+operation_id = "updateContentScraperConfig"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/search"
+operation_id = "searchContents"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/search/mixed"
+operation_id = "searchMixedContents"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/search/podcasts"
+operation_id = "searchContentPodcastEpisodeMatches"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/stats/badge"
+operation_id = "getContentBadgeStats"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/stats/long-form"
+operation_id = "getContentLongFormStats"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/stats/processing-count"
+operation_id = "getContentStatsProcessingCount"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/stats/unread-counts"
+operation_id = "getContentStatsUnreadCounts"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/submissions/list"
+operation_id = "listContentSubmissionStatuses"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/submit"
+operation_id = "submitContent"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/{content_id}"
+operation_id = "getContentDetail"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/{content_id}/audio-episodes/council"
+operation_id = "createContentCouncilAudioEpisode"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/{content_id}/body"
+operation_id = "getContentBody"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/{content_id}/chat-url"
+operation_id = "getContentChatChatgptUrl"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/{content_id}/convert-to-article"
+operation_id = "convertContentNewsToArticle"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/content/{content_id}/discussion"
+operation_id = "getContentDiscussion"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/{content_id}/discussion/refresh"
+operation_id = "refreshContentDiscussion"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/{content_id}/download-more"
+operation_id = "downloadContentMoreFromSeries"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/content/{content_id}/knowledge"
+operation_id = "removeContentFromKnowledge"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/{content_id}/knowledge"
+operation_id = "saveContentToKnowledge"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/{content_id}/mark-read"
+operation_id = "markContentRead"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/content/{content_id}/mark-unread"
+operation_id = "markContentUnread"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/content/{content_id}/tweet-suggestions"
+operation_id = "getContentTweetSuggestions"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/feedback"
+operation_id = "createFeedback"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/integrations/llm"
+operation_id = "getLlmIntegrations"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/integrations/llm/{provider}"
+operation_id = "deleteLlmIntegration"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "PUT"
+path = "/api/integrations/llm/{provider}"
+operation_id = "putLlmIntegration"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/integrations/llm/{provider}/test"
+operation_id = "testLlmIntegration"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/integrations/x/connection"
+operation_id = "disconnectIntegrationsConnectionX"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/integrations/x/connection"
+operation_id = "getIntegrationsXConnection"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/integrations/x/oauth/exchange"
+operation_id = "exchangeIntegrationsXOauthCode"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/integrations/x/oauth/start"
+operation_id = "startIntegrationsXOauthFlow"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/jobs/{job_id}"
+operation_id = "getJob"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/learning/decks"
+operation_id = "listLearningDecks"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/learning/decks"
+operation_id = "createLearningDeck"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/learning/decks/{deck_id}"
+operation_id = "deleteLearningDeck"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/learning/decks/{deck_id}"
+operation_id = "getLearningDeck"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/learning/decks/{deck_id}/retry"
+operation_id = "retryLearningDeck"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/learning/decks/{deck_id}/share"
+operation_id = "disableLearningDecksShare"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/learning/decks/{deck_id}/share"
+operation_id = "enableLearningDecksShare"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/learning/decks/{deck_id}/source-notes-url"
+operation_id = "createLearningDecksSourceNotesUrl"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/learning/decks/{deck_id}/viewer-url"
+operation_id = "createLearningDecksViewerUrl"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/llm-tasks/{task_id}/actions"
+operation_id = "listLlmTaskActions"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/llm-tasks/{task_id}/actions/{action_id}/approve"
+operation_id = "approveLlmTaskAction"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/llm-tasks/{task_id}/actions/{action_id}/reject"
+operation_id = "rejectLlmTaskAction"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/news/items"
+operation_id = "listNewsItems"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/news/items/mark-read"
+operation_id = "markNewsItemsRead"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/news/items/{news_item_id}"
+operation_id = "getNewsItem"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/news/items/{news_item_id}/audio-episodes/discussion"
+operation_id = "createDiscussionNewsItemAudioEpisode"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/news/items/{news_item_id}/body"
+operation_id = "getNewsItemBody"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/news/items/{news_item_id}/convert-to-article"
+operation_id = "convertNewsItemToArticle"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/news/items/{news_item_id}/discussion"
+operation_id = "getNewsItemDiscussion"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/news/items/{news_item_id}/discussion/refresh"
+operation_id = "refreshNewsItemDiscussion"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/onboarding/audio-discover"
+operation_id = "startOnboardingDiscoverAudioDiscoveryFlow"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/onboarding/complete"
+operation_id = "completeOnboardingFlow"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/onboarding/discovery-status"
+operation_id = "onboardingDiscoveryStatus"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/onboarding/fast-discover"
+operation_id = "runOnboardingFastDiscover"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/onboarding/parse-voice"
+operation_id = "parseOnboardingVoice"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/onboarding/profile"
+operation_id = "buildOnboardingProfile"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/onboarding/tutorial-complete"
+operation_id = "tutorialOnboardingComplete"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/openai/transcriptions"
+operation_id = "transcribeOpenaiTranscriptionsAudio"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/openai/transcriptions/health"
+operation_id = "transcriptionOpenaiHealth"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/scrapers/"
+operation_id = "listScraperConfigs"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/scrapers/"
+operation_id = "createScraperConfig"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/scrapers/subscribe"
+operation_id = "subscribeScrapersToFeed"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/api/scrapers/{config_id}"
+operation_id = "deleteScraperConfigEndpoint"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "PUT"
+path = "/api/scrapers/{config_id}"
+operation_id = "updateScraperConfig"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/api/share-actions"
+operation_id = "createShareAction"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/share-actions/{task_id}"
+operation_id = "getShareAction"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/auth/admin/login"
+operation_id = "adminLoginPage"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/auth/admin/login"
+operation_id = "adminLogin"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/auth/admin/logout"
+operation_id = "adminLogout"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/auth/apple"
+operation_id = "appleSignin"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/auth/debug/new-user"
+operation_id = "debugNewCreateUser"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "DELETE"
+path = "/auth/me"
+operation_id = "deleteMeCurrentAccount"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/auth/me"
+operation_id = "getMeCurrentUserInfo"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "PATCH"
+path = "/auth/me"
+operation_id = "updateMeCurrentUserInfo"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
+path = "/auth/refresh"
+operation_id = "refreshToken"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/health"
+operation_id = "healthCheck"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "analyze_url"
+queue = "content"
+payload_schema = "tasks/analyze_url.schema.json"
+handler = "newsly_worker::content::AnalyzeUrlHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "backfill_agent_data"
+queue = "backfill"
+payload_schema = "tasks/backfill_agent_data.schema.json"
+handler = "newsly_worker::agent_data::BackfillAgentDataHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "backfill_feeds"
+queue = "backfill"
+payload_schema = "tasks/backfill_feeds.schema.json"
+handler = "newsly_worker::feed_backfill::BackfillFeedsHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "briefing_refresh"
+queue = "llm"
+payload_schema = "tasks/briefing_refresh.schema.json"
+handler = "newsly_worker::briefing_refresh::BriefingRefreshHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "chat_turn"
+queue = "chat"
+payload_schema = "tasks/chat_turn.schema.json"
+handler = "newsly_worker::chat_turn::ChatPartitionHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "user:{owner_user_id}"
+
+[[tasks]]
+task_type = "delete_user_account"
+queue = "backfill"
+payload_schema = "tasks/delete_user_account.schema.json"
+handler = "newsly_account_deletion_worker::AccountDeletionHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "dig_deeper"
+queue = "chat"
+payload_schema = "tasks/dig_deeper.schema.json"
+handler = "newsly_worker::chat_turn::ChatPartitionHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "user:{owner_user_id}"
+
+[[tasks]]
+task_type = "discover_feeds"
+queue = "content"
+payload_schema = "tasks/discover_feeds.schema.json"
+handler = "newsly_worker::feed_discovery::DiscoverFeedsHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "download_tweet_video_audio"
+queue = "media"
+payload_schema = "tasks/download_tweet_video_audio.schema.json"
+handler = "newsly_worker::media::DownloadTweetVideoAudioHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "enrich_news_item_article"
+queue = "content"
+payload_schema = "tasks/enrich_news_item_article.schema.json"
+handler = "newsly_worker::news_item::EnrichNewsItemArticleHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "fetch_news_item_discussion"
+queue = "discussion"
+payload_schema = "tasks/fetch_news_item_discussion.schema.json"
+handler = "newsly_worker::discussion::FetchNewsItemDiscussionHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "generate_audio_episode"
+queue = "audio_episode"
+payload_schema = "tasks/generate_audio_episode.schema.json"
+handler = "newsly_worker::audio_episode::GenerateAudioEpisodeHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "generate_image"
+queue = "image"
+payload_schema = "tasks/generate_image.schema.json"
+handler = "newsly_worker::image_generation::GenerateImageHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "index_agent_data"
+queue = "backfill"
+payload_schema = "tasks/index_agent_data.schema.json"
+handler = "newsly_worker::agent_data::IndexAgentDataHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "onboarding_discover"
+queue = "onboarding"
+payload_schema = "tasks/onboarding_discover.schema.json"
+handler = "newsly_worker::onboarding_discovery::OnboardingDiscoverHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "process_content"
+queue = "content"
+payload_schema = "tasks/process_content.schema.json"
+handler = "newsly_worker::content::ProcessContentHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "process_news_item"
+queue = "content"
+payload_schema = "tasks/process_news_item.schema.json"
+handler = "newsly_worker::news_item::ProcessNewsItemHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "process_podcast_media"
+queue = "media"
+payload_schema = "tasks/process_podcast_media.schema.json"
+handler = "newsly_worker::media::ProcessPodcastMediaHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "reconcile_agent_data"
+queue = "backfill"
+payload_schema = "tasks/reconcile_agent_data.schema.json"
+handler = "newsly_worker::agent_data::ReconcileAgentDataHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "run_llm_task"
+queue = "llm"
+payload_schema = "tasks/run_llm_task.schema.json"
+handler = "newsly_worker::run_llm_task::RunLlmTaskHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "user:{owner_user_id}"
+
+[[tasks]]
+task_type = "scrape"
+queue = "content"
+payload_schema = "tasks/scrape.schema.json"
+handler = "newsly_worker::scrape::ScrapeHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "user:0"
+
+[[tasks]]
+task_type = "summarize"
+queue = "content"
+payload_schema = "tasks/summarize.schema.json"
+handler = "newsly_worker::summarization::SummarizeHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "sync_agent_data"
+queue = "backfill"
+payload_schema = "tasks/sync_agent_data.schema.json"
+handler = "newsly_worker::agent_data::SyncAgentDataHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "sync_integration"
+queue = "twitter"
+payload_schema = "tasks/sync_integration.schema.json"
+handler = "newsly_worker::x_sync::XSyncIntegrationHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[tasks]]
+task_type = "transcribe_tweet_video"
+queue = "media"
+payload_schema = "tasks/transcribe_tweet_video.schema.json"
+handler = "newsly_worker::media::TranscribeTweetVideoHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[e2b_namespaces]]
+namespace = "user:*"
+current_owner = "rust"
+database_writer = "rust"
+
+[[e2b_namespaces]]
+namespace = "user:0"
+current_owner = "rust"
+database_writer = "rust"

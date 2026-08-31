@@ -35,7 +35,9 @@ docs
 logs
 logs_from_server
 node_modules
+rust/target
 outputs
+python
 tests
 tmp
 test.db

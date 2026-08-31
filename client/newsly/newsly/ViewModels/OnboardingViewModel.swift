@@ -127,10 +127,9 @@ final class OnboardingViewModel {
         case discoveryPolling
     }
 
-    var step: OnboardingStep = .choice
+    var step: OnboardingStep = .intro
     var suggestions: OnboardingFastDiscoverResponse?
-    var selectedSourceKeys: Set<String> = []
-    var selectedSubreddits: Set<String> = []
+    var selectedSuggestionIDs: Set<Int> = []
     var selectedAggregators: Set<String> = []
     var selectedBrutalistTopics: Set<String> = Set(onboardingBrutalistTopics)
     var isLoading = false
@@ -217,6 +216,19 @@ final class OnboardingViewModel {
 
     var subredditSuggestions: [OnboardingSuggestion] {
         suggestions?.recommendedSubreddits ?? []
+    }
+
+    var selectedLongformSuggestionCount: Int {
+        (substackSuggestions + podcastSuggestions).filter(isSuggestionSelected).count
+    }
+
+    var selectedSubredditSuggestionCount: Int {
+        subredditSuggestions.filter(isSuggestionSelected).count
+    }
+
+    func isSuggestionSelected(_ suggestion: OnboardingSuggestion) -> Bool {
+        guard let suggestionID = suggestion.id else { return false }
+        return selectedSuggestionIDs.contains(suggestionID)
     }
 
     var isShowingDefaultConfirmation: Bool {
@@ -373,23 +385,17 @@ final class OnboardingViewModel {
     }
 
     func toggleSource(_ suggestion: OnboardingSuggestion) {
-        guard let feedURL = suggestion.feedURL, !feedURL.isEmpty else { return }
-        if selectedSourceKeys.contains(feedURL) {
-            selectedSourceKeys.remove(feedURL)
+        guard let suggestionID = suggestion.id else { return }
+        if selectedSuggestionIDs.contains(suggestionID) {
+            selectedSuggestionIDs.remove(suggestionID)
         } else {
-            selectedSourceKeys.insert(feedURL)
+            selectedSuggestionIDs.insert(suggestionID)
         }
         persistProgress()
     }
 
     func toggleSubreddit(_ suggestion: OnboardingSuggestion) {
-        guard let subreddit = suggestion.subreddit, !subreddit.isEmpty else { return }
-        if selectedSubreddits.contains(subreddit) {
-            selectedSubreddits.remove(subreddit)
-        } else {
-            selectedSubreddits.insert(subreddit)
-        }
-        persistProgress()
+        toggleSource(suggestion)
     }
 
     func toggleAggregator(_ option: OnboardingAggregatorOption) {
@@ -441,12 +447,14 @@ final class OnboardingViewModel {
         defer { isLoading = false }
 
         do {
+            guard !isPersonalized || discoveryRunId != nil else {
+                errorMessage = "Personalized discovery must finish before onboarding can be completed."
+                return
+            }
             let request = OnboardingCompleteRequest(
-                selectedSources: buildSelectedSources(),
-                selectedSubreddits: Array(selectedSubreddits),
+                discoveryRunId: isPersonalized ? discoveryRunId : nil,
+                selectedSuggestionIds: Array(selectedSuggestionIDs).sorted(),
                 selectedAggregators: buildSelectedAggregators(),
-                profileSummary: isPersonalized ? topicSummary : nil,
-                inferredTopics: isPersonalized ? inferredTopics : nil,
                 twitterUsername: normalizedTwitterUsername()
             )
             let response = try await service.complete(request: request)
@@ -590,8 +598,7 @@ final class OnboardingViewModel {
                 applySuggestions(suggestions)
             } else {
                 suggestions = nil
-                selectedSourceKeys = []
-                selectedSubreddits = []
+                selectedSuggestionIDs = []
             }
             errorMessage = nil
             step = .suggestions
@@ -601,8 +608,7 @@ final class OnboardingViewModel {
 
         if discoveryTaskStatus(status.runStatus) == .failed {
             suggestions = nil
-            selectedSourceKeys = []
-            selectedSubreddits = []
+            selectedSuggestionIDs = []
             errorMessage = nil
             step = .loading
             persistProgress()
@@ -614,24 +620,12 @@ final class OnboardingViewModel {
 
     private func applySuggestions(_ response: OnboardingFastDiscoverResponse) {
         suggestions = response
-        let sourceKeys = (response.recommendedSubstacks + response.recommendedPods)
-            .compactMap { $0.feedURL }
-        selectedSourceKeys = Set(sourceKeys)
-        let subredditKeys = response.recommendedSubreddits.compactMap { $0.subreddit }
-        selectedSubreddits = Set(subredditKeys)
-    }
-
-    private func buildSelectedSources() -> [OnboardingSelectedSource] {
-        let combined = substackSuggestions + podcastSuggestions
-        return combined.compactMap { suggestion in
-            guard let feedURL = suggestion.feedURL, selectedSourceKeys.contains(feedURL) else { return nil }
-            return OnboardingSelectedSource(
-                suggestionType: suggestion.suggestionType,
-                title: suggestion.title,
-                feedURL: feedURL,
-                config: nil
-            )
-        }
+        selectedSuggestionIDs = Set(
+            (response.recommendedSubstacks
+                + response.recommendedPods
+                + response.recommendedSubreddits)
+                .compactMap(\.id)
+        )
     }
 
     private func normalizedTwitterUsername() -> String? {
@@ -676,8 +670,7 @@ final class OnboardingViewModel {
         topicSummary = nil
         inferredTopics = []
         suggestions = nil
-        selectedSourceKeys = []
-        selectedSubreddits = []
+        selectedSuggestionIDs = []
         selectedAggregators = []
         selectedBrutalistTopics = Set(onboardingBrutalistTopics)
         isSubmittingAudioDiscovery = false
@@ -801,8 +794,7 @@ final class OnboardingViewModel {
         step = snapshot.step == .fastNews ? .aggregators : snapshot.step
         isPersonalized = snapshot.isPersonalized
         suggestions = snapshot.suggestions
-        selectedSourceKeys = Set(snapshot.selectedSourceKeys)
-        selectedSubreddits = Set(snapshot.selectedSubreddits)
+        selectedSuggestionIDs = Set(snapshot.selectedSuggestionIds)
         selectedAggregators = Set(snapshot.selectedAggregators)
         if !snapshot.selectedBrutalistTopics.isEmpty {
             selectedBrutalistTopics = Set(snapshot.selectedBrutalistTopics)
@@ -837,8 +829,7 @@ final class OnboardingViewModel {
                 step: step,
                 isPersonalized: isPersonalized,
                 suggestions: suggestions,
-                selectedSourceKeys: Array(selectedSourceKeys).sorted(),
-                selectedSubreddits: Array(selectedSubreddits).sorted(),
+                selectedSuggestionIds: Array(selectedSuggestionIDs).sorted(),
                 selectedAggregators: Array(selectedAggregators).sorted(),
                 selectedBrutalistTopics: Array(selectedBrutalistTopics).sorted(),
                 discoveryRunId: discoveryRunId,

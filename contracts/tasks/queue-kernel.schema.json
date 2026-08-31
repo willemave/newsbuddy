@@ -1,0 +1,288 @@
+{
+  "$defs": {
+    "ClaimedTask": {
+      "$defs": {
+        "RuntimeOwner": {
+          "description": "Application runtime allowed to execute a durable mutation.",
+          "enum": [
+            "python",
+            "rust"
+          ],
+          "title": "RuntimeOwner",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One processing task owned by an exact worker claim attempt.",
+      "properties": {
+        "available_at": {
+          "format": "date-time",
+          "title": "Available At",
+          "type": "string"
+        },
+        "content_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Content Id"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Created At"
+        },
+        "executor_namespace": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Executor Namespace",
+          "type": "string"
+        },
+        "executor_runtime": {
+          "$ref": "#/$defs/RuntimeOwner"
+        },
+        "executor_version": {
+          "exclusiveMinimum": 0,
+          "title": "Executor Version",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "lease_expires_at": {
+          "format": "date-time",
+          "title": "Lease Expires At",
+          "type": "string"
+        },
+        "lease_token": {
+          "format": "uuid",
+          "title": "Lease Token",
+          "type": "string"
+        },
+        "locked_at": {
+          "format": "date-time",
+          "title": "Locked At",
+          "type": "string"
+        },
+        "locked_by": {
+          "minLength": 1,
+          "title": "Locked By",
+          "type": "string"
+        },
+        "owner_user_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner User Id"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "queue_name": {
+          "title": "Queue Name",
+          "type": "string"
+        },
+        "retry_count": {
+          "minimum": 0,
+          "title": "Retry Count",
+          "type": "integer"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "status": {
+          "const": "processing",
+          "title": "Status",
+          "type": "string"
+        },
+        "task_type": {
+          "title": "Task Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "task_type",
+        "content_id",
+        "payload",
+        "retry_count",
+        "status",
+        "queue_name",
+        "executor_runtime",
+        "executor_version",
+        "executor_namespace",
+        "created_at",
+        "available_at",
+        "started_at",
+        "locked_at",
+        "locked_by",
+        "lease_token",
+        "lease_expires_at"
+      ],
+      "title": "ClaimedTask",
+      "type": "object"
+    },
+    "TaskResult": {
+      "additionalProperties": false,
+      "description": "Typed outcome returned by a processing-task handler.",
+      "properties": {
+        "deferred": {
+          "default": false,
+          "title": "Deferred",
+          "type": "boolean"
+        },
+        "error_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Message"
+        },
+        "retry_delay_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry Delay Seconds"
+        },
+        "retryable": {
+          "default": true,
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "title": "TaskResult",
+      "type": "object"
+    },
+    "TaskTransition": {
+      "$defs": {
+        "TaskStatus": {
+          "description": "Task execution status values.",
+          "enum": [
+            "pending",
+            "processing",
+            "completed",
+            "failed"
+          ],
+          "title": "TaskStatus",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Persisted result of one ownership-checked task finalization.",
+      "properties": {
+        "available_at": {
+          "format": "date-time",
+          "title": "Available At",
+          "type": "string"
+        },
+        "content_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Content Id"
+        },
+        "deferred": {
+          "title": "Deferred",
+          "type": "boolean"
+        },
+        "error_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error Message"
+        },
+        "queue_name": {
+          "title": "Queue Name",
+          "type": "string"
+        },
+        "retry_count": {
+          "minimum": 0,
+          "title": "Retry Count",
+          "type": "integer"
+        },
+        "retry_delay_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Retry Delay Seconds"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "task_type": {
+          "title": "Task Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_type",
+        "queue_name",
+        "content_id",
+        "error_message",
+        "status",
+        "retry_count",
+        "retry_delay_seconds",
+        "deferred",
+        "available_at"
+      ],
+      "title": "TaskTransition",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

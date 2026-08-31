@@ -1,0 +1,235 @@
+{
+  "artifacts": [
+    {
+      "category": "evals",
+      "path": "evals/embedding-bundle.example.json",
+      "sha256": "7849fde46b63cacf3f3d9f0754358c653468570ab1a86c62abc67b2d6f64d54a"
+    },
+    {
+      "category": "evals",
+      "path": "evals/embedding-bundle.schema.json",
+      "sha256": "b0bd8ef0137619166cb7d0d7697bda61f77c6a7f141b0cd59e7bd21fb6a607ba"
+    },
+    {
+      "category": "extraction",
+      "path": "extraction/crawl4ai-golden.json",
+      "sha256": "bf6c2f7cf76470024f7101b2dbeecb7227bd4f135b957320bf2e6e39753f27c9"
+    },
+    {
+      "category": "extraction",
+      "path": "extraction/crawl4ai-request.schema.json",
+      "sha256": "238a5411a86bc9c8a57a0fcc242f961fb6c474364c6312b83368be7326683d1b"
+    },
+    {
+      "category": "extraction",
+      "path": "extraction/crawl4ai-result.schema.json",
+      "sha256": "d9590da523294cba0d65eec88152f0aa5118ebde91b8299b87729d17688bfd31"
+    },
+    {
+      "category": "fixtures",
+      "path": "fixtures/auth-lifecycle.json",
+      "sha256": "7c07eca35b8c82579c6a118359573cbd7171fc8ba360a372082d27723ec8df57"
+    },
+    {
+      "category": "llm",
+      "path": "llm/e2b-command-stream.json",
+      "sha256": "a1fef20c31154b71150f51bdd2acefe5817038ef12dd7b2a7627145130ccaea7"
+    },
+    {
+      "category": "llm",
+      "path": "llm/e2b-runtime.schema.json",
+      "sha256": "fd560731bf7f134d45c86ca5d98f9d78b3f6aacdb3b75cf09a36b411c99d928b"
+    },
+    {
+      "category": "llm",
+      "path": "llm/provider-routing-and-usage.json",
+      "sha256": "3eecf2ffa8f292723243d523ef631aef5d39e79309fa63b666ade65d4043d9d9"
+    },
+    {
+      "category": "llm",
+      "path": "llm/pydantic-ai-history.json",
+      "sha256": "e9fdf0acb1a14481cadeabcf748fdadaa906117afdbaae195184d6949cdb8da5"
+    },
+    {
+      "category": "metadata",
+      "path": "metadata/field-presence.json",
+      "sha256": "4e234f127fb78f03e3041b5845cbc6ddcfa760656f37474be505c64c018402b0"
+    },
+    {
+      "category": "metadata",
+      "path": "metadata/legacy-content-metadata.json",
+      "sha256": "04811bdd73faa284587a48844ccbde7109fb20fdde11d32db388a2d942af0987"
+    },
+    {
+      "category": "metadata",
+      "path": "metadata/schema-fingerprint.json",
+      "sha256": "aafdbc04684267172c672bb7508692b1f78385811da788ae2825551429cbb2a4"
+    },
+    {
+      "category": "metadata",
+      "path": "metadata/utc-timestamps.json",
+      "sha256": "4b65060e190ea64f818386257304649e7ef2a19e9532bcff74da24c3a4151926"
+    },
+    {
+      "category": "openapi",
+      "path": "openapi/fixtures/content-detail-null-optionals.json",
+      "sha256": "461cf85a128b8d7f5c1d21330d8a724d75f13567573ddfd3adb1e8f1916b74fc"
+    },
+    {
+      "category": "openapi",
+      "path": "openapi/fixtures/job-status.json",
+      "sha256": "30819f299f1f56e4702614ac8007ed6384060badfc888e5c97d22b2867bfc095"
+    },
+    {
+      "category": "openapi",
+      "path": "openapi/fixtures/refresh-token.json",
+      "sha256": "502ad7411f5cc89b3a50cf9869e494bafdc683168c1d69e417c749865223a051"
+    },
+    {
+      "category": "openapi",
+      "path": "openapi/fixtures/share-action-create.json",
+      "sha256": "4d7680b10d1de333a492590e2056712f9441743a31346ecef75aa3a6d630cdc1"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/analyze_url.schema.json",
+      "sha256": "d13c09211d5f4b67cb2e09ded59955c71f9deac4e6ed880dc8f76dcd57163da7"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/backfill_agent_data.schema.json",
+      "sha256": "fcca4db7e7c7e5807ec3aeb97ad4c338597c87f58bd7fcf5e8a5c099e87204a3"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/backfill_feeds.schema.json",
+      "sha256": "f7ab630c55f900787eec11e76de76e0460be686014657ac8b7ccc8a20983d565"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/briefing_refresh.schema.json",
+      "sha256": "56ec4f932275aefc521c8352bedfe8487b1d023d9ddfe67e54ddb15f9e0ccc28"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/catalog.json",
+      "sha256": "3749db2bcb6b5ebbb39bb6de814cff813411d267be6b1a99e9884ce68ad354bc"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/chat_turn.schema.json",
+      "sha256": "664b09f60c132d58ab86f3f863f1bfddceffadf44bcbdeec9a22d3cc726b7af1"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/delete_user_account.schema.json",
+      "sha256": "267564bd25e030a7ab7616ebdd378a3efbe92fc54cf153d9c92d9daea5f69a39"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/dig_deeper.schema.json",
+      "sha256": "437c845d4a73311da0729ace6d8950c9589412f6f5c38cb14c3286df1315a40c"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/discover_feeds.schema.json",
+      "sha256": "267564bd25e030a7ab7616ebdd378a3efbe92fc54cf153d9c92d9daea5f69a39"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/download_tweet_video_audio.schema.json",
+      "sha256": "cace9651c7f92352e3381a4d0d8fa878010064ca5ee4f8becd7154561d7ed72f"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/enrich_news_item_article.schema.json",
+      "sha256": "df799d417baaa5f846c88657071b2b9a586453195b8f182f94c5cad10a4a1aa2"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/fetch_news_item_discussion.schema.json",
+      "sha256": "305ccb1ded325ebce60a696b56c327982b1b2a60a38b85447b2299e38fe4ec18"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/generate_audio_episode.schema.json",
+      "sha256": "b498d247e54d2b698fc4dd5c56b087ec37da9485603fa626a00e02846b9f5373"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/generate_image.schema.json",
+      "sha256": "f0e330dc48e57b51be29c1587768339c386a0c501b55fb8811fea97b9161b8f6"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/index_agent_data.schema.json",
+      "sha256": "deac2bd86acde3353db0f0151d1a2d7af2ce848693199aab9f75f99ba74a61bb"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/onboarding_discover.schema.json",
+      "sha256": "b062c30ae2e5563de71b851e0918eec510f4d6fcf05303f9205804b868c6ad17"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/process_content.schema.json",
+      "sha256": "cace9651c7f92352e3381a4d0d8fa878010064ca5ee4f8becd7154561d7ed72f"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/process_news_item.schema.json",
+      "sha256": "305ccb1ded325ebce60a696b56c327982b1b2a60a38b85447b2299e38fe4ec18"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/process_podcast_media.schema.json",
+      "sha256": "ea351ae614de2fde397456262bc4525230952676a9373cbefd7a6ec520ab3375"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/queue-kernel.schema.json",
+      "sha256": "8a992a828d184ca9f970b8a23c2ea4cc82c340ae4ad78c6b5ef8f7df530d1e27"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/queue-transitions.json",
+      "sha256": "5cc916ce2f3bc36b682f43783bdfbd2773ac7c80c220fb59626b3c8ae71b944e"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/reconcile_agent_data.schema.json",
+      "sha256": "ba1b6bee05c1433be7bb92245c67700bb6eae68b52bb7f5bba574a1ddca6af46"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/run_llm_task.schema.json",
+      "sha256": "ccfec97dc428186578483f7515d0ce17a603a8c60bd77d1a0c9baeab2dca27c8"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/scrape.schema.json",
+      "sha256": "54726d992f004f0492f0431d2248ac76d76c9988d8b8ebfff1fa412229f39011"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/summarize.schema.json",
+      "sha256": "cace9651c7f92352e3381a4d0d8fa878010064ca5ee4f8becd7154561d7ed72f"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/sync_agent_data.schema.json",
+      "sha256": "8a77544f3f42525aa0437d59b7edf8fb28189043ad0af05cd4c388c657299454"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/sync_integration.schema.json",
+      "sha256": "d786f2906900d6be7ca5f5436377de639640f7d65a56d7e1eb0006178eaef0c8"
+    },
+    {
+      "category": "tasks",
+      "path": "tasks/transcribe_tweet_video.schema.json",
+      "sha256": "cace9651c7f92352e3381a4d0d8fa878010064ca5ee4f8becd7154561d7ed72f"
+    }
+  ],
+  "version": 1
+}

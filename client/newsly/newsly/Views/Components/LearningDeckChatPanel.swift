@@ -63,6 +63,7 @@ enum LearningDeckChatFlyoverInteraction {
 
 struct LearningDeckChatFlyover: View {
     @Bindable var viewModel: LearningDeckReaderViewModel
+    let feedOptionActionModel: AssistantFeedOptionActionModel
     @Binding var presentation: LearningDeckChatPresentation
 
     var body: some View {
@@ -70,6 +71,7 @@ struct LearningDeckChatFlyover: View {
             if presentation != .peek {
                 LearningDeckChatPanel(
                     viewModel: viewModel,
+                    feedOptionActionModel: feedOptionActionModel,
                     isFocused: presentation == .focus,
                     onResize: {
                         presentation = presentation == .focus ? .compact : .focus
@@ -156,17 +158,19 @@ struct LearningDeckChatPanel: View {
     let onCollapse: (() -> Void)?
     let onHeaderDrag: ((CGSize) -> Void)?
 
-    @State private var feedOptionActionModel = AssistantFeedOptionActionModel()
+    let feedOptionActionModel: AssistantFeedOptionActionModel
     @State private var isNearBottom = true
 
     init(
         viewModel: LearningDeckReaderViewModel,
+        feedOptionActionModel: AssistantFeedOptionActionModel,
         isFocused: Bool = false,
         onResize: (() -> Void)? = nil,
         onCollapse: (() -> Void)? = nil,
         onHeaderDrag: ((CGSize) -> Void)? = nil
     ) {
         self.viewModel = viewModel
+        self.feedOptionActionModel = feedOptionActionModel
         self.isFocused = isFocused
         self.onResize = onResize
         self.onCollapse = onCollapse

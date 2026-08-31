@@ -147,7 +147,12 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             paragraphs: [
                 APIBriefingParagraph(
                     runs: [
-                        APIBriefingRun(kind: .text, text: "Feature-weight payload uses body text.")
+                        APIBriefingRun(
+                            kind: .text,
+                            text: "Feature-weight payload uses body text.",
+                            sourceKey: nil,
+                            insightId: nil
+                        )
                     ]
                 )
             ],
@@ -177,6 +182,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                             kind: .source_link,
                             text: "Read this",
                             sourceKey: "content:42",
+                            insightId: nil,
                             bold: true
                         )
                     ]
@@ -200,7 +206,9 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                     runs: [
                         APIBriefingRun(
                             kind: .text,
-                            text: "Read [Story](news://briefing/news/8) today."
+                            text: "Read [Story](news://briefing/news/8) today.",
+                            sourceKey: nil,
+                            insightId: nil
                         )
                     ]
                 )
@@ -224,7 +232,9 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                     runs: [
                         APIBriefingRun(
                             kind: .text,
-                            text: "Read [[AINews] New AI infra decacorns](newsly://briefing/content/29576)."
+                            text: "Read [[AINews] New AI infra decacorns](newsly://briefing/content/29576).",
+                            sourceKey: nil,
+                            insightId: nil
                         )
                     ]
                 )
@@ -254,7 +264,9 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                     runs: [
                         APIBriefingRun(
                             kind: .text,
-                            text: "Read [Story](news://briefing/news/8) today."
+                            text: "Read [Story](news://briefing/news/8) today.",
+                            sourceKey: nil,
+                            insightId: nil
                         )
                     ]
                 )
@@ -278,17 +290,27 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
     func testBriefingSourceLinkKeysIncludesStoredMarkdownSourceLinks() {
         let block = APIBriefingBlock(
             type: .passage,
+            weight: nil,
             paragraphs: [
                 APIBriefingParagraph(
                     runs: [
                         APIBriefingRun(
                             kind: .text,
                             text: "Read [Story](news://briefing/news/8) "
-                                + "and [Article](newsly://briefing/content/42)."
+                                + "and [Article](newsly://briefing/content/42).",
+                            sourceKey: nil,
+                            insightId: nil
                         )
                     ]
                 )
-            ]
+            ],
+            sourceKey: nil,
+            imageUrl: nil,
+            thumbnailUrl: nil,
+            caption: nil,
+            placement: nil,
+            alignment: nil,
+            text: nil
         )
 
         XCTAssertEqual(block.briefingSourceLinkKeys, ["news:8", "content:42"])
@@ -299,7 +321,8 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
         let linkRun = APIBriefingRun(
             kind: .source_link,
             text: "Read this",
-            sourceKey: "news:7"
+            sourceKey: "news:7",
+            insightId: nil
         )
         let result = builder.build(
             paragraphs: [
@@ -329,9 +352,24 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
             paragraphs: [
                 APIBriefingParagraph(
                     runs: [
-                        APIBriefingRun(kind: .text, text: "**"),
-                        APIBriefingRun(kind: .source_link, text: "Linear Digressions", sourceKey: "content:7"),
-                        APIBriefingRun(kind: .text, text: "** is going quiet, but 2 ** 3 stays.")
+                        APIBriefingRun(
+                            kind: .text,
+                            text: "**",
+                            sourceKey: nil,
+                            insightId: nil
+                        ),
+                        APIBriefingRun(
+                            kind: .source_link,
+                            text: "Linear Digressions",
+                            sourceKey: "content:7",
+                            insightId: nil
+                        ),
+                        APIBriefingRun(
+                            kind: .text,
+                            text: "** is going quiet, but 2 ** 3 stays.",
+                            sourceKey: nil,
+                            insightId: nil
+                        )
                     ]
                 )
             ],
@@ -360,6 +398,7 @@ final class BriefingAttributedTextBuilderTests: XCTestCase {
                         APIBriefingRun(
                             kind: .insight,
                             text: "important context",
+                            sourceKey: nil,
                             insightId: "source_0"
                         )
                     ]
@@ -401,15 +440,24 @@ final class BriefingRenderModelTests: XCTestCase {
             blocks: [
                 APIBriefingBlock(
                     type: .passage,
+                    weight: nil,
                     paragraphs: [
                         APIBriefingParagraph(runs: [
                             APIBriefingRun(
                                 kind: .source_link,
                                 text: "Story",
-                                sourceKey: "news:2"
+                                sourceKey: "news:2",
+                                insightId: nil
                             )
                         ])
-                    ]
+                    ],
+                    sourceKey: nil,
+                    imageUrl: nil,
+                    thumbnailUrl: nil,
+                    caption: nil,
+                    placement: nil,
+                    alignment: nil,
+                    text: nil
                 )
             ],
             sourceKeys: ["news:2"]
@@ -419,11 +467,23 @@ final class BriefingRenderModelTests: XCTestCase {
             kind: "news",
             id: 2,
             title: "Story",
+            summary: nil,
+            keyPoints: nil,
+            url: nil,
+            imageUrl: nil,
+            thumbnailUrl: nil,
+            publishedAt: nil,
+            contentType: nil,
             read: true,
             discussion: APIBriefingDiscussion(
                 platform: "hackernews",
                 commentCount: 17,
-                summaryStatus: "completed"
+                summaryStatus: "completed",
+                overview: nil,
+                topCommentAuthor: nil,
+                topCommentText: nil,
+                externalUrl: nil,
+                updatedAt: nil
             )
         )
         let lens = makeLens(

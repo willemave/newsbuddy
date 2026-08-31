@@ -11,8 +11,7 @@ struct OnboardingProgressSnapshot: Codable {
     var step: OnboardingStep
     var isPersonalized: Bool
     var suggestions: OnboardingFastDiscoverResponse?
-    var selectedSourceKeys: [String]
-    var selectedSubreddits: [String]
+    var selectedSuggestionIds: [Int]
     var selectedAggregators: [String] = []
     var selectedBrutalistTopics: [String] = []
     var discoveryRunId: Int?
@@ -33,8 +32,8 @@ extension OnboardingProgressSnapshot {
         isPersonalized = try container.decode(Bool.self, forKey: .isPersonalized)
         suggestions = try container.decodeIfPresent(
             OnboardingFastDiscoverResponse.self, forKey: .suggestions)
-        selectedSourceKeys = try container.decode([String].self, forKey: .selectedSourceKeys)
-        selectedSubreddits = try container.decode([String].self, forKey: .selectedSubreddits)
+        selectedSuggestionIds =
+            (try? container.decode([Int].self, forKey: .selectedSuggestionIds)) ?? []
         selectedAggregators =
             (try? container.decode([String].self, forKey: .selectedAggregators)) ?? []
         selectedBrutalistTopics =
@@ -80,8 +79,7 @@ final class OnboardingStateStore {
             step: .loading,
             isPersonalized: true,
             suggestions: nil,
-            selectedSourceKeys: [],
-            selectedSubreddits: [],
+            selectedSuggestionIds: [],
             discoveryRunId: legacyRunId,
             discoveryRunStatus: nil,
             discoveryErrorMessage: nil,
@@ -99,8 +97,7 @@ final class OnboardingStateStore {
                 step: .loading,
                 isPersonalized: true,
                 suggestions: nil,
-                selectedSourceKeys: [],
-                selectedSubreddits: [],
+                selectedSuggestionIds: [],
                 discoveryRunId: runId,
                 discoveryRunStatus: nil,
                 discoveryErrorMessage: nil,

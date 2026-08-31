@@ -1,0 +1,32 @@
+[package]
+name = "newsly-cli"
+description = "Newsbuddy command-line client for the Newsly public API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "newsbuddy"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+clap_complete.workspace = true
+hostname.workspace = true
+newsly-contracts = { path = "../newsly-contracts" }
+qrcode.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+axum.workspace = true

@@ -160,6 +160,23 @@ final class ShareExtensionTransport {
         }
     }
 
+    func request<Response: Decodable>(
+        _ endpoint: String,
+        method: HTTPMethod = .post,
+        body: Data? = nil
+    ) async throws -> Response {
+        do {
+            return try await client.request(
+                endpoint,
+                method: method,
+                body: body,
+                authentication: .required
+            )
+        } catch {
+            throw mapClientFailure(error)
+        }
+    }
+
     private func mapClientFailure(_ error: Error) -> ShareExtensionTransportError {
         switch ClientFailure.classify(error) {
         case .authenticationRequired, .authenticationExpired:
@@ -168,6 +185,8 @@ final class ShareExtensionTransport {
             return .invalidURL
         case .invalidResponse, .decoding:
             return .invalidResponse
+        case .server(let statusCode, let error):
+            return .server(statusCode: statusCode, detail: error.message)
         case .http(let statusCode, let detail):
             return .server(statusCode: statusCode, detail: detail)
         case .cancelled, .connectivity, .unexpected:

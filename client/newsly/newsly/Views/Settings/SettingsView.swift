@@ -20,10 +20,8 @@ private enum SettingsSheetDestination: String, Identifiable {
 struct SettingsView: View {
     @Environment(AuthenticationViewModel.self) private var authViewModel
     @Environment(BadgeStatsStore.self) private var badgeStatsStore
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
     private let scrollToCouncilOnAppear: Bool
-    private let cliLinkService = CLILinkService()
-    private let feedbackService = FeedbackService.shared
-    @State private var settings = AppSettings.shared
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var showMarkAllDialog = false
@@ -41,6 +39,10 @@ struct SettingsView: View {
 
     init(scrollToCouncilOnAppear: Bool = false) {
         self.scrollToCouncilOnAppear = scrollToCouncilOnAppear
+    }
+
+    private var settings: AppSettings {
+        dependencyFactory.appSettings
     }
 
     var body: some View {
@@ -172,7 +174,7 @@ struct SettingsView: View {
         isDeletingAccount = true
         defer { isDeletingAccount = false }
         do {
-            try await AuthenticationService.shared.deleteAccount()
+            try await dependencyFactory.authenticationService.deleteAccount()
             authViewModel.logout()
         } catch let authorizationError as ASAuthorizationError
             where authorizationError.code == .canceled {
@@ -207,7 +209,7 @@ struct SettingsView: View {
         defer { isApprovingCLILink = false }
 
         do {
-            let response = try await cliLinkService.approve(
+            let response = try await dependencyFactory.cliLinkService.approve(
                 scannedCode: scannedCode,
                 deviceName: UIDevice.current.name
             )
@@ -248,7 +250,7 @@ struct SettingsView: View {
         defer { isSavingCouncilPersonas = false }
 
         do {
-            let user = try await AuthenticationService.shared.updateCurrentUserProfile(
+            let user = try await dependencyFactory.authenticationService.updateCurrentUserProfile(
                 councilPersonas: normalized
             )
             authViewModel.updateUser(user)
@@ -265,7 +267,7 @@ struct SettingsView: View {
 
     @MainActor
     private func submitFeedback(message: String) async throws {
-        try await feedbackService.submit(message: message)
+        try await dependencyFactory.feedbackService.submit(message: message)
         alertMessage = "Thanks for the feedback."
         showingAlert = true
     }
@@ -278,7 +280,9 @@ struct SettingsView: View {
         defer { isProcessingMarkAll = false }
 
         do {
-            if let response = try await ContentService.shared.markAllAsRead(contentType: target.rawValue) {
+            if let response = try await dependencyFactory.contentService.markAllAsRead(
+                contentType: target.rawValue
+            ) {
                 if response.markedCount > 0 {
                     await badgeStatsStore.refreshStats()
                     alertMessage = "Marked \(response.markedCount) \(target.description(for: response.markedCount)) as read."
@@ -305,7 +309,7 @@ struct SettingsView: View {
             return
         }
         do {
-            xConnection = try await XIntegrationService.shared.fetchConnection()
+            xConnection = try await dependencyFactory.xIntegrationService.fetchConnection()
         } catch {
             xConnection = nil
         }

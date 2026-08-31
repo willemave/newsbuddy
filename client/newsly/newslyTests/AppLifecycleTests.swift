@@ -72,20 +72,32 @@ final class AppLifecycleTests: XCTestCase {
 
     func testRuntimeRetainsInjectedLifecycle() {
         let lifecycle = AppLifecycle()
-        let runtime = AppRuntime(lifecycle: lifecycle)
+        let runtime = AppRuntime(
+            dependencies: AppRuntime.Dependencies(
+                lifecycle: lifecycle,
+                authenticationController: makeAuthenticationController(),
+                makeAuthenticatedSession: { _ in
+                    fatalError("This test does not establish a session")
+                }
+            )
+        )
 
         XCTAssertTrue(runtime.lifecycle === lifecycle)
     }
 
     func testRuntimeReusesMatchingSessionAndReplacesAccountScope() {
         let lifecycle = AppLifecycle()
+        let dependencyFactory = makeRootDependencyFactory()
         var createdUserIDs: [Int] = []
         let runtime = AppRuntime(
-            lifecycle: lifecycle,
-            makeAuthenticatedSession: { user in
-                createdUserIDs.append(user.id)
-                return AuthenticatedSession(user: user)
-            }
+            dependencies: AppRuntime.Dependencies(
+                lifecycle: lifecycle,
+                authenticationController: makeAuthenticationController(),
+                makeAuthenticatedSession: { user in
+                    createdUserIDs.append(user.id)
+                    return dependencyFactory.makeAuthenticatedSession(user: user)
+                }
+            )
         )
 
         let original = runtime.establishSession(for: makeUser(id: 41, fullName: "Original"))
@@ -121,4 +133,63 @@ final class AppLifecycleTests: XCTestCase {
             updatedAt: Date(timeIntervalSince1970: 1_700_000_001)
         )
     }
+}
+
+@MainActor
+private func makeAuthenticationController() -> AuthenticationController {
+    AuthenticationViewModel(
+        authService: AuthenticationTestService(
+            currentUserResult: .failure(AuthError.notAuthenticated)
+        ),
+        tokenStore: AuthenticationTestTokenStore(
+            accessToken: nil,
+            refreshToken: nil,
+            userID: nil
+        ),
+        userCache: AuthenticationTestUserCache(user: nil)
+    )
+}
+
+@MainActor
+private func makeRootDependencyFactory() -> RootDependencyFactory {
+    let apiClient = APIClient.shared
+    let onboardingService = OnboardingService.shared
+    return RootDependencyFactory(
+        dependencies: RootDependencyFactory.Dependencies(
+            apiClient: apiClient,
+            authenticationService: AuthenticationService.shared,
+            tokenStore: KeychainManager.shared,
+            credentialSession: CredentialSession.shared,
+            chatService: ChatService.shared,
+            contentService: ContentService.shared,
+            scraperConfigService: ScraperConfigService.shared,
+            toastService: ToastService.shared,
+            briefingService: LiveBriefingService(
+                apiClient: apiClient,
+                completeFirstRun: {
+                    _ = try await onboardingService.markTutorialComplete()
+                }
+            ),
+            narrationPlaybackService: NarrationPlaybackService.shared,
+            audioEpisodeService: AudioEpisodeService.shared,
+            onboardingService: onboardingService,
+            onboardingStateStore: OnboardingStateStore(
+                defaults: SharedContainer.userDefaults
+            ),
+            learningDeckService: LearningDeckService.shared,
+            learningDeckStatusRegistry: LearningDeckStatusRegistry.shared,
+            twitterShareService: TwitterShareService.shared,
+            openAIService: OpenAIService.shared,
+            appSettings: AppSettings.shared,
+            xIntegrationService: XIntegrationService.shared,
+            feedbackService: FeedbackService.shared,
+            cliLinkService: CLILinkService(client: apiClient),
+            localNotificationService: LocalNotificationService.shared,
+            sharedDefaults: SharedContainer.userDefaults,
+            makeVoiceDictationTranscriber: {
+                SpeechTranscriberFactory.makeVoiceDictationTranscriber()
+            },
+            makeChatNavigationCoordinator: { ChatNavigationCoordinator() }
+        )
+    )
 }

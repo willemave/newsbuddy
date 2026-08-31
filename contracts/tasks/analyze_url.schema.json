@@ -1,0 +1,41 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "content_id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Content Id"
+    },
+    "crawl_links": {
+      "default": false,
+      "title": "Crawl Links",
+      "type": "boolean"
+    },
+    "instruction": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Instruction"
+    },
+    "subscribe_to_feed": {
+      "default": false,
+      "title": "Subscribe To Feed",
+      "type": "boolean"
+    }
+  },
+  "title": "AnalyzeUrlPayload",
+  "type": "object"
+}

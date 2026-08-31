@@ -31,13 +31,14 @@ final class OnboardingService {
         onboardingServiceLogger.info(
             "Audio discovery request started | transcriptChars=\(request.transcript.count) locale=\(request.locale ?? "nil", privacy: .public)"
         )
-        let body = try JSONEncoder().encode(request)
+        let body = try JSONEncoder().encode(request.api)
         do {
-            let response: OnboardingAudioDiscoverResponse = try await client.request(
+            let wireResponse: APIOnboardingAudioDiscoverResponse = try await client.request(
                 APIEndpoints.onboardingAudioDiscover,
                 method: .post,
                 body: body
             )
+            let response = OnboardingAudioDiscoverResponse(api: wireResponse)
             onboardingServiceLogger.info(
                 "Audio discovery request completed | runId=\(response.runId) status=\(response.runStatus, privacy: .public) laneCount=\(response.lanes.count) elapsedMs=\(onboardingServiceElapsedMilliseconds(since: startedAt))"
             )
@@ -56,11 +57,12 @@ final class OnboardingService {
             return fixtureResponse
         }
         let queryItems = [URLQueryItem(name: "run_id", value: String(runId))]
-        let response: OnboardingDiscoveryStatusResponse = try await client.request(
+        let wireResponse: APIOnboardingDiscoveryStatusResponse = try await client.request(
             APIEndpoints.onboardingDiscoveryStatus,
             method: .get,
             queryItems: queryItems
         )
+        let response = OnboardingDiscoveryStatusResponse(api: wireResponse)
         onboardingServiceLogger.info(
             "Audio discovery status fetched | runId=\(runId) status=\(response.runStatus, privacy: .public) elapsedMs=\(onboardingServiceElapsedMilliseconds(since: startedAt)) laneCount=\(response.lanes.count)"
         )
@@ -68,18 +70,20 @@ final class OnboardingService {
     }
 
     func complete(request: OnboardingCompleteRequest) async throws -> OnboardingCompleteResponse {
-        let body = try JSONEncoder().encode(request)
-        return try await client.request(
+        let body = try JSONEncoder().encode(request.api)
+        let response: APIOnboardingCompleteResponse = try await client.request(
             APIEndpoints.onboardingComplete,
             method: .post,
             body: body
         )
+        return OnboardingCompleteResponse(api: response)
     }
 
     func markTutorialComplete() async throws -> OnboardingTutorialResponse {
-        try await client.request(
+        let response: APIOnboardingTutorialResponse = try await client.request(
             APIEndpoints.onboardingTutorialComplete,
             method: .post
         )
+        return OnboardingTutorialResponse(api: response)
     }
 }

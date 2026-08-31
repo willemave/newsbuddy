@@ -100,9 +100,15 @@ private func makeEpisode(
         kind: .briefing_narration,
         status: status,
         title: "Briefing",
+        sourceContentId: nil,
         sourceCount: 1,
         sourceTitles: ["Long report"],
+        durationSeconds: nil,
+        audioUrl: nil,
+        streamUrl: nil,
+        scriptText: nil,
         errorMessage: errorMessage,
-        createdAt: Date(timeIntervalSince1970: 1_800_000_200)
+        createdAt: Date(timeIntervalSince1970: 1_800_000_200),
+        updatedAt: nil
     )
 }

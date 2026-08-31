@@ -1,1 +1,0 @@
-"""Contract code generation helpers."""

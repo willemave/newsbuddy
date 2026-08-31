@@ -12,8 +12,11 @@ struct OnboardingFlowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let onFinish: (OnboardingCompleteResponse) -> Void
 
-    init(user: User, onFinish: @escaping (OnboardingCompleteResponse) -> Void) {
-        _viewModel = State(initialValue: RootDependencyFactory.makeOnboardingViewModel(user: user))
+    init(
+        viewModel: OnboardingViewModel,
+        onFinish: @escaping (OnboardingCompleteResponse) -> Void
+    ) {
+        _viewModel = State(initialValue: viewModel)
         self.onFinish = onFinish
     }
 
@@ -57,7 +60,10 @@ struct OnboardingFlowView: View {
     @ViewBuilder
     private var content: some View {
         switch viewModel.step {
-        case .intro, .choice:
+        case .intro:
+            OnboardingIntroStep(viewModel: viewModel)
+                .transition(screenTransition)
+        case .choice:
             OnboardingChoiceStep(viewModel: viewModel)
                 .transition(screenTransition)
         case .audio:

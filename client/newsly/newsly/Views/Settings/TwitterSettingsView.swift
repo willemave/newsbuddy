@@ -7,6 +7,7 @@ import SwiftUI
 
 struct TwitterSettingsView: View {
     @Environment(AuthenticationViewModel.self) private var authViewModel
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var isUpdatingXConnection = false
@@ -266,7 +267,7 @@ struct TwitterSettingsView: View {
         }
 
         do {
-            xConnection = try await XIntegrationService.shared.fetchConnection()
+            xConnection = try await dependencyFactory.xIntegrationService.fetchConnection()
         } catch {
             xConnection = nil
         }
@@ -279,8 +280,8 @@ struct TwitterSettingsView: View {
         defer { isUpdatingXConnection = false }
 
         do {
-            _ = try await XIntegrationService.shared.connectViaOAuth()
-            let user = try await AuthenticationService.shared.getCurrentUser()
+            _ = try await dependencyFactory.xIntegrationService.connectViaOAuth()
+            let user = try await dependencyFactory.authenticationService.getCurrentUser()
             authViewModel.updateUser(user)
             await loadAccountState()
             alertMessage = "X connected successfully."
@@ -298,8 +299,8 @@ struct TwitterSettingsView: View {
         defer { isUpdatingXConnection = false }
 
         do {
-            try await XIntegrationService.shared.disconnect()
-            let user = try await AuthenticationService.shared.getCurrentUser()
+            try await dependencyFactory.xIntegrationService.disconnect()
+            let user = try await dependencyFactory.authenticationService.getCurrentUser()
             authViewModel.updateUser(user)
             await loadAccountState()
             alertMessage = "X disconnected."

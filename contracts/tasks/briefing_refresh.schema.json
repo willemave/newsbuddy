@@ -1,0 +1,19 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "mode": {
+      "default": "append",
+      "title": "Mode",
+      "type": "string"
+    },
+    "user_id": {
+      "title": "User Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "user_id"
+  ],
+  "title": "BriefingRefreshPayload",
+  "type": "object"
+}

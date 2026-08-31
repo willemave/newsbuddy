@@ -4,14 +4,8 @@ set -euo pipefail
 export APP_HOME="${APP_HOME:-/app}"
 export NEWSLY_DATA_ROOT="${NEWSLY_DATA_ROOT:-/data}"
 export NEWSLY_APP_DATA_ROOT="${NEWSLY_APP_DATA_ROOT:-${NEWSLY_DATA_ROOT}}"
-export PGDATA="${PGDATA:-${NEWSLY_DATA_ROOT}/postgres}"
-export POSTGRES_DB="${POSTGRES_DB:-newsly}"
-export POSTGRES_USER="${POSTGRES_USER:-newsly}"
-export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-newsly}"
-export POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 export PORT="${PORT:-8000}"
-export NEWSLY_BOOTSTRAP_READY_FILE="${NEWSLY_BOOTSTRAP_READY_FILE:-/tmp/newsly-bootstrap.ready}"
-export NEWSLY_RUNTIME_MODE="${NEWSLY_RUNTIME_MODE:-full}"
+export NEWSLY_RUNTIME_MODE="${NEWSLY_RUNTIME_MODE:-api}"
 
 export MEDIA_BASE_DIR="${MEDIA_BASE_DIR:-${NEWSLY_APP_DATA_ROOT}/media}"
 export LOGS_BASE_DIR="${LOGS_BASE_DIR:-${NEWSLY_APP_DATA_ROOT}/logs}"
@@ -29,82 +23,37 @@ mkdir -p \
   "${PODCAST_SCRATCH_DIR}" \
   "${PERSONAL_MARKDOWN_ROOT}"
 
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  echo "DATABASE_URL is required for NEWSLY_RUNTIME_MODE=${NEWSLY_RUNTIME_MODE}" >&2
+  exit 1
+fi
+
 case "${NEWSLY_RUNTIME_MODE}" in
-  api|workers|scheduler|migrate)
-    if [[ -z "${DATABASE_URL:-}" ]]; then
-      echo "DATABASE_URL is required for NEWSLY_RUNTIME_MODE=${NEWSLY_RUNTIME_MODE}" >&2
-      exit 1
-    fi
-    export NEWSLY_WAIT_FOR_BOOTSTRAP=false
-    case "${NEWSLY_RUNTIME_MODE}" in
-      api)
-        exec /app/docker/run-api.sh
-        ;;
-      workers)
-        exec /usr/bin/supervisord -c /app/docker/supervisord.workers.conf
-        ;;
-      scheduler)
-        exec /app/docker/run-scheduler.sh
-        ;;
-      migrate)
-        cd /app
-        exec python -m alembic -c /app/migrations/alembic.ini upgrade head
-        ;;
-    esac
+  api)
+    export NEWSLY_RUST_BIND_ADDR="${NEWSLY_RUST_BIND_ADDR:-0.0.0.0:${PORT}}"
+    exec /usr/local/bin/newsly-api
     ;;
-  full|server)
+  workers)
+    exec /usr/bin/supervisord -c /app/docker/supervisord.workers.conf
+    ;;
+  scheduler)
+    exec /usr/local/bin/newsly-scheduler
+    ;;
+  migrate)
+    if [[ "${NEWSLY_SQLX_BASELINE_ADOPTION:-false}" == "true" ]]; then
+      if [[ "${NEWSLY_MAINTENANCE_BARRIER_CONFIRMED:-false}" != "true" ]]; then
+        echo "SQLx baseline adoption requires a confirmed maintenance barrier" >&2
+        exit 1
+      fi
+      exec /usr/local/bin/newsly-db baseline --maintenance-barrier-confirmed
+    fi
+    if [[ "${NEWSLY_MAINTENANCE_BARRIER_CONFIRMED:-false}" == "true" ]]; then
+      exec /usr/local/bin/newsly-db migrate --maintenance-barrier-confirmed
+    fi
+    exec /usr/local/bin/newsly-db migrate
     ;;
   *)
     echo "unsupported NEWSLY_RUNTIME_MODE: ${NEWSLY_RUNTIME_MODE}" >&2
     exit 1
     ;;
 esac
-
-mkdir -p "${PGDATA}" /var/run/postgresql
-chown -R postgres:postgres "${PGDATA}" /var/run/postgresql
-chmod 700 "${PGDATA}"
-export DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
-
-postgres_bin_dir="$(dirname "$(find /usr/lib/postgresql -path '*/bin/postgres' | sort -V | tail -n 1)")"
-if [[ -z "${postgres_bin_dir:-}" || ! -x "${postgres_bin_dir}/initdb" ]]; then
-  echo "postgres binaries not found" >&2
-  exit 1
-fi
-
-if [[ ! -s "${PGDATA}/PG_VERSION" ]]; then
-  runuser -u postgres -- "${postgres_bin_dir}/initdb" \
-    -D "${PGDATA}" \
-    --encoding=UTF8 \
-    --locale=C.UTF-8 \
-    --auth-local=trust \
-    --auth-host=scram-sha-256
-fi
-
-if ! grep -q "listen_addresses = '0.0.0.0'" "${PGDATA}/postgresql.conf"; then
-  cat >>"${PGDATA}/postgresql.conf" <<EOF
-listen_addresses = '0.0.0.0'
-port = ${POSTGRES_PORT}
-unix_socket_directories = '/var/run/postgresql'
-EOF
-fi
-
-if ! grep -q "0.0.0.0/0" "${PGDATA}/pg_hba.conf"; then
-  cat >>"${PGDATA}/pg_hba.conf" <<EOF
-host all all 0.0.0.0/0 scram-sha-256
-host all all ::/0 scram-sha-256
-EOF
-fi
-
-rm -f "${NEWSLY_BOOTSTRAP_READY_FILE}"
-
-supervisord_conf="/app/docker/supervisord.conf"
-case "${NEWSLY_RUNTIME_MODE}" in
-  full)
-    supervisord_conf="/app/docker/supervisord.conf"
-    ;;
-  server)
-    supervisord_conf="/app/docker/supervisord.server.conf"
-    ;;
-esac
-
-exec /usr/bin/supervisord -c "${supervisord_conf}"

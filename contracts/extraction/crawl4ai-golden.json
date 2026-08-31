@@ -1,0 +1,165 @@
+{
+  "cases": [
+    {
+      "crawler_recording": {
+        "metadata": {
+          "title": "Fixture Article"
+        },
+        "raw_markdown": "# Fixture Article\n\nA synthetic paragraph.",
+        "success": true,
+        "url": "https://example.com/article"
+      },
+      "expected": {
+        "author": null,
+        "feed_links": [],
+        "final_url": "https://example.com/article",
+        "kind": "success",
+        "markdown": "# Fixture Article\n\nA synthetic paragraph.",
+        "method": "crawl4ai",
+        "published_at": null,
+        "request_id": "fixture-extraction-1",
+        "schema_version": 1,
+        "tables": [],
+        "timings": [],
+        "title": "Fixture Article",
+        "usage_events": [],
+        "warnings": []
+      },
+      "name": "basic_article",
+      "request": {
+        "absolute_deadline": "2026-08-30T12:01:00Z",
+        "intent": "extract_article",
+        "options": {
+          "allow_browser_fallback": true,
+          "browser_timeout_ms": 90000,
+          "discover_feeds": true,
+          "max_download_bytes": 5000000,
+          "max_markdown_bytes": 1000000,
+          "profile": "automatic",
+          "static_minimum_characters": 400
+        },
+        "request_id": "fixture-extraction-1",
+        "schema_version": 1,
+        "trace": {
+          "span_id": null,
+          "trace_id": null
+        },
+        "url": "https://example.com/article"
+      }
+    },
+    {
+      "crawler_recording": {
+        "full_text_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC123/",
+        "success": true,
+        "url": "https://pubmed.ncbi.nlm.nih.gov/123/"
+      },
+      "expected": {
+        "kind": "delegation",
+        "next_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC123/",
+        "reason": "pubmed_full_text",
+        "request_id": "fixture-extraction-2",
+        "schema_version": 1,
+        "timings": [],
+        "usage_events": [],
+        "warnings": []
+      },
+      "name": "pubmed_delegation",
+      "request": {
+        "absolute_deadline": "2026-08-30T12:01:00Z",
+        "intent": "resolve_pubmed",
+        "options": {
+          "allow_browser_fallback": true,
+          "browser_timeout_ms": 90000,
+          "discover_feeds": true,
+          "max_download_bytes": 5000000,
+          "max_markdown_bytes": 1000000,
+          "profile": "automatic",
+          "static_minimum_characters": 400
+        },
+        "request_id": "fixture-extraction-2",
+        "schema_version": 1,
+        "trace": {
+          "span_id": null,
+          "trace_id": null
+        },
+        "url": "https://pubmed.ncbi.nlm.nih.gov/123/"
+      }
+    },
+    {
+      "crawler_recording": {
+        "error_message": "fixture timeout",
+        "success": false
+      },
+      "expected": {
+        "fallback": "firecrawl",
+        "kind": "fallback_required",
+        "reason": "fixture timeout",
+        "request_id": "fixture-extraction-3",
+        "retryable": true,
+        "schema_version": 1,
+        "timings": [],
+        "url": "https://example.com/article",
+        "usage_events": []
+      },
+      "name": "firecrawl_fallback",
+      "request": {
+        "absolute_deadline": "2026-08-30T12:01:00Z",
+        "intent": "extract_article",
+        "options": {
+          "allow_browser_fallback": true,
+          "browser_timeout_ms": 90000,
+          "discover_feeds": true,
+          "max_download_bytes": 5000000,
+          "max_markdown_bytes": 1000000,
+          "profile": "automatic",
+          "static_minimum_characters": 400
+        },
+        "request_id": "fixture-extraction-3",
+        "schema_version": 1,
+        "trace": {
+          "span_id": null,
+          "trace_id": null
+        },
+        "url": "https://example.com/article"
+      }
+    },
+    {
+      "crawler_recording": {
+        "error_message": "no content",
+        "success": false
+      },
+      "expected": {
+        "code": "no_content",
+        "http_status": null,
+        "kind": "failure",
+        "message": "No readable content was extracted",
+        "request_id": "fixture-extraction-4",
+        "retryable": false,
+        "schema_version": 1,
+        "timings": []
+      },
+      "name": "typed_failure",
+      "request": {
+        "absolute_deadline": "2026-08-30T12:01:00Z",
+        "intent": "static_analyze",
+        "options": {
+          "allow_browser_fallback": true,
+          "browser_timeout_ms": 90000,
+          "discover_feeds": true,
+          "max_download_bytes": 5000000,
+          "max_markdown_bytes": 1000000,
+          "profile": "automatic",
+          "static_minimum_characters": 400
+        },
+        "request_id": "fixture-extraction-4",
+        "schema_version": 1,
+        "trace": {
+          "span_id": null,
+          "trace_id": null
+        },
+        "url": "https://example.com/article"
+      }
+    }
+  ],
+  "version": 1
+}

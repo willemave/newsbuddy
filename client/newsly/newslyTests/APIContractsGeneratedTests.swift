@@ -19,7 +19,6 @@ extension APIAudioEpisodeKind: OpenContractEnum {}
 extension APIAudioEpisodeStatus: OpenContractEnum {}
 extension APICliLinkStatus: OpenContractEnum {}
 extension APIOnboardingSuggestionType: OpenContractEnum {}
-extension APIOnboardingSelectedSourceType: OpenContractEnum {}
 extension APINewsItemVisibilityScope: OpenContractEnum {}
 extension APINewsItemStatus: OpenContractEnum {}
 extension APILearningDeckSourceKind: OpenContractEnum {}
@@ -46,10 +45,6 @@ final class APIContractsGeneratedTests: XCTestCase {
         try assertUnknown(APIAudioEpisodeStatus.self, rawValue: "future_audio_status")
         try assertUnknown(APICliLinkStatus.self, rawValue: "future_cli_link_status")
         try assertUnknown(APIOnboardingSuggestionType.self, rawValue: "future_onboarding_suggestion")
-        try assertUnknown(
-            APIOnboardingSelectedSourceType.self,
-            rawValue: "future_onboarding_source"
-        )
         try assertUnknown(APINewsItemVisibilityScope.self, rawValue: "future_visibility")
         try assertUnknown(APINewsItemStatus.self, rawValue: "future_news_item_status")
         try assertUnknown(APILearningDeckSourceKind.self, rawValue: "future_deck_source")
@@ -108,12 +103,18 @@ final class APIContractsGeneratedTests: XCTestCase {
         XCTAssertEqual(summary.contentType, .article)
         XCTAssertEqual(summary.status, .completed)
         XCTAssertEqual(summary.savedSource, .knowledge)
-        XCTAssertEqual(summary.knowledgeSavedAt, "2026-04-27T12:05:00Z")
+        XCTAssertEqual(
+            summary.knowledgeSavedAt,
+            ServerDate.parse("2026-04-27T12:05:00Z")
+        )
 
         let appSummary = try decodeFixture(ContentSummary.self, "content_summary_article.json")
         XCTAssertEqual(appSummary.contentType, .article)
         XCTAssertEqual(appSummary.isSavedToKnowledge, true)
-        XCTAssertEqual(appSummary.knowledgeSavedAt, "2026-04-27T12:05:00Z")
+        XCTAssertEqual(
+            ServerDate.parse(try XCTUnwrap(appSummary.knowledgeSavedAt)),
+            ServerDate.parse("2026-04-27T12:05:00Z")
+        )
         XCTAssertEqual(
             appSummary.knowledgeActivityDate,
             ServerDate.parse("2026-04-27T12:05:00Z")
@@ -153,7 +154,10 @@ final class APIContractsGeneratedTests: XCTestCase {
             "site_url": "https://example.com",
             "feed_url": "https://example.com/feed.xml",
             "feed_type": "atom",
-            "feed_format": "rss"
+            "feed_format": "rss",
+            "description": null,
+            "rationale": null,
+            "evidence_url": null
         }
         """
 
@@ -176,7 +180,9 @@ final class APIContractsGeneratedTests: XCTestCase {
             "limit": null,
             "is_active": true,
             "created_at": "not-a-date",
-            "stats": null
+            "stats": null,
+            "subscription_outcome": null,
+            "backfill_task_id": null
         }
         """
         let data = Data(json.utf8)
@@ -212,7 +218,7 @@ final class APIContractsGeneratedTests: XCTestCase {
         }
     }
 
-    func testOptionalDatetimeFieldDefaultsToNilWhenMissing() throws {
+    func testRequiredNullableDatetimeFieldDecodesExplicitNull() throws {
         let json = """
         {
             "provider": "x",
@@ -221,6 +227,7 @@ final class APIContractsGeneratedTests: XCTestCase {
             "provider_user_id": null,
             "provider_username": null,
             "scopes": [],
+            "last_synced_at": null,
             "last_status": null,
             "last_error": null,
             "twitter_username": null
@@ -243,7 +250,9 @@ final class APIContractsGeneratedTests: XCTestCase {
             "limit": null,
             "is_active": true,
             "created_at": "2026-04-27T12:00:00Z",
-            "stats": null
+            "stats": null,
+            "subscription_outcome": null,
+            "backfill_task_id": null
         }
         """
         let data = Data(json.utf8)
@@ -263,7 +272,9 @@ final class APIContractsGeneratedTests: XCTestCase {
             limit: nil,
             isActive: true,
             createdAt: try XCTUnwrap(ServerDate.parse("2026-04-27T12:00:00.123456Z")),
-            stats: nil
+            stats: nil,
+            subscriptionOutcome: nil,
+            backfillTaskId: nil
         )
 
         let data = try JSONEncoder().encode(original)
@@ -272,6 +283,53 @@ final class APIContractsGeneratedTests: XCTestCase {
 
         let roundTripped = try JSONDecoder().decode(APIScraperConfigResponse.self, from: data)
         XCTAssertEqual(roundTripped.createdAt, original.createdAt)
+    }
+
+    func testRequiredNullableFieldDecodesNullButRejectsMissingKey() throws {
+        let explicitNull = """
+        {
+            "id": 1,
+            "scraper_type": "rss",
+            "display_name": "Example Feed",
+            "config": {},
+            "feed_url": null,
+            "limit": null,
+            "is_active": true,
+            "created_at": "2026-04-27T12:00:00Z",
+            "stats": null,
+            "subscription_outcome": null,
+            "backfill_task_id": null
+        }
+        """
+        let decoded = try JSONDecoder().decode(
+            APIScraperConfigResponse.self,
+            from: Data(explicitNull.utf8)
+        )
+        XCTAssertNil(decoded.feedUrl)
+
+        let missing = """
+        {
+            "id": 1,
+            "scraper_type": "rss",
+            "display_name": "Example Feed",
+            "config": {},
+            "limit": null,
+            "is_active": true,
+            "created_at": "2026-04-27T12:00:00Z",
+            "stats": null,
+            "subscription_outcome": null,
+            "backfill_task_id": null
+        }
+        """
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(APIScraperConfigResponse.self, from: Data(missing.utf8))
+        ) { error in
+            guard case let DecodingError.keyNotFound(key, _) = error else {
+                return XCTFail("Expected DecodingError.keyNotFound, got \(error)")
+            }
+            XCTAssertEqual(key.stringValue, "feed_url")
+        }
     }
 
     // Domain models that decode through generated wire models must also encode their
@@ -360,7 +418,7 @@ final class APIContractsGeneratedTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         return repoRoot
-            .appendingPathComponent("tests/fixtures/contracts")
+            .appendingPathComponent("contracts/fixtures")
             .appendingPathComponent(name)
     }
 }

@@ -58,6 +58,12 @@ final class CredentialSession: CredentialSessionProviding {
     }
 
     var hasStoredCredentialMaterial: Bool {
+        switch storage.readPendingPublication() {
+        case .value, .unavailable:
+            return true
+        case .missing:
+            break
+        }
         switch storage.readLegacyMaterial() {
         case .value(let material):
             return material.hasAnyToken
@@ -90,6 +96,7 @@ final class CredentialSession: CredentialSessionProviding {
     func publishAuthenticated(tokens: CredentialTokens, userID: Int) async throws {
         guard tokens.isComplete else { throw CredentialStorageError.writeFailed }
         try await withCredentialLock {
+            _ = try self.resolveUnderLock(repairLegacy: false)
             try self.storage.publishEnvelopeAndLegacy(
                 CredentialEnvelope(tokens: tokens, userID: userID)
             )
@@ -103,6 +110,7 @@ final class CredentialSession: CredentialSessionProviding {
     func publishLegacyCandidate(tokens: CredentialTokens) async throws {
         guard tokens.isComplete else { throw CredentialStorageError.writeFailed }
         try await withCredentialLock {
+            _ = try self.resolveUnderLock(repairLegacy: false)
             try self.storage.publishLegacy(tokens)
         }
         await refreshCoordinator.invalidate()
@@ -240,6 +248,19 @@ final class CredentialSession: CredentialSessionProviding {
     }
 
     private func resolveUnderLock(repairLegacy: Bool = true) throws -> ResolvedCredentialMaterial {
+        switch storage.readPendingPublication() {
+        case .value(let publication):
+            do {
+                try storage.completePendingPublication(publication)
+            } catch {
+                throw CredentialSessionError.storageUnavailable
+            }
+        case .missing:
+            break
+        case .unavailable:
+            throw CredentialSessionError.storageUnavailable
+        }
+
         let envelope: CredentialEnvelope?
         switch storage.readEnvelope() {
         case .value(let value):

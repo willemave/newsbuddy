@@ -30,7 +30,13 @@ final class ChatModelProviderTests: XCTestCase {
 
     @MainActor
     func testTweetSuggestionsDefaultProviderIsOpenAI() {
-        let viewModel = RootDependencyFactory.makeTweetSuggestionsViewModel()
+        let viewModel = TweetSuggestionsViewModel(
+            contentService: ContentService.shared,
+            twitterService: TwitterShareService.shared,
+            transcriptionService: VoiceDictationService.shared,
+            refreshTranscriptionAvailability: { false },
+            setBackendTranscriptionAvailable: { _ in }
+        )
 
         XCTAssertEqual(viewModel.selectedProvider, .openai)
     }

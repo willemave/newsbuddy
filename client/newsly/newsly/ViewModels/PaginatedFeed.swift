@@ -40,9 +40,6 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
     private let loadPage: (_ cursor: String?, _ generation: Int) async throws -> Page<Item>
 
     @ObservationIgnored
-    private let mergeReplacement: (_ current: [Item], _ incoming: [Item]) -> [Item]
-
-    @ObservationIgnored
     private var requestGeneration = 0
 
     @ObservationIgnored
@@ -56,16 +53,14 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         phase: LoadPhase = .idle,
         nextCursor: String? = nil,
         hasMore: Bool = true,
-        loadPage: @escaping (_ cursor: String?) async throws -> Page<Item>,
-        mergeReplacement: @escaping (_ current: [Item], _ incoming: [Item]) -> [Item] = { _, incoming in incoming }
+        loadPage: @escaping (_ cursor: String?) async throws -> Page<Item>
     ) {
         self.init(
             items: items,
             phase: phase,
             nextCursor: nextCursor,
             hasMore: hasMore,
-            loadPageWithGeneration: { cursor, _ in try await loadPage(cursor) },
-            mergeReplacement: mergeReplacement
+            loadPageWithGeneration: { cursor, _ in try await loadPage(cursor) }
         )
     }
 
@@ -74,22 +69,20 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         phase: LoadPhase = .idle,
         nextCursor: String? = nil,
         hasMore: Bool = true,
-        loadPageWithGeneration: @escaping (_ cursor: String?, _ generation: Int) async throws -> Page<Item>,
-        mergeReplacement: @escaping (_ current: [Item], _ incoming: [Item]) -> [Item] = { _, incoming in incoming }
+        loadPageWithGeneration: @escaping (_ cursor: String?, _ generation: Int) async throws -> Page<Item>
     ) {
         self.items = items
         self.phase = phase
         self.nextCursor = nextCursor
         self.hasMore = hasMore
         self.loadPage = loadPageWithGeneration
-        self.mergeReplacement = mergeReplacement
     }
 
     func loadInitial() async {
         await requestPage(
             cursor: nil,
             loadingPhase: .initialLoading,
-            mode: .replace(clearExistingItems: true, mergeWithCurrentItems: false)
+            mode: .replace(clearExistingItems: true)
         )
     }
 
@@ -97,16 +90,7 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         await requestPage(
             cursor: nil,
             loadingPhase: items.isEmpty ? .initialLoading : .loaded,
-            mode: .replace(clearExistingItems: false, mergeWithCurrentItems: false)
-        )
-    }
-
-    func refreshInBackground() async {
-        guard requestTask == nil else { return }
-        await requestPage(
-            cursor: nil,
-            loadingPhase: phase,
-            mode: .replace(clearExistingItems: false, mergeWithCurrentItems: true)
+            mode: .replace(clearExistingItems: false)
         )
     }
 
@@ -160,7 +144,7 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
     }
 
     private enum RequestMode {
-        case replace(clearExistingItems: Bool, mergeWithCurrentItems: Bool)
+        case replace(clearExistingItems: Bool)
         case append
     }
 
@@ -177,7 +161,7 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         phase = loadingPhase
         isRequestInFlight = true
 
-        if case .replace(let clearExistingItems, _) = mode, clearExistingItems {
+        if case .replace(let clearExistingItems) = mode, clearExistingItems {
             items.removeAll()
             nextCursor = nil
             hasMore = true
@@ -222,31 +206,11 @@ final class PaginatedFeed<Item: Identifiable & Sendable> where Item.ID: Hashable
         hasMore = page.hasMore
 
         switch mode {
-        case .replace(_, let mergeWithCurrentItems):
-            items = mergeWithCurrentItems
-                ? mergeReplacement(items, page.items)
-                : page.items
+        case .replace:
+            items = page.items
         case .append:
             let existingIDs = Set(items.map(\.id))
             items.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
         }
-    }
-}
-
-extension PaginatedFeed where Item: Equatable {
-    static func mergeNewItemsOnTopKeepingExistingOrder(
-        current: [Item],
-        incoming: [Item]
-    ) -> [Item] {
-        guard !current.isEmpty else { return incoming }
-
-        let incomingByID = Dictionary(incoming.map { ($0.id, $0) }) { first, _ in first }
-        let currentIDs = Set(current.map(\.id))
-        let newItems = incoming.filter { !currentIDs.contains($0.id) }
-        let keptItems = current.compactMap { item -> Item? in
-            guard let updated = incomingByID[item.id] else { return nil }
-            return updated == item ? item : updated
-        }
-        return newItems + keptItems
     }
 }

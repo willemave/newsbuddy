@@ -19,11 +19,13 @@ struct KnowledgeView: View {
     var onOpenMore: (() -> Void)?
 
     @State private var viewModel: KnowledgeTimelineViewModel
-    @State private var settings = AppSettings.shared
+    @State private var settings: AppSettings
     @State private var composerText = ""
     @State private var deckReaderDestination: LearningDeckReaderDestination?
     @State private var showsInitialLoadingIndicator = false
     @FocusState private var isComposerFocused: Bool
+
+    private let toastPresenter: any ToastPresenting
 
     private static let topAnchor = "knowledge.top"
 
@@ -35,6 +37,8 @@ struct KnowledgeView: View {
         onSearch: @escaping () -> Void,
         onOpenMore: (() -> Void)? = nil,
         viewModel: KnowledgeTimelineViewModel,
+        settings: AppSettings,
+        toastPresenter: any ToastPresenting,
         contentTextSize: DynamicTypeSize,
         chatTransitionNamespace: Namespace.ID? = nil
     ) {
@@ -45,6 +49,8 @@ struct KnowledgeView: View {
         self.onSearch = onSearch
         self.onOpenMore = onOpenMore
         self.viewModel = viewModel
+        _settings = State(initialValue: settings)
+        self.toastPresenter = toastPresenter
         self.contentTextSize = contentTextSize
         self.chatTransitionNamespace = chatTransitionNamespace
     }
@@ -465,6 +471,6 @@ struct KnowledgeView: View {
     @MainActor
     private func regenerateDeck(_ deck: LearningDeck) async {
         guard await viewModel.decks.regenerate(deck) != nil else { return }
-        ToastService.shared.show("Regenerating your deck", type: .info)
+        toastPresenter.show("Regenerating your deck", type: .info, duration: 3)
     }
 }

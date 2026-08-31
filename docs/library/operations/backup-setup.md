@@ -10,18 +10,18 @@ sudo chown willem:willem /data/backups
 sudo chmod 755 /data/backups
 
 # Ensure log directory exists
-sudo mkdir -p /var/log/newsly
-sudo chown willem:willem /var/log/newsly
-sudo chmod 755 /var/log/newsly
+sudo mkdir -p /data/logs
+sudo chown willem:willem /data/logs
+sudo chmod 755 /data/logs
 ```
 
 ### 2. Verify script is on server
 ```bash
 # Check script exists and is executable
-ls -la /opt/newsly/scripts/backup_database.sh
+ls -la /opt/news_app/scripts/backup_database.sh
 
 # If not executable, fix it
-chmod +x /opt/newsly/scripts/backup_database.sh
+chmod +x /opt/news_app/scripts/backup_database.sh
 ```
 
 ### 3. Verify PostgreSQL client tools are installed
@@ -39,13 +39,13 @@ sudo yum install postgresql
 ### 4. Test the backup script manually
 ```bash
 # Run as the user who will own the cron job
-/opt/newsly/scripts/backup_database.sh
+/opt/news_app/scripts/backup_database.sh --env-file /opt/news_app/.env.racknerd
 
 # Check if backup was created
 ls -lh /data/backups/
 
 # Check the log output for errors
-cat /var/log/newsly/backup.log
+cat /data/logs/backup.log
 ```
 
 ### 5. Install the cron job
@@ -54,7 +54,7 @@ cat /var/log/newsly/backup.log
 crontab -e
 
 # Add this line (runs at 2 AM daily):
-0 2 * * * /opt/newsly/scripts/backup_database.sh >> /var/log/newsly/backup.log 2>&1
+0 2 * * * /opt/news_app/scripts/backup_database.sh --env-file /opt/news_app/.env.racknerd >> /data/logs/backup.log 2>&1
 
 # Save and exit (in vi: press ESC, type :wq, press ENTER)
 ```
@@ -84,16 +84,16 @@ If you want a different schedule:
 
 ```bash
 # Every day at 3:30 AM
-30 3 * * * /opt/newsly/scripts/backup_database.sh >> /var/log/newsly/backup.log 2>&1
+30 3 * * * /opt/news_app/scripts/backup_database.sh --env-file /opt/news_app/.env.racknerd >> /data/logs/backup.log 2>&1
 
 # Every day at midnight
-0 0 * * * /opt/newsly/scripts/backup_database.sh >> /var/log/newsly/backup.log 2>&1
+0 0 * * * /opt/news_app/scripts/backup_database.sh --env-file /opt/news_app/.env.racknerd >> /data/logs/backup.log 2>&1
 
 # Every 6 hours
-0 */6 * * * /opt/newsly/scripts/backup_database.sh >> /var/log/newsly/backup.log 2>&1
+0 */6 * * * /opt/news_app/scripts/backup_database.sh --env-file /opt/news_app/.env.racknerd >> /data/logs/backup.log 2>&1
 
 # Every Sunday at 1 AM
-0 1 * * 0 /opt/newsly/scripts/backup_database.sh >> /var/log/newsly/backup.log 2>&1
+0 1 * * 0 /opt/news_app/scripts/backup_database.sh --env-file /opt/news_app/.env.racknerd >> /data/logs/backup.log 2>&1
 ```
 
 ## Troubleshooting
@@ -113,10 +113,10 @@ ls -la /etc/cron.allow /etc/cron.deny
 ### Permissions errors?
 ```bash
 # Check ownership of directories
-ls -ld /data/backups /var/log/newsly
+ls -ld /data/backups /data/logs
 
 # Fix if needed
-sudo chown -R willem:willem /data/backups /var/log/newsly
+sudo chown -R willem:willem /data/backups /data/logs
 ```
 
 ### Script not found?
@@ -133,11 +133,11 @@ which bash
 
 Copy and paste on server:
 ```bash
-sudo mkdir -p /data/backups /var/log/newsly && \
-sudo chown willem:willem /data/backups /var/log/newsly && \
-chmod +x /opt/newsly/scripts/backup_database.sh && \
-/opt/newsly/scripts/backup_database.sh && \
-echo "0 2 * * * /opt/newsly/scripts/backup_database.sh >> /var/log/newsly/backup.log 2>&1" | crontab -
+sudo mkdir -p /data/backups /data/logs && \
+sudo chown willem:willem /data/backups /data/logs && \
+chmod +x /opt/news_app/scripts/backup_database.sh && \
+/opt/news_app/scripts/backup_database.sh --env-file /opt/news_app/.env.racknerd && \
+echo "0 2 * * * /opt/news_app/scripts/backup_database.sh --env-file /opt/news_app/.env.racknerd >> /data/logs/backup.log 2>&1" | crontab -
 ```
 
 Then verify:

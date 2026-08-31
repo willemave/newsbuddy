@@ -27,6 +27,7 @@ final class ChatMessageDisplayTests: XCTestCase {
             {
               "id": 7,
               "session_id": 21,
+              "source_message_id": null,
               "display_key": "21|7|tool|process_summary",
               "role": "tool",
               "content": "Thinking • Searched the web and reviewed sources",
@@ -34,7 +35,8 @@ final class ChatMessageDisplayTests: XCTestCase {
               "display_type": "process_summary",
               "process_label": "Thinking • Searched the web and reviewed sources",
               "status": "completed",
-              "error": null
+              "error": null,
+              "active_council_child_session_id": null
             }
             """.utf8
         )
@@ -54,6 +56,7 @@ final class ChatMessageDisplayTests: XCTestCase {
               "session": {
                 "id": 42,
                 "content_id": null,
+                "news_item_id": null,
                 "title": "Daily AI Brief",
                 "session_type": "article_brain",
                 "topic": null,
@@ -67,29 +70,36 @@ final class ChatMessageDisplayTests: XCTestCase {
                 "article_url": null,
                 "article_summary": null,
                 "article_source": null,
+                "article_image_url": null,
+                "article_thumbnail_url": null,
                 "has_pending_message": false,
                 "is_waiting_for_content": false,
                 "is_saved_to_knowledge": false,
                 "has_messages": true,
                 "last_message_preview": "Final deep-dive answer.",
                 "last_message_role": "assistant",
-                "council_mode": false
+                "council_mode": false,
+                "active_child_session_id": null
               },
               "messages": [
                 {
                   "id": 1,
                   "session_id": 42,
+                  "source_message_id": null,
                   "display_key": "42|1|user|message",
                   "role": "user",
                   "content": "Dig deeper into these news bullets.",
                   "timestamp": "2026-03-08T18:00:00Z",
                   "display_type": "message",
+                  "process_label": null,
                   "status": "completed",
-                  "error": null
+                  "error": null,
+                  "active_council_child_session_id": null
                 },
                 {
                   "id": 2,
                   "session_id": 42,
+                  "source_message_id": null,
                   "display_key": "42|2|tool|process_summary",
                   "role": "tool",
                   "content": "Thinking • Searched the web and reviewed sources",
@@ -97,18 +107,22 @@ final class ChatMessageDisplayTests: XCTestCase {
                   "display_type": "process_summary",
                   "process_label": "Thinking • Searched the web and reviewed sources",
                   "status": "completed",
-                  "error": null
+                  "error": null,
+                  "active_council_child_session_id": null
                 },
                 {
                   "id": 3,
                   "session_id": 42,
+                  "source_message_id": null,
                   "display_key": "42|3|assistant|message",
                   "role": "assistant",
                   "content": "Final deep-dive answer.",
                   "timestamp": "2026-03-08T18:00:02Z",
                   "display_type": "message",
+                  "process_label": null,
                   "status": "completed",
-                  "error": null
+                  "error": null,
+                  "active_council_child_session_id": null
                 }
               ]
             }
@@ -128,13 +142,16 @@ final class ChatMessageDisplayTests: XCTestCase {
             {
               "id": 8,
               "session_id": 21,
+              "source_message_id": null,
               "display_key": "21|8|assistant|message",
               "role": "assistant",
               "content": "I found a few good matches below.",
               "timestamp": "2026-03-17T18:00:00Z",
               "display_type": "message",
+              "process_label": null,
               "status": "completed",
               "error": null,
+              "active_council_child_session_id": null,
               "feed_options": [
                 {
                   "id": "8f7d2c42b0c1de90",
@@ -167,11 +184,13 @@ final class ChatMessageDisplayTests: XCTestCase {
             {
               "id": 12,
               "session_id": 21,
+              "source_message_id": null,
               "display_key": "21|12|assistant|message",
               "role": "assistant",
               "content": "Analyst branch",
               "timestamp": "2026-03-30T18:00:00Z",
               "display_type": "message",
+              "process_label": null,
               "status": "completed",
               "error": null,
               "active_council_child_session_id": 201,
@@ -211,6 +230,7 @@ final class ChatMessageDisplayTests: XCTestCase {
               "session": {
                 "id": 42,
                 "content_id": null,
+                "news_item_id": null,
                 "title": "Council Chat",
                 "session_type": "knowledge_chat",
                 "topic": null,
@@ -224,6 +244,8 @@ final class ChatMessageDisplayTests: XCTestCase {
                 "article_url": null,
                 "article_summary": null,
                 "article_source": null,
+                "article_image_url": null,
+                "article_thumbnail_url": null,
                 "has_pending_message": false,
                 "is_waiting_for_content": false,
                 "is_saved_to_knowledge": false,
@@ -237,11 +259,13 @@ final class ChatMessageDisplayTests: XCTestCase {
                 {
                   "id": 1,
                   "session_id": 42,
+                  "source_message_id": null,
                   "display_key": "42|1|assistant|message",
                   "role": "assistant",
                   "content": "Analyst branch",
                   "timestamp": "2026-03-30T18:01:00Z",
                   "display_type": "message",
+                  "process_label": null,
                   "status": "completed",
                   "error": null,
                   "active_council_child_session_id": 201,
@@ -295,14 +319,19 @@ final class ChatMessageDisplayTests: XCTestCase {
                     ScraperConfig(
                         id: 7,
                         scraperType: "feed",
+                        displayName: nil,
                         config: [:],
                         feedUrl: option.feedURL,
+                        limit: nil,
                         isActive: true,
                         createdAt: Date(),
-                        subscriptionOutcome: .already_subscribed
+                        stats: nil,
+                        subscriptionOutcome: .already_subscribed,
+                        backfillTaskId: nil
                     )
                 )
-            )
+            ),
+            toastPresenter: AssistantFeedTestToastPresenter()
         )
 
         await model.subscribe(option)
@@ -327,15 +356,22 @@ final class ChatMessageDisplayTests: XCTestCase {
                 ScraperConfig(
                     id: 8,
                     scraperType: "atom",
+                    displayName: nil,
                     config: [:],
                     feedUrl: option.feedURL,
+                    limit: nil,
                     isActive: true,
                     createdAt: Date(),
-                    subscriptionOutcome: .reactivated
+                    stats: nil,
+                    subscriptionOutcome: .reactivated,
+                    backfillTaskId: nil
                 )
             )
         )
-        let model = AssistantFeedOptionActionModel(service: service)
+        let model = AssistantFeedOptionActionModel(
+            service: service,
+            toastPresenter: AssistantFeedTestToastPresenter()
+        )
 
         await model.subscribe(option)
 
@@ -361,7 +397,8 @@ final class ChatMessageDisplayTests: XCTestCase {
         let model = AssistantFeedOptionActionModel(
             service: MockAssistantFeedSubscriptionService(
                 result: .failure(ClientFailure.http(statusCode: 400, detail: nil))
-            )
+            ),
+            toastPresenter: AssistantFeedTestToastPresenter()
         )
 
         await model.subscribe(option)
@@ -384,7 +421,10 @@ final class ChatMessageDisplayTests: XCTestCase {
         let service = MockAssistantFeedSubscriptionService(
             result: .failure(ClientFailure.http(statusCode: 500, detail: nil))
         )
-        let model = AssistantFeedOptionActionModel(service: service)
+        let model = AssistantFeedOptionActionModel(
+            service: service,
+            toastPresenter: AssistantFeedTestToastPresenter()
+        )
 
         await model.subscribe(option)
 
@@ -412,4 +452,11 @@ private final class MockAssistantFeedSubscriptionService: AssistantFeedSubscribi
         callCount += 1
         return try result.get()
     }
+}
+
+@MainActor
+private final class AssistantFeedTestToastPresenter: ToastPresenting {
+    func show(_ message: String, type: ToastType, duration: TimeInterval) {}
+    func showError(_ message: String) {}
+    func showSuccess(_ message: String) {}
 }

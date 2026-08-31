@@ -1,0 +1,71 @@
+{
+  "messages": [
+    {
+      "instructions": null,
+      "kind": "request",
+      "metadata": null,
+      "parts": [
+        {
+          "content": "Summarize the fixture article.",
+          "part_kind": "user-prompt",
+          "timestamp": "2026-08-30T12:00:00Z"
+        }
+      ],
+      "run_id": "fixture-run-1",
+      "timestamp": "2026-08-30T12:00:00Z"
+    },
+    {
+      "finish_reason": "tool_call",
+      "kind": "response",
+      "metadata": null,
+      "model_name": "fixture-model",
+      "parts": [
+        {
+          "args": {
+            "path": "input/source.md"
+          },
+          "id": null,
+          "part_kind": "tool-call",
+          "provider_details": null,
+          "provider_name": null,
+          "tool_call_id": "fixture-tool-1",
+          "tool_name": "read_file"
+        }
+      ],
+      "provider_details": null,
+      "provider_name": "fixture-provider",
+      "provider_url": "https://example.com/provider",
+      "run_id": "fixture-run-1",
+      "timestamp": "2026-08-30T12:00:01Z",
+      "usage": {
+        "cache_audio_read_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "details": {},
+        "input_audio_tokens": 0,
+        "input_tokens": 10,
+        "output_audio_tokens": 0,
+        "output_tokens": 8
+      }
+    },
+    {
+      "instructions": null,
+      "kind": "request",
+      "metadata": null,
+      "parts": [
+        {
+          "content": "Synthetic source text.",
+          "metadata": null,
+          "part_kind": "tool-return",
+          "timestamp": "2026-08-30T12:00:02Z",
+          "tool_call_id": "fixture-tool-1",
+          "tool_name": "read_file"
+        }
+      ],
+      "run_id": "fixture-run-1",
+      "timestamp": "2026-08-30T12:00:02Z"
+    }
+  ],
+  "stream_generation": 3,
+  "version": 1
+}

@@ -393,11 +393,14 @@ struct ChatSessionListResponse: Codable {
         self.meta = meta
     }
 
-    init(from decoder: Decoder) throws {
-        let response = try APIChatSessionListResponse(from: decoder)
+    init(api response: APIChatSessionListResponse) {
         self.init(
             sessions: response.sessions.map(ChatSessionSummary.init(api:)),
             meta: response.meta
         )
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(api: try APIChatSessionListResponse(from: decoder))
     }
 }

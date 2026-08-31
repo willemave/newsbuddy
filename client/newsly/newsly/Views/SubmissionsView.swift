@@ -86,6 +86,6 @@ struct SubmissionsView: View {
 
 #Preview {
     NavigationStack {
-        SubmissionsView(viewModel: RootDependencyFactory.makeSubmissionStatusViewModel())
+        EmptyView()
     }
 }

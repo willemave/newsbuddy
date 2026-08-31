@@ -1,0 +1,308 @@
+name: Quality Gate
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA to validate (defaults to the selected ref)
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      sha:
+        description: Full commit SHA to validate
+        required: false
+        type: string
+    outputs:
+      tested_sha:
+        description: Commit SHA that passed every required quality job
+        value: ${{ jobs.attest.outputs.tested_sha }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TESTED_SHA: ${{ inputs.sha || github.sha }}
+
+jobs:
+  evals:
+    name: Database-free Python evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TESTED_SHA }}
+
+      - name: Verify tested commit
+        run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Sync isolated dependencies
+        working-directory: python/evals
+        run: uv sync --frozen --group dev
+
+      - name: Prove the eval dependency graph is backend-free
+        working-directory: python/evals
+        run: |
+          env -u DATABASE_URL -u NEWSLY_DATABASE_URL uv run python - <<'PY'
+          import importlib.util
+
+          forbidden = ("alembic", "app", "asyncpg", "fastapi", "psycopg", "sqlalchemy")
+          present = [name for name in forbidden if importlib.util.find_spec(name) is not None]
+          if present:
+              raise SystemExit(f"backend dependencies entered the eval environment: {present}")
+          PY
+
+      - name: Run isolated eval tests
+        working-directory: python/evals
+        run: >-
+          env -u DATABASE_URL -u NEWSLY_DATABASE_URL
+          uv run pytest -q tests
+
+      - name: Check isolated eval style and types
+        working-directory: python/evals
+        run: |
+          uv run ruff check src scripts tests
+          uv run ruff format --check src scripts tests
+          uv run mypy --config-file pyproject.toml src scripts tests
+
+      - name: Build isolated eval package
+        working-directory: python/evals
+        run: uv build --out-dir "${RUNNER_TEMP}/evals-dist"
+
+  document-extractor:
+    name: Database-free Python document extractor
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TESTED_SHA }}
+
+      - name: Verify tested commit
+        run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Sync isolated dependencies
+        run: uv sync --project python/document_extractor --frozen --group dev
+
+      - name: Prove the service dependency graph is database-free
+        run: |
+          env -u DATABASE_URL -u NEWSLY_DATABASE_URL \
+            uv run --project python/document_extractor python - <<'PY'
+          import importlib.util
+
+          forbidden = ("alembic", "asyncpg", "psycopg", "sqlalchemy")
+          present = [name for name in forbidden if importlib.util.find_spec(name) is not None]
+          if present:
+              raise SystemExit(f"database dependencies entered the extractor environment: {present}")
+          PY
+
+      - name: Run isolated extractor tests
+        run: >-
+          env -u DATABASE_URL -u NEWSLY_DATABASE_URL
+          uv run --project python/document_extractor
+          pytest -q python/document_extractor/tests
+
+      - name: Check isolated package style and types
+        run: |
+          unset DATABASE_URL NEWSLY_DATABASE_URL
+          uv run --project python/document_extractor ruff check \
+            python/document_extractor/newsly_document_extractor \
+            python/document_extractor/tests
+          uv run --project python/document_extractor ruff format --check \
+            python/document_extractor/newsly_document_extractor \
+            python/document_extractor/tests
+          uv run --project python/document_extractor mypy \
+            --config-file python/document_extractor/pyproject.toml \
+            python/document_extractor/newsly_document_extractor
+
+      - name: Build isolated package artifacts
+        run: >-
+          env -u DATABASE_URL -u NEWSLY_DATABASE_URL
+          uv build --project python/document_extractor
+          --out-dir "${RUNNER_TEMP}/document-extractor-dist"
+
+  rust:
+    name: Rust, SQLx, contracts, and production images
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DATABASE_URL: postgresql://newsly:newsly@127.0.0.1:5432/newsly
+      JWT_SECRET_KEY: ci-jwt-secret-key
+      ADMIN_PASSWORD: ci-admin-password
+      GOOGLE_API_KEY: ci-google-api-key
+      LANGFUSE_ENABLED: "false"
+      NEWSLY_BUILD_SHA: ${{ env.TESTED_SHA }}
+
+    services:
+      postgres:
+        image: postgres:15.18-bookworm
+        env:
+          POSTGRES_USER: newsly
+          POSTGRES_PASSWORD: newsly
+          POSTGRES_DB: newsly
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U newsly -d newsly"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TESTED_SHA }}
+
+      - name: Verify tested commit
+        run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.94.1"
+          components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Apply SQLx migrations to fresh PostgreSQL
+        working-directory: rust
+        run: cargo run --locked -p newsly-db -- migrate --maintenance-barrier-confirmed
+
+      - name: Install pinned SQLx CLI
+        run: >-
+          cargo install sqlx-cli
+          --version 0.9.0
+          --locked
+          --no-default-features
+          --features rustls,postgres
+
+      - name: Check architecture, formatting, and public contracts
+        run: scripts/architecture_guard.sh
+
+      - name: Run Clippy with warnings denied
+        working-directory: rust
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Run Rust workspace tests
+        working-directory: rust
+        run: cargo test --workspace --locked
+
+      - name: Check SQLx offline workspace build
+        working-directory: rust
+        env:
+          SQLX_OFFLINE: "true"
+        run: cargo check --workspace --all-targets --locked --offline
+
+      - name: Check SQLx query metadata against PostgreSQL
+        working-directory: rust
+        run: cargo sqlx prepare --workspace --check
+
+      - name: Validate local development Compose manifest
+        env:
+          NEWSLY_BUILD_SHA: ${{ env.TESTED_SHA }}
+          NEWSLY_ENV_FILE: /dev/null
+        run: docker compose --file docker-compose.yml config --quiet
+
+      - name: Build exact-SHA production image
+        run: >-
+          docker build
+          --file Dockerfile
+          --build-arg NEWSLY_BUILD_SHA="$TESTED_SHA"
+          --label "org.opencontainers.image.revision=$TESTED_SHA"
+          --tag "newsly-ci:$TESTED_SHA"
+          .
+
+      - name: Build exact-SHA document extractor image
+        run: >-
+          docker build
+          --file python/document_extractor/Dockerfile
+          --build-arg NEWSLY_BUILD_SHA="$TESTED_SHA"
+          --label "org.opencontainers.image.revision=$TESTED_SHA"
+          --tag "newsly-document-extractor-ci:$TESTED_SHA"
+          python/document_extractor
+
+  ios:
+    name: Native iOS tests
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        working-directory: client/newsly
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TESTED_SHA }}
+
+      - name: Verify tested commit
+        working-directory: ${{ github.workspace }}
+        run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.3.0"
+
+      - name: Run iOS tests serially
+        run: |
+          xcodebuild test \
+            -project newsly.xcodeproj \
+            -scheme newsly \
+            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17' \
+            -derivedDataPath build/DerivedData \
+            -parallel-testing-enabled NO \
+            -maximum-parallel-testing-workers 1 \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+  attest:
+    name: Attest tested SHA
+    runs-on: ubuntu-latest
+    needs:
+      - evals
+      - document-extractor
+      - rust
+      - ios
+    outputs:
+      tested_sha: ${{ steps.tested-sha.outputs.tested_sha }}
+    steps:
+      - name: Record tested SHA
+        id: tested-sha
+        run: |
+          if [[ ! "$TESTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Quality jobs must attest a full commit SHA, got: $TESTED_SHA" >&2
+            exit 1
+          fi
+          echo "tested_sha=$TESTED_SHA" >> "$GITHUB_OUTPUT"

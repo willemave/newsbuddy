@@ -1,7 +1,0 @@
-# Example Reddit configuration for the News App scraper.
-# Copy to reddit.yml and adjust limits per subreddit.
-subreddits:
-  - name: MachineLearning
-    limit: 10
-  - name: front  # special keyword for the Reddit front page
-    limit: 25

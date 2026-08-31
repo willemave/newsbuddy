@@ -25,21 +25,9 @@ enum ChatServiceError: LocalizedError {
     }
 }
 
-/// Request to update a chat session
-struct UpdateChatSessionRequest: Codable {
-    var llmProvider: String?
-    var llmModelHint: String?
-
-    enum CodingKeys: String, CodingKey {
-        case llmProvider = "llm_provider"
-        case llmModelHint = "llm_model_hint"
-    }
-}
-
 protocol ChatSessionServicing: MessageStatusFetching {
     func getSession(id: Int) async throws -> ChatSessionDetail
     func sendMessageAsync(sessionId: Int, message: String) async throws -> SendChatMessageResponse
-    func getInitialSuggestions(sessionId: Int) async throws -> ChatMessage
     func startCouncil(sessionId: Int, message: String) async throws -> ChatSessionDetail
     func selectCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail
     func retryCouncilBranch(sessionId: Int, childSessionId: Int) async throws -> ChatSessionDetail
@@ -83,7 +71,7 @@ class ChatService {
         newsItemId: Int? = nil,
         limit: Int = 50
     ) async throws -> [ChatSessionSummary] {
-        return try await client.request(
+        let response: [APIChatSessionSummary] = try await client.request(
             APIEndpoints.chatSessions,
             queryItems: sessionListQueryItems(
                 contentId: contentId,
@@ -92,6 +80,7 @@ class ChatService {
             ),
             recoveryPolicy: .safeRead
         )
+        return response.map(ChatSessionSummary.init(api:))
     }
 
     /// List one page of chat sessions for the current user
@@ -101,7 +90,7 @@ class ChatService {
         limit: Int = 25,
         cursor: String? = nil
     ) async throws -> ChatSessionListResponse {
-        return try await client.request(
+        let response: APIChatSessionListResponse = try await client.request(
             APIEndpoints.chatSessionsList,
             queryItems: sessionListQueryItems(
                 contentId: contentId,
@@ -112,6 +101,7 @@ class ChatService {
             headers: ["Cache-Control": "no-cache"],
             recoveryPolicy: .safeRead
         )
+        return ChatSessionListResponse(api: response)
     }
 
     /// Create a new chat session
@@ -123,11 +113,11 @@ class ChatService {
         modelHint: String? = nil,
         initialMessage: String? = nil
     ) async throws -> ChatSessionSummary {
-        let request = CreateChatSessionRequest(
+        let request = APICreateChatSessionRequest(
             contentId: contentId,
             newsItemId: newsItemId,
             topic: topic,
-            llmProvider: provider?.rawValue,
+            llmProvider: provider.flatMap { APILLMProvider(rawValue: $0.rawValue) },
             llmModelHint: modelHint,
             initialMessage: initialMessage
         )
@@ -135,21 +125,22 @@ class ChatService {
         let encoder = JSONEncoder()
         let body = try encoder.encode(request)
 
-        let response: CreateChatSessionResponse = try await client.request(
+        let response: APICreateChatSessionResponse = try await client.request(
             APIEndpoints.chatSessions,
             method: .post,
             body: body
         )
 
-        return response.session
+        return ChatSessionSummary(api: response.session)
     }
 
     /// Get session details with message history
     func getSession(id: Int) async throws -> ChatSessionDetail {
-        return try await client.request(
+        let response: APIChatSessionDetail = try await client.request(
             APIEndpoints.chatSession(id: id),
             recoveryPolicy: .safeRead
         )
+        return ChatSessionDetail(api: response)
     }
 
     /// Check if a session exists for the given content
@@ -176,19 +167,20 @@ class ChatService {
         sessionId: Int,
         provider: ChatModelProvider
     ) async throws -> ChatSessionSummary {
-        let request = UpdateChatSessionRequest(
-            llmProvider: provider.rawValue,
+        let request = APIUpdateChatSessionRequest(
+            llmProvider: APILLMProvider(rawValue: provider.rawValue),
             llmModelHint: nil
         )
 
         let encoder = JSONEncoder()
         let body = try encoder.encode(request)
 
-        return try await client.request(
+        let response: APIChatSessionSummary = try await client.request(
             APIEndpoints.chatSession(id: sessionId),
             method: .patch,
             body: body
         )
+        return ChatSessionSummary(api: response)
     }
 
     /// Soft-delete (archive) a chat session
@@ -207,15 +199,16 @@ class ChatService {
         sessionId: Int,
         message: String
     ) async throws -> SendChatMessageResponse {
-        let request = SendChatMessageRequest(message: message)
+        let request = APISendChatMessageRequest(message: message)
         let encoder = JSONEncoder()
         let body = try encoder.encode(request)
 
-        return try await client.request(
+        let response: APISendMessageResponse = try await client.request(
             APIEndpoints.chatMessages(sessionId: sessionId),
             method: .post,
             body: body
         )
+        return SendChatMessageResponse(api: response)
     }
 
     /// Create or continue a contextual assistant turn.
@@ -224,41 +217,26 @@ class ChatService {
         sessionId: Int? = nil,
         screenContext: AssistantScreenContext
     ) async throws -> AssistantTurnResponse {
-        let request = AssistantTurnRequest(
+        let request = APIAssistantTurnRequest(
             message: message,
             sessionId: sessionId,
-            screenContext: screenContext
+            screenContext: screenContext.api
         )
         let body = try JSONEncoder().encode(request)
-        return try await client.request(
+        let response: APIAssistantTurnResponse = try await client.request(
             APIEndpoints.assistantTurns,
             method: .post,
             body: body
         )
+        return AssistantTurnResponse(api: response)
     }
 
     /// Poll for message status
     func getMessageStatus(messageId: Int) async throws -> MessageStatusResponse {
-        return try await client.request(
+        let response: APIMessageStatusResponse = try await client.request(
             APIEndpoints.chatMessageStatus(messageId: messageId)
         )
-    }
-
-    /// Get initial follow-up question suggestions for an article-based session (non-streaming)
-    func getInitialSuggestions(
-        sessionId: Int
-    ) async throws -> ChatMessage {
-        let response: InitialSuggestionsResponse = try await client.request(
-            APIEndpoints.chatInitialSuggestions(sessionId: sessionId),
-            method: .post
-        )
-
-        return ChatMessage(
-            id: response.id,
-            role: response.role,
-            timestamp: response.timestamp,
-            content: response.content
-        )
+        return MessageStatusResponse(api: response)
     }
 
     /// Start council mode for an existing session and return the merged parent transcript.
@@ -266,13 +244,14 @@ class ChatService {
         sessionId: Int,
         message: String
     ) async throws -> ChatSessionDetail {
-        let request = StartCouncilChatRequest(message: message)
+        let request = APICouncilStartRequest(message: message)
         let body = try JSONEncoder().encode(request)
-        return try await client.request(
+        let response: APIChatSessionDetail = try await client.request(
             APIEndpoints.chatCouncilStart(sessionId: sessionId),
             method: .post,
             body: body
         )
+        return ChatSessionDetail(api: response)
     }
 
     /// Select the active council branch and return the merged parent transcript.
@@ -280,13 +259,14 @@ class ChatService {
         sessionId: Int,
         childSessionId: Int
     ) async throws -> ChatSessionDetail {
-        let request = SelectCouncilBranchRequest(childSessionId: childSessionId)
+        let request = APICouncilSelectRequest(childSessionId: childSessionId)
         let body = try JSONEncoder().encode(request)
-        return try await client.request(
+        let response: APIChatSessionDetail = try await client.request(
             APIEndpoints.chatCouncilSelect(sessionId: sessionId),
             method: .post,
             body: body
         )
+        return ChatSessionDetail(api: response)
     }
 
     /// Retry one council branch and return the merged parent transcript.
@@ -294,13 +274,14 @@ class ChatService {
         sessionId: Int,
         childSessionId: Int
     ) async throws -> ChatSessionDetail {
-        let request = RetryCouncilBranchRequest(childSessionId: childSessionId)
+        let request = APICouncilRetryRequest(childSessionId: childSessionId)
         let body = try JSONEncoder().encode(request)
-        return try await client.request(
+        let response: APIChatSessionDetail = try await client.request(
             APIEndpoints.chatCouncilRetry(sessionId: sessionId),
             method: .post,
             body: body
         )
+        return ChatSessionDetail(api: response)
     }
 
     // MARK: - Convenience Methods
@@ -353,29 +334,4 @@ class ChatService {
         )
     }
 
-    /// Start an ad-hoc chat without article context
-    func startAdHocChat(
-        initialMessage: String? = nil,
-        provider: ChatModelProvider = .openai
-    ) async throws -> ChatSessionSummary {
-        return try await createSession(
-            provider: provider,
-            initialMessage: initialMessage
-        )
-    }
-
-    /// Start a deep research session for an article
-    /// Deep research uses OpenAI's o4-mini-deep-research model for comprehensive research
-    func startDeepResearch(
-        contentId: Int? = nil,
-        newsItemId: Int? = nil,
-        topic: String? = nil
-    ) async throws -> ChatSessionSummary {
-        return try await createSession(
-            contentId: contentId,
-            newsItemId: newsItemId,
-            topic: topic,
-            provider: .deep_research
-        )
-    }
 }

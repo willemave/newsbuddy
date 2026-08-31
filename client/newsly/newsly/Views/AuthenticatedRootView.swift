@@ -29,10 +29,13 @@ struct AuthenticatedRootView: View {
             case .deciding:
                 LoadingView()
             case .onboarding:
-                OnboardingFlowView(user: user) { response in
+                OnboardingFlowView(
+                    viewModel: session.dependencyFactory.makeOnboardingViewModel(user: user)
+                ) { response in
                     // Refresh user from server to pick up updated has_completed_onboarding
                     Task {
-                        if let updatedUser = try? await AuthenticationService.shared.getCurrentUser() {
+                        if let updatedUser = try? await session.dependencyFactory
+                            .authenticationService.getCurrentUser() {
                             authViewModel.updateUser(updatedUser)
                         } else {
                             authViewModel.updateUser(updatedUserOnboardingFlag(true))
@@ -44,10 +47,11 @@ struct AuthenticatedRootView: View {
                 ContentView(session: session)
                     .id(user.id)
                     .environment(authViewModel)
-                    .withToast()
+                    .withToast(service: session.dependencyFactory.toastService)
                     .task {
                         guard !E2ETestLaunch.isEnabled else { return }
-                        await LocalNotificationService.shared.requestAuthorization()
+                        await session.dependencyFactory.localNotificationService
+                            .requestAuthorization()
                     }
             }
         }

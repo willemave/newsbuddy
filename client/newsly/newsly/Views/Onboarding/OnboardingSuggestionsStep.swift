@@ -33,7 +33,7 @@ struct OnboardingSuggestionsStep: View {
                         OnboardingSuggestionSection(
                             title: "NEWSLETTERS",
                             items: viewModel.substackSuggestions,
-                            isSelected: { viewModel.selectedSourceKeys.contains($0.feedURL ?? "") },
+                            isSelected: { viewModel.isSuggestionSelected($0) },
                             onToggle: { viewModel.toggleSource($0) }
                         )
                     }
@@ -42,7 +42,7 @@ struct OnboardingSuggestionsStep: View {
                         OnboardingSuggestionSection(
                             title: "PODCASTS",
                             items: viewModel.podcastSuggestions,
-                            isSelected: { viewModel.selectedSourceKeys.contains($0.feedURL ?? "") },
+                            isSelected: { viewModel.isSuggestionSelected($0) },
                             onToggle: { viewModel.toggleSource($0) }
                         )
                     }

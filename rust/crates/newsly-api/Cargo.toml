@@ -1,0 +1,50 @@
+[package]
+name = "newsly-api"
+description = "Newsly Axum HTTP API"
+default-run = "newsly-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-stream = "=0.3.6"
+axum.workspace = true
+base64.workspace = true
+chrono.workspace = true
+feed-rs.workspace = true
+fernet.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+jsonwebtoken.workspace = true
+newsly-contracts = { path = "../newsly-contracts" }
+newsly-db = { path = "../newsly-db" }
+newsly-domain = { path = "../newsly-domain" }
+newsly-e2b = { path = "../newsly-e2b" }
+newsly-providers = { path = "../newsly-providers" }
+newsly-queue = { path = "../newsly-queue" }
+newsly-worker = { path = "../newsly-worker" }
+object_store = { version = "=0.14.1", default-features = false, features = ["aws"] }
+percent-encoding = "=2.3.2"
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+subtle.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util = { version = "=0.7.19", features = ["io"] }
+toml.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+utoipa.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

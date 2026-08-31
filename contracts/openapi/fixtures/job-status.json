@@ -1,0 +1,24 @@
+{
+  "method": "GET",
+  "operation_id": "getJob",
+  "path": "/api/jobs/{job_id}",
+  "responses": {
+    "200": {
+      "completed_at": null,
+      "content_id": null,
+      "created_at": "2026-08-30T12:00:00Z",
+      "error_message": null,
+      "id": 41001,
+      "payload": {
+        "llm_task_id": 8801,
+        "user_id": 51
+      },
+      "queue_name": "llm",
+      "retry_count": 0,
+      "started_at": "2026-08-30T12:00:02Z",
+      "status": "processing",
+      "task_type": "run_llm_task"
+    }
+  },
+  "version": 1
+}

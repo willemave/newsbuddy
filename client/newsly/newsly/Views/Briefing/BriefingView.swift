@@ -30,8 +30,8 @@ struct BriefingView: View {
     /// so the reader gets the standard back stack and edge-swipe.
     private let onOpenContent: (ContentDetailRoute) -> Void
 
-    @State private var digViewModel = BriefingDigViewModel(service: LiveBriefingService())
-    @State private var playbackService = NarrationPlaybackService.shared
+    @State private var digViewModel: BriefingDigViewModel
+    @State private var playbackService: NarrationPlaybackService
     @State private var activeNarrationChapters: BriefingNarrationChapterSheetItem?
     @State private var chromeCollapse = BriefingChromeCollapseModel()
     @State private var mastheadHeight: CGFloat = 0
@@ -43,6 +43,7 @@ struct BriefingView: View {
 
     init(
         viewModel: BriefingViewModel,
+        playbackService: NarrationPlaybackService,
         scrollToTopRequest: Int = 0,
         onOpenContent: @escaping (ContentDetailRoute) -> Void
     ) {
@@ -50,6 +51,10 @@ struct BriefingView: View {
         self.scrollToTopRequest = scrollToTopRequest
         self.narrationController = viewModel.narrationController
         self.onOpenContent = onOpenContent
+        self._digViewModel = State(
+            initialValue: BriefingDigViewModel(service: viewModel.service)
+        )
+        self._playbackService = State(initialValue: playbackService)
     }
 
     private var digSheetPresented: Binding<Bool> {

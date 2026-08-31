@@ -21,6 +21,7 @@ struct ChatMessageList: View {
     let session: ChatSessionSummary?
     let scrollToBottomRequest: Int
     let retryingCouncilChildSessionId: Int?
+    let feedOptionActionModel: AssistantFeedOptionActionModel
     let onOpenCouncilSettings: () -> Void
     let onDismissError: () -> Void
     let onRetryLoad: () -> Void
@@ -32,8 +33,6 @@ struct ChatMessageList: View {
     @State private var isNearBottom = true
     @State private var hasNewerContentBelow = false
     @State private var hasAnchoredInitialScroll = false
-    @State private var feedOptionActionModel = AssistantFeedOptionActionModel()
-
     private static let thinkingBubbleID = "chat.thinkingBubble"
 
     private var messageAnimation: Animation {
@@ -308,6 +307,7 @@ private struct ChatLoadErrorState: View {
         session: ChatPreviewFixtures.session,
         scrollToBottomRequest: 0,
         retryingCouncilChildSessionId: nil,
+        feedOptionActionModel: ChatPreviewActionModels.feedOptions(),
         onOpenCouncilSettings: {},
         onDismissError: {},
         onRetryLoad: {},

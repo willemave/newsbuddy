@@ -92,11 +92,14 @@ struct MixedSearchResponse: Codable {
     let feeds: [MixedSearchFeedResult]
     let podcasts: [PodcastSearchResult]
 
-    init(from decoder: Decoder) throws {
-        let response = try APIMixedSearchResponse(from: decoder)
+    init(api response: APIMixedSearchResponse) {
         query = response.query
         content = response.content.map(ContentSummary.init(api:))
         feeds = response.feeds.map(MixedSearchFeedResult.init(api:))
         podcasts = response.podcasts.map(PodcastSearchResult.init(api:))
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(api: try APIMixedSearchResponse(from: decoder))
     }
 }

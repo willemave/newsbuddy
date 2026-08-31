@@ -27,6 +27,7 @@ Change-oriented docs that used to live under `docs/plans/`, `docs/specs/`, and `
 - `pipeline-reliability/`
 - `podcast-sources-2025-11/`
 - `python-cleanup-2026-07/` - executes the 2026-07 full Python audit: bug fixes, ~13.5k lines of dead-code deletion, perf work, consolidations.
+- `rust-backend-migration-2026-08/` - approved design direction for the schema-first Rust migration, SQLx ownership, retained Python boundaries, and direct E2B integration.
 - `settings-ui-modernization/`
 - `share-sheet-instruction-processing/`
 - `swiftui-list-views-refactor/`

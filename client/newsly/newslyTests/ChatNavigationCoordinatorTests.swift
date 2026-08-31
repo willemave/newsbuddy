@@ -3,14 +3,8 @@ import XCTest
 
 @MainActor
 final class ChatNavigationCoordinatorTests: XCTestCase {
-    override func tearDown() {
-        ChatNavigationCoordinator.shared.clear()
-        super.tearDown()
-    }
-
     func testOpenStoresPendingRouteAndClearRemovesMatchingRoute() {
-        let coordinator = ChatNavigationCoordinator.shared
-        coordinator.clear()
+        let coordinator = ChatNavigationCoordinator()
 
         let firstRoute = ChatSessionRoute(sessionId: 42)
         let secondRoute = ChatSessionRoute(sessionId: 99)
@@ -27,8 +21,7 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
     }
 
     func testConsecutiveRoutesAreDeliveredInOrderInsteadOfOverwritten() {
-        let coordinator = ChatNavigationCoordinator.shared
-        coordinator.clear()
+        let coordinator = ChatNavigationCoordinator()
         let firstRoute = ChatSessionRoute(sessionId: 42)
         let secondRoute = ChatSessionRoute(sessionId: 99)
 
@@ -47,8 +40,7 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
     }
 
     func testDuplicatePendingRouteIsCoalesced() {
-        let coordinator = ChatNavigationCoordinator.shared
-        coordinator.clear()
+        let coordinator = ChatNavigationCoordinator()
         let route = ChatSessionRoute(sessionId: 42)
 
         coordinator.open(route)
@@ -59,8 +51,7 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
     }
 
     func testAcknowledgementOnlyRemovesThePresentedHeadRoute() {
-        let coordinator = ChatNavigationCoordinator.shared
-        coordinator.clear()
+        let coordinator = ChatNavigationCoordinator()
         let firstRoute = ChatSessionRoute(sessionId: 42)
         let secondRoute = ChatSessionRoute(sessionId: 99)
         coordinator.open(firstRoute)
@@ -76,8 +67,7 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
     }
 
     func testOpeningRouteWhileAnotherIsPresentedQueuesWithoutReplacingIt() {
-        let coordinator = ChatNavigationCoordinator.shared
-        coordinator.clear()
+        let coordinator = ChatNavigationCoordinator()
         let visibleRoute = ChatSessionRoute(sessionId: 42)
         let queuedRoute = ChatSessionRoute(sessionId: 99)
 
@@ -94,8 +84,7 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
     }
 
     func testQueuedRouteCanExplicitlyReplaceABackgroundPresentation() {
-        let coordinator = ChatNavigationCoordinator.shared
-        coordinator.clear()
+        let coordinator = ChatNavigationCoordinator()
         let visibleRoute = ChatSessionRoute(sessionId: 42)
         let requestedRoute = ChatSessionRoute(sessionId: 99)
 
@@ -114,8 +103,7 @@ final class ChatNavigationCoordinatorTests: XCTestCase {
     }
 
     func testContentDetailRouteCarriesNavigationReplacementIntentUntilPresentation() {
-        let coordinator = ChatNavigationCoordinator.shared
-        coordinator.clear()
+        let coordinator = ChatNavigationCoordinator()
         let route = ChatSessionRoute(sessionId: 42)
 
         coordinator.openReplacingCurrentNavigation(route)

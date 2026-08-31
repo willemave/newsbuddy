@@ -169,6 +169,7 @@ final class OnboardingStateStoreTests: XCTestCase {
                     recommendedPods: [],
                     recommendedSubstacks: [
                         makeSuggestion(
+                            id: 9021,
                             suggestionType: "substack",
                             title: "Stale Feed",
                             feedURL: "https://stale.example/feed"
@@ -193,6 +194,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         let response = OnboardingFastDiscoverResponse(
             recommendedPods: [
                 makeSuggestion(
+                    id: 421,
                     suggestionType: "podcast_rss",
                     title: "Hard Fork",
                     feedURL: "https://example.com/hard-fork.xml"
@@ -200,6 +202,7 @@ final class OnboardingStateStoreTests: XCTestCase {
             ],
             recommendedSubstacks: [
                 makeSuggestion(
+                    id: 422,
                     suggestionType: "substack",
                     title: "Stratechery",
                     feedURL: "https://example.com/stratechery.xml"
@@ -207,6 +210,7 @@ final class OnboardingStateStoreTests: XCTestCase {
             ],
             recommendedSubreddits: [
                 makeSuggestion(
+                    id: 423,
                     suggestionType: "reddit",
                     title: "MachineLearning",
                     subreddit: "MachineLearning"
@@ -219,8 +223,7 @@ final class OnboardingStateStoreTests: XCTestCase {
                 step: .suggestions,
                 isPersonalized: true,
                 suggestions: response,
-                selectedSourceKeys: ["https://example.com/hard-fork.xml"],
-                selectedSubreddits: ["MachineLearning"],
+                selectedSuggestionIds: [421, 423],
                 discoveryRunId: nil,
                 discoveryRunStatus: "completed",
                 discoveryErrorMessage: nil,
@@ -241,8 +244,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         XCTAssertTrue(viewModel.isPersonalized)
         XCTAssertEqual(viewModel.substackSuggestions.map(\.displayTitle), ["Stratechery"])
         XCTAssertEqual(viewModel.podcastSuggestions.map(\.displayTitle), ["Hard Fork"])
-        XCTAssertEqual(viewModel.selectedSourceKeys, ["https://example.com/hard-fork.xml"])
-        XCTAssertEqual(viewModel.selectedSubreddits, ["MachineLearning"])
+        XCTAssertEqual(viewModel.selectedSuggestionIDs, [421, 423])
         XCTAssertEqual(viewModel.topicSummary, "AI and startups")
         XCTAssertEqual(viewModel.inferredTopics, ["AI", "startups"])
     }
@@ -254,6 +256,7 @@ final class OnboardingStateStoreTests: XCTestCase {
             recommendedSubstacks: [],
             recommendedSubreddits: [
                 makeSuggestion(
+                    id: 441,
                     suggestionType: "reddit",
                     title: "MachineLearning",
                     subreddit: "MachineLearning"
@@ -266,8 +269,7 @@ final class OnboardingStateStoreTests: XCTestCase {
                 step: .reddit,
                 isPersonalized: true,
                 suggestions: response,
-                selectedSourceKeys: [],
-                selectedSubreddits: ["MachineLearning"],
+                selectedSuggestionIds: [441],
                 selectedAggregators: ["brutalist"],
                 selectedBrutalistTopics: ["science"],
                 discoveryRunId: 123,
@@ -287,7 +289,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(viewModel.step, .reddit)
-        XCTAssertEqual(viewModel.selectedSubreddits, ["MachineLearning"])
+        XCTAssertEqual(viewModel.selectedSuggestionIDs, [441])
         XCTAssertEqual(viewModel.selectedAggregators, ["brutalist"])
         XCTAssertEqual(viewModel.selectedBrutalistTopics, ["science"])
     }
@@ -300,8 +302,7 @@ final class OnboardingStateStoreTests: XCTestCase {
                 step: .fastNews,
                 isPersonalized: true,
                 suggestions: nil,
-                selectedSourceKeys: [],
-                selectedSubreddits: ["MachineLearning"],
+                selectedSuggestionIds: [],
                 selectedAggregators: ["sciurls"],
                 discoveryRunId: nil,
                 discoveryRunStatus: "completed",
@@ -320,7 +321,7 @@ final class OnboardingStateStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(viewModel.step, .aggregators)
-        XCTAssertEqual(viewModel.selectedSubreddits, ["MachineLearning"])
+        XCTAssertTrue(viewModel.selectedSuggestionIDs.isEmpty)
         XCTAssertEqual(viewModel.selectedAggregators, ["sciurls"])
     }
 
@@ -336,13 +337,34 @@ final class OnboardingStateStoreTests: XCTestCase {
         XCTAssertEqual(snapshot?.discoveryRunId, 987)
     }
 
+    func testPersonalizedCompletionSendsOnlyRunAndPersistedSuggestionIDs() async {
+        let service = DeferredOnboardingService()
+        let viewModel = OnboardingViewModel(
+            user: makeUser(id: 50),
+            service: service,
+            dictationService: FakeSpeechTranscriber(),
+            onboardingStateStore: store
+        )
+        viewModel.isPersonalized = true
+        viewModel.discoveryRunId = 500
+        viewModel.selectedSuggestionIDs = [501, 503]
+
+        await viewModel.completeOnboarding()
+
+        XCTAssertEqual(service.completedRequest?.discoveryRunId, 500)
+        XCTAssertEqual(service.completedRequest?.selectedSuggestionIds, [501, 503])
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     private func makeSuggestion(
+        id: Int,
         suggestionType: String,
         title: String,
         feedURL: String? = nil,
         subreddit: String? = nil
     ) -> OnboardingSuggestion {
         OnboardingSuggestion(
+            id: id,
             suggestionType: suggestionType,
             title: title,
             siteURL: nil,
@@ -469,6 +491,7 @@ private final class DeferredOnboardingService: OnboardingServicing {
     private let immediateAudioResponse: OnboardingAudioDiscoverResponse?
     private var audioContinuation: CheckedContinuation<OnboardingAudioDiscoverResponse, Error>?
     private var statusContinuation: CheckedContinuation<OnboardingDiscoveryStatusResponse, Error>?
+    private(set) var completedRequest: OnboardingCompleteRequest?
 
     init(immediateAudioResponse: OnboardingAudioDiscoverResponse? = nil) {
         self.immediateAudioResponse = immediateAudioResponse
@@ -497,8 +520,16 @@ private final class DeferredOnboardingService: OnboardingServicing {
     }
 
     func complete(request: OnboardingCompleteRequest) async throws -> OnboardingCompleteResponse {
-        _ = request
-        fatalError("Completion is not used by these tests")
+        completedRequest = request
+        return OnboardingCompleteResponse(
+            status: "queued",
+            taskId: 1,
+            inboxCountEstimate: 100,
+            configuredSourceCount: request.selectedSuggestionIds.count,
+            longformStatus: "loading",
+            hasCompletedOnboarding: true,
+            hasCompletedNewUserTutorial: false
+        )
     }
 
     func resolveAudioDiscovery(_ response: OnboardingAudioDiscoverResponse) {

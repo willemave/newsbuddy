@@ -33,11 +33,13 @@ struct BriefingTab: View {
     let readingStateStore: ReadingStateStore
     let readStateCache: ReadStateCache
     let contentTextSize: DynamicTypeSize
+    let dependencyFactory: RootDependencyFactory
 
     var body: some View {
         NavigationStack(path: $path) {
             BriefingView(
                 viewModel: viewModel,
+                playbackService: dependencyFactory.narrationPlaybackService,
                 scrollToTopRequest: scrollToTopRequest,
                 onOpenContent: pushDetail
             )
@@ -47,7 +49,8 @@ struct BriefingTab: View {
                     readingStateStore: readingStateStore,
                     readStateCache: readStateCache,
                     contentTextSize: contentTextSize,
-                    contentTransitionNamespace: contentTransitionNamespace
+                    contentTransitionNamespace: contentTransitionNamespace,
+                    dependencyFactory: dependencyFactory
                 )
         }
         .toolbar(.hidden, for: .tabBar)
@@ -67,6 +70,7 @@ struct KnowledgeTab: View {
     let readStateCache: ReadStateCache
     let readingStateStore: ReadingStateStore
     let contentTextSize: DynamicTypeSize
+    let dependencyFactory: RootDependencyFactory
     let onOpenMore: () -> Void
     let onSelectSession: (ChatSessionRoute) -> Void
 
@@ -80,13 +84,17 @@ struct KnowledgeTab: View {
                 onSearch: { path.append(KnowledgeSearchRoute()) },
                 onOpenMore: onOpenMore,
                 viewModel: viewModel,
+                settings: dependencyFactory.appSettings,
+                toastPresenter: dependencyFactory.toastService,
                 contentTextSize: contentTextSize,
                 chatTransitionNamespace: chatTransitionNamespace
             )
             .navigationDestination(for: KnowledgeSearchRoute.self) { _ in
                 KnowledgeSearchView(
                     onSelectContent: pushContent,
-                    readStateCache: readStateCache
+                    viewModel: dependencyFactory.makeContentListViewModel(
+                        readStateCache: readStateCache
+                    )
                 )
             }
             .withContentRoutes(
@@ -95,7 +103,8 @@ struct KnowledgeTab: View {
                 readStateCache: readStateCache,
                 contentTextSize: contentTextSize,
                 chatTransitionNamespace: chatTransitionNamespace,
-                allowsChatHistory: true
+                allowsChatHistory: true,
+                dependencyFactory: dependencyFactory
             )
         }
         .toolbar(.hidden, for: .tabBar)

@@ -274,6 +274,8 @@ private func isRetryableLearningDeckStatusError(_ error: Error) -> Bool {
             || statusCode == 425
             || statusCode == 429
             || statusCode >= 500
+    case .server(_, let error):
+        return error.retryable
     case .connectivity, .invalidResponse, .unexpected:
         return true
     }

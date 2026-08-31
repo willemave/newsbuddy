@@ -13,13 +13,14 @@ private let detailLogger = Logger(subsystem: "com.newsly", category: "ContentDet
 struct ContentDetailView: View {
     @Environment(ActiveChatSessionManager.self) private var activeChatSessionManager
     @Environment(ChatNavigationCoordinator.self) private var chatNavigation
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
 
     private let contentId: Int
     private let contentType: APIContentType?
     private let allContentIds: [Int]
     private let navigationSurface: ContentDetailNavigationSurface
     private let initialScrollTarget: ContentDetailScrollTarget?
-    private let readStateCache: ReadStateCache?
+    private let readStateCache: ReadStateCache
 
     init(
         contentId: Int,
@@ -27,7 +28,7 @@ struct ContentDetailView: View {
         allContentIds: [Int] = [],
         navigationSurface: ContentDetailNavigationSurface = .direct,
         initialScrollTarget: ContentDetailScrollTarget? = nil,
-        readStateCache: ReadStateCache? = nil
+        readStateCache: ReadStateCache
     ) {
         self.contentId = contentId
         self.contentType = contentType
@@ -46,7 +47,8 @@ struct ContentDetailView: View {
             initialScrollTarget: initialScrollTarget,
             readStateCache: readStateCache,
             activeChatSessionManager: activeChatSessionManager,
-            chatNavigation: chatNavigation
+            chatNavigation: chatNavigation,
+            dependencyFactory: dependencyFactory
         )
     }
 }
@@ -59,6 +61,7 @@ private struct ContentDetailContentView: View {
     private var initialContentId: Int { navigationContext.initialContentId }
     private var initialContentType: APIContentType? { navigationContext.initialContentType }
     private var allContentIds: [Int] { navigationContext.contentIds }
+    private let dependencyFactory: RootDependencyFactory
     @State private var viewModel: ContentDetailViewModel
     @Environment(AppLifecycle.self) private var lifecycle
     @Environment(ReadingStateStore.self) private var readingStateStore
@@ -92,11 +95,11 @@ private struct ContentDetailContentView: View {
         allContentIds: [Int] = [],
         navigationSurface: ContentDetailNavigationSurface = .direct,
         initialScrollTarget: ContentDetailScrollTarget? = nil,
-        readStateCache: ReadStateCache? = nil,
+        readStateCache: ReadStateCache,
         activeChatSessionManager: ActiveChatSessionManager,
-        chatNavigation: ChatNavigationCoordinator
+        chatNavigation: ChatNavigationCoordinator,
+        dependencyFactory: RootDependencyFactory
     ) {
-        let readStateCache = readStateCache ?? ReadStateCache()
         let context = ContentDetailNavigationContext(
             initialContentId: contentId,
             initialContentType: contentType,
@@ -105,22 +108,27 @@ private struct ContentDetailContentView: View {
             initialScrollTarget: initialScrollTarget
         )
         self.navigationContext = context
+        self.dependencyFactory = dependencyFactory
         self._currentIndex = State(initialValue: context.initialIndex)
         self._viewModel = State(
-            initialValue: RootDependencyFactory.makeContentDetailViewModel(
+            initialValue: dependencyFactory.makeContentDetailViewModel(
                 contentId: contentId,
                 contentType: contentType,
                 readStateCache: readStateCache
             )
         )
         self._chatCoordinator = State(
-            initialValue: RootDependencyFactory.makeDetailChatCoordinator(
+            initialValue: dependencyFactory.makeDetailChatCoordinator(
                 chatSessionManager: activeChatSessionManager,
                 chatRouter: chatNavigation
             )
         )
-        self._podcastAudioController = State(initialValue: RootDependencyFactory.makePodcastAudioController())
-        self._discussionCoordinator = State(initialValue: RootDependencyFactory.makeDiscussionSummaryCoordinator())
+        self._podcastAudioController = State(
+            initialValue: dependencyFactory.makePodcastAudioController()
+        )
+        self._discussionCoordinator = State(
+            initialValue: dependencyFactory.makeDiscussionSummaryCoordinator()
+        )
         self._pendingScrollTarget = State(initialValue: context.initialScrollTarget)
     }
     
@@ -350,7 +358,10 @@ private struct ContentDetailContentView: View {
 
             case .tweet:
                 if let content = viewModel.content {
-                    TweetSuggestionsSheet(contentId: content.id)
+                    TweetSuggestionsSheet(
+                        contentId: content.id,
+                        viewModel: dependencyFactory.makeTweetSuggestionsViewModel()
+                    )
                 }
 
             case .knowledgeActions:
@@ -365,6 +376,8 @@ private struct ContentDetailContentView: View {
                 if let content = viewModel.content {
                     LearningDeckContentCreateSheet(
                         content: content,
+                        focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
+                        learningDeckService: dependencyFactory.learningDeckService,
                         onOpenDeck: { deck, url in
                             activeLearningDeckReader = LearningDeckReaderDestination(
                                 deck: deck,
@@ -431,7 +444,11 @@ private struct ContentDetailContentView: View {
             guard generation != previousGeneration else { return }
             handledActivationGeneration = generation
             Task {
-                await viewModel.revalidateContent()
+                async let revalidation: Void = viewModel.revalidateContent()
+                async let readerResume: Void = viewModel.resumeReaderBodyIfNeeded(
+                    for: activeReaderContent
+                )
+                _ = await (revalidation, readerResume)
             }
         }
     }

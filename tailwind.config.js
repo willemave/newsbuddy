@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["./app/admin_web/templates/**/*.html"],
+  content: ["./rust/crates/newsly-api/templates/**/*.html", "./rust/crates/newsly-api/src/templates/**/*.html"],
   theme: {
     extend: {},
   },

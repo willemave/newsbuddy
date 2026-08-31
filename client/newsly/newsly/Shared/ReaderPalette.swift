@@ -42,27 +42,28 @@ struct ReaderPaletteColors {
 /// The app's one fixed palette. All color tokens (see DesignTokens) read from here.
 enum ReaderPalette {
     static let colors = ReaderPaletteColors(
-        // Dark surfaces sit on a lifted charcoal rather than near-black, with wider
-        // steps between rungs so unselected chips stay visible against the ground.
-        surfacePrimary: adaptive(light: 0xf4f5f7, dark: 0x131519),
-        surfaceSecondary: adaptive(light: 0xffffff, dark: 0x1b1e23),
-        surfaceTertiary: adaptive(light: 0xe8eaee, dark: 0x21252b),
-        surfaceContainer: adaptive(light: 0xdcdee4, dark: 0x282c33),
-        surfaceContainerHigh: adaptive(light: 0xcdd1d9, dark: 0x333841),
-        surfaceContainerHighest: adaptive(light: 0xbcc1cb, dark: 0x40454f),
-        // Amber accent — the single opinionated brand hue.
-        brandPrimary: adaptive(light: 0x99610a, dark: 0xe0a33f),
-        brandPrimaryStrong: adaptive(light: 0x8f5a08, dark: 0xc98a2c),
-        // Secondary/tertiary are cool neutrals, not second/third hues (single-accent doctrine).
-        brandSecondary: adaptive(light: 0x676c76, dark: 0x8f959f),
-        brandTertiary: adaptive(light: 0x6a707b, dark: 0x818792),
-        onSurface: adaptive(light: 0x1b1e24, dark: 0xe5e7ec),
-        onSurfaceSecondary: adaptive(light: 0x676c76, dark: 0x8f959f),
-        onSurfaceTertiary: adaptive(light: 0x6a707b, dark: 0x818792),
-        chatUserBubble: adaptive(light: 0xefe7d8, dark: 0x2a2417),
-        outlineVariant: adaptive(light: 0xcdd1d9, dark: 0x3b404a),
-        borderSubtle: adaptive(light: 0xdcdee4, dark: 0x282c33),
-        borderStrong: adaptive(light: 0xaab0bb, dark: 0x5b626d)
+        // Warm paper neutrals. Dark surfaces sit on a lifted warm charcoal rather than
+        // near-black, with wide steps between rungs so unselected chips stay visible.
+        surfacePrimary: adaptive(light: 0xf8f6f1, dark: 0x171613),
+        surfaceSecondary: adaptive(light: 0xfffcf7, dark: 0x1f1e1a),
+        surfaceTertiary: adaptive(light: 0xedeae2, dark: 0x262521),
+        surfaceContainer: adaptive(light: 0xe3dfd5, dark: 0x2e2c27),
+        surfaceContainerHigh: adaptive(light: 0xd6d1c5, dark: 0x393731),
+        surfaceContainerHighest: adaptive(light: 0xc6c0b2, dark: 0x46433c),
+        // Slate accent, taken from the app icon's brush ring. Dark lifts the same hue
+        // rather than substituting another — #3f4c60 is invisible on a dark ground.
+        brandPrimary: adaptive(light: 0x3f4c60, dark: 0x93a7c4),
+        brandPrimaryStrong: adaptive(light: 0x333e50, dark: 0xaabdd8),
+        // Secondary/tertiary are warm neutrals, not second/third hues (single-accent doctrine).
+        brandSecondary: adaptive(light: 0x6e6a61, dark: 0x9a958a),
+        brandTertiary: adaptive(light: 0x757067, dark: 0x8d887e),
+        onSurface: adaptive(light: 0x22211d, dark: 0xece8e0),
+        onSurfaceSecondary: adaptive(light: 0x6e6a61, dark: 0x9a958a),
+        onSurfaceTertiary: adaptive(light: 0x757067, dark: 0x8d887e),
+        chatUserBubble: adaptive(light: 0xefe7d8, dark: 0x2b2620),
+        outlineVariant: adaptive(light: 0xdcd7cb, dark: 0x413e37),
+        borderSubtle: adaptive(light: 0xe7e3da, dark: 0x2e2c27),
+        borderStrong: adaptive(light: 0xb5afa1, dark: 0x635e54)
     )
 
     /// Trait-aware UIColor for a palette slot. Resolves light/dark at draw time.

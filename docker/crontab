@@ -1,5 +1,0 @@
-*/15 * * * * cd /app && flock -n /tmp/news_app_scrapers.lock python scripts/run_scrapers.py --show-stats
-*/15 * * * * cd /app && flock -n /tmp/news_app_twitter.lock python scripts/run_twitter.py
-0 3 * * 1 cd /app && flock -n /tmp/news_app_feed_discovery.lock python scripts/run_feed_discovery.py
-45 4 * * * cd /app && flock -n /tmp/news_app_queue_cleanup.lock python scripts/queue_control.py cleanup-terminal --retention-days 14 --batch-size 5000 --max-delete 50000 --yes
-15 5 * * * cd /app && flock -n /tmp/news_app_agent_data_reconcile.lock python scripts/reconcile_agent_data.py

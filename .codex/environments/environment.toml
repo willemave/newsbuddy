@@ -9,8 +9,3 @@ script = "scripts/codex_bootstrap.sh"
 name = "Run iOS in Codex"
 icon = "run"
 command = "scripts/codex_run_ios.sh"
-
-[[actions]]
-name = "Seed iOS developer user"
-icon = "refresh"
-command = "uv run python scripts/dev_user.py setup --launch"

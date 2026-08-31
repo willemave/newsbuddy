@@ -1,0 +1,147 @@
+{
+  "cases": [
+    {
+      "claim": {
+        "available_at": "2026-08-30T12:00:01Z",
+        "content_id": null,
+        "created_at": "2026-08-30T12:00:00Z",
+        "executor_namespace": "run_llm_task",
+        "executor_runtime": "python",
+        "executor_version": 1,
+        "id": 41001,
+        "lease_expires_at": "2026-08-30T12:01:02Z",
+        "lease_token": "00000000-0000-4000-8000-000000000001",
+        "locked_at": "2026-08-30T12:00:02Z",
+        "locked_by": "fixture-worker",
+        "owner_user_id": 51,
+        "payload": {
+          "llm_task_id": 8801,
+          "user_id": 51
+        },
+        "queue_name": "llm",
+        "retry_count": 0,
+        "started_at": "2026-08-30T12:00:02Z",
+        "status": "processing",
+        "task_type": "run_llm_task"
+      },
+      "expected": {
+        "deferred": false,
+        "retry_count": 0,
+        "retry_delay_seconds": null,
+        "status": "completed"
+      },
+      "name": "success",
+      "result": {
+        "success": true
+      }
+    },
+    {
+      "claim": {
+        "available_at": "2026-08-30T12:00:01Z",
+        "content_id": null,
+        "created_at": "2026-08-30T12:00:00Z",
+        "executor_namespace": "run_llm_task",
+        "executor_runtime": "python",
+        "executor_version": 1,
+        "id": 41001,
+        "lease_expires_at": "2026-08-30T12:01:02Z",
+        "lease_token": "00000000-0000-4000-8000-000000000001",
+        "locked_at": "2026-08-30T12:00:02Z",
+        "locked_by": "fixture-worker",
+        "owner_user_id": 51,
+        "payload": {
+          "llm_task_id": 8801,
+          "user_id": 51
+        },
+        "queue_name": "llm",
+        "retry_count": 0,
+        "started_at": "2026-08-30T12:00:02Z",
+        "status": "processing",
+        "task_type": "run_llm_task"
+      },
+      "expected": {
+        "deferred": false,
+        "retry_count": 1,
+        "retry_delay_seconds": 30,
+        "status": "pending"
+      },
+      "name": "retry",
+      "result": {
+        "error_message": "fixture transient failure",
+        "retry_delay_seconds": 30,
+        "retryable": true,
+        "success": false
+      }
+    },
+    {
+      "claim": {
+        "available_at": "2026-08-30T12:00:01Z",
+        "content_id": null,
+        "created_at": "2026-08-30T12:00:00Z",
+        "executor_namespace": "run_llm_task",
+        "executor_runtime": "python",
+        "executor_version": 1,
+        "id": 41001,
+        "lease_expires_at": "2026-08-30T12:01:02Z",
+        "lease_token": "00000000-0000-4000-8000-000000000001",
+        "locked_at": "2026-08-30T12:00:02Z",
+        "locked_by": "fixture-worker",
+        "owner_user_id": 51,
+        "payload": {
+          "llm_task_id": 8801,
+          "user_id": 51
+        },
+        "queue_name": "llm",
+        "retry_count": 0,
+        "started_at": "2026-08-30T12:00:02Z",
+        "status": "processing",
+        "task_type": "run_llm_task"
+      },
+      "expected": {
+        "deferred": true,
+        "retry_count": 0,
+        "retry_delay_seconds": 15,
+        "status": "pending"
+      },
+      "name": "defer_without_retry",
+      "result": {
+        "deferred": true,
+        "retry_delay_seconds": 15,
+        "retryable": false,
+        "success": false
+      }
+    },
+    {
+      "claim": {
+        "available_at": "2026-08-30T12:00:01Z",
+        "content_id": null,
+        "created_at": "2026-08-30T12:00:00Z",
+        "executor_namespace": "run_llm_task",
+        "executor_runtime": "python",
+        "executor_version": 1,
+        "id": 41001,
+        "lease_expires_at": "2026-08-30T12:01:02Z",
+        "lease_token": "00000000-0000-4000-8000-000000000001",
+        "locked_at": "2026-08-30T12:00:02Z",
+        "locked_by": "fixture-worker",
+        "owner_user_id": 51,
+        "payload": {
+          "llm_task_id": 8801,
+          "user_id": 51
+        },
+        "queue_name": "llm",
+        "retry_count": 0,
+        "started_at": "2026-08-30T12:00:02Z",
+        "status": "processing",
+        "task_type": "run_llm_task"
+      },
+      "expected": {
+        "published": false,
+        "reason": "lease_token_mismatch"
+      },
+      "name": "stale_finalize_rejected",
+      "presented_lease_token": "00000000-0000-4000-8000-000000000002"
+    }
+  ],
+  "version": 1
+}

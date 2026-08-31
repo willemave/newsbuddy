@@ -1,0 +1,2 @@
+rust/crates/newsly-db/migrations/*.sql text eol=lf
+rust/crates/newsly-db/baseline/*.json text eol=lf

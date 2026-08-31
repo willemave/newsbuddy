@@ -1,0 +1,456 @@
+{
+  "$defs": {
+    "ExtractionFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ExtractionFailureCode"
+        },
+        "http_status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Http Status"
+        },
+        "kind": {
+          "const": "failure",
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "timings": {
+          "items": {
+            "$ref": "#/$defs/ExtractionTiming"
+          },
+          "maxItems": 25,
+          "title": "Timings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "kind",
+        "code",
+        "retryable",
+        "http_status",
+        "message",
+        "timings"
+      ],
+      "title": "ExtractionFailure",
+      "type": "object"
+    },
+    "ExtractionFailureCode": {
+      "enum": [
+        "access_gate",
+        "crawl_failed",
+        "deadline_exceeded",
+        "fetch_failed",
+        "internal_error",
+        "invalid_url",
+        "no_content",
+        "response_too_large",
+        "unsupported_schema"
+      ],
+      "title": "ExtractionFailureCode",
+      "type": "string"
+    },
+    "ExtractionFallbackRequired": {
+      "additionalProperties": false,
+      "properties": {
+        "fallback": {
+          "$ref": "#/$defs/FallbackKind"
+        },
+        "kind": {
+          "const": "fallback_required",
+          "title": "Kind",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "timings": {
+          "items": {
+            "$ref": "#/$defs/ExtractionTiming"
+          },
+          "maxItems": 25,
+          "title": "Timings",
+          "type": "array"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "usage_events": {
+          "items": {
+            "$ref": "#/$defs/UsageEvent"
+          },
+          "maxItems": 25,
+          "title": "Usage Events",
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "kind",
+        "fallback",
+        "url",
+        "reason",
+        "retryable",
+        "usage_events",
+        "timings"
+      ],
+      "title": "ExtractionFallbackRequired",
+      "type": "object"
+    },
+    "ExtractionMethod": {
+      "enum": [
+        "static_readability",
+        "crawl4ai"
+      ],
+      "title": "ExtractionMethod",
+      "type": "string"
+    },
+    "ExtractionSuccess": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Author"
+        },
+        "feed_links": {
+          "items": {
+            "format": "uri",
+            "maxLength": 2083,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Feed Links",
+          "type": "array"
+        },
+        "final_url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Final Url",
+          "type": "string"
+        },
+        "kind": {
+          "const": "success",
+          "title": "Kind",
+          "type": "string"
+        },
+        "markdown": {
+          "maxLength": 2000000,
+          "minLength": 1,
+          "title": "Markdown",
+          "type": "string"
+        },
+        "method": {
+          "$ref": "#/$defs/ExtractionMethod"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Published At"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "tables": {
+          "items": {
+            "maxLength": 250000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Tables",
+          "type": "array"
+        },
+        "timings": {
+          "items": {
+            "$ref": "#/$defs/ExtractionTiming"
+          },
+          "maxItems": 25,
+          "title": "Timings",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "usage_events": {
+          "items": {
+            "$ref": "#/$defs/UsageEvent"
+          },
+          "maxItems": 25,
+          "title": "Usage Events",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 25,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "kind",
+        "final_url",
+        "title",
+        "author",
+        "published_at",
+        "markdown",
+        "tables",
+        "feed_links",
+        "method",
+        "warnings",
+        "usage_events",
+        "timings"
+      ],
+      "title": "ExtractionSuccess",
+      "type": "object"
+    },
+    "ExtractionTiming": {
+      "additionalProperties": false,
+      "properties": {
+        "milliseconds": {
+          "maximum": 3600000,
+          "minimum": 0,
+          "title": "Milliseconds",
+          "type": "integer"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "milliseconds"
+      ],
+      "title": "ExtractionTiming",
+      "type": "object"
+    },
+    "FallbackKind": {
+      "enum": [
+        "firecrawl"
+      ],
+      "title": "FallbackKind",
+      "type": "string"
+    },
+    "PubMedDelegation": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "delegation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "next_url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Next Url",
+          "type": "string"
+        },
+        "reason": {
+          "const": "pubmed_full_text",
+          "title": "Reason",
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "timings": {
+          "items": {
+            "$ref": "#/$defs/ExtractionTiming"
+          },
+          "maxItems": 25,
+          "title": "Timings",
+          "type": "array"
+        },
+        "usage_events": {
+          "items": {
+            "$ref": "#/$defs/UsageEvent"
+          },
+          "maxItems": 25,
+          "title": "Usage Events",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 25,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "kind",
+        "next_url",
+        "reason",
+        "warnings",
+        "usage_events",
+        "timings"
+      ],
+      "title": "PubMedDelegation",
+      "type": "object"
+    },
+    "UsageEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "quantity": {
+          "maximum": 100000000,
+          "minimum": 0,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "unit": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "quantity",
+        "unit"
+      ],
+      "title": "UsageEvent",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "delegation": "#/$defs/PubMedDelegation",
+      "failure": "#/$defs/ExtractionFailure",
+      "fallback_required": "#/$defs/ExtractionFallbackRequired",
+      "success": "#/$defs/ExtractionSuccess"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ExtractionSuccess"
+    },
+    {
+      "$ref": "#/$defs/PubMedDelegation"
+    },
+    {
+      "$ref": "#/$defs/ExtractionFallbackRequired"
+    },
+    {
+      "$ref": "#/$defs/ExtractionFailure"
+    }
+  ]
+}

@@ -166,18 +166,31 @@ private final class PreviewAssistantFeedSubscribing: AssistantFeedSubscribing {
             scraperType: feedType,
             displayName: displayName ?? "Preview Feed",
             config: ["feed_url": AnyCodable(feedURL)],
+            feedUrl: nil,
             limit: nil,
             isActive: true,
             createdAt: ChatPreviewFixtures.timestamp,
-            stats: nil
+            stats: nil,
+            subscriptionOutcome: nil,
+            backfillTaskId: nil
         )
     }
 }
 
 @MainActor
+private final class PreviewToastPresenter: ToastPresenting {
+    func show(_ message: String, type: ToastType, duration: TimeInterval) {}
+    func showError(_ message: String) {}
+    func showSuccess(_ message: String) {}
+}
+
+@MainActor
 enum ChatPreviewActionModels {
     static func feedOptions() -> AssistantFeedOptionActionModel {
-        AssistantFeedOptionActionModel(service: PreviewAssistantFeedSubscribing())
+        AssistantFeedOptionActionModel(
+            service: PreviewAssistantFeedSubscribing(),
+            toastPresenter: PreviewToastPresenter()
+        )
     }
 }
 #endif

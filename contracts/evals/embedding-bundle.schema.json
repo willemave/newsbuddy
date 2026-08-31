@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "dimensions": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "items": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "vector": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "text_sha256",
+          "vector"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "model": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "normalization": {
+      "enum": [
+        "none",
+        "l2"
+      ]
+    },
+    "provider_metadata": {
+      "type": "object"
+    },
+    "timings_ms": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "type": "object"
+    },
+    "version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "version",
+    "model",
+    "dimensions",
+    "normalization",
+    "items",
+    "timings_ms"
+  ],
+  "type": "object"
+}

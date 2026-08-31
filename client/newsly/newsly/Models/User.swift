@@ -42,6 +42,24 @@ struct CouncilPersona: Codable, Equatable, Identifiable {
         self.instructionPrompt = instructionPrompt
         self.sortOrder = sortOrder
     }
+
+    init(api response: APICouncilPersonaConfig) {
+        self.init(
+            id: response.id,
+            displayName: response.displayName,
+            instructionPrompt: response.instructionPrompt,
+            sortOrder: response.sortOrder
+        )
+    }
+
+    var apiInput: APICouncilPersonaInput {
+        APICouncilPersonaInput(
+            id: id,
+            displayName: displayName,
+            instructionPrompt: instructionPrompt,
+            sortOrder: sortOrder
+        )
+    }
 }
 
 /// User account model matching backend UserResponse schema
@@ -110,6 +128,25 @@ struct User: Codable, Identifiable, Equatable {
         self.updatedAt = updatedAt
     }
 
+    init(api response: APIUserResponse) {
+        self.init(
+            id: response.id,
+            appleId: response.appleId,
+            email: response.email,
+            fullName: response.fullName,
+            twitterUsername: response.twitterUsername,
+            councilPersonas: response.councilPersonas.map(CouncilPersona.init(api:)),
+            hasXBookmarkSync: response.hasXBookmarkSync,
+            isAdmin: response.isAdmin,
+            isActive: response.isActive,
+            hasCompletedOnboarding: response.hasCompletedOnboarding,
+            hasCompletedNewUserTutorial: response.hasCompletedNewUserTutorial,
+            readingExperience: response.readingExperience,
+            createdAt: response.createdAt,
+            updatedAt: response.updatedAt
+        )
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)
@@ -133,50 +170,7 @@ struct User: Codable, Identifiable, Equatable {
     }
 }
 
-/// Token response from authentication endpoints
-struct TokenResponse: Codable {
-    let accessToken: String
-    let refreshToken: String
-    let tokenType: String
-    let user: User
-    let isNewUser: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
-        case refreshToken = "refresh_token"
-        case tokenType = "token_type"
-        case user
-        case isNewUser = "is_new_user"
-    }
-}
-
 struct AuthSession: Equatable {
     let user: User
     let isNewUser: Bool
-}
-
-struct UpdateUserProfileRequest: Codable {
-    let fullName: String?
-    let twitterUsername: String?
-    let councilPersonas: [CouncilPersona]?
-    let readingExperience: ReadingExperience?
-
-    init(
-        fullName: String? = nil,
-        twitterUsername: String? = nil,
-        councilPersonas: [CouncilPersona]? = nil,
-        readingExperience: ReadingExperience? = nil
-    ) {
-        self.fullName = fullName
-        self.twitterUsername = twitterUsername
-        self.councilPersonas = councilPersonas
-        self.readingExperience = readingExperience
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case fullName = "full_name"
-        case twitterUsername = "twitter_username"
-        case councilPersonas = "council_personas"
-        case readingExperience = "reading_experience"
-    }
 }

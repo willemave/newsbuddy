@@ -1,0 +1,40 @@
+{
+  "method": "POST",
+  "operation_id": "createShareAction",
+  "path": "/api/share-actions",
+  "request": {
+    "instruction": "Save this article",
+    "mode": "add_content",
+    "url": "https://example.com/article"
+  },
+  "responses": {
+    "202": {
+      "actions": [],
+      "created_at": "2026-08-30T12:00:00Z",
+      "mode": "add_content",
+      "status": "queued",
+      "task_id": 8801,
+      "workflow_state": "queued"
+    },
+    "422": {
+      "code": "validation_error",
+      "details": {
+        "errors": [
+          {
+            "input": {},
+            "loc": [
+              "body",
+              "url"
+            ],
+            "msg": "Field required",
+            "type": "missing"
+          }
+        ]
+      },
+      "message": "Request validation failed",
+      "request_id": "fixture-request-id",
+      "retryable": false
+    }
+  },
+  "version": 1
+}

@@ -29,7 +29,7 @@ struct OnboardingRedditStep: View {
                         OnboardingSuggestionSection(
                             title: "SUBREDDITS",
                             items: viewModel.subredditSuggestions,
-                            isSelected: { viewModel.selectedSubreddits.contains($0.subreddit ?? "") },
+                            isSelected: { viewModel.isSuggestionSelected($0) },
                             onToggle: { viewModel.toggleSubreddit($0) }
                         )
                     }
@@ -45,7 +45,7 @@ struct OnboardingRedditStep: View {
 
     private var footer: some View {
         VStack(spacing: 10) {
-            Text("\(viewModel.selectedSubreddits.count) selected")
+            Text("\(viewModel.selectedSubredditSuggestionCount) selected")
                 .font(.appCaption.weight(.semibold))
                 .monospacedDigit()
                 .foregroundColor(.onboardingText.opacity(0.65))
@@ -79,11 +79,11 @@ struct OnboardingRedditStep: View {
     }
 
     private var selectedLongformCount: Int {
-        viewModel.selectedSourceKeys.count
+        viewModel.selectedLongformSuggestionCount
     }
 
     private var selectedShortformCount: Int {
-        viewModel.selectedAggregators.count + viewModel.selectedSubreddits.count
+        viewModel.selectedAggregators.count + viewModel.selectedSubredditSuggestionCount
     }
 
     private var completionPrimaryTitle: String {

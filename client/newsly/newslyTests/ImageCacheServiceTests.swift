@@ -34,29 +34,6 @@ final class ImageCacheServiceTests: XCTestCase {
         XCTAssertEqual(requests.snapshot.requestCount, 1)
     }
 
-    func testPrefetchBoundsConcurrentDownloads() async throws {
-        let fixture = makePNGData()
-        let requests = LockedRequestMetrics()
-        ImageCacheURLProtocol.requestHandler = { request in
-            requests.beginRequest()
-            defer { requests.endRequest() }
-            Thread.sleep(forTimeInterval: 0.05)
-            return Self.response(for: request, data: fixture)
-        }
-
-        let (cache, session, directory) = try makeCache()
-        defer {
-            session.invalidateAndCancel()
-            try? FileManager.default.removeItem(at: directory)
-        }
-        let urls = (0..<8).map { URL(string: "https://images.example.test/\($0).png")! }
-
-        await cache.prefetch(urls: urls, maximumConcurrentDownloads: 2)
-
-        XCTAssertEqual(requests.snapshot.requestCount, urls.count)
-        XCTAssertLessThanOrEqual(requests.snapshot.peakConcurrentCount, 2)
-    }
-
     func testStableIdentifierReusesImageAcrossRotatingSignedURLs() async throws {
         let fixture = makePNGData()
         let requests = LockedRequestMetrics()

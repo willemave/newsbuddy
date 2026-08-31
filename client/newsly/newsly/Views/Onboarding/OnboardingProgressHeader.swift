@@ -35,7 +35,9 @@ struct OnboardingProgressHeader: View {
 
     private var currentStepInfo: (number: Int, label: String) {
         switch step {
-        case .intro, .choice:
+        case .intro:
+            return (1, "Say hello")
+        case .choice:
             return (1, "Choose your start")
         case .audio, .loading:
             return (2, step == .audio ? "Voice setup" : "Matching sources")

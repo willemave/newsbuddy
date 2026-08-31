@@ -164,7 +164,9 @@ DEFAULT_RUNWARE_MODEL = "bytedance:seedream@5.0-lite"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-5.4-image-2"
 
 
-def gen_runware(prompt: str, out: Path, model: str = DEFAULT_RUNWARE_MODEL) -> None:
+def gen_runware(
+    prompt: str, out: Path, model: str = DEFAULT_RUNWARE_MODEL, size: int = 2048
+) -> None:
     req: dict[str, str | bool | int] = {
         "taskType": "imageInference",
         "taskUUID": str(uuid4()),
@@ -174,8 +176,8 @@ def gen_runware(prompt: str, out: Path, model: str = DEFAULT_RUNWARE_MODEL) -> N
         "positivePrompt": prompt,
         "model": model,
         "numberResults": 1,
-        "width": 2048,
-        "height": 2048,
+        "width": size,
+        "height": size,
     }
     r = requests.post(
         RUNWARE_URL,
@@ -185,19 +187,43 @@ def gen_runware(prompt: str, out: Path, model: str = DEFAULT_RUNWARE_MODEL) -> N
     )
     payload = r.json()
     if r.status_code >= 400 or payload.get("errors"):
-        raise RuntimeError(f"runware {r.status_code}: {json.dumps(payload.get('errors'))[:500]}")
+        raise RuntimeError(
+            f"runware {r.status_code}: {json.dumps(payload.get('errors'))[:500]}"
+        )
     url = payload["data"][0]["imageURL"]
     out.write_bytes(requests.get(url, timeout=120).content)
     print(f"  cost: ${payload['data'][0].get('cost')}")
 
 
-def gen_openrouter(prompt: str, out: Path, model: str = DEFAULT_OPENROUTER_MODEL) -> None:
+def gen_openrouter(
+    prompt: str,
+    out: Path,
+    model: str = DEFAULT_OPENROUTER_MODEL,
+    reference: Path | None = None,
+) -> None:
+    """Generate an image, optionally editing from a reference instead of from scratch.
+
+    Text-only prompts drift: re-describing an existing mark reliably produces a different
+    mark. Passing the original as `reference` keeps the silhouette and lets the prompt
+    change only what it names.
+    """
+    if reference is None:
+        content: str | list[dict[str, object]] = prompt
+    else:
+        ref_b64 = base64.b64encode(reference.read_bytes()).decode()
+        content = [
+            {"type": "text", "text": prompt},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{ref_b64}"},
+            },
+        ]
     r = requests.post(
         OPENROUTER_URL,
         headers={"Authorization": f"Bearer {ENV['OPENROUTER_API_KEY']}"},
         json={
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
             "modalities": ["image", "text"],
         },
         timeout=600,
@@ -207,7 +233,9 @@ def gen_openrouter(prompt: str, out: Path, model: str = DEFAULT_OPENROUTER_MODEL
         raise RuntimeError(f"openrouter {r.status_code}: {json.dumps(payload)[:500]}")
     images = payload["choices"][0]["message"].get("images") or []
     if not images:
-        raise RuntimeError(f"openrouter returned no images: {json.dumps(payload)[:500]}")
+        raise RuntimeError(
+            f"openrouter returned no images: {json.dumps(payload)[:500]}"
+        )
     data_url = images[0]["image_url"]["url"]
     b64 = data_url.split(",", 1)[1]
     out.write_bytes(base64.b64decode(b64))
@@ -215,12 +243,16 @@ def gen_openrouter(prompt: str, out: Path, model: str = DEFAULT_OPENROUTER_MODEL
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("ids", nargs="*", help="concept ids to regenerate (default: all pending)")
+    parser.add_argument(
+        "ids", nargs="*", help="concept ids to regenerate (default: all pending)"
+    )
     parser.add_argument(
         "--runware-model",
         help="route every concept through this Runware model instead of the per-concept provider",
     )
-    parser.add_argument("--out", default="images", help="output directory (default: images)")
+    parser.add_argument(
+        "--out", default="images", help="output directory (default: images)"
+    )
     args = parser.parse_args()
 
     out_dir = ROOT / args.out
@@ -234,7 +266,9 @@ def main() -> None:
         if out.exists() and not only:
             print(f"skip {cid} (exists)")
             continue
-        prompt = STYLE_BASE + concept + f" Color palette: {palette}. Square 1:1 composition."
+        prompt = (
+            STYLE_BASE + concept + f" Color palette: {palette}. Square 1:1 composition."
+        )
         label = args.runware_model or provider
         print(f"gen {cid} via {label} ...")
         try:

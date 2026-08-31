@@ -282,7 +282,9 @@ final class APIClientAuthTests: XCTestCase {
                     httpVersion: nil,
                     headerFields: ["Content-Type": "application/json"]
                 )!,
-                Data(#"{"detail":"permission denied"}"#.utf8)
+                Data(
+                    #"{"code":"forbidden","message":"permission denied","details":{"resource":"chat"},"retryable":false,"request_id":"request-1"}"#.utf8
+                )
             )
         }
 
@@ -290,15 +292,67 @@ final class APIClientAuthTests: XCTestCase {
             try await client.requestVoid("/private-resource", method: .get)
             XCTFail("Expected permission failure")
         } catch let error as ClientFailure {
-            guard case .http(let statusCode, _) = error else {
+            guard case .server(let statusCode, let serverError) = error else {
                 return XCTFail("Unexpected ClientFailure: \(error)")
             }
             XCTAssertEqual(statusCode, 403)
+            XCTAssertEqual(serverError.code, "forbidden")
+            XCTAssertEqual(serverError.message, "permission denied")
+            XCTAssertFalse(serverError.retryable)
+            XCTAssertEqual(serverError.requestID, "request-1")
+            XCTAssertEqual(serverError.detailsJSON, Data(#"{"resource":"chat"}"#.utf8))
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
 
         XCTAssertEqual(refresher.refreshCallCount, 0)
+    }
+
+    func testTypedAuthentication403RefreshesWithoutInspectingEnglishMessage() async throws {
+        let session = makeSession()
+        let tokenStore = MockTokenStore(
+            accessToken: "stale-access-token",
+            refreshToken: "refresh-token"
+        )
+        let refresher = MockCredentialSession(
+            tokenStore: tokenStore,
+            result: .success("fresh-access-token")
+        )
+        let client = APIClient(
+            session: session,
+            credentialSession: refresher
+        )
+        let requestCounter = LockedCounter()
+        MockURLProtocol.requestHandler = { request in
+            requestCounter.increment()
+            if requestCounter.value == 1 {
+                return (
+                    HTTPURLResponse(
+                        url: try XCTUnwrap(request.url),
+                        statusCode: 403,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"]
+                    )!,
+                    Data(
+                        #"{"code":"authentication_expired","message":"Session unavailable","details":null,"retryable":false,"request_id":"request-2"}"#.utf8
+                    )
+                )
+            }
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 204,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data()
+            )
+        }
+
+        try await client.requestVoid("/private-resource", method: .get)
+
+        XCTAssertEqual(requestCounter.value, 2)
+        XCTAssertEqual(refresher.refreshCallCount, 1)
     }
 
     func testConditionalReadPreservesHeadersAndAllowed304() async throws {

@@ -1,189 +1,65 @@
 ---
 name: daily-checkup
-description: "Run a daily production checkup for Newsly using the admin CLI: inspect recent logs, recent exceptions, LLM usage, and cost stats, then produce a concise set of suggested fixes."
+description: Run a read-only Newsly production sweep using the Rust operator, container logs, queue failures, and model/vendor usage. Use for daily checkups, morning reviews, or quick deployed-system health reports; do not use it to mutate production.
 ---
 
 # Daily Checkup
 
-Use this skill when the user asks for a daily checkup, production sweep, morning review, or a quick operational summary of the deployed Newsly system.
+Inspect the last 24 hours by default and return a concise, evidence-backed
+health report. This skill is read-only. A request to fix, commit, push, or
+deploy is a separate authorization and workflow.
 
-## Goal
-- Inspect recent remote production signals with the `admin` CLI.
-- Include a short LLM usage and cost readout for the same window.
-- Summarize what looks healthy, noisy, or broken.
-- End with concrete suggested fixes, ordered by severity.
+## Runtime boundary
 
-## Fast Rules
-- Use the `admin` CLI, not ad hoc SSH, unless the CLI cannot answer the question.
-- Default window: last 24 hours.
-- Prefer concise findings over raw output dumps.
-- Do not apply fixes unless the user explicitly asks.
-- If one command fails, report that clearly and continue with the others when possible.
+Use the Rust `newsly-admin` binary inside a healthy production application
+container so it inherits the deployed database environment. Use the existing
+remote/container access mechanism; do not recreate or invoke the retired Python
+`admin` package.
 
-## Mode
-- Bare `daily-checkup`, `production sweep`, or `morning review` means triage and report only.
-- `investigate production` means gather live evidence first, trace the relevant code path, and report root cause plus the smallest durable fix before patching unless the user clearly asked for implementation.
-- `yes fix`, `fix it`, or `remediate` means apply the narrow approved fix, then verify with the same live signal that exposed the issue.
-- `commit`, `push`, or `deploy` are separate explicit requests. Do not infer them from a checkup.
-
-## Time Window
-Compute a UTC `since` timestamp for the last 24 hours:
+For a local checkout, the equivalent prefix is:
 
 ```bash
-SINCE="$(uv run python - <<'PY'
-from datetime import UTC, datetime, timedelta
-print((datetime.now(UTC) - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ'))
-PY
-)"
+cargo run --manifest-path rust/Cargo.toml --locked -p newsly-admin --
 ```
 
-## Workflow
+Production logs come from the container runtime, not `newsly-admin`. Read the
+bounded unified application stream and include the extractor only when an
+extraction symptom makes it relevant. Never dump environment variables,
+credentials, task payloads, or unrestricted database rows.
 
-### 1) Recent logs
-Start with the live container stream:
+## Evidence to collect
+
+Run the Rust operator in JSON mode where possible:
 
 ```bash
-uv run admin logs tail --limit 200
+newsly-admin --output json health snapshot
+newsly-admin --output json health queue --window-hours 24 --top-errors-limit 20
+newsly-admin --output json tasks failures --window-hours 24 --limit 50
+newsly-admin --output json usage summary --window-hours 24 --group-by feature
+newsly-admin --output json usage summary --window-hours 24 --group-by model
+newsly-admin --output json usage summary --window-hours 24 --group-by provider
 ```
 
-Look for:
-- repeated failures or restart loops
-- queue backlogs or stuck worker noise
-- auth, DB, websocket, or provider errors
-- sudden spikes in one subsystem
+Add operation or source usage groupings only when they help explain a spike.
+Use `newsly-admin db query` only for a narrow follow-up that the health/task
+commands cannot answer; it enforces a bounded read-only transaction. If one
+signal fails, identify the missing evidence and continue with the others.
 
-### 2) Recent exceptions
-Pull structured exceptions for the same window:
+In container logs, look for restart loops, repeated worker failures, lease or
+queue churn, database/auth failures, and provider-specific clusters. Correlate
+log claims with the queue/task snapshots rather than inferring health from logs
+alone.
 
-```bash
-uv run admin logs exceptions --since "$SINCE" --limit 200
-```
+## Report
 
-If one noisy component dominates the top of the list, de-bias before concluding the sweep:
+Return four short sections:
 
-```bash
-uv run admin logs exceptions --since "$SINCE" --limit 200
-uv run admin logs search --source errors --query "OperationalError" --since "$SINCE" --limit 50
-uv run admin logs search --source errors --query "recovery mode" --since "$SINCE" --limit 50
-```
+1. **Health** — what is healthy and what needs attention.
+2. **Usage** — calls/tokens/resources/cost and the leading feature, model, and
+   provider, including suspicious zero usage or retry amplification.
+3. **Findings** — highest severity first, with the exact bounded signal.
+4. **Suggested fixes** — one to five scoped next actions tied to findings.
 
-If needed, narrow further:
-
-```bash
-uv run admin logs search --source errors --query timeout --since "$SINCE" --limit 50
-uv run admin logs search --source errors --query ElevenLabs --since "$SINCE" --limit 50
-```
-
-Focus on:
-- dominant `component/operation` pairs
-- repeated identical failures
-- new exception types
-- errors tied to one feature or external dependency
-- whether one recurring error pattern is hiding older but higher-severity incidents earlier in the window
-
-### 3) Recent LLM usage and cost stats
-Inspect usage totals for the same window and include the stats in the final answer:
-
-```bash
-uv run admin usage summary --since "$SINCE" --group-by feature
-uv run admin usage summary --since "$SINCE" --group-by model
-uv run admin usage summary --since "$SINCE" --group-by provider
-```
-
-If a feature, provider, or model dominates cost or tokens, add an operation or source breakdown:
-
-```bash
-uv run admin usage summary --since "$SINCE" --group-by operation
-uv run admin usage summary --since "$SINCE" --group-by source
-```
-
-Use these stats to report:
-- total calls, tokens, requests/resources, and estimated cost
-- top cost driver by feature, model, and provider
-- whether one feature/provider/model is dominating spend or token volume
-- whether usage dropped unexpectedly to zero for active features
-- whether retries or provider errors appear to be amplifying usage
-
-Use this to spot:
-- unusual cost spikes
-- one feature dominating calls or tokens
-- model/provider drift
-- usage dropping unexpectedly to zero
-
-## Output Shape
-Respond in 4 short sections:
-
-### Health
-- what looks normal
-- anything worth watching
-
-### LLM Usage
-- report the window totals: calls, tokens, requests/resources, and estimated cost
-- name the top feature, model, and provider by cost or tokens
-- call out cost spikes, zero-usage surprises, model/provider drift, or retry amplification
-- if usage checks fail, say which command failed and keep the rest of the checkup moving
-
-### Findings
-- highest-severity issue first
-- include the signal that proves it
-- mention missing or failed checks explicitly
-
-### Suggested Fixes
-- give 1-5 concrete next actions
-- tie each action to an observed issue
-- prefer specific CLI follow-ups such as:
-
-```bash
-uv run admin health snapshot
-uv run admin db query --sql 'select id, task_type, status, content_id from processing_tasks order by id desc limit 20'
-uv run admin fix requeue-stale --hours 4
-uv run admin fix reset-content --hours 24
-```
-
-## Suggested Fix Heuristics
-
-### Logs show repeated worker backlog or stale queue noise
-Suggested fixes:
-- inspect task state with `admin db query`
-- preview `uv run admin fix requeue-stale --hours 4`
-- if approved, apply the requeue fix
-
-### Exceptions cluster around one feature
-Suggested fixes:
-- isolate the failing feature with `admin logs search`
-- inspect recent related DB rows
-- disable or reduce the failing path only if the user asks
-
-### LLM usage spikes sharply
-Suggested fixes:
-- compare `feature`, `model`, `provider`, `operation`, and `source` summaries
-- identify the feature driving cost
-- inspect recent exceptions to see whether retries amplified usage
-
-### LLM usage drops unexpectedly
-Suggested fixes:
-- check recent logs for provider/auth failures
-- check exceptions for a shared upstream dependency
-- verify the feature still emits normal task flow
-
-### Provider-specific errors dominate
-Suggested fixes:
-- confirm whether the issue is isolated to one provider
-- recommend fallback or retry policy review
-- inspect credential/config state only if the user asks for remediation
-
-## Remediation Rules
-- Before changing code or production state, identify the decisive signal: log line, exception cluster, DB row, queue state, health snapshot, or config/container mismatch.
-- Keep fixes scoped to the observed failure class. Do not fold in adjacent cleanup unless the user asks.
-- After applying a fix, rerun the smallest relevant live check, such as `admin health snapshot`, focused `logs exceptions`, a targeted DB query, or the specific admin fix preview/apply output.
-- If the user asks to commit after a narrow fix, check `git status` first and stage only the task files.
-
-## Watchouts
-- `admin logs tail` defaults to Docker and is the best first check.
-- Global CLI flags must come before the subcommand, for example:
-
-```bash
-uv run admin --output json health snapshot
-```
-
-- Keep the final write-up short. The point is triage, not a raw transcript.
+Do not apply a suggested fix during a checkup. If remediation is later
+authorized, first re-read the decisive signal, make the narrowest in-scope
+change, and rerun the smallest check that proves the outcome.

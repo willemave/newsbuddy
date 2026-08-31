@@ -1,0 +1,14 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "user_id": {
+      "title": "User Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "user_id"
+  ],
+  "title": "RequiredUserPayload",
+  "type": "object"
+}

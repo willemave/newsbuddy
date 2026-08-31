@@ -90,31 +90,6 @@ final class AudioEpisodeService {
 
     private init() {}
 
-    func createFastNewsEpisode(
-        delivery: AudioEpisodeDelivery = .background
-    ) async throws -> AudioEpisode {
-        let startedAt = Date()
-        audioEpisodeLogger.info(
-            "Create episode started | kind=fast_news_digest delivery=\(delivery.rawValue, privacy: .public)"
-        )
-        do {
-            let episode: AudioEpisode = try await client.request(
-                APIEndpoints.fastNewsAudioEpisode,
-                method: .post,
-                queryItems: [URLQueryItem(name: "delivery", value: delivery.rawValue)]
-            )
-            audioEpisodeLogger.info(
-                "Create episode completed | kind=fast_news_digest episodeId=\(episode.id) status=\(episode.status.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds(since: startedAt)) hasStream=\(episode.streamUrl != nil)"
-            )
-            return episode
-        } catch {
-            audioEpisodeLogger.error(
-                "Create episode failed | kind=fast_news_digest elapsedMs=\(elapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .private)"
-            )
-            throw error
-        }
-    }
-
     func createContentCouncilEpisode(
         contentId: Int,
         delivery: AudioEpisodeDelivery = .background

@@ -1,82 +1,61 @@
-# Python
-__pycache__/
-*.py[cod]
-.news_app.egg-info
-news_app.egg-info
+# Dependencies, build output, and caches
 node_modules/
-# Environments
-.env
-.env.*
-!.env.example
-.code/
-client/newsly/newsly.xcodeproj/project.xcworkspace/xcuserdata/willem.xcuserdatad/*.xcuserstate
-news_app.db
-logs/
-logs_from_server/
-.tmp/
-.worktrees/
-.githooks/
-
-.tmp/*
-
-static/
-
-*.out
-
-data/*
-docker/local-data/
-
-# SQLite database
-*.db
-*.sqlite3
-
-db/*
-
-# Log files (including LLM response debugging logs)
-logs/
-
-# Byte-compiled / optimized / DLL files
-*.pyc
-*.pyo
-*.pyd
-
+rust/target/
 build/
 .build/
 .deriveddata/
 .derived-data/
-*.png
-!docs/assets/newsbuddy-hero.png
-!client/newsly/newsly/Assets.xcassets/AppIcon.appiconset/*.png
-!tests/ios_e2e/baselines/
-!tests/ios_e2e/baselines/**/
-!tests/ios_e2e/baselines/**/*.png
-tests/ios_e2e/baselines/**/*_diff.png
-!tests/fixtures/images/
-!tests/fixtures/images/**/
-!tests/fixtures/images/**/*.png
-*.db-shm
-*.db-wal
+*.out
 
-# Mac/Linux system files
-.DS_Store
-
-package-lock.json
-
-# Refactor backup and migration files
-.refactor-backup/
-.migration-test-db/
-.worktrees/
-*.pyc
+# Python islands and repository tooling
 __pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# SSL certificates
+# Environments and local credentials
+.env
+.env.*
+!.env.example
 certs/
 *.pem
 *.key
 *.crt
+
+# Runtime state and local artifacts
+data/
+db/
+docker/local-data/
+logs/
+logs_from_server/
+static/
+*.db
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Visual artifacts; retain product and reference assets
+*.png
+!docs/assets/newsbuddy-hero.png
+!docs/brand-exploration-2026-08/images_r2/*.png
+!docs/brand-exploration-2026-08/images_r3/*.png
+!client/newsly/newsly/Assets.xcassets/AppIcon.appiconset/*.png
+!client/newsly/Maestro/baselines/**/*.png
+client/newsly/Maestro/baselines/**/*_diff.png
+
+# Local tools, editors, and operating-system state
+.DS_Store
+.code/
+.claude/
+.githooks/
+.tmp/
+.worktrees/
+.local_dumps/
+.refactor-backup/
+.migration-test-db/
 
 # Xcode user data
 **/xcuserdata/
@@ -85,8 +64,4 @@ certs/
 outputs/
 test-results/
 tmp/ios-performance-traces/
-.local_dumps/
 work/knowledge_summary_eval_*/
-
-# Local agent/editor state
-.claude/

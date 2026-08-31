@@ -11,8 +11,6 @@ import Observation
 @MainActor
 @Observable
 final class ChatNavigationCoordinator {
-    static let shared = ChatNavigationCoordinator()
-
     /// App-level sink for chat entry routes originating outside the current
     /// navigation stack (notifications, content actions, quick actions, etc.).
     private var pendingRoutes: [ChatSessionRoute] = []

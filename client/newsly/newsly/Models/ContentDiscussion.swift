@@ -60,15 +60,14 @@ struct ContentDiscussion: Codable {
     // JSON. `stats` stays AnyCodable: its keys vary by discussion platform/mode and
     // are not consumed by the app (see ContentDiscussionResponse.stats on the
     // backend, an intentional escape hatch).
-    init(from decoder: Decoder) throws {
-        let response = try APIContentDiscussionResponse(from: decoder)
+    init(api response: APIContentDiscussionResponse) {
         contentId = response.contentId
         status = response.status
         mode = response.mode.rawValue
         platform = response.platform
         sourceURL = response.sourceUrl
         discussionURL = response.discussionUrl
-        fetchedAt = response.fetchedAt
+        fetchedAt = response.fetchedAt.map(ServerDate.format)
         errorMessage = response.errorMessage
         comments = response.comments.map(DiscussionComment.init(api:))
         discussionGroups = response.discussionGroups.map(DiscussionGroup.init(api:))
@@ -76,6 +75,10 @@ struct ContentDiscussion: Codable {
         summary = response.summary.map(DiscussionSummary.init(api:))
         commentCount = response.commentCount
         stats = response.stats
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(api: try APIContentDiscussionResponse(from: decoder))
     }
 
     func encode(to encoder: Encoder) throws {
@@ -146,7 +149,7 @@ struct DiscussionSummary: Codable {
         notableLinks = response.notableLinks.map(DiscussionSummaryLink.init(api:))
         representativeComments = response.representativeComments.map(DiscussionSummaryComment.init(api:))
         externalDiscussionURL = response.externalDiscussionUrl
-        generatedAt = response.generatedAt
+        generatedAt = response.generatedAt.map(ServerDate.format)
     }
 
     enum CodingKeys: String, CodingKey {

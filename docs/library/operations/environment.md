@@ -1,105 +1,112 @@
-# Newsly Development Guide
----
+# Newsly Development Environment
 
-## 1. Python / FastAPI Coding Rules
+Newsly's application backend is the Rust workspace under `rust/`.
+Newsly-owned Python has two isolated projects: `python/document_extractor` for
+the database-free Crawl4AI service and `python/evals` for offline model and
+embedding work. The application image's pinned third-party `yt-dlp` executable
+may bring its own Python runtime, but it is a Rust-controlled media tool rather
+than an application package.
 
-* **Functions over classes**.
-* **Full type hints**; validate with **Pydantic v2** models. Use `typing` for complex types.
-* **RORO** pattern (receive object, return object).
-* `lower_snake_case` for files/dirs; verbs in variables (`is_valid`, `has_permission`).
-* Guard-clause error handling; early returns over nested `else`.
-* **Docstrings**: Use Google-style for all public functions/classes.
-* **Constants**: Define in `app/constants.py` or module-level UPPER_CASE.
+## Native local runtime
 
----
+Install Rust 1.94.1, PostgreSQL 15 or newer, and `uv`. On macOS, the setup
+helper installs and starts Homebrew PostgreSQL, creates the local database and
+role, and writes a native SQLx URL to `.env`:
 
-## 2. FastAPI Best Practices
-
-* Use **lifespan** context, not `startup/shutdown` events.
-* Inject DB/session with dependencies; use `Annotated` for cleaner signatures.
-* Middleware order matters: logging → tracing → CORS → error capture.
-
----
-
-## 3. Code Quality & Safety
-
-* **No hardcoded secrets**; use `pydantic-settings` for config management.
-* **Input validation**: Always validate at boundaries (API, external services).
-* **SQL injection prevention**: Use parameterized queries, never f-strings.
-* **Graceful degradation**: Circuit breakers for external services.
-* **Error context**: Include request IDs, user context in error logs.
-
----
-
-## 5. Development Workflow
-
-* **Pre-commit hooks**: `ruff` for linting/formatting
-* **Environment management**: `.env.example` template; never commit `.env`. Use `app/core/settings.py` and Pydantic for settings.
-* **Database migrations**: Alembic with descriptive revision messages.
-* **Error responses**: Consistent format with error codes, messages, details.
-* **Tailwind CSS**: Write admin styles to `./app/admin_web/static/css/styles.css`, build with:
-  ```bash
-  npm run build:css
-  ```
-
----
-
-## 6. Package & Dev Tools
-
-### Package Management (uv)
 ```bash
-uv sync                    # Install all dependencies
-uv add <package>           # Add dependency
-uv add --dev <package>     # Add dev dependency
-source .venv/bin/activate  # Activate venv
-```
-
-### Database
-```bash
-alembic -c migrations/alembic.ini upgrade head       # Apply migrations
-alembic -c migrations/alembic.ini revision -m "..."  # Create migration
-```
-
-### Code Quality
-```bash
-ruff check .               # Lint
-ruff format .              # Format
-pytest tests/ -v       # Run tests
-```
-
-### Running the App
-```bash
-# Local development uses native host services plus local PostgreSQL.
-# Reserve Docker for staging/production-style runs.
-uv sync && . .venv/bin/activate
+cp .env.example .env
 ./scripts/setup_local_postgres.sh
-alembic -c migrations/alembic.ini upgrade head
-scripts/start_server.sh              # API server
-scripts/start_workers.sh             # Task workers
-scripts/start_scrapers.sh            # Content scrapers
+./scripts/start_services.sh all --env-file .env
 ```
 
----
+The unified launcher accepts `server`, `workers`, `scheduler`, `extractor`, and
+`migrate` in addition to `all`. Scraper scheduling and queue recovery belong to
+the Rust scheduler; there are no separate scraper or watchdog processes.
 
-## 7. Preferred Dev Tools
+For a complete local end-to-end run, choose an unoccupied API port and use the
+bounded pool profile:
 
-* **LLM internet search**: Use the EXA MCP `web_search_exa` tool for any web/internet lookups (and `get_code_context_exa` for external API/library docs).
-
-| Tool | Purpose | Example |
-|------|---------|---------|
-| **fd** | Fast file finder | `fd -e py foo` |
-| **rg** | Fast code search | `rg "TODO"` |
-| **ast-grep (sg)** | AST-aware search | `sg -p 'if ($A) { $B }'` |
-| **jq** | JSON processor | `cat data.json \| jq '.items'` |
-| **fzf** | Fuzzy finder | `history \| fzf` |
-| **bat** | Better cat | `bat file.py` |
-| **eza** | Modern ls | `eza -l --git` |
-| **httpie** | HTTP client | `http GET api/foo` |
-| **delta** | Better git diff | `git diff` (with config) |
-
-
-### Environment Variables (Required)
 ```bash
-DATABASE_URL="postgresql+psycopg://newsly:change-me@127.0.0.1:5432/newsly"
-JWT_SECRET_KEY=<generate with: python -c "import secrets; print(secrets.token_urlsafe(32))">
-ADMIN_PASSWORD=<secure-password>
+./scripts/start_services.sh all --env-file .env --local-e2e --port 8010
+./scripts/codex_run_ios.sh --api-base-url http://127.0.0.1:8010
+# or: ./scripts/axe_simulator_smoke.sh --api-base-url http://127.0.0.1:8010
+```
+
+The profile forces one pooled PostgreSQL connection per background process and
+two for the API, in addition to the queue listeners. The launcher supervises
+the extractor and Rust processes as direct children and terminates the rest of
+the stack if one exits unexpectedly.
+
+## Rust dependencies and checks
+
+```bash
+cd rust
+cargo fetch --locked
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+Use `cargo add -p <crate> <dependency>` for Rust dependencies. Do not add an
+application dependency to a root Python project.
+
+## Python islands
+
+Each Python island has its own project metadata, lock, environment, and checks:
+
+```bash
+uv sync --project python/document_extractor --frozen --group dev
+uv run --project python/document_extractor pytest -q python/document_extractor/tests
+
+uv sync --project python/evals --frozen --group dev
+uv run --project python/evals mypy --config-file python/evals/pyproject.toml \
+  python/evals/src python/evals/scripts python/evals/tests
+uv run --project python/evals pytest -q python/evals/tests
+```
+
+Neither island may own PostgreSQL, queue, auth, migration, or product state.
+
+## SQLx migrations
+
+Add timestamped reversible pairs under
+`rust/crates/newsly-db/migrations/` and apply them with:
+
+```bash
+scripts/run_sqlx_migrations.sh
+```
+
+An existing database at the frozen pre-SQLx head is adopted once, with every
+writer stopped and the maintenance barrier explicitly attested:
+
+```bash
+NEWSLY_SQLX_BASELINE_ADOPTION=true \
+NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true \
+scripts/run_sqlx_migrations.sh
+```
+
+Remove both one-shot flags after successful adoption. Fresh and already
+adopted databases use the ordinary migration command.
+
+## Public contracts and admin CSS
+
+Rust Utoipa types own public OpenAPI:
+
+```bash
+scripts/regenerate_public_contracts.sh
+scripts/check_public_contracts.sh
+```
+
+Tailwind input and output live under `rust/assets/admin-static/css/`:
+
+```bash
+npm ci
+npm run build:css
+```
+
+## Required local configuration
+
+Start from [`.env.example`](../../../.env.example). The minimum application
+values are a native `DATABASE_URL`, `JWT_SECRET_KEY`, `ADMIN_PASSWORD`, and a
+separate `DOCUMENT_EXTRACTOR_SHARED_SECRET`. Provider and E2B credentials are
+required only for the paths that call those services. Never commit an env file
+or print secret values in diagnostics.

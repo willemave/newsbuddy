@@ -1,0 +1,24 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "provider": {
+      "default": "x",
+      "title": "Provider",
+      "type": "string"
+    },
+    "trigger": {
+      "default": "cron",
+      "title": "Trigger",
+      "type": "string"
+    },
+    "user_id": {
+      "title": "User Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "user_id"
+  ],
+  "title": "SyncIntegrationPayload",
+  "type": "object"
+}

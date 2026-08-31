@@ -86,8 +86,12 @@ final class ScraperSettingsViewModelTests: XCTestCase {
             displayName: displayName,
             config: [:],
             feedUrl: "https://example.com/feed-\(id).xml",
+            limit: nil,
             isActive: true,
-            createdAt: Date(timeIntervalSince1970: TimeInterval(id))
+            createdAt: Date(timeIntervalSince1970: TimeInterval(id)),
+            stats: nil,
+            subscriptionOutcome: nil,
+            backfillTaskId: nil
         )
     }
 
@@ -97,6 +101,9 @@ final class ScraperSettingsViewModelTests: XCTestCase {
             completedCount: 0,
             unreadCount: 0,
             processingCount: 0,
+            latestProcessedAt: nil,
+            latestPublicationAt: nil,
+            nextExpectedAt: nil,
             averageIntervalHours: intervalHours
         )
     }

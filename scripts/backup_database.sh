@@ -19,7 +19,7 @@ Options:
   -h, --help              Show this help
 
 Environment:
-  DATABASE_URL            SQLAlchemy/PostgreSQL database URL to back up
+  DATABASE_URL            PostgreSQL URL to back up
   BACKUP_DIR              Backup directory override
   BACKUP_RETENTION_DAYS   Retention override in days
   NEWSLY_ENV_FILE         Preferred env file to source
@@ -92,35 +92,23 @@ default_backup_dir() {
 }
 
 normalize_database_url() {
-  RAW_DATABASE_URL="$1" python <<'PY'
-import os
-import re
-import sys
+  local raw="$1"
 
-raw = os.environ["RAW_DATABASE_URL"].strip()
-if not raw:
-    print("ERROR: DATABASE_URL is empty.", file=sys.stderr)
-    raise SystemExit(1)
-
-if raw.startswith("postgres://"):
-    print("postgresql://" + raw[len("postgres://"):])
-    raise SystemExit(0)
-
-if raw.startswith("postgresql://"):
-    print(raw)
-    raise SystemExit(0)
-
-match = re.match(r"^postgresql\+[A-Za-z0-9_]+://", raw)
-if match:
-    print("postgresql://" + raw.split("://", 1)[1])
-    raise SystemExit(0)
-
-print(
-    "ERROR: backup_database.sh only supports PostgreSQL DATABASE_URL values.",
-    file=sys.stderr,
-)
-raise SystemExit(1)
-PY
+  case "${raw}" in
+    postgresql://*)
+      printf '%s\n' "${raw}"
+      ;;
+    postgres://*)
+      printf 'postgresql://%s\n' "${raw#postgres://}"
+      ;;
+    postgresql+*://*)
+      printf 'postgresql://%s\n' "${raw#*://}"
+      ;;
+    *)
+      echo "ERROR: backup_database.sh only supports PostgreSQL DATABASE_URL values." >&2
+      return 1
+      ;;
+  esac
 }
 
 while [[ $# -gt 0 ]]; do

@@ -312,6 +312,11 @@ final class ContentDetailViewModel {
         await task.value
     }
 
+    func resumeReaderBodyIfNeeded(for presentedContent: ContentDetail?) async {
+        guard let presentedContent, readerBody == nil else { return }
+        await loadReaderBody(for: presentedContent)
+    }
+
     private func performReaderBodyLoad(
         for content: ContentDetail,
         token: TaskBag<TaskKey>.Token

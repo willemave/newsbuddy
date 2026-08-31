@@ -15,6 +15,7 @@ private enum LearningDeckReaderLayout {
 struct LearningDeckReaderView: View {
     @Environment(AppLifecycle.self) private var lifecycle
     @Environment(ActiveChatSessionManager.self) private var activeSessionManager
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
 
     private let deck: LearningDeck
     private let viewerURL: URL?
@@ -40,6 +41,7 @@ struct LearningDeckReaderView: View {
             viewerURL: viewerURL,
             lifecycle: lifecycle,
             activeSessionManager: activeSessionManager,
+            dependencyFactory: dependencyFactory,
             onClose: onClose,
             chatService: chatService
         )
@@ -54,8 +56,10 @@ private struct LearningDeckReaderContent: View {
     private let deck: LearningDeck
     private let viewerURL: URL?
     private let onClose: (() -> Void)?
+    private let serverHost: String
 
     @State private var viewModel: LearningDeckReaderViewModel
+    @State private var feedOptionActionModel: AssistantFeedOptionActionModel
     @State private var webController = LearningDeckReaderWebController()
     @State private var portraitChatPresentation: LearningDeckChatPresentation = .peek
     @State private var showLandscapeChat = false
@@ -66,6 +70,7 @@ private struct LearningDeckReaderContent: View {
         viewerURL: URL?,
         lifecycle: AppLifecycle,
         activeSessionManager: ActiveChatSessionManager,
+        dependencyFactory: RootDependencyFactory,
         onClose: (() -> Void)? = nil,
         chatService: (any LearningDeckReaderChatServicing)? = nil
     ) {
@@ -73,13 +78,17 @@ private struct LearningDeckReaderContent: View {
         self.viewerURL = viewerURL
         self.lifecycle = lifecycle
         self.onClose = onClose
+        self.serverHost = dependencyFactory.appSettings.serverHost
         _viewModel = State(
-            initialValue: RootDependencyFactory.makeLearningDeckReaderViewModel(
+            initialValue: dependencyFactory.makeLearningDeckReaderViewModel(
                 deck: deck,
                 lifecycle: lifecycle,
                 activeSessionManager: activeSessionManager,
                 chatService: chatService
             )
+        )
+        _feedOptionActionModel = State(
+            initialValue: dependencyFactory.makeAssistantFeedOptionActionModel()
         )
     }
 
@@ -112,7 +121,8 @@ private struct LearningDeckReaderContent: View {
         }
         .sheet(isPresented: $showLandscapeChat) {
             LearningDeckChatPanel(
-                viewModel: viewModel
+                viewModel: viewModel,
+                feedOptionActionModel: feedOptionActionModel
             )
             .presentationDetents([.medium, .fraction(0.75), .large])
             .presentationDragIndicator(.visible)
@@ -148,6 +158,7 @@ private struct LearningDeckReaderContent: View {
     private func portraitChatFlyover(geometry: GeometryProxy) -> some View {
         LearningDeckChatFlyover(
             viewModel: viewModel,
+            feedOptionActionModel: feedOptionActionModel,
             presentation: $portraitChatPresentation
         )
         .frame(
@@ -181,7 +192,7 @@ private struct LearningDeckReaderContent: View {
 
     private func deckWebView(url: URL) -> some View {
         LearningDeckWebView(
-            url: url.newslyBrowserCompatibleLocalURL,
+            url: url.newslyBrowserCompatibleLocalURL(serverHost: serverHost),
             controller: webController,
             slideContext: $viewModel.currentSlideContext
         )

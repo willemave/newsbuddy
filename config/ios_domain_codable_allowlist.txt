@@ -1,0 +1,16 @@
+# Domain/cache models whose Request/Response suffix is intentionally not a wire DTO.
+# Network code must decode generated API* contracts and map into these types.
+AssistantTurnResponse
+ChatSessionListResponse
+ContentListResponse
+MessageStatusResponse
+MixedSearchResponse
+OnboardingAudioDiscoverRequest
+OnboardingAudioDiscoverResponse
+OnboardingCompleteRequest
+OnboardingCompleteResponse
+OnboardingDiscoveryStatusResponse
+OnboardingFastDiscoverResponse
+OnboardingTutorialResponse
+SendChatMessageResponse
+TweetSuggestionsResponse

@@ -59,7 +59,9 @@ def extract(path: Path) -> dict[str, str | list[str]]:
     fg_img.putdata(fg)
     quant = fg_img.quantize(colors=6, method=Image.Quantize.MEDIANCUT).convert("RGB")
     counts: dict[tuple[int, int, int], int] = {}
-    quantized_pixels = cast(list[tuple[int, int, int]], list(quant.get_flattened_data()))
+    quantized_pixels = cast(
+        list[tuple[int, int, int]], list(quant.get_flattened_data())
+    )
     for px in quantized_pixels:
         counts[px] = counts.get(px, 0) + 1
     ranked = sorted(counts.items(), key=lambda kv: -kv[1])
@@ -98,7 +100,17 @@ def extract(path: Path) -> dict[str, str | list[str]]:
 
 def main() -> None:
     # Each image set gets its own palette file; the site switches between them.
-    sets = {"v1": (IMAGES, "PALETTES"), "v2": (ROOT / "images_v2", "PALETTES_V2")}
+    sets = {
+        "v1": (IMAGES, "PALETTES"),
+        "v2": (ROOT / "images_v2", "PALETTES_V2"),
+        "r2": (ROOT / "images_r2", "PALETTES_R2"),
+        "r3": (ROOT / "images_r3", "PALETTES_R3"),
+        "r4": (ROOT / "images_r4", "PALETTES_R4"),
+        "r5": (ROOT / "images_r5", "PALETTES_R5"),
+        "r6": (ROOT / "images_r6", "PALETTES_R6"),
+        "r7": (ROOT / "images_r7", "PALETTES_R7"),
+        "r8": (ROOT / "images_r8", "PALETTES_R8"),
+    }
     for name, (folder, global_name) in sets.items():
         if not folder.is_dir():
             continue

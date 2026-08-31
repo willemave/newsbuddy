@@ -137,112 +137,6 @@ actor ImageCacheService {
         return image
     }
     
-    /// Cache an image in both memory and disk.
-    func cache(
-        _ image: UIImage,
-        for url: URL,
-        targetPixelSize: Int? = nil,
-        cacheIdentifier: String? = nil
-    ) async {
-        let key = cacheKey(
-            for: url,
-            targetPixelSize: targetPixelSize,
-            cacheIdentifier: cacheIdentifier
-        )
-
-        storeInMemory(image, forKey: key)
-        await saveToDisk(
-            image: image,
-            key: diskCacheKey(for: url, cacheIdentifier: cacheIdentifier)
-        )
-    }
-
-    /// Decode downloaded image data off the view task and cache the original bytes.
-    func cacheImageData(
-        _ data: Data,
-        for url: URL,
-        targetPixelSize: Int? = nil,
-        cacheIdentifier: String? = nil
-    ) async -> UIImage? {
-        guard let image = await preparedImage(from: data, targetPixelSize: targetPixelSize) else {
-            return nil
-        }
-
-        storeInMemory(
-            image,
-            forKey: cacheKey(
-                for: url,
-                targetPixelSize: targetPixelSize,
-                cacheIdentifier: cacheIdentifier
-            )
-        )
-        await saveDataToDisk(
-            data,
-            key: diskCacheKey(for: url, cacheIdentifier: cacheIdentifier)
-        )
-        return image
-    }
-    
-    /// Prefetch multiple images while bounding network and disk pressure.
-    func prefetch(urls: [URL], maximumConcurrentDownloads: Int = 4) async {
-        var seenURLs: Set<URL> = []
-        let urls = urls.filter { seenURLs.insert($0).inserted }
-        guard !urls.isEmpty else { return }
-
-        let concurrency = min(max(maximumConcurrentDownloads, 1), urls.count)
-        await withTaskGroup(of: Void.self) { group in
-            var iterator = urls.makeIterator()
-
-            for _ in 0..<concurrency {
-                guard let url = iterator.next() else { break }
-                group.addTask {
-                    _ = await self.cachedOrDownloadedData(for: url)
-                }
-            }
-
-            while await group.next() != nil {
-                guard let url = iterator.next() else { continue }
-                group.addTask {
-                    _ = await self.cachedOrDownloadedData(for: url)
-                }
-            }
-        }
-    }
-    
-    /// Clear all cached images.
-    func clearCache() async {
-        inFlightImagePreparations.values.forEach { $0.cancel() }
-        inFlightImagePreparations.removeAll()
-        inFlightDataDownloads.values.forEach { $0.cancel() }
-        inFlightDataDownloads.removeAll()
-
-        // Clear memory cache
-        memoryCache.removeAllObjects()
-
-        let fileURLs: [URL]
-        do {
-            fileURLs = try fileManager.contentsOfDirectory(
-                at: cacheDirectory,
-                includingPropertiesForKeys: nil
-            )
-        } catch {
-            imageCacheLogger.error(
-                "Failed to enumerate image cache during clear | path=\(self.cacheDirectory.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
-            )
-            return
-        }
-        
-        for fileURL in fileURLs {
-            do {
-                try fileManager.removeItem(at: fileURL)
-            } catch {
-                imageCacheLogger.error(
-                    "Failed to remove cached image during clear | path=\(fileURL.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
-                )
-            }
-        }
-    }
-    
     // MARK: - Private Methods
     
     private func cacheKey(
@@ -319,12 +213,6 @@ actor ImageCacheService {
         }
     }
     
-    private func saveToDisk(image: UIImage, key: String) async {
-        guard let data = image.pngData() else { return }
-
-        await saveDataToDisk(data, key: key)
-    }
-
     private func saveDataToDisk(_ data: Data, key: String) async {
         let fileURL = diskCacheURL(for: key)
 

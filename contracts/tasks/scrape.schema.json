@@ -1,0 +1,28 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "first_edition_run_id": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "First Edition Run Id"
+    },
+    "sources": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Sources",
+      "type": "array"
+    }
+  },
+  "title": "ScrapePayload",
+  "type": "object"
+}

@@ -1,61 +1,165 @@
 # Coding Guidelines
 
-For SwiftUI app and share extension conventions, use
+For SwiftUI app and Share Extension conventions, use
 [`docs/coding-guidelines-ios.md`](coding-guidelines-ios.md).
 
-## Local Patterns
+## Rust boundaries
 
-FastAPI route shape:
+The production backend is the Cargo workspace under `rust/`:
 
-```python
-@router.get("/items", response_model=ContentListResponse)
-def list_news_items(
-    db: Annotated[Session, Depends(get_readonly_db_session)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> ContentListResponse:
-    return list_visible_news_items(db, user_id=require_user_id(current_user))
+- `newsly-api` owns Axum routes, middleware, and the Utoipa public contract;
+- `newsly-domain` owns product types and state rules;
+- `newsly-db` owns shared SQLx repositories, cross-feature transactions, and
+  migrations;
+- feature crates may keep private SQLx repository modules beside their owning
+  workflow when the query is not a shared persistence contract;
+- `newsly-queue` owns lease, retry, deferral, and transition semantics;
+- `newsly-worker` owns task executors and process entrypoints;
+- `newsly-providers` owns external provider adapters;
+- `newsly-agent-runtime` wraps Rig and keeps SDK types out of durable state;
+- `newsly-e2b` owns direct E2B control-plane and ConnectRPC transport.
+
+Routes parse and authorize requests, invoke one application operation, and map
+the result into the typed response/error envelope. They do not contain SQL,
+provider calls, queue policy, or domain state machines.
+
+SQL belongs in a repository module. Shared persistence contracts and
+cross-feature transactions belong in `newsly-db`; a feature-local query may
+remain private to its owning runtime crate. Prefer `query!` and `query_as!` when
+practical and always bind values. Complex PostgreSQL features such as
+`SKIP LOCKED`, advisory locks, partial indexes, FTS, and compare-and-set updates
+should remain explicit SQL rather than being hidden behind a second ORM.
+
+Provider and agent crates do not depend on `newsly-db`. A durable record uses a
+Newsly-owned type and versioned encoding; Rig, `async-openai`, ConnectRPC, and
+E2B representations are transient adapter details.
+
+## Long-running work
+
+Every worker and provider-backed command follows the same shape:
+
+```text
+short prepare transaction
+  -> owned, immutable work plan
+  -> external work with no DB transaction or checked-out connection
+  -> fresh short finalize transaction
+  -> revalidate owner, lease/generation, and product lifecycle
 ```
 
-Structured logging shape:
+Lease loss or cancellation stops progress publication and prevents final state
+from committing. Do not solve long transaction ownership with a larger pool,
+detached ORM state, or a timeout increase.
 
-```python
-logger.error(
-    "Unable to resolve feed config for content",
-    extra={
-        "component": "feed_backfill",
-        "operation": "resolve_config",
-        "item_id": str(content.id),
-    },
-)
-```
+External retries must follow the operation's idempotency contract. An E2B
+command whose delivery is ambiguous is reattached by durable sandbox/process
+identity; it is never blindly started again.
 
-Settings shape:
+## Contracts and errors
 
-```python
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
+Use Serde for encoding, Utoipa for public OpenAPI, Schemars for provider/tool
+schemas, and explicit validators or `TryFrom` conversions for constrained
+domain types.
 
-    database_url: PostgresDsn
-    cors_allow_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
-```
+Audit these details for every changed wire type:
 
-## Tests and Checks
+- absent versus explicit `null`;
+- defaulted versus required fields;
+- tagged unions and open versus closed enums;
+- aliases and request-only or response-only fields;
+- RFC 3339 UTC timestamps serialized with `Z`;
+- legacy JSONB lenience versus strict new inputs.
 
-- Add tests for new functionality under `tests/` when you change production behavior.
-- Scripts under `scripts/` do not need tests unless the task specifically asks for them.
-- If you change the admin CLI, bug-test the touched CLI commands with `pytest tests/admin -v` and `ruff check admin tests/admin` before handoff when possible.
-- Run `ruff check` on touched Python files, or the repo, before handoff when possible.
-- Use `pytest tests/ -v` for relevant validation when behavior changes.
+Public failures use the shared typed error envelope. Log the internal source
+with structured `tracing` fields, but return only stable codes, bounded safe
+details, and the request identifier.
 
-## Common Commands
+The Rust Utoipa document is the public route/schema authority. Regenerate and
+check the checked-in corpus after an intentional HTTP change:
 
 ```bash
-uv sync && . .venv/bin/activate
-alembic -c migrations/alembic.ini upgrade head
-scripts/dev.sh
-ruff check .
-ruff format .
-pytest tests/ -v
-uv run -m admin logs exceptions --limit 20
-uv run -m admin logs tail --limit 200
+scripts/regenerate_public_contracts.sh
+scripts/check_public_contracts.sh
 ```
+
+Do not hand-edit generated client artifacts.
+
+## Python islands
+
+Newsly-owned Python is allowed only in:
+
+- `python/document_extractor`: production Crawl4AI extraction behind a
+  database-free, authenticated, versioned contract;
+- `python/evals`: offline datasets, embedding/model experiments, judges, and
+  reports that exercise the real Rust algorithms through `newsly-eval-driver`.
+
+Neither package may read Newsly's database, claim queue rows, run migrations,
+issue user auth tokens, or own product state. The extractor returns typed usage
+events; Rust decides retries and persists them. Evals exchange versioned
+JSON/NDJSON artifacts and must not grow a second production matcher.
+
+The application image may include the pinned third-party `yt-dlp` executable
+and its private Python runtime. Treat it as a Rust-controlled media tool, not a
+place for Newsly application code or workflow ownership.
+
+The Python files in `docs/brand-exploration-2026-08` are a narrow historical
+exception for offline design-asset generation. They are not a package, may not
+be imported by application code, and are excluded from production images. The
+architecture guard rejects Python in every other repository path.
+
+## Tests and checks
+
+Add focused tests beside changed Rust code. Persistence and queue behavior need
+isolated PostgreSQL coverage; provider behavior needs typed fakes plus live
+canaries when SDK or protocol semantics matter. Contract changes require the
+Rust drift check and affected native-client builds/tests.
+
+iOS UI flows and reference images live with the client under
+`client/newsly/Maestro/flows/` and `client/newsly/Maestro/baselines/`. Do not
+recreate a repository-root Maestro tree or a backend `tests/ios_e2e` package.
+
+Before handoff, run the smallest commands that prove the change and record any
+broader gate that remains outstanding:
+
+```bash
+cd rust
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cd ..
+scripts/check_public_contracts.sh
+```
+
+For a Python-island change:
+
+```bash
+uv run --project python/document_extractor ruff check \
+  python/document_extractor/newsly_document_extractor \
+  python/document_extractor/tests
+uv run --project python/document_extractor mypy \
+  python/document_extractor/newsly_document_extractor
+uv run --project python/document_extractor pytest \
+  python/document_extractor/tests -v
+
+uv run --project python/evals ruff check \
+  python/evals/src \
+  python/evals/scripts \
+  python/evals/tests
+uv run --project python/evals mypy \
+  --config-file python/evals/pyproject.toml \
+  python/evals/src \
+  python/evals/scripts \
+  python/evals/tests
+uv run --project python/evals pytest python/evals/tests -v
+```
+
+## Operations
+
+Local development uses native Rust processes and a local PostgreSQL instance.
+Docker is the staging/production runtime. SQLx is the only schema owner. The
+retired Alembic source tree has been removed; its audited catalog survives in
+the SQLx baseline and repository history and must not be recreated.
+
+Use `newsly-admin` for ownership, health, task, usage, eval, and bounded
+read-only database-inspection operations. Use the Rust admin HTTP surface or
+container runtime for logs after narrowing the symptom. Do not create ad hoc
+database-copy or production-mutation scripts.

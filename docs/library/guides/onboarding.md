@@ -32,15 +32,14 @@ Single explainer screen post‑login.
 - “Build a personalized feed in ~30–45 seconds or start with defaults.”
 - Options: **Personalize my feed** / **Use defaults**
 
-### Screen 2 — Profile Inputs (personalized path)
+### Screen 2 — Voice discovery (personalized path)
 - Speech-first capture with live transcript.
-- Extracted fields: `first_name` + `interest_topics` (at least one topic required).
-- CTA: Build my profile
+- The server creates a durable discovery run and owns its inferred profile and search lanes.
 - Interstitial: “Building your profile…”
 
 ### Screen 3 — Recommended Sources (pods/substacks)
-- Uses **fast_discover** (sync) to suggest sources.
-- User selects from list; can search/refresh.
+- Polls the durable discovery run and presents persisted suggestions with stable IDs.
+- User selects from the server-owned proposals.
 - CTA: Continue
 
 ### Screen 4 — Optional Subreddits
@@ -67,7 +66,7 @@ Single explainer screen post‑login.
 
 ### Three Phases (Backend)
 1) **Create User**: via `/auth/apple` (only if user doesn’t exist).
-2) **Onboarding**: sync fast discovery + selections, then async crawler setup.
+2) **Onboarding**: durable audio discovery + run-owned selections, then async crawler setup.
 3) **Tutorial**: persisted completion flag so it only shows once.
 
 ### Fast vs Async Discovery
@@ -77,10 +76,9 @@ Single explainer screen post‑login.
   - Output used to populate Screen 3 immediately.
   - If timeout/failure → fallback to defaults.
 
-- **discover_enrich (async)**
-  - Runs after onboarding completion.
-  - Expands coverage, re‑ranks, dedupes, fills gaps.
-  - Can add suggestions silently (no blocking UI).
+- **feed discovery (async)**
+  - Runs as a separate post-completion workflow when no active discovery task exists.
+  - Expands coverage without replaying the completed onboarding discovery run.
 
 ### Source Inputs
 - Exa AI search results based on name + handle.
@@ -94,9 +92,10 @@ Single explainer screen post‑login.
 - `has_completed_new_user_tutorial: bool` (default false)
 
 ### Onboarding Selections
-- `selected_sources` (substack / atom / podcast_rss)
-- `selected_subreddits` (optional)
-- Persisted at completion.
+- `discovery_run_id` identifies the authenticated user's completed personalized run.
+- `selected_suggestion_ids` confirms persisted feed, podcast, and subreddit proposals.
+- Aggregator choices remain explicit manual product choices.
+- The server resolves URLs, titles, subreddit names, and inferred profile context; clients do not echo them.
 
 ---
 
@@ -148,10 +147,18 @@ Response:
 Request:
 ```json
 {
-  "selected_sources": [ ... ],
-  "selected_subreddits": ["MachineLearning", "LocalLLaMA"]
+  "discovery_run_id": 412,
+  "selected_suggestion_ids": [9102, 9104, 9110],
+  "selected_aggregators": [
+    {"key": "hackernews", "title": "Hacker News", "topics": []}
+  ],
+  "twitter_username": null
 }
 ```
+
+The non-personalized path sends `discovery_run_id: null` and an empty
+`selected_suggestion_ids` list. Completion rejects unfinished, foreign, stale,
+duplicate, or cross-run suggestion IDs.
 
 Response:
 ```json

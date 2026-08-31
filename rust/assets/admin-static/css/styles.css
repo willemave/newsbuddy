@@ -1,0 +1,160 @@
+@import "tailwindcss" source(none);
+@source "../../../crates/newsly-api/templates/**/*.html";
+@source "../../../crates/newsly-api/src/templates/**/*.html";
+
+@layer base {
+  body {
+    font-feature-settings: "kern", "liga", "tnum";
+  }
+}
+
+@layer components {
+  .markdown-content,
+  .prose {
+    color: #374151;
+    line-height: 1.65;
+  }
+
+  .markdown-content h1,
+  .markdown-content h2,
+  .markdown-content h3,
+  .markdown-content h4,
+  .markdown-content h5,
+  .markdown-content h6,
+  .prose h1,
+  .prose h2,
+  .prose h3,
+  .prose h4,
+  .prose h5,
+  .prose h6 {
+    color: #111827;
+    font-weight: 650;
+    line-height: 1.25;
+    margin: 1.4em 0 0.55em;
+  }
+
+  .markdown-content h1,
+  .prose h1 {
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 1.75rem;
+    padding-bottom: 0.35em;
+  }
+
+  .markdown-content h2,
+  .prose h2 {
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 1.35rem;
+    padding-bottom: 0.3em;
+  }
+
+  .markdown-content h3,
+  .prose h3 {
+    font-size: 1.15rem;
+  }
+
+  .markdown-content p,
+  .markdown-content ul,
+  .markdown-content ol,
+  .markdown-content blockquote,
+  .markdown-content pre,
+  .markdown-content table,
+  .prose p,
+  .prose ul,
+  .prose ol,
+  .prose blockquote,
+  .prose pre,
+  .prose table {
+    margin: 1em 0;
+  }
+
+  .markdown-content ul,
+  .markdown-content ol,
+  .prose ul,
+  .prose ol {
+    padding-left: 1.5rem;
+  }
+
+  .markdown-content ul,
+  .prose ul {
+    list-style: disc;
+  }
+
+  .markdown-content ol,
+  .prose ol {
+    list-style: decimal;
+  }
+
+  .markdown-content li,
+  .prose li {
+    margin: 0.35em 0;
+  }
+
+  .markdown-content blockquote,
+  .prose blockquote {
+    background: #f9fafb;
+    border-left: 3px solid #93c5fd;
+    color: #4b5563;
+    padding: 0.75rem 1rem;
+  }
+
+  .markdown-content code,
+  .prose code {
+    background: #f3f4f6;
+    border-radius: 4px;
+    color: #be123c;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.9em;
+    padding: 0.15em 0.35em;
+  }
+
+  .markdown-content pre,
+  .prose pre {
+    background: #111827;
+    border-radius: 8px;
+    color: #f9fafb;
+    overflow-x: auto;
+    padding: 1rem;
+  }
+
+  .markdown-content pre code,
+  .prose pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+  }
+
+  .markdown-content table,
+  .prose table {
+    border-collapse: collapse;
+    display: block;
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  .markdown-content th,
+  .markdown-content td,
+  .prose th,
+  .prose td {
+    border: 1px solid #e5e7eb;
+    padding: 0.65rem 0.75rem;
+    text-align: left;
+  }
+
+  .markdown-content th,
+  .prose th {
+    background: #f9fafb;
+    color: #111827;
+    font-weight: 650;
+  }
+
+  .markdown-content a,
+  .prose a {
+    color: #2563eb;
+    text-decoration: none;
+  }
+
+  .markdown-content a:hover,
+  .prose a:hover {
+    text-decoration: underline;
+  }
+}

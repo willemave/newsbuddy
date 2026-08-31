@@ -1,0 +1,570 @@
+{
+  "fields": [
+    {
+      "allows_null": false,
+      "field": "access_token",
+      "model": "AccessTokenResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "refresh_token",
+      "model": "AccessTokenResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "token_type",
+      "model": "AccessTokenResponse",
+      "required_on_wire": false,
+      "schema_default": "bearer",
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "id",
+      "model": "ContentDetailResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "content_type",
+      "model": "ContentDetailResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "url",
+      "model": "ContentDetailResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": true,
+      "field": "source_url",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "discussion_url",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "title",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "display_title",
+      "model": "ContentDetailResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": true,
+      "field": "source",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "status",
+      "model": "ContentDetailResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": true,
+      "field": "error_message",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "retry_count",
+      "model": "ContentDetailResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "metadata",
+      "model": "ContentDetailResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "created_at",
+      "model": "ContentDetailResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": true,
+      "field": "updated_at",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "processed_at",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "checked_out_by",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "checked_out_at",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "publication_date",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "is_read",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": false,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "is_saved_to_knowledge",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": false,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "summary",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "short_summary",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "summary_kind",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "summary_version",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "structured_summary",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "longform_artifact",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "feed_preview",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "artifact_type",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "preview_bullets",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "reason_to_read",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "bullet_points",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "quotes",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "topics",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": true,
+      "field": "full_markdown",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "body_available",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": false,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "body_kind",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "body_format",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "news_article_url",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "news_discussion_url",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "news_key_points",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "news_summary",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "image_url",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "thumbnail_url",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "detected_feed",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "can_subscribe",
+      "model": "ContentDetailResponse",
+      "required_on_wire": false,
+      "schema_default": false,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "id",
+      "model": "JobStatusResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "task_type",
+      "model": "JobStatusResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "status",
+      "model": "JobStatusResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "queue_name",
+      "model": "JobStatusResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": true,
+      "field": "content_id",
+      "model": "JobStatusResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "payload",
+      "model": "JobStatusResponse",
+      "required_on_wire": false,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "retry_count",
+      "model": "JobStatusResponse",
+      "required_on_wire": false,
+      "schema_default": 0,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "created_at",
+      "model": "JobStatusResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "started_at",
+      "model": "JobStatusResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "completed_at",
+      "model": "JobStatusResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "error_message",
+      "model": "JobStatusResponse",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "refresh_token",
+      "model": "RefreshTokenRequest",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": true,
+      "field": "attempt_id",
+      "model": "RefreshTokenRequest",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "url",
+      "model": "ShareActionCreateRequest",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "mode",
+      "model": "ShareActionCreateRequest",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": true,
+      "field": "instruction",
+      "model": "ShareActionCreateRequest",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "chat_initial_message",
+      "model": "ShareActionCreateRequest",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "interests_prompt",
+      "model": "ShareActionCreateRequest",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": true,
+      "field": "approval_policy",
+      "model": "ShareActionCreateRequest",
+      "required_on_wire": false,
+      "schema_default": null,
+      "schema_has_default": true
+    },
+    {
+      "allows_null": false,
+      "field": "task_id",
+      "model": "ShareActionResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "mode",
+      "model": "ShareActionResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "status",
+      "model": "ShareActionResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "workflow_state",
+      "model": "ShareActionResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "created_at",
+      "model": "ShareActionResponse",
+      "required_on_wire": true,
+      "schema_has_default": false
+    },
+    {
+      "allows_null": false,
+      "field": "actions",
+      "model": "ShareActionResponse",
+      "required_on_wire": false,
+      "schema_has_default": false
+    }
+  ],
+  "models": [
+    "AccessTokenResponse",
+    "ContentDetailResponse",
+    "JobStatusResponse",
+    "RefreshTokenRequest",
+    "ShareActionCreateRequest",
+    "ShareActionResponse"
+  ],
+  "version": 1
+}

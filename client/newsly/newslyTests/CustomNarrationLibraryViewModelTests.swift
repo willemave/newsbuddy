@@ -164,11 +164,17 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
             kind: .custom_narration,
             status: status,
             title: "Custom narration",
+            sourceContentId: nil,
             sourceContentIds: sourceContentIDs,
             sourceCount: sourceContentIDs.count,
             sourceTitles: ["Source"],
+            durationSeconds: nil,
+            audioUrl: nil,
+            streamUrl: nil,
+            scriptText: nil,
             errorMessage: status == .failed ? "Generation failed" : nil,
-            createdAt: Date(timeIntervalSince1970: 1_800_000_200)
+            createdAt: Date(timeIntervalSince1970: 1_800_000_200),
+            updatedAt: nil
         )
     }
 

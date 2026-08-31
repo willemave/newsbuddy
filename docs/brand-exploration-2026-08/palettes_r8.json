@@ -1,0 +1,283 @@
+{
+  "r8-01-enso-ink": {
+    "bg": "#d8c8a8",
+    "swatches": [
+      "#242d30",
+      "#8a8274"
+    ],
+    "accent": "#242d30",
+    "accent_strong": "#242d30",
+    "ink": "#242d30"
+  },
+  "r8-02-enso-indigo": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#37305a",
+      "#d4be87",
+      "#a6937d"
+    ],
+    "accent": "#d4be87",
+    "accent_strong": "#bb9537",
+    "ink": "#37305a"
+  },
+  "r8-03-enso-slate": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#465163",
+      "#d0bfa5",
+      "#797b81"
+    ],
+    "accent": "#d0bfa5",
+    "accent_strong": "#af8b55",
+    "ink": "#465163"
+  },
+  "r8-04-enso-forest": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#325335",
+      "#ccbb9e",
+      "#8b8f73"
+    ],
+    "accent": "#ccbb9e",
+    "accent_strong": "#ab8a51",
+    "ink": "#325335"
+  },
+  "r8-05-enso-espresso": {
+    "bg": "#e8d8b8",
+    "swatches": [
+      "#422d26",
+      "#cba68f",
+      "#7a6254"
+    ],
+    "accent": "#cba68f",
+    "accent_strong": "#ac6d46",
+    "ink": "#422d26"
+  },
+  "r8-06-enso-oxblood": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#6c1e1c",
+      "#d0ba9b",
+      "#9e6d60"
+    ],
+    "accent": "#6c1e1c",
+    "accent_strong": "#6c1e1c",
+    "ink": "#6c1e1c"
+  },
+  "r8-07-enso-plum": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#68374b",
+      "#d7b2a3",
+      "#ab8381"
+    ],
+    "accent": "#d7b2a3",
+    "accent_strong": "#bb6c4c",
+    "ink": "#68374b"
+  },
+  "r8-08-enso-olive": {
+    "bg": "#d8b898",
+    "swatches": [
+      "#525536"
+    ],
+    "accent": "#525536",
+    "accent_strong": "#525536",
+    "ink": "#252717"
+  },
+  "r8-09-reader-ink": {
+    "bg": "#e8e8c8",
+    "swatches": [
+      "#25282d",
+      "#51524e"
+    ],
+    "accent": "#25282d",
+    "accent_strong": "#25282d",
+    "ink": "#25282d"
+  },
+  "r8-10-reader-indigo": {
+    "bg": "#e8e8c8",
+    "swatches": [
+      "#383061",
+      "#796b74"
+    ],
+    "accent": "#383061",
+    "accent_strong": "#383061",
+    "ink": "#383061"
+  },
+  "r8-11-reader-slate": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#445768",
+      "#6d7779"
+    ],
+    "accent": "#445768",
+    "accent_strong": "#445768",
+    "ink": "#445768"
+  },
+  "r8-12-reader-forest": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#2c4e36",
+      "#667555"
+    ],
+    "accent": "#2c4e36",
+    "accent_strong": "#2c4e36",
+    "ink": "#2c4e36"
+  },
+  "r8-13-reader-espresso": {
+    "bg": "#e8e8c8",
+    "swatches": [
+      "#412c2a",
+      "#674d47"
+    ],
+    "accent": "#412c2a",
+    "accent_strong": "#412c2a",
+    "ink": "#412c2a"
+  },
+  "r8-14-reader-oxblood": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#671717",
+      "#803833"
+    ],
+    "accent": "#671717",
+    "accent_strong": "#671717",
+    "ink": "#671717"
+  },
+  "r8-15-reader-plum": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#6b304e",
+      "#a8727c"
+    ],
+    "accent": "#6b304e",
+    "accent_strong": "#6b304e",
+    "ink": "#6b304e"
+  },
+  "r8-16-reader-olive": {
+    "bg": "#e8e8c8",
+    "swatches": [
+      "#504f23",
+      "#827a4a"
+    ],
+    "accent": "#504f23",
+    "accent_strong": "#504f23",
+    "ink": "#504f23"
+  },
+  "r8-17-enso-2t-ink-cream": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#1a2626",
+      "#dec398",
+      "#68685e"
+    ],
+    "accent": "#dec398",
+    "accent_strong": "#cc9339",
+    "ink": "#1a2626"
+  },
+  "r8-18-enso-2t-petrol-sand": {
+    "bg": "#a89878",
+    "swatches": [
+      "#2c535b",
+      "#c5b69d"
+    ],
+    "accent": "#2c535b",
+    "accent_strong": "#2c535b",
+    "ink": "#12262a"
+  },
+  "r8-19-enso-2t-indigo-gold": {
+    "bg": "#d8b878",
+    "swatches": [
+      "#362e5f",
+      "#6e5e61"
+    ],
+    "accent": "#362e5f",
+    "accent_strong": "#362e5f",
+    "ink": "#362e5f"
+  },
+  "r8-20-enso-2t-forest-oat": {
+    "bg": "#a89878",
+    "swatches": [
+      "#275039",
+      "#dec9ac",
+      "#5c6c54"
+    ],
+    "accent": "#dec9ac",
+    "accent_strong": "#c3934f",
+    "ink": "#102519"
+  },
+  "r8-21-enso-2t-oxblood-blush": {
+    "bg": "#e8d8c8",
+    "swatches": [
+      "#661619",
+      "#8b4748"
+    ],
+    "accent": "#661619",
+    "accent_strong": "#661619",
+    "ink": "#661619"
+  },
+  "r8-22-enso-2t-slate-ivory": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#3d586d"
+    ],
+    "accent": "#3d586d",
+    "accent_strong": "#3d586d",
+    "ink": "#3d586d"
+  },
+  "r8-23-reader-2t-ink-cream": {
+    "bg": "#e8e8c8",
+    "swatches": [
+      "#1f241e"
+    ],
+    "accent": "#1f241e",
+    "accent_strong": "#1f241e",
+    "ink": "#1f241e"
+  },
+  "r8-24-reader-2t-petrol-sand": {
+    "bg": "#e8c8a8",
+    "swatches": [
+      "#275056"
+    ],
+    "accent": "#275056",
+    "accent_strong": "#275056",
+    "ink": "#275056"
+  },
+  "r8-25-reader-2t-indigo-gold": {
+    "bg": "#c8b878",
+    "swatches": [
+      "#352d5f"
+    ],
+    "accent": "#352d5f",
+    "accent_strong": "#352d5f",
+    "ink": "#352d5f"
+  },
+  "r8-26-reader-2t-forest-oat": {
+    "bg": "#e8e8c8",
+    "swatches": [
+      "#365a40",
+      "#5c755a"
+    ],
+    "accent": "#365a40",
+    "accent_strong": "#365a40",
+    "ink": "#365a40"
+  },
+  "r8-27-reader-2t-oxblood-blush": {
+    "bg": "#e8c8b8",
+    "swatches": [
+      "#5f1315"
+    ],
+    "accent": "#5f1315",
+    "accent_strong": "#5f1315",
+    "ink": "#5f1315"
+  },
+  "r8-28-reader-2t-slate-ivory": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#405067"
+    ],
+    "accent": "#405067",
+    "accent_strong": "#405067",
+    "ink": "#405067"
+  }
+}

@@ -13,12 +13,12 @@ struct OnboardingChoiceStep: View {
             Spacer()
 
             VStack(spacing: 32) {
-                Image("Mascot")
+                Image("BuddyMark")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 180, height: 180)
                     .appShadow(.elevated)
-                    .accessibilityLabel("Newsbuddy mascot")
+                    .accessibilityLabel("Newsbuddy")
 
                 VStack(spacing: 12) {
                     Text("MEET YOUR GUIDE")

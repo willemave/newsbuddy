@@ -7,6 +7,12 @@ import Observation
 @MainActor
 @Observable
 final class AppRuntime {
+    struct Dependencies {
+        let lifecycle: AppLifecycle
+        let authenticationController: AuthenticationController
+        let makeAuthenticatedSession: @MainActor (User) -> AuthenticatedSession
+    }
+
     let lifecycle: AppLifecycle
     let authenticationController: AuthenticationController
     private(set) var authenticatedSession: AuthenticatedSession?
@@ -14,17 +20,10 @@ final class AppRuntime {
     @ObservationIgnored
     private let makeAuthenticatedSession: @MainActor (User) -> AuthenticatedSession
 
-    init(
-        lifecycle: AppLifecycle? = nil,
-        authenticationController: AuthenticationController? = nil,
-        makeAuthenticatedSession: @escaping @MainActor (User) -> AuthenticatedSession = {
-            AuthenticatedSession(user: $0)
-        }
-    ) {
-        self.lifecycle = lifecycle ?? AppLifecycle()
-        self.authenticationController = authenticationController
-            ?? RootDependencyFactory.makeAuthenticationViewModel()
-        self.makeAuthenticatedSession = makeAuthenticatedSession
+    init(dependencies: Dependencies) {
+        self.lifecycle = dependencies.lifecycle
+        self.authenticationController = dependencies.authenticationController
+        self.makeAuthenticatedSession = dependencies.makeAuthenticatedSession
     }
 
     @discardableResult
@@ -50,6 +49,11 @@ final class AppRuntime {
     /// The app root is the only product-level lifecycle writer.
     func record(_ phase: AppLifecycle.Phase) {
         lifecycle.record(phase)
+        if phase == .active {
+            authenticationController.resumeRestorationIfNeeded(
+                for: lifecycle.activation
+            )
+        }
         authenticatedSession?.synchronize(with: lifecycle)
     }
 }

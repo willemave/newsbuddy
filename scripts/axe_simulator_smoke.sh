@@ -13,6 +13,11 @@ set -euo pipefail
 #   BUILD_BEFORE_RUN=1
 #   XCODE_PROJECT=client/newsly/newsly.xcodeproj
 #   XCODE_SCHEME=newsly
+#   NEWSLY_AXE_API_BASE_URL=http://127.0.0.1:8000
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/rust_runtime.sh
+source "${script_dir}/lib/rust_runtime.sh"
 
 BUNDLE_ID="org.willemaw.newsly"
 UDID=""
@@ -21,6 +26,7 @@ BUILD_BEFORE_RUN="${BUILD_BEFORE_RUN:-0}"
 XCODE_PROJECT="${XCODE_PROJECT:-client/newsly/newsly.xcodeproj}"
 XCODE_SCHEME="${XCODE_SCHEME:-newsly}"
 APP_BUNDLE_PATH="${APP_BUNDLE_PATH:-/tmp/newsly_codex_build/Build/Products/Debug-iphonesimulator/newsly.app}"
+API_BASE_URL="${NEWSLY_AXE_API_BASE_URL:-${NEWSLY_LOCAL_API_BASE_URL:-http://127.0.0.1:8000}}"
 INSTALL_APP="${INSTALL_APP:-1}"
 RECORD_VIDEO=0
 CAPTURE_LOGS=0
@@ -32,6 +38,7 @@ Usage: scripts/axe_simulator_smoke.sh [options]
 Options:
   --udid <SIM_UDID>       Simulator UDID. If omitted, auto-selects booted sim.
   --bundle-id <BUNDLE_ID> App bundle id (default: org.willemaw.newsly).
+  --api-base-url <URL>    Local Rust API origin (default: http://127.0.0.1:8000).
   --output-dir <DIR>      Output folder for artifacts.
   --build                 Build app before launch.
   --no-install            Skip simulator app install before launch.
@@ -50,6 +57,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bundle-id)
       BUNDLE_ID="${2:-}"
+      shift 2
+      ;;
+    --api-base-url)
+      if [[ -z "${2:-}" ]]; then
+        echo "--api-base-url requires a value" >&2
+        exit 2
+      fi
+      API_BASE_URL="${2:-}"
       shift 2
       ;;
     --output-dir)
@@ -88,6 +103,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+IFS=$'\t' read -r api_scheme api_host api_port api_use_https \
+  < <(newsly_parse_api_base_url "${API_BASE_URL}")
+API_BASE_URL="${api_scheme}://${api_host}:${api_port}"
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
@@ -96,6 +115,7 @@ require_cmd() {
 }
 
 require_cmd axe
+require_cmd curl
 require_cmd xcrun
 require_cmd jq
 
@@ -162,7 +182,23 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Launching app: $BUNDLE_ID"
-xcrun simctl launch "$UDID" "$BUNDLE_ID" >/dev/null || true
+debug_user_id="$(
+  curl --fail --silent --show-error \
+    --request POST \
+    --header 'Content-Type: application/json' \
+    --data '{"has_completed_onboarding":true,"has_completed_new_user_tutorial":true}' \
+    "${API_BASE_URL%/}/auth/debug/new-user" |
+    jq -er '.user.id'
+)"
+xcrun simctl launch "$UDID" "$BUNDLE_ID" \
+  -newslyE2EEnabled true \
+  -newslyE2EAutoLogin true \
+  -newslyE2EServerHost "${api_host}" \
+  -newslyE2EServerPort "${api_port}" \
+  -newslyE2EUseHTTPS "${api_use_https}" \
+  -newslyE2EUserId "$debug_user_id" \
+  -newslyE2ECompleteOnboarding true \
+  -newslyE2ECompleteTutorial true >/dev/null
 sleep 1
 
 echo "Capturing launch artifacts..."

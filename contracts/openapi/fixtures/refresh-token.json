@@ -1,0 +1,36 @@
+{
+  "method": "POST",
+  "operation_id": "refreshToken",
+  "path": "/auth/refresh",
+  "request": {
+    "attempt_id": "00000000-0000-4000-8000-000000000003",
+    "refresh_token": "<redacted:refresh-token>"
+  },
+  "responses": {
+    "200": {
+      "access_token": "<redacted:access-token>",
+      "refresh_token": "<redacted:rotated-refresh-token>",
+      "token_type": "bearer"
+    },
+    "422": {
+      "code": "validation_error",
+      "details": {
+        "errors": [
+          {
+            "input": {},
+            "loc": [
+              "body",
+              "url"
+            ],
+            "msg": "Field required",
+            "type": "missing"
+          }
+        ]
+      },
+      "message": "Request validation failed",
+      "request_id": "fixture-request-id",
+      "retryable": false
+    }
+  },
+  "version": 1
+}

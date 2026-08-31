@@ -1,0 +1,43 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "briefing_dates": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Briefing Dates",
+      "type": "array"
+    },
+    "chat_session_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Chat Session Ids",
+      "type": "array"
+    },
+    "content_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Content Ids",
+      "type": "array"
+    },
+    "news_item_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "News Item Ids",
+      "type": "array"
+    },
+    "user_id": {
+      "exclusiveMinimum": 0,
+      "title": "User Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "user_id"
+  ],
+  "title": "AgentDataSyncPayload",
+  "type": "object"
+}

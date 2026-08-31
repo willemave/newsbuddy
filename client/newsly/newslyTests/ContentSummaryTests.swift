@@ -42,22 +42,11 @@ final class ContentSummaryTests: XCTestCase {
     }
 
     func testDecodesSavedSourceForBookmarkFilters() throws {
-        let data = """
-        {
-          "id": 7,
-          "content_type": "article",
-          "url": "https://example.com/story",
-          "title": "Example story",
-          "source": "Example",
-          "platform": "web",
-          "status": "completed",
-          "short_summary": "Summary",
-          "created_at": "2026-03-18T05:00:00Z",
-          "is_read": false,
-          "is_saved_to_knowledge": true,
-          "saved_source": "x_bookmark"
-        }
-        """.data(using: .utf8)!
+        let data = try makeWireSummaryPayload(overrides: [
+            "content_type": "article",
+            "is_saved_to_knowledge": true,
+            "saved_source": "x_bookmark",
+        ])
 
         let summary = try JSONDecoder().decode(ContentSummary.self, from: data)
 
@@ -94,22 +83,10 @@ final class ContentSummaryTests: XCTestCase {
     }
 
     func testNewsSummaryPayloadStillDecodesButIsHiddenFromDisplaySummary() throws {
-        let data = """
-        {
-          "id": 7,
-          "content_type": "news",
-          "url": "https://example.com/story",
-          "title": "Example story",
-          "source": "Example",
-          "platform": "web",
-          "status": "completed",
-          "short_summary": "Hidden list summary",
-          "news_summary": "Hidden news summary",
-          "created_at": "2026-03-18T05:00:00Z",
-          "is_read": false,
-          "is_saved_to_knowledge": false
-        }
-        """.data(using: .utf8)!
+        let data = try makeWireSummaryPayload(overrides: [
+            "short_summary": "Hidden list summary",
+            "news_summary": "Hidden news summary",
+        ])
 
         let summary = try JSONDecoder().decode(ContentSummary.self, from: data)
 
@@ -136,22 +113,11 @@ final class ContentSummaryTests: XCTestCase {
     }
 
     func testArticleKeyTakeawayDecodesAndSurvivesLocalUpdates() throws {
-        let data = """
-        {
-          "id": 7,
-          "content_type": "article",
-          "url": "https://example.com/story",
-          "title": "Example story",
-          "source": "Example",
-          "platform": "web",
-          "status": "completed",
-          "short_summary": "Current list summary",
-          "key_takeaway": "  The key takeaway belongs under the title.  ",
-          "created_at": "2026-03-18T05:00:00Z",
-          "is_read": false,
-          "is_saved_to_knowledge": false
-        }
-        """.data(using: .utf8)!
+        let data = try makeWireSummaryPayload(overrides: [
+            "content_type": "article",
+            "short_summary": "Current list summary",
+            "key_takeaway": "  The key takeaway belongs under the title.  ",
+        ])
 
         let summary = try JSONDecoder().decode(ContentSummary.self, from: data)
         let updated = summary.updating(isRead: true)
@@ -218,5 +184,45 @@ final class ContentSummaryTests: XCTestCase {
             keyTakeaway: keyTakeaway,
             savedSource: savedSource
         )
+    }
+
+    private func makeWireSummaryPayload(overrides: [String: Any]) throws -> Data {
+        var payload: [String: Any] = [
+            "id": 7,
+            "content_type": "news",
+            "url": "https://example.com/story",
+            "source_url": NSNull(),
+            "discussion_url": NSNull(),
+            "title": "Example story",
+            "source": "Example",
+            "platform": "web",
+            "status": "completed",
+            "short_summary": "Summary",
+            "created_at": "2026-03-18T05:00:00Z",
+            "processed_at": NSNull(),
+            "classification": NSNull(),
+            "publication_date": NSNull(),
+            "is_read": false,
+            "is_saved_to_knowledge": false,
+            "knowledge_saved_at": NSNull(),
+            "news_article_url": NSNull(),
+            "news_discussion_url": NSNull(),
+            "news_key_points": NSNull(),
+            "news_summary": NSNull(),
+            "user_status": NSNull(),
+            "image_url": NSNull(),
+            "thumbnail_url": NSNull(),
+            "primary_topic": NSNull(),
+            "top_comment": NSNull(),
+            "comment_count": NSNull(),
+            "feed_preview": NSNull(),
+            "artifact_type": NSNull(),
+            "preview_bullets": NSNull(),
+            "reason_to_read": NSNull(),
+            "key_takeaway": NSNull(),
+            "saved_source": NSNull(),
+        ]
+        payload.merge(overrides) { _, replacement in replacement }
+        return try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
     }
 }

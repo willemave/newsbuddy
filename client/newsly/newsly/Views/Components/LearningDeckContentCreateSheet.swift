@@ -7,6 +7,8 @@ import SwiftUI
 
 struct LearningDeckContentCreateSheet: View {
     let content: ContentDetail
+    let focusRecorder: LearningDeckFocusRecorder
+    let learningDeckService: LearningDeckService
     let onOpenDeck: (LearningDeck, URL?) -> Void
     let onNotice: (String, String) -> Void
 
@@ -17,6 +19,7 @@ struct LearningDeckContentCreateSheet: View {
             sourceTitle: content.displayTitle,
             requiresURL: false,
             isSubmitting: isSubmitting,
+            focusRecorder: focusRecorder,
             onCreate: createDeck
         )
     }
@@ -31,7 +34,7 @@ struct LearningDeckContentCreateSheet: View {
         do {
             let deck = try await createDeck(for: content, interestsPrompt: interestsPrompt)
             if deck.viewerAvailable {
-                let url = try await LearningDeckService.shared.viewerURL(deckId: deck.id)
+                let url = try await learningDeckService.viewerURL(deckId: deck.id)
                 onOpenDeck(deck, url)
             } else {
                 // The deck is still generating — open the reader anyway so it can
@@ -53,12 +56,12 @@ struct LearningDeckContentCreateSheet: View {
         interestsPrompt: String?
     ) async throws -> LearningDeck {
         if content.contentType == .news {
-            return try await LearningDeckService.shared.createDeck(
+            return try await learningDeckService.createDeck(
                 newsItemId: content.id,
                 interestsPrompt: interestsPrompt
             )
         }
-        return try await LearningDeckService.shared.createDeck(
+        return try await learningDeckService.createDeck(
             contentId: content.id,
             interestsPrompt: interestsPrompt
         )

@@ -1,0 +1,162 @@
+{
+  "$defs": {
+    "ExtractIntent": {
+      "enum": [
+        "static_analyze",
+        "extract_article",
+        "resolve_pubmed"
+      ],
+      "title": "ExtractIntent",
+      "type": "string"
+    },
+    "ExtractOptions": {
+      "additionalProperties": false,
+      "description": "Bounded policy selectors; arbitrary Crawl4AI configuration is never accepted.",
+      "properties": {
+        "allow_browser_fallback": {
+          "title": "Allow Browser Fallback",
+          "type": "boolean"
+        },
+        "browser_timeout_ms": {
+          "maximum": 180000,
+          "minimum": 1000,
+          "title": "Browser Timeout Ms",
+          "type": "integer"
+        },
+        "discover_feeds": {
+          "title": "Discover Feeds",
+          "type": "boolean"
+        },
+        "max_download_bytes": {
+          "maximum": 10000000,
+          "minimum": 65536,
+          "title": "Max Download Bytes",
+          "type": "integer"
+        },
+        "max_markdown_bytes": {
+          "maximum": 2000000,
+          "minimum": 4096,
+          "title": "Max Markdown Bytes",
+          "type": "integer"
+        },
+        "profile": {
+          "$ref": "#/$defs/ExtractionProfile"
+        },
+        "static_minimum_characters": {
+          "maximum": 10000,
+          "minimum": 100,
+          "title": "Static Minimum Characters",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "profile",
+        "allow_browser_fallback",
+        "discover_feeds",
+        "max_download_bytes",
+        "max_markdown_bytes",
+        "static_minimum_characters",
+        "browser_timeout_ms"
+      ],
+      "title": "ExtractOptions",
+      "type": "object"
+    },
+    "ExtractionProfile": {
+      "enum": [
+        "automatic",
+        "article",
+        "newsletter",
+        "scientific"
+      ],
+      "title": "ExtractionProfile",
+      "type": "string"
+    },
+    "TraceContext": {
+      "additionalProperties": false,
+      "properties": {
+        "span_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Span Id"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Trace Id"
+        }
+      },
+      "required": [
+        "trace_id",
+        "span_id"
+      ],
+      "title": "TraceContext",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "absolute_deadline": {
+      "format": "date-time",
+      "title": "Absolute Deadline",
+      "type": "string"
+    },
+    "intent": {
+      "$ref": "#/$defs/ExtractIntent"
+    },
+    "options": {
+      "$ref": "#/$defs/ExtractOptions"
+    },
+    "request_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "trace": {
+      "$ref": "#/$defs/TraceContext"
+    },
+    "url": {
+      "format": "uri",
+      "maxLength": 2083,
+      "minLength": 1,
+      "title": "Url",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "request_id",
+    "url",
+    "intent",
+    "absolute_deadline",
+    "options",
+    "trace"
+  ],
+  "title": "ExtractRequest",
+  "type": "object"
+}

@@ -107,7 +107,7 @@ struct ChatSessionCard: View {
             let role = session.lastMessageRole ?? "assistant"
 
             (role == "user"
-                ? Text("You: ").foregroundColor(.onSurface).fontWeight(.medium) + Text(preview)
+                ? Text("\(Text("You: ").foregroundColor(.onSurface).fontWeight(.medium))\(preview)")
                 : Text(preview))
                 .font(.terracottaBodyMedium)
                 .foregroundColor(.onSurfaceSecondary)

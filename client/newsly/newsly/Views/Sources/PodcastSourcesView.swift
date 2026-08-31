@@ -20,15 +20,17 @@ private enum PodcastSourcesSheetDestination: Identifiable {
 }
 
 struct PodcastSourcesView: View {
-    @State private var viewModel = RootDependencyFactory.makeScraperSettingsViewModel(
-        filterTypes: ["podcast_rss"]
-    )
+    @State private var viewModel: ScraperSettingsViewModel
     @State private var activeSheet: PodcastSourcesSheetDestination?
     @State private var newFeedURL: String = ""
     @State private var newFeedName: String = ""
     @State private var newLimit: String = ""
     @State private var addSourceError: String?
     @State private var isAddingSource = false
+
+    init(viewModel: ScraperSettingsViewModel) {
+        self._viewModel = State(initialValue: viewModel)
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {

@@ -13,12 +13,11 @@ struct SearchView: View {
     @State private var browserDestination: BrowserDestination?
 
     init(
-        readStateCache: ReadStateCache? = nil,
-        viewModel: SearchViewModel? = nil
+        readStateCache: ReadStateCache,
+        viewModel: SearchViewModel
     ) {
-        let readStateCache = readStateCache ?? ReadStateCache()
         self.readStateCache = readStateCache
-        self._viewModel = State(initialValue: viewModel ?? RootDependencyFactory.makeSearchViewModel())
+        self._viewModel = State(initialValue: viewModel)
     }
 
     var body: some View {
@@ -44,8 +43,8 @@ struct SearchView: View {
         .background(Color.surfacePrimary.ignoresSafeArea())
         .toolbarBackground(Color.surfacePrimary, for: .navigationBar)
         .navigationTitle("Search")
-        .task(id: viewModel.searchText) {
-            await viewModel.handleSearchTextChangedAfterDelay()
+        .onChange(of: viewModel.searchText, initial: true) { _, searchText in
+            viewModel.searchTextDidChange(to: searchText)
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {

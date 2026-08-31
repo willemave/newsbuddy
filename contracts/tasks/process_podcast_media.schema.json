@@ -1,0 +1,31 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "content_id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Content Id"
+    },
+    "media_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Media Url"
+    }
+  },
+  "title": "ProcessPodcastMediaPayload",
+  "type": "object"
+}

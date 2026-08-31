@@ -1,0 +1,56 @@
+[project]
+name = "newsly-document-extractor"
+version = "0.1.0"
+description = "Database-free Crawl4AI document extraction service for Newsly"
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "crawl4ai>=0.9.2,<0.10",
+    "fastapi>=0.115.12",
+    "httpx>=0.28.1",
+    "pydantic>=2.11.5",
+    "pydantic-settings>=2.9.1",
+    "python-dateutil>=2.9.0.post0",
+    "trafilatura>=2.0.0",
+    "uvicorn>=0.34.2",
+]
+
+[project.scripts]
+newsly-document-extractor = "newsly_document_extractor.__main__:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "ruff>=0.11.12",
+]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["newsly_document_extractor*"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "UP", "B", "SIM", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config"]
+
+[tool.mypy]
+python_version = "3.13"
+warn_unused_configs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+explicit_package_bases = true
+implicit_reexport = true
+disable_error_code = ["import-untyped"]

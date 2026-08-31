@@ -1,0 +1,50 @@
+{
+  "cases": [
+    {
+      "claims": {
+        "exp": 1788093000,
+        "iat": 1788091200,
+        "sub": "51",
+        "token_kind": "access"
+      },
+      "header": {
+        "alg": "HS256",
+        "typ": "JWT"
+      },
+      "name": "jwt_claims",
+      "signing_key": "<redacted:fixture-signing-key>"
+    },
+    {
+      "expected_identity": {
+        "credential_kind": "api_key",
+        "user_id": 51
+      },
+      "header": {
+        "Authorization": "Bearer <redacted:api-key>"
+      },
+      "name": "api_key_header"
+    },
+    {
+      "different_attempt_result": "rejected",
+      "first_result": "rotated",
+      "name": "refresh_rotation",
+      "replay_result": "same_attempt_response",
+      "request": {
+        "attempt_id": "00000000-0000-4000-8000-000000000003",
+        "refresh_token": "<redacted:refresh-token>"
+      }
+    },
+    {
+      "name": "account_deletion",
+      "queue_task": "delete_user_account",
+      "request": {
+        "authorization_code": "<redacted:authorization-code>",
+        "id_token": "<redacted:apple-id-token>"
+      },
+      "response": {
+        "status": "deletion_scheduled"
+      }
+    }
+  ],
+  "version": 1
+}

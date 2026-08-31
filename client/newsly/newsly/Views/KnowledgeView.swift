@@ -16,14 +16,10 @@ struct KnowledgeSearchView: View {
 
     init(
         onSelectContent: @escaping (ContentDetailRoute) -> Void,
-        readStateCache: ReadStateCache
+        viewModel: ContentListViewModel
     ) {
         self.onSelectContent = onSelectContent
-        self._viewModel = State(
-            initialValue: RootDependencyFactory.makeContentListViewModel(
-                readStateCache: readStateCache
-            )
-        )
+        self._viewModel = State(initialValue: viewModel)
     }
 
     private var trimmedQuery: String {

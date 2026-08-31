@@ -6,23 +6,18 @@ glob_matcher: doublestar
 pre-commit:
   jobs:
     - name: module size guardrails
-      run: python3 scripts/check_module_size_guardrails.py
+      run: scripts/check_module_size_guardrails.sh
 
     - name: ruff check
       glob: "**/*.py"
-      run: uv run ruff check --fix {staged_files}
+      run: uvx --from ruff==0.11.12 ruff check --fix {staged_files}
       stage_fixed: true
 
     - name: ruff format
       glob: "**/*.py"
-      run: uv run ruff format {staged_files}
+      run: uvx --from ruff==0.11.12 ruff format {staged_files}
       stage_fixed: true
 
-    - name: mypy
-      glob: "**/*.py"
-      run: uv run --with mypy mypy {staged_files}
-
-post-commit:
-  jobs:
-    - name: vulture
-      run: uv run vulture
+    - name: Rust format
+      glob: "rust/**/*.rs"
+      run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check

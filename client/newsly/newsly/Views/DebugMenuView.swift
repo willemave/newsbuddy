@@ -12,7 +12,7 @@ import UIKit
 struct DebugMenuView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(AuthenticationViewModel.self) private var authViewModel
-    @State private var appSettings = AppSettings.shared
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
     @State private var showingTokenInput = false
     @State private var forceOnboardingAfterTokenSave = false
     @State private var accessToken = ""
@@ -22,7 +22,12 @@ struct DebugMenuView: View {
     @State private var alertMessage = ""
     @State private var suppressNextAuthenticatedDismiss = false
 
+    private var appSettings: AppSettings {
+        dependencyFactory.appSettings
+    }
+
     var body: some View {
+        @Bindable var appSettings = appSettings
         NavigationStack {
             List {
                 Section(header: Text("Server Configuration")) {
@@ -251,7 +256,7 @@ struct DebugMenuView: View {
         Task {
             do {
                 authViewModel.authState = .loading
-                let user = try await AuthenticationService.shared.getCurrentUser()
+                let user = try await dependencyFactory.authenticationService.getCurrentUser()
                 await MainActor.run {
                     authViewModel.authState = .authenticated(user)
                 }
@@ -294,7 +299,7 @@ struct DebugMenuView: View {
                         refreshToken: normalizedRefreshToken
                     )
                 )
-                let user = try await AuthenticationService.shared.getCurrentUser()
+                let user = try await dependencyFactory.authenticationService.getCurrentUser()
 
                 if shouldResetOnboarding {
                     do {
@@ -363,7 +368,7 @@ struct DebugMenuView: View {
             }
 
             do {
-                let session = try await AuthenticationService.shared.createDebugSession(
+                let session = try await dependencyFactory.authenticationService.createDebugSession(
                     hasCompletedOnboarding: false,
                     hasCompletedNewUserTutorial: false
                 )
@@ -415,7 +420,7 @@ struct DebugMenuView: View {
     }
 
     private func resetOnboardingSession(for user: User) async throws -> User {
-        let session = try await AuthenticationService.shared.createDebugSession(
+        let session = try await dependencyFactory.authenticationService.createDebugSession(
             userId: user.id,
             hasCompletedOnboarding: false,
             hasCompletedNewUserTutorial: false

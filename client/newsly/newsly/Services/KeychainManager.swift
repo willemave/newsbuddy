@@ -26,6 +26,7 @@ final class KeychainManager: AuthTokenStore {
         case cachedUser = "cachedUser"
         case refreshAttempt = "refreshAttempt"
         case credentialEnvelope = "credentialEnvelope"
+        case credentialPublication = "credentialPublication"
     }
 
     /// Optional configuration for shared keychain access (e.g., extensions).
@@ -315,6 +316,7 @@ final class KeychainManager: AuthTokenStore {
         deleteToken(key: .cachedUser)
         deleteToken(key: .refreshAttempt)
         deleteToken(key: .credentialEnvelope)
+        deleteToken(key: .credentialPublication)
         deleteLegacyToken(named: "openaiApiKey")
     }
 
@@ -348,12 +350,24 @@ final class KeychainManager: AuthTokenStore {
 protocol AuthTokenStore: AnyObject {
     func getToken(key: KeychainManager.KeychainKey) -> String?
     func saveToken(_ token: String, key: KeychainManager.KeychainKey)
+    func saveTokenReportingStatus(
+        _ token: String,
+        key: KeychainManager.KeychainKey
+    ) -> Bool
     func deleteToken(key: KeychainManager.KeychainKey)
     func deleteTokenReportingStatus(key: KeychainManager.KeychainKey) -> Bool
     func clearAll()
 }
 
 extension AuthTokenStore {
+    func saveTokenReportingStatus(
+        _ token: String,
+        key: KeychainManager.KeychainKey
+    ) -> Bool {
+        saveToken(token, key: key)
+        return getToken(key: key) == token
+    }
+
     func deleteTokenReportingStatus(key: KeychainManager.KeychainKey) -> Bool {
         deleteToken(key: key)
         return getToken(key: key) == nil

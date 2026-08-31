@@ -19,7 +19,7 @@ private enum SummaryDesign {
 struct StructuredSummaryView: View {
     let summary: StructuredSummary
     var contentId: Int?
-    var startTopicSession: ((String) async throws -> ChatSessionSummary)?
+    let startTopicSession: (String) async throws -> ChatSessionSummary
     var onTopicDeepDive: ((String) -> Void)?
 
     @State private var isQuotesExpanded = true
@@ -255,12 +255,7 @@ struct StructuredSummaryView: View {
 
     private func startChatSession(topic: String) async -> ChatSessionSummary? {
         do {
-            if let startTopicSession {
-                return try await startTopicSession(topic)
-            }
-
-            guard let contentId else { return nil }
-            return try await ChatService.shared.startTopicChat(contentId: contentId, topic: topic)
+            return try await startTopicSession(topic)
         } catch {
             print("Failed to start topic chat: \(error)")
             return nil
@@ -431,27 +426,30 @@ struct FlowLayout: Layout {
 }
 
 #Preview {
-    StructuredSummaryView(summary: StructuredSummary(
-        title: "Sample Title",
-        overview: "This is a sample overview",
-        bulletPoints: [
-            BulletPoint(text: "Point 1", category: "key_finding"),
-            BulletPoint(text: "Point 2", category: nil)
-        ],
-        quotes: [
-            Quote(text: "Sample quote", context: "John Doe", attribution: nil)
-        ],
-        topics: ["Topic 1", "Topic 2"],
-        questions: [
-            "What are the implications of this approach?",
-            "How might this affect existing systems?"
-        ],
-        counterArguments: [
-            "Some critics argue that this approach is too complex",
-            "Alternative methods might be more efficient"
-        ],
-        summarizationDate: nil,
-        classification: "to_read"
-    ))
+    StructuredSummaryView(
+        summary: StructuredSummary(
+            title: "Sample Title",
+            overview: "This is a sample overview",
+            bulletPoints: [
+                BulletPoint(text: "Point 1", category: "key_finding"),
+                BulletPoint(text: "Point 2", category: nil)
+            ],
+            quotes: [
+                Quote(text: "Sample quote", context: "John Doe", attribution: nil)
+            ],
+            topics: ["Topic 1", "Topic 2"],
+            questions: [
+                "What are the implications of this approach?",
+                "How might this affect existing systems?"
+            ],
+            counterArguments: [
+                "Some critics argue that this approach is too complex",
+                "Alternative methods might be more efficient"
+            ],
+            summarizationDate: nil,
+            classification: "to_read"
+        ),
+        startTopicSession: { _ in throw CancellationError() }
+    )
     .padding()
 }

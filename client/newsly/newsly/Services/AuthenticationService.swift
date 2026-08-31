@@ -12,6 +12,12 @@ import os.log
 
 private let authLogger = Logger(subsystem: "com.newsly", category: "AuthenticationService")
 
+enum CredentialSessionEndResult: Equatable, Sendable {
+    case ended
+    case noLongerCurrent
+    case failed
+}
+
 protocol AuthenticationServicing: AnyObject {
     @MainActor
     func signInWithApple() async throws -> AuthSession
@@ -19,7 +25,7 @@ protocol AuthenticationServicing: AnyObject {
     /// Ends the current session. Terminal refresh failures pass their event so
     /// a delayed failure cannot clear a newer account publication.
     @discardableResult
-    func logout(matching event: CredentialTerminalEvent?) async -> Bool
+    func logout(matching event: CredentialTerminalEvent?) async -> CredentialSessionEndResult
     func getCurrentUser() async throws -> User
 
     #if DEBUG
@@ -35,20 +41,6 @@ protocol AuthenticationServicing: AnyObject {
 /// Authentication service handling Apple Sign In and token management
 final class AuthenticationService: NSObject {
     static let shared = AuthenticationService()
-
-    #if DEBUG
-    private struct DebugSessionRequest: Encodable {
-        let userId: Int?
-        let hasCompletedOnboarding: Bool?
-        let hasCompletedNewUserTutorial: Bool?
-
-        enum CodingKeys: String, CodingKey {
-            case userId = "user_id"
-            case hasCompletedOnboarding = "has_completed_onboarding"
-            case hasCompletedNewUserTutorial = "has_completed_new_user_tutorial"
-        }
-    }
-    #endif
 
     private override init() {
         super.init()
@@ -83,7 +75,9 @@ final class AuthenticationService: NSObject {
     /// Logout user. Credential deletion is serialized with refresh rotation so
     /// an exchange already in flight cannot publish a token pair after logout.
     @discardableResult
-    func logout(matching event: CredentialTerminalEvent?) async -> Bool {
+    func logout(
+        matching event: CredentialTerminalEvent?
+    ) async -> CredentialSessionEndResult {
         // Explicit user logout tears down presentation state immediately. A
         // conditional terminal event does so only after its credential identity
         // is proven current under the refresh lock.
@@ -95,13 +89,15 @@ final class AuthenticationService: NSObject {
             didClear = try await CredentialSession.shared.clearCredentials(ifCurrent: event)
         } catch {
             authLogger.error("Credential clear failed during logout: \(error.localizedDescription)")
-            return false
+            return .failed
         }
-        guard didClear else { return false }
+        guard didClear else {
+            return event == nil ? .failed : .noLongerCurrent
+        }
         if event != nil {
             performLocalLogoutSideEffects()
         }
-        return true
+        return .ended
     }
 
     private func performLocalLogoutSideEffects() {
@@ -126,7 +122,7 @@ final class AuthenticationService: NSObject {
         }
 
         do {
-            _ = try await APIClient.shared.requestHTTP(
+            let _: APIDeleteAccountResponse = try await APIClient.shared.request(
                 APIEndpoints.authMe,
                 method: .delete,
                 body: JSONEncoder().encode(credentials),
@@ -140,12 +136,13 @@ final class AuthenticationService: NSObject {
 
     /// Get current user from backend
     func getCurrentUser() async throws -> User {
-        let user: User = try await APIClient.shared.request(
+        let response: APIUserResponse = try await APIClient.shared.request(
             APIEndpoints.authMe,
             recoveryPolicy: .safeRead,
             authentication: .required,
             decoding: .iso8601
         )
+        let user = User(api: response)
         try Task.checkCancellation()
         // Legacy loose tokens establish identity only after this server
         // validation succeeds.
@@ -161,21 +158,21 @@ final class AuthenticationService: NSObject {
         councilPersonas: [CouncilPersona]? = nil,
         readingExperience: ReadingExperience? = nil
     ) async throws -> User {
-        let body = UpdateUserProfileRequest(
+        let body = APIUpdateUserProfileRequest(
             fullName: fullName,
             twitterUsername: twitterUsername,
-            councilPersonas: councilPersonas,
+            councilPersonas: councilPersonas?.map(\.apiInput),
             readingExperience: readingExperience
         )
         do {
-            let user: User = try await APIClient.shared.request(
+            let response: APIUserResponse = try await APIClient.shared.request(
                 APIEndpoints.authMe,
                 method: .patch,
                 body: JSONEncoder().encode(body),
                 authentication: .required,
                 decoding: .iso8601
             )
-            return user
+            return User(api: response)
         } catch {
             throw mapAuthenticationClientError(error)
         }
@@ -190,15 +187,16 @@ final class AuthenticationService: NSObject {
         hasCompletedNewUserTutorial: Bool? = nil
     ) async throws -> AuthSession {
         let body = try JSONEncoder().encode(
-            DebugSessionRequest(
+            APIDebugUserSessionRequest(
                 userId: userId,
                 hasCompletedOnboarding: hasCompletedOnboarding,
-                hasCompletedNewUserTutorial: hasCompletedNewUserTutorial
+                hasCompletedNewUserTutorial: hasCompletedNewUserTutorial,
+                readingExperience: nil
             )
         )
 
         do {
-            let tokenResponse: TokenResponse = try await APIClient.shared.request(
+            let tokenResponse: APITokenResponse = try await APIClient.shared.request(
                 APIEndpoints.authDebugNewUser,
                 method: .post,
                 body: body,
@@ -207,7 +205,10 @@ final class AuthenticationService: NSObject {
             )
             try Task.checkCancellation()
             try await persistSessionTokens(tokenResponse)
-            return AuthSession(user: tokenResponse.user, isNewUser: tokenResponse.isNewUser)
+            return AuthSession(
+                user: User(api: tokenResponse.user),
+                isNewUser: tokenResponse.isNewUser
+            )
         } catch {
             throw mapAuthenticationClientError(error)
         }
@@ -261,36 +262,24 @@ final class AuthenticationService: NSObject {
     private func sendAppleCredentialsToBackend(
         _ credentials: AppleSignInCredentials
     ) async throws -> AuthSession {
-        var body: [String: Any] = ["id_token": credentials.identityToken]
-
-        if let email = credentials.email, !email.isEmpty {
-            body["email"] = email
-        }
-        if let fullName = credentials.fullName, !fullName.isEmpty {
-            body["full_name"] = fullName
-        }
-
-        let requestBody = try JSONSerialization.data(withJSONObject: body)
-        let tokenResponse: TokenResponse = try await APIClient.shared.request(
+        let request = APIAppleSignInRequest(
+            idToken: credentials.identityToken,
+            email: nonEmptyAuthField(credentials.email),
+            fullName: nonEmptyAuthField(credentials.fullName)
+        )
+        let tokenResponse: APITokenResponse = try await APIClient.shared.request(
             "/auth/apple",
             method: .post,
-            body: requestBody,
+            body: JSONEncoder().encode(request),
             authentication: .none,
             decoding: .iso8601
         )
         try Task.checkCancellation()
         try await persistSessionTokens(tokenResponse)
-        return AuthSession(user: tokenResponse.user, isNewUser: tokenResponse.isNewUser)
-    }
-}
-
-private struct AppleAccountDeletionCredentials: Encodable {
-    let idToken: String
-    let authorizationCode: String
-
-    enum CodingKeys: String, CodingKey {
-        case idToken = "id_token"
-        case authorizationCode = "authorization_code"
+        return AuthSession(
+            user: User(api: tokenResponse.user),
+            isNewUser: tokenResponse.isNewUser
+        )
     }
 }
 
@@ -298,9 +287,9 @@ private struct AppleAccountDeletionCredentials: Encodable {
 private final class AppleAccountDeletionDelegate: NSObject, ASAuthorizationControllerDelegate,
     ASAuthorizationControllerPresentationContextProviding
 {
-    let continuation: CheckedContinuation<AppleAccountDeletionCredentials, Error>
+    let continuation: CheckedContinuation<APIDeleteAccountRequest, Error>
 
-    init(continuation: CheckedContinuation<AppleAccountDeletionCredentials, Error>) {
+    init(continuation: CheckedContinuation<APIDeleteAccountRequest, Error>) {
         self.continuation = continuation
     }
 
@@ -317,7 +306,7 @@ private final class AppleAccountDeletionDelegate: NSObject, ASAuthorizationContr
             return
         }
         continuation.resume(
-            returning: AppleAccountDeletionCredentials(
+            returning: APIDeleteAccountRequest(
                 idToken: idToken,
                 authorizationCode: authorizationCode
             )
@@ -391,18 +380,18 @@ private class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, 
 
 @MainActor
 private func applePresentationAnchor() -> ASPresentationAnchor {
-    for scene in UIApplication.shared.connectedScenes {
-        guard let windowScene = scene as? UIWindowScene else { continue }
-        if let window = windowScene.windows.first(where: { $0.isKeyWindow })
-            ?? windowScene.windows.first {
-            return window
-        }
+    let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    guard let windowScene = windowScenes.first(where: { $0.activationState == .foregroundActive })
+        ?? windowScenes.first
+    else {
+        preconditionFailure("Apple Sign In requires a connected window scene")
     }
-    authLogger.error("Apple Sign In presentation anchor unavailable")
-    return ASPresentationAnchor()
+    return windowScene.windows.first(where: { $0.isKeyWindow })
+        ?? windowScene.windows.first
+        ?? ASPresentationAnchor(windowScene: windowScene)
 }
 
-private func persistSessionTokens(_ tokenResponse: TokenResponse) async throws {
+private func persistSessionTokens(_ tokenResponse: APITokenResponse) async throws {
     try await CredentialSession.shared.publishAuthenticated(
         tokens: CredentialTokens(
             accessToken: tokenResponse.accessToken,
@@ -411,6 +400,11 @@ private func persistSessionTokens(_ tokenResponse: TokenResponse) async throws {
         userID: tokenResponse.user.id
     )
     KeychainManager.shared.deleteLegacyToken(named: "openaiApiKey")
+}
+
+private func nonEmptyAuthField(_ value: String?) -> String? {
+    guard let value, !value.isEmpty else { return nil }
+    return value
 }
 
 private func mapAuthenticationClientError(_ error: Error) -> Error {
@@ -422,6 +416,8 @@ private func mapAuthenticationClientError(_ error: Error) -> Error {
         return AuthError.networkError(URLError(code))
     case .authenticationRequired, .authenticationExpired:
         return AuthError.notAuthenticated
+    case .server(let statusCode, let error):
+        return AuthError.serverError(statusCode: statusCode, message: error.message)
     case .http(let statusCode, let detail):
         return AuthError.serverError(statusCode: statusCode, message: detail)
     case .invalidRequest, .invalidResponse, .decoding, .unexpected:

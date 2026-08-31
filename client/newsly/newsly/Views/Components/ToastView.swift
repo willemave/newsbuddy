@@ -30,7 +30,11 @@ struct ToastView: View {
 }
 
 struct ToastModifier: ViewModifier {
-    @State private var toastService = ToastService.shared
+    @State private var toastService: ToastService
+
+    init(toastService: ToastService) {
+        _toastService = State(initialValue: toastService)
+    }
 
     func body(content: Content) -> some View {
         ZStack(alignment: .top) {
@@ -49,7 +53,7 @@ struct ToastModifier: ViewModifier {
 }
 
 extension View {
-    func withToast() -> some View {
-        modifier(ToastModifier())
+    func withToast(service: ToastService) -> some View {
+        modifier(ToastModifier(toastService: service))
     }
 }

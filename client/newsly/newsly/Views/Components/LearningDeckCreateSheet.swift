@@ -12,7 +12,7 @@ struct LearningDeckCreateSheet: View {
     let onCreate: (_ url: String?, _ interestsPrompt: String?) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
-    @State private var focusRecorder = RootDependencyFactory.makeLearningDeckFocusRecorder()
+    @State private var focusRecorder: LearningDeckFocusRecorder
     @State private var urlText = ""
     @State private var interestsText = ""
 
@@ -41,6 +41,20 @@ struct LearningDeckCreateSheet: View {
     }
 
     private let focusSuggestions = ["Key takeaways", "How it works", "Why it matters"]
+
+    init(
+        sourceTitle: String?,
+        requiresURL: Bool,
+        isSubmitting: Bool,
+        focusRecorder: LearningDeckFocusRecorder,
+        onCreate: @escaping (_ url: String?, _ interestsPrompt: String?) async -> Bool
+    ) {
+        self.sourceTitle = sourceTitle
+        self.requiresURL = requiresURL
+        self.isSubmitting = isSubmitting
+        self._focusRecorder = State(initialValue: focusRecorder)
+        self.onCreate = onCreate
+    }
 
     var body: some View {
         NavigationStack {

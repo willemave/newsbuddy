@@ -49,30 +49,6 @@ final class PaginatedFeedTests: XCTestCase {
         XCTAssertEqual(feed.phase, .loaded)
     }
 
-    func testRefreshInBackgroundMergesNewItemsOnTopAndKeepsExistingOrder() async {
-        let feed = PaginatedFeed<TestFeedItem>(
-            items: [TestFeedItem(id: 2), TestFeedItem(id: 1)],
-            phase: .loaded,
-            loadPage: { _ in
-                Page(
-                    items: [
-                        TestFeedItem(id: 3),
-                        TestFeedItem(id: 1),
-                        TestFeedItem(id: 2),
-                    ],
-                    nextCursor: nil,
-                    hasMore: false
-                )
-            },
-            mergeReplacement: PaginatedFeed.mergeNewItemsOnTopKeepingExistingOrder
-        )
-
-        await feed.refreshInBackground()
-
-        XCTAssertEqual(feed.items.map(\.id), [3, 2, 1])
-        XCTAssertEqual(feed.phase, .loaded)
-    }
-
     func testSupersededRequestDoesNotOverwriteNewerResult() async {
         let loader = ControlledPageLoader()
         let feed = PaginatedFeed<TestFeedItem>(loadPage: loader.loadPage)

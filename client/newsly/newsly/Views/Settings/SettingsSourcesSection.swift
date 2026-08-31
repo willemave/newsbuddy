@@ -6,13 +6,19 @@
 import SwiftUI
 
 struct SettingsSourcesSection: View {
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(title: "Sources")
 
             VStack(spacing: 0) {
                 NavigationLink {
-                    FeedSourcesView()
+                    FeedSourcesView(
+                        viewModel: dependencyFactory.makeScraperSettingsViewModel(
+                            filterTypes: ["substack", "atom", "youtube"]
+                        )
+                    )
                 } label: {
                     SettingsRow(
                         icon: "list.bullet.rectangle",
@@ -24,7 +30,11 @@ struct SettingsSourcesSection: View {
                 RowDivider(leadingInset: Spacing.rowHorizontal)
 
                 NavigationLink {
-                    PodcastSourcesView()
+                    PodcastSourcesView(
+                        viewModel: dependencyFactory.makeScraperSettingsViewModel(
+                            filterTypes: ["podcast_rss"]
+                        )
+                    )
                 } label: {
                     SettingsRow(
                         icon: "waveform",

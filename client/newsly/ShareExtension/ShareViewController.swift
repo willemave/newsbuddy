@@ -539,7 +539,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     // MARK: - API Submission
 
     private func submitURL(_ url: URL) async throws {
-        let payload = ShareActionRequest(
+        let payload = APIShareActionCreateRequest(
             url: url.absoluteString,
             mode: shareActionMode(),
             chatInitialMessage: shareOutcomeMode == .chat ? chatInitialMessage : nil,
@@ -550,11 +550,14 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         let requestBody = try JSONEncoder().encode(payload)
 
         do {
-            try await ShareExtensionTransport.shared.requestVoid(
+            let response: APIShareActionResponse = try await ShareExtensionTransport.shared.request(
                 "/api/share-actions",
                 method: .post,
                 body: requestBody
             )
+            guard response.taskId > 0, response.mode == payload.mode else {
+                throw ShareError.invalidResponse
+            }
         } catch let error as ShareExtensionTransportError {
             switch error {
             case .notAuthenticated:
@@ -576,16 +579,16 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         }
     }
 
-    private func shareActionMode() -> String {
+    private func shareActionMode() -> APILlmTaskMode {
         switch shareOutcomeMode {
         case .addToBriefing:
-            return "add_to_briefing"
+            return .add_to_briefing
         case .addToKnowledge:
-            return "bookmark_only"
+            return .bookmark_only
         case .createDeck:
-            return "presentation"
+            return .presentation
         case .chat:
-            return "chat"
+            return .chat
         }
     }
 
@@ -661,20 +664,6 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         case .invalidResponse, .networkError, .serverError, .userCancelled:
             return .recoverable
         }
-    }
-}
-
-private struct ShareActionRequest: Encodable {
-    let url: String
-    let mode: String
-    let chatInitialMessage: String?
-    let interestsPrompt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case url
-        case mode
-        case chatInitialMessage = "chat_initial_message"
-        case interestsPrompt = "interests_prompt"
     }
 }
 

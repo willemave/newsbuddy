@@ -1,0 +1,96 @@
+name: Publish E2B Template
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full current-main commit SHA to validate and publish
+        required: true
+        type: string
+      no_cache:
+        description: Rebuild every E2B template layer without cache
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: newsly-e2b-template-publication
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    name: Validate publication commit
+    uses: ./.github/workflows/quality-gate.yml
+    with:
+      sha: ${{ inputs.sha }}
+
+  publish:
+    name: Rebuild canonical template alias
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    env:
+      TESTED_SHA: ${{ needs.quality.outputs.tested_sha }}
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TESTED_SHA }}
+
+      - name: Require tested current-main commit
+        run: |
+          set -euo pipefail
+          if [[ ! "$TESTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "A full tested commit SHA is required, got: $TESTED_SHA" >&2
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+          current_main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ "$current_main_sha" != "$TESTED_SHA" ]]; then
+            echo "Refusing stale template publication: tested $TESTED_SHA, current main $current_main_sha" >&2
+            exit 1
+          fi
+
+      - name: Set up pinned Node runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.9.0"
+
+      - name: Validate template definition without E2B access
+        run: scripts/build_agent_vm_template.sh --check
+
+      - name: Publish newsly-agent alias
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          LLM_TASK_SANDBOX_E2B_API_KEY: ${{ secrets.LLM_TASK_SANDBOX_E2B_API_KEY }}
+          NO_CACHE: ${{ inputs.no_cache }}
+          RECEIPT_PATH: ${{ runner.temp }}/e2b-template-receipt.json
+        run: |
+          set -euo pipefail
+          args=(--publish --receipt "$RECEIPT_PATH")
+          if [[ "$NO_CACHE" == "true" ]]; then
+            args+=(--no-cache)
+          fi
+          scripts/build_agent_vm_template.sh "${args[@]}"
+
+      - name: Record publication receipt
+        env:
+          RECEIPT_PATH: ${{ runner.temp }}/e2b-template-receipt.json
+        run: |
+          echo '### E2B template publication' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          jq . "$RECEIPT_PATH" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload publication receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2b-template-${{ env.TESTED_SHA }}
+          path: ${{ runner.temp }}/e2b-template-receipt.json
+          if-no-files-found: error
+          retention-days: 30

@@ -44,6 +44,7 @@ extension ScraperConfigService: SearchFeedSubscribing {}
 @Observable
 final class SearchViewModel {
     private enum TaskKey: Hashable {
+        case local
         case mixed
     }
 
@@ -74,12 +75,7 @@ final class SearchViewModel {
     private let tasks = TaskBag<TaskKey>()
 
     @ObservationIgnored
-    private var localSearchGeneration = 0
-
-    @ObservationIgnored
-    private var contentResultsQuery: String?
-
-    private var lastSubmittedQuery: String?
+    private var observedQuery: String?
 
     init(
         contentService: any SearchContentServicing,
@@ -108,11 +104,7 @@ final class SearchViewModel {
         }
         let query = trimmedQuery
         guard query.count >= 2 else { return }
-        localSearchGeneration += 1
-        let generation = localSearchGeneration
-        Task { [weak self] in
-            await self?.runLocalSearchTask(for: query, generation: generation)
-        }
+        startLocalSearch(for: query, debounce: false)
     }
 
     func submitSearch() {
@@ -174,61 +166,61 @@ final class SearchViewModel {
         }
     }
 
-    func handleSearchTextChangedAfterDelay() async {
-        localSearchGeneration += 1
-        let generation = localSearchGeneration
-        let trimmed = trimmedQuery
+    func searchTextDidChange(to searchText: String) {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query != observedQuery else { return }
+        observedQuery = query
 
-        if contentResultsQuery != trimmed {
-            contentResults = []
-            contentResultsQuery = nil
-            hasLocalSearch = false
-            localErrorMessage = nil
-        }
+        contentResults = []
+        hasLocalSearch = false
+        localErrorMessage = nil
 
-        if lastSubmittedQuery != trimmed {
-            tasks.cancel(.mixed)
-            isLoadingMixed = false
-            hasSubmittedSearch = false
-            feedResults = []
-            podcastResults = []
-            completedActionLabels = [:]
-            actionErrorMessages = [:]
-            mixedErrorMessage = nil
-        }
+        tasks.cancel(.mixed)
+        isLoadingMixed = false
+        hasSubmittedSearch = false
+        feedResults = []
+        podcastResults = []
+        completedActionLabels = [:]
+        actionErrorMessages = [:]
+        mixedErrorMessage = nil
 
-        guard trimmed.count >= 2 else {
-            contentResults = []
-            contentResultsQuery = nil
-            hasLocalSearch = false
-            localErrorMessage = nil
+        guard query.count >= 2 else {
+            tasks.cancel(.local)
             isLoadingLocal = false
             return
         }
 
-        isLoadingLocal = true
-
-        do {
-            try await Task.sleep(for: .milliseconds(350))
-        } catch {
-            if generation == localSearchGeneration {
-                isLoadingLocal = false
-            }
-            return
-        }
-
-        guard !Task.isCancelled, generation == localSearchGeneration else { return }
-        await runLocalSearchTask(for: trimmed, generation: generation)
+        startLocalSearch(for: query, debounce: true)
     }
 
-    private func runLocalSearchTask(for query: String, generation: Int) async {
+    private func startLocalSearch(for query: String, debounce: Bool) {
         isLoadingLocal = true
+        localErrorMessage = nil
+        tasks.runReplacing(.local) { [weak self] token in
+            await self?.runLocalSearch(for: query, debounce: debounce, token: token)
+        }
+    }
+
+    private func runLocalSearch(
+        for query: String,
+        debounce: Bool,
+        token: TaskBag<TaskKey>.Token
+    ) async {
         defer {
-            if generation == localSearchGeneration {
+            if tasks.isCurrent(token) {
                 isLoadingLocal = false
             }
         }
-        localErrorMessage = nil
+
+        if debounce {
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+            } catch {
+                return
+            }
+        }
+
+        guard tasks.isCurrent(token), trimmedQuery == query else { return }
 
         do {
             let response = try await contentService.searchContent(
@@ -237,15 +229,13 @@ final class SearchViewModel {
                 limit: localSearchResultLimit,
                 cursor: nil
             )
-            guard !Task.isCancelled, generation == localSearchGeneration else { return }
+            guard tasks.isCurrent(token), trimmedQuery == query else { return }
             contentResults = response.contents
-            contentResultsQuery = query
             hasLocalSearch = true
         } catch {
-            guard !Task.isCancelled, generation == localSearchGeneration else { return }
+            guard tasks.isCurrent(token), trimmedQuery == query else { return }
             localErrorMessage = "Newsly couldn't search your content."
             contentResults = []
-            contentResultsQuery = query
             hasLocalSearch = true
         }
     }
@@ -264,9 +254,7 @@ final class SearchViewModel {
             guard !Task.isCancelled,
                   tasks.isCurrent(token),
                   trimmedQuery == query else { return }
-            lastSubmittedQuery = query
             contentResults = response.content
-            contentResultsQuery = query
             feedResults = response.feeds
             podcastResults = response.podcasts
             for result in response.feeds where result.isSubscribed {

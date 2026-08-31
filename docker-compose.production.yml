@@ -3,9 +3,17 @@ name: newsly-prod
 x-newsly-environment: &newsly-environment
   AGENT_DATA_MIRROR_ROOT: /data/agent_user_data
   DATABASE_URL: ${NEWSLY_DATABASE_URL:?NEWSLY_DATABASE_URL is required}
-  NEWSLY_WAIT_FOR_BOOTSTRAP: "false"
+  NEWSLY_MAINTENANCE_BARRIER_CONFIRMED: ${NEWSLY_MAINTENANCE_BARRIER_CONFIRMED:-false}
+  NEWSLY_SQLX_BASELINE_ADOPTION: ${NEWSLY_SQLX_BASELINE_ADOPTION:-false}
+  DOCUMENT_EXTRACTOR_URL: http://document-extractor:8200
+  DOCUMENT_EXTRACTOR_SHARED_SECRET: ${DOCUMENT_EXTRACTOR_SHARED_SECRET:?DOCUMENT_EXTRACTOR_SHARED_SECRET is required}
+  DOCUMENT_EXTRACTOR_TIMEOUT_SECONDS: ${DOCUMENT_EXTRACTOR_TIMEOUT_SECONDS:-190}
+  DOCUMENT_EXTRACTOR_MAX_RESPONSE_BYTES: ${DOCUMENT_EXTRACTOR_MAX_RESPONSE_BYTES:-2500000}
   PUBLIC_BASE_URL: ${NEWSLY_PUBLIC_BASE_URL:-https://news.willemsavenue.com}
   PORT: "8000"
+  NEWSLY_RUST_BIND_ADDR: 0.0.0.0:8000
+  YOUTUBE_PO_TOKEN_PROVIDER: ${YOUTUBE_PO_TOKEN_PROVIDER:-bgutilhttp}
+  YOUTUBE_PO_TOKEN_BASE_URL: http://bgutil-provider:4416
 
 x-newsly-app: &newsly-app
   image: ${NEWSLY_IMAGE:?NEWSLY_IMAGE is required}
@@ -17,6 +25,7 @@ x-newsly-app: &newsly-app
     - /data:/data:z
   networks:
     - newsly-internal
+    - newsly-extractor-ingress
 
 services:
   postgres:
@@ -39,6 +48,39 @@ services:
       retries: 20
       start_period: 10s
     stop_grace_period: 2m
+    networks:
+      - newsly-internal
+
+  document-extractor:
+    image: ${NEWSLY_EXTRACTOR_IMAGE:?NEWSLY_EXTRACTOR_IMAGE is required}
+    container_name: newsly-document-extractor
+    init: true
+    restart: unless-stopped
+    read_only: true
+    environment:
+      DOCUMENT_EXTRACTOR_ENVIRONMENT: production
+      DOCUMENT_EXTRACTOR_SHARED_SECRET: ${DOCUMENT_EXTRACTOR_SHARED_SECRET:?DOCUMENT_EXTRACTOR_SHARED_SECRET is required}
+    tmpfs:
+      - /tmp:size=1024m,mode=1777
+    shm_size: 1gb
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8200/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    stop_grace_period: 30s
+    networks:
+      - newsly-extractor-egress
+      - newsly-extractor-ingress
+
+  bgutil-provider:
+    image: ${BGUTIL_PROVIDER_IMAGE:-brainicism/bgutil-ytdlp-pot-provider:1.3.1}
+    container_name: newsly-bgutil-provider
+    init: true
+    restart: unless-stopped
     networks:
       - newsly-internal
 
@@ -92,6 +134,9 @@ services:
     environment:
       <<: *newsly-environment
       NEWSLY_RUNTIME_MODE: workers
+    depends_on:
+      bgutil-provider:
+        condition: service_started
     healthcheck:
       disable: true
     stop_grace_period: 10m
@@ -110,3 +155,6 @@ networks:
   newsly-internal:
     name: newsly-internal
     external: true
+  newsly-extractor-ingress:
+    internal: true
+  newsly-extractor-egress:

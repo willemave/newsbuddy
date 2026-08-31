@@ -406,7 +406,10 @@ final class ContentDetailTests: XCTestCase {
             """
         )
 
-        XCTAssertEqual(detail.primaryTimestamp, "2026-04-02T09:00:00Z")
+        XCTAssertEqual(
+            ServerDate.parse(detail.primaryTimestamp),
+            ServerDate.parse("2026-04-02T09:00:00Z")
+        )
     }
 
     func testInterestingExternalLinksDecodeFromMetadata() throws {
@@ -626,6 +629,140 @@ final class ContentDetailTests: XCTestCase {
             extraSections[3].items,
             ["Arguments: The argument is supported by operational examples."]
         )
+    }
+
+    func testNewsDetailMapsFromCanonicalNewsWireContract() throws {
+        let json = """
+        {
+          "id": 91,
+          "content_type": "news",
+          "url": "https://example.com/news/91",
+          "source_url": null,
+          "discussion_url": "https://example.com/discuss/91",
+          "title": "Canonical News title",
+          "display_title": "Canonical News title",
+          "source": "Example News",
+          "status": "completed",
+          "retry_count": 0,
+          "metadata": {},
+          "created_at": "2026-08-31T12:00:00Z",
+          "updated_at": null,
+          "processed_at": "2026-08-31T12:01:00Z",
+          "publication_date": "2026-08-31T11:55:00Z",
+          "is_read": true,
+          "is_saved_to_knowledge": false,
+          "summary": "Canonical summary",
+          "short_summary": "Short summary",
+          "body_available": false,
+          "body_kind": null,
+          "body_format": null,
+          "news_article_url": "https://example.com/news/91",
+          "news_discussion_url": "https://example.com/discuss/91",
+          "news_key_points": ["One key point"],
+          "news_summary": "News summary",
+          "can_subscribe": false
+        }
+        """
+
+        let wire = try JSONDecoder().decode(
+            APINewsItemDetailResponse.self,
+            from: Data(json.utf8)
+        )
+        let detail = ContentDetail(api: wire)
+
+        XCTAssertEqual(detail.id, 91)
+        XCTAssertEqual(detail.contentType, .news)
+        XCTAssertEqual(detail.displayTitle, "Canonical News title")
+        XCTAssertEqual(detail.newsDiscussionURL, "https://example.com/discuss/91")
+        XCTAssertEqual(detail.newsKeyPoints, ["One key point"])
+        XCTAssertEqual(
+            ServerDate.parse(detail.primaryTimestamp),
+            ServerDate.parse("2026-08-31T11:55:00Z")
+        )
+        XCTAssertTrue(detail.isRead)
+        XCTAssertFalse(detail.isSavedToKnowledge)
+
+        XCTAssertNil(detail.errorMessage)
+        XCTAssertNil(detail.checkedOutBy)
+        XCTAssertNil(detail.checkedOutAt)
+        XCTAssertNil(detail.summaryKind)
+        XCTAssertNil(detail.structuredSummaryRaw)
+        XCTAssertNil(detail.longformArtifactRaw)
+        XCTAssertNil(detail.feedPreview)
+        XCTAssertNil(detail.imageUrl)
+        XCTAssertNil(detail.detectedFeed)
+        XCTAssertTrue(detail.bulletPoints.isEmpty)
+        XCTAssertTrue(detail.quotes.isEmpty)
+        XCTAssertTrue(detail.topics.isEmpty)
+    }
+
+    func testNewsListMapsCanonicalNewsSummariesWithoutContentOnlyFields() throws {
+        let json = """
+        {
+          "contents": [
+            {
+              "id": 92,
+              "content_type": "news",
+              "url": "https://example.com/news/92",
+              "source_url": null,
+              "discussion_url": null,
+              "title": "News list title",
+              "source": "Example News",
+              "platform": "example",
+              "status": "completed",
+              "short_summary": "List summary",
+              "created_at": "2026-08-31T12:00:00Z",
+              "processed_at": null,
+              "classification": "to_read",
+              "publication_date": null,
+              "is_read": false,
+              "is_saved_to_knowledge": true,
+              "news_article_url": "https://example.com/news/92",
+              "news_discussion_url": null,
+              "news_key_points": ["List key point"],
+              "news_summary": "List news summary",
+              "top_comment": {"author": "reader", "text": "Useful context"},
+              "comment_count": 7
+            }
+          ],
+          "available_dates": ["2026-08-31"],
+          "content_types": ["news"],
+          "meta": {
+            "next_cursor": null,
+            "has_more": false,
+            "page_size": 1,
+            "total": null
+          }
+        }
+        """
+
+        let wire = try JSONDecoder().decode(
+            APINewsItemListResponse.self,
+            from: Data(json.utf8)
+        )
+        let response = ContentListResponse(api: wire)
+        let summary = try XCTUnwrap(response.contents.first)
+
+        XCTAssertEqual(response.contentTypes, [APIContentType.news.rawValue])
+        XCTAssertEqual(response.availableDates, ["2026-08-31"])
+        XCTAssertNil(response.total)
+        XCTAssertFalse(response.hasMore)
+        XCTAssertEqual(summary.id, 92)
+        XCTAssertEqual(summary.contentType, .news)
+        XCTAssertEqual(summary.classification, APIContentClassification.to_read.rawValue)
+        XCTAssertEqual(summary.newsKeyPoints, ["List key point"])
+        XCTAssertEqual(
+            summary.topComment,
+            ContentSummary.TopComment(author: "reader", text: "Useful context")
+        )
+        XCTAssertEqual(summary.commentCount, 7)
+        XCTAssertTrue(summary.isSavedToKnowledge)
+
+        XCTAssertNil(summary.knowledgeSavedAt)
+        XCTAssertNil(summary.imageUrl)
+        XCTAssertNil(summary.thumbnailUrl)
+        XCTAssertNil(summary.feedPreview)
+        XCTAssertNil(summary.savedSource)
     }
 
     private func decodeDetail(from json: String) throws -> ContentDetail {

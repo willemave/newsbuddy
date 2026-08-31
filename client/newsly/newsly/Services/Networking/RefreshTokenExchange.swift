@@ -51,10 +51,7 @@ final class RefreshTokenExchange: RefreshTokenExchanging {
         case 401, 403:
             throw ClientFailure.authenticationExpired
         default:
-            throw ClientFailure.http(
-                statusCode: response.statusCode,
-                detail: HTTPResponseDetail.extract(from: data)
-            )
+            throw HTTPResponseDetail.failure(statusCode: response.statusCode, data: data)
         }
     }
 
@@ -85,8 +82,16 @@ final class RefreshTokenExchange: RefreshTokenExchanging {
 }
 
 enum HTTPResponseDetail {
+    static func errorResponse(from data: Data) -> APIErrorResponse? {
+        guard !data.isEmpty else { return nil }
+        return try? JSONDecoder().decode(APIErrorResponse.self, from: data)
+    }
+
     static func extract(from data: Data) -> String? {
         guard !data.isEmpty else { return nil }
+        if let errorResponse = errorResponse(from: data) {
+            return errorResponse.message
+        }
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for key in ["detail", "message", "error", "error_message"] {
                 if let value = json[key] {
@@ -100,5 +105,15 @@ enum HTTPResponseDetail {
             return nil
         }
         return raw.prefix(240).description
+    }
+
+    static func failure(statusCode: Int, data: Data) -> ClientFailure {
+        if let response = errorResponse(from: data) {
+            return .server(
+                statusCode: statusCode,
+                error: APIErrorMetadata(response: response)
+            )
+        }
+        return .http(statusCode: statusCode, detail: extract(from: data))
     }
 }

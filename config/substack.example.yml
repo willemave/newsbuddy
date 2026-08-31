@@ -1,6 +1,0 @@
-# Example Substack configuration for the News App scraper.
-# Copy to substack.yml to enable live scraping.
-feeds:
-  - name: Example Substack
-    url: https://example.substack.com/feed
-    limit: 10

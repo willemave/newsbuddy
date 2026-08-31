@@ -1,0 +1,25 @@
+{
+  "dimensions": 3,
+  "items": [
+    {
+      "id": "fixture-1",
+      "text_sha256": "ddd66d0d31ca70893d66b384aad958222c6100c35dde016c4def4062128c13b4",
+      "vector": [
+        0.267261,
+        0.534522,
+        0.801784
+      ]
+    }
+  ],
+  "model": "fixture-embedding-model",
+  "normalization": "l2",
+  "provider_metadata": {
+    "provider": "offline-fixture",
+    "request_count": 1
+  },
+  "timings_ms": {
+    "encoding": 10.0,
+    "total": 12.5
+  },
+  "version": 1
+}

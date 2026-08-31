@@ -1,0 +1,730 @@
+# Reviewed client surface layered on the Rust Utoipa document.
+#
+# The OpenAPI component is the wire-shape authority. This file only chooses the
+# client-visible subset, source names, forward-compatible enums, and the small
+# number of deliberately lenient/defaulted fields that OpenAPI cannot express.
+version = 1
+
+[[enums]]
+schema = "ContentType"
+targets = ["app_swift"]
+open = true
+swift_name = "APIContentType"
+
+[[enums]]
+schema = "ContentStatus"
+targets = ["app_swift"]
+open = true
+swift_name = "APIContentStatus"
+
+[[enums]]
+schema = "ContentClassification"
+targets = ["app_swift"]
+open = false
+swift_name = "APIContentClassification"
+
+[[enums]]
+schema = "TaskType"
+targets = ["app_swift"]
+open = true
+swift_name = "APITaskType"
+
+[[enums]]
+schema = "TaskStatus"
+targets = ["app_swift"]
+open = true
+swift_name = "APITaskStatus"
+
+[[enums]]
+schema = "SummaryKind"
+targets = ["app_swift"]
+open = true
+swift_name = "APISummaryKind"
+
+[[enums]]
+schema = "SummaryVersion"
+targets = ["app_swift"]
+open = false
+swift_name = "APISummaryVersion"
+
+[[enums]]
+schema = "SavedSource"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "OperationStatus"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "KnowledgeMutationStatus"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "ContentInteractionType"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "NarrationTargetType"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "SubmissionKind"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "SubmissionOutcome"
+targets = ["app_swift"]
+open = true
+
+[[unions]]
+schema = "SubmissionResult"
+targets = ["app_swift"]
+discriminator = "result_kind"
+open = true
+
+[[enums]]
+schema = "DiscussionMode"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "FeedType"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "FeedFormat"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "FeedSubscriptionOutcome"
+targets = ["app_swift"]
+open = true
+swift_name = "APIFeedSubscriptionOutcome"
+
+[[enums]]
+schema = "ScraperType"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "AudioEpisodeKind"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "AudioEpisodeStatus"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "BriefingTier"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "BriefingFirstRunPhase"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "BriefingFirstRunSourceOutcome"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "ReadingExperience"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "BriefingBlockType"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "BriefingFigureAlignment"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "BriefingFigurePlacement"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "BriefingRunKind"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "CliLinkStatus"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "OnboardingSuggestionType"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "IntegrationDisconnectStatus"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "DeleteStatus"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "UserLlmProvider"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "NewsItemVisibilityScope"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "NewsItemStatus"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "LearningDeckSourceKind"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "LearningDeckRunStatus"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "LearningDeckStatus"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "MessageProcessingStatus"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "ChatMessageRole"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
+schema = "ChatMessageDisplayType"
+targets = ["app_swift"]
+open = true
+
+[[enums]]
+schema = "LlmProvider"
+targets = ["app_swift"]
+open = false
+swift_name = "APILLMProvider"
+
+[[enums]]
+schema = "LlmTaskMode"
+targets = ["app_swift", "share_swift"]
+open = false
+
+[[enums]]
+schema = "LlmTaskStatus"
+targets = ["app_swift", "share_swift"]
+open = true
+
+[[enums]]
+schema = "LlmTaskActionStatus"
+targets = ["app_swift", "share_swift"]
+open = true
+
+[[enums]]
+schema = "LlmTaskApprovalPolicy"
+targets = ["app_swift", "share_swift"]
+open = false
+
+[[enums]]
+schema = "TweetLength"
+targets = ["app_swift"]
+open = false
+
+# Explicit roots are emitted first in this order. Referenced object schemas are
+# appended in deterministic first-discovery order and inherit the target.
+[[models]]
+schema = "ErrorEnvelope"
+targets = ["app_swift", "share_swift"]
+swift_name = "APIErrorResponse"
+
+[[models]]
+schema = "ContentListResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "ContentDetailResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "NewsItemListResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "NewsItemDetailResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "ContentBodyResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "NarrationResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "SubmissionStatusListResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "PodcastEpisodeSearchResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "MixedSearchResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "DownloadMoreRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "DownloadMoreResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BulkMarkReadRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "BulkMarkReadResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "MarkReadResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "MarkUnreadResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "KnowledgeMutationResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "ChatGptUrlResponse"
+targets = ["app_swift"]
+swift_name = "APIChatGPTUrlResponse"
+[[models]]
+schema = "ConvertNewsResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BadgeStatsResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "LongFormStatsResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "TweetSuggestionsRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "TweetSuggestionsResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "ContentDiscussionResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "RecordContentInteractionRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "RecordContentInteractionResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "CreateChatSessionRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "UpdateChatSessionRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "SendChatMessageRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "ChatSessionDetailDto"
+targets = ["app_swift"]
+[[models]]
+schema = "ChatSessionListResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "SendMessageResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "AssistantTurnRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "AssistantTurnResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "MessageStatusResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "CreateChatSessionResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "CouncilStartRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "CouncilSelectRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "CouncilRetryRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "JobStatusResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "CustomNarrationCreateRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "AudioEpisodeResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "AudioEpisodeShareResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingIndexResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingFirstRunProgress"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingLensSummary"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingLensResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingSegmentDto"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingDiscussionDto"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingSourceDto"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingReadMarkRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingReadMarkResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingDigSearchRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingDigSearchResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingDigSearchResult"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingDigSummarizeRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingDigSummarizeResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingNarrationRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingNarrationResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingRefreshResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "CreateUserScraperConfig"
+targets = ["app_swift"]
+[[models]]
+schema = "UpdateUserScraperConfig"
+targets = ["app_swift"]
+[[models]]
+schema = "ScraperConfigResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "SubscribeToFeedRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "XOAuthStartRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "XOAuthStartResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "XOAuthExchangeRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "XConnectionResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "IntegrationDisconnectResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "UserLlmIntegrationResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "UpsertUserLlmIntegrationRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "UserLlmIntegrationTestResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "DeleteUserLlmIntegrationResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingProfileRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingProfileResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingVoiceParseRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingVoiceParseResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingAudioDiscoverRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingAudioDiscoverResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingFastDiscoverRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingDiscoveryStatusResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingCompleteRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingCompleteResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "OnboardingTutorialResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "LearningDeckCreateRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "LearningDeckListResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "LearningDeckUrlResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "LearningDeckShareResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "AudioTranscriptionResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "AudioTranscriptionHealthResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "AppleSignInRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "DebugUserSessionRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "DeleteAccountRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "DeleteAccountResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "TokenResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "RefreshTokenRequest"
+targets = ["app_swift", "share_swift"]
+[[models]]
+schema = "AccessTokenResponse"
+targets = ["app_swift", "share_swift"]
+[[models]]
+schema = "UpdateUserProfileRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "SubmitFeedbackRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "SubmitFeedbackResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "ShareActionCreateRequest"
+targets = ["app_swift", "share_swift"]
+[[models]]
+schema = "ShareActionResponse"
+targets = ["app_swift", "share_swift"]
+[[models]]
+schema = "CliLinkApproveRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "CliLinkApproveResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "SubmitContentRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "ContentSubmissionResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "ConvertNewsItemResponse"
+targets = ["app_swift"]
+
+[settings]
+
+# Untyped JSON is rejected unless the precise schema field is reviewed here.
+untyped_fields = [
+  "ErrorEnvelope.details",
+  "ContentDetailResponse.feed_preview",
+  "ContentDetailResponse.longform_artifact",
+  "ContentDetailResponse.metadata",
+  "ContentDetailResponse.structured_summary",
+  "ContentSummaryResponse.feed_preview",
+  "CreateUserScraperConfig.config",
+  "NewsItemDetailResponse.metadata",
+  "AgentOnboardingStartRequest.preferences",
+  "ContentDiscussionResponse.stats",
+  "JobStatusResponse.payload",
+  "LearningDeckResponse.source_metadata",
+  "LlmTaskActionResponse.action_input",
+  "LlmTaskActionResponse.action_result",
+  "RecordContentInteractionRequest.context_data",
+  "ScraperConfigResponse.config",
+  "UpdateUserScraperConfig.config",
+]
+
+# These older response fields deliberately tolerate an absent key. All other
+# non-null fields keep strict Swift decoding even if construction has a default.
+lenient_fields = [
+  "ContentDetailResponse.bullet_points",
+  "ContentDetailResponse.quotes",
+  "ContentDetailResponse.topics",
+  "MixedSearchFeedResultResponse.is_subscribed",
+  "AssistantFeedOption.is_subscribed",
+  "ChatMessageDto.feed_options",
+  "ChatMessageDto.council_candidates",
+]
+
+# Defaults whose value cannot be recovered from OpenAPI's required/nullability
+# model. JSON literals are rendered in the destination language.
+[field_defaults]
+"AccessTokenResponse.token_type" = '"bearer"'
+"TokenResponse.token_type" = '"bearer"'
+"SubmitFeedbackRequest.source" = '"ios_settings"'
+"DetectedFeed.format" = '"rss"'
+"DiscussionLinkResponse.source" = '"unknown"'
+"AssistantScreenContextDto.screen_type" = '"unknown"'
+"ChatSessionSummaryDto.has_messages" = "true"
+"SubmissionStatusResponse.is_self_submission" = "true"
+"AssistantTurnResponse.status" = '"processing"'
+"SendMessageResponse.status" = '"processing"'
+"ChatMessageDto.display_type" = '"message"'
+"ChatMessageDto.status" = '"completed"'
+"ContentDiscussionResponse.mode" = '"none"'
+"IntegrationDisconnectResponse.status" = '"disconnected"'
+"DeleteUserLlmIntegrationResponse.status" = '"deleted"'
+"SubmissionStatusResponse.submission_kind" = '"content"'
+"SubmissionStatusResponse.outcome" = '"processing"'
+"UserResponse.reading_experience" = '"briefing"'
+"ContentDetailResponse.is_read" = "false"
+"ContentDetailResponse.is_saved_to_knowledge" = "false"
+"ContentDetailResponse.body_available" = "false"
+"ContentDetailResponse.can_subscribe" = "false"
+"PodcastEpisodeSearchResponse.results" = "[]"
+"MixedSearchResponse.content" = "[]"
+"MixedSearchResponse.feeds" = "[]"
+"MixedSearchResponse.podcasts" = "[]"
+"BulkMarkReadResponse.status" = '"success"'
+"BulkMarkReadResponse.failed_ids" = "[]"
+"MarkReadResponse.status" = '"success"'
+"MarkUnreadResponse.status" = '"success"'
+"ContentDiscussionResponse.comments" = "[]"
+"ContentDiscussionResponse.discussion_groups" = "[]"
+"ContentDiscussionResponse.links" = "[]"
+"ContentDiscussionResponse.stats" = "{}"
+"JobStatusResponse.payload" = "{}"
+"JobStatusResponse.retry_count" = "0"
+"AudioEpisodeResponse.source_item_ids" = "[]"
+"AudioEpisodeResponse.source_content_ids" = "[]"
+"AudioEpisodeResponse.source_count" = "0"
+"AudioEpisodeResponse.source_titles" = "[]"
+"AudioEpisodeResponse.read_on_play_content_ids" = "[]"
+"AudioEpisodeResponse.read_on_play_news_item_ids" = "[]"
+"BriefingIndexResponse.lenses" = "[]"
+"BriefingFirstRunProgress.completed_sources" = "[]"
+"BriefingFirstRunProgress.active_sources" = "[]"
+"BriefingFirstRunProgress.queued_sources" = "[]"
+"BriefingFirstRunProgress.ready_category_keys" = "[]"
+"BriefingLensResponse.segments" = "[]"
+"BriefingLensResponse.sources" = "[]"
+"BriefingLensResponse.has_more" = "false"
+"BriefingSegmentDto.blocks" = "[]"
+"BriefingSegmentDto.source_keys" = "[]"
+"BriefingSourceDto.read" = "false"
+"BriefingDigSearchResponse.results" = "[]"
+"XOAuthStartResponse.scopes" = "[]"
+"XConnectionResponse.scopes" = "[]"
+"IntegrationDisconnectResponse.provider" = '"x"'
+"OnboardingProfileResponse.inferred_topics" = "[]"
+"OnboardingProfileResponse.candidate_sources" = "[]"
+"OnboardingVoiceParseResponse.interest_topics" = "[]"
+"OnboardingVoiceParseResponse.missing_fields" = "[]"
+"OnboardingAudioDiscoverResponse.inferred_topics" = "[]"
+"OnboardingAudioDiscoverResponse.lanes" = "[]"
+"OnboardingDiscoveryStatusResponse.inferred_topics" = "[]"
+"OnboardingDiscoveryStatusResponse.lanes" = "[]"
+"LearningDeckListResponse.decks" = "[]"
+"TokenResponse.is_new_user" = "false"
+"ShareActionResponse.actions" = "[]"
+"ContentSubmissionResponse.already_exists" = "false"
+"ContentSummaryResponse.is_read" = "false"
+"ContentSummaryResponse.is_saved_to_knowledge" = "false"
+"PaginationMetadata.has_more" = "false"
+"DiscussionCommentResponse.depth" = "0"
+"DiscussionGroupResponse.items" = "[]"
+"DiscussionSummaryResponse.topics" = "[]"
+"DiscussionSummaryResponse.notable_links" = "[]"
+"DiscussionSummaryResponse.representative_comments" = "[]"
+"ChatSessionSummaryDto.has_pending_message" = "false"
+"ChatSessionSummaryDto.is_waiting_for_content" = "false"
+"ChatSessionSummaryDto.is_saved_to_knowledge" = "false"
+"ChatSessionSummaryDto.council_mode" = "false"
+"ChatMessageDto.display_key" = '""'
+"ScraperConfigStatsResponse.interval_sample_size" = "0"
+"OnboardingDiscoveryLaneStatus.completed_queries" = "0"
+"OnboardingDiscoveryLaneStatus.query_count" = "0"
+"OnboardingFastDiscoverResponse.recommended_pods" = "[]"
+"OnboardingFastDiscoverResponse.recommended_substacks" = "[]"
+"OnboardingFastDiscoverResponse.recommended_subreddits" = "[]"
+"LearningDeckResponse.source_metadata" = "{}"
+"LearningDeckResponse.share_enabled" = "false"
+"LearningDeckResponse.viewer_available" = "false"
+"LearningDeckResponse.source_notes_available" = "false"
+"UserResponse.council_personas" = "[]"
+"UserResponse.has_x_bookmark_sync" = "false"
+"CouncilPersonaConfig.instruction_prompt" = '""'
+"LlmTaskActionResponse.action_input" = "{}"
+"LlmTaskActionResponse.action_result" = "{}"
+"AssistantFeedOption.feed_format" = '"rss"'
+"AssistantFeedOption.is_subscribed" = "false"
+"BriefingParagraphDto.runs" = "[]"
+"OnboardingSuggestion.is_default" = "false"
+"LearningDeckRunResponse.timeline" = "[]"
+"BriefingRunDto.bold" = "false"

@@ -356,7 +356,15 @@ final class BriefingViewModelTests: XCTestCase {
                         kind: "content",
                         id: 1,
                         title: "First",
-                        read: false
+                        summary: nil,
+                        keyPoints: nil,
+                        url: nil,
+                        imageUrl: nil,
+                        thumbnailUrl: nil,
+                        publishedAt: nil,
+                        contentType: nil,
+                        read: false,
+                        discussion: nil
                     )
                 ],
                 nextCursor: "today-page-2",
@@ -372,7 +380,15 @@ final class BriefingViewModelTests: XCTestCase {
                         kind: "news",
                         id: 2,
                         title: "Second",
-                        read: false
+                        summary: nil,
+                        keyPoints: nil,
+                        url: nil,
+                        imageUrl: nil,
+                        thumbnailUrl: nil,
+                        publishedAt: nil,
+                        contentType: nil,
+                        read: false,
+                        discussion: nil
                     )
                 ]
             )
@@ -685,8 +701,14 @@ final class BriefingViewModelTests: XCTestCase {
                     id: 9,
                     title: "Unrelated",
                     summary: nil,
+                    keyPoints: nil,
+                    url: nil,
+                    imageUrl: nil,
+                    thumbnailUrl: nil,
+                    publishedAt: nil,
                     contentType: .article,
-                    read: false
+                    read: false,
+                    discussion: nil
                 ),
                 APIBriefingSource(
                     sourceKey: "news:8",
@@ -694,9 +716,17 @@ final class BriefingViewModelTests: XCTestCase {
                     id: 8,
                     title: "Unrelated news",
                     summary: nil,
-                    read: false
+                    keyPoints: nil,
+                    url: nil,
+                    imageUrl: nil,
+                    thumbnailUrl: nil,
+                    publishedAt: nil,
+                    contentType: nil,
+                    read: false,
+                    discussion: nil
                 )
-            ]
+            ],
+            nextCursor: nil
         )
         let viewModel = BriefingViewModel(service: service)
 
@@ -877,12 +907,22 @@ final class BriefingViewModelTests: XCTestCase {
                     id: 2,
                     title: "Updated news item",
                     summary: "News summary",
+                    keyPoints: nil,
+                    url: nil,
+                    imageUrl: nil,
+                    thumbnailUrl: nil,
+                    publishedAt: nil,
+                    contentType: nil,
                     read: false,
                     discussion: APIBriefingDiscussion(
                         platform: "hackernews",
                         commentCount: 12,
                         summaryStatus: "completed",
-                        overview: "Commenters focused on deployment risk."
+                        overview: "Commenters focused on deployment risk.",
+                        topCommentAuthor: nil,
+                        topCommentText: nil,
+                        externalUrl: nil,
+                        updatedAt: nil
                     )
                 )
             ]
@@ -983,7 +1023,14 @@ final class BriefingViewModelTests: XCTestCase {
                     id: 2,
                     title: "Fresh news item",
                     summary: "Updated summary",
-                    read: false
+                    keyPoints: nil,
+                    url: nil,
+                    imageUrl: nil,
+                    thumbnailUrl: nil,
+                    publishedAt: nil,
+                    contentType: nil,
+                    read: false,
+                    discussion: nil
                 )
             ]
         )
@@ -1020,8 +1067,14 @@ final class BriefingViewModelTests: XCTestCase {
                     id: 9,
                     title: "Unrelated",
                     summary: nil,
+                    keyPoints: nil,
+                    url: nil,
+                    imageUrl: nil,
+                    thumbnailUrl: nil,
+                    publishedAt: nil,
                     contentType: .article,
-                    read: false
+                    read: false,
+                    discussion: nil
                 )
             ]
         )

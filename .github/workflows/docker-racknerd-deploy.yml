@@ -11,20 +11,46 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  deploy:
-    name: Build image and deploy to production
+  quality:
+    name: Validate release commit
+    uses: ./.github/workflows/quality-gate.yml
+    with:
+      sha: ${{ github.sha }}
+
+  build-image:
+    name: Build tested image
+    needs: quality
     runs-on: ubuntu-latest
-    concurrency: news-app-docker-deploy
-    environment: production
     permissions:
       contents: read
       packages: write
     env:
-      DEPLOY_REMOTE_DIR: ${{ vars.DEPLOY_REMOTE_DIR }}
-      DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+      TESTED_SHA: ${{ needs.quality.outputs.tested_sha }}
     steps:
-      - name: Checkout repository
+      - name: Checkout tested commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TESTED_SHA }}
+
+      - name: Verify tested commit
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+          current_main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ "$current_main_sha" != "$TESTED_SHA" ]]; then
+            echo "Refusing stale build: tested $TESTED_SHA, current main $current_main_sha" >&2
+            exit 1
+          fi
+
+      - name: Validate production Compose manifest
+        env:
+          NEWSLY_DATABASE_URL: postgresql://newsly:newsly@postgres:5432/newsly
+          DOCUMENT_EXTRACTOR_SHARED_SECRET: manifest-validation-only
+          NEWSLY_ENV_FILE: /dev/null
+          NEWSLY_EXTRACTOR_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}-extractor
+          NEWSLY_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}
+          POSTGRES_PASSWORD: manifest-validation-only
+        run: docker compose -f docker-compose.production.yml config --quiet
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -53,12 +79,61 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: |
+            NEWSLY_BUILD_SHA=${{ env.TESTED_SHA }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ env.TESTED_SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build database-free document extractor image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./python/document_extractor
+          file: ./python/document_extractor/Dockerfile
+          push: true
+          build-args: |
+            NEWSLY_BUILD_SHA=${{ env.TESTED_SHA }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}-extractor
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.TESTED_SHA }}
+          cache-from: type=gha,scope=document-extractor
+          cache-to: type=gha,mode=max,scope=document-extractor
+
+  deploy:
+    name: Deploy tested image to production
+    needs:
+      - quality
+      - build-image
+    runs-on: ubuntu-latest
+    concurrency: news-app-docker-deploy
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      TESTED_SHA: ${{ needs.quality.outputs.tested_sha }}
+      DEPLOY_REMOTE_DIR: ${{ vars.DEPLOY_REMOTE_DIR }}
+      DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TESTED_SHA }}
+
+      - name: Verify tested commit
+        run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+
+      - name: Verify tested commit is current main
+        run: |
+          current_main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ "$current_main_sha" != "$TESTED_SHA" ]]; then
+            echo "Refusing stale deploy: tested $TESTED_SHA, current main $current_main_sha" >&2
+            exit 1
+          fi
 
       - name: Start ssh-agent
         uses: webfactory/ssh-agent@v0.9.0
@@ -83,7 +158,8 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USERNAME: ${{ github.actor }}
           IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          IMAGE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          IMAGE_EXTRACTOR_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}-extractor
+          IMAGE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}
           REGISTRY: ${{ env.REGISTRY }}
         run: |
           set -euo pipefail
@@ -152,22 +228,12 @@ jobs:
             echo ".env.racknerd is required for deploy" >&2
             exit 1
           fi
-          for key in POSTGRES_PASSWORD NEWSLY_DATABASE_URL; do
+          for key in POSTGRES_PASSWORD NEWSLY_DATABASE_URL DOCUMENT_EXTRACTOR_SHARED_SECRET; do
             if ! grep -q "^${key}=" "$env_file"; then
               echo "${key} is required for deploy" >&2
               exit 1
             fi
           done
-          if grep -q '^ENVIRONMENT=production$' "$env_file"; then
-            if ! grep -q '^CORS_ALLOW_ORIGINS=' "$env_file"; then
-              echo "CORS_ALLOW_ORIGINS is required when ENVIRONMENT=production" >&2
-              exit 1
-            fi
-            if grep -q '^CORS_ALLOW_ORIGINS=\*$' "$env_file"; then
-              echo "CORS_ALLOW_ORIGINS must be explicit when ENVIRONMENT=production" >&2
-              exit 1
-            fi
-          fi
           chmod 600 "$env_file"
           test -x "$remote_dir/scripts/deploy_blue_green.sh"
           test -x "$remote_dir/scripts/deploy/switch-api-slot.sh"
@@ -179,27 +245,31 @@ jobs:
           echo "→ Logging in to GitHub Container Registry on remote host"
           printf '%s' "$GHCR_TOKEN" | ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo docker login '$REGISTRY' --username '$GHCR_USERNAME' --password-stdin >/dev/null"
 
-          echo "→ Pulling image on remote host"
-          ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s -- "$IMAGE_TAG" <<'REMOTE_PULL'
+          echo "→ Pulling images on remote host"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s -- "$IMAGE_TAG" "$IMAGE_EXTRACTOR_TAG" <<'REMOTE_PULL'
           set -euo pipefail
-          image_tag="$1"
-          for attempt in 1 2 3 4 5; do
-            if docker pull "$image_tag"; then
-              exit 0
-            fi
-            if [[ "$attempt" -eq 5 ]]; then
-              echo "docker pull failed after $attempt attempts" >&2
-              exit 1
-            fi
-            sleep_seconds=$((attempt * 5))
-            echo "docker pull attempt $attempt failed; retrying in ${sleep_seconds}s" >&2
-            sleep "$sleep_seconds"
+          for image_tag in "$@"; do
+            pulled=false
+            for attempt in 1 2 3 4 5; do
+              if docker pull "$image_tag"; then
+                pulled=true
+                break
+              fi
+              if [[ "$attempt" -eq 5 ]]; then
+                echo "docker pull failed for $image_tag after $attempt attempts" >&2
+                exit 1
+              fi
+              sleep_seconds=$((attempt * 5))
+              echo "docker pull attempt $attempt failed for $image_tag; retrying in ${sleep_seconds}s" >&2
+              sleep "$sleep_seconds"
+            done
+            [[ "$pulled" == true ]]
           done
           REMOTE_PULL
 
           echo "→ Deploying inactive API slot"
           ssh "${SSH_OPTS[@]}" "$REMOTE" \
-            "sudo env NEWSLY_DEPLOY_APP_DIR='$REMOTE_DIR' '$REMOTE_DIR/scripts/deploy_blue_green.sh' '$IMAGE_TAG'"
+            "sudo env NEWSLY_DEPLOY_APP_DIR='$REMOTE_DIR' NEWSLY_EXTRACTOR_IMAGE='$IMAGE_EXTRACTOR_TAG' '$REMOTE_DIR/scripts/deploy_blue_green.sh' '$IMAGE_TAG'"
 
           echo "→ Verifying production runtime"
           ssh "${SSH_OPTS[@]}" "$REMOTE" sudo bash -s <<'REMOTE_VERIFY'
@@ -211,7 +281,7 @@ jobs:
             *) echo "invalid active API slot: $active_slot" >&2; exit 1 ;;
           esac
 
-          for container in newsly-postgres "newsly-api-${active_slot}" newsly-workers newsly-scheduler; do
+          for container in newsly-postgres newsly-document-extractor "newsly-api-${active_slot}" newsly-workers newsly-scheduler; do
             status="$(docker inspect --format '{{.State.Status}}' "$container")"
             if [[ "$status" != "running" ]]; then
               echo "$container is not running: $status" >&2
@@ -219,8 +289,10 @@ jobs:
             fi
           done
           postgres_health="$(docker inspect --format '{{.State.Health.Status}}' newsly-postgres)"
+          extractor_health="$(docker inspect --format '{{.State.Health.Status}}' newsly-document-extractor)"
           api_health="$(docker inspect --format '{{.State.Health.Status}}' "newsly-api-${active_slot}")"
           [[ "$postgres_health" == "healthy" ]]
+          [[ "$extractor_health" == "healthy" ]]
           [[ "$api_health" == "healthy" ]]
           curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${active_port}/health" >/dev/null
           curl --fail --silent --show-error --max-time 10 http://127.0.0.1/health >/dev/null

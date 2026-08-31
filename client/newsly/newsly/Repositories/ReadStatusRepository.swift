@@ -46,16 +46,8 @@ final class ReadStatusRepository: ReadStatusRepositoryType {
 
         logger.info("[ReadStatus] markRead called | ids=\(ids, privacy: .public) count=\(ids.count)")
 
-        struct BulkMarkReadRequest: Codable {
-            let contentIds: [Int]
-
-            enum CodingKeys: String, CodingKey {
-                case contentIds = "content_ids"
-            }
-        }
-
-        let payload = BulkMarkReadRequest(contentIds: ids)
-        let body = try? encoder.encode(payload)
+        let payload = APIBulkMarkReadRequest(contentIds: ids)
+        let body = try encoder.encode(payload)
 
         do {
             let _: BulkMarkReadResponse = try await client.request(

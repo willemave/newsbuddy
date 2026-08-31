@@ -4,26 +4,134 @@ import XCTest
 
 @MainActor
 final class SearchViewModelTests: XCTestCase {
-    func testChangingValidQueryImmediatelyInvalidatesPreviousLocalResults() async {
+    func testRapidTextReplacementCancelsAndFencesStaleLocalSuccess() async {
+        let contentService = SearchContentServiceMock()
         let viewModel = SearchViewModel(
-            contentService: SearchContentServiceMock(),
+            contentService: contentService,
             scraperConfigService: SearchFeedServiceMock()
         )
-        viewModel.searchText = "previous topic"
+
         viewModel.contentResults = [makeContentSummary(id: 42)]
         viewModel.hasLocalSearch = true
-
-        viewModel.searchText = "current topic"
-        let searchTask = Task {
-            await viewModel.handleSearchTextChangedAfterDelay()
-        }
-        await Task.yield()
+        viewModel.searchText = "first topic"
+        viewModel.searchTextDidChange(to: viewModel.searchText)
 
         XCTAssertTrue(viewModel.contentResults.isEmpty)
         XCTAssertFalse(viewModel.hasLocalSearch)
+        XCTAssertTrue(viewModel.isLoadingLocal)
 
-        searchTask.cancel()
-        await searchTask.value
+        let firstRequestStarted = await waitUntil {
+            contentService.requestedLocalQueries == ["first topic"]
+        }
+        XCTAssertTrue(firstRequestStarted)
+
+        viewModel.searchText = "current topic"
+        viewModel.searchTextDidChange(to: viewModel.searchText)
+        let currentRequestStarted = await waitUntil {
+            contentService.requestedLocalQueries == ["first topic", "current topic"]
+        }
+        XCTAssertTrue(currentRequestStarted)
+
+        contentService.resumeLocalSearch(
+            query: "current topic",
+            with: .success(makeContentListResponse(ids: [2]))
+        )
+        let currentResultsLoaded = await waitUntil {
+            viewModel.contentResults.map(\.id) == [2] && !viewModel.isLoadingLocal
+        }
+        XCTAssertTrue(currentResultsLoaded)
+
+        contentService.resumeLocalSearch(
+            query: "first topic",
+            with: .success(makeContentListResponse(ids: [1]))
+        )
+        let staleRequestObservedCancellation = await waitUntil {
+            contentService.cancelledLocalQueries.contains("first topic")
+        }
+        XCTAssertTrue(staleRequestObservedCancellation)
+        XCTAssertEqual(viewModel.contentResults.map(\.id), [2])
+        XCTAssertNil(viewModel.localErrorMessage)
+        XCTAssertFalse(viewModel.isLoadingLocal)
+    }
+
+    func testRetryReplacesTrackedLocalSearchAndFencesStaleFailure() async {
+        let contentService = SearchContentServiceMock()
+        let viewModel = SearchViewModel(
+            contentService: contentService,
+            scraperConfigService: SearchFeedServiceMock()
+        )
+        viewModel.searchText = "retry topic"
+
+        viewModel.retrySearch()
+        let firstRequestStarted = await waitUntil {
+            contentService.requestedLocalQueries == ["retry topic"]
+        }
+        XCTAssertTrue(firstRequestStarted)
+
+        viewModel.retrySearch()
+        let retryRequestStarted = await waitUntil {
+            contentService.requestedLocalQueries == ["retry topic", "retry topic"]
+        }
+        XCTAssertTrue(retryRequestStarted)
+
+        contentService.resumeLocalSearch(
+            query: "retry topic",
+            occurrence: 1,
+            with: .success(makeContentListResponse(ids: [7]))
+        )
+        let retryResultsLoaded = await waitUntil {
+            viewModel.contentResults.map(\.id) == [7] && !viewModel.isLoadingLocal
+        }
+        XCTAssertTrue(retryResultsLoaded)
+
+        contentService.resumeLocalSearch(
+            query: "retry topic",
+            with: .failure(SearchTestError.failed)
+        )
+        let staleRequestObservedCancellation = await waitUntil {
+            contentService.cancelledLocalQueries.contains("retry topic")
+        }
+        XCTAssertTrue(staleRequestObservedCancellation)
+        XCTAssertEqual(viewModel.contentResults.map(\.id), [7])
+        XCTAssertNil(viewModel.localErrorMessage)
+        XCTAssertTrue(viewModel.hasLocalSearch)
+        XCTAssertFalse(viewModel.isLoadingLocal)
+    }
+
+    func testQueryBelowTwoCharactersCancelsLocalWorkAndClearsLoading() async {
+        let contentService = SearchContentServiceMock()
+        let viewModel = SearchViewModel(
+            contentService: contentService,
+            scraperConfigService: SearchFeedServiceMock()
+        )
+        viewModel.searchText = "valid topic"
+        viewModel.retrySearch()
+        let requestStarted = await waitUntil {
+            contentService.requestedLocalQueries == ["valid topic"]
+        }
+        XCTAssertTrue(requestStarted)
+        XCTAssertTrue(viewModel.isLoadingLocal)
+
+        viewModel.searchText = "x"
+        viewModel.searchTextDidChange(to: viewModel.searchText)
+
+        XCTAssertFalse(viewModel.isLoadingLocal)
+        XCTAssertFalse(viewModel.hasLocalSearch)
+        XCTAssertTrue(viewModel.contentResults.isEmpty)
+        XCTAssertNil(viewModel.localErrorMessage)
+
+        contentService.resumeLocalSearch(
+            query: "valid topic",
+            with: .success(makeContentListResponse(ids: [9]))
+        )
+        let staleRequestObservedCancellation = await waitUntil {
+            contentService.cancelledLocalQueries.contains("valid topic")
+        }
+        XCTAssertTrue(staleRequestObservedCancellation)
+        XCTAssertFalse(viewModel.isLoadingLocal)
+        XCTAssertFalse(viewModel.hasLocalSearch)
+        XCTAssertTrue(viewModel.contentResults.isEmpty)
+        XCTAssertNil(viewModel.localErrorMessage)
     }
 
     func testSupersededMixedSearchCannotReplaceCurrentResults() async {
@@ -228,7 +336,12 @@ final class SearchViewModelTests: XCTestCase {
 private final class SearchContentServiceMock: SearchContentServicing {
     private var immediateMixedResults: [Result<MixedSearchResponse, Error>]
     private let submitResult: Result<SubmitContentResponse, Error>?
+    private var localContinuations: [
+        String: [CheckedContinuation<Result<ContentListResponse, Error>, Never>]
+    ] = [:]
     private var mixedContinuations: [String: CheckedContinuation<MixedSearchResponse, Error>] = [:]
+    private(set) var requestedLocalQueries: [String] = []
+    private(set) var cancelledLocalQueries: [String] = []
     private(set) var requestedMixedQueries: [String] = []
     private(set) var submitCallCount = 0
 
@@ -246,12 +359,14 @@ private final class SearchContentServiceMock: SearchContentServicing {
         limit: Int,
         cursor: String?
     ) async throws -> ContentListResponse {
-        ContentListResponse(
-            contents: [],
-            availableDates: [],
-            contentTypes: [],
-            meta: PaginationMetadata(pageSize: limit)
-        )
+        requestedLocalQueries.append(query)
+        let result = await withCheckedContinuation { continuation in
+            localContinuations[query, default: []].append(continuation)
+        }
+        if Task.isCancelled {
+            cancelledLocalQueries.append(query)
+        }
+        return try result.get()
     }
 
     func searchMixed(query: String, limit: Int) async throws -> MixedSearchResponse {
@@ -282,6 +397,25 @@ private final class SearchContentServiceMock: SearchContentServicing {
         }
         continuation.resume(with: result)
     }
+
+    func resumeLocalSearch(
+        query: String,
+        occurrence: Int = 0,
+        with result: Result<ContentListResponse, Error>
+    ) {
+        guard var continuations = localContinuations[query],
+              continuations.indices.contains(occurrence) else {
+            XCTFail("No pending local search for \(query) at occurrence \(occurrence)")
+            return
+        }
+        let continuation = continuations.remove(at: occurrence)
+        if continuations.isEmpty {
+            localContinuations.removeValue(forKey: query)
+        } else {
+            localContinuations[query] = continuations
+        }
+        continuation.resume(returning: result)
+    }
 }
 
 @MainActor
@@ -311,9 +445,12 @@ private final class SearchFeedServiceMock: SearchFeedSubscribing {
             displayName: displayName,
             config: ["feed_url": AnyCodable(feedURL)],
             feedUrl: feedURL,
+            limit: nil,
             isActive: true,
             createdAt: Date(),
-            subscriptionOutcome: subscriptionOutcome
+            stats: nil,
+            subscriptionOutcome: subscriptionOutcome,
+            backfillTaskId: nil
         )
     }
 }
@@ -339,6 +476,9 @@ private func makeMixedResponse(
           "feed_url": "https://example.com/feed.xml",
           "feed_type": "rss",
           "feed_format": "rss",
+          "description": null,
+          "rationale": null,
+          "evidence_url": null,
           "is_subscribed": \(isSubscribed)
         }
       ],
@@ -364,5 +504,18 @@ private func makeContentSummary(id: Int) -> ContentSummary {
         publicationDate: nil,
         isRead: false,
         isSavedToKnowledge: false
+    )
+}
+
+private func makeContentListResponse(ids: [Int]) -> ContentListResponse {
+    ContentListResponse(
+        contents: ids.map(makeContentSummary),
+        availableDates: [],
+        contentTypes: [],
+        meta: PaginationMetadata(
+            nextCursor: nil,
+            pageSize: ids.count,
+            total: nil
+        )
     )
 }

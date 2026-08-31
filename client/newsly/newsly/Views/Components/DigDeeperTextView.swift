@@ -11,11 +11,6 @@ class DigDeeperTextView: UITextView {
     var digSelectionNormalizer: (String) -> String? = { selection in
         selection.isEmpty ? nil : selection
     }
-    var adaptiveTextColor: UIColor? {
-        didSet {
-            applyAdaptiveTextColor()
-        }
-    }
 
     /// When set, text wraps around a rectangle anchored to a top edge of the
     /// text container (used for briefing passages with an inline floated figure).
@@ -56,14 +51,6 @@ class DigDeeperTextView: UITextView {
         resignFirstResponder()
     }
 
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard previousTraitCollection?.hasDifferentColorAppearance(comparedTo: traitCollection) != false else {
-            return
-        }
-        applyAdaptiveTextColor()
-    }
-
     override func buildMenu(with builder: any UIMenuBuilder) {
         super.buildMenu(with: builder)
         guard onDigDeeper != nil, selectedTextForDigDeeper != nil else { return }
@@ -98,10 +85,5 @@ class DigDeeperTextView: UITextView {
               let selectedText = text(in: selectedTextRange)
         else { return nil }
         return digSelectionNormalizer(selectedText)
-    }
-
-    private func applyAdaptiveTextColor() {
-        guard let adaptiveTextColor else { return }
-        textColor = adaptiveTextColor.resolvedColor(with: traitCollection)
     }
 }

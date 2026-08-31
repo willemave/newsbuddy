@@ -17,26 +17,15 @@ struct ChatSessionDetail: Codable {
         self.messages = messages
     }
 
-    init(from decoder: Decoder) throws {
-        let response = try APIChatSessionDetail(from: decoder)
+    init(api response: APIChatSessionDetail) {
         self.init(
             session: ChatSessionSummary(api: response.session),
             messages: response.messages.map(ChatMessage.init(api:))
         )
     }
-}
-
-/// Response from creating a new chat session
-struct CreateChatSessionResponse: Codable {
-    let session: ChatSessionSummary
-
-    init(session: ChatSessionSummary) {
-        self.session = session
-    }
 
     init(from decoder: Decoder) throws {
-        let response = try APICreateChatSessionResponse(from: decoder)
-        self.init(session: ChatSessionSummary(api: response.session))
+        self.init(api: try APIChatSessionDetail(from: decoder))
     }
 }
 
@@ -67,14 +56,17 @@ struct SendChatMessageResponse: Codable {
         self.status = status
     }
 
-    init(from decoder: Decoder) throws {
-        let response = try APISendMessageResponse(from: decoder)
+    init(api response: APISendMessageResponse) {
         self.init(
             sessionId: response.sessionId,
             userMessage: ChatMessage(api: response.userMessage),
             messageId: response.messageId,
             status: response.status
         )
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(api: try APISendMessageResponse(from: decoder))
     }
 }
 
@@ -116,8 +108,7 @@ struct MessageStatusResponse: Codable {
         self.error = error
     }
 
-    init(from decoder: Decoder) throws {
-        let response = try APIMessageStatusResponse(from: decoder)
+    init(api response: APIMessageStatusResponse) {
         self.init(
             messageId: response.messageId,
             status: response.status,
@@ -127,6 +118,10 @@ struct MessageStatusResponse: Codable {
             streamRevision: response.streamRevision,
             error: response.error
         )
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(api: try APIMessageStatusResponse(from: decoder))
     }
 
     var isCompleted: Bool {
@@ -139,93 +134,6 @@ struct MessageStatusResponse: Codable {
 
     var hasFailed: Bool {
         status == .failed
-    }
-}
-
-/// Response for initial suggestions (non-streaming)
-struct InitialSuggestionsResponse: Codable {
-    let id: Int
-    let sessionId: Int
-    let role: APIChatMessageRole
-    let content: String
-    let timestamp: Date
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case sessionId = "session_id"
-        case role
-        case content
-        case timestamp
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(Int.self, forKey: .id)
-        sessionId = try container.decode(Int.self, forKey: .sessionId)
-        role = try container.decode(APIChatMessageRole.self, forKey: .role)
-        content = try container.decode(String.self, forKey: .content)
-        let timestampRaw = try container.decode(String.self, forKey: .timestamp)
-        guard let timestampParsed = ServerDate.parse(timestampRaw) else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .timestamp,
-                in: container,
-                debugDescription: "Unparseable date for timestamp"
-            )
-        }
-        timestamp = timestampParsed
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(sessionId, forKey: .sessionId)
-        try container.encode(role, forKey: .role)
-        try container.encode(content, forKey: .content)
-        try container.encode(ServerDate.format(timestamp), forKey: .timestamp)
-    }
-}
-
-/// Request to create a new chat session
-struct CreateChatSessionRequest: Codable {
-    var contentId: Int?
-    var newsItemId: Int?
-    var topic: String?
-    var llmProvider: String?
-    var llmModelHint: String?
-    var initialMessage: String?
-
-    enum CodingKeys: String, CodingKey {
-        case contentId = "content_id"
-        case newsItemId = "news_item_id"
-        case topic
-        case llmProvider = "llm_provider"
-        case llmModelHint = "llm_model_hint"
-        case initialMessage = "initial_message"
-    }
-}
-
-/// Request to send a message in a chat session
-struct SendChatMessageRequest: Codable {
-    let message: String
-}
-
-struct StartCouncilChatRequest: Codable {
-    let message: String
-}
-
-struct SelectCouncilBranchRequest: Codable {
-    let childSessionId: Int
-
-    enum CodingKeys: String, CodingKey {
-        case childSessionId = "child_session_id"
-    }
-}
-
-struct RetryCouncilBranchRequest: Codable {
-    let childSessionId: Int
-
-    enum CodingKeys: String, CodingKey {
-        case childSessionId = "child_session_id"
     }
 }
 
@@ -280,17 +188,20 @@ struct AssistantScreenContext: Codable, Equatable {
         case note
         case assistantAction = "assistant_action"
     }
-}
 
-struct AssistantTurnRequest: Codable {
-    let message: String
-    let sessionId: Int?
-    let screenContext: AssistantScreenContext
-
-    enum CodingKeys: String, CodingKey {
-        case message
-        case sessionId = "session_id"
-        case screenContext = "screen_context"
+    var api: APIAssistantScreenContext {
+        APIAssistantScreenContext(
+            screenType: screenType,
+            screenTitle: screenTitle,
+            contentId: contentId,
+            newsItemId: newsItemId,
+            visibleContentIds: visibleContentIds,
+            visibleNewsItemIds: visibleNewsItemIds,
+            selectedTopic: selectedTopic,
+            query: query,
+            note: note,
+            assistantAction: assistantAction
+        )
     }
 }
 
@@ -319,13 +230,16 @@ struct AssistantTurnResponse: Codable {
         self.status = status
     }
 
-    init(from decoder: Decoder) throws {
-        let response = try APIAssistantTurnResponse(from: decoder)
+    init(api response: APIAssistantTurnResponse) {
         self.init(
             session: ChatSessionSummary(api: response.session),
             userMessage: ChatMessage(api: response.userMessage),
             messageId: response.messageId,
             status: response.status
         )
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init(api: try APIAssistantTurnResponse(from: decoder))
     }
 }

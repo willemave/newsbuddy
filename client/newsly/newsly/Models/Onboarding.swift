@@ -10,6 +10,10 @@ import Foundation
 struct OnboardingAudioDiscoverRequest: Codable {
     let transcript: String
     let locale: String?
+
+    var api: APIOnboardingAudioDiscoverRequest {
+        APIOnboardingAudioDiscoverRequest(transcript: transcript, locale: locale)
+    }
 }
 
 struct OnboardingDiscoveryLaneStatus: Codable, Hashable, Identifiable {
@@ -19,6 +23,20 @@ struct OnboardingDiscoveryLaneStatus: Codable, Hashable, Identifiable {
     let queryCount: Int
 
     var id: String { name }
+
+    init(name: String, status: String, completedQueries: Int, queryCount: Int) {
+        self.name = name
+        self.status = status
+        self.completedQueries = completedQueries
+        self.queryCount = queryCount
+    }
+
+    init(api response: APIOnboardingDiscoveryLaneStatus) {
+        name = response.name
+        status = response.status
+        completedQueries = response.completedQueries
+        queryCount = response.queryCount
+    }
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -35,6 +53,28 @@ struct OnboardingAudioDiscoverResponse: Codable {
     let inferredTopics: [String]
     let lanes: [OnboardingDiscoveryLaneStatus]
 
+    init(
+        runId: Int,
+        runStatus: String,
+        topicSummary: String?,
+        inferredTopics: [String],
+        lanes: [OnboardingDiscoveryLaneStatus]
+    ) {
+        self.runId = runId
+        self.runStatus = runStatus
+        self.topicSummary = topicSummary
+        self.inferredTopics = inferredTopics
+        self.lanes = lanes
+    }
+
+    init(api response: APIOnboardingAudioDiscoverResponse) {
+        runId = response.runId
+        runStatus = response.runStatus
+        topicSummary = response.topicSummary
+        inferredTopics = response.inferredTopics
+        lanes = response.lanes.map(OnboardingDiscoveryLaneStatus.init(api:))
+    }
+
     enum CodingKeys: String, CodingKey {
         case runId = "run_id"
         case runStatus = "run_status"
@@ -45,6 +85,7 @@ struct OnboardingAudioDiscoverResponse: Codable {
 }
 
 struct OnboardingSuggestion: Codable, Hashable {
+    let id: Int?
     let suggestionType: String
     let title: String?
     let siteURL: String?
@@ -54,7 +95,42 @@ struct OnboardingSuggestion: Codable, Hashable {
     let score: Double?
     let isDefault: Bool
 
+    init(
+        id: Int?,
+        suggestionType: String,
+        title: String?,
+        siteURL: String?,
+        feedURL: String?,
+        subreddit: String?,
+        rationale: String?,
+        score: Double?,
+        isDefault: Bool
+    ) {
+        self.id = id
+        self.suggestionType = suggestionType
+        self.title = title
+        self.siteURL = siteURL
+        self.feedURL = feedURL
+        self.subreddit = subreddit
+        self.rationale = rationale
+        self.score = score
+        self.isDefault = isDefault
+    }
+
+    init(api response: APIOnboardingSuggestion) {
+        id = response.id
+        suggestionType = response.suggestionType.rawValue
+        title = response.title
+        siteURL = response.siteUrl
+        feedURL = response.feedUrl
+        subreddit = response.subreddit
+        rationale = response.rationale
+        score = response.score
+        isDefault = response.isDefault
+    }
+
     enum CodingKeys: String, CodingKey {
+        case id
         case suggestionType = "suggestion_type"
         case title
         case siteURL = "site_url"
@@ -66,7 +142,7 @@ struct OnboardingSuggestion: Codable, Hashable {
     }
 
     var stableKey: String {
-        feedURL ?? subreddit ?? siteURL ?? title ?? UUID().uuidString
+        id.map(String.init) ?? feedURL ?? subreddit ?? siteURL ?? title ?? UUID().uuidString
     }
 
     var displayTitle: String {
@@ -123,6 +199,22 @@ struct OnboardingFastDiscoverResponse: Codable {
     let recommendedSubstacks: [OnboardingSuggestion]
     let recommendedSubreddits: [OnboardingSuggestion]
 
+    init(
+        recommendedPods: [OnboardingSuggestion],
+        recommendedSubstacks: [OnboardingSuggestion],
+        recommendedSubreddits: [OnboardingSuggestion]
+    ) {
+        self.recommendedPods = recommendedPods
+        self.recommendedSubstacks = recommendedSubstacks
+        self.recommendedSubreddits = recommendedSubreddits
+    }
+
+    init(api response: APIOnboardingFastDiscoverResponse) {
+        recommendedPods = response.recommendedPods.map(OnboardingSuggestion.init(api:))
+        recommendedSubstacks = response.recommendedSubstacks.map(OnboardingSuggestion.init(api:))
+        recommendedSubreddits = response.recommendedSubreddits.map(OnboardingSuggestion.init(api:))
+    }
+
     enum CodingKeys: String, CodingKey {
         case recommendedPods = "recommended_pods"
         case recommendedSubstacks = "recommended_substacks"
@@ -139,6 +231,34 @@ struct OnboardingDiscoveryStatusResponse: Codable {
     let suggestions: OnboardingFastDiscoverResponse?
     let errorMessage: String?
 
+    init(
+        runId: Int,
+        runStatus: String,
+        topicSummary: String?,
+        inferredTopics: [String],
+        lanes: [OnboardingDiscoveryLaneStatus],
+        suggestions: OnboardingFastDiscoverResponse?,
+        errorMessage: String?
+    ) {
+        self.runId = runId
+        self.runStatus = runStatus
+        self.topicSummary = topicSummary
+        self.inferredTopics = inferredTopics
+        self.lanes = lanes
+        self.suggestions = suggestions
+        self.errorMessage = errorMessage
+    }
+
+    init(api response: APIOnboardingDiscoveryStatusResponse) {
+        runId = response.runId
+        runStatus = response.runStatus
+        topicSummary = response.topicSummary
+        inferredTopics = response.inferredTopics
+        lanes = response.lanes.map(OnboardingDiscoveryLaneStatus.init(api:))
+        suggestions = response.suggestions.map(OnboardingFastDiscoverResponse.init(api:))
+        errorMessage = response.errorMessage
+    }
+
     enum CodingKeys: String, CodingKey {
         case runId = "run_id"
         case runStatus = "run_status"
@@ -147,20 +267,6 @@ struct OnboardingDiscoveryStatusResponse: Codable {
         case lanes
         case suggestions
         case errorMessage = "error_message"
-    }
-}
-
-struct OnboardingSelectedSource: Codable {
-    let suggestionType: String
-    let title: String?
-    let feedURL: String
-    let config: [String: String]?
-
-    enum CodingKeys: String, CodingKey {
-        case suggestionType = "suggestion_type"
-        case title
-        case feedURL = "feed_url"
-        case config
     }
 }
 
@@ -174,38 +280,43 @@ struct OnboardingSelectedAggregator: Codable, Hashable {
         self.title = title
         self.topics = topics
     }
+
+    var api: APIOnboardingSelectedAggregator {
+        APIOnboardingSelectedAggregator(key: key, title: title, topics: topics)
+    }
 }
 
 struct OnboardingCompleteRequest: Codable {
-    let selectedSources: [OnboardingSelectedSource]
-    let selectedSubreddits: [String]
+    let discoveryRunId: Int?
+    let selectedSuggestionIds: [Int]
     let selectedAggregators: [OnboardingSelectedAggregator]
-    let profileSummary: String?
-    let inferredTopics: [String]?
     let twitterUsername: String?
 
     init(
-        selectedSources: [OnboardingSelectedSource],
-        selectedSubreddits: [String],
+        discoveryRunId: Int?,
+        selectedSuggestionIds: [Int],
         selectedAggregators: [OnboardingSelectedAggregator] = [],
-        profileSummary: String?,
-        inferredTopics: [String]?,
         twitterUsername: String?
     ) {
-        self.selectedSources = selectedSources
-        self.selectedSubreddits = selectedSubreddits
+        self.discoveryRunId = discoveryRunId
+        self.selectedSuggestionIds = selectedSuggestionIds
         self.selectedAggregators = selectedAggregators
-        self.profileSummary = profileSummary
-        self.inferredTopics = inferredTopics
         self.twitterUsername = twitterUsername
     }
 
+    var api: APIOnboardingCompleteRequest {
+        APIOnboardingCompleteRequest(
+            discoveryRunId: discoveryRunId,
+            selectedSuggestionIds: selectedSuggestionIds,
+            selectedAggregators: selectedAggregators.map(\.api),
+            twitterUsername: twitterUsername
+        )
+    }
+
     enum CodingKeys: String, CodingKey {
-        case selectedSources = "selected_sources"
-        case selectedSubreddits = "selected_subreddits"
+        case discoveryRunId = "discovery_run_id"
+        case selectedSuggestionIds = "selected_suggestion_ids"
         case selectedAggregators = "selected_aggregators"
-        case profileSummary = "profile_summary"
-        case inferredTopics = "inferred_topics"
         case twitterUsername = "twitter_username"
     }
 }
@@ -218,6 +329,34 @@ struct OnboardingCompleteResponse: Codable, Equatable {
     let longformStatus: String
     let hasCompletedOnboarding: Bool
     let hasCompletedNewUserTutorial: Bool
+
+    init(
+        status: String,
+        taskId: Int?,
+        inboxCountEstimate: Int,
+        configuredSourceCount: Int,
+        longformStatus: String,
+        hasCompletedOnboarding: Bool,
+        hasCompletedNewUserTutorial: Bool
+    ) {
+        self.status = status
+        self.taskId = taskId
+        self.inboxCountEstimate = inboxCountEstimate
+        self.configuredSourceCount = configuredSourceCount
+        self.longformStatus = longformStatus
+        self.hasCompletedOnboarding = hasCompletedOnboarding
+        self.hasCompletedNewUserTutorial = hasCompletedNewUserTutorial
+    }
+
+    init(api response: APIOnboardingCompleteResponse) {
+        status = response.status
+        taskId = response.taskId
+        inboxCountEstimate = response.inboxCountEstimate
+        configuredSourceCount = response.configuredSourceCount
+        longformStatus = response.longformStatus
+        hasCompletedOnboarding = response.hasCompletedOnboarding
+        hasCompletedNewUserTutorial = response.hasCompletedNewUserTutorial
+    }
 
     enum CodingKeys: String, CodingKey {
         case status
@@ -232,6 +371,14 @@ struct OnboardingCompleteResponse: Codable, Equatable {
 
 struct OnboardingTutorialResponse: Codable {
     let hasCompletedNewUserTutorial: Bool
+
+    init(hasCompletedNewUserTutorial: Bool) {
+        self.hasCompletedNewUserTutorial = hasCompletedNewUserTutorial
+    }
+
+    init(api response: APIOnboardingTutorialResponse) {
+        hasCompletedNewUserTutorial = response.hasCompletedNewUserTutorial
+    }
 
     enum CodingKeys: String, CodingKey {
         case hasCompletedNewUserTutorial = "has_completed_new_user_tutorial"

@@ -14,26 +14,13 @@ protocol XIntegrationAPIClientProtocol {
     func disconnect() async throws
 }
 
-struct XOAuthStartRequest: Codable {}
-
-struct XOAuthStartResponse: Codable {
+struct XOAuthStartResponse {
     let authorizeURL: String
     let state: String
     let scopes: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case authorizeURL = "authorize_url"
-        case state
-        case scopes
-    }
 }
 
-struct XOAuthExchangeRequest: Codable {
-    let code: String
-    let state: String
-}
-
-struct XConnectionResponse: Codable {
+struct XConnectionResponse {
     let provider: String
     let connected: Bool
     let isActive: Bool
@@ -43,18 +30,6 @@ struct XConnectionResponse: Codable {
     let lastSyncedAt: String?
     let lastStatus: String?
     let lastError: String?
-
-    enum CodingKeys: String, CodingKey {
-        case provider
-        case connected
-        case isActive = "is_active"
-        case providerUserID = "provider_user_id"
-        case providerUsername = "provider_username"
-        case scopes
-        case lastSyncedAt = "last_synced_at"
-        case lastStatus = "last_status"
-        case lastError = "last_error"
-    }
 }
 
 extension XConnectionResponse {
@@ -296,38 +271,70 @@ private struct LiveXIntegrationAPIClient: XIntegrationAPIClientProtocol {
     }
 
     func fetchConnection() async throws -> XConnectionResponse {
-        try await client.request(APIEndpoints.xIntegrationConnection)
+        let response: APIXConnectionResponse = try await client.request(
+            APIEndpoints.xIntegrationConnection
+        )
+        return XConnectionResponse(api: response)
     }
 
     func startOAuth() async throws -> XOAuthStartResponse {
-        let body = try JSONEncoder().encode(XOAuthStartRequest())
-        return try await client.request(
+        let body = try JSONEncoder().encode(APIXOAuthStartRequest(twitterUsername: nil))
+        let response: APIXOAuthStartResponse = try await client.request(
             APIEndpoints.xIntegrationOAuthStart,
             method: .post,
             body: body
         )
+        return XOAuthStartResponse(
+            authorizeURL: response.authorizeUrl,
+            state: response.state,
+            scopes: response.scopes
+        )
     }
 
     func exchangeOAuth(code: String, state: String) async throws -> XConnectionResponse {
-        let body = try JSONEncoder().encode(XOAuthExchangeRequest(code: code, state: state))
-        return try await client.request(
+        let body = try JSONEncoder().encode(APIXOAuthExchangeRequest(code: code, state: state))
+        let response: APIXConnectionResponse = try await client.request(
             APIEndpoints.xIntegrationOAuthExchange,
             method: .post,
             body: body
         )
+        return XConnectionResponse(api: response)
     }
 
     func disconnect() async throws {
-        try await client.requestVoid(APIEndpoints.xIntegrationConnection, method: .delete)
+        let _: APIIntegrationDisconnectResponse = try await client.request(
+            APIEndpoints.xIntegrationConnection,
+            method: .delete
+        )
+    }
+}
+
+private extension XConnectionResponse {
+    init(api response: APIXConnectionResponse) {
+        self.init(
+            provider: response.provider,
+            connected: response.connected,
+            isActive: response.isActive,
+            providerUserID: response.providerUserId,
+            providerUsername: response.providerUsername,
+            scopes: response.scopes,
+            lastSyncedAt: response.lastSyncedAt.map(ServerDate.format),
+            lastStatus: response.lastStatus,
+            lastError: response.lastError
+        )
     }
 }
 
 private final class OAuthPresentationContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first {
-            return window
+        let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let windowScene = windowScenes.first(where: { $0.activationState == .foregroundActive })
+            ?? windowScenes.first
+        else {
+            preconditionFailure("X OAuth requires a connected window scene")
         }
-        return ASPresentationAnchor()
+        return windowScene.windows.first(where: { $0.isKeyWindow })
+            ?? windowScene.windows.first
+            ?? ASPresentationAnchor(windowScene: windowScene)
     }
 }

@@ -14,14 +14,12 @@ struct ChatSessionHistoryView: View {
 
     init(
         onSelectSession: @escaping (ChatSessionRoute) -> Void,
-        viewModel: ChatSessionsViewModel? = nil,
+        viewModel: ChatSessionsViewModel,
         chatTransitionNamespace: Namespace.ID? = nil
     ) {
         self.onSelectSession = onSelectSession
         self.chatTransitionNamespace = chatTransitionNamespace
-        self._viewModel = State(
-            initialValue: viewModel ?? RootDependencyFactory.makeChatSessionsViewModel()
-        )
+        self._viewModel = State(initialValue: viewModel)
     }
 
     private var knowledgeSessions: [ChatSessionSummary] {

@@ -3,9 +3,9 @@ You are optimizing Newsly's short-form news relation matcher thresholds.
 Repository: `/Users/willem/Development/news_app`
 
 Matcher surface:
-- Main code: `app/services/news_relations.py`
-- Eval cases: `tests/services/news_relation_cluster_cases.py`
-- Eval runner: `scripts/run_title_clustering_eval.py`
+- Main code: `rust/crates/newsly-domain/src/news_relations.rs`
+- Eval cases: `python/evals/src/newsly_evals/news_relation_cases.py`
+- Eval runner: `python/evals/scripts/run_title_clustering_eval.py`
 
 Current settings:
 - primary similarity threshold: `0.85`
@@ -25,12 +25,12 @@ Run the real eval path. Do not invent a separate scoring harness unless the exis
 
 Suggested baseline command:
 ```bash
-/opt/homebrew/bin/uv run python scripts/run_title_clustering_eval.py --json
+uv run --project python/evals python python/evals/scripts/run_title_clustering_eval.py --json
 ```
 
 Suggested threshold sweep shape:
 ```bash
-/opt/homebrew/bin/uv run python scripts/run_title_clustering_eval.py \
+uv run --project python/evals python python/evals/scripts/run_title_clustering_eval.py \
   --threshold current:0.85:0.75 \
   --threshold probe_082_072:0.82:0.72 \
   --threshold probe_084_072:0.84:0.72 \

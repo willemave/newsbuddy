@@ -503,6 +503,12 @@ final class KnowledgeTimelineViewModelTests: XCTestCase {
             kind: .custom_narration,
             status: .completed,
             title: "Narration \(id)",
+            sourceContentId: nil,
+            durationSeconds: nil,
+            audioUrl: nil,
+            streamUrl: nil,
+            scriptText: nil,
+            errorMessage: nil,
             createdAt: activityDate.addingTimeInterval(-60),
             updatedAt: activityDate
         )
@@ -527,7 +533,12 @@ private final class KnowledgeTimelineChatService: KnowledgeChatServicing {
         if loadFails { throw Failure.unavailable }
         return ChatSessionListResponse(
             sessions: [],
-            meta: PaginationMetadata(hasMore: false, pageSize: 0)
+            meta: PaginationMetadata(
+                nextCursor: nil,
+                hasMore: false,
+                pageSize: 0,
+                total: nil
+            )
         )
     }
 
@@ -591,7 +602,12 @@ private final class KnowledgeTimelineContentService: ContentSummaryListServicing
             contents: contents,
             availableDates: [],
             contentTypes: [],
-            meta: PaginationMetadata(hasMore: false, pageSize: contents.count)
+            meta: PaginationMetadata(
+                nextCursor: nil,
+                hasMore: false,
+                pageSize: contents.count,
+                total: nil
+            )
         )
     }
 
@@ -639,7 +655,12 @@ private final class ControlledKnowledgeTimelineContentService: ContentSummaryLis
             contents: contents,
             availableDates: [],
             contentTypes: [],
-            meta: PaginationMetadata(hasMore: false, pageSize: contents.count)
+            meta: PaginationMetadata(
+                nextCursor: nil,
+                hasMore: false,
+                pageSize: contents.count,
+                total: nil
+            )
         )
     }
 

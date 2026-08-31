@@ -9,7 +9,7 @@ POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 APP_DB="${POSTGRES_DB:-newsly}"
 APP_USER="${POSTGRES_USER:-newsly}"
-APP_PASSWORD="${POSTGRES_PASSWORD:-$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 24)}"
+APP_PASSWORD="${POSTGRES_PASSWORD:-$(openssl rand -hex 18)}"
 ENV_FILE="${NEWSLY_ENV_FILE:-${PROJECT_ROOT}/.env}"
 
 usage() {
@@ -98,23 +98,30 @@ if ! pg_isready -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT}" >/dev/null 2>&1; the
 fi
 
 echo "Ensuring application role and database exist..."
-psql postgres -v ON_ERROR_STOP=1 <<SQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_USER}') THEN
-    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${APP_USER}', '${APP_PASSWORD}');
-  ELSE
-    EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', '${APP_USER}', '${APP_PASSWORD}');
-  END IF;
-END
-\$\$;
+NEWSLY_SETUP_APP_USER="${APP_USER}" \
+NEWSLY_SETUP_APP_PASSWORD="${APP_PASSWORD}" \
+psql postgres --set=ON_ERROR_STOP=1 <<'SQL'
+\getenv app_user NEWSLY_SETUP_APP_USER
+\getenv app_password NEWSLY_SETUP_APP_PASSWORD
+SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'app_user', :'app_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_user')
+\gexec
+SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'app_user', :'app_password')
+\gexec
 SQL
 
-if ! psql postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '${APP_DB}'" | grep -q 1; then
-  createdb -O "${APP_USER}" "${APP_DB}"
+if ! NEWSLY_SETUP_APP_DB="${APP_DB}" psql postgres \
+  --set=ON_ERROR_STOP=1 \
+  --tuples-only \
+  --no-align <<'SQL' | grep -qx 1
+\getenv app_db NEWSLY_SETUP_APP_DB
+SELECT 1 FROM pg_database WHERE datname = :'app_db';
+SQL
+then
+  createdb --owner="${APP_USER}" -- "${APP_DB}"
 fi
 
-DATABASE_URL="postgresql+psycopg://${APP_USER}:${APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${APP_DB}"
+DATABASE_URL="postgresql://${APP_USER}:${APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${APP_DB}"
 mkdir -p "$(dirname "${ENV_FILE}")"
 touch "${ENV_FILE}"
 
@@ -153,4 +160,4 @@ echo "Formula: ${POSTGRES_FORMULA}"
 echo "Database: ${APP_DB}"
 echo "User: ${APP_USER}"
 echo "Env file updated: ${ENV_FILE}"
-echo "DATABASE_URL=${DATABASE_URL}"
+echo "DATABASE_URL was written to the env file."

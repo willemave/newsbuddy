@@ -199,13 +199,13 @@ struct ContentSummary: Codable, Identifiable, Equatable {
             platform: response.platform,
             status: response.status,
             shortSummary: response.shortSummary,
-            createdAt: response.createdAt,
-            processedAt: response.processedAt,
+            createdAt: ServerDate.format(response.createdAt),
+            processedAt: response.processedAt.map(ServerDate.format),
             classification: response.classification?.rawValue,
-            publicationDate: response.publicationDate,
+            publicationDate: response.publicationDate.map(ServerDate.format),
             isRead: response.isRead,
             isSavedToKnowledge: response.isSavedToKnowledge,
-            knowledgeSavedAt: response.knowledgeSavedAt,
+            knowledgeSavedAt: response.knowledgeSavedAt.map(ServerDate.format),
             imageUrl: response.imageUrl,
             thumbnailUrl: response.thumbnailUrl,
             primaryTopic: response.primaryTopic,
@@ -219,6 +219,29 @@ struct ContentSummary: Codable, Identifiable, Equatable {
             reasonToRead: response.reasonToRead,
             keyTakeaway: response.keyTakeaway,
             savedSource: response.savedSource?.rawValue
+        )
+    }
+
+    init(api response: APINewsItemSummaryResponse) {
+        self.init(
+            id: response.id,
+            contentType: response.contentType,
+            url: response.url,
+            title: response.title,
+            source: response.source,
+            platform: response.platform,
+            status: response.status,
+            shortSummary: response.shortSummary,
+            createdAt: ServerDate.format(response.createdAt),
+            processedAt: response.processedAt.map(ServerDate.format),
+            classification: response.classification?.rawValue,
+            publicationDate: response.publicationDate.map(ServerDate.format),
+            isRead: response.isRead,
+            isSavedToKnowledge: response.isSavedToKnowledge,
+            topComment: Self.topComment(from: response.topComment),
+            commentCount: response.commentCount,
+            newsSummary: response.newsSummary,
+            newsKeyPoints: response.newsKeyPoints
         )
     }
 

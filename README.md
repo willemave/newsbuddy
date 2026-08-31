@@ -13,9 +13,9 @@
 </p>
 
 <p align="center">
-  <a href="#getting-started"><img src="https://img.shields.io/badge/python-3.13+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.13+"></a>
-  <a href="#getting-started"><img src="https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"></a>
-  <a href="#cli"><img src="https://img.shields.io/badge/Go_CLI-1.26+-00add8?style=flat-square&logo=go&logoColor=white" alt="Go CLI"></a>
+  <a href="#getting-started"><img src="https://img.shields.io/badge/Rust-1.94+-000000?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.94+"></a>
+  <a href="#python-islands"><img src="https://img.shields.io/badge/Python_islands-3.13+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.13+"></a>
+  <a href="#cli"><img src="https://img.shields.io/badge/Rust_CLI-newsbuddy-000000?style=flat-square&logo=rust&logoColor=white" alt="Rust CLI"></a>
   <a href="#ios-app"><img src="https://img.shields.io/badge/SwiftUI-iOS_18.5+-007aff?style=flat-square&logo=swift&logoColor=white" alt="SwiftUI"></a>
   <a href="https://github.com/willemave/newsbuddy/actions"><img src="https://img.shields.io/github/actions/workflow/status/willemave/newsbuddy/docker-racknerd-deploy.yml?branch=main&style=flat-square&label=deploy" alt="Deploy"></a>
   <a href="docs/architecture.md"><img src="https://img.shields.io/badge/docs-architecture-8b5cf6?style=flat-square" alt="Docs"></a>
@@ -140,21 +140,29 @@ Local Markdown Sync
 
 ## CLI
 
-The Newsbuddy CLI is a Go, Cobra-based binary that gives you full control over your knowledge base from the terminal — perfect for scripting, automation, or letting your AI agents manage content on your behalf.
+The `newsbuddy` CLI is a Rust and Clap client for scripting content, source,
+search, onboarding, and local Markdown-library operations. It uses the same
+`newsly-contracts` request types as the Axum API while keeping its stable JSON
+output envelope and forward-compatible response decoding.
 
-Install it with Homebrew:
+Install it from this repository:
 
 ```bash
-brew tap willemave/newsbuddy
-brew install newsbuddy
+git clone https://github.com/willemave/newsbuddy.git
+cd newsbuddy
+cargo install --locked --path rust/crates/newsly-cli
 ```
+
+The Homebrew formula lives in the external `willemave/newsbuddy` tap. Updating
+that tap to package the Rust binary is separate from this repository cutover;
+use the source install until the tap publishes the Rust build.
 
 ```bash
 # Authenticate — scan the QR code in the app to approve, no password needed
 newsbuddy auth login
 
 # Subscribe to an RSS feed
-newsbuddy sources add "https://simonwillison.net/atom/everything/" --feed-type rss --display-name "Simon Willison"
+newsbuddy sources add "https://simonwillison.net/atom/everything/" --feed-type atom --display-name "Simon Willison"
 
 # Submit a one-off article and wait for processing
 newsbuddy content submit "https://example.com/great-post" --wait
@@ -186,9 +194,10 @@ For full architecture details, see **[docs/architecture.md](docs/architecture.md
 
 ### Prerequisites
 
-- **Homebrew** for the CLI install and native PostgreSQL local-dev path
-- **uv** for Python environment management
-- **Docker** and **Docker Compose** only if you want the containerized runtime
+- **Rust 1.94.1** and Cargo
+- **PostgreSQL 15+** (the setup helper uses Homebrew on macOS)
+- **uv** only for the isolated Crawl4AI extractor and offline eval package
+- **Docker Compose** only for a containerized development or production-style run
 
 ### Native PostgreSQL Quick Start
 
@@ -202,11 +211,11 @@ cd newsbuddy
 # Install/start PostgreSQL, create the local app DB/user, and update .env
 ./scripts/setup_local_postgres.sh
 
-# Install Python dependencies
-uv sync && . .venv/bin/activate
-
 # Start the full local stack
 ./scripts/start_services.sh all --env-file .env
+
+# For bounded end-to-end testing on an explicit, unoccupied API port
+./scripts/start_services.sh all --env-file .env --local-e2e --port 8010
 ```
 
 The setup script installs Homebrew PostgreSQL if needed, starts the service, creates the `newsly` database + role, and rewrites `DATABASE_URL` in `.env` to point at `127.0.0.1:5432`.
@@ -221,14 +230,15 @@ git clone https://github.com/willemave/newsbuddy.git
 cd newsbuddy
 
 # Configure environment
-cp .env.docker.example .env.docker.local
-# Edit .env.docker.local with your secrets
+cp .env.example .env
+# Edit .env with your provider keys and development secrets
 
-# Start the single-container stack (FastAPI + embedded Postgres)
-docker compose --env-file .env.docker.local up --build -d
+# Start PostgreSQL, SQLx migration, Rust API/workers/scheduler, the extractor,
+# and the media worker's pinned PO-token provider
+docker compose up --build -d
 
 # View logs
-docker compose logs -f newsly
+docker compose logs -f api workers scheduler document-extractor bgutil-provider
 ```
 
 The container exposes:
@@ -236,10 +246,9 @@ The container exposes:
 - API: `http://127.0.0.1:8000`
 - PostgreSQL: `127.0.0.1:5432`
 
-Set `NEWSLY_RUNTIME_MODE=server` in `.env.docker.local` to skip workers, the queue watchdog, and the scheduler while keeping the API server and embedded Postgres.
-The default Docker runtime starts the same queue partitions as production:
-content, media, audio episode, image, onboarding, backfill, discussion, twitter,
-and chat.
+Production uses the separate blue-green topology in
+[`docker-compose.production.yml`](docker-compose.production.yml). The root
+Compose file is for local development only.
 
 ### Local Start Scripts
 
@@ -250,38 +259,42 @@ For native local development, use the unified launcher with `.env`:
 ./scripts/start_services.sh all --env-file .env
 
 # Run just the API server
-./scripts/start_services.sh server --env-file .env --port 8000 --reload
+./scripts/start_services.sh server --env-file .env --port 8000
 
 # Run just the workers
-./scripts/start_services.sh workers --env-file .env --content-workers 4 --discussion-workers 1 --media-workers 1
+./scripts/start_services.sh workers --env-file .env
+
+# Run the Rust scheduler (scraper fan-out and queue recovery)
+./scripts/start_services.sh scheduler --env-file .env
+
+# Run only the isolated Crawl4AI service
+./scripts/start_services.sh extractor --env-file .env
 
 # Run migrations explicitly
 ./scripts/start_services.sh migrate --env-file .env
 ```
 
-The legacy entrypoints still work and now delegate to `start_services.sh`:
-
-```bash
-./scripts/start_server.sh --env-file .env
-./scripts/start_workers.sh --env-file .env
-./scripts/start_scrapers.sh --env-file .env --show-stats
-./scripts/start_queue_watchdog.sh --env-file .env
-```
+The `--local-e2e` profile constrains each process's PostgreSQL pool so the full
+worker set can run against a normal local server. Pass the same API origin to
+the iOS helper, for example
+`./scripts/codex_run_ios.sh --api-base-url http://127.0.0.1:8010`.
 
 ### Environment Variables
 
 | Variable | Required | Description |
 |----------|:--------:|-------------|
-| `DATABASE_URL` | Yes | SQLAlchemy connection URL. Local dev uses native PostgreSQL on `127.0.0.1:5432`; Docker uses `.env.docker.local`. |
+| `DATABASE_URL` | Yes | Native PostgreSQL URL used by SQLx. Local host development uses `127.0.0.1:5432`. |
 | `PORT` | | API port inside/outside the container (default `8000`) |
-| `JWT_SECRET_KEY` | Yes | Token signing key — generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `JWT_SECRET_KEY` | Yes | Token-signing key |
 | `ADMIN_PASSWORD` | Yes | Admin panel access |
-| `ANTHROPIC_API_KEY` | | Summarization, chat agents |
-| `OPENAI_API_KEY` | | Summarization, deep research |
-| `GOOGLE_API_KEY` | | Image generation (Gemini) |
+| `DOCUMENT_EXTRACTOR_SHARED_SECRET` | Yes | Separate shared secret for the Rust-to-extractor boundary |
+| `E2B_API_KEY` | | Agent sandbox control and command streaming |
+| `ANTHROPIC_API_KEY` | | Provider operations configured for Anthropic |
+| `OPENAI_API_KEY` | | Provider operations configured for OpenAI |
+| `GOOGLE_API_KEY` | | Provider operations configured for Google |
 | `EXA_API_KEY` | | Web search in chat |
 
-Docker-only env templates remain in `.env.docker.example` and `.env.docker.local`.
+See [`.env.example`](.env.example) for the full non-secret template.
 
 <br>
 
@@ -303,60 +316,84 @@ Build and run on a simulator or device. The app connects to `http://127.0.0.1:80
 ## Development
 
 ```bash
-# Run tests
-pytest tests/ -v
+# Rust backend checks
+cd rust
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cd ..
 
-# Lint & format
-ruff check .
-ruff format .
+# Public contract drift
+scripts/check_public_contracts.sh
 
-# Create a new migration
-alembic -c migrations/alembic.ini revision -m "describe your change"
+# Create a new reversible migration pair
+# rust/crates/newsly-db/migrations/YYYYMMDDHHMMSS_describe_change.{up,down}.sql
 
 # Apply migrations
-alembic -c migrations/alembic.ini upgrade head
+scripts/run_sqlx_migrations.sh
+
+# Validate the canonical E2B template definition without network access
+scripts/build_agent_vm_template.sh --check
 ```
+
+The manual `Publish E2B Template` workflow validates a full current-main SHA,
+runs the complete quality gate, and rebuilds the fixed `newsly-agent` alias with
+the pinned official E2B CLI and SDK. It stores a receipt containing the E2B
+template ID, source SHA, Dockerfile digest, tool versions, and image metadata.
 
 ### Project Structure
 
 ```
-app/
-├── routers/           # API endpoints
-├── commands/          # Write operations (CQRS)
-├── queries/           # Read operations (CQRS)
-├── repositories/      # Data access layer
-├── services/          # Business logic & integrations
-├── pipeline/          # Task queue workers
-├── processing_strategies/  # Content extraction
-├── scraping/          # Feed & site scrapers
-├── models/            # SQLAlchemy ORM models
-└── core/              # Settings, DB, auth
+rust/
+└── crates/            # Axum API, domain, SQLx, queue, workers, providers, E2B
+python/
+├── document_extractor/ # Database-free Crawl4AI service
+└── evals/              # Offline embedding and model pipelines
 client/
 └── newsly/            # SwiftUI iOS app + Share Extension
-cli/                   # Go (Cobra) command-line client
-migrations/
-└── alembic/           # Alembic env, templates, and schema history
+rust/crates/newsly-cli/ # Rust/Clap `newsbuddy` command-line client
+contracts/             # Versioned OpenAPI and ownership policy artifacts
+```
+
+### Python Islands
+
+Newsly-owned Python is intentionally isolated from application state. The
+production extractor may fetch and parse documents but cannot access
+PostgreSQL, the queue, auth, or migrations. The eval package runs model and
+embedding experiments offline and calls the Rust eval driver for production
+algorithm behavior. The Rust application image also includes the pinned
+third-party `yt-dlp` executable/runtime as a bounded media subprocess; it is not
+an application authority.
+
+```bash
+uv sync --project python/document_extractor --frozen --group dev
+uv run --project python/document_extractor pytest -q python/document_extractor/tests
+
+uv sync --project python/evals --frozen --group dev
+uv run --project python/evals mypy --config-file python/evals/pyproject.toml \
+  python/evals/src python/evals/scripts python/evals/tests
+uv run --project python/evals pytest -q python/evals/tests
 ```
 
 ### Deployment
 
-Production deploys are handled via GitHub Actions with Docker image build + RackNerd container rollout through [`.github/workflows/docker-racknerd-deploy.yml`](.github/workflows/docker-racknerd-deploy.yml). The server runs the repo `docker-compose.yml` and a single `newsly` container.
+Production deploys are handled through [`.github/workflows/docker-racknerd-deploy.yml`](.github/workflows/docker-racknerd-deploy.yml). The workflow gates the exact SHA, builds separate Rust application and Python extractor images, then rolls the blue-green topology in [`docker-compose.production.yml`](docker-compose.production.yml).
 
 <br>
 
 ## Architecture
 
-One FastAPI backend owns auth, APIs, chat, discovery, and processing orchestration. Scrapers and user submissions create canonical content rows and enqueue work onto a PostgreSQL-backed task queue; a fleet of async workers extracts, transcribes, summarizes, and illustrates that content. The SwiftUI app, Share Extension, and Go CLI all consume the same API as the single source of truth.
+One Rust modular monolith owns auth, APIs, chat, discovery, migrations, and processing orchestration. User submissions and scheduled ingestion enqueue work onto a PostgreSQL-backed durable queue. Workers prepare immutable plans in short transactions, release their connections during provider calls, and finalize through fresh lease-fenced transactions.
 
 ```mermaid
 flowchart LR
   subgraph Clients
     iOS["SwiftUI App"]
     Share["Share Extension"]
-    CLI["Go CLI"]
+    CLI["Rust CLI"]
   end
 
-  iOS -->|JWT / API key| API["FastAPI"]
+  iOS -->|JWT / API key| API["Rust / Axum"]
   Share --> API
   CLI --> API
 
@@ -365,7 +402,8 @@ flowchart LR
   API --> DB[(PostgreSQL)]
 
   Queue --> Workers["Async workers"]
-  Workers --> Pipeline["Extract · Transcribe<br/>Summarize · Illustrate"]
+  Workers --> Extractor["Python Crawl4AI<br/>database-free"]
+  Workers --> Pipeline["Transcribe · Summarize<br/>Illustrate · Agent work"]
   Pipeline --> Providers["OpenAI · Claude · Gemini<br/>Whisper · Exa"]
   Workers --> DB
 ```
@@ -376,25 +414,25 @@ flowchart LR
 
 A few of the engineering decisions that make Newsbuddy interesting:
 
-- **Postgres _is_ the queue.** The async task system is built directly on PostgreSQL — no Redis, Celery, or external broker. It claims jobs lock-free with `FOR UPDATE SKIP LOCKED`, wakes workers instantly via `LISTEN`/`NOTIFY` (with a polling fallback), dedupes with partial unique indexes, and holds time-based leases that a background thread renews so long-running jobs survive. A watchdog re-routes stale or misrouted tasks, and rotating retry buckets keep old failures from starving fresh work.
+- **Postgres _is_ the queue.** The async task system is built directly on PostgreSQL — no Redis, Celery, or external broker. It claims jobs lock-free with `FOR UPDATE SKIP LOCKED`, wakes workers instantly via `LISTEN`/`NOTIFY` (with a polling fallback), dedupes with partial unique indexes, and renews time-based leases so long-running jobs survive. Scheduler-owned recovery re-routes stale or misrouted tasks, and rotating retry buckets keep old failures from starving fresh work.
 
-- **One API spec, three clients, zero drift.** The FastAPI app is the single source of truth: it exports an OpenAPI schema that generates _both_ the Swift iOS client and the Go CLI. A local contract check regenerates every artifact and diffs it against what's committed, making drift between the server, app, and CLI visible.
+- **One contract authority, three clients.** Utoipa types in the Rust API are the source of truth for public OpenAPI. A fail-closed generator emits the reviewed iOS app and Share Extension wire types, while the Rust CLI consumes `newsly-contracts` directly. Contract checks byte-diff the checked-in schema and generated native-client artifacts.
 
 - **Content-aware model routing.** Each piece of content picks its own model — cheap-and-fast for short news, stronger models for long-form articles and podcasts — across OpenAI, Anthropic, Google Gemini, OpenRouter, and DeepSeek. Provider errors and context-limit overflows fall back automatically, and users can bring their own (encrypted) API keys.
 
-- **Structured outputs, never string-scraping.** Classification, summaries, editorial briefs, and discussion digests are all generated as validated Pydantic schemas through pydantic-ai, then stored as JSON — the pipeline never parses free-form text out of a model response.
+- **Structured outputs, never string-scraping.** Newsly-owned Serde/Schemars contracts validate model and tool boundaries before typed domain values can be persisted. Rig and provider SDK objects remain transient adapter details.
 
 - **A council of experts.** Ask a hard question and the chat agent can fan it out to several AI personas at once; each runs in its own server-side session and the conversation fills in as each expert finishes. It's fully async — the client polls for completion instead of holding a socket open.
 
 - **Cover art chosen by information theory.** Editorial images come from Gemini + Runware, but the _brief_ is picked by scoring each story's Shannon entropy, information density, surprise keywords, conceptual tension, and abstractness — so a dense, surprising story gets a bolder, more dramatic image than a routine update.
 
-- **Self-healing extraction.** A URL is routed through an ordered strategy registry — Hacker News, arXiv, PubMed, YouTube, X, PDF, image, plain text, HTML — and HTML extraction degrades gracefully from crawl4ai to trafilatura to a paid Firecrawl fallback, only escalating when the cheaper tiers hit a paywall or return junk. Podcasts, YouTube, and tweet videos all flow through one yt-dlp + Whisper audio pipeline.
+- **Self-healing extraction.** Rust routes URL and media work through typed strategies; HTML is delegated over an authenticated, versioned boundary to the isolated Crawl4AI service. Podcasts, YouTube, and tweet videos flow through the native media workers.
 
 - **One story, not fifty headlines.** When the same event surfaces from Hacker News, Techmeme, Reddit, and a dozen blogs, Newsbuddy collapses it into a single card. Every incoming news item runs a cost-tiered cascade — exact-URL match → a cheap lexical pre-filter → multi-view sentence-embedding similarity (title, summary, and source scored separately) → a Qwen cross-encoder asked, yes-or-no, whether two headlines describe _the same_ event (a fresh launch, lawsuit, or follow-up counts as different). Matches fold into one representative item that tracks how many sources covered it, and the feed only ever shows representatives. The whole thing runs incrementally on CPU inside a worker, narrowing thousands of items down to ~12 candidates before the heavy model ever loads.
 
 - **Two read models, one product.** Long-form articles and short-form "Fast Reads" are separate canonical models — each with its own read-state, visibility, and discussion rules — bridged by an explicit link, so each surface stays fast without denormalizing the other. Article bodies live in pluggable local-or-S3 storage rather than the database, and comment threads refresh on a leased, TTL-bounded schedule that stops parallel workers from stampeding the same discussion.
 
-- **Ships as a single container.** One Docker image runs Postgres, the API, every queue worker, the watchdog, and a cron scheduler under Supervisor (with a lighter server-only mode). The `admin` CLI SSHes into the box and runs commands inside the container behind a stable JSON envelope, and `newsbuddy auth login` links the CLI by QR code — approve it in the app, no passwords in the terminal.
+- **One application image, explicit services.** The Rust image exposes API, worker, scheduler, migration, and `newsly-admin` modes, plus a pinned third-party `yt-dlp` media subprocess. Production runs PostgreSQL and the database-free extractor separately, with blue-green API slots and singleton worker/scheduler services.
 
 See **[docs/architecture.md](docs/architecture.md)** for the full system reference.
 
@@ -404,15 +442,15 @@ See **[docs/architecture.md](docs/architecture.md)** for the full system referen
 
 | Layer | Technologies |
 |-------|-------------|
-| **Backend** | Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, Alembic |
-| **Async & queue** | PostgreSQL-backed queue (`SKIP LOCKED`, `LISTEN`/`NOTIFY`), Supervisor, cron scheduler |
-| **AI / LLM** | pydantic-ai · OpenAI, Anthropic Claude, Google Gemini, OpenRouter, DeepSeek · Exa search · local SentenceTransformers + Qwen reranker |
-| **Ingestion & media** | crawl4ai, trafilatura, Firecrawl, feedparser, yt-dlp, Whisper, Gemini + Runware images |
-| **CLI** | Go, Cobra, registry-generated API models, `newsbuddy` binary |
+| **Backend** | Rust 1.94, Axum, Tokio, Tower, Serde, Utoipa |
+| **Database & queue** | PostgreSQL, SQLx migrations/queries, `SKIP LOCKED`, `LISTEN`/`NOTIFY`, leases |
+| **AI / LLM** | Rig, typed provider HTTP/SDK adapters, OpenAI, Anthropic, Google, OpenRouter, Exa |
+| **Ingestion & media** | Rust workers, isolated Python Crawl4AI extractor, yt-dlp, ffmpeg, Runware |
+| **CLI** | Rust, Clap, reqwest, shared `newsly-contracts`, `newsbuddy` binary |
 | **iOS** | SwiftUI, Apple Sign In, Share Extension |
-| **Admin / Web** | Jinja2 templates, Tailwind CSS v4 |
+| **Admin / Web** | Axum server rendering, Tailwind CSS v4, `newsly-admin` |
 | **Observability** | Structured JSONL logs and vendor usage records |
-| **Infrastructure** | Docker (single-container), GitHub Actions, uv |
+| **Infrastructure** | Docker Compose, GitHub Actions, Cargo, uv-isolated Python packages |
 
 <br>
 
@@ -431,7 +469,7 @@ See **[docs/architecture.md](docs/architecture.md)** for the full system referen
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feat/amazing-feature`)
 3. Make your changes and add tests
-4. Run `ruff check . && ruff format . && pytest tests/ -v`
+4. Run the focused Cargo/client checks and the complete quality gate for cross-cutting changes
 5. Commit and push
 6. Open a Pull Request
 
@@ -446,6 +484,6 @@ Released under the [MIT License](LICENSE).
 ---
 
 <p align="center">
-  Built with FastAPI, SwiftUI, and a council of LLMs<br>
+  Built with Rust, SwiftUI, and a council of LLMs<br>
   <sub>Made by <a href="https://github.com/willemave">@willemave</a></sub>
 </p>

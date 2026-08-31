@@ -1,0 +1,19 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "llm_task_id": {
+      "title": "Llm Task Id",
+      "type": "integer"
+    },
+    "user_id": {
+      "title": "User Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "user_id",
+    "llm_task_id"
+  ],
+  "title": "LlmTaskRunPayload",
+  "type": "object"
+}

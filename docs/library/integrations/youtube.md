@@ -1,152 +1,50 @@
-# YouTube Integration Documentation
+# YouTube Media Processing
 
-## Overview
-
-YouTube video processing treats individual YouTube URLs as podcast-like content. This allows the system to:
-
-1. Extract video metadata and transcripts
-2. Process videos through the existing podcast pipeline
-3. Summarize video content using AI
-
-## Architecture
-
-### 1. YouTube configuration (`app/scraping/youtube_config.py`)
-- Reads shared yt-dlp client settings from `config/youtube.yml`
-- Supports optional cookies, proof-of-origin provider settings, throttling, and player-client hints
-- Keeps channel/playlist config parsing available for tooling, but scheduled YouTube scraping is retired
-
-### 2. YouTube Processing Strategy (`app/processing_strategies/youtube_strategy.py`)
-- Handles YouTube URLs when processing individual links
-- Extracts video metadata using yt-dlp
-- Downloads and parses subtitles/captions
-- Supports multiple subtitle formats (VTT, SRV3, JSON3)
-- Falls back to video description if no transcript available
-
-### 3. Pipeline Integration
-- **PodcastMediaWorker**: Detects YouTube URLs, reuses existing transcript metadata when present, and otherwise downloads/transcribes through the unified podcast media path
-- **Summarization**: Works normally with transcript/description content
+Direct YouTube video URLs are classified by the Rust content worker and handed
+to the native media worker as podcast-like content. The provider adapter runs
+the installed `yt-dlp` executable, then the media worker uses the normal
+transcription and summarization pipeline. Channel and playlist scraping are not
+part of this path.
 
 ## Configuration
 
-### config/youtube.yml
+The media worker accepts:
 
-```yaml
-client:
-  cookies_path: "secrets/youtube_cookies.txt"  # netscape cookie file exported from Firefox/Chrome
-  po_token_provider: "bgutilhttp"              # set to null to disable until provider is running
-  po_token_base_url: "http://127.0.0.1:4416"   # bgutil provider HTTP endpoint
-  throttle_seconds: 6                           # sleep between metadata fetches
-  player_client: "mweb"                        # YouTube player client hint
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `YT_DLP_BINARY` | `yt-dlp` | Explicit executable path |
+| `NEWSLY_MEDIA_YT_DLP_TIMEOUT_SECONDS` | `600` | Download deadline |
+| `YOUTUBE_COOKIES_PATH` | `secrets/youtube_cookies.txt` | Optional Netscape cookie file |
+| `YOUTUBE_PLAYER_CLIENT` | `mweb` | yt-dlp YouTube player client |
+| `YOUTUBE_PO_TOKEN_PROVIDER` | `bgutilhttp` | `bgutilhttp`, `webpoclient`, or `none` |
+| `YOUTUBE_PO_TOKEN_BASE_URL` | `http://127.0.0.1:4416` | PO-token provider endpoint |
 
-channels: []
+The Rust application image installs `yt-dlp` and `ffmpeg`. The repository
+Compose topologies run the pinned provider as `bgutil-provider` and configure
+the media worker to use `http://bgutil-provider:4416`. For native development,
+run the same pinned helper container on loopback:
+
+```bash
+scripts/start_bgutil_provider.sh
 ```
 
-**Field reference**
-
-| Field | Description |
-| --- | --- |
-| `name` | Friendly label displayed in logs and admin views |
-| `url` | Channel/handle/playlist URL (optional if `channel_id` or `playlist_id` present) |
-| `channel_id` | Raw channel identifier (e.g., `UC...`) |
-| `playlist_id` | Optional playlist identifier to override the channel feed |
-| `limit` | Maximum videos ingested per run (default 10, max 50) |
-| `max_age_days` | Skip videos older than the threshold (`0` disables filtering) |
-| `language` | Preferred transcript language hint propagated to metadata |
-
-**Client block**
-
-| Field | Description |
-| --- | --- |
-| `cookies_path` | Optional path to a Netscape-format cookie jar authenticated against the target channels |
-| `po_token_provider` | Proof-of-origin provider slug. Supported: `bgutilhttp`, `webpoclient` (or `null` to disable) |
-| `po_token_base_url` | Override endpoint for the HTTP provider (default `http://127.0.0.1:4416`) |
-| `throttle_seconds` | Adds a delay between per-video metadata fetches to soften BotGuard scoring |
-| `player_client` | Player client hint forwarded to yt-dlp (`mweb` recommended for PO flow) |
-
-## Metadata Fields
-
-YouTube videos are stored as podcasts with additional metadata:
-
-- `video_url`: Original YouTube URL
-- `video_id`: YouTube video ID
-- `channel_name`: YouTube channel name
-- `thumbnail_url`: Video thumbnail URL
-- `view_count`: Number of views
-- `like_count`: Number of likes
-- `has_transcript`: Whether transcript is available
-- `youtube_video`: Boolean flag to identify YouTube content
-
-## Usage
-
-### Processing Individual YouTube URLs
-
-YouTube URLs are automatically detected and processed when:
-1. Added manually through the API
-2. Found as links in other content
-3. Submitted through the UI
-
-## Future Enhancements
-
-1. **UI Improvements**: 
-   - Display video thumbnails
-   - Show view/like counts
-   - Embed YouTube player
-
-2. **Advanced Features**:
-   - Support for live streams
-   - Channel subscriptions with notifications
-   - Video comments analysis
-   - Playlist synchronization
-
-3. **Performance**:
-   - Parallel video processing
-   - Incremental channel updates
-   - Caching of video metadata
+If a deployment selects a different provider, its endpoint must remain
+reachable from the media worker container; do not use a host-only loopback
+address there.
 
 ## Troubleshooting
 
-### Common Issues
-
-1. **No transcript available**: Some videos don't have captions. The system will use the video description instead.
-
-2. **Rate limiting / BotGuard**: If you see `HTTP Error 403: Forbidden` with `fragment 1 not found`, confirm the PO token provider is running and reachable at `po_token_base_url`.
-
-3. **Private/deleted videos**: These will be skipped automatically.
-
-### Proof-of-Origin (PO) token provider
-
-1. Install the yt-dlp plugin `bgutil-ytdlp-pot-provider` via `uv pip install bgutil-ytdlp-pot-provider` (already listed in `pyproject.toml`).
-2. Run the provider HTTP service locally. In production we manage it via Supervisor with [`scripts/start_bgutil_provider.sh`](../../../scripts/start_bgutil_provider.sh), which launches the pinned Docker image `brainicism/bgutil-ytdlp-pot-provider:1.3.1` bound to `127.0.0.1:4416`.
-
-   Manual equivalent:
-
-   ```bash
-   docker run --rm --name news_app_bgutil_provider --init -p 127.0.0.1:4416:4416 brainicism/bgutil-ytdlp-pot-provider:1.3.1
-   ```
-
-   The service exposes `http://127.0.0.1:4416` by default; adjust `po_token_base_url` if you map a custom port.
-
-3. Alternatively, run the Node.js server natively (requires Node 20+):
-
-   ```bash
-   git clone --single-branch --branch 1.3.1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git
-   cd bgutil-ytdlp-pot-provider/server/
-   npm ci
-   npx tsc
-   node build/main.js --port 4416
-   ```
-
-4. Verify integration with `yt-dlp -v https://www.youtube.com/watch?v=...` and ensure the debug log shows `PO Token Providers: bgutil:http-…`. On the server, `sudo supervisorctl status news_app_bgutil_provider` and `ss -ltnp | rg 4416` should confirm the service is up.
-
-### Debug Commands
+Run the same executable the worker uses and inspect its provider diagnostics:
 
 ```bash
-# Dry-run the scraper for a single channel and print results
-python scripts/test_youtube_scraper.py --name "Example" --url "https://www.youtube.com/@Example" --limit 1
-
-# Run only the YouTube scraper via the runner
-python scripts/run_scrapers.py --scrapers youtube --show-stats
-
-# Inspect stored YouTube content
-python scripts/check_content.py --type podcast --platform youtube
+yt-dlp --verbose --skip-download "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
+
+For 403 or BotGuard failures, verify the configured PO provider is reachable,
+the cookie file exists inside the worker when configured, and the pinned image
+contains a current `yt-dlp`. Private, deleted, age-gated, and region-restricted
+videos may still be terminal failures.
+
+Use `newsly-admin tasks failures` and the worker container logs to correlate a
+failure with its task and provider error. Do not recreate a Python diagnostic
+or media-processing path.

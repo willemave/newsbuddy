@@ -11,7 +11,12 @@ struct TweetSuggestionsSheet: View {
     let contentId: Int
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var viewModel = RootDependencyFactory.makeTweetSuggestionsViewModel()
+    @State private var viewModel: TweetSuggestionsViewModel
+
+    init(contentId: Int, viewModel: TweetSuggestionsViewModel) {
+        self.contentId = contentId
+        self._viewModel = State(initialValue: viewModel)
+    }
 
     var body: some View {
         NavigationStack {
@@ -354,5 +359,5 @@ struct TweetSuggestionCard: View {
 }
 
 #Preview {
-    TweetSuggestionsSheet(contentId: 1)
+    EmptyView()
 }

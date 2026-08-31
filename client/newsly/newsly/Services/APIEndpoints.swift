@@ -27,7 +27,6 @@ enum APIEndpoints {
     static func markContentUnread(id: Int) -> String {
         return "/api/content/\(id)/mark-unread"
     }
-    static let fastNewsAudioEpisode = "/api/content/audio-episodes/fast-news"
     static func contentCouncilAudioEpisode(id: Int) -> String {
         return "/api/content/\(id)/audio-episodes/council"
     }
@@ -66,9 +65,6 @@ enum APIEndpoints {
     }
     static let knowledgeLibraryList = "/api/content/knowledge/list"
     static let recentlyReadList = "/api/content/recently-read/list"
-    static func chatGPTUrl(id: Int) -> String {
-        return "/api/content/\(id)/chat-url"
-    }
     static func contentDiscussion(id: Int) -> String {
         return "/api/content/\(id)/discussion"
     }
@@ -144,9 +140,6 @@ enum APIEndpoints {
     }
     static func chatMessages(sessionId: Int) -> String {
         return "/api/content/chat/sessions/\(sessionId)/messages"
-    }
-    static func chatInitialSuggestions(sessionId: Int) -> String {
-        return "/api/content/chat/sessions/\(sessionId)/initial-suggestions"
     }
     static func chatCouncilStart(sessionId: Int) -> String {
         return "/api/content/chat/sessions/\(sessionId)/council/start"

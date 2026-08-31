@@ -1,0 +1,41 @@
+{
+  "format_version": 1,
+  "baseline_version": 20260830000000,
+  "alembic_head": "20260829_02",
+  "alembic_revision_count": 91,
+  "source_postgresql_major": 17,
+  "minimum_postgresql_major": 15,
+  "baseline_sql_sha256": "d7d572ccfb57c94323baa3e0d88fa58b424b28b9ce4fb52a3b111f6fdf0d1823",
+  "catalog_sha256": "8500bc7d8fba7f8b77ffca636480d88d0969b1f949f3b353aab4b717d564864d",
+  "data_invariants_sha256": "d9c009916ce6df1dc6dff7e3b6cdfcc1410dab1d5d90c48cfb0bcc1df33ccd48",
+  "role_policy_sha256": "40720d9beb2a287871ad152496c043283d27e4b7967694734a813083612a12d9",
+  "catalog_counts": {
+    "extensions": 2,
+    "schemas": 1,
+    "relations": 46,
+    "columns": 609,
+    "sequences": 42,
+    "constraints": 90,
+    "indexes": 314,
+    "types": 0,
+    "routines": 0,
+    "triggers": 0,
+    "policies": 0,
+    "explicit_grants": 3
+  },
+  "required_data_invariants": [
+    "the frozen Alembic head marker is exactly 20260829_02",
+    "no persisted chat session references the retired Cerebras provider",
+    "no user scraper configuration references the retired Reddit aggregator"
+  ],
+  "normalization": {
+    "excluded_relations": ["public._sqlx_migrations"],
+    "excluded_attributes": [
+      "physical OIDs",
+      "planner statistics",
+      "storage locations",
+      "environment-specific role names"
+    ],
+    "owner_and_grant_policy": "role-policy.json"
+  }
+}

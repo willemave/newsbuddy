@@ -4,6 +4,81 @@ import XCTest
 
 @MainActor
 final class SubmissionStatusViewModelTests: XCTestCase {
+    func testCanonicalFeedResultOverridesLegacyCompatibilityFields() {
+        let feed = APIDetectedFeed(
+            url: "https://example.com/feed.xml",
+            type: "rss",
+            title: "Canonical Feed"
+        )
+        let subscription = APISubmissionFeedSubscriptionResponse(
+            status: "created",
+            feedUrl: feed.url,
+            feedType: feed.type,
+            created: true,
+            configId: nil,
+            initialDownload: nil
+        )
+        let response = APISubmissionStatusResponse(
+            id: 43,
+            contentType: .unknown,
+            url: "https://example.com",
+            sourceUrl: nil,
+            title: nil,
+            status: .completed,
+            errorMessage: nil,
+            createdAt: Date(timeIntervalSince1970: 0),
+            processedAt: nil,
+            submittedVia: nil,
+            result: .feed_subscription(
+                APISubmissionFeedSubscriptionResult(
+                    outcome: .subscribed,
+                    detectedFeed: feed,
+                    subscription: subscription
+                )
+            ),
+            submissionKind: .content,
+            outcome: .failed,
+            rationale: "stale compatibility value",
+            detectedFeed: nil,
+            feedSubscription: nil
+        )
+
+        let item = SubmissionStatusItem(api: response)
+
+        XCTAssertTrue(item.isFeedSubscription)
+        XCTAssertEqual(item.outcome, .subscribed)
+        XCTAssertEqual(item.detectedFeed?.title, "Canonical Feed")
+        XCTAssertEqual(item.feedSubscription?.status, "created")
+        XCTAssertNil(item.rationale)
+    }
+
+    func testUnknownCanonicalResultUsesTemporaryCompatibilityFields() {
+        let response = APISubmissionStatusResponse(
+            id: 44,
+            contentType: .unknown,
+            url: "https://example.com/future",
+            sourceUrl: nil,
+            title: nil,
+            status: .processing,
+            errorMessage: nil,
+            createdAt: Date(timeIntervalSince1970: 0),
+            processedAt: nil,
+            submittedVia: nil,
+            result: .unknown("future_result", AnyCodable(["value": true])),
+            submissionKind: .learning_deck,
+            outcome: .queued,
+            rationale: "Compatibility projection",
+            detectedFeed: nil,
+            feedSubscription: nil
+        )
+
+        let item = SubmissionStatusItem(api: response)
+
+        XCTAssertTrue(item.isLearningDeck)
+        XCTAssertEqual(item.outcome, .queued)
+        XCTAssertEqual(item.rationale, "Compatibility projection")
+    }
+
     func testFeedSubscriptionSuccessDisplaysSemanticStatus() {
         let item = SubmissionStatusItem(
             id: 44,

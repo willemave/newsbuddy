@@ -107,7 +107,8 @@ struct SubmissionFeedInitialDownload {
 /// the generated `APISubmissionStatusResponse` wire model (mirrors the `ContentDetail`
 /// wire/domain split). `createdAt`/`processedAt` stay `String` because the backend DTO
 /// fields are plain `str`, not `UTCDateTime` (see `SubmissionStatusResponse` in
-/// `app/models/api/content.py`) — there is no generated `Date` field to adopt here.
+/// The generated boundary decodes server-owned timestamps as `Date`; this
+/// presentation model keeps canonical strings for its existing formatting API.
 struct SubmissionStatusItem: Identifiable {
     let id: Int
     let contentType: APIContentType
@@ -134,17 +135,44 @@ struct SubmissionStatusItem: Identifiable {
         title = response.title
         status = response.status
         errorMessage = response.errorMessage
-        createdAt = response.createdAt
-        processedAt = response.processedAt
+        createdAt = ServerDate.format(response.createdAt)
+        processedAt = response.processedAt.map(ServerDate.format)
         submittedVia = response.submittedVia
         isSelfSubmission = response.isSelfSubmission
-        submissionKind = response.submissionKind
-        outcome = response.outcome
-        rationale = response.rationale
-        detectedFeed = response.detectedFeed.map {
-            DetectedFeed(url: $0.url, type: $0.type, title: $0.title, format: $0.format)
+        switch response.result {
+        case let .content(result):
+            submissionKind = .content
+            outcome = result.outcome
+            rationale = nil
+            detectedFeed = nil
+            feedSubscription = nil
+        case let .feed_subscription(result):
+            submissionKind = .feed_subscription
+            outcome = result.outcome
+            rationale = nil
+            detectedFeed = Self.detectedFeed(from: result.detectedFeed)
+            feedSubscription = result.subscription.map(SubmissionFeedSubscription.init(api:))
+        case let .learning_deck(result):
+            submissionKind = .learning_deck
+            outcome = result.outcome
+            rationale = nil
+            detectedFeed = nil
+            feedSubscription = nil
+        case let .no_action(result):
+            submissionKind = .content
+            outcome = .no_action
+            rationale = result.rationale
+            detectedFeed = nil
+            feedSubscription = nil
+        case .unknown:
+            // During the compatibility window the server keeps these legacy mirrors so a newer
+            // result tag can still receive a useful, bounded presentation in an older client.
+            submissionKind = response.submissionKind
+            outcome = response.outcome
+            rationale = response.rationale
+            detectedFeed = Self.detectedFeed(from: response.detectedFeed)
+            feedSubscription = response.feedSubscription.map(SubmissionFeedSubscription.init(api:))
         }
-        feedSubscription = response.feedSubscription.map(SubmissionFeedSubscription.init(api:))
     }
 
     init(
@@ -355,6 +383,12 @@ struct SubmissionStatusItem: Identifiable {
 
     private func parseDate(from dateString: String) -> Date? {
         ServerDate.parse(dateString)
+    }
+
+    private static func detectedFeed(from response: APIDetectedFeed?) -> DetectedFeed? {
+        response.map {
+            DetectedFeed(url: $0.url, type: $0.type, title: $0.title, format: $0.format)
+        }
     }
 }
 

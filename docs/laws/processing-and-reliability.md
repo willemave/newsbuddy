@@ -22,7 +22,7 @@ P10. Paid provider work has time and size bounds. Durable success and resumable 
 
 P11. Queue notifications, client caches, and progress indicators reconcile with durable state.
 
-P12. Public APIs and generated clients change together, while active external contracts keep compatibility until their stated removal condition.
+P12. Public APIs and generated clients change together, while active external contracts keep compatibility until their stated removal condition. Every response field promised by the contract is present on the wire, including explicit `null` for nullable values; request construction defaults do not weaken response guarantees, and server-owned timestamps use typed RFC 3339 UTC values rather than sentinel strings.
 
 P13. New feed discovery and validation run in bounded isolation with candidate-scoped egress and batched probes. Accepted RSS and Atom documents have no byte cap and download through the application client; page analysis and non-YouTube media remain size-limited. Every redirect stays on the public network, and downloaded data cannot execute work on the application host.
 
@@ -41,3 +41,11 @@ P19. A user VM snapshot is a clean recovery checkpoint taken after canonical hyd
 P20. Short-form processing reuses durable summaries for definitive duplicates before paid provider work, retains independent summarization for uncertain semantic matches, bounds provider input, and generates optional enrichment only for unsuppressed representatives.
 
 P21. Discussion comment collection and summary publication have independent cadences. The first usable summary is immediate; later input changes accumulate and coalesce by materiality and time, while stale changed summaries eventually refresh.
+
+P22. Long external work never holds a database transaction or receives a live ORM entity. Workers commit a short preparation transaction, execute from an immutable snapshot, and finalize through a fresh transaction that revalidates ownership and lifecycle state.
+
+P23. After the Rust production-authority cutover, Rust is the final active owner of every route group, task type, VM namespace, and state writer. Durable work retains its stamped owner and version as historical migration evidence; a worker may claim, renew, and finalize only work assigned to its exact runtime version. Any future authority change must use the same acknowledged write barrier and compare-and-set promotion used by the migration, and rollback may change ownership only for new work rather than silently reassigning an in-flight attempt.
+
+P24. Production document extraction is a versioned, bounded, database-free Python boundary. It revalidates the public network for the initial URL, redirects, and browser requests, accepts no arbitrary crawler configuration, and fails closed without its private service credential. Its runtime receives no application database configuration and returns only typed extraction, delegation, fallback, or failure results. Rust alone owns durable state, retries, Firecrawl credentials and calls, usage persistence, and downstream enqueueing.
+
+P25. Generated long-form artwork is derived from one immutable summary fingerprint. Provider and image-transform work runs without a database connection and writes only attempt-scoped staging files; the exact live lease must revalidate the current summary and lifecycle before publishing the canonical image, thumbnail, UTC cache version, and usage record. News rows never enter this artwork path.

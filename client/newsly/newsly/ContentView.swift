@@ -17,8 +17,9 @@ struct ContentView: View {
     private let readStateCache: ReadStateCache
     private let submissionStatusViewModel: SubmissionStatusViewModel
     private let chatNavigation: ChatNavigationCoordinator
+    private let dependencyFactory: RootDependencyFactory
 
-    @State private var settings = AppSettings.shared
+    @State private var settings: AppSettings
     @State private var e2eRouteInjector = E2ERouteInjector()
     @State private var briefingPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
@@ -36,6 +37,8 @@ struct ContentView: View {
         self.readStateCache = session.readStateCache
         self.submissionStatusViewModel = session.submissionStatusViewModel
         self.chatNavigation = session.chatNavigation
+        self.dependencyFactory = session.dependencyFactory
+        _settings = State(initialValue: session.dependencyFactory.appSettings)
     }
 
     var body: some View {
@@ -48,7 +51,8 @@ struct ContentView: View {
                     viewModel: tabCoordinator.briefingVM,
                     readingStateStore: readingStateStore,
                     readStateCache: readStateCache,
-                    contentTextSize: contentTextSize
+                    contentTextSize: contentTextSize,
+                    dependencyFactory: dependencyFactory
                 )
             }
 
@@ -61,6 +65,7 @@ struct ContentView: View {
                     readStateCache: readStateCache,
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize,
+                    dependencyFactory: dependencyFactory,
                     onOpenMore: { showMoreSheet = true },
                     onSelectSession: openChatSession
                 )
@@ -91,13 +96,15 @@ struct ContentView: View {
                 MoreView(
                     submissionsViewModel: submissionStatusViewModel,
                     readStateCache: readStateCache,
-                    showsDismissButton: true
+                    showsDismissButton: true,
+                    dependencyFactory: dependencyFactory
                 )
                 .withContentRoutes(
                     path: $morePath,
                     readingStateStore: readingStateStore,
                     readStateCache: readStateCache,
-                    contentTextSize: contentTextSize
+                    contentTextSize: contentTextSize,
+                    dependencyFactory: dependencyFactory
                 )
             }
             .presentationDragIndicator(.visible)

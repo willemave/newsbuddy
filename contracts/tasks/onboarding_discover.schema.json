@@ -1,0 +1,27 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "run_id": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "user_id": {
+      "title": "User Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "user_id"
+  ],
+  "title": "OnboardingDiscoverPayload",
+  "type": "object"
+}

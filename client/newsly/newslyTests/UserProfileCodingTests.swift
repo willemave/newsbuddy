@@ -56,11 +56,11 @@ final class UserProfileCodingTests: XCTestCase {
     }
 
     func testUpdateUserProfileRequestEncodesCouncilPersonas() throws {
-        let request = UpdateUserProfileRequest(
+        let request = APIUpdateUserProfileRequest(
             fullName: nil,
             twitterUsername: "willem_aw",
             councilPersonas: [
-                CouncilPersona(
+                APICouncilPersonaInput(
                     id: "einstein",
                     displayName: "Albert Einstein",
                     instructionPrompt: "Reduce the issue to first principles.",
@@ -77,7 +77,7 @@ final class UserProfileCodingTests: XCTestCase {
     }
 
     func testUpdateUserProfileRequestEncodesReadingExperience() throws {
-        let request = UpdateUserProfileRequest(readingExperience: .briefing)
+        let request = APIUpdateUserProfileRequest(readingExperience: .briefing)
 
         let data = try JSONEncoder().encode(request)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])

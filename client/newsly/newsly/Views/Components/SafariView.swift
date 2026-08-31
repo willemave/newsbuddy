@@ -7,10 +7,15 @@ import SafariServices
 import SwiftUI
 
 struct SafariView: UIViewControllerRepresentable {
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
     let url: URL
 
     func makeUIViewController(context: Context) -> SFSafariViewController {
-        SFSafariViewController(url: url.newslyBrowserCompatibleLocalURL)
+        SFSafariViewController(
+            url: url.newslyBrowserCompatibleLocalURL(
+                serverHost: dependencyFactory.appSettings.serverHost
+            )
+        )
     }
 
     func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {
@@ -19,10 +24,10 @@ struct SafariView: UIViewControllerRepresentable {
 }
 
 extension URL {
-    var newslyBrowserCompatibleLocalURL: URL {
+    func newslyBrowserCompatibleLocalURL(serverHost: String) -> URL {
 #if targetEnvironment(simulator)
         guard host == "127.0.0.1",
-              AppSettings.shared.serverHost.caseInsensitiveCompare("localhost") == .orderedSame,
+              serverHost.caseInsensitiveCompare("localhost") == .orderedSame,
               var components = URLComponents(url: self, resolvingAgainstBaseURL: false)
         else {
             return self

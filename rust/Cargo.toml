@@ -1,0 +1,87 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT"
+repository = "https://github.com/willem/news_app"
+
+[workspace.dependencies]
+anyhow = "=1.0.104"
+async-openai = { version = "=0.41.3", default-features = false, features = ["responses", "embedding", "image", "audio", "rustls-no-provider"] }
+axum = { version = "=0.8.9", features = ["http1", "json", "multipart", "tokio", "tracing"] }
+base64 = "=0.22.1"
+chrono = { version = "=0.4.45", features = ["serde"] }
+clap = { version = "=4.6.6", features = ["derive", "env"] }
+clap_complete = "=4.6.9"
+futures-util = "=0.3.34"
+fernet = "=0.2.2"
+feed-rs = { version = "=2.4.0", default-features = false }
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+getrandom = "=0.3.4"
+hostname = "=0.4.2"
+jsonwebtoken = { version = "=11.0.0", default-features = false, features = ["rust_crypto", "use_pem"] }
+jsonschema = { version = "=0.52.1", default-features = false }
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+object_store = { version = "=0.14.1", default-features = false, features = ["aws"] }
+qrcode = { version = "=0.14.1", default-features = false }
+reqwest = { version = "=0.13.4", default-features = false, features = [
+    "http2",
+    "form",
+    "json",
+    "multipart",
+    "query",
+    "rustls",
+    "stream",
+] }
+regex = "=1.13.1"
+rig-core = { version = "=0.42.0", default-features = false, features = ["reqwest", "rustls"] }
+schemars = { version = "=1.2.2", features = ["chrono04", "derive", "uuid1"] }
+scraper = "=0.27.0"
+secrecy = "=0.10.3"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["preserve_order"] }
+sha1 = "=0.10.7"
+sha2 = "=0.11.0"
+sqlx = { version = "=0.9.0", default-features = false, features = [
+    "chrono",
+    "derive",
+    "json",
+    "macros",
+    "migrate",
+    "postgres",
+    "runtime-tokio",
+    "tls-rustls-aws-lc-rs",
+    "uuid",
+] }
+subtle = "=2.6.1"
+tempfile = "=3.27.0"
+tar = { version = "=0.4.46", default-features = false }
+thiserror = "=2.0.20"
+tokio = { version = "=1.53.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "time"] }
+tokio-util = "=0.7.19"
+tower-http = { version = "=0.7.0", features = ["catch-panic", "request-id", "trace"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt", "json"] }
+toml = "=0.9.8"
+utoipa = { version = "=5.5.0", features = ["axum_extras", "chrono", "preserve_order", "repr", "uuid"] }
+uuid = { version = "=1.26.0", features = ["serde", "v4"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

@@ -23,6 +23,7 @@ private enum ChatSessionSheetDestination: Identifiable {
 struct ChatSessionView: View {
     @Environment(AppLifecycle.self) private var lifecycle
     @Environment(ActiveChatSessionManager.self) private var activeSessionManager
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
 
     private let route: ChatSessionRoute
     private let dependencies: ChatDependencies?
@@ -46,7 +47,10 @@ struct ChatSessionView: View {
         ChatSessionContent(
             route: route,
             lifecycle: lifecycle,
-            dependencies: dependencies ?? .live(activeSessionManager: activeSessionManager),
+            dependencies: dependencies ?? dependencyFactory.makeChatDependencies(
+                activeSessionManager: activeSessionManager
+            ),
+            feedOptionActionModel: dependencyFactory.makeAssistantFeedOptionActionModel(),
             onShowHistory: onShowHistory,
             onClose: onClose
         )
@@ -61,6 +65,7 @@ private struct ChatSessionContent: View {
     private let lifecycle: AppLifecycle
     private let route: ChatSessionRoute
     private let dependencies: ChatDependencies
+    private let feedOptionActionModel: AssistantFeedOptionActionModel
     private let onShowHistory: (() -> Void)?
     private let onClose: (() -> Void)?
 
@@ -76,12 +81,14 @@ private struct ChatSessionContent: View {
         route: ChatSessionRoute,
         lifecycle: AppLifecycle,
         dependencies: ChatDependencies,
+        feedOptionActionModel: AssistantFeedOptionActionModel,
         onShowHistory: (() -> Void)? = nil,
         onClose: (() -> Void)? = nil
     ) {
         self.route = route
         self.lifecycle = lifecycle
         self.dependencies = dependencies
+        self.feedOptionActionModel = feedOptionActionModel
         _viewModel = State(
             initialValue: ChatSessionViewModel(
                 lifecycle: lifecycle,
@@ -180,6 +187,7 @@ private struct ChatSessionContent: View {
             session: viewModel.session,
             scrollToBottomRequest: scrollToBottomRequest,
             retryingCouncilChildSessionId: viewModel.retryingCouncilChildSessionId,
+            feedOptionActionModel: feedOptionActionModel,
             onOpenCouncilSettings: openCouncilSettings,
             onDismissError: dismissError,
             onRetryLoad: retryLoad,

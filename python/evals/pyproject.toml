@@ -1,0 +1,48 @@
+[project]
+name = "newsly-evals"
+version = "0.1.0"
+description = "Offline Newsly model and embedding evaluation pipelines"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.5.1",
+]
+
+[project.optional-dependencies]
+hosted = ["openai>=1.75.0"]
+local = ["sentence-transformers>=5.3.0"]
+judge = ["anthropic>=0.69.0", "python-dotenv>=1.1.0"]
+
+[project.scripts]
+newsly-evals = "newsly_evals.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "pytest>=8.3.5",
+    "ruff>=0.11.12",
+]
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "UP", "B", "SIM", "I"]
+
+[tool.mypy]
+python_version = "3.13"
+warn_unused_configs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+explicit_package_bases = true
+implicit_reexport = true
+disable_error_code = ["import-untyped"]

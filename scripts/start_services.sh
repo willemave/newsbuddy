@@ -1,825 +1,354 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ALEMBIC_CONFIG_PATH="${PROJECT_ROOT}/migrations/alembic.ini"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repository_root="$(cd "${script_dir}/.." && pwd)"
+rust_manifest="${repository_root}/rust/Cargo.toml"
+rust_target="${repository_root}/rust/target/debug"
+# shellcheck source=scripts/lib/rust_runtime.sh
+source "${script_dir}/lib/rust_runtime.sh"
+extractor_binary="${repository_root}/python/document_extractor/.venv/bin/newsly-document-extractor"
 
 usage() {
   cat <<'EOF'
 Usage: scripts/start_services.sh <command> [options]
 
 Commands:
-  all        Start the local long-running runtime: server, workers, watchdog, scheduler
-  server     Start only the API server
-  workers    Start only queue workers
-  scrapers   Run scrapers once
-  watchdog   Start the queue watchdog loop
-  scheduler  Start the cron-style scheduler loop
-  migrate    Run Alembic migrations
+  all        Start the Rust API, every native worker, the scheduler, and Crawl4AI extractor
+  server     Start only the Rust API
+  workers    Start every native Rust queue worker
+  scheduler  Start the native Rust scheduler (including queue recovery and scraper fan-out)
+  extractor  Start only the isolated Python Crawl4AI document extractor
+  migrate    Apply SQLx migrations with newsly-db
 
-Common options:
-  --env-file PATH   Load settings from PATH instead of .env
-  -h, --help        Show this help
+Options:
+  --env-file PATH  Load process settings from PATH instead of the first local .env candidate
+  --port PORT      API bind port (server/all; default 8000)
+  --local-e2e      Force bounded SQLx pools for a complete local end-to-end stack
+  --skip-migrate   Do not apply SQLx migrations before starting the API
+  --debug          Use debug-level, human-readable Rust logs
+  -h, --help       Show this help
 
-Examples:
-  scripts/start_services.sh all --env-file .env
-  scripts/start_services.sh server --port 8000 --reload
-  scripts/start_services.sh workers --content-workers 6 --discussion-workers 4 --media-workers 3 --llm-workers 4
-  scripts/start_services.sh migrate --env-file .env
+Python is deliberately limited to the database-free document extractor. Model and embedding
+evaluation pipelines live under python/evals and are not part of the application runtime.
+The local launcher gives each process a conservative PostgreSQL pool by default. Explicit
+NEWSLY_*_DATABASE_MAX_CONNECTIONS values take precedence unless --local-e2e is selected.
 EOF
 }
 
-resolve_env_file() {
-  if [[ -n "${NEWSLY_ENV_FILE:-}" && -f "${NEWSLY_ENV_FILE}" ]]; then
-    printf '%s\n' "${NEWSLY_ENV_FILE}"
-    return 0
-  fi
+load_environment() {
+  local env_file="$1"
+  newsly_load_dotenv "${env_file}"
+  newsly_normalize_database_environment
 
-  if [[ -f "${PROJECT_ROOT}/.env" ]]; then
-    printf '%s\n' "${PROJECT_ROOT}/.env"
-    return 0
-  fi
+  export ENVIRONMENT="${ENVIRONMENT:-development}"
+  export NEWSLY_RUST_LOG_FORMAT="${NEWSLY_RUST_LOG_FORMAT:-pretty}"
+  export DOCUMENT_EXTRACTOR_SHARED_SECRET="${DOCUMENT_EXTRACTOR_SHARED_SECRET:-local-extractor-secret}"
+  export NEWSLY_DOCUMENT_EXTRACTOR_SHARED_SECRET="${NEWSLY_DOCUMENT_EXTRACTOR_SHARED_SECRET:-${DOCUMENT_EXTRACTOR_SHARED_SECRET}}"
+  export NEWSLY_DOCUMENT_EXTRACTOR_URL="${NEWSLY_DOCUMENT_EXTRACTOR_URL:-${DOCUMENT_EXTRACTOR_URL:-http://127.0.0.1:8200}}"
 
-  if [[ -f "${PROJECT_ROOT}/.env.docker.local" ]]; then
-    printf '%s\n' "${PROJECT_ROOT}/.env.docker.local"
-    return 0
+  # A full native stack has one PostgreSQL listener per queue process in addition
+  # to its SQLx pool. Production sets capacity explicitly; the local launcher
+  # defaults to one pooled connection per background process and two for the API.
+  if [[ "${local_e2e}" == "true" ]]; then
+    export NEWSLY_RUST_DATABASE_MAX_CONNECTIONS=2
+    export NEWSLY_RUST_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_RUST_WORKER_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_RUST_WORKER_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_NEWS_ITEM_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_NEWS_ITEM_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_SUMMARIZATION_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_SUMMARIZATION_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_DISCUSSION_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_DISCUSSION_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_IMAGE_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_IMAGE_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_AUDIO_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_AUDIO_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_X_SYNC_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_X_SYNC_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_MEDIA_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_MEDIA_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_AGENT_DATA_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_AGENT_DATA_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_SCHEDULER_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_SCHEDULER_DATABASE_MIN_CONNECTIONS=0
+    export NEWSLY_DELETE_WORKER_DATABASE_MAX_CONNECTIONS=1
+    export NEWSLY_DELETE_WORKER_DATABASE_MIN_CONNECTIONS=0
+  else
+    export NEWSLY_RUST_DATABASE_MAX_CONNECTIONS="${NEWSLY_RUST_DATABASE_MAX_CONNECTIONS:-2}"
+    export NEWSLY_RUST_WORKER_DATABASE_MAX_CONNECTIONS="${NEWSLY_RUST_WORKER_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_NEWS_ITEM_DATABASE_MAX_CONNECTIONS="${NEWSLY_NEWS_ITEM_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_SUMMARIZATION_DATABASE_MAX_CONNECTIONS="${NEWSLY_SUMMARIZATION_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_DISCUSSION_DATABASE_MAX_CONNECTIONS="${NEWSLY_DISCUSSION_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_IMAGE_DATABASE_MAX_CONNECTIONS="${NEWSLY_IMAGE_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_AUDIO_DATABASE_MAX_CONNECTIONS="${NEWSLY_AUDIO_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_X_SYNC_DATABASE_MAX_CONNECTIONS="${NEWSLY_X_SYNC_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_MEDIA_DATABASE_MAX_CONNECTIONS="${NEWSLY_MEDIA_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_AGENT_DATA_DATABASE_MAX_CONNECTIONS="${NEWSLY_AGENT_DATA_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_SCHEDULER_DATABASE_MAX_CONNECTIONS="${NEWSLY_SCHEDULER_DATABASE_MAX_CONNECTIONS:-1}"
+    export NEWSLY_DELETE_WORKER_DATABASE_MAX_CONNECTIONS="${NEWSLY_DELETE_WORKER_DATABASE_MAX_CONNECTIONS:-1}"
   fi
-
-  if [[ -f "${PROJECT_ROOT}/.env.docker" ]]; then
-    printf '%s\n' "${PROJECT_ROOT}/.env.docker"
-    return 0
-  fi
-
-  return 1
 }
 
-activate_runtime() {
-  cd "${PROJECT_ROOT}"
-
-  if [[ ! -f "${ENV_FILE}" ]]; then
-    echo "ERROR: env file not found at ${ENV_FILE}" >&2
-    exit 1
-  fi
-
-  export NEWSLY_ENV_FILE="${ENV_FILE}"
-
-  if [[ -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
-    # shellcheck source=/dev/null
-    source "${PROJECT_ROOT}/.venv/bin/activate"
-  fi
+build_packages() {
+  cargo build --manifest-path "${rust_manifest}" --locked "$@"
 }
 
-dotenv_get() {
-  local key="$1"
-  local default_value="${2:-}"
-
-  NEWSLY_ENV_FILE="${ENV_FILE}" KEY_NAME="${key}" DEFAULT_VALUE="${default_value}" python <<'PY'
-import os
-
-from dotenv import dotenv_values
-
-env_file = os.environ["NEWSLY_ENV_FILE"]
-key_name = os.environ["KEY_NAME"]
-default_value = os.environ["DEFAULT_VALUE"]
-
-if key_name in os.environ:
-    print(os.environ[key_name])
-    raise SystemExit(0)
-
-values = dotenv_values(env_file)
-value = values.get(key_name, default_value)
-print("" if value is None else value)
-PY
-}
-
-resolve_worker_threads() {
-  local settings_key="$1"
-  local legacy_process_key="$2"
-  local legacy_alias_key="${3:-}"
-  local configured
-
-  configured="$(dotenv_get "${settings_key}" "")"
-  if [[ -z "${configured}" ]]; then
-    # Preserve old local overrides, but reinterpret them as thread counts so a
-    # legacy *_WORKER_PROCS=4 cannot create four threaded worker processes.
-    configured="$(dotenv_get "${legacy_process_key}" "")"
-  fi
-  if [[ -z "${configured}" && -n "${legacy_alias_key}" ]]; then
-    configured="$(dotenv_get "${legacy_alias_key}" "")"
-  fi
-  printf '%s\n' "${configured}"
-}
-
-print_database_target() {
-  PROJECT_ROOT="${PROJECT_ROOT}" python <<'PY'
-from app.core.settings import get_settings
-
-settings = get_settings()
-print(settings.database_url)
-PY
-}
-
-check_database_connection() {
-  python -c "from app.core.db import init_db; init_db()"
+run_binary() {
+  local binary="$1"
+  shift
+  exec "${rust_target}/${binary}" "$@"
 }
 
 run_migrations() {
-  if [[ ! -f "${ALEMBIC_CONFIG_PATH}" ]]; then
-    echo "ERROR: alembic config not found at ${ALEMBIC_CONFIG_PATH}" >&2
+  "${script_dir}/run_sqlx_migrations.sh"
+}
+
+prepare_extractor() {
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "uv is required to start the isolated Crawl4AI extractor" >&2
     exit 1
   fi
-
-  echo "Running database migrations..."
-  python -m alembic -c "${ALEMBIC_CONFIG_PATH}" upgrade head
-}
-
-ensure_playwright_chromium() {
-  if [[ "${SKIP_BROWSER_INSTALL:-false}" == "true" ]]; then
-    return 0
-  fi
-
-  echo "Ensuring Playwright Chromium is installed..."
-  python -m playwright install chromium
-}
-
-start_server() {
-  local debug_mode="false"
-  local reload_mode=""
-  local skip_migrate="false"
-  local port_override=""
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --env-file)
-        ENV_FILE="$2"
-        shift 2
-        ;;
-      --debug)
-        debug_mode="true"
-        shift
-        ;;
-      --reload)
-        reload_mode="true"
-        shift
-        ;;
-      --no-reload)
-        reload_mode="false"
-        shift
-        ;;
-      --skip-migrate)
-        skip_migrate="true"
-        shift
-        ;;
-      --port)
-        port_override="$2"
-        shift 2
-        ;;
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      *)
-        echo "Unknown server option: $1" >&2
-        exit 1
-        ;;
-    esac
-  done
-
-  activate_runtime
-
-  if [[ "${debug_mode}" == "true" ]]; then
-    export LOG_LEVEL=DEBUG
-  fi
-
-  local database_target
-  database_target="$(print_database_target)"
-  echo "Database target: ${database_target}"
-
-  if [[ "${skip_migrate}" != "true" ]]; then
-    run_migrations
-  fi
-
-  local port="${port_override:-$(dotenv_get PORT 8000)}"
-  local environment_name
-  environment_name="$(dotenv_get ENVIRONMENT development)"
-  local -a server_args=(
-    python -m uvicorn app.main:app
-    --host 0.0.0.0
-    --port "${port}"
-    --no-access-log
-  )
-
-  if [[ "${reload_mode}" == "true" || ( -z "${reload_mode}" && "${environment_name}" == "development" ) ]]; then
-    server_args+=(--reload)
-  fi
-
-  if [[ "${debug_mode}" == "true" ]]; then
-    server_args+=(--log-level debug)
-  fi
-
-  exec "${server_args[@]}"
-}
-
-start_workers() {
-  local debug_enabled="false"
-  local max_tasks=""
-  local stats_interval="30"
-  local content_workers=""
-  local media_workers=""
-  local audio_episode_workers=""
-  local image_workers=""
-  local onboarding_workers=""
-  local backfill_workers=""
-  local discussion_workers=""
-  local twitter_workers=""
-  local chat_workers=""
-  local llm_workers=""
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --env-file)
-        ENV_FILE="$2"
-        shift 2
-        ;;
-      --debug)
-        debug_enabled="true"
-        shift
-        ;;
-      --max-tasks)
-        max_tasks="$2"
-        shift 2
-        ;;
-      --stats-interval)
-        stats_interval="$2"
-        shift 2
-        ;;
-      --content-workers)
-        content_workers="$2"
-        shift 2
-        ;;
-      --media-workers|--transcribe-workers)
-        media_workers="$2"
-        shift 2
-        ;;
-      --audio-episode-workers|--tts-workers)
-        audio_episode_workers="$2"
-        shift 2
-        ;;
-      --image-workers)
-        image_workers="$2"
-        shift 2
-        ;;
-      --onboarding-workers)
-        onboarding_workers="$2"
-        shift 2
-        ;;
-      --backfill-workers)
-        backfill_workers="$2"
-        shift 2
-        ;;
-      --discussion-workers)
-        discussion_workers="$2"
-        shift 2
-        ;;
-      --twitter-workers)
-        twitter_workers="$2"
-        shift 2
-        ;;
-      --chat-workers)
-        chat_workers="$2"
-        shift 2
-        ;;
-      --llm-workers)
-        llm_workers="$2"
-        shift 2
-        ;;
-      --no-stats)
-        stats_interval="0"
-        shift
-        ;;
-      --skip-browser-install)
-        SKIP_BROWSER_INSTALL="true"
-        shift
-        ;;
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      *)
-        echo "Unknown workers option: $1" >&2
-        exit 1
-        ;;
-    esac
-  done
-
-  activate_runtime
-
-  content_workers="${content_workers:-$(resolve_worker_threads WORKER_THREADS_CONTENT CONTENT_WORKER_PROCS)}"
-  media_workers="${media_workers:-$(resolve_worker_threads WORKER_THREADS_MEDIA MEDIA_WORKER_PROCS TRANSCRIBE_WORKER_PROCS)}"
-  audio_episode_workers="${audio_episode_workers:-$(resolve_worker_threads WORKER_THREADS_AUDIO_EPISODE AUDIO_EPISODE_WORKER_PROCS TTS_WORKER_PROCS)}"
-  image_workers="${image_workers:-$(resolve_worker_threads WORKER_THREADS_IMAGE IMAGE_WORKER_PROCS)}"
-  onboarding_workers="${onboarding_workers:-$(resolve_worker_threads WORKER_THREADS_ONBOARDING ONBOARDING_WORKER_PROCS)}"
-  backfill_workers="${backfill_workers:-$(resolve_worker_threads WORKER_THREADS_BACKFILL BACKFILL_WORKER_PROCS)}"
-  discussion_workers="${discussion_workers:-$(resolve_worker_threads WORKER_THREADS_DISCUSSION DISCUSSION_WORKER_PROCS)}"
-  twitter_workers="${twitter_workers:-$(resolve_worker_threads WORKER_THREADS_TWITTER TWITTER_WORKER_PROCS)}"
-  chat_workers="${chat_workers:-$(resolve_worker_threads WORKER_THREADS_CHAT CHAT_WORKER_PROCS)}"
-  llm_workers="${llm_workers:-$(resolve_worker_threads WORKER_THREADS_LLM LLM_WORKER_PROCS)}"
-
-  local database_target
-  database_target="$(print_database_target)"
-  echo "Database target: ${database_target}"
-
-  echo "Checking database connection..."
-  check_database_connection
-
-  ensure_playwright_chromium
-
-  local -a thread_overrides=(
-    "${content_workers}" "${media_workers}" "${audio_episode_workers}"
-    "${image_workers}" "${onboarding_workers}" "${backfill_workers}"
-    "${discussion_workers}" "${twitter_workers}" "${chat_workers}"
-    "${llm_workers}"
-  )
-  local enabled_workers=0
-  local thread_override
-  for thread_override in "${thread_overrides[@]}"; do
-    if [[ -n "${thread_override}" && ! "${thread_override}" =~ ^[0-9]+$ ]]; then
-      echo "ERROR: worker thread counts must be non-negative integers" >&2
-      exit 1
-    fi
-    if [[ -z "${thread_override}" || "${thread_override}" -gt 0 ]]; then
-      enabled_workers=$((enabled_workers + 1))
-    fi
-  done
-  if [[ "${enabled_workers}" -le 0 ]]; then
-    echo "ERROR: at least one worker must be enabled" >&2
+  uv sync \
+    --project "${repository_root}/python/document_extractor" \
+    --frozen >/dev/null
+  if [[ ! -x "${extractor_binary}" ]]; then
+    echo "document extractor entrypoint is missing after uv sync: ${extractor_binary}" >&2
     exit 1
   fi
+}
 
-  local -a pids=()
+start_extractor() {
+  prepare_extractor
+  exec env -u DATABASE_URL -u NEWSLY_DATABASE_URL "${extractor_binary}"
+}
 
-  launch_worker() {
-    local queue="$1"
-    local threads="$2"
-    if [[ "${threads}" == "0" ]]; then
-      return
-    fi
+worker_binaries=(
+  newsly-worker
+  media_worker
+  audio_episode_worker
+  image_worker
+  discussion_worker
+  news_item_worker
+  scrape_worker
+  summarization_worker
+  x_sync_worker
+  agent_data_worker
+  feed_backfill_worker
+  feed_discovery_worker
+  onboarding_discovery_worker
+  briefing_refresh_worker
+  chat_worker
+  run_llm_task_worker
+  newsly-account-deletion-worker
+)
 
-    local -a cmd=(
-      python scripts/run_workers.py
-      --queue "${queue}"
-      --worker-slot 1
-      --stats-interval "${stats_interval}"
-    )
-    if [[ -n "${threads}" ]]; then
-      cmd+=(--threads "${threads}")
-    fi
-    if [[ "${debug_enabled}" == "true" ]]; then
-      cmd+=(--debug)
-    fi
-    if [[ -n "${max_tasks}" ]]; then
-      cmd+=(--max-tasks "${max_tasks}")
-    fi
+supervise_children() {
+  local label="$1"
+  shift
+  local -a child_pids=("$@")
+  local shutdown_status=0
 
-    echo "Launching ${queue} worker: ${cmd[*]}"
-    "${cmd[@]}" &
-    pids+=("$!")
+  terminate_children() {
+    local pid
+    for pid in "${child_pids[@]}"; do
+      kill -TERM "${pid}" 2>/dev/null || true
+    done
   }
+  request_shutdown() {
+    shutdown_status="$1"
+    trap - INT TERM
+    terminate_children
+  }
+  trap 'request_shutdown 130' INT
+  trap 'request_shutdown 143' TERM
 
-  trap 'for pid in "${pids[@]}"; do kill -TERM "$pid" 2>/dev/null || true; done; wait || true; exit 0' INT TERM
-
-  launch_worker content "${content_workers}"
-  launch_worker media "${media_workers}"
-  launch_worker audio_episode "${audio_episode_workers}"
-  launch_worker image "${image_workers}"
-  launch_worker onboarding "${onboarding_workers}"
-  launch_worker backfill "${backfill_workers}"
-  launch_worker discussion "${discussion_workers}"
-  launch_worker twitter "${twitter_workers}"
-  launch_worker chat "${chat_workers}"
-  launch_worker llm "${llm_workers}"
-
-  local exit_code=0
-  for pid in "${pids[@]}"; do
-    if ! wait "${pid}"; then
-      exit_code=1
+  local running_pids pid exited_pid child_status other_pid
+  while [[ "${shutdown_status}" -eq 0 ]]; do
+    running_pids=" $(jobs -pr | tr '\n' ' ') "
+    if [[ "${shutdown_status}" -ne 0 ]]; then
+      break
     fi
+    exited_pid=""
+    for pid in "${child_pids[@]}"; do
+      if [[ "${running_pids}" != *" ${pid} "* ]]; then
+        exited_pid="${pid}"
+        break
+      fi
+    done
+    if [[ -z "${exited_pid}" ]]; then
+      sleep 0.25
+      continue
+    fi
+
+    child_status=0
+    wait "${exited_pid}" || child_status=$?
+    if [[ "${shutdown_status}" -ne 0 ]]; then
+      break
+    fi
+    if [[ "${child_status}" -eq 0 ]]; then
+      child_status=1
+    fi
+    echo "${label} child ${exited_pid} exited unexpectedly (status ${child_status}); stopping peers" >&2
+    terminate_children
+    for other_pid in "${child_pids[@]}"; do
+      [[ "${other_pid}" == "${exited_pid}" ]] && continue
+      wait "${other_pid}" 2>/dev/null || true
+    done
+    trap - INT TERM
+    return "${child_status}"
   done
 
-  exit "${exit_code}"
+  for pid in "${child_pids[@]}"; do
+    wait "${pid}" 2>/dev/null || true
+  done
+  trap - INT TERM
+  return "${shutdown_status}"
 }
 
-start_scrapers() {
-  local debug_flag=""
-  local stats_flag=""
-  local -a scraper_names=()
+start_worker_group() {
+  newsly_require_database_url
+  build_packages \
+    --package newsly-worker --bins \
+    --package newsly-account-deletion-worker --bin newsly-account-deletion-worker
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --env-file)
-        ENV_FILE="$2"
-        shift 2
-        ;;
-      --debug)
-        debug_flag="--debug"
-        shift
-        ;;
-      --show-stats)
-        stats_flag="--show-stats"
-        shift
-        ;;
-      --scrapers)
-        shift
-        while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
-          scraper_names+=("$1")
-          shift
-        done
-        ;;
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      *)
-        echo "Unknown scrapers option: $1" >&2
-        exit 1
-        ;;
-    esac
+  local -a worker_pids=()
+  local binary
+  for binary in "${worker_binaries[@]}"; do
+    echo "starting native worker: ${binary}"
+    "${rust_target}/${binary}" &
+    worker_pids+=("$!")
   done
 
-  activate_runtime
-
-  local database_target
-  database_target="$(print_database_target)"
-  echo "Database target: ${database_target}"
-
-  echo "Checking database connection..."
-  check_database_connection
-
-  local -a cmd=(python scripts/run_scrapers.py)
-  if [[ -n "${debug_flag}" ]]; then
-    cmd+=("${debug_flag}")
-  fi
-  if [[ -n "${stats_flag}" ]]; then
-    cmd+=("${stats_flag}")
-  fi
-  if [[ "${#scraper_names[@]}" -gt 0 ]]; then
-    cmd+=(--scrapers "${scraper_names[@]}")
-  fi
-
-  exec "${cmd[@]}"
-}
-
-start_watchdog() {
-  local interval_seconds="300"
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --env-file)
-        ENV_FILE="$2"
-        shift 2
-        ;;
-      --interval-seconds)
-        interval_seconds="$2"
-        shift 2
-        ;;
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      *)
-        echo "Unknown watchdog option: $1" >&2
-        exit 1
-        ;;
-    esac
-  done
-
-  activate_runtime
-  exec python scripts/watchdog_queue_recovery.py --loop --interval-seconds "${interval_seconds}"
-}
-
-start_scheduler() {
-  local crontab_path="${PROJECT_ROOT}/docker/crontab"
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --env-file)
-        ENV_FILE="$2"
-        shift 2
-        ;;
-      --crontab)
-        crontab_path="$2"
-        shift 2
-        ;;
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      *)
-        echo "Unknown scheduler option: $1" >&2
-        exit 1
-        ;;
-    esac
-  done
-
-  activate_runtime
-  exec python docker/supercronic.py "${crontab_path}"
+  supervise_children "worker group" "${worker_pids[@]}"
 }
 
 start_all() {
-  local debug_mode="false"
-  local reload_mode=""
-  local port_override=""
-  local interval_seconds="300"
-  local crontab_path="${PROJECT_ROOT}/docker/crontab"
-  local content_workers=""
-  local media_workers=""
-  local audio_episode_workers=""
-  local image_workers=""
-  local onboarding_workers=""
-  local backfill_workers=""
-  local discussion_workers=""
-  local twitter_workers=""
-  local chat_workers=""
-  local llm_workers=""
-  local stats_interval="30"
-  local max_tasks=""
-  local skip_browser_install="false"
+  newsly_require_database_url
+  if [[ "${skip_migrate}" != "true" ]]; then
+    run_migrations
+  fi
+  build_packages \
+    --package newsly-api --bin newsly-api \
+    --package newsly-scheduler --bin newsly-scheduler \
+    --package newsly-worker --bins \
+    --package newsly-account-deletion-worker --bin newsly-account-deletion-worker
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --env-file)
-        ENV_FILE="$2"
-        shift 2
-        ;;
-      --debug)
-        debug_mode="true"
-        shift
-        ;;
-      --reload)
-        reload_mode="true"
-        shift
-        ;;
-      --no-reload)
-        reload_mode="false"
-        shift
-        ;;
-      --port)
-        port_override="$2"
-        shift 2
-        ;;
-      --interval-seconds)
-        interval_seconds="$2"
-        shift 2
-        ;;
-      --crontab)
-        crontab_path="$2"
-        shift 2
-        ;;
-      --content-workers)
-        content_workers="$2"
-        shift 2
-        ;;
-      --media-workers|--transcribe-workers)
-        media_workers="$2"
-        shift 2
-        ;;
-      --audio-episode-workers|--tts-workers)
-        audio_episode_workers="$2"
-        shift 2
-        ;;
-      --image-workers)
-        image_workers="$2"
-        shift 2
-        ;;
-      --onboarding-workers)
-        onboarding_workers="$2"
-        shift 2
-        ;;
-      --backfill-workers)
-        backfill_workers="$2"
-        shift 2
-        ;;
-      --discussion-workers)
-        discussion_workers="$2"
-        shift 2
-        ;;
-      --twitter-workers)
-        twitter_workers="$2"
-        shift 2
-        ;;
-      --chat-workers)
-        chat_workers="$2"
-        shift 2
-        ;;
-      --llm-workers)
-        llm_workers="$2"
-        shift 2
-        ;;
-      --stats-interval)
-        stats_interval="$2"
-        shift 2
-        ;;
-      --max-tasks)
-        max_tasks="$2"
-        shift 2
-        ;;
-      --skip-browser-install)
-        skip_browser_install="true"
-        shift
-        ;;
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      *)
-        echo "Unknown all option: $1" >&2
-        exit 1
-        ;;
-    esac
+  prepare_extractor
+
+  local -a service_pids=()
+  env -u DATABASE_URL -u NEWSLY_DATABASE_URL "${extractor_binary}" &
+  service_pids+=("$!")
+
+  "${rust_target}/newsly-api" &
+  service_pids+=("$!")
+
+  "${rust_target}/newsly-scheduler" &
+  service_pids+=("$!")
+
+  local binary
+  for binary in "${worker_binaries[@]}"; do
+    "${rust_target}/${binary}" &
+    service_pids+=("$!")
   done
 
-  activate_runtime
-
-  content_workers="${content_workers:-$(resolve_worker_threads WORKER_THREADS_CONTENT CONTENT_WORKER_PROCS)}"
-  media_workers="${media_workers:-$(resolve_worker_threads WORKER_THREADS_MEDIA MEDIA_WORKER_PROCS TRANSCRIBE_WORKER_PROCS)}"
-  audio_episode_workers="${audio_episode_workers:-$(resolve_worker_threads WORKER_THREADS_AUDIO_EPISODE AUDIO_EPISODE_WORKER_PROCS TTS_WORKER_PROCS)}"
-  image_workers="${image_workers:-$(resolve_worker_threads WORKER_THREADS_IMAGE IMAGE_WORKER_PROCS)}"
-  onboarding_workers="${onboarding_workers:-$(resolve_worker_threads WORKER_THREADS_ONBOARDING ONBOARDING_WORKER_PROCS)}"
-  backfill_workers="${backfill_workers:-$(resolve_worker_threads WORKER_THREADS_BACKFILL BACKFILL_WORKER_PROCS)}"
-  discussion_workers="${discussion_workers:-$(resolve_worker_threads WORKER_THREADS_DISCUSSION DISCUSSION_WORKER_PROCS)}"
-  twitter_workers="${twitter_workers:-$(resolve_worker_threads WORKER_THREADS_TWITTER TWITTER_WORKER_PROCS)}"
-  chat_workers="${chat_workers:-$(resolve_worker_threads WORKER_THREADS_CHAT CHAT_WORKER_PROCS)}"
-  llm_workers="${llm_workers:-$(resolve_worker_threads WORKER_THREADS_LLM LLM_WORKER_PROCS)}"
-
-  local database_target
-  database_target="$(print_database_target)"
-  echo "Database target: ${database_target}"
-
-  echo "Checking database connection..."
-  check_database_connection
-
-  run_migrations
-
-  local -a pids=()
-  local -a names=()
-
-  launch_service() {
-    local name="$1"
-    shift
-    (
-      "$@" 2>&1 | while IFS= read -r line; do
-        printf '[%s] [%s] %s\n' "$(date '+%H:%M:%S')" "${name}" "${line}"
-      done
-    ) &
-    pids+=("$!")
-    names+=("${name}")
-  }
-
-  local -a server_cmd=("${SCRIPT_DIR}/start_services.sh" server --env-file "${ENV_FILE}" --skip-migrate)
-  if [[ "${debug_mode}" == "true" ]]; then
-    server_cmd+=(--debug)
-  fi
-  if [[ "${reload_mode}" == "true" ]]; then
-    server_cmd+=(--reload)
-  elif [[ "${reload_mode}" == "false" ]]; then
-    server_cmd+=(--no-reload)
-  fi
-  if [[ -n "${port_override}" ]]; then
-    server_cmd+=(--port "${port_override}")
-  fi
-
-  local -a workers_cmd=(
-    "${SCRIPT_DIR}/start_services.sh" workers
-    --env-file "${ENV_FILE}"
-    --stats-interval "${stats_interval}"
-  )
-  local -a worker_flags=(
-    --content-workers --media-workers --audio-episode-workers --image-workers
-    --onboarding-workers --backfill-workers --discussion-workers --twitter-workers
-    --chat-workers --llm-workers
-  )
-  local -a worker_values=(
-    "${content_workers}" "${media_workers}" "${audio_episode_workers}"
-    "${image_workers}" "${onboarding_workers}" "${backfill_workers}"
-    "${discussion_workers}" "${twitter_workers}" "${chat_workers}"
-    "${llm_workers}"
-  )
-  local worker_index
-  for worker_index in "${!worker_flags[@]}"; do
-    if [[ -n "${worker_values[$worker_index]}" ]]; then
-      workers_cmd+=("${worker_flags[$worker_index]}" "${worker_values[$worker_index]}")
-    fi
-  done
-  if [[ "${debug_mode}" == "true" ]]; then
-    workers_cmd+=(--debug)
-  fi
-  if [[ -n "${max_tasks}" ]]; then
-    workers_cmd+=(--max-tasks "${max_tasks}")
-  fi
-  if [[ "${skip_browser_install}" == "true" ]]; then
-    workers_cmd+=(--skip-browser-install)
-  fi
-
-  local -a watchdog_cmd=(
-    "${SCRIPT_DIR}/start_services.sh" watchdog
-    --env-file "${ENV_FILE}"
-    --interval-seconds "${interval_seconds}"
-  )
-  local -a scheduler_cmd=(
-    "${SCRIPT_DIR}/start_services.sh" scheduler
-    --env-file "${ENV_FILE}"
-    --crontab "${crontab_path}"
-  )
-
-  launch_service server "${server_cmd[@]}"
-  launch_service workers "${workers_cmd[@]}"
-  launch_service watchdog "${watchdog_cmd[@]}"
-  launch_service scheduler "${scheduler_cmd[@]}"
-
-  cleanup_children() {
-    for pid in "${pids[@]}"; do
-      kill -TERM "${pid}" 2>/dev/null || true
-    done
-    wait || true
-  }
-
-  trap 'cleanup_children; exit 0' INT TERM
-
-  while true; do
-    local idx=0
-    for pid in "${pids[@]}"; do
-      if ! kill -0 "${pid}" 2>/dev/null; then
-        local name="${names[$idx]}"
-        local exit_code=0
-        if ! wait "${pid}"; then
-          exit_code=$?
-        fi
-        echo "Service exited: ${name} (exit=${exit_code})" >&2
-        cleanup_children
-        exit "${exit_code}"
-      fi
-      idx=$((idx + 1))
-    done
-    sleep 2
-  done
+  supervise_children "runtime" "${service_pids[@]}"
 }
 
-COMMAND="${1:-}"
-if [[ -z "${COMMAND}" || "${COMMAND}" == "-h" || "${COMMAND}" == "--help" ]]; then
+if [[ $# -eq 0 ]]; then
   usage
-  exit 0
-fi
-shift
-
-if ! ENV_FILE="$(resolve_env_file)"; then
-  echo "ERROR: no env file found. Create .env for native local Postgres, .env.docker.local for Docker, or pass --env-file PATH." >&2
   exit 1
 fi
 
-case "${COMMAND}" in
+command_name="$1"
+shift
+if [[ "${command_name}" == "-h" || "${command_name}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+env_file_option=""
+port="8000"
+skip_migrate="false"
+debug="false"
+local_e2e="false"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --env-file)
+      env_file_option="$2"
+      shift 2
+      ;;
+    --port)
+      port="$2"
+      shift 2
+      ;;
+    --skip-migrate)
+      skip_migrate="true"
+      shift
+      ;;
+    --local-e2e)
+      local_e2e="true"
+      shift
+      ;;
+    --debug)
+      debug="true"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+env_file="$(newsly_resolve_env_file "${repository_root}" "${env_file_option}")"
+load_environment "${env_file}"
+if [[ "${debug}" == "true" ]]; then
+  export NEWSLY_RUST_LOG_FORMAT=pretty
+  export RUST_LOG="${RUST_LOG:-newsly_api=debug,newsly_worker=debug,newsly_queue=debug,newsly_scheduler=debug}"
+fi
+export NEWSLY_RUST_BIND_ADDR="0.0.0.0:${port}"
+if [[ ! "${port}" =~ ^[1-9][0-9]*$ || "${port}" -gt 65535 ]]; then
+  echo "--port must be between 1 and 65535" >&2
+  exit 2
+fi
+
+cd "${repository_root}"
+case "${command_name}" in
   all)
-    start_all "$@"
+    start_all
     ;;
   server)
-    start_server "$@"
+    newsly_require_database_url
+    if [[ "${skip_migrate}" != "true" ]]; then
+      run_migrations
+    fi
+    build_packages --package newsly-api --bin newsly-api
+    run_binary newsly-api
     ;;
   workers)
-    start_workers "$@"
-    ;;
-  scrapers)
-    start_scrapers "$@"
-    ;;
-  watchdog)
-    start_watchdog "$@"
+    start_worker_group
     ;;
   scheduler)
-    start_scheduler "$@"
+    newsly_require_database_url
+    build_packages --package newsly-scheduler --bin newsly-scheduler
+    run_binary newsly-scheduler
+    ;;
+  extractor)
+    start_extractor
     ;;
   migrate)
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --env-file)
-          ENV_FILE="$2"
-          shift 2
-          ;;
-        -h|--help)
-          usage
-          exit 0
-          ;;
-        *)
-          echo "Unknown migrate option: $1" >&2
-          exit 1
-          ;;
-      esac
-    done
-    activate_runtime
-    echo "Database target: $(print_database_target)"
     run_migrations
     ;;
   *)
-    echo "Unknown command: ${COMMAND}" >&2
-    usage
+    echo "unknown command: ${command_name}" >&2
+    usage >&2
     exit 1
     ;;
 esac

@@ -362,7 +362,7 @@ private struct BriefingStartHereFeatureGroup: View {
                         .font(.appCallout)
                         .foregroundStyle(Color.onSurfaceSecondary)
 
-                    (Text(feature.title).fontWeight(.semibold) + Text(" \(feature.detail)"))
+                    Text("\(Text(feature.title).fontWeight(.semibold)) \(feature.detail)")
                         .font(.appCallout)
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .lineSpacing(4)

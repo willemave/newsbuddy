@@ -1,0 +1,21 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "audio_episode_id": {
+      "exclusiveMinimum": 0,
+      "title": "Audio Episode Id",
+      "type": "integer"
+    },
+    "user_id": {
+      "exclusiveMinimum": 0,
+      "title": "User Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "user_id",
+    "audio_episode_id"
+  ],
+  "title": "AudioEpisodePayload",
+  "type": "object"
+}
