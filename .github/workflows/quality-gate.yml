@@ -157,7 +157,7 @@ jobs:
       ADMIN_PASSWORD: ci-admin-password
       GOOGLE_API_KEY: ci-google-api-key
       LANGFUSE_ENABLED: "false"
-      NEWSLY_BUILD_SHA: ${{ env.TESTED_SHA }}
+      NEWSLY_BUILD_SHA: ${{ inputs.sha || github.sha }}
 
     services:
       postgres:

@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-31 — `main` — Make the Rust quality workflow compile on GitHub
+
+- **Status:** Complete locally; queued for the replacement release.
+- **Scope:** `.github/workflows/quality-gate.yml`.
+- **Decisions:** Resolve the build SHA directly from the allowed `inputs` and `github` contexts at job-environment evaluation time instead of referencing the workflow-level `env` context, which GitHub does not expose there.
+- **Changes:** Replaced the invalid `env.TESTED_SHA` expression for `NEWSLY_BUILD_SHA` with `inputs.sha || github.sha` while preserving exact-SHA behavior for both reusable and manually dispatched runs.
+- **Validation:** Pinned `actionlint` 1.7.7 reproduces the zero-job GitHub failure on the pushed SHA and passes the corrected workflow; the complete release gates are rerun before the replacement push.
+- **Remaining:** None.
+- **Commits:** This commit.
+
 ### 2026-08-31 — `main` — Keep Crawl4AI from reloading application secrets
 
 - **Status:** Complete locally; queued for the current release.
