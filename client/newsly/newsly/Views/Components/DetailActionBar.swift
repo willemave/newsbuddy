@@ -111,7 +111,7 @@ struct DetailActionBar: View {
             }
 
             Button(action: onOpenKnowledgeActions) {
-                actionIcon("sparkles")
+                buddyActionIcon()
             }
             .detailActionBarSegment()
             .accessibilityIdentifier("content.action.knowledge_actions")
@@ -120,6 +120,21 @@ struct DetailActionBar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 44)
         .textSelection(.disabled)
+    }
+
+    /// The ask-the-buddy action, matching `actionIcon`'s metrics so the bar stays evenly
+    /// distributed. Kept separate because the buddy is an asset, not an SF Symbol, and
+    /// carries its own color rather than the bar's tint.
+    @ViewBuilder
+    private func buddyActionIcon() -> some View {
+        Image("BuddyMark")
+            .resizable()
+            .renderingMode(.original)
+            .scaledToFit()
+            .frame(width: 22, height: 22)
+            .appShadow(overlaid ? .overlayText : .none)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     @ViewBuilder
