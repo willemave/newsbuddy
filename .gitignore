@@ -40,9 +40,9 @@ static/
 # Visual artifacts; retain product and reference assets
 *.png
 !docs/assets/newsbuddy-hero.png
-!docs/brand-exploration-2026-08/images_r2/*.png
-!docs/brand-exploration-2026-08/images_r3/*.png
-!client/newsly/newsly/Assets.xcassets/AppIcon.appiconset/*.png
+!docs/brand-exploration-2026-08/**/*.png
+docs/brand-exploration-2026-08/build_assets/
+!client/newsly/newsly/Assets.xcassets/**/*.png
 !client/newsly/Maestro/baselines/**/*.png
 client/newsly/Maestro/baselines/**/*_diff.png
 

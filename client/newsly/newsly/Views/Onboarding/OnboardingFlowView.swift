@@ -22,7 +22,7 @@ struct OnboardingFlowView: View {
 
     var body: some View {
         ZStack {
-            WatercolorBackground(energy: 0.15)
+            Color.surfacePrimary.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 OnboardingProgressHeader(

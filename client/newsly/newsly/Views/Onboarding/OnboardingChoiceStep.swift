@@ -12,29 +12,30 @@ struct OnboardingChoiceStep: View {
         VStack(spacing: 0) {
             Spacer()
 
+            // The buddy already introduced itself on the preceding intro step, so this
+            // screen asks its question directly instead of saying hello a second time.
             VStack(spacing: 32) {
                 Image("BuddyMark")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 180, height: 180)
+                    .frame(width: 92, height: 92)
                     .appShadow(.elevated)
                     .accessibilityLabel("Newsbuddy")
 
                 VStack(spacing: 12) {
-                    Text("MEET YOUR GUIDE")
+                    Text("GETTING STARTED")
                         .font(.editorialMeta)
-                        .tracking(1.8)
-                        .foregroundColor(.onboardingText.opacity(0.55))
-                    Text("Newsbuddy")
-                        .font(.watercolorDisplay)
-                        .foregroundColor(.onboardingText)
+                        .tracking(1.5)
+                        .foregroundColor(.onSurfaceSecondary)
+                    Text("How should we begin?")
+                        .font(.onboardingDisplay)
+                        .foregroundColor(.onSurface)
                         .multilineTextAlignment(.center)
                         .accessibilityIdentifier("onboarding.choice.screen")
-                    Text("I'm going to help you get onboarded.\nLet's get going.")
-                        .font(.watercolorSubtitle)
-                        .foregroundColor(.onboardingText.opacity(0.74))
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(3)
+                    Rectangle()
+                        .fill(Color.outlineVariant)
+                        .frame(width: 54, height: 1)
+                        .padding(.top, 4)
                 }
             }
 
@@ -54,7 +55,7 @@ struct OnboardingChoiceStep: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .foregroundColor(.onboardingSurface)
+                    .foregroundColor(.surfacePrimary)
                     .background(primaryButtonBackground)
                 }
                 .buttonStyle(OnboardingPrimaryPressStyle())
@@ -65,13 +66,11 @@ struct OnboardingChoiceStep: View {
                 } label: {
                     Text("Skip personalization")
                         .font(.appCallout.weight(.medium))
-                        .foregroundColor(.onboardingText.opacity(0.72))
+                        .foregroundColor(.onSurfaceSecondary)
                 }
                 .buttonStyle(OnboardingTextButtonStyle())
                 .accessibilityIdentifier("onboarding.choice.skip")
             }
-            .padding(12)
-            .background(cardSurface(cornerRadius: 36))
 
             if let error = viewModel.errorMessage {
                 Text(error)

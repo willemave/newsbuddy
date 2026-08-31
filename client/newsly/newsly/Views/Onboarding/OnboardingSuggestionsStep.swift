@@ -15,7 +15,6 @@ struct OnboardingSuggestionsStep: View {
                     onboardingHeaderBlock(
                         eyebrow: viewModel.isShowingDefaultConfirmation ? "QUICK START" : nil,
                         title: viewModel.isShowingDefaultConfirmation ? "Start without personalized sources" : "Your picks",
-                        subtitle: suggestionsSubtitle,
                         isLeading: true,
                         titleAccessibilityIdentifier: "onboarding.suggestions.screen"
                     )
@@ -100,17 +99,10 @@ struct OnboardingSuggestionsStep: View {
         .background(onboardingFooterBackground)
     }
 
-    private var suggestionsSubtitle: String {
-        if viewModel.isShowingDefaultConfirmation {
-            return "No searched sources selected yet. You can personalize instead."
-        }
-        return "Keep the ones that feel right. You can tune this again later."
-    }
-
     private var emptyStateMessage: String {
         if viewModel.isShowingDefaultConfirmation {
-            return "No newsletters or podcasts will be added automatically. You can add fast-news sources next."
+            return "Nothing added automatically."
         }
-        return "No matches found yet. You can try again or continue without long-form sources."
+        return "No matches yet."
     }
 }

@@ -109,7 +109,9 @@ def write_scales(img: Image.Image, name: str, base: int) -> None:
     for scale in (1, 2, 3):
         size = base * scale
         suffix = "" if scale == 1 else f"@{scale}x"
-        img.resize((size, size), Image.LANCZOS).save(OUT / f"{name}{suffix}.png")
+        img.resize((size, size), Image.Resampling.LANCZOS).save(
+            OUT / f"{name}{suffix}.png"
+        )
 
 
 def main() -> None:
@@ -123,11 +125,13 @@ def main() -> None:
 
     # The ensō keeps its field — an app icon is a filled square wherever it is shown.
     enso = Image.open(ENSO_SRC).convert("RGB")
-    enso.resize((1024, 1024), Image.LANCZOS).save(OUT / "AppIcon-Light.png")
+    enso.resize((1024, 1024), Image.Resampling.LANCZOS).save(OUT / "AppIcon-Light.png")
     for scale in (1, 2, 3):
         size = 72 * scale
         suffix = "" if scale == 1 else f"@{scale}x"
-        enso.resize((size, size), Image.LANCZOS).save(OUT / f"AppMark{suffix}.png")
+        enso.resize((size, size), Image.Resampling.LANCZOS).save(
+            OUT / f"AppMark{suffix}.png"
+        )
 
     # Dark icon: same drawing, lifted ring on a warm charcoal ground. Classifying by
     # blueness separates the slate ring from the cream book without a hand-made mask.
@@ -139,20 +143,21 @@ def main() -> None:
     ring_dark = np.array([0x93, 0xA7, 0xC4], dtype=np.float32)
     book_dark = np.array([0xE6, 0xD9, 0xBA], dtype=np.float32)
     # Keep each pixel's shading by scaling the target with its own relative brightness.
-    shade = (rgb.mean(axis=2, keepdims=True) / max(rgb.mean(), 1.0)).clip(0.55, 1.25)
+    mean_level = max(float(rgb.mean()), 1.0)
+    shade = (rgb.mean(axis=2, keepdims=True) / mean_level).clip(0.55, 1.25)
     recolored = np.where(is_ring, ring_dark * shade, book_dark * shade).clip(0, 255)
 
     ground = np.array([0x17, 0x16, 0x13], dtype=np.float32)
     composited = recolored * alpha + ground * (1.0 - alpha)
     Image.fromarray(composited.astype(np.uint8), "RGB").resize(
-        (1024, 1024), Image.LANCZOS
+        (1024, 1024), Image.Resampling.LANCZOS
     ).save(OUT / "AppIcon-Dark.png")
 
     dark_mark = Image.open(OUT / "AppIcon-Dark.png")
     for scale in (1, 2, 3):
         size = 72 * scale
         suffix = "" if scale == 1 else f"@{scale}x"
-        dark_mark.resize((size, size), Image.LANCZOS).save(
+        dark_mark.resize((size, size), Image.Resampling.LANCZOS).save(
             OUT / f"AppMarkDark{suffix}.png"
         )
 

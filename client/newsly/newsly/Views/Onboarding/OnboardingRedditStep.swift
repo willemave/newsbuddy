@@ -15,13 +15,12 @@ struct OnboardingRedditStep: View {
                     onboardingHeaderBlock(
                         eyebrow: "REDDIT",
                         title: "Add subreddit feeds",
-                        subtitle: "Focused communities add topic-level posts alongside the broader headline mix.",
                         isLeading: true,
                         titleAccessibilityIdentifier: "onboarding.reddit.screen"
                     )
 
                     if viewModel.subredditSuggestions.isEmpty {
-                        Text("No Reddit matches found. You can start without subreddit feeds.")
+                        Text("No matches.")
                             .font(.appCallout)
                             .foregroundColor(.onboardingText.opacity(0.7))
                             .padding(.vertical, 20)

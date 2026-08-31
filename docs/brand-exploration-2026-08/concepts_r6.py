@@ -189,8 +189,7 @@ CONCEPTS = [
         "r6-15-mark-glasses",
         "nano-banana-pro",
         "Bookmark × Spectacles",
-        "The bookmark character given the reader's round glasses. Both personalities in one "
-        "shape.",
+        "The bookmark character given the reader's round glasses. Both personalities in one shape.",
         "A rounded bookmark ribbon with a notched swallow-tail bottom and squared shoulders, "
         "wearing a pair of round spectacles with two small dot eyes behind the lenses. "
         "Palette: deep forest green ribbon, warm cream spectacles, on warm oat.",
@@ -209,8 +208,7 @@ CONCEPTS = [
         "r6-17-blob-enso-specs",
         "gpt-image-2",
         "Reader × Ensō Lenses",
-        "The blob's two lenses drawn as tiny brushed ensō rings. The most subtle of the "
-        "hybrids.",
+        "The blob's two lenses drawn as tiny brushed ensō rings. The most subtle of the hybrids.",
         "A soft rounded blob character wearing round spectacles whose two lenses are drawn as "
         "small hand-brushed ink rings with dry-brush texture, two dot eyes behind them. "
         "Palette: deep warm taupe body, near-black brushed lenses, on warm cream.",
@@ -227,8 +225,7 @@ CONCEPTS = [
         "r6-19-mark-book",
         "nano-banana-pro",
         "Bookmark × Book",
-        "A bookmark ribbon rising out of a small closed book. The clearest reading-object "
-        "hybrid.",
+        "A bookmark ribbon rising out of a small closed book. The clearest reading-object hybrid.",
         "A small closed book seen flat-on with a bookmark ribbon emerging from its top edge, "
         "the ribbon carrying two small dot eyes and a tiny smile. "
         "Palette: deep petrol book, pale sage ribbon, on warm oat.",

@@ -76,7 +76,7 @@ func onboardingPrimaryButton(_ title: String, action: @escaping () -> Void) -> s
 func onboardingHeaderBlock(
     eyebrow: String? = nil,
     title: String,
-    subtitle: String,
+    subtitle: String? = nil,
     isLeading: Bool = false,
     titleAccessibilityIdentifier: String? = nil
 ) -> some View {
@@ -88,21 +88,28 @@ func onboardingHeaderBlock(
         if let eyebrow, !eyebrow.isEmpty {
             Text(eyebrow)
                 .font(.editorialMeta)
-                .tracking(1.8)
-                .foregroundColor(.onboardingText.opacity(0.58))
+                .tracking(1.5)
+                .foregroundColor(.onSurfaceSecondary)
         }
 
         Text(title)
             .accessibilityIdentifier(ifPresent: titleAccessibilityIdentifier)
-            .font(.appTitle2)
-            .foregroundColor(.onboardingText)
+            .font(.appTitle)
+            .foregroundColor(.onSurface)
             .multilineTextAlignment(textAlignment)
 
-        Text(subtitle)
-            .font(.appCallout)
-            .foregroundColor(.onboardingText.opacity(0.72))
-            .multilineTextAlignment(textAlignment)
-            .lineSpacing(2)
+        if let subtitle, !subtitle.isEmpty {
+            Text(subtitle)
+                .font(.appCallout)
+                .foregroundColor(.onSurfaceSecondary)
+                .multilineTextAlignment(textAlignment)
+                .lineSpacing(3)
+        }
+
+        Rectangle()
+            .fill(Color.outlineVariant)
+            .frame(width: 54, height: 1)
+            .padding(.top, 6)
     }
     .frame(maxWidth: .infinity, alignment: frameAlignment)
 }
@@ -142,36 +149,27 @@ func topicPreviewCard(
     .background(cardSurface(cornerRadius: 24))
 }
 
+/// Flat card on the paper ground with a hairline edge — the same treatment the rest of
+/// the app uses. Corner radius is accepted for call-site compatibility but clamped to the
+/// control radius so onboarding stops using its own oversized pill geometry.
 func cardSurface(cornerRadius: CGFloat) -> some View {
-    RoundedRectangle(cornerRadius: cornerRadius)
-        .fill(Color.onboardingSurface.opacity(0.76))
+    RoundedRectangle(cornerRadius: min(cornerRadius, CornerRadius.control), style: .continuous)
+        .fill(Color.surfaceSecondary)
         .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius)
-                .stroke(Color.onboardingText.opacity(0.10), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: min(cornerRadius, CornerRadius.control), style: .continuous)
+                .stroke(Color.borderSubtle, lineWidth: 1)
         )
-        .appShadow(.card)
 }
 
 var primaryButtonBackground: some View {
-    RoundedRectangle(cornerRadius: 24)
-        .fill(Color.onboardingText)
-        .appShadow(.elevated)
+    RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+        .fill(Color.onSurface)
 }
 
 var onboardingFooterBackground: some View {
     ZStack(alignment: .top) {
-        Rectangle()
-            .fill(.ultraThinMaterial)
-
-        LinearGradient(
-            colors: [.clear, Color.onboardingSurface.opacity(0.28)],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-
-        Rectangle()
-            .fill(Color.onboardingText.opacity(0.08))
-            .frame(height: 0.5)
+        Rectangle().fill(Color.surfacePrimary)
+        Rectangle().fill(Color.outlineVariant).frame(height: 0.5)
     }
     .ignoresSafeArea(edges: .bottom)
 }

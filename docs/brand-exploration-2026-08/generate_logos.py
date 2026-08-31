@@ -10,6 +10,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import requests
@@ -218,14 +219,15 @@ def gen_openrouter(
                 "image_url": {"url": f"data:image/png;base64,{ref_b64}"},
             },
         ]
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": content}],
+        "modalities": ["image", "text"],
+    }
     r = requests.post(
         OPENROUTER_URL,
         headers={"Authorization": f"Bearer {ENV['OPENROUTER_API_KEY']}"},
-        json={
-            "model": model,
-            "messages": [{"role": "user", "content": content}],
-            "modalities": ["image", "text"],
-        },
+        json=body,
         timeout=600,
     )
     payload = r.json()

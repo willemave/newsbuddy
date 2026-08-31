@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-31 — `codex/rust-backend-migration` — Integrate the Rust migration with current main
+
+- **Status:** Complete locally; not pushed, deployed, or distributed.
+- **Scope:** Merge the complete Rust backend and CLI migration with the six newer commits on `main`, including the Slate brand, onboarding, and cold-session restoration changes.
+- **Decisions:** Keep Rust as the sole application backend and schema owner; retain the newer `main` iOS and brand implementation; preserve the Rust OpenRouter privacy policy instead of restoring deleted Python onboarding routing; and keep the primary checkout's unrelated uncommitted changes outside this merge.
+- **Changes:** Resolved the migration against current `main`, retained explicit iOS dependency composition plus the generated typed server-error case, and reconciled generated asset tracking and architecture history.
+- **Validation:** `git diff --check`; architecture guard (module limits, iOS wire boundary, Rust-owned public contract drift); focused native iOS authentication and palette suite, 16 passed and 0 failed.
+- **Remaining:** None for local integration. Full Rust, Python-island, native iOS, and local AXe/backend E2E evidence remains recorded on the migration commit; no push, deploy, or Apple distribution was requested.
+- **Commits:** Migration commit `2e945899`; integration merge recorded by Git history.
+
 ### 2026-08-31 — detached `c77aa869` — Make Share Add Feed subscription results truthful
 
 - **Status:** Complete locally; live canary pending; not committed, pushed, deployed, or distributed.
@@ -331,6 +341,22 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Open design decision:** because the real chat has no avatar slot, the chosen Reader character has nowhere to live. It is currently placed in the chat session header as the smallest change that gives it a home; putting it on every assistant message would be a real design change rather than a re-skin. Flagged prominently on the page.
 - **Remaining:** The Ink scheme carries a known constraint: body ink and accent are close enough that inline links depend on underline plus weight to separate. Vector output still unexplored — the chosen ensō is a raster brush texture and will need redrawing or tracing for a real app icon asset.
 - **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Slate brand implemented in the iOS client
+
+- **Status:** Complete
+- **Scope:** iOS client. Plan in `docs/initiatives/2026-08-30-slate-brand-rollout-plan.md`.
+- **Decisions:** Scheme is **Slate on warm paper**. App icon is Ensō · Slate; the Reader · Indigo buddy appears only where the app speaks to the user. `ReaderPalette.swift` is the single source of truth for color, so the whole accent change is one file — amber `#99610a` → slate `#3f4c60`, cool grey neutrals → warm paper, and the dark ramp warmed to match with `brandPrimary` lifted to `#93a7c4` rather than substituting another hue.
+- **Trap found:** `Assets.xcassets/AccentColor.colorset` must be kept in lockstep with `brandPrimary` — `ReaderPaletteContrastTests.testGlobalAccentAssetMatchesBrandPrimary` asserts it, and editing only `ReaderPalette.swift` fails that test. Updated both.
+- **Changes:** `Shared/ReaderPalette.swift` (full light+dark ramp); `AccentColor.colorset`; `AppIcon.appiconset` (ensō replaces the purple penguin, light + dark); new `BuddyMark.imageset` and `AppMark.imageset` with `appearances` dark variants so `Image("BuddyMark")` resolves per mode with no `colorScheme` branching in views. Buddy placed in `ChatComposerDock` (leading menu button, menu wiring and `knowledge.mode_menu` identifier untouched) and `DetailActionBar` (new `buddyActionIcon()` sibling so the shared `actionIcon` helper is unchanged). App icon added to `LoadingView` (session-restore splash) and `SettingsBrandHeader`. New `OnboardingIntroStep` on the previously-dead `.intro` case, with `OnboardingViewModel.step` defaulting to `.intro`; retired `Image("Mascot")` in `LandingView` and `OnboardingChoiceStep`.
+- **Asset pipeline:** `docs/brand-exploration-2026-08/build_assets.py` cuts the baked cream field to real alpha and produces the dark buddy by remapping the body hue while protecting the spectacle gold. Re-run it if the source renders change.
+- **Validation:** Clean build succeeds with no warnings. `ReaderPaletteContrastTests` pass (2/2) covering both modes. Verified on simulator: `surfacePrimary` samples exactly `#f8f6f1` light and `#1f1e1a` on secondary surfaces dark; Settings shows the ensō; the buddy renders in the composer and at the end of the detail action bar, resolving its dark variant correctly.
+- **Onboarding verified (follow-up):** Reached the flow via Debug Menu → "Reset Current User Onboarding". All five steps captured to `docs/brand-exploration-2026-08/onboarding_shots/` with a combined `onboarding_flow.png`. This exposed a redundancy the plan missed: the existing choice step was itself an introduction ("MEET YOUR GUIDE / Newsbuddy / I'm going to help you get onboarded"), so with the new intro ahead of it the user met the buddy twice in a row. `OnboardingChoiceStep` now asks its actual question — eyebrow "GETTING STARTED", title "How should we begin?" — with the buddy reduced from 180pt to 92pt so it reads as continuity rather than a second headline. The `onboarding.choice.screen` accessibility identifier was preserved on the new title. Flow confirmed end to end through to the Knowledge tab.
+- **Onboarding redesign (follow-up):** The onboarding chrome never read from `ReaderPalette` — `onboardingSurface` and `onboardingText` in `DesignTokens.swift` hardcoded their own copies of the old surfaces. Both now resolve to `surfacePrimary` / `onSurface`, so onboarding follows the palette. Deleted `WatercolorBackground.swift`; consumers now use flat `surfacePrimary`. Display type was retuned to match the Briefing masthead, and onboarding controls now use the shared palette and geometry.
+- **Copy reduction (follow-up):** Titles and buttons now carry the flow; explanatory subtitles were removed where the controls already state the choice. The intro retains the single-line product description.
+- **Validation:** Clean build, no warnings. Full onboarding flow re-walked in light and dark modes.
+- **Remaining:** Re-verify with a clean install; vector redraw of the ensō remains outstanding.
+- **Commits:** `5749656e`, `9655dfd8`, `24682e0a`, `f6810671`.
 
 ### 2026-08-29 — `main` — Remove Cerebras integration
 

@@ -7,8 +7,6 @@ import SwiftUI
 
 struct LandingView: View {
     @Environment(AuthenticationViewModel.self) private var authViewModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var animatedTitleOffset: CGFloat = -3
     #if DEBUG && targetEnvironment(simulator)
     @State private var showingDebugMenu = false
     @State private var tapCount = 0
@@ -22,7 +20,7 @@ struct LandingView: View {
 
     var body: some View {
         ZStack {
-            WatercolorBackground(energy: 0.15)
+            Color.surfacePrimary.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer()
@@ -44,34 +42,11 @@ struct LandingView: View {
 
     // MARK: - Title
 
-    @ViewBuilder
     private var titleSection: some View {
-        if reduceMotion {
-            staticTitleSection
-        } else {
-            animatedTitleSection
-        }
+        titleContent()
     }
 
-    private var staticTitleSection: some View {
-        titleContent(yOffset: 0, glowColor: WatercolorBackground.titleGlow)
-    }
-
-    private var animatedTitleSection: some View {
-        titleContent(
-            yOffset: animatedTitleOffset,
-            glowColor: WatercolorBackground.titleGlow
-        )
-        .animation(
-            AppMotion.landingFloat,
-            value: animatedTitleOffset
-        )
-        .onAppear {
-            animatedTitleOffset = 3
-        }
-    }
-
-    private func titleContent(yOffset: CGFloat, glowColor: Color) -> some View {
+    private func titleContent() -> some View {
         VStack(spacing: 24) {
             Image("BuddyMark")
                 .resizable()
@@ -86,18 +61,17 @@ struct LandingView: View {
 
             VStack(spacing: 10) {
                 Text("Newsbuddy")
-                    .font(.watercolorDisplay)
-                    .foregroundColor(.onboardingText)
-                    .appShadow(.titleGlow(glowColor))
+                    .font(.onboardingDisplay)
+                    .foregroundColor(.onSurface)
                     .accessibilityIdentifier("auth.landing.screen")
 
-                Text("Your cuddly news companion.\nQuiet clarity in a noisy world.")
-                    .font(.watercolorSubtitle)
-                    .foregroundColor(.onboardingText.opacity(0.7))
+                Text("Your quiet news companion.\nOne briefing, read across your sources.")
+                    .font(.onboardingSubtitle)
+                    .foregroundColor(.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(3)
             }
         }
-        .offset(y: yOffset)
     }
 
     // MARK: - Bottom Card

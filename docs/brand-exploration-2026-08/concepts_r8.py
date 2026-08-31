@@ -51,7 +51,7 @@ TWOTONE_PALETTES = [
     ("slate-ivory", "Slate / Ivory", "deep slate blue", "pale ivory"),
 ]
 
-CONCEPTS = []
+CONCEPTS: list[tuple[str, str, str, str, str]] = []
 REFS: dict[str, Path] = {}
 
 

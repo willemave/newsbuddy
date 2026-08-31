@@ -34,21 +34,23 @@ struct OnboardingIntroStep: View {
                 VStack(spacing: 12) {
                     Text("HELLO")
                         .font(.editorialMeta)
-                        .tracking(1.8)
-                        .foregroundColor(.onboardingText.opacity(0.55))
+                        .tracking(1.5)
+                        .foregroundColor(.onSurfaceSecondary)
                     Text("I'm your buddy.")
-                        .font(.watercolorDisplay)
-                        .foregroundColor(.onboardingText)
+                        .font(.onboardingDisplay)
+                        .foregroundColor(.onSurface)
                         .multilineTextAlignment(.center)
                         .accessibilityIdentifier("onboarding.intro.screen")
-                    Text(
-                        "Every morning I read across your sources and write you one briefing.\n"
-                        + "When something needs a second look, just ask — I'll show my working."
-                    )
-                    .font(.watercolorSubtitle)
-                    .foregroundColor(.onboardingText.opacity(0.74))
+                    Text("I read your sources each morning and write you one briefing.")
+                    .font(.onboardingSubtitle)
+                    .foregroundColor(.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
                     .lineSpacing(3)
+
+                    Rectangle()
+                        .fill(Color.outlineVariant)
+                        .frame(width: 54, height: 1)
+                        .padding(.top, 4)
                 }
                 .opacity(arrived ? 1 : 0)
                 .offset(y: arrived ? 0 : 10)
@@ -65,13 +67,11 @@ struct OnboardingIntroStep: View {
                     .font(.appCallout.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .foregroundColor(.onboardingSurface)
+                    .foregroundColor(.surfacePrimary)
                     .background(primaryButtonBackground)
             }
             .buttonStyle(OnboardingPrimaryPressStyle())
             .accessibilityIdentifier("onboarding.intro.continue")
-            .padding(12)
-            .background(cardSurface(cornerRadius: 36))
         }
         .padding(24)
         .padding(.bottom, 16)

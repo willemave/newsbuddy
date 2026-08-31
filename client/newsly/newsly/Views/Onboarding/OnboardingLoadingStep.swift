@@ -14,7 +14,6 @@ struct OnboardingLoadingStep: View {
             onboardingHeaderBlock(
                 eyebrow: "MATCHING SOURCES",
                 title: "Finding your feeds",
-                subtitle: "Searching newsletters, podcasts, and Reddit for a strong first set.",
                 titleAccessibilityIdentifier: "onboarding.loading.screen"
             )
             .padding(.top, 24)

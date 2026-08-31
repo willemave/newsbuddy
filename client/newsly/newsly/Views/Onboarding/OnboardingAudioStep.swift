@@ -13,7 +13,6 @@ struct OnboardingAudioStep: View {
             onboardingHeaderBlock(
                 eyebrow: "VOICE SETUP",
                 title: "Tell us what you read",
-                subtitle: "Say a few topics, names, or sources you follow. We'll use that to tune the feed.",
                 titleAccessibilityIdentifier: "onboarding.audio.screen"
             )
             .padding(.top, 24)
