@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-31 — `main` — Compare paired day and night reading grounds
+
+- **Status:** Complete locally; queued for the current release.
+- **Scope:** `docs/brand-exploration-2026-08/day-mode-options.html`.
+- **Decisions:** Keep the exploration self-contained and compare the actual Briefing and Reader structures across six paired light/dark palettes. Separate ink contrast, card-to-ground lift, and ground lightness so the design choice is based on distinct readability variables rather than a general impression of greyness.
+- **Changes:** Added a responsive browser comparison with palette switching, contrast calculations, representative device frames, and notes describing the purpose and tradeoff of each pair.
+- **Validation:** Reviewed the complete HTML, CSS, JavaScript, internal link, and local image references; `git diff --check` passes.
+- **Remaining:** None.
+- **Commits:** This commit.
+
 ### 2026-08-31 — `main` — Left-align detail action icons and enlarge the hero
 
 - **Status:** Complete locally; queued for the current release.

@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Newsbuddy — Day mode options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Lora + Lato are the app's real typefaces. -->
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Lato:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f4f3f0; --ink: #24262a; --ink-soft: #767a82; --line: #e0e1e4;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: "Lato", sans-serif; line-height: 1.6;
+  }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 0 40px; }
+
+  header.hero { padding: 72px 0 40px; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 10px; font-size: 12px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-soft); font-weight: 700;
+  }
+  .kicker::before { content: ""; width: 30px; height: 2px; background: #404c60; }
+  h1 {
+    font-family: "Lora", serif; font-size: clamp(38px, 5vw, 60px); font-weight: 600;
+    line-height: 1.06; margin: 16px 0 18px; letter-spacing: -0.015em; max-width: 18ch;
+  }
+  .lede { max-width: 68ch; font-size: 16.5px; color: var(--ink-soft); }
+
+  .assets { display: flex; gap: 34px; margin-top: 34px; flex-wrap: wrap; }
+  .asset { display: flex; gap: 14px; align-items: center; }
+  .asset img { width: 66px; height: 66px; border-radius: 22.4%; display: block; box-shadow: 0 6px 18px -8px rgba(0,0,0,0.3); }
+  .asset .t { font-size: 13px; }
+  .asset .t b { display: block; font-size: 14px; }
+  .asset .t span { color: var(--ink-soft); }
+
+  .caveat { margin-top: 26px; max-width: 74ch; font-size: 14.5px; color: var(--ink-soft); border-left: 3px solid #404c60; padding-left: 14px; }
+  .caveat b { color: var(--ink); }
+  .switch { margin-top: 28px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .switch .lbl { font-size: 11.5px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; color: var(--ink-soft); margin-right: 4px; }
+  .switch button {
+    font-family: inherit; font-size: 13px; font-weight: 700; color: var(--ink-soft);
+    background: #fff; border: 1px solid var(--line); border-radius: 99px;
+    padding: 7px 16px; cursor: pointer; transition: all 0.18s;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .switch button i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  .switch button:hover { border-color: #9aa0aa; color: var(--ink); }
+  .switch button.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+  .metrics { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 12px; }
+  .metric { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink-soft); }
+  .metric b { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink); }
+  .metric span { display: inline-flex; align-items: center; gap: 5px; }
+  .metric i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .mode-split { width: 1px; align-self: stretch; background: var(--line); margin: 0 6px; }
+
+  section.variant { padding: 54px 0 10px; border-top: 1px solid var(--line); margin-top: 44px; }
+  .v-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .v-head h2 { font-family: "Lora", serif; font-size: 30px; font-weight: 600; }
+  .v-head .hexes { display: flex; gap: 6px; }
+  .v-head .hex {
+    font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 6px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink-soft);
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .v-head .hex i { width: 10px; height: 10px; border-radius: 3px; }
+  .v-note { color: var(--ink-soft); font-size: 15px; margin-top: 8px; max-width: 74ch; }
+  .screens { display: flex; gap: 22px; margin-top: 30px; flex-wrap: wrap; }
+  .screen-wrap { display: flex; flex-direction: column; align-items: center; gap: 9px; }
+  .screen-wrap .cap { font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+
+  /* ---------------- device ---------------- */
+  .phone {
+    width: 288px; flex-shrink: 0; border-radius: 44px; padding: 10px;
+    background: #26282c; box-shadow: 0 26px 60px -22px rgba(20,22,26,0.55), inset 0 0 0 2px #3d4046;
+  }
+  .screen {
+    border-radius: 35px; overflow: hidden; height: 596px; position: relative;
+    background: var(--bg); color: var(--fg);
+    font-family: "Lato", sans-serif; display: flex; flex-direction: column;
+  }
+  .statusbar { display: flex; justify-content: space-between; padding: 11px 20px 3px; font-size: 10.5px; font-weight: 700; }
+  .statusbar .sig { letter-spacing: -1px; opacity: 0.65; }
+
+  .kick { font-size: 8.5px; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 700; color: var(--fg-soft); }
+
+  /* masthead */
+  .masthead { padding: 10px 18px 0; display: flex; align-items: flex-start; gap: 8px; }
+  .masthead .mh-l { flex: 1; min-width: 0; }
+  .masthead h3 { font-family: "Lora", serif; font-size: 32px; font-weight: 600; line-height: 1.02; margin-top: 5px; letter-spacing: -0.015em; }
+  .listen {
+    display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; margin-top: 7px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
+    border-radius: 99px; padding: 5px 11px; font-size: 9.5px; font-weight: 700;
+  }
+  .listen svg { width: 10px; height: 10px; }
+
+  .pills { display: flex; gap: 6px; padding: 12px 18px 0; }
+  .pills.cat { padding-top: 7px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600;
+    background: var(--card); border-radius: 99px; padding: 6px 12px; white-space: nowrap;
+    border: 1px solid var(--line-s);
+  }
+  .pills.cat .pill { padding: 5px 10px; font-size: 9.5px; }
+  .pill i { font-style: normal; font-size: 8.5px; font-weight: 700; color: var(--accent); }
+  .pill.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .pill.on i { color: color-mix(in srgb, var(--bg) 68%, transparent); }
+
+  /* editorial column */
+  .column { padding: 15px 18px 0; overflow: hidden; }
+  .seg + .seg { margin-top: 13px; }
+  .seg.read { opacity: 0.7; }
+  .passage { font-size: 11px; line-height: 1.64; }
+  .passage + .passage { margin-top: 7px; }
+  .passage a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; font-weight: 700; }
+  .passage .disc { color: var(--accent); font-weight: 700; font-size: 9.5px; white-space: nowrap; }
+  .figure-float {
+    float: right; width: 86px; height: 62px; margin: 2px 0 6px 10px; border-radius: 6px;
+    background: var(--tint); border: 1px solid var(--line-s); position: relative;
+  }
+  .figure-float::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px;
+    transform: translate(-50%,-50%); border-radius: 50%; background: var(--accent); opacity: 0.4;
+  }
+  .pullquote {
+    font-family: "Lora", serif; font-style: italic; font-size: 11.5px; line-height: 1.42;
+    padding-left: 10px; margin: 11px 0 8px; border-left: 3px solid var(--accent);
+  }
+  .pullquote cite { display: block; font-family: "Lato", sans-serif; font-style: normal; font-size: 8.5px; font-weight: 600; color: var(--fg-soft); margin-top: 4px; }
+  .timeline { display: flex; align-items: center; gap: 8px; margin: 14px 0 11px; font-size: 8px; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 700; color: var(--fg-soft); }
+  .timeline hr { flex: 1; height: 1px; border: 0; background: var(--line-s); }
+
+  /* reader */
+  .rd-toolbar { display: flex; align-items: center; gap: 8px; padding: 9px 18px 10px; border-bottom: 1px solid var(--line-s); }
+  .rd-btn { width: 27px; height: 27px; border-radius: 50%; flex-shrink: 0; background: var(--tint); display: flex; align-items: center; justify-content: center; }
+  .rd-btn svg { width: 12px; height: 12px; }
+  .rd-aa { margin-left: auto; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line-s); border-radius: 99px; padding: 3px 10px; font-size: 10px; font-weight: 700; }
+  .reader { padding: 17px 18px 0; overflow: hidden; }
+  .read-title { font-family: "Lora", serif; font-size: 23px; line-height: 1.14; font-weight: 600; letter-spacing: -0.012em; }
+  .byline { display: flex; align-items: center; gap: 6px; margin-top: 11px; font-size: 9.5px; color: var(--fg-soft); }
+  .byline b { font-weight: 700; }
+  .byline s { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.45; }
+  .byline-rule { width: 54px; height: 1px; background: var(--line-s); margin-top: 10px; }
+  .reader .body { font-size: 11.5px; line-height: 1.68; margin-top: 13px; }
+  .sec-head { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
+  .sec-head .bar { width: 26px; height: 2.5px; border-radius: 99px; background: var(--accent); }
+  .sec-head h5 { font-family: "Lora", serif; font-size: 15px; font-weight: 600; }
+  .bullets { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .bullets li { list-style: none; display: flex; gap: 8px; font-size: 11.5px; line-height: 1.5; }
+  .bullets li::before { content: ""; width: 4px; height: 4px; border-radius: 50%; flex-shrink: 0; background: var(--fg); opacity: 0.5; margin-top: 7px; }
+
+  /* chat — bubbles both sides, no avatars, no suggestion chips (neither exists in the app) */
+  .chat-head { display: flex; align-items: center; gap: 12px; padding: 8px 18px 9px; }
+  .chat-head + .hair { height: 1px; background: var(--line-s); }
+  .back {
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
+    border: 1px solid color-mix(in srgb, var(--line-s) 60%, transparent);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .back svg { width: 13px; height: 13px; }
+  .buddy { width: 28px; height: 28px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--card); }
+  .buddy img { width: 100%; height: 100%; object-fit: cover; object-position: center 40%; transform: scale(1.12); }
+  .chat-head .who b { display: block; font-family: "Lora", serif; font-size: 13px; font-weight: 600; line-height: 1.25; }
+  .chat-head .who span { font-size: 9.5px; color: var(--fg-soft); }
+
+  .thread { padding: 10px 18px 0; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+  .row { display: flex; flex-direction: column; gap: 4px; }
+  .row.me { align-items: flex-end; padding-left: 52px; }
+  .bub { font-size: 11px; line-height: 1.55; padding: 8px 12px; border-radius: 14px; }
+  .row.ai .bub { background: var(--bub-ai); border: 1px solid color-mix(in srgb, var(--line-s) 70%, transparent); }
+  .row.me .bub { background: var(--bub-me); }
+  .bub a { color: var(--accent); text-decoration: underline; font-weight: 700; }
+  .stamp { font-size: 8.5px; color: var(--fg-soft); padding: 0 4px; }
+  .procline {
+    align-self: center; display: inline-flex; align-items: center; gap: 5px;
+    font-size: 9px; color: var(--fg-soft); background: color-mix(in srgb, var(--container) 80%, transparent);
+    border-radius: 99px; padding: 6px 10px;
+  }
+  .procline svg { width: 10px; height: 10px; }
+  .thinking {
+    align-self: flex-start; background: var(--container);
+    border-radius: 4px 16px 16px 16px; padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .thinking .dots { display: flex; gap: 6px; align-items: center; }
+  .thinking .dots i { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 50%, transparent); }
+  .thinking .dots em { font-style: normal; font-size: 8.5px; color: var(--fg-soft); font-variant-numeric: tabular-nums; margin-left: 3px; }
+  .thinking .st { font-size: 9px; color: var(--fg-soft); }
+
+  .dock { margin-top: auto; padding: 6px 18px 14px; }
+  .dock-in {
+    background: var(--bg); border: 1px solid color-mix(in srgb, var(--line-s) 80%, transparent);
+    border-radius: 22px; padding: 8px 12px; display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  }
+  .plus {
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; color: var(--fg-soft);
+    background: color-mix(in srgb, var(--card) 72%, transparent);
+    border: 1px solid color-mix(in srgb, var(--line-s) 70%, transparent);
+    display: flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1;
+  }
+  .field {
+    flex: 1; min-height: 32px; border-radius: 18px; background: var(--card);
+    border: 1px solid var(--line-s); display: flex; align-items: center;
+    padding: 0 12px; font-size: 11px; color: var(--fg-soft);
+  }
+  .mic {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; color: #fff;
+    background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 82%, #000));
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mic svg { width: 13px; height: 13px; }
+
+  /* knowledge — masthead, ask-anything dock, then a day-grouped timeline of flat rows */
+  .k-head { padding: 10px 18px 0; display: flex; align-items: flex-start; gap: 8px; }
+  .k-head .kh-l { flex: 1; min-width: 0; }
+  .k-head h3 { font-family: "Lora", serif; font-size: 32px; font-weight: 600; line-height: 1.02; margin-top: 5px; letter-spacing: -0.015em; }
+  .k-acts { display: flex; gap: 2px; margin-top: 8px; }
+  .k-acts span { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; }
+  .k-acts svg { width: 15px; height: 15px; }
+  .ask {
+    margin: 16px 18px 0; border: 1px solid var(--line-s); background: var(--card);
+    border-radius: 14px; padding: 0 8px 0 14px; min-height: 42px;
+    display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--fg-soft);
+  }
+  .ask > svg { width: 14px; height: 14px; flex-shrink: 0; }
+  .ask .sp { flex: 1; }
+  .k-day {
+    display: flex; align-items: center; gap: 10px; padding: 10px 18px;
+    font-size: 8.5px; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 700; color: var(--fg-soft);
+  }
+  .k-day hr { flex: 1; height: 1px; border: 0; background: var(--line-s); }
+  .k-row { display: flex; gap: 12px; align-items: center; padding: 8px 18px; }
+  .k-row .th { width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0; background: var(--card); border: 1px solid color-mix(in srgb, var(--line-s) 70%, transparent); display: flex; align-items: center; justify-content: center; color: var(--fg-soft); }
+  .k-row .th svg { width: 16px; height: 16px; }
+  .k-row .tx { flex: 1; min-width: 0; }
+  .k-row .tx b {
+    display: block; font-family: "Lora", serif; font-size: 13px; font-weight: 600; line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .k-row .tx .sub { font-size: 9.5px; color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .k-row .tx .kick { margin-top: 2px; }
+  .k-row .chev { color: var(--fg-soft); opacity: 0.6; font-size: 12px; }
+  .k-row .play { width: 30px; height: 30px; border-radius: 50%; background: var(--card); color: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .k-row .play svg { width: 11px; height: 11px; }
+  .k-div { height: 1px; background: var(--line-s); margin-left: 70px; margin-right: 18px; }
+
+  /* tab bar */
+  .tabbar { margin-top: auto; display: flex; justify-content: center; padding: 9px 20px 16px; }
+  .tabbar .bar { display: flex; gap: 6px; align-items: center; padding: 5px; background: var(--card); border-radius: 99px; border: 1px solid var(--line-s); box-shadow: 0 4px 10px rgba(0,0,0,0.09); }
+  .tab { display: flex; align-items: center; gap: 5px; border-radius: 99px; padding: 7px 10px; font-size: 9.5px; font-weight: 700; color: var(--fg-soft); }
+  .tab svg { width: 16px; height: 16px; }
+  .tab.active { background: var(--fg); color: var(--bg); padding: 7px 13px; }
+
+  footer { border-top: 1px solid var(--line); margin-top: 60px; padding: 40px 0 70px; color: var(--ink-soft); font-size: 14px; }
+  footer a { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<header class="hero wrap">
+  <div class="kicker">Day mode · 2026-08-31</div>
+  <h1>Six grounds for daylight reading.</h1>
+  <p class="lede">The shipped ground is already 96% light and body ink scores 14.9 against it, so this is not a contrast problem. What is missing is <em>separation</em>: cards sit 1.06 from the ground, which is invisible, so every surface collapses into one field and the whole screen reads flat and grey. These six vary two things independently — how light the paper is, and how far cards lift off it — so you can tell which one you are actually reacting to.</p>
+  <div class="switch" id="switch"><span class="lbl">Scheme</span></div>
+</header>
+
+<main id="variants" class="wrap"></main>
+
+<footer>
+  <div class="wrap">
+    Screens reproduce the real app structure — continuous editorial Briefing column, long-form reader, chat and knowledge.
+    Back to the <a href="index.html">mark exploration</a>.
+  </div>
+</footer>
+
+<script>
+const ICON  = "images_r8/r8-03-enso-slate.png";
+const BUDDY = "images_r8/r8-10-reader-indigo.png";
+
+// Grounds are deliberately near-white — the earlier mocks used the extracted image
+// backgrounds, which were far too saturated to sit behind body text all day.
+// Day-mode candidates. Two axes are being tested at once: how light the ground is,
+// and how far cards separate from it. The shipped scheme scores 1.06 on card/ground
+// separation, which is why the screen reads as one flat field.
+const SCHEMES = [
+  {
+    id: "a-current", name: "A · Current (shipped)",
+    note: "Both modes have the same flaw. Light cards sit 1.06 from the ground and dark cards 1.24 — in each case nothing lifts, so the screen reads as one continuous field rather than surfaces on paper.",
+    light: { bg: "#f8f6f1", card: "#fffcf7", fg: "#22211d", fgSoft: "#6e6a61", line: "#e7e3da", tint: "#edeae2", bubAi: "#eae7e0", bubMe: "#efe7d8", container: "#e0dcd2", accent: "#3f4c60", onAccent: "#ffffff" },
+    dark:  { bg: "#171613", card: "#1f1e1a", fg: "#ece8e0", fgSoft: "#9a958a", line: "#2e2c27", tint: "#262521", bubAi: "#2e2c27", bubMe: "#2b2620", container: "#2e2c27", accent: "#93a7c4", onAccent: "#171613" },
+  },
+  {
+    id: "b-lifted", name: "B · Lifted surfaces",
+    note: "Grounds untouched in both modes; only the separation changes. Light cards go pure white, dark cards step up two rungs, and borders firm up on both. The diagnostic option — if this fixes it, the paper tone was never the problem.",
+    light: { bg: "#f8f6f1", card: "#ffffff", fg: "#1e1d19", fgSoft: "#6b675e", line: "#ddd8cb", tint: "#eae6dc", bubAi: "#e8e4dc", bubMe: "#efe7d8", container: "#ded9cd", accent: "#3f4c60", onAccent: "#ffffff" },
+    dark:  { bg: "#141310", card: "#262421", fg: "#efebe3", fgSoft: "#a09b8f", line: "#38352f", tint: "#2b2925", bubAi: "#302d28", bubMe: "#332c22", container: "#333029", accent: "#9db0cc", onAccent: "#141310" },
+  },
+  {
+    id: "c-paper", name: "C · Lighter paper / softer charcoal",
+    note: "Ground moves away from the extremes in both directions: lighter in day, a touch lifted at night so black-on-OLED smear is reduced. The most conservative pair.",
+    light: { bg: "#fbf9f5", card: "#ffffff", fg: "#22211d", fgSoft: "#6e6a61", line: "#e9e5dc", tint: "#f2efe8", bubAi: "#efece5", bubMe: "#f3ecdd", container: "#e6e2d8", accent: "#3f4c60", onAccent: "#ffffff" },
+    dark:  { bg: "#1a1815", card: "#232120", fg: "#ece8e0", fgSoft: "#9a958a", line: "#332f2a", tint: "#292724", bubAi: "#2d2b27", bubMe: "#2e2820", container: "#312e29", accent: "#93a7c4", onAccent: "#1a1815" },
+  },
+  {
+    id: "d-ivory", name: "D · Ivory / warm graphite",
+    note: "Lighter still by day, and a warmer graphite by night rather than near-black. Both read as a lit page rather than a screen.",
+    light: { bg: "#fdfbf7", card: "#ffffff", fg: "#22211d", fgSoft: "#6e6a61", line: "#ece8df", tint: "#f5f2eb", bubAi: "#f2efe8", bubMe: "#f6efe0", container: "#eae6dc", accent: "#3f4c60", onAccent: "#ffffff" },
+    dark:  { bg: "#1c1a17", card: "#262320", fg: "#efebe3", fgSoft: "#9e998e", line: "#37332d", tint: "#2b2825", bubAi: "#302d29", bubMe: "#332c22", container: "#343029", accent: "#9db0cc", onAccent: "#1c1a17" },
+  },
+  {
+    id: "e-cream", name: "E · Warm cream / warm dark",
+    note: "Attacks the greyness with hue instead of brightness — yellow by day, a brown-black at night. Warmest pair; check both on a real OLED before committing, since warmth is where screens diverge most from mockups.",
+    light: { bg: "#faf6ea", card: "#fffdf6", fg: "#24221a", fgSoft: "#716c5c", line: "#e8e1cf", tint: "#f2ecdc", bubAi: "#f0ead8", bubMe: "#f4ecd8", container: "#e6dfc9", accent: "#3f4c60", onAccent: "#ffffff" },
+    dark:  { bg: "#191510", card: "#231e17", fg: "#efe9da", fgSoft: "#9d9581", line: "#352f24", tint: "#282219", bubAi: "#2d271e", bubMe: "#332b1c", container: "#332c1f", accent: "#9db0cc", onAccent: "#191510" },
+  },
+  {
+    id: "f-white", name: "F · Near white / near black",
+    note: "Maximum brightness by day, maximum depth at night. Highest ink contrast of the set in both modes; the trade is that it gives up the paper character the brand was chosen for.",
+    light: { bg: "#fefdfa", card: "#ffffff", fg: "#1f1e1a", fgSoft: "#6b675e", line: "#eeeae1", tint: "#f6f3ec", bubAi: "#f4f1ea", bubMe: "#f7f1e3", container: "#ece8de", accent: "#3f4c60", onAccent: "#ffffff" },
+    dark:  { bg: "#111110", card: "#1c1b1a", fg: "#f2efe9", fgSoft: "#9b978f", line: "#2c2a28", tint: "#232221", bubAi: "#272625", bubMe: "#2c2620", container: "#2b2a28", accent: "#9db0cc", onAccent: "#111110" },
+  },
+];
+
+// Readability maths shown per option: ink contrast, how far cards lift off the ground,
+// and the ground's own lightness.
+function lumOf(hex) {
+  const [r, g, b] = hex.replace("#", "").match(/../g).map(v => parseInt(v, 16) / 255);
+  const f = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+function ratio(a, b) {
+  const la = lumOf(a), lb = lumOf(b);
+  return ((Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)).toFixed(2);
+}
+function lightness(hex) {
+  const [r, g, b] = hex.replace("#", "").match(/../g).map(v => parseInt(v, 16) / 255);
+  return Math.round(((Math.max(r, g, b) + Math.min(r, g, b)) / 2) * 100);
+}
+
+const TABS = [
+  ["Briefing",  "M3 4h11v12H4.5A1.5 1.5 0 013 14.5zm12 3h2v7.5a1.5 1.5 0 01-3 0V7zM5 6h7v1.4H5zm0 3h7v1.2H5zm0 2.6h5v1.2H5z"],
+  ["Knowledge", "M3.5 3.5h3v13h-3zM8 3.5h3v13H8zm5.2.4l2.9 12.2-2.4.6L10.8 4.5z"],
+];
+const tabs = (active) => TABS.map(([n, d], i) => `
+  <div class="tab ${i === active ? "active" : ""}">
+    <svg viewBox="0 0 20 20" fill="currentColor"><path d="${d}"/></svg>${i === active ? n : ""}
+  </div>`).join("");
+
+const bar = `<span class="sig">▮▮▮ ⌁</span>`;
+const status = `<div class="statusbar"><span>9:41</span>${bar}</div>`;
+
+const briefing = () => `
+  ${status}
+  <div class="masthead">
+    <div class="mh-l"><div class="kick">Sunday, Aug 30</div><h3>Briefing</h3></div>
+    <span class="listen"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M4 11a6 6 0 0112 0v4a2 2 0 01-2 2h-1v-5h2v-1a5 5 0 00-10 0v1h2v5H6a2 2 0 01-2-2z"/></svg>Listen</span>
+  </div>
+  <div class="pills"><span class="pill on">News <i>12</i></span><span class="pill">Articles <i>4</i></span><span class="pill">Podcasts</span></div>
+  <div class="pills cat"><span class="pill on">Top</span><span class="pill">Technology <i>5</i></span><span class="pill">Local</span></div>
+  <div class="column">
+    <div class="seg">
+      <p class="passage">
+        <span class="figure-float"></span>
+        Apple's system language model has moved into the app runtime, giving developers
+        <a href="#">structured generation and tool calling</a> <span class="disc">(◗ 214)</span>
+        without sending a single prompt off the device. The change lands quietly, but it
+        reshapes how briefing apps handle personalisation.
+      </p>
+      <div class="pullquote">Nothing leaves the device to produce a summary.<cite>The Verge ↗</cite></div>
+    </div>
+    <div class="timeline"><span>Saturday</span><hr><span>18:40</span></div>
+    <div class="seg read">
+      <p class="passage">The council approved <a href="#">eight hundred homes on the east bank</a> after two years of review, closing the longest planning fight the city has seen this decade.</p>
+    </div>
+  </div>
+  <div class="tabbar"><div class="bar">${tabs(0)}</div></div>`;
+
+const reader = () => `
+  ${status}
+  <div class="rd-toolbar">
+    <div class="rd-btn"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg></div>
+    <div class="rd-btn"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="10" r="7"/><path d="M12.6 7.4l-1.9 4.3-4.3 1.9 1.9-4.3z"/></svg></div>
+    <div class="rd-aa"><span>−</span><span>Aa</span><span>+</span></div>
+  </div>
+  <div class="reader">
+    <h4 class="read-title">On-device models move into the app runtime</h4>
+    <div class="byline"><b>The Verge</b><s></s><span>2h ago</span><s></s><span>6 min read</span></div>
+    <div class="byline-rule"></div>
+    <p class="body">Apple's system language model now runs inside the app runtime, giving developers structured generation and tool calling without sending a single prompt off the device.</p>
+    <div class="sec-head"><div class="bar"></div><h5>Key Points</h5></div>
+    <ul class="bullets">
+      <li>Summaries render locally, with no network round trip.</li>
+      <li>Tool calling is available to third-party apps for the first time.</li>
+    </ul>
+  </div>`;
+
+const chat = () => `
+  ${status}
+  <div class="chat-head">
+    <div class="back"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4l-5 6 5 6"/></svg></div>
+    <div class="buddy"><img src="${BUDDY}" alt=""></div>
+    <div class="who"><b>Riverfront housing vote</b><span>Newsbuddy · Claude</span></div>
+  </div>
+  <div class="hair"></div>
+  <div class="thread">
+    <div class="row ai">
+      <div class="bub">Two stories left today. The housing vote connects to the piece you read on Tuesday — the same flood-risk report is cited in both.</div>
+      <span class="stamp">6:28 PM</span>
+    </div>
+    <div class="row me">
+      <div class="bub">Why did it take two years?</div>
+      <span class="stamp">6:30 PM</span>
+    </div>
+    <div class="procline">
+      <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2l1.6 4.4L16 8l-4.4 1.6L10 14l-1.6-4.4L4 8l4.4-1.6z"/></svg>
+      Checked three sources
+    </div>
+    <div class="row ai">
+      <div class="bub">Three rounds of review. The <a href="#">flood-risk assessment</a> was the long pole — it was resubmitted twice.</div>
+      <span class="stamp">6:30 PM</span>
+    </div>
+    <div class="thinking">
+      <div class="dots"><i></i><i></i><i></i><em>00:04</em></div>
+      <div class="st">Drafting a grounded response</div>
+    </div>
+  </div>
+  <div class="dock">
+    <div class="dock-in">
+      <div class="plus">+</div>
+      <div class="field">Message</div>
+      <div class="mic"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 3a2.2 2.2 0 012.2 2.2v4.4a2.2 2.2 0 01-4.4 0V5.2A2.2 2.2 0 0110 3zm-4.6 6.4h1.4a3.2 3.2 0 006.4 0h1.4a4.6 4.6 0 01-3.9 4.5V16h-1.4v-2.1a4.6 4.6 0 01-3.9-4.5z"/></svg></div>
+    </div>
+  </div>`;
+
+const kRow = (icon, title, sub, kick, trail) => `
+  <div class="k-row">
+    <div class="th">${icon}</div>
+    <div class="tx"><b>${title}</b><div class="sub">${sub}</div><div class="kick">${kick}</div></div>
+    ${trail}
+  </div>`;
+const I = {
+  chat: `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 5h9v6H6l-3 2.5z"/><path d="M9 8h8v5h-3l-2 1.8V13"/></svg>`,
+  deck: `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="10" height="8" rx="1.5"/><path d="M6 4h8.5A1.5 1.5 0 0116 5.5V12"/></svg>`,
+  save: `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="14" height="12" rx="2"/><circle cx="7.5" cy="8" r="1.4"/><path d="M4 14l4-3.5 3 2.5 2.5-2 3 3"/></svg>`,
+  audio: `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 10h2M6.5 6.5v7M10 4v12M13.5 7.5v5M17 9.5h0"/></svg>`,
+};
+const chev = `<span class="chev">›</span>`;
+
+const knowledge = () => `
+  ${status}
+  <div class="k-head">
+    <div class="kh-l"><div class="kick">Sunday, Aug 30</div><h3>Knowledge</h3></div>
+    <div class="k-acts">
+      <span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="9" cy="9" r="5.5"/><path d="M13 13l3.5 3.5"/></svg></span>
+      <span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 6h14M3 10h14M3 14h14"/></svg></span>
+    </div>
+  </div>
+  <div class="ask">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 5h14v9H8l-4 3z"/></svg>
+    <span class="sp">Ask anything…</span>
+    <div class="mic"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 3a2.2 2.2 0 012.2 2.2v4.4a2.2 2.2 0 01-4.4 0V5.2A2.2 2.2 0 0110 3zm-4.6 6.4h1.4a3.2 3.2 0 006.4 0h1.4a4.6 4.6 0 01-3.9 4.5V16h-1.4v-2.1a4.6 4.6 0 01-3.9-4.5z"/></svg></div>
+  </div>
+  <div class="k-day"><hr><span>Today</span><hr></div>
+  ${kRow(I.chat, "Riverfront housing vote", "The flood-risk assessment was the long pole", "Chat · 3h ago", chev)}
+  <div class="k-div"></div>
+  ${kRow(I.deck, "On-device AI, in five cards", "Interactive lesson", "Deck · 12m ago", chev)}
+  <div class="k-div"></div>
+  ${kRow(I.audio, "The week in local politics", "Newsbuddy audio", "Audio · 5h ago", `<div class="play"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M7 4.5l8 5.5-8 5.5z"/></svg></div>`)}
+  <div class="k-day"><hr><span>Yesterday</span><hr></div>
+  ${kRow(I.save, "On-device models move into the app runtime", "Apple's system language model gives apps structured generation", "Saved · The Verge · 1d ago", chev)}
+  <div class="tabbar"><div class="bar">${tabs(1)}</div></div>`;
+
+// The two reading surfaces, in both modes. Chat and Knowledge are omitted here — this
+// comparison is about reading long text, and eight phones per row stops being comparable.
+const SCREENS = [["Briefing", briefing], ["Reader", reader]];
+const cssVars = (v) =>
+  `--bg:${v.bg};--card:${v.card};--fg:${v.fg};--fg-soft:${v.fgSoft};`
+  + `--accent:${v.accent};--line-s:${v.line};--tint:${v.tint};--on-accent:${v.onAccent};`
+  + `--bub-ai:${v.bubAi};--bub-me:${v.bubMe};--container:${v.container};`;
+
+const main = document.getElementById("variants");
+const sw = document.getElementById("switch");
+
+SCHEMES.forEach((s) => {
+  sw.insertAdjacentHTML("beforeend",
+    `<button data-go="v-${s.id}"><i style="background:${s.light.bg};border:1px solid #ccc"></i>${s.name}</button>`);
+
+  const pair = (v, mode) => SCREENS.map(([name, fn]) => `
+    <div class="screen-wrap">
+      <div class="phone"><div class="screen" style="${cssVars(v)}">${fn()}</div></div>
+      <div class="cap">${mode} · ${name}</div>
+    </div>`).join("");
+
+  main.insertAdjacentHTML("beforeend", `
+    <section class="variant" id="v-${s.id}">
+      <div class="v-head">
+        <h2>${s.name}</h2>
+      </div>
+      <p class="v-note">${s.note}</p>
+      <div class="metrics">
+        <div class="metric">
+          <b>Day</b>
+          <span>ink ${ratio(s.light.fg, s.light.bg)}:1</span>
+          <span>card lift ${ratio(s.light.card, s.light.bg)}:1</span>
+          <span><i style="background:${s.light.bg};border:1px solid #ddd"></i>${s.light.bg}</span>
+        </div>
+        <div class="metric">
+          <b>Night</b>
+          <span>ink ${ratio(s.dark.fg, s.dark.bg)}:1</span>
+          <span>card lift ${ratio(s.dark.card, s.dark.bg)}:1</span>
+          <span><i style="background:${s.dark.bg};border:1px solid #444"></i>${s.dark.bg}</span>
+        </div>
+      </div>
+      <div class="screens">
+        ${pair(s.light, "Day")}
+        <div class="mode-split"></div>
+        ${pair(s.dark, "Night")}
+      </div>
+    </section>`);
+});
+
+sw.addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  sw.querySelectorAll("button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  document.getElementById(b.dataset.go).scrollIntoView({ behavior: "smooth", block: "start" });
+});
+</script>
+</body>
+</html>
