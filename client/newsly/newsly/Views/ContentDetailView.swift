@@ -431,7 +431,11 @@ private struct ContentDetailContentView: View {
             guard generation != previousGeneration else { return }
             handledActivationGeneration = generation
             Task {
-                await viewModel.revalidateContent()
+                async let revalidation: Void = viewModel.revalidateContent()
+                async let readerResume: Void = viewModel.resumeReaderBodyIfNeeded(
+                    for: activeReaderContent
+                )
+                _ = await (revalidation, readerResume)
             }
         }
     }

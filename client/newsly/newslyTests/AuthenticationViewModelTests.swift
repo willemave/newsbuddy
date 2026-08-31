@@ -108,6 +108,74 @@ final class AuthenticationViewModelTests: XCTestCase {
         XCTAssertEqual(cache.clearCount, 0)
     }
 
+    func testWarmActivationRetriesUnavailableCredentialRestoration() async {
+        let user = makeUser(fullName: "Recovered")
+        let tokenStore = AuthenticationTestTokenStore(
+            accessToken: nil,
+            refreshToken: nil,
+            userID: nil
+        )
+        let cache = AuthenticationTestUserCache(user: nil)
+        let service = AuthenticationTestService(currentUserResult: .success(user))
+        let storage = AuthenticationUnavailableCredentialStorage()
+        let controller = AuthenticationViewModel(
+            authService: service,
+            tokenStore: tokenStore,
+            userCache: cache,
+            credentialStorage: storage
+        )
+        let runtime = AppRuntime(authenticationController: controller)
+
+        runtime.record(.active)
+        XCTAssertEqual(controller.authState, .loading)
+        XCTAssertEqual(service.currentUserCount, 0)
+
+        storage.makeAvailable()
+        runtime.record(.background)
+        runtime.record(.active)
+
+        await waitUntil { controller.authState == .authenticated(user) }
+        XCTAssertEqual(service.currentUserCount, 1)
+        XCTAssertNil(controller.errorMessage)
+    }
+
+    func testWarmActivationRetriesConnectivityRestorationFailure() async {
+        let user = makeUser(fullName: "Recovered")
+        let tokenStore = AuthenticationTestTokenStore(
+            accessToken: "access",
+            refreshToken: "refresh",
+            userID: nil
+        )
+        let cache = AuthenticationTestUserCache(user: nil)
+        let service = AuthenticationTestService(
+            currentUserResult: .failure(
+                AuthError.networkError(URLError(.notConnectedToInternet))
+            )
+        )
+        let lifecycle = AppLifecycle()
+        lifecycle.record(.active)
+        let controller = AuthenticationViewModel(
+            authService: service,
+            tokenStore: tokenStore,
+            userCache: cache
+        )
+        let runtime = AppRuntime(
+            lifecycle: lifecycle,
+            authenticationController: controller
+        )
+
+        await waitUntil { controller.errorMessage != nil }
+        XCTAssertEqual(controller.authState, .loading)
+        service.setCurrentUserResult(.success(user))
+
+        runtime.record(.background)
+        runtime.record(.active)
+
+        await waitUntil { controller.authState == .authenticated(user) }
+        XCTAssertEqual(service.currentUserCount, 2)
+        XCTAssertNil(controller.errorMessage)
+    }
+
     func testTerminalAuthenticationRejectionClearsCachedIdentity() async {
         let cachedUser = makeUser(fullName: "Cached")
         let tokenStore = AuthenticationTestTokenStore(
@@ -194,7 +262,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         let cache = AuthenticationTestUserCache(user: nil)
         let service = AuthenticationTestService(
             currentUserResult: .failure(AuthError.notAuthenticated),
-            explicitLogoutResult: false
+            explicitLogoutResult: .failed
         )
         let viewModel = AuthenticationViewModel(
             authService: service,
@@ -284,7 +352,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         let cache = AuthenticationTestUserCache(user: nil)
         let service = AuthenticationTestService(
             currentUserResult: .failure(AuthError.notAuthenticated),
-            terminalLogoutResult: false
+            terminalLogoutResult: .noLongerCurrent
         )
         let viewModel = AuthenticationViewModel(
             authService: service,
@@ -299,6 +367,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         await waitUntil { service.logoutCount == 1 }
 
         XCTAssertEqual(viewModel.authState, .authenticated(newUser))
+        XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(cache.clearCount, 1)
         XCTAssertEqual(
             service.logoutEvents,
@@ -320,7 +389,7 @@ final class AuthenticationViewModelTests: XCTestCase {
         let service = AuthenticationTestService(
             currentUserResult: .failure(AuthError.notAuthenticated),
             logoutGate: logoutGate,
-            terminalLogoutResult: true
+            terminalLogoutResult: .ended
         )
         let viewModel = AuthenticationViewModel(
             authService: service,
@@ -389,13 +458,13 @@ private actor AuthenticationTestGate {
 
 private final class AuthenticationTestService: AuthenticationServicing, @unchecked Sendable {
     private let lock = NSLock()
-    private let currentUserResult: Result<User, Error>
+    private var currentUserResult: Result<User, Error>
     private let currentUserGate: AuthenticationTestGate?
     private let signInResult: Result<AuthSession, Error>
     private let signInGate: AuthenticationTestGate?
     private let logoutGate: AuthenticationTestGate?
-    private let explicitLogoutResult: Bool
-    private let terminalLogoutResult: Bool
+    private let explicitLogoutResult: CredentialSessionEndResult
+    private let terminalLogoutResult: CredentialSessionEndResult
     private var recordedLogoutCount = 0
     private var recordedCurrentUserCount = 0
     private var recordedSignInCount = 0
@@ -407,8 +476,8 @@ private final class AuthenticationTestService: AuthenticationServicing, @uncheck
         signInResult: Result<AuthSession, Error> = .failure(AuthError.appleSignInFailed),
         signInGate: AuthenticationTestGate? = nil,
         logoutGate: AuthenticationTestGate? = nil,
-        explicitLogoutResult: Bool = true,
-        terminalLogoutResult: Bool = true
+        explicitLogoutResult: CredentialSessionEndResult = .ended,
+        terminalLogoutResult: CredentialSessionEndResult = .ended
     ) {
         self.currentUserResult = currentUserResult
         self.currentUserGate = currentUserGate
@@ -435,7 +504,9 @@ private final class AuthenticationTestService: AuthenticationServicing, @uncheck
         return try signInResult.get()
     }
 
-    func logout(matching event: CredentialTerminalEvent?) async -> Bool {
+    func logout(
+        matching event: CredentialTerminalEvent?
+    ) async -> CredentialSessionEndResult {
         lock.withLock {
             recordedLogoutCount += 1
             recordedLogoutEvents.append(event)
@@ -447,11 +518,18 @@ private final class AuthenticationTestService: AuthenticationServicing, @uncheck
     }
 
     func getCurrentUser() async throws -> User {
-        lock.withLock { recordedCurrentUserCount += 1 }
+        let result = lock.withLock {
+            recordedCurrentUserCount += 1
+            return currentUserResult
+        }
         if let currentUserGate {
             await currentUserGate.wait()
         }
-        return try currentUserResult.get()
+        return try result.get()
+    }
+
+    func setCurrentUserResult(_ result: Result<User, Error>) {
+        lock.withLock { currentUserResult = result }
     }
 
     #if DEBUG
@@ -467,16 +545,37 @@ private final class AuthenticationTestService: AuthenticationServicing, @uncheck
 }
 
 private final class AuthenticationUnavailableCredentialStorage: CredentialMaterialStoring {
+    private let lock = NSLock()
+    private var unavailable = true
+
     func readEnvelope() -> CredentialStoreRead<CredentialEnvelope> {
-        .unavailable
+        lock.withLock { unavailable ? .unavailable : .missing }
     }
 
     func readLegacyMaterial() -> CredentialStoreRead<LegacyCredentialMaterial> {
-        .unavailable
+        lock.withLock {
+            unavailable
+                ? .unavailable
+                : .value(
+                    LegacyCredentialMaterial(
+                        accessToken: "recovered-access",
+                        refreshToken: "recovered-refresh"
+                    )
+                )
+        }
+    }
+
+    func readPendingPublication() -> CredentialStoreRead<CredentialPublication> {
+        lock.withLock { unavailable ? .unavailable : .missing }
     }
 
     func publishEnvelopeAndLegacy(_ envelope: CredentialEnvelope) throws {
         _ = envelope
+        throw CredentialStorageError.unavailable
+    }
+
+    func completePendingPublication(_ publication: CredentialPublication) throws {
+        _ = publication
         throw CredentialStorageError.unavailable
     }
 
@@ -486,6 +585,10 @@ private final class AuthenticationUnavailableCredentialStorage: CredentialMateri
     }
 
     func deleteCredentialMaterial() {}
+
+    func makeAvailable() {
+        lock.withLock { unavailable = false }
+    }
 }
 
 private final class AuthenticationTestTokenStore: AuthTokenStore {

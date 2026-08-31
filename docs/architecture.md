@@ -1612,19 +1612,23 @@ background duration are logged together so a wake can be reconstructed from one
 stream.
 
 `AppRuntime` forwards lifecycle facts once to the current
-`AuthenticatedSession`. True background suspends badge polling and the global
-chat manager. A new activation generation resumes each once. `.inactive` alone
-does neither. `ContentView` combines lifecycle phase with tab visibility for
-Briefing: leaving the tab or entering true background deactivates it, while a
-short system interruption preserves selected-Lens work.
+`AuthenticatedSession` and gives `AuthenticationController` each activation so
+a recoverable cold-session restoration can be replayed once per generation.
+True background suspends badge polling and the global chat manager. A new
+activation generation resumes each once. `.inactive` alone does neither.
+`ContentView` combines lifecycle phase with tab visibility for Briefing:
+leaving the tab or entering true background deactivates it, while a short
+system interruption preserves selected-Lens work.
 
 Visible Content Detail, Knowledge, chat, and Learning Deck reader routes consume
 the shared lifecycle through environment or initializer injection. They do not
 observe `scenePhase` themselves. Feature request generations still fence network
 results; the lifecycle generation supplies trigger context and does not replace
-request identity. Audio-session interruptions remain an audio-subsystem concern,
-and voice capture uses the typed UIKit background notification for its OS-level
-cleanup.
+request identity. A presented Content Detail reader explicitly restarts its
+cancelled body read after activation because its full-screen cover remains
+mounted and its ordinary task identity does not change. Audio-session
+interruptions remain an audio-subsystem concern, and voice capture uses the
+typed UIKit background notification for its OS-level cleanup.
 
 Warm resume and cold relaunch are separate flows. Warm resume retains the
 process and its models. Cold relaunch constructs a new runtime, restores a
@@ -1765,6 +1769,11 @@ On process launch:
 5. Keep the cached shell for transient connectivity or server failure, and clear
    it after definitive credential rejection.
 
+A recoverable Keychain or `/auth/me` failure records a pending restoration
+obligation. `AppRuntime` consumes that obligation at most once for each later
+activation generation, so an empty loading shell cannot become terminal merely
+because the original launch task ended.
+
 `CredentialSession` owns access-token acquisition, in-process single-flight
 refresh, the existing app-group process lock, cross-process credential re-read,
 one terminal event per credential generation, and publication ordering. Sign-in
@@ -1783,17 +1792,24 @@ shared lock or secure storage is unavailable the client logs the failed clear
 and never bypasses serialization.
 
 New builds store one `CredentialEnvelope` containing the token pair, user ID,
-and credential generation. During the mixed-version window, publication also
-writes the legacy split keys refresh-token-first so already-distributed app and
-extension builds continue to converge. Production storage distinguishes missing
-Keychain items from unavailable access and reconciles the access-group,
-no-access-group, and App Group mirror paths while holding the process lock. Once
-a valid envelope exists, a stale plaintext mirror cannot become authoritative
-again. A matching or safely incomplete legacy copy is repaired from the
-envelope; a coherent two-leg takeover waits for server identity validation; and
-an interrupted one-leg publication fails unavailable without overwriting either
-token leg. This prevents both old-access/new-refresh rotation residue and
-new-access/old-refresh sign-in residue from being mistaken for an atomic pair.
+and credential generation. Before changing any legacy leg, storage durably
+stages a `CredentialPublication` containing the target envelope and its observed
+baseline. Resolution under the cross-process lock may complete that journal only
+while every visible leg is still either its baseline or target value. The
+journal is deleted only after refresh token, access token, user ID, and envelope
+have all committed, making every process-death boundary idempotently recoverable
+without overwriting a newer publication or a logout.
+
+During the mixed-version window, publication still writes the legacy split keys
+refresh-token-first so already-distributed app and extension builds continue to
+converge. Production storage distinguishes missing Keychain items from
+unavailable access and reconciles the access-group, no-access-group, and App
+Group mirror paths while holding the process lock. A pending publication cannot
+confirm a cached user shell. Once a valid envelope exists, a stale plaintext
+mirror cannot become authoritative again. A matching or safely incomplete
+legacy copy is repaired from the envelope; a coherent two-leg takeover waits for
+server identity validation; and an unjournaled one-leg divergence still fails
+unavailable without overwriting either token leg.
 
 `CredentialSession` delivers a terminal credential-generation event directly
 to `AuthenticationController`; there is no authentication-required notification

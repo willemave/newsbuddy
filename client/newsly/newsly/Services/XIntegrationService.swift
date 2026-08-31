@@ -324,10 +324,14 @@ private struct LiveXIntegrationAPIClient: XIntegrationAPIClientProtocol {
 
 private final class OAuthPresentationContextProvider: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first {
-            return window
+        let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let windowScene = windowScenes.first(where: { $0.activationState == .foregroundActive })
+            ?? windowScenes.first
+        else {
+            preconditionFailure("X OAuth requires a connected window scene")
         }
-        return ASPresentationAnchor()
+        return windowScene.windows.first(where: { $0.isKeyWindow })
+            ?? windowScene.windows.first
+            ?? ASPresentationAnchor(windowScene: windowScene)
     }
 }

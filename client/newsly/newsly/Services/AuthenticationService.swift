@@ -12,6 +12,12 @@ import os.log
 
 private let authLogger = Logger(subsystem: "com.newsly", category: "AuthenticationService")
 
+enum CredentialSessionEndResult: Equatable, Sendable {
+    case ended
+    case noLongerCurrent
+    case failed
+}
+
 protocol AuthenticationServicing: AnyObject {
     @MainActor
     func signInWithApple() async throws -> AuthSession
@@ -19,7 +25,7 @@ protocol AuthenticationServicing: AnyObject {
     /// Ends the current session. Terminal refresh failures pass their event so
     /// a delayed failure cannot clear a newer account publication.
     @discardableResult
-    func logout(matching event: CredentialTerminalEvent?) async -> Bool
+    func logout(matching event: CredentialTerminalEvent?) async -> CredentialSessionEndResult
     func getCurrentUser() async throws -> User
 
     #if DEBUG
@@ -83,7 +89,9 @@ final class AuthenticationService: NSObject {
     /// Logout user. Credential deletion is serialized with refresh rotation so
     /// an exchange already in flight cannot publish a token pair after logout.
     @discardableResult
-    func logout(matching event: CredentialTerminalEvent?) async -> Bool {
+    func logout(
+        matching event: CredentialTerminalEvent?
+    ) async -> CredentialSessionEndResult {
         // Explicit user logout tears down presentation state immediately. A
         // conditional terminal event does so only after its credential identity
         // is proven current under the refresh lock.
@@ -95,13 +103,15 @@ final class AuthenticationService: NSObject {
             didClear = try await CredentialSession.shared.clearCredentials(ifCurrent: event)
         } catch {
             authLogger.error("Credential clear failed during logout: \(error.localizedDescription)")
-            return false
+            return .failed
         }
-        guard didClear else { return false }
+        guard didClear else {
+            return event == nil ? .failed : .noLongerCurrent
+        }
         if event != nil {
             performLocalLogoutSideEffects()
         }
-        return true
+        return .ended
     }
 
     private func performLocalLogoutSideEffects() {
@@ -391,15 +401,15 @@ private class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, 
 
 @MainActor
 private func applePresentationAnchor() -> ASPresentationAnchor {
-    for scene in UIApplication.shared.connectedScenes {
-        guard let windowScene = scene as? UIWindowScene else { continue }
-        if let window = windowScene.windows.first(where: { $0.isKeyWindow })
-            ?? windowScene.windows.first {
-            return window
-        }
+    let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    guard let windowScene = windowScenes.first(where: { $0.activationState == .foregroundActive })
+        ?? windowScenes.first
+    else {
+        preconditionFailure("Apple Sign In requires a connected window scene")
     }
-    authLogger.error("Apple Sign In presentation anchor unavailable")
-    return ASPresentationAnchor()
+    return windowScene.windows.first(where: { $0.isKeyWindow })
+        ?? windowScene.windows.first
+        ?? ASPresentationAnchor(windowScene: windowScene)
 }
 
 private func persistSessionTokens(_ tokenResponse: TokenResponse) async throws {

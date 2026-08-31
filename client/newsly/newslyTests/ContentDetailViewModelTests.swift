@@ -149,7 +149,7 @@ final class ContentDetailViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.contentBody?.text, "Source body")
     }
 
-    func testSuspensionFencesNonCooperativeReaderBodyResult() async throws {
+    func testSuspendedReaderBodyResumesWithoutRemountingReader() async throws {
         let detail = try Self.articleDetail(id: 42)
         let gate = ContentDetailAsyncGate()
         let service = SequencedReaderBodyContentDetailService(firstGate: gate)
@@ -166,6 +166,12 @@ final class ContentDetailViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.readerBody)
         XCTAssertNil(viewModel.readerErrorMessage)
         XCTAssertFalse(viewModel.isLoadingReaderBody)
+
+        await viewModel.resumeReaderBodyIfNeeded(for: detail)
+
+        XCTAssertEqual(service.requestCount, 2)
+        XCTAssertEqual(viewModel.readerBody?.text, "new reader body")
+        XCTAssertNil(viewModel.readerErrorMessage)
     }
 
     func testForcedReaderBodyReplacementFencesNonCooperativeOlderResult() async throws {

@@ -26,7 +26,7 @@ enum AuthState: Equatable {
 @MainActor
 @Observable
 final class AuthenticationController {
-    private enum AuthWorkKind {
+    private enum AuthWorkKind: Equatable {
         case idle
         case restoration
         case credentialReplacement
@@ -34,7 +34,7 @@ final class AuthenticationController {
 
     private struct PendingSessionEnd {
         let id: UUID
-        let task: Task<Bool, Never>
+        let task: Task<CredentialSessionEndResult, Never>
     }
 
     var authState: AuthState = .loading
@@ -58,6 +58,10 @@ final class AuthenticationController {
     private var authWorkTask: Task<Void, Never>?
     @ObservationIgnored
     private var pendingSessionEnd: PendingSessionEnd?
+    @ObservationIgnored
+    private var restorationRetryPending = false
+    @ObservationIgnored
+    private var handledRestorationActivationGeneration: UInt64?
     #if DEBUG
     @ObservationIgnored
     private var hasAttemptedE2EAutoLogin = false
@@ -86,6 +90,7 @@ final class AuthenticationController {
 
     /// Check if user is already authenticated on app launch
     func checkAuthStatus() {
+        restorationRetryPending = false
         errorMessage = nil
 
         #if DEBUG
@@ -136,6 +141,7 @@ final class AuthenticationController {
             } else {
                 authState = .loading
             }
+            restorationRetryPending = true
             finishAuthWork(generation)
             return
         case .missing:
@@ -156,6 +162,7 @@ final class AuthenticationController {
                 let user = try await authService.getCurrentUser()
                 guard canCommit(generation) else { return }
                 errorMessage = nil
+                restorationRetryPending = false
                 lastKnownUser = user
                 userCache.save(user)
                 authState = .authenticated(user)
@@ -206,9 +213,9 @@ final class AuthenticationController {
         applyLoggedOutPresentationState()
         let endTask = startSessionEnd(matching: nil)
         Task { [weak self] in
-            let didEnd = await endTask.value
+            let result = await endTask.value
             guard let self,
-                  !didEnd,
+                  result == .failed,
                   self.credentialIntentGeneration == logoutIntent,
                   self.authState == .unauthenticated else {
                 return
@@ -280,24 +287,38 @@ final class AuthenticationController {
         let failure = ClientFailure.classify(error)
         switch failure {
         case .authenticationRequired, .authenticationExpired:
+            restorationRetryPending = false
             logout()
         case .cancelled:
             errorMessage = nil
-            retainRestoringSession()
+            retainRestoringSessionForRetry()
         case .connectivity:
             errorMessage = "We couldn't reach Newsbuddy. Check your connection and try again."
-            retainRestoringSession()
+            retainRestoringSessionForRetry()
         case .http(let statusCode, let detail):
             errorMessage = AuthError.serverError(
                 statusCode: statusCode,
                 message: detail
             ).userFacingMessage
-            retainRestoringSession()
+            retainRestoringSessionForRetry()
         case .invalidRequest, .invalidResponse, .decoding, .unexpected:
             errorMessage = (error as? AuthError)?.userFacingMessage
                 ?? error.localizedDescription
-            retainRestoringSession()
+            retainRestoringSessionForRetry()
         }
+    }
+
+    /// Replays a recoverable launch/restoration read at most once for each app
+    /// activation. AppRuntime is the only production caller.
+    func resumeRestorationIfNeeded(for activation: AppLifecycle.Activation?) {
+        guard restorationRetryPending,
+              authWorkKind == .idle,
+              let activation,
+              handledRestorationActivationGeneration != activation.generation else {
+            return
+        }
+        handledRestorationActivationGeneration = activation.generation
+        checkAuthStatus()
     }
 
     func handleTerminalCredentialEvent(_ event: CredentialTerminalEvent) {
@@ -309,9 +330,10 @@ final class AuthenticationController {
             && authWorkKind != .credentialReplacement
         let endTask = startSessionEnd(matching: event)
         Task { [weak self] in
-            let didEnd = await endTask.value
+            let result = await endTask.value
             guard let self else { return }
-            guard didEnd else {
+            guard result != .noLongerCurrent else { return }
+            guard result == .ended else {
                 if shouldApplyToPresentation,
                    self.credentialIntentGeneration == observedCredentialIntent {
                     self.errorMessage = credentialClearFailureMessage
@@ -364,6 +386,9 @@ final class AuthenticationController {
     ) -> UInt64 {
         authWorkTask?.cancel()
         authWorkTask = nil
+        if kind != .restoration {
+            restorationRetryPending = false
+        }
         authWorkGeneration &+= 1
         if changesCredentialIdentity {
             credentialIntentGeneration &+= 1
@@ -385,7 +410,7 @@ final class AuthenticationController {
     @discardableResult
     private func startSessionEnd(
         matching event: CredentialTerminalEvent?
-    ) -> Task<Bool, Never> {
+    ) -> Task<CredentialSessionEndResult, Never> {
         let predecessor = pendingSessionEnd?.task
         let id = UUID()
         let task = Task { [authService] in
@@ -418,7 +443,8 @@ final class AuthenticationController {
         errorMessage = error.localizedDescription
     }
 
-    private func retainRestoringSession() {
+    private func retainRestoringSessionForRetry() {
+        restorationRetryPending = true
         if let user = lastKnownUser {
             authState = .authenticated(user)
         } else {

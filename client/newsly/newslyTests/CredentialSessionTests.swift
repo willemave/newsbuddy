@@ -3,7 +3,7 @@ import XCTest
 @testable import newsly
 
 final class CredentialSessionTests: XCTestCase {
-    func testSignInPublishesRefreshFirstAndEnvelopeLast() async throws {
+    func testSignInJournalsBeforePublishingRefreshFirstAndEnvelopeLast() async throws {
         let tokenStore = RecordingAuthTokenStore()
         let storage = TokenStoreCredentialStorage(tokenStore: tokenStore)
         let session = makeCredentialSession(storage: storage)
@@ -15,7 +15,13 @@ final class CredentialSessionTests: XCTestCase {
 
         XCTAssertEqual(
             tokenStore.savedKeys,
-            [.refreshToken, .accessToken, .userId, .credentialEnvelope]
+            [
+                .credentialPublication,
+                .refreshToken,
+                .accessToken,
+                .userId,
+                .credentialEnvelope,
+            ]
         )
         guard case .value(let envelope) = storage.readEnvelope() else {
             return XCTFail("Expected a published envelope")
@@ -49,6 +55,7 @@ final class CredentialSessionTests: XCTestCase {
             [
                 .refreshToken,
                 .accessToken,
+                .credentialPublication,
                 .refreshToken,
                 .accessToken,
                 .userId,
@@ -126,7 +133,7 @@ final class CredentialSessionTests: XCTestCase {
         }
     }
 
-    func testInterruptedRefreshPreservesNewRefreshAndFailsUnavailable() async {
+    func testUnjournaledInterruptedRefreshPreservesNewRefreshAndFailsUnavailable() async {
         let envelope = CredentialEnvelope(
             tokens: CredentialTokens(accessToken: "old-access", refreshToken: "old-refresh"),
             userID: 42
@@ -151,6 +158,191 @@ final class CredentialSessionTests: XCTestCase {
         XCTAssertEqual(storage.legacy, interruptedRefresh)
         XCTAssertEqual(storage.legacy?.refreshToken, "new-refresh")
         XCTAssertEqual(storage.confirmedUserID(), 42)
+    }
+
+    func testPendingPublicationRecoversEveryInterruptedWriteBoundary() async throws {
+        let oldEnvelope = CredentialEnvelope(
+            tokens: CredentialTokens(accessToken: "old-access", refreshToken: "old-refresh"),
+            userID: 42
+        )
+        let targetEnvelope = CredentialEnvelope(
+            tokens: CredentialTokens(accessToken: "new-access", refreshToken: "new-refresh"),
+            userID: 42
+        )
+        let publication = CredentialPublication(
+            target: targetEnvelope,
+            baselineEnvelope: oldEnvelope,
+            baselineAccessToken: "old-access",
+            baselineRefreshToken: "old-refresh",
+            baselineUserID: "42"
+        )
+        let boundaries: [(CredentialEnvelope, LegacyCredentialMaterial)] = [
+            (
+                oldEnvelope,
+                LegacyCredentialMaterial(
+                    accessToken: "old-access",
+                    refreshToken: "old-refresh"
+                )
+            ),
+            (
+                oldEnvelope,
+                LegacyCredentialMaterial(
+                    accessToken: "old-access",
+                    refreshToken: "new-refresh"
+                )
+            ),
+            (
+                oldEnvelope,
+                LegacyCredentialMaterial(
+                    accessToken: "new-access",
+                    refreshToken: "new-refresh"
+                )
+            ),
+            (
+                targetEnvelope,
+                LegacyCredentialMaterial(
+                    accessToken: "new-access",
+                    refreshToken: "new-refresh"
+                )
+            ),
+        ]
+
+        for (envelope, legacy) in boundaries {
+            let storage = RecordingCredentialStorage(
+                envelope: envelope,
+                legacy: legacy,
+                pendingPublication: publication
+            )
+            let session = makeCredentialSession(storage: storage)
+
+            XCTAssertNil(storage.confirmedUserID())
+            let accessToken = try await session.accessToken(for: .required)
+
+            XCTAssertEqual(accessToken, "new-access")
+            XCTAssertEqual(storage.envelope, targetEnvelope)
+            XCTAssertEqual(storage.legacy?.completeTokens, targetEnvelope.tokens)
+            XCTAssertEqual(storage.confirmedUserID(), 42)
+            guard case .missing = storage.readPendingPublication() else {
+                return XCTFail("Expected the recovered publication journal to be removed")
+            }
+        }
+    }
+
+    func testTokenStoreAdapterRecoversJournaledPartialRefresh() async throws {
+        let tokenStore = RecordingAuthTokenStore()
+        let oldEnvelope = CredentialEnvelope(
+            tokens: CredentialTokens(accessToken: "old-access", refreshToken: "old-refresh"),
+            userID: 42
+        )
+        let targetEnvelope = CredentialEnvelope(
+            tokens: CredentialTokens(accessToken: "new-access", refreshToken: "new-refresh"),
+            userID: 42
+        )
+        let publication = CredentialPublication(
+            target: targetEnvelope,
+            baselineEnvelope: oldEnvelope,
+            baselineAccessToken: "old-access",
+            baselineRefreshToken: "old-refresh",
+            baselineUserID: "42"
+        )
+        tokenStore.saveToken(
+            try JSONEncoder().encode(oldEnvelope).base64EncodedString(),
+            key: .credentialEnvelope
+        )
+        tokenStore.saveToken("old-access", key: .accessToken)
+        tokenStore.saveToken("new-refresh", key: .refreshToken)
+        tokenStore.saveToken("42", key: .userId)
+        tokenStore.saveToken(
+            try JSONEncoder().encode(publication).base64EncodedString(),
+            key: .credentialPublication
+        )
+        let storage = TokenStoreCredentialStorage(tokenStore: tokenStore)
+        let session = makeCredentialSession(storage: storage)
+
+        let accessToken = try await session.accessToken(for: .required)
+
+        XCTAssertEqual(accessToken, "new-access")
+        guard case .value(let recoveredEnvelope) = storage.readEnvelope() else {
+            return XCTFail("Expected the target envelope after journal recovery")
+        }
+        XCTAssertEqual(recoveredEnvelope, targetEnvelope)
+        guard case .missing = storage.readPendingPublication() else {
+            return XCTFail("Expected the publication journal to be removed")
+        }
+    }
+
+    func testStalePublicationDefersToUnrelatedCommittedCredentialState() async throws {
+        let oldEnvelope = CredentialEnvelope(
+            tokens: CredentialTokens(accessToken: "old-access", refreshToken: "old-refresh"),
+            userID: 42
+        )
+        let targetEnvelope = CredentialEnvelope(
+            tokens: CredentialTokens(accessToken: "target-access", refreshToken: "target-refresh"),
+            userID: 42
+        )
+        let newerEnvelope = CredentialEnvelope(
+            tokens: CredentialTokens(accessToken: "newer-access", refreshToken: "newer-refresh"),
+            userID: 84
+        )
+        let publication = CredentialPublication(
+            target: targetEnvelope,
+            baselineEnvelope: oldEnvelope,
+            baselineAccessToken: "old-access",
+            baselineRefreshToken: "old-refresh",
+            baselineUserID: "42"
+        )
+        let storage = RecordingCredentialStorage(
+            envelope: newerEnvelope,
+            legacy: LegacyCredentialMaterial(
+                accessToken: "newer-access",
+                refreshToken: "newer-refresh"
+            ),
+            pendingPublication: publication
+        )
+        let session = makeCredentialSession(storage: storage)
+
+        let accessToken = try await session.accessToken(for: .required)
+
+        XCTAssertEqual(accessToken, "newer-access")
+        XCTAssertEqual(storage.envelope, newerEnvelope)
+        XCTAssertEqual(storage.legacy?.completeTokens, newerEnvelope.tokens)
+        guard case .missing = storage.readPendingPublication() else {
+            return XCTFail("Expected the superseded publication to be discarded")
+        }
+    }
+
+    func testPendingPublicationDoesNotResurrectDeletedCredentials() async {
+        let oldEnvelope = CredentialEnvelope(
+            tokens: CredentialTokens(accessToken: "old-access", refreshToken: "old-refresh"),
+            userID: 42
+        )
+        let publication = CredentialPublication(
+            target: CredentialEnvelope(
+                tokens: CredentialTokens(
+                    accessToken: "target-access",
+                    refreshToken: "target-refresh"
+                ),
+                userID: 42
+            ),
+            baselineEnvelope: oldEnvelope,
+            baselineAccessToken: "old-access",
+            baselineRefreshToken: "old-refresh",
+            baselineUserID: "42"
+        )
+        let storage = RecordingCredentialStorage(pendingPublication: publication)
+        let session = makeCredentialSession(storage: storage)
+
+        do {
+            _ = try await session.accessToken(for: .required)
+            XCTFail("Expected deleted credentials to remain signed out")
+        } catch {
+            XCTAssertEqual(ClientFailure.classify(error), .authenticationRequired)
+        }
+        XCTAssertNil(storage.envelope)
+        XCTAssertNil(storage.legacy)
+        guard case .missing = storage.readPendingPublication() else {
+            return XCTFail("Expected the stale publication to be discarded")
+        }
     }
 
     func testInterruptedSignInAccessLegCannotTakeOverEnvelope() async {
@@ -731,6 +923,8 @@ private final class RecordingCredentialStorage: CredentialMaterialStoring,
     private let lock = NSLock()
     private var storedEnvelope: CredentialEnvelope?
     private var storedLegacy: LegacyCredentialMaterial?
+    private var storedPendingPublication: CredentialPublication?
+    private var storedUserID: String?
     private let isUnavailable: Bool
     private let publishLegacyFails: Bool
     private let deleteFails: Bool
@@ -738,12 +932,15 @@ private final class RecordingCredentialStorage: CredentialMaterialStoring,
     init(
         envelope: CredentialEnvelope? = nil,
         legacy: LegacyCredentialMaterial? = nil,
+        pendingPublication: CredentialPublication? = nil,
         isUnavailable: Bool = false,
         publishLegacyFails: Bool = false,
         deleteFails: Bool = false
     ) {
         storedEnvelope = envelope
         storedLegacy = legacy
+        storedPendingPublication = pendingPublication
+        storedUserID = envelope.map { String($0.userID) }
         self.isUnavailable = isUnavailable
         self.publishLegacyFails = publishLegacyFails
         self.deleteFails = deleteFails
@@ -773,13 +970,52 @@ private final class RecordingCredentialStorage: CredentialMaterialStoring,
         }
     }
 
+    func readPendingPublication() -> CredentialStoreRead<CredentialPublication> {
+        if isUnavailable { return .unavailable }
+        return lock.withLock {
+            storedPendingPublication.map(CredentialStoreRead.value) ?? .missing
+        }
+    }
+
     func publishEnvelopeAndLegacy(_ envelope: CredentialEnvelope) throws {
-        lock.withLock {
-            storedEnvelope = envelope
-            storedLegacy = LegacyCredentialMaterial(
-                accessToken: envelope.tokens.accessToken,
-                refreshToken: envelope.tokens.refreshToken
+        let publication = lock.withLock {
+            CredentialPublication(
+                target: envelope,
+                baselineEnvelope: storedEnvelope,
+                baselineAccessToken: storedLegacy?.accessToken,
+                baselineRefreshToken: storedLegacy?.refreshToken,
+                baselineUserID: storedUserID
             )
+        }
+        lock.withLock { storedPendingPublication = publication }
+        try completePendingPublication(publication)
+    }
+
+    func completePendingPublication(_ publication: CredentialPublication) throws {
+        try lock.withLock {
+            guard storedPendingPublication == publication else {
+                throw CredentialStorageError.unavailable
+            }
+            let snapshot = CredentialPublicationSnapshot(
+                envelope: storedEnvelope,
+                accessToken: storedLegacy?.accessToken,
+                refreshToken: storedLegacy?.refreshToken,
+                userID: storedUserID
+            )
+            guard publication.permits(snapshot) else {
+                if publication.isClearlySuperseded(by: snapshot) {
+                    storedPendingPublication = nil
+                    return
+                }
+                throw CredentialStorageError.unavailable
+            }
+            storedEnvelope = publication.target
+            storedLegacy = LegacyCredentialMaterial(
+                accessToken: publication.target.tokens.accessToken,
+                refreshToken: publication.target.tokens.refreshToken
+            )
+            storedUserID = String(publication.target.userID)
+            storedPendingPublication = nil
         }
     }
 
@@ -802,6 +1038,8 @@ private final class RecordingCredentialStorage: CredentialMaterialStoring,
         lock.withLock {
             storedEnvelope = nil
             storedLegacy = nil
+            storedPendingPublication = nil
+            storedUserID = nil
         }
     }
 }

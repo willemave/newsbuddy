@@ -50,6 +50,11 @@ final class AppRuntime {
     /// The app root is the only product-level lifecycle writer.
     func record(_ phase: AppLifecycle.Phase) {
         lifecycle.record(phase)
+        if phase == .active {
+            authenticationController.resumeRestorationIfNeeded(
+                for: lifecycle.activation
+            )
+        }
         authenticatedSession?.synchronize(with: lifecycle)
     }
 }

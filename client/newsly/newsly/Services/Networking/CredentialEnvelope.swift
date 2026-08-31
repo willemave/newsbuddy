@@ -29,6 +29,67 @@ struct CredentialEnvelope: Codable, Equatable, Sendable {
     }
 }
 
+/// Durable intent written before a multi-key credential publication starts.
+/// The baseline lets recovery prove that every visible leg is either the old
+/// value or this publication's target before it resumes the write sequence.
+struct CredentialPublication: Codable, Equatable, Sendable {
+    let target: CredentialEnvelope
+    let baselineEnvelope: CredentialEnvelope?
+    let baselineAccessToken: String?
+    let baselineRefreshToken: String?
+    let baselineUserID: String?
+
+    func permits(_ snapshot: CredentialPublicationSnapshot) -> Bool {
+        Self.matches(snapshot.envelope, baseline: baselineEnvelope, target: target)
+            && Self.matches(
+                snapshot.accessToken,
+                baseline: baselineAccessToken,
+                target: target.tokens.accessToken
+            )
+            && Self.matches(
+                snapshot.refreshToken,
+                baseline: baselineRefreshToken,
+                target: target.tokens.refreshToken
+            )
+            && Self.matches(
+                snapshot.userID,
+                baseline: baselineUserID,
+                target: String(target.userID)
+            )
+    }
+
+    func isClearlySuperseded(by snapshot: CredentialPublicationSnapshot) -> Bool {
+        let baselineHadMaterial = baselineEnvelope != nil
+            || baselineAccessToken != nil
+            || baselineRefreshToken != nil
+            || baselineUserID != nil
+        if baselineHadMaterial, snapshot.isEmpty {
+            return true
+        }
+        guard let currentEnvelope = snapshot.envelope else { return false }
+        return baselineEnvelope != currentEnvelope && target != currentEnvelope
+    }
+
+    private static func matches<Value: Equatable>(
+        _ current: Value?,
+        baseline: Value?,
+        target: Value
+    ) -> Bool {
+        current == baseline || current == target
+    }
+}
+
+struct CredentialPublicationSnapshot: Equatable, Sendable {
+    let envelope: CredentialEnvelope?
+    let accessToken: String?
+    let refreshToken: String?
+    let userID: String?
+
+    var isEmpty: Bool {
+        envelope == nil && accessToken == nil && refreshToken == nil && userID == nil
+    }
+}
+
 /// Loose material written by already-distributed builds. It cannot establish
 /// identity until `/auth/me` validates it and promotes it into an envelope.
 struct LegacyCredentialMaterial: Equatable, Sendable {
