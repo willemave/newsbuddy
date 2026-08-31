@@ -8,7 +8,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -23,6 +23,10 @@ from app.services.onboarding.audio_plan_heuristics import (
 from app.services.onboarding.config import AUDIO_PLAN_SYSTEM_PROMPT
 from app.services.onboarding.internal_models import _AudioPlanOutput
 from app.services.onboarding.llm_plans import _format_audio_plan_prompt
+from app.services.onboarding.model_routing import (
+    OpenRouterReasoningEffort,
+    private_openrouter_model_settings,
+)
 
 DEEPSEEK_V4_FLASH_0731 = "openrouter:deepseek/deepseek-v4-flash-0731"
 DEFAULT_JUDGE_MODEL = "gpt-5.6-sol"
@@ -38,7 +42,7 @@ class OnboardingEvalCandidate:
     alias: str
     model_spec: str
     provider_tag: str | None = None
-    reasoning_effort: str | None = None
+    reasoning_effort: OpenRouterReasoningEffort | None = None
 
 
 ONBOARDING_EVAL_CANDIDATES: dict[str, OnboardingEvalCandidate] = {
@@ -180,22 +184,12 @@ def build_candidate_model_settings(
     timeout_seconds: int,
 ) -> ModelSettings:
     """Build fail-closed settings for a specific candidate route."""
-    settings = dict(base_settings or {})
-    settings["timeout"] = timeout_seconds
-    if candidate.provider_tag:
-        settings["openrouter_provider"] = {
-            "order": [candidate.provider_tag],
-            "allow_fallbacks": False,
-            "require_parameters": True,
-            "data_collection": "deny",
-            "zdr": True,
-        }
-        settings["openrouter_reasoning"] = (
-            {"effort": candidate.reasoning_effort, "exclude": True}
-            if candidate.reasoning_effort
-            else {"enabled": False, "exclude": True}
-        )
-    return cast(ModelSettings, settings)
+    return private_openrouter_model_settings(
+        timeout_seconds=timeout_seconds,
+        base_settings=base_settings,
+        provider_tag=candidate.provider_tag,
+        reasoning_effort=candidate.reasoning_effort,
+    )
 
 
 def compute_audio_plan_checks(plan: _AudioPlanOutput) -> tuple[dict[str, bool], float]:
