@@ -10,6 +10,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import requests
@@ -164,7 +165,9 @@ DEFAULT_RUNWARE_MODEL = "bytedance:seedream@5.0-lite"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-5.4-image-2"
 
 
-def gen_runware(prompt: str, out: Path, model: str = DEFAULT_RUNWARE_MODEL) -> None:
+def gen_runware(
+    prompt: str, out: Path, model: str = DEFAULT_RUNWARE_MODEL, size: int = 2048
+) -> None:
     req: dict[str, str | bool | int] = {
         "taskType": "imageInference",
         "taskUUID": str(uuid4()),
@@ -174,8 +177,8 @@ def gen_runware(prompt: str, out: Path, model: str = DEFAULT_RUNWARE_MODEL) -> N
         "positivePrompt": prompt,
         "model": model,
         "numberResults": 1,
-        "width": 2048,
-        "height": 2048,
+        "width": size,
+        "height": size,
     }
     r = requests.post(
         RUNWARE_URL,
@@ -191,15 +194,35 @@ def gen_runware(prompt: str, out: Path, model: str = DEFAULT_RUNWARE_MODEL) -> N
     print(f"  cost: ${payload['data'][0].get('cost')}")
 
 
-def gen_openrouter(prompt: str, out: Path, model: str = DEFAULT_OPENROUTER_MODEL) -> None:
+def gen_openrouter(
+    prompt: str,
+    out: Path,
+    model: str = DEFAULT_OPENROUTER_MODEL,
+    reference: Path | None = None,
+) -> None:
+    """Generate an image, optionally editing from a reference instead of from scratch.
+
+    Text-only prompts drift: re-describing an existing mark reliably produces a different
+    mark. Passing the original as `reference` keeps the silhouette and lets the prompt
+    change only what it names.
+    """
+    if reference is None:
+        content: str | list[dict[str, object]] = prompt
+    else:
+        ref_b64 = base64.b64encode(reference.read_bytes()).decode()
+        content = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{ref_b64}"}},
+        ]
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": content}],
+        "modalities": ["image", "text"],
+    }
     r = requests.post(
         OPENROUTER_URL,
         headers={"Authorization": f"Bearer {ENV['OPENROUTER_API_KEY']}"},
-        json={
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "modalities": ["image", "text"],
-        },
+        json=body,
         timeout=600,
     )
     payload = r.json()

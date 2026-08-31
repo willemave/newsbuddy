@@ -1,0 +1,247 @@
+window.PALETTES_R7 = {
+  "r7-01-enso-petrol": {
+    "bg": "#a89888",
+    "swatches": [
+      "#2a5053",
+      "#5d6d66"
+    ],
+    "accent": "#2a5053",
+    "accent_strong": "#2a5053",
+    "ink": "#112526"
+  },
+  "r7-02-enso-forest": {
+    "bg": "#f8e8e8",
+    "swatches": [
+      "#2b4a3a",
+      "#9ea693"
+    ],
+    "accent": "#2b4a3a",
+    "accent_strong": "#2b4a3a",
+    "ink": "#2b4a3a"
+  },
+  "r7-03-enso-ink": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#262a2d",
+      "#aba191"
+    ],
+    "accent": "#aba191",
+    "accent_strong": "#7f725d",
+    "ink": "#262a2d"
+  },
+  "r7-04-enso-indigo": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#292348",
+      "#888083"
+    ],
+    "accent": "#292348",
+    "accent_strong": "#292348",
+    "ink": "#292348"
+  },
+  "r7-05-enso-plum": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#602f46",
+      "#a98b8b"
+    ],
+    "accent": "#602f46",
+    "accent_strong": "#602f46",
+    "ink": "#602f46"
+  },
+  "r7-06-enso-moss": {
+    "bg": "#e8d8c8",
+    "swatches": [
+      "#47553a",
+      "#a5a083",
+      "#646d50"
+    ],
+    "accent": "#47553a",
+    "accent_strong": "#47553a",
+    "ink": "#47553a"
+  },
+  "r7-07-enso-olive": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#504b2d",
+      "#938c71"
+    ],
+    "accent": "#504b2d",
+    "accent_strong": "#504b2d",
+    "ink": "#504b2d"
+  },
+  "r7-08-enso-slate": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#3f5262",
+      "#6f7c84"
+    ],
+    "accent": "#3f5262",
+    "accent_strong": "#3f5262",
+    "ink": "#3f5262"
+  },
+  "r7-09-enso-espresso": {
+    "bg": "#f8f8d8",
+    "swatches": [
+      "#3f2c25",
+      "#ada094",
+      "#5b473f"
+    ],
+    "accent": "#3f2c25",
+    "accent_strong": "#3f2c25",
+    "ink": "#3f2c25"
+  },
+  "r7-10-enso-oxblood": {
+    "bg": "#f8f8d8",
+    "swatches": [
+      "#53070b",
+      "#761a1b",
+      "#ae8076"
+    ],
+    "accent": "#53070b",
+    "accent_strong": "#53070b",
+    "ink": "#53070b"
+  },
+  "r7-11-enso-pine": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#264438",
+      "#657768"
+    ],
+    "accent": "#264438",
+    "accent_strong": "#264438",
+    "ink": "#264438"
+  },
+  "r7-12-enso-navy": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#213552",
+      "#adaeab",
+      "#3e4e64"
+    ],
+    "accent": "#213552",
+    "accent_strong": "#213552",
+    "ink": "#213552"
+  },
+  "r7-13-reader-petrol": {
+    "bg": "#a89888",
+    "swatches": [
+      "#3b5b60",
+      "#687972"
+    ],
+    "accent": "#3b5b60",
+    "accent_strong": "#3b5b60",
+    "ink": "#19292c"
+  },
+  "r7-14-reader-forest": {
+    "bg": "#f8f8d8",
+    "swatches": [
+      "#416c4e",
+      "#264b35"
+    ],
+    "accent": "#264b35",
+    "accent_strong": "#264b35",
+    "ink": "#264b35"
+  },
+  "r7-15-reader-ink": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#292b31",
+      "#88867f"
+    ],
+    "accent": "#292b31",
+    "accent_strong": "#292b31",
+    "ink": "#292b31"
+  },
+  "r7-16-reader-indigo": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#3a356e",
+      "#81727c"
+    ],
+    "accent": "#3a356e",
+    "accent_strong": "#3a356e",
+    "ink": "#3a356e"
+  },
+  "r7-17-reader-plum": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#7a3c54",
+      "#a46f78"
+    ],
+    "accent": "#7a3c54",
+    "accent_strong": "#7a3c54",
+    "ink": "#7a3c54"
+  },
+  "r7-18-reader-moss": {
+    "bg": "#e8e8c8",
+    "swatches": [
+      "#526742",
+      "#9a9c6d"
+    ],
+    "accent": "#526742",
+    "accent_strong": "#526742",
+    "ink": "#526742"
+  },
+  "r7-19-reader-olive": {
+    "bg": "#f8e8c8",
+    "swatches": [
+      "#5c643f",
+      "#787b57"
+    ],
+    "accent": "#5c643f",
+    "accent_strong": "#5c643f",
+    "ink": "#5c643f"
+  },
+  "r7-20-reader-slate": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#2e3f51",
+      "#47586b",
+      "#879095"
+    ],
+    "accent": "#2e3f51",
+    "accent_strong": "#2e3f51",
+    "ink": "#2e3f51"
+  },
+  "r7-21-reader-espresso": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#4a322e",
+      "#81635a"
+    ],
+    "accent": "#4a322e",
+    "accent_strong": "#4a322e",
+    "ink": "#4a322e"
+  },
+  "r7-22-reader-oxblood": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#550510",
+      "#a3443f"
+    ],
+    "accent": "#550510",
+    "accent_strong": "#550510",
+    "ink": "#550510"
+  },
+  "r7-23-reader-pine": {
+    "bg": "#f8e8d8",
+    "swatches": [
+      "#3b6c4f",
+      "#7f9e80"
+    ],
+    "accent": "#3b6c4f",
+    "accent_strong": "#3b6c4f",
+    "ink": "#3b6c4f"
+  },
+  "r7-24-reader-navy": {
+    "bg": "#f8f8e8",
+    "swatches": [
+      "#23375c",
+      "#797c85"
+    ],
+    "accent": "#23375c",
+    "accent_strong": "#23375c",
+    "ink": "#23375c"
+  }
+};

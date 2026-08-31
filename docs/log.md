@@ -27,6 +27,36 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-30 — `main` — Make Codex worktree npm setup reproducible
+
+- **Status:** Complete locally; not committed.
+- **Scope:** Codex worktree bootstrap dependency installation.
+- **Decisions:** Keep `npm ci` as the deterministic setup command and track the existing valid npm lockfile instead of weakening setup to `npm install`.
+- **Changes:** Removed the `package-lock.json` ignore rule so fresh worktrees receive the dependency lockfile required by `npm ci`.
+- **Validation:** The current lockfile passes `npm ci --dry-run --ignore-scripts`; Git now exposes it as a repository addition, and the npm setup failure was reproduced as missing-lockfile `EUSAGE` in fresh Codex worktrees.
+- **Remaining:** Commit the `.gitignore`, `package-lock.json`, and log changes before expecting newly created worktrees to contain the fix.
+- **Commits:** Uncommitted.
+
+### 2026-08-30 — `main` — Remove iOS 26 deprecation warnings
+
+- **Status:** Complete locally; not committed or distributed.
+- **Scope:** Apple and X authentication presentation anchors, styled SwiftUI text composition, and the selectable `DigDeeperTextView` implementation.
+- **Decisions:** Resolve authentication anchors from the foreground connected scene and use `UIWindow(windowScene:)` only when that scene has no existing window. Preserve mixed text styling through SwiftUI `Text` interpolation. Remove the unused adaptive-color callback rather than replacing its deprecated trait observer with new lifecycle machinery; active wrappers already refresh rendered colors from SwiftUI environment changes.
+- **Changes:** Replaced detached `ASPresentationAnchor()` fallbacks, migrated the two deprecated `Text + Text` expressions, and removed the unreferenced `adaptiveTextColor` path and its `traitCollectionDidChange` override.
+- **Validation:** The app builds successfully on iPhone 17 Pro, iOS 26.5, with none of the reported deprecation warnings; the only remaining build-log warning is Xcode's App Intents metadata skip for a target without an AppIntents dependency. All 29 focused authentication, X integration, and Briefing figure/text-view tests pass serially. `git diff --check` passes.
+- **Remaining:** None for this warning cleanup. No commit, push, or iOS distribution was authorized.
+- **Commits:** Uncommitted.
+
+### 2026-08-29 — `main` — Close lifecycle and credential review findings
+
+- **Status:** Complete locally; not committed, pushed, distributed, or deployed.
+- **Scope:** iOS lifecycle restoration, Content Detail reader resumption, credential publication/logout semantics, shared onboarding model routing, and brand exploration asset tracking.
+- **Decisions:** Make recoverable authentication failure an explicit activation-consumed obligation; restart a still-presented reader body without remounting its cover; distinguish stale terminal events from deletion failures with a typed result; and journal a complete credential target plus baseline before changing any split Keychain leg so recovery never has to guess authority. Keep unjournaled divergence fail-closed. Reuse pydantic-ai's typed OpenRouter settings in one production/eval helper. Expose only the R2/R3 generated brand image folders through scoped ignore exceptions.
+- **Changes:** Wired `AppRuntime` activation to authentication retry, resumed cancelled reader-body work, added crash-recoverable credential publication, made stale terminal cleanup silent, consolidated onboarding route settings, and added focused regression coverage for the state-machine transitions and every credential write boundary.
+- **Validation:** All 625 native iOS tests pass on the Newsly Regression iOS 26.5 Simulator, including 56 focused authentication, credential-session, and Content Detail cases. All 34 focused onboarding/client architecture tests pass. Ruff, mypy, onboarding production/eval route tests, the module-size guard, current brand script lint/type/format checks, and `git diff --check` pass.
+- **Remaining:** Physical-device app/Share Extension publication-interruption testing remains appropriate for release acceptance. No commit, push, deployment, production mutation, or iOS distribution was authorized.
+- **Commits:** Uncommitted.
+
 ### 2026-08-29 — `main` — Preserve authenticated UI coverage in unsigned release builds
 
 - **Status:** Complete locally and committed; release validation in progress.
@@ -58,6 +88,105 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** 16/16 v2 generations succeeded at $0.138 each (~$2.21 total); both toggle branches verified via headless Chrome; `ruff check` clean.
 - **Remaining:** Recraft/Ideogram require fixed 2048² dimensions — handled in `bakeoff.py` only, not in `generate_logos.py`. Vector/SVG output for the winning mark is still unexplored.
 - **Commits:** This brand bake-off follow-up commit.
+
+### 2026-08-29 — `main` — Brand exploration round 2: single-glyph reduction
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Round 1 read the Japanese brief as iconography (torii, daruma, origami), which was too literal. Round 2 keeps Japanese influence as sensibility only — restraint, negative space, one warm accent — and the prompt now explicitly forbids that motif list. Each concept reduces to a single geometric glyph that must survive at 16px. 25 concepts spread 5-per-model across the pro tier (Seedream 5.0 Pro, Nano Banana Pro, Recraft V4.1 Pro, Ideogram 4.0, GPT Image 2), chosen for idea diversity rather than model comparison.
+- **Changes:** `concepts_r2.py` (concept + model registry, single source of truth), `generate_r2.py` (emits `concepts_r2.js` for the site), `gen_runware` gained a `size` param, `extract_palettes.py` covers the r2 set, `index.html` renders per-set concept lists behind a three-way round switcher with a per-set blurb.
+- **Validation:** 25/25 generated (~$3.30); `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Three Recraft outputs collide with existing marks — Lifted Quadrant reads as the Microsoft logo, Signal as the Wi-Fi glyph, and Plane is off-palette. Exclude or re-prompt before shortlisting. Vector output still unexplored. Note 2048² is the only square every model in `MODELS` accepts; Nano Banana Pro rejects 1536.
+- **Commits:** Uncommitted
+
+### 2026-08-29 — `main` — Brand exploration round 3: paper-craft objects
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Round 2's flat glyphs reduced too far. Direction rebuilt from the user's picked favorites (Ensō & Paper, Washi Bubble, Hanko Seal, the folded-paper marks, Ribbon Eyes), whose shared DNA is a tactile made object with soft shading, visible creases, and a hint of character. Two prompt corrections were needed after test renders: the first style base produced photorealistic product shots, so it now demands a flat 2D illustration and bans photography/3D; the second still drifted into three-quarter perspective, so it now requires flat-on front-facing composition. 25 concepts across the pro tier, with Recraft V4.1 Pro cut to 2 after collisions in both prior rounds.
+- **Changes:** `concepts_r3.py`; `generate_round.py` replaces the per-round scripts (`generate_r2.py` deleted) and takes a round name, loading `concepts_<round>.py` and emitting `concepts_<round>.js`; `extract_palettes.py` covers r3; `index.html` switcher extended to four sets with round 3 as default.
+- **Validation:** 25/25 generated (~$2.90); `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Envelope Lift and Wax Seal both read as generic mail icons; Card Stack came back with scenic art inside it; Ribbon Loop reads as an awareness ribbon. Exclude before shortlisting. Vector output still unexplored — no round has produced a true vector.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 4: calm, reading, knowledge
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Two corrections from round 3. Paper folding is no longer the driving concept — round 3 turned every idea into an origami variation — while the soft illustrated texture stays. And every prior round came out orange because the shared style base asked for "one warm accent"; the palette is now specified per concept and deliberately varied (sage, slate, plum, indigo, teal, moss, olive, mauve), with orange named as a color to avoid. Carried forward: the Ensō brush-ring direction with its warm-grey-plus-blush palette, and the cute bookmark from round 2's Ribbon Eyes. Recraft V4.1 Pro retired after producing the weakest tiles in all three prior rounds; 24 concepts, 6 each across the remaining four models.
+- **Changes:** `concepts_r4.py`; `extract_palettes.py` covers r4; `index.html` switcher extended to five sets with round 4 as default, hero copy and date updated.
+- **Validation:** 24/24 generated (~$2.30); extracted palettes confirm the spread (indigo `#1d2548`, teal `#2a656d`, plum `#53233a`, sage `#9ca48a`, slate `#2e435e`, olive `#c7b57e`); `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Per-concept palette specification is the mechanism that fixed color diversity — keep it in any future round. Vector output still unexplored; no round has produced a true vector, so the winning mark still needs redrawing.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 5: shortlist variations
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Convergence round rather than exploration. The three shortlisted marks — Ensō & Book (r4-01), Bookmark Buddy (r4-07), Reader (r4-21) — each rendered in eight color schemes with light form variation, holding the form recognizable so palettes compare directly. Each family stays on the model that produced its original, since the rendering character being selected for is partly the model's.
+- **Changes:** `concepts_r5.py`; `extract_palettes.py` covers r5; `index.html` switcher extended to six sets with round 5 as default; hero copy, blurb escaping and date corrected.
+- **Validation:** 24/24 generated; `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Runware credits were exhausted mid-run — the five Nano Banana Pro bookmarks were recovered by routing to `google/gemini-3-pro-image` on OpenRouter, which is the same underlying model. Runware needs a top-up at my.runware.ai/wallet before any further Seedream or Ideogram work; the OpenRouter path still works. Vector output still unexplored.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 6: darker palettes and hybrids
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Shortlist narrowed to Ensō · Charcoal, Ensō · Teal, Bookmark · Sage, Reader · Warm Grey. Round split in two: ten palettes pushed darker with the accent constrained to a minority of the mark (the style base now states this explicitly, since earlier rounds let the accent grow to half the shape), then fourteen hybrids crossing the ensō ring, book, bookmark ribbon and blob reader. Bookmark concepts now specify squared shoulders, which fixed the ghost read flagged in round 5.
+- **Changes:** `concepts_r6.py`; `extract_palettes.py` covers r6; `index.html` switcher extended to seven sets with round 6 as default, hero copy updated.
+- **Validation:** 24/24 generated; `ruff check` clean; site verified via headless Chrome and over Tailscale.
+- **Remaining:** Runware is out of credits and needs a top-up at my.runware.ai/wallet — a single test call succeeded on residual balance, which is misleading, so verify with more than one request. This round ran entirely on OpenRouter; Seedream 5.0 Pro has no OpenRouter route, so the ensō concepts fell back to Nano Banana Pro. The two strongest results, Bookmark × Spectacles (r6-15) and Reader × Ribbon Tail (r6-16), are the same fusion reached from opposite directions. Vector output still unexplored.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 7: finalists, and an app-accurate mock
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only. No app code touched — the simulator was used read-only for reference screenshots.
+- **Decisions:** Two finalists locked: Ensō · Petrol (r6-03) and Reader × Ribbon Tail (r6-16), each rendered across twelve palettes on one model so color is the only variable. Separately, the site's phone mock was rebuilt against the real app rather than invention. The previous mock showed a card feed with thumbnails, read-time chips and unread dots; the actual Briefing has none of those. It is a continuous editorial column on a single 20pt gutter, where stories are inline underlined accent links inside running prose, figures float in the text, and read state is expressed as 0.72 opacity rather than badges. Selected pills invert to ink, not accent. The mock now uses the app's real typefaces (Lora serif + Lato sans) and its two-tab floating capsule bar (Briefing, Knowledge).
+- **Changes:** `concepts_r7.py` (palette list drives concept generation); `extract_palettes.py` covers r7; `index.html` phone mock markup and CSS fully replaced with Briefing-column + long-form-reader screens, Lora/Lato added, `TABS` corrected to the real two tabs; switcher extended to eight sets with round 7 as default. Reference screenshots saved to `app_reference/`.
+- **Validation:** 24/24 generated; `ruff check` clean; site verified via headless Chrome and over Tailscale. Reference screens captured from `org.willemaw.newsly.local` on booted sim E2D8054B against the local API.
+- **Remaining:** The Ensō family is highly consistent across all twelve palettes; the Reader family is not — Ink, Oxblood, Pine and Navy lost or distorted the ribbon tail and would need regeneration. Near-monochrome palettes (Ensō · Ink) leave inline links nearly indistinguishable from body text in the mock, which is a real legibility finding, not a mock bug. Runware still needs a top-up. Vector output still unexplored.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand exploration round 8: image-to-image recolors and two-tone
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only.
+- **Decisions:** Round 7's Reader variants were wrong — re-describing an existing mark in text reliably drifts it, and the arched top and deep swallow-tail collapsed back into the round blob from round 4. Fixed at the root by switching to image-to-image: `gen_openrouter` now accepts a `reference` image, and `generate_round.py` reads an optional `REFS` mapping from the round module, so named concepts are edited rather than regenerated. Silhouettes are now held exactly and only color changes. Second half adds two-tone treatments — exactly two flat inks, all shading removed — which also serves as the print / favicon / monochrome-icon reduction.
+- **Changes:** `generate_logos.py` (`reference` param, base64 image content part), `generate_round.py` (`REFS` support), `concepts_r8.py`, `extract_palettes.py` covers r8. `index.html` gained a `.concept.twotone` mode that collapses the phone mock to two inks — cards and tints resolve to the ground, structure carried by hairline rules and outlines — applied automatically to concepts whose id contains `-2t-`.
+- **Validation:** 28/28 generated; every Reader recolor retained the arched top, swallow-tail and spectacles, confirming the image-to-image fix; `ruff check` clean; two-tone app shots verified via headless Chrome; site verified over Tailscale.
+- **Remaining:** Use image-to-image for any further variation of a chosen mark — text re-description is not reliable for this. Runware still needs a top-up (round ran on OpenRouter). Vector output still unexplored; the two-tone flats are the closest thing to a traceable source and are the best candidates to vectorize.
+- **Commits:** Uncommitted
+
+### 2026-08-30 — `main` — Brand direction selected; app-screen variants
+
+- **Status:** Complete
+- **Scope:** `docs/brand-exploration-2026-08/` only. Design selection is recorded here; no app code changed yet.
+- **Decisions:** Direction chosen. **App icon = Ensō · Slate** (`images_r8/r8-03-enso-slate.png`, ring `#404c60`, book `#edd9b3`). **Chat and Knowledge character = Reader · Indigo** (`images_r8/r8-10-reader-indigo.png`, body `#383061`, spectacles `#d3bc78`). The two marks intentionally differ: the ensō carries the app identity, the reader appears only where the app speaks to the user. Screen backgrounds no longer derive from the generated images — those extracted grounds were far too saturated to sit behind body text — and are instead hand-set near-white per scheme.
+- **Changes:** New `app-screens.html` presenting four screens (Briefing, Reader, Chat, Knowledge) across four light schemes: Slate on cool grey (the app's real `#f4f5f7` surface), Slate on warm paper, Ink on paper, and Indigo. Chat and Knowledge screens are new — neither existed in the earlier mocks. Linked from `index.html`.
+- **Validation:** Rendered via headless Chrome; both pages verified over Tailscale.
+- **Chat/Knowledge accuracy:** Both screens were rebuilt against the real implementations after the first pass proved wrong. Chat has **no avatars and no suggested-prompt chips** — messages are bubbles on both sides (assistant left, `surfaceContainer` tint, full column width; user right, warm `chatUserBubble` `#efe7d8`, 72px left gutter; both radius 14, Lato 13), with a timestamp under each, centered process-summary capsules, a thinking bubble carrying dots + elapsed timer + status line, and a composer dock of `+` / "Message" field / mic. The tab bar is hidden on chat. Knowledge is not cards or a deck-with-progress; it is the scrolling editorial masthead ("Knowledge" in Lora 44) plus an "Ask anything…" dock, then a day-grouped timeline of flat 40×40-thumbnail rows whose type is carried entirely by a kicker (`CHAT · 3H AGO`, `DECK · 12M AGO`, `SAVED · THE VERGE · 1D AGO`), with audio rows swapping the chevron for a play circle.
+- **Open design decision:** because the real chat has no avatar slot, the chosen Reader character has nowhere to live. It is currently placed in the chat session header as the smallest change that gives it a home; putting it on every assistant message would be a real design change rather than a re-skin. Flagged prominently on the page.
+- **Remaining:** The Ink scheme carries a known constraint: body ink and accent are close enough that inline links depend on underline plus weight to separate. Vector output still unexplored — the chosen ensō is a raster brush texture and will need redrawing or tracing for a real app icon asset.
+
+### 2026-08-30 — `main` — Slate brand implemented in the iOS client
+
+- **Status:** Complete
+- **Scope:** iOS client. Plan in `docs/initiatives/2026-08-30-slate-brand-rollout-plan.md`.
+- **Decisions:** Scheme is **Slate on warm paper**. App icon is Ensō · Slate; the Reader · Indigo buddy appears only where the app speaks to the user. `ReaderPalette.swift` is the single source of truth for color, so the whole accent change is one file — amber `#99610a` → slate `#3f4c60`, cool grey neutrals → warm paper, and the dark ramp warmed to match with `brandPrimary` lifted to `#93a7c4` rather than substituting another hue.
+- **Trap found:** `Assets.xcassets/AccentColor.colorset` must be kept in lockstep with `brandPrimary` — `ReaderPaletteContrastTests.testGlobalAccentAssetMatchesBrandPrimary` asserts it, and editing only `ReaderPalette.swift` fails that test. Updated both.
+- **Changes:** `Shared/ReaderPalette.swift` (full light+dark ramp); `AccentColor.colorset`; `AppIcon.appiconset` (ensō replaces the purple penguin, light + dark); new `BuddyMark.imageset` and `AppMark.imageset` with `appearances` dark variants so `Image("BuddyMark")` resolves per mode with no `colorScheme` branching in views. Buddy placed in `ChatComposerDock` (leading menu button, menu wiring and `knowledge.mode_menu` identifier untouched) and `DetailActionBar` (new `buddyActionIcon()` sibling so the shared `actionIcon` helper is unchanged). App icon added to `LoadingView` (session-restore splash) and `SettingsBrandHeader`. New `OnboardingIntroStep` on the previously-dead `.intro` case, with `OnboardingViewModel.step` defaulting to `.intro`; retired `Image("Mascot")` in `LandingView` and `OnboardingChoiceStep`.
+- **Asset pipeline:** `docs/brand-exploration-2026-08/build_assets.py` cuts the baked cream field to real alpha and produces the dark buddy by remapping the body hue while protecting the spectacle gold. Re-run it if the source renders change.
+- **Validation:** Clean build succeeds with no warnings. `ReaderPaletteContrastTests` pass (2/2) covering both modes. Verified on simulator: `surfacePrimary` samples exactly `#f8f6f1` light and `#1f1e1a` on secondary surfaces dark; Settings shows the ensō; the buddy renders in the composer and at the end of the detail action bar, resolving its dark variant correctly.
+- **Onboarding verified (follow-up):** Reached the flow via Debug Menu → "Reset Current User Onboarding". All five steps captured to `docs/brand-exploration-2026-08/onboarding_shots/` with a combined `onboarding_flow.png`. This exposed a redundancy the plan missed: the existing choice step was itself an introduction ("MEET YOUR GUIDE / Newsbuddy / I'm going to help you get onboarded"), so with the new intro ahead of it the user met the buddy twice in a row. `OnboardingChoiceStep` now asks its actual question — eyebrow "GETTING STARTED", title "How should we begin?" — with the buddy reduced from 180pt to 92pt so it reads as continuity rather than a second headline. The `onboarding.choice.screen` accessibility identifier was preserved on the new title. Flow confirmed end to end through to the Knowledge tab.
+- **Onboarding redesign (follow-up):** The onboarding chrome never read from `ReaderPalette` — `onboardingSurface` and `onboardingText` in `DesignTokens.swift` hardcoded their own copies of the *old* surfaces (`#f4f5f7` / `#1b1e24`), which is why onboarding stayed off-brand after the palette switch. Both now resolve to `surfacePrimary` / `onSurface`, so onboarding follows the palette from here on.
+- **Changes:** Deleted `WatercolorBackground.swift` — an animated `TimelineView` + `Canvas` drawing four blurred drifting gradient blobs, the single most generic thing in the app. Both consumers (`OnboardingFlowView`, `LandingView`) now sit on flat `surfacePrimary`. Removed the landing title's float animation and its `titleGlow` shadow token, which only existed to sit on that wash. The four `onboardingAmbient*` tokens now resolve to flat palette values instead of the amber/bronze/cream ramp, so the three surfaces still using them lost their amber without needing edits. `cardSurface` is flat `surfaceSecondary` with a hairline border and clamps its corner radius to `CornerRadius.control` (onboarding was using 24–36pt pills against a 14pt app); `primaryButtonBackground` dropped its elevated shadow; `onboardingFooterBackground` dropped `.ultraThinMaterial` and its gradient for flat paper plus a hairline. `onboardingHeaderBlock` moved to `appTitle` with a 54pt hairline rule beneath, matching the reader's byline rule. Progress header switched from 4pt capsules to 1–2px rules in `brandPrimary`. Display type renamed `watercolorDisplay`/`watercolorSubtitle` → `onboardingDisplay`/`onboardingSubtitle` and retuned from Lora 54 to Lora 40, matching the Briefing masthead scale. Landing tagline rewritten off the old "cuddly" voice.
+- **Copy reduction (follow-up):** Titles and buttons now carry the flow; the explanatory subtitles are gone. `onboardingHeaderBlock`'s `subtitle` became optional (`String? = nil`) and every step dropped it — aggregators, audio, loading, reddit, suggestions. The suggestions step's `suggestionsSubtitle` helper was deleted as dead. The choice step lost its subtitle entirely because the two buttons ("Personalize with voice" / "Skip personalization") already state both options. The intro kept one line — "I read your sources each morning and write you one briefing." — since that sentence is the product description and the only thing on the screen that isn't self-evident. Empty states were cut to fragments ("Nothing added automatically.", "No matches.") rather than narrating the next step, which the Continue button already does. Loading-step strings were left alone: they are short progress status, not explanation.
+- **Validation:** Clean build, no warnings. Full flow re-walked and captured to `onboarding_shots/` (`onboarding_flow.png`); dark mode verified on the same flow — ground resolves to `#171613` and the primary CTA correctly inverts to a light fill.
+- **Remaining:** A stale simulator install masked the palette change on first run; a clean build plus uninstall was needed, so re-verify with a clean install rather than an incremental one. Vector redraw of the ensō still outstanding.
+- **Commits:** Uncommitted
+- **Commits:** Uncommitted
 
 ### 2026-08-29 — `main` — Remove Cerebras integration
 

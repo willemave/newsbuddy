@@ -6,7 +6,8 @@
 <title>Newsbuddy — Brand Exploration · August 2026</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;600;800&family=Zen+Maru+Gothic:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- Lora + Lato are the app's real typefaces; the rest is site chrome. -->
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Lato:ital,wght@0,400;0,600;0,700;1,400&family=Shippori+Mincho:wght@500;600;800&family=Zen+Maru+Gothic:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --paper: #f7f1e6;
@@ -100,10 +101,10 @@
   .concept .desc { color: var(--ink-soft); max-width: 68ch; font-size: 15.5px; margin-bottom: 34px; }
 
   .concept-body {
-    display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-    gap: 44px; align-items: start;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: 40px; align-items: start;
   }
-  @media (max-width: 900px) { .concept-body { grid-template-columns: 1fr; } }
+  @media (max-width: 1080px) { .concept-body { grid-template-columns: 1fr; } }
 
   .art-col .main-art {
     border-radius: 20px; overflow: hidden; border: 1px solid rgba(58,53,46,0.08);
@@ -133,79 +134,185 @@
   .role-row .role { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
   .role-row .dot { width: 12px; height: 12px; border-radius: 4px; border: 1px solid rgba(58,53,46,0.15); }
 
-  /* ---------- phone mock ---------- */
-  .phone-col { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+  /* ---------- phone mock: mirrors the real Newsbuddy Briefing + Reader ----------
+     The real Briefing is a continuous editorial column, not a card feed: one 20pt gutter,
+     no card chrome, stories identified by inline underlined accent links and floating
+     figures. Read state is opacity, not badges. Type is Lora (serif) + Lato (sans). */
+  .phone-col { display: flex; gap: 18px; align-items: flex-start; }
   .phone {
-    width: 300px; border-radius: 44px; padding: 12px;
+    width: 266px; flex-shrink: 0; border-radius: 40px; padding: 9px;
     background: #2e2a25;
     box-shadow: 0 24px 60px -20px rgba(46,42,37,0.5), inset 0 0 0 2px #4a443c;
   }
   .screen {
-    border-radius: 34px; overflow: hidden;
+    border-radius: 32px; overflow: hidden; height: 545px; position: relative;
     background: var(--c-bg, #faf6ee);
     color: var(--c-ink, #3a352e);
-    font-family: "Zen Kaku Gothic New", "Zen Maru Gothic", sans-serif;
+    font-family: "Lato", sans-serif;
+    display: flex; flex-direction: column;
   }
-  .statusbar { display: flex; justify-content: space-between; padding: 12px 22px 4px; font-size: 11px; font-weight: 700; color: var(--c-ink); }
-  .app-head { padding: 12px 20px 4px; }
-  .app-head .day { font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; color: var(--c-accent-strong); }
-  .app-head h3 { font-family: "Shippori Mincho", serif; font-size: 23px; font-weight: 800; color: var(--c-ink); line-height: 1.2; margin-top: 2px; }
-  .app-head .progress { margin-top: 10px; height: 4px; border-radius: 4px; background: var(--c-tint-2); overflow: hidden; }
-  .app-head .progress i { display: block; height: 100%; width: 62%; border-radius: 4px; background: var(--c-accent-strong); }
+  .statusbar { display: flex; justify-content: space-between; padding: 10px 18px 2px; font-size: 10px; font-weight: 700; color: var(--c-ink); }
+  .statusbar .sig { letter-spacing: -1px; opacity: 0.7; }
 
-  .hero-card { margin: 14px 16px 0; border-radius: 18px; overflow: hidden; background: var(--c-card, #fff); box-shadow: 0 6px 18px -10px rgba(58,53,46,0.25); }
-  .hero-card .img { height: 92px; background: linear-gradient(120deg, var(--c-tint-1), var(--c-tint-2) 55%, var(--c-tint-3)); position: relative; }
-  .hero-card .img::after {
-    content: ""; position: absolute; inset: 0;
-    background: radial-gradient(circle at 78% 30%, var(--c-accent) 0 16px, transparent 17px),
-                radial-gradient(circle at 78% 30%, var(--c-accent-soft) 22px, transparent 23px);
-    opacity: 0.85;
+  /* ---- Briefing masthead ---- */
+  .masthead { padding: 10px 16px 0; display: flex; align-items: flex-start; gap: 8px; }
+  .masthead .mh-l { flex: 1; min-width: 0; }
+  .kick {
+    font-size: 8px; letter-spacing: 0.15em; text-transform: uppercase;
+    font-weight: 700; color: var(--c-ink-soft);
   }
-  .hero-card .pad { padding: 12px 14px 14px; }
-  .chip { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--c-accent-strong); background: var(--c-tint-1); padding: 3px 9px; border-radius: 99px; }
-  .hero-card h4 { font-size: 14.5px; line-height: 1.35; font-weight: 700; margin-top: 7px; color: var(--c-ink); }
-  .hero-card p { font-size: 11px; color: var(--c-ink-soft); margin-top: 4px; }
+  .masthead h3 {
+    font-family: "Lora", serif; font-size: 30px; font-weight: 600;
+    color: var(--c-ink); line-height: 1.02; margin-top: 5px; letter-spacing: -0.015em;
+  }
+  .listen {
+    display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+    background: color-mix(in srgb, var(--c-accent-strong) 12%, transparent);
+    color: var(--c-accent-strong); border-radius: 99px;
+    padding: 5px 10px; font-size: 9px; font-weight: 700; margin-top: 6px;
+  }
+  .listen svg { width: 10px; height: 10px; }
 
-  .row-card { display: flex; align-items: center; gap: 11px; margin: 10px 16px 0; padding: 10px 12px; border-radius: 14px; background: var(--c-card); }
-  .row-card .thumb { width: 40px; height: 40px; border-radius: 11px; flex-shrink: 0; background: linear-gradient(135deg, var(--c-tint-2), var(--c-tint-1)); position: relative; }
-  .row-card .thumb::after { content: ""; position: absolute; inset: 12px; border-radius: 50%; background: var(--c-accent); opacity: 0.8; }
-  .row-card .tx { min-width: 0; flex: 1; }
-  .row-card .tx b { display: block; font-size: 12px; line-height: 1.35; font-weight: 700; color: var(--c-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .row-card .tx span { font-size: 10px; color: var(--c-ink-soft); }
-  .row-card .unread { width: 8px; height: 8px; border-radius: 50%; background: var(--c-accent-strong); flex-shrink: 0; }
-  .row-card.read { opacity: 0.62; }
-  .row-card.read .unread { background: transparent; border: 1.5px solid var(--c-ink-soft); width: 7px; height: 7px; }
+  /* ---- pill strips: selected pill inverts to ink, not accent ---- */
+  .pills { display: flex; gap: 6px; padding: 11px 16px 0; }
+  .pills.cat { padding-top: 7px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 9.5px; font-weight: 600; color: var(--c-ink);
+    background: var(--c-card); border-radius: 99px; padding: 6px 11px; white-space: nowrap;
+  }
+  .pills.cat .pill { padding: 5px 10px; font-size: 9px; }
+  .pill i { font-style: normal; font-size: 8.5px; font-weight: 700; color: var(--c-accent-strong); }
+  .pill.on { background: var(--c-ink); color: var(--c-bg); }
+  .pill.on i { color: color-mix(in srgb, var(--c-bg) 65%, transparent); }
 
-  .buddy-bubble { margin: 14px 16px 0; display: flex; gap: 9px; align-items: flex-end; }
-  .buddy-bubble .avatar { width: 30px; height: 30px; border-radius: 50%; overflow: hidden; flex-shrink: 0; border: 2px solid var(--c-tint-1); }
-  .buddy-bubble .avatar img { width: 100%; height: 100%; object-fit: cover; }
-  .buddy-bubble .msg {
-    background: var(--c-tint-1); color: var(--c-ink);
-    font-size: 11.5px; line-height: 1.45; padding: 9px 12px; border-radius: 15px 15px 15px 4px;
+  /* ---- the editorial column ---- */
+  .column { padding: 14px 16px 0; overflow: hidden; }
+  .seg + .seg { margin-top: 13px; }
+  .seg.read { opacity: 0.72; }
+  .passage {
+    font-size: 10.5px; line-height: 1.62; color: var(--c-ink);
+  }
+  .passage + .passage { margin-top: 7px; }
+  .passage a {
+    color: var(--c-accent-strong); text-decoration: underline;
+    text-underline-offset: 2px; font-weight: 600;
+  }
+  .passage .disc { color: var(--c-accent-strong); font-weight: 700; font-size: 9.5px; white-space: nowrap; }
+  .figure-float {
+    float: right; width: 84px; height: 62px; margin: 2px 0 6px 9px;
+    border-radius: 6px; border: 1px solid rgba(0,0,0,0.1);
+    background: linear-gradient(140deg, var(--c-tint-1), var(--c-tint-2));
+    position: relative;
+  }
+  .figure-float::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px;
+    transform: translate(-50%,-50%); border-radius: 50%;
+    background: var(--c-accent); opacity: 0.55;
+  }
+  .pullquote {
+    font-family: "Lora", serif; font-style: italic; font-size: 11px; line-height: 1.42;
+    color: var(--c-ink); padding-left: 9px; margin: 10px 0 8px;
+    border-left: 3px solid var(--c-accent-strong);
+  }
+  .pullquote cite {
+    display: block; font-family: "Lato", sans-serif; font-style: normal;
+    font-size: 8.5px; font-weight: 600; color: var(--c-ink-soft); margin-top: 4px;
+  }
+  .timeline {
+    display: flex; align-items: center; gap: 8px; margin: 13px 0 11px;
+    font-size: 8px; letter-spacing: 0.15em; text-transform: uppercase;
+    font-weight: 700; color: var(--c-ink-soft);
+  }
+  .timeline hr { flex: 1; height: 1px; border: 0; background: var(--c-tint-2); }
+
+  /* ---- Reader ---- */
+  .rd-toolbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 16px 9px;
+    border-bottom: 1px solid color-mix(in srgb, var(--c-tint-2) 60%, transparent);
+  }
+  .rd-btn {
+    width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+    background: var(--c-tint-2); color: var(--c-ink);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .rd-btn svg { width: 12px; height: 12px; }
+  .rd-aa {
+    margin-left: auto; display: flex; align-items: center; gap: 7px;
+    border: 1px solid var(--c-tint-2); border-radius: 99px; padding: 3px 9px;
+    font-size: 10px; font-weight: 700; color: var(--c-ink);
+  }
+  .reader { padding: 16px 16px 0; overflow: hidden; }
+  .read-title {
+    font-family: "Lora", serif; font-size: 22px; line-height: 1.14;
+    font-weight: 600; color: var(--c-ink); letter-spacing: -0.012em;
+  }
+  .byline {
+    display: flex; align-items: center; gap: 5px; margin-top: 10px;
+    font-size: 9px; color: var(--c-ink-soft);
+  }
+  .byline b { font-weight: 700; }
+  .byline s { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.45; }
+  .byline-rule { width: 54px; height: 1px; background: var(--c-tint-2); margin-top: 9px; }
+  .reader .body { font-size: 11px; line-height: 1.66; color: var(--c-ink); margin-top: 12px; }
+  .sec-head { display: flex; flex-direction: column; gap: 6px; margin-top: 15px; }
+  .sec-head .bar { width: 26px; height: 2.5px; border-radius: 99px; background: var(--c-accent-strong); }
+  .sec-head h5 { font-family: "Lora", serif; font-size: 14px; font-weight: 600; color: var(--c-ink); }
+  .bullets { margin-top: 9px; display: flex; flex-direction: column; gap: 7px; }
+  .bullets li { list-style: none; display: flex; gap: 7px; font-size: 11px; line-height: 1.5; color: var(--c-ink); }
+  .bullets li::before {
+    content: ""; width: 4px; height: 4px; border-radius: 50%; flex-shrink: 0;
+    background: var(--c-ink); opacity: 0.5; margin-top: 6px;
   }
 
+  /* ---- floating capsule tab bar: two tabs, selected inverts to ink ---- */
   .tabbar {
-    display: flex; justify-content: space-around; align-items: center;
-    margin-top: 16px; padding: 11px 8px 20px; border-top: 1px solid var(--c-tint-2);
-    background: color-mix(in srgb, var(--c-card) 72%, transparent);
+    margin-top: auto; display: flex; justify-content: center;
+    padding: 8px 20px 14px;
   }
-  .tab { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; color: var(--c-ink-soft); }
-  .tab svg { width: 20px; height: 20px; }
-  .tab.active { color: var(--c-accent-strong); }
+  .tabbar .bar {
+    display: flex; gap: 6px; align-items: center; padding: 5px;
+    background: var(--c-card); border-radius: 99px;
+    border: 1px solid color-mix(in srgb, var(--c-tint-2) 60%, transparent);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.13);
+  }
+  .tab {
+    display: flex; align-items: center; gap: 5px; border-radius: 99px;
+    padding: 7px 9px; font-size: 9px; font-weight: 700; color: var(--c-ink-soft);
+  }
+  .tab svg { width: 15px; height: 15px; }
+  .tab.active { background: var(--c-ink); color: var(--c-bg); padding: 7px 12px; }
 
-  .comp-strip { width: 300px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  .btn-primary {
-    font-family: inherit; font-size: 12.5px; font-weight: 700; color: var(--c-on-accent, #fff);
-    background: var(--c-accent-strong); border: none; border-radius: 12px; padding: 9px 18px;
+  /* ---- two-tone app shots: exactly two inks, everything else knocked out to paper ----
+     Cards and tints collapse to the ground, and structure is carried by hairline rules and
+     the accent alone. This is the same constraint as the two-tone marks, applied to the UI. */
+  .concept.twotone .screen {
+    --c-card: var(--c-bg);
+    --c-tint-1: var(--c-bg);
+    --c-tint-2: var(--c-bg);
+    --c-tint-3: var(--c-bg);
+    --c-ink: var(--c-accent-strong);
+    --c-ink-soft: color-mix(in srgb, var(--c-accent-strong) 62%, var(--c-bg));
   }
-  .btn-ghost {
-    font-family: inherit; font-size: 12.5px; font-weight: 700; color: var(--c-accent-strong);
-    background: var(--c-tint-1); border: none; border-radius: 12px; padding: 9px 18px;
+  .concept.twotone .pill { border: 1px solid var(--c-accent-strong); }
+  .concept.twotone .pill.on { background: var(--c-accent-strong); color: var(--c-bg); }
+  .concept.twotone .pill i { color: inherit; }
+  .concept.twotone .listen { background: transparent; border: 1px solid var(--c-accent-strong); }
+  .concept.twotone .rd-btn,
+  .concept.twotone .rd-aa { background: transparent; border: 1px solid var(--c-accent-strong); }
+  .concept.twotone .rule-thin,
+  .concept.twotone .byline-rule,
+  .concept.twotone .timeline hr { background: var(--c-accent-strong); opacity: 0.45; }
+  .concept.twotone .figure-float {
+    background: var(--c-accent-strong); border-color: var(--c-accent-strong);
   }
-  .tag-chip { font-size: 11px; font-weight: 700; color: var(--c-ink); background: var(--c-tint-2); border-radius: 99px; padding: 5px 13px; }
-  .toggle { width: 40px; height: 24px; border-radius: 99px; background: var(--c-accent-strong); position: relative; }
-  .toggle::after { content: ""; position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
-  .comp-note { font-size: 11.5px; color: var(--ink-soft); width: 100%; text-align: center; }
+  .concept.twotone .figure-float::after { background: var(--c-bg); opacity: 1; }
+  .concept.twotone .tabbar .bar {
+    background: transparent; border-color: var(--c-accent-strong); box-shadow: none;
+  }
+  .concept.twotone .tab.active { background: var(--c-accent-strong); color: var(--c-bg); }
+  .concept.twotone .bullets li::before { background: var(--c-accent-strong); opacity: 1; }
+  .concept.twotone .rd-toolbar { border-bottom-color: color-mix(in srgb, var(--c-accent-strong) 45%, transparent); }
 
   /* ---------- footer ---------- */
   footer { border-top: 1px solid var(--line); padding: 54px 0 80px; margin-top: 40px; color: var(--ink-soft); font-size: 14px; }
@@ -226,28 +333,41 @@
   }
   .modelswitch button:hover { border-color: var(--accent); color: var(--ink); }
   .modelswitch button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .applink { margin-top: 26px; font-size: 15px; }
+  .applink a { color: var(--ink); font-weight: 700; text-decoration: none; border-bottom: 2px solid var(--accent); padding-bottom: 2px; }
+  .applink a:hover { color: var(--accent); }
+  .set-blurb { margin-top: 14px; font-size: 14.5px; color: var(--ink-soft); max-width: 64ch; font-style: italic; }
 </style>
 </head>
 <body>
 
 <header class="hero wrap">
   <div class="jp">新聞の友</div>
-  <div class="kicker">Brand Exploration · 2026-08-29</div>
-  <h1>Newsbuddy,<br>but make it <em>washi</em>.</h1>
-  <p class="lede">Sixteen logo &amp; app-icon directions exploring a Japanese-leaning aesthetic for the Newsly&nbsp;→&nbsp;Newsbuddy rebrand: abstract, pastel, and friendly — each with a small extracted color kit and a mock of how that kit would flow through the briefing UI.</p>
+  <div class="kicker">Brand Exploration · 2026-08-30</div>
+  <h1>Newsbuddy,<br>a <em>made</em> thing.</h1>
+  <p class="lede">Logo &amp; app-icon directions for the Newsly&nbsp;→&nbsp;Newsbuddy rebrand, in eight rounds. One read the Japanese brief literally. Two cut everything down to a flat glyph — too far. Three found the tactile, illustrated register, but made every idea an origami variation and every palette orange. Four kept the craft and the calm, dropped the folding, and gave each concept its own color. Five took the three survivors and put each through eight palettes. Six went darker still and crossed the survivors with each other. Seven put the last two through twelve palettes apiece. Eight recolors them by editing the originals rather than re-describing them, and reduces both to two flat inks. Every option carries an extracted color kit and a mock of the real app — the continuous editorial Briefing column and the long-form reader — rendered in that kit.</p>
   <div class="meta">
     <span><b>Doctrine</b> — one accent + neutrals per kit</span>
     <span><b>Palettes</b> — extracted per image, re-themed live below</span>
   </div>
+  <p class="applink"><a href="app-screens.html">→ App screens: Slate ensō icon + Indigo buddy, in four light schemes</a></p>
   <div class="modelswitch">
     <span class="switch-label">Model set</span>
-    <button data-set="v1" class="on">Seedream 5.0 Lite + GPT Image 2</button>
-    <button data-set="v2">Nano Banana Pro</button>
+    <button data-set="r8" class="on">R8 · Recolors &amp; two-tone</button>
+    <button data-set="r7">R7 · Finalists</button>
+    <button data-set="r6">R6 · Dark &amp; hybrids</button>
+    <button data-set="r5">R5 · Variations</button>
+    <button data-set="r4">R4 · Calm &amp; knowledge</button>
+    <button data-set="r3">R3 · Paper craft</button>
+    <button data-set="r2">R2 · One glyph</button>
+    <button data-set="v1">R1 · Seedream Lite + GPT Image 2</button>
+    <button data-set="v2">R1 · Nano Banana Pro</button>
   </div>
+  <p class="set-blurb" id="set-blurb"></p>
 </header>
 
 <section class="overview wrap">
-  <div class="sec-title">All sixteen at icon size <span class="jp-small">一覧</span></div>
+  <div class="sec-title">The whole set at icon size <span class="jp-small">一覧</span></div>
   <p class="sec-sub">The honest test: how each mark survives the squircle at home-screen scale. Click any tile to jump to its full treatment.</p>
   <div class="grid" id="overview-grid"></div>
 </section>
@@ -263,6 +383,20 @@
 
 <script src="palettes.js"></script>
 <script src="palettes_v2.js"></script>
+<script src="palettes_r2.js"></script>
+<script src="concepts_r2.js"></script>
+<script src="palettes_r3.js"></script>
+<script src="concepts_r3.js"></script>
+<script src="palettes_r4.js"></script>
+<script src="concepts_r4.js"></script>
+<script src="palettes_r5.js"></script>
+<script src="concepts_r5.js"></script>
+<script src="palettes_r6.js"></script>
+<script src="concepts_r6.js"></script>
+<script src="palettes_r7.js"></script>
+<script src="concepts_r7.js"></script>
+<script src="palettes_r8.js"></script>
+<script src="concepts_r8.js"></script>
 <script>
 const CONCEPTS = [
   ["01-enso-paper",  "Ensō &amp; Paper",     "seedream", "A single brush circle — the daily ritual — with a folded page tucked into its opening. The most 'zen' of the set."],
@@ -283,9 +417,62 @@ const CONCEPTS = [
   ["16-asanoha-burst","Asanoha Burst",       "seedream", "The hemp-leaf star with its core folding open like a paper. Geometric, pattern-ready."],
 ];
 
+// Later rounds are generated by Python (concepts_rN.js); normalize to the round-1 shape.
+const norm = list => (list || []).map(c => [c.id, c.title, c.model, c.desc]);
+const CONCEPTS_R2 = norm(window.CONCEPTS_R2);
+const CONCEPTS_R3 = norm(window.CONCEPTS_R3);
+const CONCEPTS_R4 = norm(window.CONCEPTS_R4);
+const CONCEPTS_R5 = norm(window.CONCEPTS_R5);
+const CONCEPTS_R6 = norm(window.CONCEPTS_R6);
+const CONCEPTS_R7 = norm(window.CONCEPTS_R7);
+const CONCEPTS_R8 = norm(window.CONCEPTS_R8);
+
 const SETS = {
-  v1: { palettes: window.PALETTES || {},    dir: "images",    tag: id => CONCEPTS.find(c => c[0] === id)[2] === "seedream" ? "Seedream 5.0 Lite" : "GPT Image 2" },
-  v2: { palettes: window.PALETTES_V2 || {}, dir: "images_v2", tag: () => "Nano Banana Pro" },
+  r8: {
+    concepts: CONCEPTS_R8, palettes: window.PALETTES_R8 || {}, dir: "images_r8",
+    tag: id => (CONCEPTS_R8.find(c => c[0] === id) || [])[2] || "",
+    blurb: "Round eight: faithful recolors of both finalists — edited from the originals rather than re-described, so the silhouettes actually survive — followed by two-tone treatments. The two-tone concepts also collapse the app mock to exactly two inks.",
+  },
+  r7: {
+    concepts: CONCEPTS_R7, palettes: window.PALETTES_R7 || {}, dir: "images_r7",
+    tag: id => (CONCEPTS_R7.find(c => c[0] === id) || [])[2] || "",
+    blurb: "Round seven: the two finalists — Ensō · Petrol and Reader × Ribbon Tail — across twelve palettes each, on one model so color is the only variable. The phone mocks now mirror the real app: a continuous editorial column with inline links, and the long-form reader.",
+  },
+  r6: {
+    concepts: CONCEPTS_R6, palettes: window.PALETTES_R6 || {}, dir: "images_r6",
+    tag: id => (CONCEPTS_R6.find(c => c[0] === id) || [])[2] || "",
+    blurb: "Round six: darker palettes with a single restrained accent (01–10), then hybrids crossing the ensō ring, the book, the bookmark and the blob reader (11–24) to see whether any pair fuses into something better than either parent.",
+  },
+  r5: {
+    concepts: CONCEPTS_R5, palettes: window.PALETTES_R5 || {}, dir: "images_r5",
+    tag: id => (CONCEPTS_R5.find(c => c[0] === id) || [])[2] || "",
+    blurb: "Round five: the three shortlisted marks — Ensō & Book, Bookmark Buddy and Reader — each in eight color schemes with light form variation. Each family stays on the model that produced the original.",
+  },
+  r4: {
+    concepts: CONCEPTS_R4, palettes: window.PALETTES_R4 || {}, dir: "images_r4",
+    tag: id => (CONCEPTS_R4.find(c => c[0] === id) || [])[2] || "",
+    blurb: "Round four: calm, zen, reading and knowledge — paper folding dropped as the driver, and a distinct palette specified per concept to break out of the orange monoculture the earlier rounds fell into.",
+  },
+  r3: {
+    concepts: CONCEPTS_R3, palettes: window.PALETTES_R3 || {}, dir: "images_r3",
+    tag: id => (CONCEPTS_R3.find(c => c[0] === id) || [])[2] || "",
+    blurb: "Round three: soft paper-craft objects with real texture and a hint of character — built from the marks you picked out (Ensō & Paper, Washi Bubble, Hanko Seal, the folds, Ribbon Eyes). Illustrated and tactile, not reduced to a glyph.",
+  },
+  v1: {
+    concepts: CONCEPTS, palettes: window.PALETTES || {}, dir: "images",
+    tag: id => CONCEPTS.find(c => c[0] === id)[2] === "seedream" ? "Seedream 5.0 Lite" : "GPT Image 2",
+    blurb: "Round one: Japanese motifs read literally — ensō, origami, torii, daruma.",
+  },
+  v2: {
+    concepts: CONCEPTS, palettes: window.PALETTES_V2 || {}, dir: "images_v2",
+    tag: () => "Nano Banana Pro",
+    blurb: "Round one, re-rendered on the bake-off winner. Stronger on the geometric marks.",
+  },
+  r2: {
+    concepts: CONCEPTS_R2, palettes: window.PALETTES_R2 || {}, dir: "images_r2",
+    tag: id => (CONCEPTS_R2.find(c => c[0] === id) || [])[2] || "",
+    blurb: "Round two: one glyph, no motifs. Japanese restraint as sensibility, not iconography — reduced until only the idea is left.",
+  },
 };
 
 function mix(hex, hex2, t) {
@@ -298,10 +485,10 @@ function luma(hex) {
   return 0.2126*r + 0.7152*g + 0.0722*b;
 }
 
+// The app ships two tabs — newspaper + books.vertical.fill — in a floating capsule bar.
 const TABS = [
-  ["Briefing", "M4 5h12v2.5H4zM4 9h12v1.8H4zM4 12.2h8v1.8H4z"],
-  ["Library",  "M4 4h3.5v12H4zM9 4h3.5v12H9zM14 5l2.8 10.6-2.4.6L11.6 5.7z"],
-  ["Buddy",    "M10 3a6 6 0 016 6c0 3.3-2.7 6-6 6-.8 0-1.6-.2-2.3-.5L4 16l1.6-3.2A6 6 0 1110 3z"],
+  ["Briefing",  "M3 4h11v12H4.5A1.5 1.5 0 013 14.5zm12 3h2v7.5a1.5 1.5 0 01-3 0V7zM5 6h7v1.4H5zm0 3h7v1.2H5zm0 2.6h5v1.2H5z"],
+  ["Knowledge", "M3.5 3.5h3v13h-3zM8 3.5h3v13H8zm5.2.4l2.9 12.2-2.4.6L10.8 4.5z"],
 ];
 
 const grid = document.getElementById("overview-grid");
@@ -312,8 +499,9 @@ const SET = SETS[setName];
 const P = SET.palettes;
 grid.innerHTML = "";
 main.innerHTML = "";
+document.getElementById("set-blurb").textContent = SET.blurb;
 
-CONCEPTS.forEach(([id, title, model, desc], idx) => {
+SET.concepts.forEach(([id, title, model, desc], idx) => {
   const pal = P[id];
   if (!pal) return;
   const num = String(idx + 1).padStart(2, "0");
@@ -332,13 +520,14 @@ CONCEPTS.forEach(([id, title, model, desc], idx) => {
   const swatches = [bg, ...pal.swatches].slice(0, 5).map(hx =>
     `<div class="sw" style="background:${hx}" title="${hx}"><span>${hx}</span></div>`).join("");
 
+  // Only the selected tab shows its label, matching the app's matched-geometry pill.
   const tabs = TABS.map(([name, d], i) => `
     <div class="tab ${i === 0 ? "active" : ""}">
-      <svg viewBox="0 0 20 20" fill="currentColor"><path d="${d}"/></svg>${name}
+      <svg viewBox="0 0 20 20" fill="currentColor"><path d="${d}"/></svg>${i === 0 ? name : ""}
     </div>`).join("");
 
   main.insertAdjacentHTML("beforeend", `
-  <section class="concept reveal" id="c-${id}" style="
+  <section class="concept reveal${id.includes("-2t-") ? " twotone" : ""}" id="c-${id}" style="
       --c-bg:${bg}; --c-card:${card}; --c-ink:${ink}; --c-ink-soft:${inkSoft};
       --c-accent:${accent}; --c-accent-strong:${strong}; --c-accent-soft:${mix(accent, bg, 0.5)};
       --c-tint-1:${tint1}; --c-tint-2:${tint2}; --c-tint-3:${tint3}; --c-on-accent:${onAccent};">
@@ -366,43 +555,69 @@ CONCEPTS.forEach(([id, title, model, desc], idx) => {
       </div>
       <div class="phone-col">
         <div class="phone"><div class="screen">
-          <div class="statusbar"><span>9:41</span><span>●●●</span></div>
-          <div class="app-head">
-            <div class="day">Friday · August 29</div>
-            <h3>Your Morning Briefing</h3>
-            <div class="progress"><i></i></div>
+          <div class="statusbar"><span>9:41</span><span class="sig">▮▮▮ ⌁</span></div>
+          <div class="masthead">
+            <div class="mh-l">
+              <div class="kick">Sunday, Aug 30</div>
+              <h3>Briefing</h3>
+            </div>
+            <span class="listen"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M4 11a6 6 0 0112 0v4a2 2 0 01-2 2h-1v-5h2v-1a5 5 0 00-10 0v1h2v5H6a2 2 0 01-2-2z"/></svg>Listen</span>
           </div>
-          <div class="hero-card">
-            <div class="img"></div>
-            <div class="pad">
-              <span class="chip">Top story</span>
-              <h4>Markets steady as chip supply talks resume in Osaka</h4>
-              <p>7 min read · 3 sources</p>
+          <div class="pills">
+            <span class="pill on">News <i>12</i></span>
+            <span class="pill">Articles <i>4</i></span>
+            <span class="pill">Podcasts</span>
+          </div>
+          <div class="pills cat">
+            <span class="pill on">Top</span>
+            <span class="pill">Technology <i>5</i></span>
+            <span class="pill">Local</span>
+          </div>
+          <div class="column">
+            <div class="seg">
+              <p class="passage">
+                <span class="figure-float"></span>
+                Apple's system language model has moved into the app runtime, giving developers
+                <a href="#c-${id}">structured generation and tool calling</a> <span class="disc">(◗ 214)</span>
+                without sending a single prompt off the device. The change lands quietly, but it
+                reshapes how briefing apps handle personalisation.
+              </p>
+              <div class="pullquote">
+                Nothing leaves the device to produce a summary.
+                <cite>The Verge ↗</cite>
+              </div>
+            </div>
+            <div class="timeline"><span>Saturday</span><hr><span>18:40</span></div>
+            <div class="seg read">
+              <p class="passage">
+                The council approved <a href="#c-${id}">eight hundred homes on the east bank</a>
+                after two years of review, closing the longest planning fight the city has seen
+                this decade.
+              </p>
             </div>
           </div>
-          <div class="row-card">
-            <div class="thumb"></div>
-            <div class="tx"><b>Council approves riverfront housing plan</b><span>Local · 4 min</span></div>
-            <div class="unread"></div>
-          </div>
-          <div class="row-card read">
-            <div class="thumb"></div>
-            <div class="tx"><b>The quiet comeback of the paper notebook</b><span>Culture · 6 min</span></div>
-            <div class="unread"></div>
-          </div>
-          <div class="buddy-bubble">
-            <div class="avatar"><img src="${SET.dir}/${id}.png" alt="" loading="lazy"></div>
-            <div class="msg">Two stories left in today's briefing — the housing one connects to what you read Tuesday.</div>
-          </div>
-          <div class="tabbar">${tabs}</div>
+          <div class="tabbar"><div class="bar">${tabs}</div></div>
         </div></div>
-        <div class="comp-strip">
-          <button class="btn-primary">Start briefing</button>
-          <button class="btn-ghost">Save for later</button>
-          <span class="tag-chip">Technology</span>
-          <div class="toggle"></div>
-          <div class="comp-note">Buttons, chips &amp; toggles in this kit</div>
-        </div>
+
+        <div class="phone"><div class="screen">
+          <div class="statusbar"><span>9:41</span><span class="sig">▮▮▮ ⌁</span></div>
+          <div class="rd-toolbar">
+            <div class="rd-btn"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg></div>
+            <div class="rd-btn"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10" cy="10" r="7"/><path d="M12.6 7.4l-1.9 4.3-4.3 1.9 1.9-4.3z"/></svg></div>
+            <div class="rd-aa"><span>−</span><span>Aa</span><span>+</span></div>
+          </div>
+          <div class="reader">
+            <h4 class="read-title">On-device models move into the app runtime</h4>
+            <div class="byline"><b>The Verge</b><s></s><span>2h ago</span><s></s><span>6 min read</span></div>
+            <div class="byline-rule"></div>
+            <p class="body">Apple's system language model now runs inside the app runtime, giving developers structured generation and tool calling without sending a single prompt off the device.</p>
+            <div class="sec-head"><div class="bar"></div><h5>Key Points</h5></div>
+            <ul class="bullets">
+              <li>Summaries render locally, with no network round trip.</li>
+              <li>Tool calling is available to third-party apps for the first time.</li>
+            </ul>
+          </div>
+        </div></div>
       </div>
     </div>
   </section>`);
@@ -422,7 +637,7 @@ document.querySelectorAll(".modelswitch button").forEach(btn => {
   });
 });
 
-render("v1");
+render("r8");
 </script>
 </body>
 </html>
