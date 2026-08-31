@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-31 — `main` — Keep Crawl4AI from reloading application secrets
+
+- **Status:** Complete locally; queued for the current release.
+- **Scope:** The isolated document extractor's Crawl4AI adapter and focused tests.
+- **Decisions:** Disable python-dotenv before importing Crawl4AI because the third-party package otherwise searches parent directories and repopulates the retired application `.env`, violating the extractor's database-free process contract after the launcher has explicitly removed database variables.
+- **Changes:** Set `PYTHON_DOTENV_DISABLED=1` at the adapter boundary before the first Crawl4AI import and added a regression assertion for that process invariant.
+- **Validation:** The failure was reproduced from both the repository root and a neutral working directory; focused and full extractor validation are part of the current release rerun.
+- **Remaining:** None.
+- **Commits:** This commit.
+
 ### 2026-08-31 — `main` — Compare paired day and night reading grounds
 
 - **Status:** Complete locally; queued for the current release.

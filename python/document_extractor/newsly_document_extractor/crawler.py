@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any
 from urllib.parse import urlsplit
+
+# Crawl4AI imports python-dotenv and otherwise searches parent directories for a `.env` file.
+# The extractor is intentionally database-free, so third-party imports must not repopulate the
+# application environment after the launcher has removed it.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 
 from crawl4ai import (
     AsyncWebCrawler,

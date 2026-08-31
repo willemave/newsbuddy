@@ -1,4 +1,5 @@
 import asyncio
+import os
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any
@@ -9,6 +10,10 @@ import newsly_document_extractor.crawler as crawler_module
 from newsly_document_extractor.crawler import WarmCrawler
 from newsly_document_extractor.models import ExtractionProfile
 from newsly_document_extractor.settings import ExtractorSettings
+
+
+def test_crawl4ai_cannot_reload_the_application_dotenv() -> None:
+    assert os.environ["PYTHON_DOTENV_DISABLED"] == "1"
 
 
 class FakePage:
