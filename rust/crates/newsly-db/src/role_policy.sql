@@ -3,6 +3,7 @@ WITH application_namespaces AS (
     FROM pg_catalog.pg_namespace
     WHERE nspname !~ '^pg_'
       AND nspname <> 'information_schema'
+      AND nspname <> '_sqlx_test'
 ),
 database_identity AS (
     SELECT datdba
@@ -58,6 +59,12 @@ normalized_owners AS (
     SELECT
         owned_objects.object_kind,
         CASE
+            WHEN owned_objects.object_kind = 'schema'
+              AND (
+                  owned_objects.owner_oid = identity.datdba
+                  OR pg_catalog.pg_get_userbyid(owned_objects.owner_oid) = 'pg_database_owner'
+              )
+                THEN 'DATABASE_OWNER_VIRTUAL'
             WHEN owned_objects.owner_oid = identity.datdba THEN 'DATABASE_OWNER'
             WHEN owned_objects.owner_oid = (SELECT usesysid FROM pg_catalog.pg_user WHERE usename = current_user)
                 THEN 'CURRENT_ROLE'
@@ -75,7 +82,7 @@ schema_grants AS (
         namespace.nspname AS schema_name,
         CASE
             WHEN acl.grantee = 0 THEN 'PUBLIC'
-            WHEN acl.grantee = identity.datdba THEN 'DATABASE_OWNER'
+            WHEN acl.grantee = identity.datdba THEN 'DATABASE_OWNER_VIRTUAL'
             WHEN acl.grantee = (SELECT usesysid FROM pg_catalog.pg_user WHERE usename = current_user)
                 THEN 'CURRENT_ROLE'
             WHEN pg_catalog.pg_get_userbyid(acl.grantee) = 'pg_database_owner'

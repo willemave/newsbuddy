@@ -1,14 +1,30 @@
-FROM rust:1.94.1-bookworm AS newsly-rust-builder
+# syntax=docker/dockerfile:1.7
+
+FROM rust:1.94.1-bookworm AS newsly-rust-chef
+
+RUN cargo install cargo-chef --version 0.1.78 --locked
+
+WORKDIR /workspace/rust
+
+FROM newsly-rust-chef AS newsly-rust-planner
+
+COPY rust/ /workspace/rust/
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM newsly-rust-chef AS newsly-rust-builder
+
+COPY --from=newsly-rust-planner /workspace/rust/recipe.json recipe.json
+COPY contracts/ /workspace/contracts/
+COPY e2b.Dockerfile /workspace/e2b.Dockerfile
+RUN cargo chef cook --locked --release --recipe-path recipe.json
+
+COPY rust/ /workspace/rust/
 
 ARG NEWSLY_BUILD_SHA
 ENV NEWSLY_BUILD_SHA=${NEWSLY_BUILD_SHA}
 
-WORKDIR /workspace/rust
-COPY rust/ /workspace/rust/
-COPY contracts/ /workspace/contracts/
-COPY e2b.Dockerfile /workspace/e2b.Dockerfile
 RUN test -n "${NEWSLY_BUILD_SHA}" \
-    && cargo build --locked --release \
+    && cargo build --locked --release --jobs 1 \
     --package newsly-db \
     --package newsly-api \
     --package newsly-admin \

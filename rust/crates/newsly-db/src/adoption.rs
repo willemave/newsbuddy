@@ -69,15 +69,34 @@ pub async fn adopt_existing_database(
 /// # Errors
 ///
 /// Returns an error when the connection cannot be established, the catalog/data/role evidence
-/// differs, or existing `SQLx` history is not empty or the exact baseline prefix.
+/// differs, or existing `SQLx` history is not an exact prefix of this binary's migrations. This
+/// recognizes a completed adoption or the baseline marker alone. A partially applied post-baseline
+/// prefix fails closed for operator inspection instead of being resumed automatically by deploy.
 pub async fn verify_existing_baseline(config: &DatabaseConfig) -> Result<(), AdoptionError> {
     let options = config.connect_options()?;
     let mut connection = PgConnection::connect_with(&options).await?;
     sqlx::query("SET search_path TO public, pg_catalog")
         .execute(&mut connection)
         .await?;
-    verify_baseline_fingerprint(&mut connection).await?;
-    validate_adoption_history(&load_history(&mut connection).await?)?;
+    let history = load_history(&mut connection).await?;
+    if history.is_empty() {
+        verify_baseline_fingerprint(&mut connection).await?;
+        validate_adoption_history(&history)?;
+    } else {
+        validate_runtime_history_prefix(&history)?;
+        let expected_count = expected_up_migrations(None).len();
+        if history.len() == 1 {
+            verify_baseline_fingerprint(&mut connection).await?;
+        } else if history.len() == expected_count {
+            verify_post_migration_catalog(&mut connection).await?;
+        } else {
+            return Err(MigrationHistoryError::IncompleteAdoption {
+                applied: history.len(),
+                expected: expected_count,
+            }
+            .into());
+        }
+    }
     Ok(())
 }
 
@@ -273,6 +292,10 @@ pub enum MigrationHistoryError {
     InvalidExecutionTime(i64),
     #[error("only the audited baseline may be recorded as skipped; found skipped version {0}")]
     UnexpectedSkippedVersion(i64),
+    #[error(
+        "SQLx baseline adoption is incomplete: {applied} of {expected} migrations are recorded; operator inspection is required before resuming"
+    )]
+    IncompleteAdoption { applied: usize, expected: usize },
 }
 
 #[derive(Debug, Error)]
@@ -603,6 +626,46 @@ mod tests {
             .await
             .expect_err("schema drift must fail verification");
         assert!(matches!(error, FingerprintError::SnapshotMismatch { .. }));
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn complete_legacy_alembic_catalog_is_adoptable(pool: PgPool) {
+        pool.execute(BASELINE_SQL)
+            .await
+            .expect("baseline fixture should install");
+        pool.execute(
+            r"
+            DROP INDEX uq_learning_deck_runs_user_active;
+            CREATE UNIQUE INDEX uq_learning_deck_runs_user_active
+                ON learning_deck_runs (user_id)
+                WHERE (status)::text = ANY (
+                    ARRAY[
+                        ('queued'::character varying)::text,
+                        ('preparing'::character varying)::text,
+                        ('generating'::character varying)::text,
+                        ('validating'::character varying)::text,
+                        ('publishing'::character varying)::text
+                    ]
+                );
+            DROP INDEX uq_processing_tasks_dedupe_key_active;
+            CREATE UNIQUE INDEX uq_processing_tasks_dedupe_key_active
+                ON processing_tasks (dedupe_key)
+                WHERE dedupe_key IS NOT NULL
+                  AND (status)::text = ANY (
+                      ARRAY[
+                          ('pending'::character varying)::text,
+                          ('processing'::character varying)::text
+                      ]
+                  );
+            ",
+        )
+        .await
+        .expect("legacy Alembic index renderings should install");
+
+        let mut connection = pool.acquire().await.expect("connection should open");
+        verify_baseline_fingerprint(&mut connection)
+            .await
+            .expect("the complete pinned legacy Alembic catalog should be adoptable");
     }
 
     #[sqlx::test(migrations = false)]

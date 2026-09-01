@@ -3,6 +3,7 @@ WITH application_namespaces AS (
     FROM pg_catalog.pg_namespace
     WHERE nspname !~ '^pg_'
       AND nspname <> 'information_schema'
+      AND nspname <> '_sqlx_test'
 ),
 database_identity AS (
     SELECT datdba
@@ -21,7 +22,7 @@ explicit_grants AS (
         namespace.nspname AS object_name,
         CASE
             WHEN acl.grantee = 0 THEN 'PUBLIC'
-            WHEN acl.grantee = identity.datdba THEN 'DATABASE_OWNER'
+            WHEN acl.grantee = identity.datdba THEN 'DATABASE_OWNER_VIRTUAL'
             WHEN acl.grantee = (SELECT usesysid FROM pg_catalog.pg_user WHERE usename = current_user)
                 THEN 'CURRENT_ROLE'
             WHEN pg_catalog.pg_get_userbyid(acl.grantee) = 'pg_database_owner'
@@ -45,7 +46,7 @@ explicit_grants AS (
         relation.relname,
         CASE
             WHEN acl.grantee = 0 THEN 'PUBLIC'
-            WHEN acl.grantee = identity.datdba THEN 'DATABASE_OWNER'
+            WHEN acl.grantee = identity.datdba THEN 'DATABASE_OWNER_VIRTUAL'
             WHEN acl.grantee = (SELECT usesysid FROM pg_catalog.pg_user WHERE usename = current_user)
                 THEN 'CURRENT_ROLE'
             WHEN pg_catalog.pg_get_userbyid(acl.grantee) = 'pg_database_owner'
@@ -69,7 +70,7 @@ explicit_grants AS (
         routine.proname || '(' || pg_catalog.pg_get_function_identity_arguments(routine.oid) || ')',
         CASE
             WHEN acl.grantee = 0 THEN 'PUBLIC'
-            WHEN acl.grantee = identity.datdba THEN 'DATABASE_OWNER'
+            WHEN acl.grantee = identity.datdba THEN 'DATABASE_OWNER_VIRTUAL'
             WHEN acl.grantee = (SELECT usesysid FROM pg_catalog.pg_user WHERE usename = current_user)
                 THEN 'CURRENT_ROLE'
             WHEN pg_catalog.pg_get_userbyid(acl.grantee) = 'pg_database_owner'

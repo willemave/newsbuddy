@@ -148,7 +148,7 @@ jobs:
           --out-dir "${RUNNER_TEMP}/document-extractor-dist"
 
   rust:
-    name: Rust, SQLx, contracts, and production images
+    name: Rust, SQLx, and contracts
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -237,24 +237,6 @@ jobs:
           NEWSLY_BUILD_SHA: ${{ env.TESTED_SHA }}
           NEWSLY_ENV_FILE: /dev/null
         run: docker compose --file docker-compose.yml config --quiet
-
-      - name: Build exact-SHA production image
-        run: >-
-          docker build
-          --file Dockerfile
-          --build-arg NEWSLY_BUILD_SHA="$TESTED_SHA"
-          --label "org.opencontainers.image.revision=$TESTED_SHA"
-          --tag "newsly-ci:$TESTED_SHA"
-          .
-
-      - name: Build exact-SHA document extractor image
-        run: >-
-          docker build
-          --file python/document_extractor/Dockerfile
-          --build-arg NEWSLY_BUILD_SHA="$TESTED_SHA"
-          --label "org.opencontainers.image.revision=$TESTED_SHA"
-          --tag "newsly-document-extractor-ci:$TESTED_SHA"
-          python/document_extractor
 
   ios:
     name: Native iOS tests

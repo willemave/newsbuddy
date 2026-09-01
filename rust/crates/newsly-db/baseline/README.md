@@ -5,7 +5,11 @@ It was generated from a newly created PostgreSQL database after the complete Ale
 reached its single head, `20260829_02`.
 
 - `manifest.json` pins the source head, migration version, hashes, and inventory counts.
-- `catalog-inventory.json` is the exact normalized catalog expected before adoption.
+- `catalog-inventory.json` is the exact catalog produced by installing the frozen baseline SQL.
+- `manifest.json` also pins the complete legacy-Alembic catalog hash. The Rust verifier derives
+  that second full snapshot by replacing only the two audited partial-index parse-tree renderings,
+  then compares the live catalog byte-for-byte with one complete snapshot or the other. It never
+  normalizes or rewrites live catalog evidence.
 - `data-invariants.json` records the bounded data invariants required by the frozen history.
 - `role-policy.json` checks ownership and grants without embedding environment-specific role names.
 - the SQL used to collect each snapshot lives beside the Rust verifier in `src/*.sql`.
@@ -13,8 +17,12 @@ reached its single head, `20260829_02`.
 The inventory covers extensions and versions, application schemas, relations, columns and
 defaults, sequence ownership, constraints and validation state, index definitions and readiness,
 user-defined types/routines/triggers, row-level policies, and explicit grants. It intentionally
-excludes SQLx's own history table, physical OIDs, planner statistics, storage paths, and literal
-role names.
+excludes SQLx's test-harness schema and migration history table, physical OIDs, planner statistics,
+storage paths, and literal role names.
+
+Database-owner and PostgreSQL's `pg_database_owner` schema ownership/grants are recorded under one
+logical label. They grant the same database-scoped authority but have different OIDs across
+PostgreSQL initialization histories.
 
 Do not edit these files or the baseline migration after an adoption has run. A later schema change
 must be a new SQLx migration. The retired Alembic source and one-time baseline generator are kept

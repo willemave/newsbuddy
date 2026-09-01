@@ -31,6 +31,7 @@ archive
 client
 data
 db
+docker/local-data
 docs
 logs
 logs_from_server

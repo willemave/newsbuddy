@@ -1,10 +1,5 @@
 FROM python:3.13-slim-bookworm
 
-ARG NEWSLY_BUILD_SHA=development
-
-LABEL org.opencontainers.image.title="Newsly document extractor" \
-    org.opencontainers.image.revision="${NEWSLY_BUILD_SHA}"
-
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -28,6 +23,10 @@ RUN uv sync --frozen --no-dev --no-install-project \
 
 COPY newsly_document_extractor /service/newsly_document_extractor
 RUN uv sync --frozen --no-dev
+
+ARG NEWSLY_BUILD_SHA=development
+LABEL org.opencontainers.image.title="Newsly document extractor" \
+    org.opencontainers.image.revision="${NEWSLY_BUILD_SHA}"
 
 RUN useradd --create-home --uid 10002 extractor
 USER extractor

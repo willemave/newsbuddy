@@ -392,6 +392,17 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** The Ink scheme carries a known constraint: body ink and accent are close enough that inline links depend on underline plus weight to separate. Vector output still unexplored — the chosen ensō is a raster brush texture and will need redrawing or tracing for a real app icon asset.
 - **Commits:** Uncommitted
 
+### 2026-08-31 — `main` — Day mode retuned to warm cream (option E)
+
+- **Status:** Complete, with one verification gap (below).
+- **Scope:** `ReaderPalette.swift`, `AccentColor.colorset`, regenerated dark app-icon assets, `docs/brand-exploration-2026-08/day-mode-options.html`.
+- **Diagnosis:** The reported "too grey" day mode was not a contrast failure. The shipped ground was already 96% light and body ink scored 14.9 against it. Two things were actually wrong: the ramp was near-neutral, so it read as grey rather than paper, and card lift was 1.06 in light and 1.08 in dark — surfaces were effectively invisible against the ground, collapsing every screen into one flat field. Six paired light/dark options were built at `day-mode-options.html` with ink contrast, card lift and ground lightness printed per option so the two axes could be judged separately.
+- **Decision:** Option E — warm cream by day (`#faf6ea`), warm brown-black at night (`#191510`). It attacks the greyness with hue rather than lightness. Note this fixes the *neutrality* but not the separation: card lift stays 1.06/1.10. If surfaces still read flat in use, option B's lift is the follow-up and is independent of this change.
+- **Changes:** Full light and dark ramps retuned to warm cream / warm dark. `onSurfaceTertiary` had to move from `#787261` to `#757060`: at `#787261` it scored 4.44 against the new `surfacePrimary` and failed the project's own contrast test. Dark `brandPrimary` lifted `#93a7c4` → `#9db0cc` to clear the warmer ground, with `AccentColor.colorset` updated in lockstep. The dark app icon and `AppMark`/`BuddyMark` dark variants were regenerated because the old dark icon baked in the previous `#171613` ground and would have sat as a visibly mismatched square on the new one.
+- **Validation:** `ReaderPaletteContrastTests` pass (2/2, both modes). Clean build. On-device pixel samples match exactly: `#faf6ea` light, `#191510` dark.
+- **Verification gap:** The Briefing and Reader surfaces were **not** re-checked on device. The local API will not start — `newsly-db migrate` aborts with "this database already has Alembic schema history; run `newsly-db baseline --maintenance-barrier-confirmed` before ordinary SQLx migrations". That baseline was deliberately not run. Until the local stack is back, the reading surfaces in this palette have only been seen in the HTML mock.
+- **Commits:** Uncommitted.
+
 ### 2026-08-30 — `main` — Slate brand implemented in the iOS client
 
 - **Status:** Complete
@@ -1761,3 +1772,11 @@ Use this append-only log to preserve implementation context across sessions and 
 - Kept baseline adoption fail-closed while canonicalizing the one exact, production-observed PostgreSQL rendering variant for `uq_learning_deck_runs_user_active`.
 - The accepted legacy definition and predicate are semantically identical to the frozen baseline; all other catalog differences still fail the fingerprint comparison.
 - Added a focused regression test for the legacy rendering.
+# 2026-08-31 — `main` — accelerate exact-SHA Rust releases and harden SQLx adoption
+
+- Removed disposable production-image builds from the reusable quality workflow; exact-SHA images are now built and published once after all quality jobs pass.
+- Added a pinned Cargo Chef dependency layer to the Rust production image and moved extractor revision metadata after Python/Chromium dependency installation.
+- Compared the complete frozen and production catalog inventories. The only differences are two audited PostgreSQL renderings of equivalent `ANY(character varying[])` predicates; the verifier now accepts either complete manifest-hashed catalog snapshot without normalizing live evidence, so every third rendering or unrelated catalog difference still fails closed.
+- Made the inventory ignore SQLx's internal test-harness schema and classify direct database-owner versus `pg_database_owner` schema authority under the same logical label. The disposable drill still rejected a genuinely broader `PUBLIC CREATE` grant, proving that privilege drift remains fail-closed.
+- Added an exact-image, read-only eligibility preflight before downtime and a verified, ownership-and-grant-preserving custom-format PostgreSQL backup after the writer barrier but before any first-adoption write. A partial post-baseline SQLx history now stops automated deployment for operator inspection even when its checksums form an exact embedded prefix.
+- Added focused acceptance, rejection, and exact-history coverage and documented the release-pipeline and database-recovery contracts. A PostgreSQL 15 disposable adoption drill passed the full legacy-catalog preflight, produced a restorable custom-format backup, recorded all seven SQLx migrations, and preserved a sentinel application row.

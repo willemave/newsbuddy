@@ -15,6 +15,8 @@ state_dir="${NEWSLY_DEPLOY_STATE_DIR:-/opt/newsly/state}"
 switch_script="${NEWSLY_DEPLOY_SWITCH_SCRIPT:-/opt/newsly/bin/switch-api-slot}"
 active_slot_file="${state_dir}/active-api-slot"
 sqlx_adoption_marker="${state_dir}/sqlx-baseline-adopted"
+sqlx_backup_marker="${state_dir}/sqlx-baseline-backup"
+sqlx_backup_dir="${NEWSLY_SQLX_BACKUP_DIR:-/data/backups/sqlx-baseline}"
 
 if [[ ! -f "${compose_file}" ]]; then
   echo "production Compose file not found: ${compose_file}" >&2
@@ -80,6 +82,15 @@ if [[ "${baseline_adoption}" == "true" && -f "${sqlx_adoption_marker}" ]]; then
   echo "SQLx baseline was already adopted; remove NEWSLY_SQLX_BASELINE_ADOPTION=true" >&2
   exit 1
 fi
+if [[ "${baseline_adoption}" == "true" ]]; then
+  case "${sqlx_backup_dir}" in
+    /data/*) ;;
+    *)
+      echo "NEWSLY_SQLX_BACKUP_DIR must be a dedicated directory below /data" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 echo "Starting persistent PostgreSQL"
 compose up -d postgres
@@ -97,6 +108,13 @@ for attempt in $(seq 1 60); do
   fi
   sleep 5
 done
+
+if [[ "${baseline_adoption}" == "true" ]]; then
+  echo "Running read-only SQLx baseline eligibility preflight with the exact image"
+  compose --profile ops run --rm --no-deps \
+    --entrypoint /usr/local/bin/newsly-db \
+    migrate verify-baseline
+fi
 
 barrier_containers=()
 restore_barrier_on_failure=false
@@ -163,6 +181,49 @@ for container in newsly-api-blue newsly-api-green newsly-workers newsly-schedule
 done
 restore_barrier_on_failure=true
 compose stop api_blue api_green workers scheduler
+
+if [[ "${baseline_adoption}" == "true" ]]; then
+  if [[ -f "${sqlx_backup_marker}" ]]; then
+    sqlx_backup_path="$(tr -d '\r\n' < "${sqlx_backup_marker}")"
+    case "${sqlx_backup_path}" in
+      "${sqlx_backup_dir}"/*) ;;
+      *)
+        echo "Recorded SQLx baseline backup is outside ${sqlx_backup_dir}" >&2
+        exit 1
+        ;;
+    esac
+    if [[ ! -f "${sqlx_backup_path}" || ! -f "${sqlx_backup_path}.sha256" ]]; then
+      echo "Recorded SQLx baseline backup is missing: ${sqlx_backup_path}" >&2
+      exit 1
+    fi
+    sha256sum --check --status "${sqlx_backup_path}.sha256"
+    docker exec -i newsly-postgres pg_restore --list < "${sqlx_backup_path}" >/dev/null
+    echo "Reusing verified pre-adoption database backup: ${sqlx_backup_path}"
+  else
+    echo "Creating recoverable pre-adoption database backup"
+    mkdir -p "${sqlx_backup_dir}"
+    chmod 700 "${sqlx_backup_dir}"
+    backup_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    sqlx_backup_temp="$(mktemp "${sqlx_backup_dir}/pre-adoption-${backup_timestamp}.XXXXXX.dump")"
+    if ! docker exec newsly-postgres sh -c \
+      'exec pg_dump --format=custom --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"' \
+      > "${sqlx_backup_temp}"; then
+      rm -f "${sqlx_backup_temp}"
+      echo "Pre-adoption database backup failed" >&2
+      exit 1
+    fi
+    docker exec -i newsly-postgres pg_restore --list < "${sqlx_backup_temp}" >/dev/null
+    sqlx_backup_path="${sqlx_backup_dir}/pre-adoption-${backup_timestamp}.dump"
+    mv "${sqlx_backup_temp}" "${sqlx_backup_path}"
+    chmod 600 "${sqlx_backup_path}"
+    sha256sum "${sqlx_backup_path}" > "${sqlx_backup_path}.sha256"
+    chmod 600 "${sqlx_backup_path}.sha256"
+    backup_marker_temp="$(mktemp "${state_dir}/sqlx-baseline-backup.XXXXXX")"
+    printf '%s\n' "${sqlx_backup_path}" > "${backup_marker_temp}"
+    mv "${backup_marker_temp}" "${sqlx_backup_marker}"
+    echo "Verified pre-adoption database backup: ${sqlx_backup_path}"
+  fi
+fi
 
 echo "Running database migrations with the exact-image SQLx binary"
 if ! compose --profile ops run --rm --no-deps \

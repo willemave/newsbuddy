@@ -85,8 +85,8 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ env.TESTED_SHA }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=newsly-rust-image
+          cache-to: type=gha,mode=max,scope=newsly-rust-image
 
       - name: Build database-free document extractor image
         uses: docker/build-push-action@v6
