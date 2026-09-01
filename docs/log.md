@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-01 — `willem/local-release-gates` — Move the complete release gate local
+
+- **Status:** In progress.
+- **Scope:** Local release orchestration, GitHub deployment workflows, iOS/AXe validation, live local-staging smoke, and release documentation.
+- **Decisions:** Make one clean local commit the source-level release authority; keep the paid live smoke explicit; build Docker images once per full live run; retain immutable exact-SHA image identity, published-image smoke, stale-main refusal, and blue/green deployment in GitHub; rely on Xcode Cloud for the independent post-push iOS build.
+- **Changes:** Added `scripts/release_gate.sh`; removed the reusable GitHub Quality Gate; changed Docker Deploy to build, smoke, and deploy `github.sha` directly; changed manual E2B template publication to require a locally validated current-main SHA; documented the new ownership boundary.
+- **Validation:** Pending the exact-commit local gate and post-push deploy proof.
+- **Remaining:** Validate, commit, push the tested SHA to `main`, and verify production.
+- **Commits:** `0d14b01a` contains the rebased local-staging smoke harness; release-pipeline commit pending.
+
 ### 2026-08-31 — `main` — Build local-staging live API smoke coverage
 
 - **Status:** Complete locally; not committed, pushed, deployed, or distributed.

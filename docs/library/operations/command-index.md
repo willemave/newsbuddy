@@ -19,8 +19,9 @@ Environment-specific pool settings remain available for ordinary local runs.
 
 ## Operations and deploy
 
-- `.github/workflows/docker-racknerd-deploy.yml` — supported exact-SHA production deploy.
-- `.github/workflows/e2b-template-publish.yml` — manual, quality-gated publication of the canonical E2B template from a current-main SHA.
+- `scripts/release_gate.sh` — canonical local Rust, SQLx, contract, Python-island, native iOS, and AXe release gate, with an opt-in live Docker/API/LLM smoke phase.
+- `.github/workflows/docker-racknerd-deploy.yml` — exact-SHA production image build, image smoke, and blue/green deploy; it does not repeat the local source-level gate.
+- `.github/workflows/e2b-template-publish.yml` — manual publication of the canonical E2B template from a locally validated current-main SHA.
 - `scripts/build_agent_vm_template.sh` — network-free template validation/dry-run and explicit E2B publication with a source receipt.
 - `scripts/deploy_blue_green.sh` — remote blue-green API and singleton worker/scheduler rollout.
 - `scripts/deploy/switch-api-slot.sh` — atomic Nginx upstream switch.

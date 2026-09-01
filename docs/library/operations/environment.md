@@ -37,6 +37,24 @@ two for the API, in addition to the queue listeners. The launcher supervises
 the extractor and Rust processes as direct children and terminates the rest of
 the stack if one exits unexpectedly.
 
+## Local release gate
+
+The complete source-level release gate runs locally, not in GitHub Actions:
+
+```bash
+scripts/release_gate.sh --env-file /absolute/path/to/local.env
+```
+
+It requires a clean commit, starts one local Rust API for authenticated iOS and
+AXe validation, and records the exact tested SHA. Add `--with-live-smoke
+--allow-live-provider-costs` when the release needs the real API/LLM/E2B,
+Learning Deck, chat, and Share Extension matrix. That phase builds the two
+Docker images once and shares them across the full run.
+
+On push to `main`, GitHub only builds and smoke-tests immutable production
+images and deploys them after an exact current-main check. Xcode Cloud provides
+the independent clean iOS build for each pushed main revision.
+
 ## Rust dependencies and checks
 
 ```bash

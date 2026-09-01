@@ -11,34 +11,27 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  quality:
-    name: Validate release commit
-    uses: ./.github/workflows/quality-gate.yml
-    with:
-      sha: ${{ github.sha }}
-
   build-image:
-    name: Build tested image
-    needs: quality
+    name: Build release image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     env:
-      TESTED_SHA: ${{ needs.quality.outputs.tested_sha }}
+      RELEASE_SHA: ${{ github.sha }}
     steps:
-      - name: Checkout tested commit
+      - name: Checkout release commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.TESTED_SHA }}
+          ref: ${{ env.RELEASE_SHA }}
 
-      - name: Verify tested commit
+      - name: Verify release commit
         run: |
           test "$GITHUB_REF" = "refs/heads/main"
-          test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           current_main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [[ "$current_main_sha" != "$TESTED_SHA" ]]; then
-            echo "Refusing stale build: tested $TESTED_SHA, current main $current_main_sha" >&2
+          if [[ "$current_main_sha" != "$RELEASE_SHA" ]]; then
+            echo "Refusing stale build: release $RELEASE_SHA, current main $current_main_sha" >&2
             exit 1
           fi
 
@@ -47,8 +40,8 @@ jobs:
           NEWSLY_DATABASE_URL: postgresql://newsly:newsly@postgres:5432/newsly
           DOCUMENT_EXTRACTOR_SHARED_SECRET: manifest-validation-only
           NEWSLY_ENV_FILE: /dev/null
-          NEWSLY_EXTRACTOR_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}-extractor
-          NEWSLY_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}
+          NEWSLY_EXTRACTOR_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}-extractor
+          NEWSLY_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}
           POSTGRES_PASSWORD: manifest-validation-only
         run: docker compose -f docker-compose.production.yml config --quiet
 
@@ -80,11 +73,11 @@ jobs:
           context: .
           push: true
           build-args: |
-            NEWSLY_BUILD_SHA=${{ env.TESTED_SHA }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}
+            NEWSLY_BUILD_SHA=${{ env.RELEASE_SHA }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ env.TESTED_SHA }}
+            org.opencontainers.image.revision=${{ env.RELEASE_SHA }}
           cache-from: type=gha,scope=newsly-rust-image
           cache-to: type=gha,mode=max,scope=newsly-rust-image
 
@@ -95,18 +88,18 @@ jobs:
           file: ./python/document_extractor/Dockerfile
           push: true
           build-args: |
-            NEWSLY_BUILD_SHA=${{ env.TESTED_SHA }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}-extractor
+            NEWSLY_BUILD_SHA=${{ env.RELEASE_SHA }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}-extractor
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ env.TESTED_SHA }}
+            org.opencontainers.image.revision=${{ env.RELEASE_SHA }}
           cache-from: type=gha,scope=document-extractor
           cache-to: type=gha,mode=max,scope=document-extractor
 
       - name: Smoke-test published deployment images
         env:
-          APP_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}
-          EXTRACTOR_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}-extractor
+          APP_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}
+          EXTRACTOR_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}-extractor
         run: |
           set -euo pipefail
           docker pull "$APP_IMAGE"
@@ -143,10 +136,8 @@ jobs:
           exit 1
 
   deploy:
-    name: Deploy tested image to production
-    needs:
-      - quality
-      - build-image
+    name: Deploy release image to production
+    needs: build-image
     runs-on: ubuntu-latest
     concurrency: news-app-docker-deploy
     environment: production
@@ -154,23 +145,23 @@ jobs:
       contents: read
       packages: read
     env:
-      TESTED_SHA: ${{ needs.quality.outputs.tested_sha }}
+      RELEASE_SHA: ${{ github.sha }}
       DEPLOY_REMOTE_DIR: ${{ vars.DEPLOY_REMOTE_DIR }}
       DEPLOY_SSH_PORT: ${{ vars.DEPLOY_SSH_PORT }}
     steps:
-      - name: Checkout tested commit
+      - name: Checkout release commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.TESTED_SHA }}
+          ref: ${{ env.RELEASE_SHA }}
 
-      - name: Verify tested commit
-        run: test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+      - name: Verify release commit
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
 
-      - name: Verify tested commit is current main
+      - name: Verify release commit is current main
         run: |
           current_main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [[ "$current_main_sha" != "$TESTED_SHA" ]]; then
-            echo "Refusing stale deploy: tested $TESTED_SHA, current main $current_main_sha" >&2
+          if [[ "$current_main_sha" != "$RELEASE_SHA" ]]; then
+            echo "Refusing stale deploy: release $RELEASE_SHA, current main $current_main_sha" >&2
             exit 1
           fi
 
@@ -197,8 +188,8 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USERNAME: ${{ github.actor }}
           IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          IMAGE_EXTRACTOR_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}-extractor
-          IMAGE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}
+          IMAGE_EXTRACTOR_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}-extractor
+          IMAGE_TAG: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_SHA }}
           REGISTRY: ${{ env.REGISTRY }}
         run: |
           set -euo pipefail

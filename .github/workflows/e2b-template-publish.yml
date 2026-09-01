@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: Full current-main commit SHA to validate and publish
+        description: Full locally validated current-main commit SHA to publish
         required: true
         type: string
       no_cache:
@@ -21,38 +21,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  quality:
-    name: Validate publication commit
-    uses: ./.github/workflows/quality-gate.yml
-    with:
-      sha: ${{ inputs.sha }}
-
   publish:
     name: Rebuild canonical template alias
-    needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: production
     env:
-      TESTED_SHA: ${{ needs.quality.outputs.tested_sha }}
+      RELEASE_SHA: ${{ inputs.sha }}
 
     steps:
-      - name: Checkout tested commit
+      - name: Checkout release commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.TESTED_SHA }}
+          ref: ${{ env.RELEASE_SHA }}
 
-      - name: Require tested current-main commit
+      - name: Require locally validated current-main commit
         run: |
           set -euo pipefail
-          if [[ ! "$TESTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "A full tested commit SHA is required, got: $TESTED_SHA" >&2
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "A full locally validated commit SHA is required, got: $RELEASE_SHA" >&2
             exit 1
           fi
-          test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           current_main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [[ "$current_main_sha" != "$TESTED_SHA" ]]; then
-            echo "Refusing stale template publication: tested $TESTED_SHA, current main $current_main_sha" >&2
+          if [[ "$current_main_sha" != "$RELEASE_SHA" ]]; then
+            echo "Refusing stale template publication: release $RELEASE_SHA, current main $current_main_sha" >&2
             exit 1
           fi
 
@@ -90,7 +83,7 @@ jobs:
       - name: Upload publication receipt
         uses: actions/upload-artifact@v4
         with:
-          name: e2b-template-${{ env.TESTED_SHA }}
+          name: e2b-template-${{ env.RELEASE_SHA }}
           path: ${{ runner.temp }}/e2b-template-receipt.json
           if-no-files-found: error
           retention-days: 30
