@@ -19,6 +19,9 @@ const CATALOG_INVENTORY_SQL: &str = include_str!("catalog_inventory.sql");
 const DATA_INVARIANTS_SQL: &str = include_str!("data_invariants.sql");
 const ROLE_POLICY_SQL: &str = include_str!("role_policy.sql");
 
+const LEARNING_DECK_ACTIVE_PREDICATE: &str = "((status)::text = ANY ((ARRAY['queued'::character varying, 'preparing'::character varying, 'generating'::character varying, 'validating'::character varying, 'publishing'::character varying])::text[]))";
+const LEGACY_LEARNING_DECK_ACTIVE_PREDICATE: &str = "((status)::text = ANY (ARRAY[('queued'::character varying)::text, ('preparing'::character varying)::text, ('generating'::character varying)::text, ('validating'::character varying)::text, ('publishing'::character varying)::text]))";
+
 #[derive(Debug, Deserialize)]
 struct BaselineManifest {
     format_version: u32,
@@ -311,7 +314,8 @@ fn compare_snapshot(
     expected: &Value,
     actual: &Value,
 ) -> Result<(), FingerprintError> {
-    if expected == actual {
+    let actual = canonicalize_catalog_snapshot(artifact, actual);
+    if expected == &actual {
         return Ok(());
     }
     Err(FingerprintError::SnapshotMismatch {
@@ -320,10 +324,52 @@ fn compare_snapshot(
             &serde_json::to_vec(expected).expect("serializing parsed JSON cannot fail"),
         ),
         actual_sha256: hex_sha256(
-            &serde_json::to_vec(actual).expect("serializing parsed JSON cannot fail"),
+            &serde_json::to_vec(&actual).expect("serializing parsed JSON cannot fail"),
         ),
-        first_difference: first_difference(expected, actual, "$"),
+        first_difference: first_difference(expected, &actual, "$"),
     })
+}
+
+fn canonicalize_catalog_snapshot(artifact: &str, snapshot: &Value) -> Value {
+    let mut canonical = snapshot.clone();
+    if artifact != "catalog inventory" {
+        return canonical;
+    }
+
+    let Some(indexes) = canonical.get_mut("indexes").and_then(Value::as_array_mut) else {
+        return canonical;
+    };
+    for index in indexes {
+        if index.get("name").and_then(Value::as_str) != Some("uq_learning_deck_runs_user_active") {
+            continue;
+        }
+        if let Some(predicate) = index.get_mut("predicate") {
+            canonicalize_exact_string(
+                predicate,
+                LEGACY_LEARNING_DECK_ACTIVE_PREDICATE,
+                LEARNING_DECK_ACTIVE_PREDICATE,
+            );
+        }
+        let legacy_definition = format!(
+            "CREATE UNIQUE INDEX uq_learning_deck_runs_user_active ON public.learning_deck_runs USING btree (user_id) WHERE {LEGACY_LEARNING_DECK_ACTIVE_PREDICATE}"
+        );
+        let canonical_definition = format!(
+            "CREATE UNIQUE INDEX uq_learning_deck_runs_user_active ON public.learning_deck_runs USING btree (user_id) WHERE {LEARNING_DECK_ACTIVE_PREDICATE}"
+        );
+        if let Some(definition) = index.get_mut("definition") {
+            canonicalize_exact_string(definition, &legacy_definition, &canonical_definition);
+        }
+    }
+    canonical
+}
+
+fn canonicalize_exact_string(value: &mut Value, legacy: &str, canonical: &str) {
+    let Value::String(value) = value else {
+        return;
+    };
+    if value == legacy {
+        canonical.clone_into(value);
+    }
 }
 
 fn first_difference(expected: &Value, actual: &Value, path: &str) -> String {
@@ -408,7 +454,10 @@ pub enum FingerprintError {
 mod tests {
     use serde_json::json;
 
-    use super::{BaselineEvidence, first_difference};
+    use super::{
+        BaselineEvidence, LEARNING_DECK_ACTIVE_PREDICATE, LEGACY_LEARNING_DECK_ACTIVE_PREDICATE,
+        canonicalize_catalog_snapshot, first_difference,
+    };
 
     #[test]
     fn embedded_evidence_is_internally_consistent() {
@@ -422,6 +471,28 @@ mod tests {
         assert_eq!(
             first_difference(&expected, &actual, "$"),
             "$.relations[0].valid differs: expected true, actual false"
+        );
+    }
+
+    #[test]
+    fn canonicalizes_the_legacy_learning_deck_partial_index_rendering() {
+        let legacy_definition = format!(
+            "CREATE UNIQUE INDEX uq_learning_deck_runs_user_active ON public.learning_deck_runs USING btree (user_id) WHERE {LEGACY_LEARNING_DECK_ACTIVE_PREDICATE}"
+        );
+        let snapshot = json!({"indexes": [{
+            "name": "uq_learning_deck_runs_user_active",
+            "definition": legacy_definition,
+            "predicate": LEGACY_LEARNING_DECK_ACTIVE_PREDICATE,
+        }]});
+
+        let canonical = canonicalize_catalog_snapshot("catalog inventory", &snapshot);
+        let index = &canonical["indexes"][0];
+        assert_eq!(index["predicate"], LEARNING_DECK_ACTIVE_PREDICATE);
+        assert_eq!(
+            index["definition"],
+            format!(
+                "CREATE UNIQUE INDEX uq_learning_deck_runs_user_active ON public.learning_deck_runs USING btree (user_id) WHERE {LEARNING_DECK_ACTIVE_PREDICATE}"
+            )
         );
     }
 }

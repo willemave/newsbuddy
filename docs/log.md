@@ -1756,3 +1756,8 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** Three focused request-budget tests passed. `newsly-worker` compiled across all targets and passed warning-denied Clippy; formatting checks passed. No provider or E2B call ran in this implementation lane.
 - **Remaining:** Rebuild the local worker once and retry the failed This Week in Rust homepage Share request to confirm it completes within the new default cap of 12.
 - **Commits:** Uncommitted.
+# 2026-08-31 — `main` — tolerate audited legacy partial-index rendering during SQLx adoption
+
+- Kept baseline adoption fail-closed while canonicalizing the one exact, production-observed PostgreSQL rendering variant for `uq_learning_deck_runs_user_active`.
+- The accepted legacy definition and predicate are semantically identical to the frozen baseline; all other catalog differences still fail the fingerprint comparison.
+- Added a focused regression test for the legacy rendering.
