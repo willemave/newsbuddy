@@ -222,6 +222,16 @@ capture_nonempty_ui_tree() {
   return 1
 }
 
+assert_id() {
+  local identifier="$1"
+  local ui_file="$2"
+  if ! jq -e --arg identifier "$identifier" \
+    '.. | objects | select(.AXUniqueId == $identifier)' "$ui_file" >/dev/null; then
+    echo "Required accessibility identifier not found: $identifier" >&2
+    exit 1
+  fi
+}
+
 launch_authenticated_app
 sleep 1
 
@@ -239,18 +249,16 @@ if ! capture_nonempty_ui_tree "$OUTPUT_DIR/00_launch_ui.json"; then
     exit 1
   fi
 fi
+
+if ! jq -e \
+  '.. | objects | select(.AXUniqueId == "briefing.screen")' \
+  "$OUTPUT_DIR/00_launch_ui.json" >/dev/null; then
+  assert_id "tab.briefing" "$OUTPUT_DIR/00_launch_ui.json"
+  echo "Selecting Briefing tab to normalize persisted root-tab state..."
+  axe tap --id "tab.briefing" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
+  axe describe-ui --udid "$UDID" >"$OUTPUT_DIR/00_launch_ui.json"
+fi
 axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/00_launch.png" >/dev/null
-
-assert_id() {
-  local identifier="$1"
-  local ui_file="$2"
-  if ! jq -e --arg identifier "$identifier" \
-    '.. | objects | select(.AXUniqueId == $identifier)' "$ui_file" >/dev/null; then
-    echo "Required accessibility identifier not found: $identifier" >&2
-    exit 1
-  fi
-}
-
 assert_id "briefing.screen" "$OUTPUT_DIR/00_launch_ui.json"
 
 echo "Navigating to Knowledge tab..."

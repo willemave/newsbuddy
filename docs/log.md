@@ -27,13 +27,13 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
-### 2026-09-01 — `main` — Integrate local release gates with current product work
+### 2026-09-01 — `main` — Integrate and harden local release gates with current product work
 
 - **Status:** Release validation in progress.
 - **Scope:** Merge the local release-gate and production-shaped smoke work from `origin/main` with the current onboarding, Briefing audio, palette, branding, and Rust steady-state commits.
 - **Decisions:** Preserve both commit stacks without rewriting shared history; resolve the append-only log by retaining every entry; use the repository-owned `scripts/release_gate.sh` as the current source-level release authority.
-- **Changes:** Merged `origin/main` into the local `main` release candidate with no implementation conflicts; the only manual resolution retained both sides of `docs/log.md`.
-- **Validation:** Merge-tree inspection and `git diff --check` are part of the merge commit check; the full local release gate, exact-SHA push, Docker deployment, and production health proof remain in progress.
+- **Changes:** Merged `origin/main` into the local `main` release candidate with no implementation conflicts; the only manual resolution retained both sides of `docs/log.md`. Made the AXe smoke explicitly return to Briefing when a prior run persisted the Knowledge tab for the same disposable user ID.
+- **Validation:** Merge-tree inspection and `git diff --check` passed. The deterministic Rust, SQLx, contract, Python, native iOS, and first AXe phases passed; the first live smoke correctly exposed the stale shared E2B template, and the rerun exposed the persisted-tab AXe harness bug. The complete gate, exact-SHA push, Docker deployment, and production health proof remain in progress.
 - **Remaining:** Complete the repository release gate, push the exact tested SHA, wait for the matching Docker Deploy run, and verify production.
 - **Commits:** This merge commit.
 
