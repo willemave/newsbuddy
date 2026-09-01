@@ -26,7 +26,7 @@ ENSO_SRC = ROOT / "images_r8" / "r8-03-enso-slate.png"
 # Body indigo and spectacle gold as rendered, sampled from the source.
 BUDDY_BODY = (0x38, 0x30, 0x61)
 BUDDY_GOLD = (0xD3, 0xBC, 0x78)
-# Dark-mode body: same hue, lifted until it reads on a warm charcoal ground.
+# Dark-mode body: same hue, lifted until it reads on the warm dark ground.
 BUDDY_BODY_DARK = (0x8B, 0x7F, 0xD0)
 
 
@@ -140,14 +140,14 @@ def main() -> None:
     rgb, alpha = arr[:, :, :3], arr[:, :, 3:4] / 255.0
     is_ring = (rgb[:, :, 2] > rgb[:, :, 0] + 6)[:, :, None]
 
-    ring_dark = np.array([0x93, 0xA7, 0xC4], dtype=np.float32)
+    ring_dark = np.array([0x9D, 0xB0, 0xCC], dtype=np.float32)
     book_dark = np.array([0xE6, 0xD9, 0xBA], dtype=np.float32)
     # Keep each pixel's shading by scaling the target with its own relative brightness.
     mean_level = max(float(rgb.mean()), 1.0)
     shade = (rgb.mean(axis=2, keepdims=True) / mean_level).clip(0.55, 1.25)
     recolored = np.where(is_ring, ring_dark * shade, book_dark * shade).clip(0, 255)
 
-    ground = np.array([0x17, 0x16, 0x13], dtype=np.float32)
+    ground = np.array([0x19, 0x15, 0x10], dtype=np.float32)
     composited = recolored * alpha + ground * (1.0 - alpha)
     Image.fromarray(composited.astype(np.uint8), "RGB").resize(
         (1024, 1024), Image.Resampling.LANCZOS
