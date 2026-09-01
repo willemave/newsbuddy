@@ -18,11 +18,13 @@ RUN apt-get update \
 
 COPY pyproject.toml uv.lock /service/
 RUN uv sync --frozen --no-dev --no-install-project \
-    && uv run playwright install --with-deps chromium \
+    && /service/.venv/bin/playwright install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
 
 COPY newsly_document_extractor /service/newsly_document_extractor
-RUN uv sync --frozen --no-dev
+RUN uv pip install --python /service/.venv/bin/python --no-deps . \
+    && cd /tmp \
+    && /service/.venv/bin/python -c "import newsly_document_extractor"
 
 ARG NEWSLY_BUILD_SHA=development
 LABEL org.opencontainers.image.title="Newsly document extractor" \
@@ -40,4 +42,4 @@ EXPOSE 8200
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
   CMD curl --fail --silent --show-error http://127.0.0.1:8200/health/ready || exit 1
 
-ENTRYPOINT ["newsly-document-extractor"]
+ENTRYPOINT ["/service/.venv/bin/newsly-document-extractor"]

@@ -59,8 +59,18 @@ if ! systemctl reload nginx; then
   rollback_upstream
   exit 1
 fi
-if ! curl --fail --silent --show-error --max-time 10 \
-  http://127.0.0.1/health >/dev/null; then
+active_upstream_healthy=false
+for attempt in $(seq 1 10); do
+  if curl --fail --silent --show-error --max-time 10 \
+    http://127.0.0.1/health >/dev/null; then
+    active_upstream_healthy=true
+    break
+  fi
+  if [[ "${attempt}" -lt 10 ]]; then
+    sleep 1
+  fi
+done
+if [[ "${active_upstream_healthy}" != true ]]; then
   rollback_upstream
   exit 1
 fi

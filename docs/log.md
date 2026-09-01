@@ -1780,3 +1780,10 @@ Use this append-only log to preserve implementation context across sessions and 
 - Made the inventory ignore SQLx's internal test-harness schema and classify direct database-owner versus `pg_database_owner` schema authority under the same logical label. The disposable drill still rejected a genuinely broader `PUBLIC CREATE` grant, proving that privilege drift remains fail-closed.
 - Added an exact-image, read-only eligibility preflight before downtime and a verified, ownership-and-grant-preserving custom-format PostgreSQL backup after the writer barrier but before any first-adoption write. A partial post-baseline SQLx history now stops automated deployment for operator inspection even when its checksums form an exact embedded prefix.
 - Added focused acceptance, rejection, and exact-history coverage and documented the release-pipeline and database-recovery contracts. A PostgreSQL 15 disposable adoption drill passed the full legacy-catalog preflight, produced a restorable custom-format backup, recorded all seven SQLx migrations, and preserved a sentinel application row.
+
+# 2026-08-31 — `main` — fail image packaging before production cutover
+
+- Fixed the document extractor image so Playwright setup does not trigger a premature project build or install development tools, the complete project is explicitly installed into its virtual environment, and production starts the installed entrypoint directly without an implicit `uv` synchronization against a read-only filesystem.
+- Added post-publish, pre-deploy smoke tests for the exact Rust migration binary and the exact extractor image under production-like read-only and health-check constraints.
+- Made the Nginx slot switch retry its local post-reload health probe so a graceful worker handoff cannot spuriously roll routing back to the stopped prior slot.
+- Production recovery kept the completed SQLx authority migration, used the verified pre-adoption backup as its recovery point, and restored service with the exact Rust image plus a metadata-only extractor recovery image while the durable image fix proceeds through the full release gate.

@@ -103,6 +103,45 @@ jobs:
           cache-from: type=gha,scope=document-extractor
           cache-to: type=gha,mode=max,scope=document-extractor
 
+      - name: Smoke-test published deployment images
+        env:
+          APP_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}
+          EXTRACTOR_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.TESTED_SHA }}-extractor
+        run: |
+          set -euo pipefail
+          docker pull "$APP_IMAGE"
+          docker pull "$EXTRACTOR_IMAGE"
+
+          docker run --rm --entrypoint /usr/local/bin/newsly-db \
+            "$APP_IMAGE" migration-count
+
+          extractor_container="newsly-extractor-smoke-${GITHUB_RUN_ID}"
+          cleanup() {
+            docker rm -f "$extractor_container" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d \
+            --name "$extractor_container" \
+            --read-only \
+            --tmpfs /tmp:size=1024m,mode=1777 \
+            --security-opt no-new-privileges:true \
+            -e DOCUMENT_EXTRACTOR_SHARED_SECRET=image-smoke-test \
+            "$EXTRACTOR_IMAGE" >/dev/null
+          for attempt in $(seq 1 60); do
+            health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$extractor_container")"
+            if [[ "$health" == "healthy" ]]; then
+              exit 0
+            fi
+            if [[ "$health" == "unhealthy" || "$health" == "exited" || "$health" == "dead" ]]; then
+              docker logs "$extractor_container"
+              exit 1
+            fi
+            sleep 2
+          done
+          docker logs "$extractor_container"
+          echo "Extractor image did not become healthy" >&2
+          exit 1
+
   deploy:
     name: Deploy tested image to production
     needs:
