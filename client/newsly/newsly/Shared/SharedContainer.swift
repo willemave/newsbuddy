@@ -142,6 +142,7 @@ enum E2ETestLaunch {
     static let fakeSpeechTranscriptKey = "newslyE2EFakeSpeechTranscript"
     static let fakeSpeechScenarioKey = "newslyE2EFakeSpeechScenario"
     static let visualNowKey = "newslyE2EVisualNow"
+    static let visualStateKey = "newslyE2EVisualState"
 
     static var isEnabled: Bool {
         bool(for: enabledKey)
@@ -222,6 +223,11 @@ enum E2ETestLaunch {
         guard isEnabled else { return nil }
         return date(for: visualNowKey)
     }
+
+    static var visualState: String? {
+        guard isEnabled else { return nil }
+        return string(for: visualStateKey)
+    }
 #else
     static let isEnabled = false
     static let shouldAutoLogin = false
@@ -239,6 +245,7 @@ enum E2ETestLaunch {
     static let fakeSpeechTranscript: String? = nil
     static let fakeSpeechScenario: String? = nil
     static let visualNow: Date? = nil
+    static let visualState: String? = nil
 #endif
 }
 

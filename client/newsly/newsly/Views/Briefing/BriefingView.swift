@@ -104,7 +104,7 @@ struct BriefingView: View {
         Group {
             switch viewModel.state {
             case .idle, .loading:
-                LoadingView()
+                BuddyLoadingView(message: "Preparing your briefing")
             case .empty:
                 emptyState
             case .error(let message):

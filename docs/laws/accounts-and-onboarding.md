@@ -25,3 +25,5 @@ A11. A cached authenticated shell may be shown only for the identity bound to th
 A12. A credential publication binds one complete access/refresh pair to one user and generation. Legacy loose credentials must be server-validated before they can establish cached identity, a stale plaintext mirror cannot resurrect credentials after the bound record exists, and an interrupted one-leg publication cannot be treated as or overwritten by an atomic pair.
 
 A13. Completing a discovery run never schedules that discovery again. Later source expansion belongs to the separate durable feed-discovery workflow.
+
+A14. Onboarding guidance never obscures or intercepts actionable controls. The Buddy may expand for the welcome and then dock in the upper-right to guide the flow; loading states use the centered Buddy indicator, and reduced-motion users receive a settled presentation.

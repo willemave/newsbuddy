@@ -20,11 +20,11 @@ struct OnboardingLoadingStep: View {
 
             Spacer()
 
-            VStack(spacing: 16) {
+            VStack(spacing: 18) {
+                BuddyLoadingIndicator(size: 74)
+                    .accessibilityIdentifier("onboarding.loading.buddy")
+
                 if viewModel.discoveryLanes.isEmpty {
-                    ProgressView()
-                        .scaleEffect(1.2)
-                        .tint(.onboardingText)
                     Text("Preparing search...")
                         .font(.appCallout)
                         .foregroundColor(.onboardingText.opacity(0.7))

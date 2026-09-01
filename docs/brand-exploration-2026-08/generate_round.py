@@ -41,8 +41,9 @@ def main() -> int:
 
     module = importlib.import_module(f"concepts_{args.round}")
     concepts, models, style = module.CONCEPTS, module.MODELS, module.STYLE_BASE
-    # Optional {concept id: reference image} — those concepts are edited, not generated fresh.
-    refs: dict[str, Path] = getattr(module, "REFS", {})
+    # Optional {concept id: reference image(s)} — those concepts are edited, not generated
+    # fresh. A list composites several existing marks in the order given.
+    refs: dict[str, Path | list[Path]] = getattr(module, "REFS", {})
 
     out_dir = ROOT / f"images_{args.round}"
     out_dir.mkdir(exist_ok=True)

@@ -79,21 +79,15 @@ struct newslyApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                switch authViewModel.authState {
-                case .authenticated(let user):
-                    if let session = runtime.authenticatedSession,
-                       session.user.id == user.id {
-                        AuthenticatedRootView(session: session)
-                            .environment(authViewModel)
-                    } else {
-                        LoadingView()
-                    }
-                case .unauthenticated:
-                    LandingView()
-                        .environment(authViewModel)
-                case .loading:
-                    LoadingView()
+                #if DEBUG
+                if let visualState = E2ETestLaunch.visualState {
+                    E2EVisualStateView(state: visualState)
+                } else {
+                    authenticatedPresentation
                 }
+                #else
+                authenticatedPresentation
+                #endif
             }
             .environment(runtime.lifecycle)
             .environment(dependencyFactory)
@@ -116,6 +110,25 @@ struct newslyApp: App {
             } message: {
                 Text(cliLinkAlertMessage ?? "")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var authenticatedPresentation: some View {
+        switch authViewModel.authState {
+        case .authenticated(let user):
+            if let session = runtime.authenticatedSession,
+               session.user.id == user.id {
+                AuthenticatedRootView(session: session)
+                    .environment(authViewModel)
+            } else {
+                LoadingView()
+            }
+        case .unauthenticated:
+            LandingView()
+                .environment(authViewModel)
+        case .loading:
+            LoadingView()
         }
     }
 

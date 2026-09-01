@@ -12,16 +12,9 @@ struct OnboardingChoiceStep: View {
         VStack(spacing: 0) {
             Spacer()
 
-            // The buddy already introduced itself on the preceding intro step, so this
-            // screen asks its question directly instead of saying hello a second time.
+            // The docked guide stays visible in the upper-right, so this screen can ask
+            // its question directly without duplicating the character in the content.
             VStack(spacing: 32) {
-                Image("BuddyMark")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 92, height: 92)
-                    .appShadow(.elevated)
-                    .accessibilityLabel("Newsbuddy")
-
                 VStack(spacing: 12) {
                     Text("GETTING STARTED")
                         .font(.editorialMeta)

@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-01 — `main` — Warm-clay Buddy icon and onboarding guide
+
+- **Status:** Complete locally.
+- **Scope:** iOS app icon and mark assets, onboarding presentation, onboarding and Briefing loading states, and a debug-only visual-state screenshot seam.
+- **Decisions:** Keep the approved slate-and-ink icon composition while recoloring Buddy warm clay with gold glasses; let one flow-level Buddy own onboarding continuity; expand Buddy at the welcome and dock it upper-right so it avoids the back affordance and primary controls; use Buddy instead of a generic spinner; settle motion when Reduce Motion is enabled.
+- **Changes:** Replaced light, dark, and tinted app-icon variants plus app and Buddy marks; added a breathing Buddy loading indicator; applied it to onboarding preparation and initial Briefing loading; added the expanding and floating upper-right onboarding guide; added DEBUG-only backend-free visual states for deterministic screenshot capture.
+- **Validation:** Built and launched the current checkout on iPhone 17 Pro Simulator running iOS 26.4; all 631 native iOS tests passed with zero failures or skips; captured and visually inspected the installed Home Screen icon, docked onboarding guide, onboarding loading state, and Briefing loading state.
+- **Remaining:** Optional physical-device motion and small-icon taste check. No commit, push, deployment, or Apple distribution was requested.
+- **Commits:** Uncommitted.
+
 ### 2026-09-01 — `main` — Briefing audio cleanup follow-up
 
 - **Status:** Complete locally; physical-device Lock Screen verification remains.
