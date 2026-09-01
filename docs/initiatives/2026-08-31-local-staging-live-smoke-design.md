@@ -1,7 +1,7 @@
 # Local Staging Live Smoke Design
 
-**Status:** Complete locally  
-**Branch:** `main`  
+**Status:** Complete locally
+**Branch:** `main`
 **Scope:** Learning Decks, chat, deck-grounded chat, and Share Extension outcomes that create a deck or chat
 
 ## 1. Goal
