@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-01 — `main` — Remove Rust migration remnants and harden steady-state runtime
+
+- **Status:** Complete locally; not pushed or deployed.
+- **Scope:** Steady-state architecture and operator documentation, obsolete migration artifacts, queue payload contracts, worker process and local-object infrastructure, the document-extractor boundary, and blue-green deployment behavior.
+- **Decisions:** Delete one-time migration plans only after moving durable behavior into architecture, laws, and operator guides. Retain SQLx baseline/fingerprint evidence, runtime ownership, contract fixtures, and installed-client compatibility because they still enforce recovery or active boundaries. Treat executor versions as authority epochs rather than binary versions. Keep the maintenance barrier only for explicit legacy baseline adoption; ordinary deploy migrations must be reviewed as backward-compatible or expand-contract work.
+- **Changes:** Removed nine stale planning/guidance files and the unused Tailwind v3 config; rewrote current Rust, onboarding, Hacker News, environment, and deploy documentation; consolidated process setup across all 17 worker entrypoints; unified four content-addressed local stores behind atomic no-clobber publication; rejected malformed `enrich_news_item_article` tasks at enqueue/dispatch; added bidirectional extraction golden/schema checks; and kept the active API online during ordinary migrations while draining old writers before the public switch. Once target routing is attempted, failures leave writers stopped even if routing rolls back, because the target may already have emitted new-version tasks. A checked-in shell guard locks that order and fail-closed behavior.
+- **Validation:** Full warning-denied workspace Clippy and the complete Rust workspace test suite passed, including SQLx-backed tests against an isolated migrated PostgreSQL instance; SQLx offline workspace checking, Rust formatting, architecture and public-contract guards, Docker Compose validation, shell syntax, all extractor tests, Ruff, MyPy, and `git diff --check` passed. Byte-for-byte CSS regeneration and checked-in success, public-failure, rollback-failure, missing-slot, target-switch-failure, and pre-switch drain-failure simulations also passed.
+- **Remaining:** No cleanup blocker. Removing runtime ownership or recovery evidence would require an explicit law, schema, and operator-surface redesign; deployment and Apple client validation were outside this cleanup.
+- **Commits:** This commit.
+
 ### 2026-09-01 — `main` — Warm-clay Buddy icon and onboarding guide
 
 - **Status:** Complete locally.

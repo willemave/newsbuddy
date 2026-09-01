@@ -180,7 +180,7 @@ pub(super) async fn parse_voice(
                 tracing::error!(
                     error = %error,
                     user_id = current_user.id,
-                    "onboarding voice parse failed; returning the Python-compatible empty result"
+                    "onboarding voice parse failed; returning the canonical empty result"
                 );
                 empty_voice_response()
             }

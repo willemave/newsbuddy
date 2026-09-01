@@ -270,7 +270,7 @@ fn normalize_subscription_config(config: &Value, feed_url: &str, feed_format: &s
     Value::Object(config)
 }
 
-/// List a user's scraper configurations in the same newest-first order as the Python service.
+/// List a user's scraper configurations in the stable newest-first order.
 ///
 /// # Errors
 ///
@@ -360,7 +360,7 @@ pub async fn find_scraper_config(
     .await?)
 }
 
-/// Check the coexistence identity before performing an expensive external feed probe.
+/// Checks the persisted subscription identity before performing an expensive external feed probe.
 /// The fenced create transaction repeats this check so a concurrent writer cannot win unnoticed.
 ///
 /// # Errors
@@ -586,7 +586,7 @@ fn map_write_error(error: sqlx::Error) -> ScraperConfigRepositoryError {
     }
 }
 
-/// Stable URL identity retained while Python and Rust writers coexist.
+/// Stable URL identity retained for existing subscriptions and deduplication keys.
 pub fn canonicalize_feed_url(value: &str) -> String {
     let trimmed = value.trim();
     let without_fragment = trimmed
@@ -652,7 +652,7 @@ mod tests {
     use super::canonicalize_feed_url;
 
     #[test]
-    fn canonical_url_identity_matches_python_coexistence_rules() {
+    fn canonical_url_identity_preserves_existing_rules() {
         assert_eq!(
             canonicalize_feed_url("  HTTPS://Example.COM/feed/?a=1#fragment  "),
             "https://example.com/feed?a=1"

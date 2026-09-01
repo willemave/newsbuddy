@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn match_tokens_follow_the_python_stemming_contract() {
+    fn match_tokens_follow_the_persisted_stemming_contract() {
         assert_eq!(
             match_tokens("Launching rockets after tests"),
             BTreeSet::from(["launch".to_owned(), "rocket".to_owned(), "test".to_owned()])

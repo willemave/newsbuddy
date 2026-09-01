@@ -92,8 +92,8 @@ async fn execute_image_generation(
                 error = %error,
                 "image generation provider failed"
             );
-            // The Python handler scheduled queue retries for every provider failure. Preserve that
-            // outer retry policy while the gateway uses its structured flag only for inline calls.
+            // The durable queue retries every provider failure. The gateway's structured retryable
+            // flag applies only to callers that perform retries inline.
             return plain_failure(error.to_string(), true);
         }
     };

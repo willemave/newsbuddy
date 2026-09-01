@@ -844,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    fn relation_query_matches_python_stemming_and_or_shape() {
+    fn relation_query_preserves_stemming_and_or_shape() {
         assert_eq!(
             relation_search_query(Some("Models launched with agents")),
             Some("agent | launch | model".to_owned())

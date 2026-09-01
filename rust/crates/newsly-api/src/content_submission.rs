@@ -100,8 +100,8 @@ pub(super) async fn submit_content(
     }
 
     let mut requests = Vec::new();
-    // Preserve the Python producer's observable enqueue ordering. A completed share-and-chat
-    // request is handed to the chat queue before any optional reanalysis for the same content.
+    // Preserve the established observable enqueue ordering. A completed share-and-chat request is
+    // handed to the chat queue before any optional reanalysis for the same content.
     if applied.enqueue_dig_deeper {
         requests.push(dig_deeper_request(
             applied.content_id,
@@ -393,7 +393,7 @@ mod tests {
     use super::{NormalizedSubmission, agent_data_sync_payload, normalize_http_url};
 
     #[test]
-    fn request_normalization_matches_python_submission_defaults() {
+    fn request_normalization_preserves_submission_defaults() {
         let normalized = NormalizedSubmission::try_from_request(
             SubmitContentRequest {
                 url: " https://EXAMPLE.com ".to_owned(),

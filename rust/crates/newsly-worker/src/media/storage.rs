@@ -1,10 +1,12 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use newsly_db::MediaTranscriptPointer;
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::fs;
-use uuid::Uuid;
+
+use crate::local_object::{
+    LocalObjectError, publish, sha256_hex, storage_key, validate_relative_path,
+};
 
 const MAX_TRANSCRIPT_BYTES: usize = 2_000_000;
 
@@ -153,38 +155,7 @@ impl MediaFileStore {
             .join(format!("source-{sha256}.txt"));
         validate_relative_path(&storage_key_path)?;
         let storage_key = storage_key(&storage_key_path)?;
-        let destination = self.body_root.join(&storage_key_path);
-        let parent = destination
-            .parent()
-            .ok_or(MediaFileStoreError::UnsafeStorageKey)?;
-        fs::create_dir_all(parent)
-            .await
-            .map_err(MediaFileStoreError::Write)?;
-        match fs::symlink_metadata(&destination).await {
-            Ok(metadata) => {
-                if metadata.file_type().is_symlink()
-                    || !metadata.is_file()
-                    || metadata.len() != encoded.len() as u64
-                    || fs::read(&destination)
-                        .await
-                        .map_err(MediaFileStoreError::Read)?
-                        != encoded
-                {
-                    return Err(MediaFileStoreError::UnsafeExistingBody);
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
-                fs::write(&temporary, encoded)
-                    .await
-                    .map_err(MediaFileStoreError::Write)?;
-                if let Err(error) = fs::rename(&temporary, &destination).await {
-                    let _ = fs::remove_file(&temporary).await;
-                    return Err(MediaFileStoreError::Write(error));
-                }
-            }
-            Err(error) => return Err(MediaFileStoreError::Read(error)),
-        }
+        publish(&self.body_root, &storage_key_path, encoded).await?;
         Ok(MediaTranscriptPointer {
             storage_provider: "local".to_owned(),
             storage_bucket: None,
@@ -219,47 +190,6 @@ fn absolute_path(path: PathBuf, current_directory: &Path) -> PathBuf {
     }
 }
 
-fn validate_relative_path(path: &Path) -> Result<(), MediaFileStoreError> {
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(MediaFileStoreError::UnsafeStorageKey);
-    }
-    Ok(())
-}
-
-fn storage_key(path: &Path) -> Result<String, MediaFileStoreError> {
-    path.components()
-        .map(|component| match component {
-            Component::Normal(part) => part
-                .to_str()
-                .map(str::to_owned)
-                .ok_or(MediaFileStoreError::UnsafeStorageKey),
-            _ => Err(MediaFileStoreError::UnsafeStorageKey),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|parts| parts.join("/"))
-}
-
-fn sha256_hex(value: &[u8]) -> String {
-    let digest = Sha256::digest(value);
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        encoded.push(
-            char::from_digit(u32::from(byte >> 4), 16)
-                .expect("a four-bit nibble is always hexadecimal"),
-        );
-        encoded.push(
-            char::from_digit(u32::from(byte & 0x0f), 16)
-                .expect("a four-bit nibble is always hexadecimal"),
-        );
-    }
-    encoded
-}
-
 #[derive(Debug, Error)]
 pub enum MediaFileStoreError {
     #[error("media byte limit must be greater than zero")]
@@ -288,6 +218,18 @@ pub enum MediaFileStoreError {
     Write(#[source] std::io::Error),
 }
 
+impl From<LocalObjectError> for MediaFileStoreError {
+    fn from(error: LocalObjectError) -> Self {
+        match error {
+            LocalObjectError::CurrentDirectory(error) => Self::CurrentDir(error),
+            LocalObjectError::UnsafePath => Self::UnsafeStorageKey,
+            LocalObjectError::Write(error) => Self::Write(error),
+            LocalObjectError::Read(error) => Self::Read(error),
+            LocalObjectError::UnsafeExistingObject => Self::UnsafeExistingBody,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -297,7 +239,7 @@ mod tests {
     use super::MediaFileStore;
 
     #[tokio::test]
-    async fn stages_python_compatible_content_body_pointer() {
+    async fn stages_canonical_content_body_pointer() {
         let root = std::env::temp_dir().join(format!("newsly-media-{}", Uuid::new_v4()));
         let store = MediaFileStore::new(
             root.join("scratch"),
@@ -307,10 +249,20 @@ mod tests {
             1_000_000,
         )
         .unwrap();
-        let pointer = store.stage_transcript(42, "hello podcast").await.unwrap();
+        let pointer = store
+            .stage_transcript(42, "  hello podcast \n")
+            .await
+            .unwrap();
         assert_eq!(pointer.storage_provider, "local");
         assert!(pointer.storage_key.starts_with("content/42/source-"));
         assert_eq!(pointer.char_count, 13);
+        assert_eq!(pointer.byte_size, 13);
+        assert_eq!(
+            tokio::fs::read(root.join("body").join(&pointer.storage_key))
+                .await
+                .unwrap(),
+            b"hello podcast"
+        );
         let _ = tokio::fs::remove_dir_all(root).await;
     }
 

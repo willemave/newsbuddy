@@ -50,7 +50,7 @@ macro_rules! string_enum {
     };
 }
 
-// The API schema intentionally retains the complete Python LlmTaskMode enum even though the
+// The API schema intentionally retains the complete persisted LlmTaskMode enum even though the
 // Share Actions endpoint accepts only the seven modes returned by `is_share_action`.
 string_enum!(LlmTaskMode {
     AddContent => "add_content",

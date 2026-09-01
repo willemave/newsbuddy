@@ -183,5 +183,5 @@ pub struct AgentOnboardingCompleteRequest {
 }
 
 // Keep the response alias explicit at the contract boundary. Both fast-discovery callers expose
-// the same Python wire object and should never drift into parallel DTOs.
+// the same canonical wire object and should never drift into parallel DTOs.
 pub type AgentOnboardingSuggestionsResponse = OnboardingFastDiscoverResponse;

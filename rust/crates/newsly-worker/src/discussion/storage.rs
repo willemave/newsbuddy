@@ -1,11 +1,12 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 
 use chrono::Utc;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio::fs;
-use uuid::Uuid;
+
+use crate::local_object::{
+    LocalObjectError, absolute_root, publish, sha256_hex, storage_key, validate_relative_path,
+};
 
 use super::model::RawDiscussionPointer;
 
@@ -18,20 +19,14 @@ pub struct DiscussionObjectStore {
 }
 
 impl DiscussionObjectStore {
-    /// Creates the Python-compatible local object-store boundary for immutable comment trees.
+    /// Creates the canonical local object-store boundary for immutable comment trees.
     ///
     /// # Errors
     ///
     /// Rejects an absolute or traversing storage prefix and failure to resolve a relative root.
     pub fn new(root: PathBuf, prefix: PathBuf) -> Result<Self, DiscussionObjectStoreError> {
         validate_relative_path(&prefix)?;
-        let root = if root.is_absolute() {
-            root
-        } else {
-            std::env::current_dir()
-                .map_err(DiscussionObjectStoreError::CurrentDirectory)?
-                .join(root)
-        };
+        let root = absolute_root(root)?;
         Ok(Self { root, prefix })
     }
 
@@ -57,38 +52,8 @@ impl DiscussionObjectStore {
             .join(format!("comments-{sha256}.json"));
         validate_relative_path(&storage_path)?;
         let storage_key = storage_key(&storage_path)?;
-        let destination = self.root.join(&storage_path);
-        let parent = destination
-            .parent()
-            .ok_or(DiscussionObjectStoreError::UnsafeStorageKey)?;
-        fs::create_dir_all(parent)
-            .await
-            .map_err(DiscussionObjectStoreError::Write)?;
         let pretty = serde_json::to_vec_pretty(raw_payload)?;
-        match fs::symlink_metadata(&destination).await {
-            Ok(metadata) => {
-                if metadata.file_type().is_symlink()
-                    || !metadata.is_file()
-                    || fs::read(&destination)
-                        .await
-                        .map_err(DiscussionObjectStoreError::Read)?
-                        != pretty
-                {
-                    return Err(DiscussionObjectStoreError::UnsafeExistingObject);
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
-                fs::write(&temporary, &pretty)
-                    .await
-                    .map_err(DiscussionObjectStoreError::Write)?;
-                if let Err(error) = fs::rename(&temporary, &destination).await {
-                    let _ = fs::remove_file(&temporary).await;
-                    return Err(DiscussionObjectStoreError::Write(error));
-                }
-            }
-            Err(error) => return Err(DiscussionObjectStoreError::Read(error)),
-        }
+        publish(&self.root, &storage_path, &pretty).await?;
         Ok(RawDiscussionPointer {
             storage_provider: "local",
             storage_bucket: None,
@@ -101,41 +66,6 @@ impl DiscussionObjectStore {
             updated_at: Utc::now(),
         })
     }
-}
-
-fn validate_relative_path(path: &Path) -> Result<(), DiscussionObjectStoreError> {
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(DiscussionObjectStoreError::UnsafeStorageKey);
-    }
-    Ok(())
-}
-
-fn storage_key(path: &Path) -> Result<String, DiscussionObjectStoreError> {
-    path.components()
-        .map(|component| match component {
-            Component::Normal(part) => part
-                .to_str()
-                .map(str::to_owned)
-                .ok_or(DiscussionObjectStoreError::UnsafeStorageKey),
-            _ => Err(DiscussionObjectStoreError::UnsafeStorageKey),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|parts| parts.join("/"))
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut output = String::with_capacity(64);
-    for byte in digest {
-        use std::fmt::Write as _;
-        let _ = write!(output, "{byte:02x}");
-    }
-    output
 }
 
 #[derive(Debug, Error)]
@@ -156,14 +86,28 @@ pub enum DiscussionObjectStoreError {
     UnsafeExistingObject,
 }
 
+impl From<LocalObjectError> for DiscussionObjectStoreError {
+    fn from(error: LocalObjectError) -> Self {
+        match error {
+            LocalObjectError::CurrentDirectory(error) => Self::CurrentDirectory(error),
+            LocalObjectError::UnsafePath => Self::UnsafeStorageKey,
+            LocalObjectError::Write(error) => Self::Write(error),
+            LocalObjectError::Read(error) => Self::Read(error),
+            LocalObjectError::UnsafeExistingObject => Self::UnsafeExistingObject,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use tokio::fs;
+    use uuid::Uuid;
 
     use super::*;
 
     #[tokio::test]
-    async fn stages_python_compatible_immutable_pointer() {
+    async fn stages_canonical_immutable_pointer() {
         let root = std::env::temp_dir().join(format!("newsly-discussion-{}", Uuid::new_v4()));
         let store = DiscussionObjectStore::new(root.clone(), PathBuf::from("content")).unwrap();
         let payload = json!({"comments": [{"comment_id": "1", "text": "hello"}]});
@@ -176,6 +120,8 @@ mod tests {
                 .storage_key
                 .starts_with("content/news-item-discussions/42/")
         );
+        let stored = fs::read(root.join(&first.storage_key)).await.unwrap();
+        assert_eq!(first.byte_size, i32::try_from(stored.len()).unwrap());
         assert_eq!(first.to_json()["comment_count"], 1);
         let _ = fs::remove_dir_all(root).await;
     }

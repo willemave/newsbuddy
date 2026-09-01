@@ -132,13 +132,13 @@ async fn write_local_artifacts(artifacts: &IosE2eLocalArtifactPlan) -> Result<()
         .with_context(|| format!("could not write fixture Learning Deck {}", index.display()))?;
     tokio::fs::write(
         &notes,
-        "# Rust migration fixture\n\nPrepare immutable input, release the transaction, and finalize in a fresh fenced transaction.\n",
+        "# Reliable async systems fixture\n\nPrepare immutable input, release the transaction, and finalize in a fresh fenced transaction.\n",
     )
     .await
     .with_context(|| format!("could not write fixture source notes {}", notes.display()))?;
     tokio::fs::write(
         &notes_html,
-        "<!doctype html><html><body><h1>Rust migration source notes</h1><p>Use short prepare and finalize transactions around external work.</p></body></html>",
+        "<!doctype html><html><body><h1>Reliable async systems source notes</h1><p>Use short prepare and finalize transactions around external work.</p></body></html>",
     )
     .await
     .with_context(|| {
@@ -190,9 +190,9 @@ fn resolve_artifact_path(root: &Path, relative: &str) -> Result<PathBuf> {
 fn deck_fixture_html() -> &'static str {
     r#"<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A Practical Playbook for Rust Migration</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A Practical Playbook for Reliable Async Systems</title></head>
 <body style="font-family:-apple-system,sans-serif;background:#10141c;color:#f7f7f7;margin:0;padding:32px">
-<main><p>NEWSLY LEARNING DECK</p><h1>A Practical Playbook for Rust Migration</h1>
+<main><p>NEWSLY LEARNING DECK</p><h1>A Practical Playbook for Reliable Async Systems</h1>
 <section><h2>Keep transactions short</h2><p>Prepare an immutable DTO, perform external work without a session, then finalize behind a fresh lease-fenced transaction.</p></section>
 <section><h2>Make contracts generated</h2><p>Use the Rust OpenAPI document as the only client wire authority.</p></section></main>
 </body></html>"#

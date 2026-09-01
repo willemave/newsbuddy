@@ -896,8 +896,7 @@ async fn find_duplicate_content(
 ///
 /// Each insert absorbs a concurrent or pre-existing winner row before the loser is deleted. The
 /// timestamped overlays retain the newer interaction, while independent chat histories only
-/// change their content destination. This is the `SQLx` equivalent of Python's
-/// `finalize_canonical_user_state` and runs inside the queue/product finalize fence.
+/// change their content destination. The relink runs inside the queue/product finalize fence.
 async fn relink_canonical_user_state(
     transaction: &mut Transaction<'static, Postgres>,
     loser_content_id: i64,

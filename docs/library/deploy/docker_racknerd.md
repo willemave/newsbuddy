@@ -63,30 +63,40 @@ GitHub Actions:
 3. starts or verifies the external PostgreSQL container
 4. runs the exact-image embedded SQLx migrations once
 5. starts the inactive API slot and waits for its direct health check
-6. atomically switches Nginx to that slot
-7. verifies the configured public HTTPS origin reaches the new slot, rolling
+6. drains the singleton workers and scheduler so no old binary can claim work
+   emitted by the new API
+7. atomically switches Nginx to that slot
+8. verifies the configured public HTTPS origin reaches the new slot, rolling
    Nginx back if that probe fails
-8. updates the single workers and scheduler containers
-9. retains the previous API slot and image as the immediate rollback target
+9. updates the single workers and scheduler containers
+10. retains the previous API slot and image as the immediate rollback target
 
 The production services are defined in `docker-compose.production.yml`.
 `scripts/deploy_blue_green.sh` owns the release sequence. The active slot is
 recorded in `/opt/newsly/state/active-api-slot`; Nginx reads
 `/etc/nginx/newsly-active-upstream.conf`.
 
-### One-time SQLx baseline adoption
+### SQLx baseline-adoption recovery
 
-An existing production database at frozen Alembic head `20260829_02` must be adopted exactly once.
-Set `NEWSLY_SQLX_BASELINE_ADOPTION=true` in `.env.racknerd` for that deploy only. The deploy script
-records the running API/worker/scheduler set, stops and drains those writers, and invokes the
-exact-image `newsly-db baseline` command with the maintenance-barrier attestation. Adoption refuses
-to write SQLx history unless the Alembic head, migration history, normalized schema/data catalog,
-and role/grant policy all match the committed baseline evidence.
+Normal deploys leave `NEWSLY_SQLX_BASELINE_ADOPTION` unset or set to `false`.
+The retained adoption path is reserved for an eligible database at frozen
+Alembic head `20260829_02` that has never been adopted, such as a verified
+legacy-database restoration.
 
-After the adoption deploy succeeds, remove `NEWSLY_SQLX_BASELINE_ADOPTION` (or set it to `false`)
-before the next deploy. The host marker at `/opt/newsly/state/sqlx-baseline-adopted` makes leaving
-the one-shot flag enabled a hard error. Once the maintenance barrier begins, an adoption failure
-fails closed: the deploy does not restart a retired Python writer set or advance the release.
+For that deliberate operation, set `NEWSLY_SQLX_BASELINE_ADOPTION=true` for one
+deploy only. The deploy script records the running API, worker, and scheduler
+set; stops and drains those writers; and invokes the exact-image `newsly-db
+baseline` command with the maintenance-barrier attestation. Adoption refuses to
+write SQLx history unless the Alembic head, migration history, normalized
+schema/data catalog, and role/grant policy all match the committed baseline
+evidence.
+
+After adoption succeeds, remove the flag before the next deploy. The host marker
+at `/opt/newsly/state/sqlx-baseline-adopted` makes enabling the one-shot flag
+again a hard error. If adoption fails before the authority migration is applied,
+the deploy restores the recorded prior containers. Once Rust authority is applied,
+or when its state cannot be proven, failure is fail-closed: the release does not
+advance and the prior application writers remain stopped.
 
 The host Nginx configuration and atomic slot-switch helper live at
 `scripts/deploy/newsly-nginx.conf` and
@@ -105,8 +115,11 @@ for database settings and the Rust admin surface or container runtime for logs. 
 - Nginx is reloaded only after the inactive slot passes `/health`; existing
   connections drain under Nginx's graceful reload.
 - PostgreSQL and `/data` outlive every app container replacement.
-- Workers and the scheduler are singletons. They are replaced after the HTTP
-  switch, so HTTP deploys are near-hitless while background processing has a
-  short controlled restart.
+- Workers and the scheduler are singletons. They drain before the HTTP switch
+  and are replaced after it, preventing mixed API/worker task semantics while
+  HTTP remains near-hitless. A failure while draining them, before target routing
+  is attempted, restores the recorded writers. Once target switching begins, the
+  old writers remain stopped on every failure—even if the prior route is restored—
+  because the target API may already have emitted new-version tasks.
 - Migrations run before the API switch. Migrations used in this deploy path
   must remain compatible with the currently active API until Nginx switches.

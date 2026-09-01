@@ -1,7 +1,7 @@
 //! Durable queue specifications and lease-fenced worker orchestration.
 //!
-//! Queue implementation moves here only with task ownership cutovers. It must preserve the
-//! existing `PostgreSQL` compare-and-set lease, retry-generation, deferral, and notification rules.
+//! The implementation preserves the `PostgreSQL` compare-and-set lease, retry-generation,
+//! deferral, and notification rules.
 
 #![forbid(unsafe_code)]
 
@@ -11,7 +11,7 @@ mod model;
 mod notifications;
 mod ownership;
 
-pub use compatibility_json::python_canonical_json;
+pub use compatibility_json::compatibility_canonical_json;
 pub use kernel::{
     ClaimRequest, EnqueueBatchResult, FencedFinalization, PrepareWorkOutcome, QueueError,
     QueueKernel,

@@ -41,8 +41,8 @@ pub(super) fn extraction_failure(
     let task_result = if retryable {
         TaskResult::fail(Some(reason.clone()), true)
     } else {
-        // The product row carries the authoritative terminal extraction failure. Matching the
-        // Python worker, the delivery task itself completes once that state is durable.
+        // The product row carries the authoritative terminal extraction failure. The delivery
+        // task itself completes once that state is durable.
         TaskResult::ok()
     };
     let finalization = ContentFinalizationPlan {

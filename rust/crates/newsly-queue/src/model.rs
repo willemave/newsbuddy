@@ -186,8 +186,8 @@ impl TaskType {
         )
     }
 
-    /// Applies the same defaults, null elision, and closed/open-object rules as the generated
-    /// Python task schemas. This is deliberately performed both at enqueue and before dispatch.
+    /// Applies the same defaults, null elision, and closed/open-object rules as the checked-in
+    /// task schemas. This is deliberately performed both at enqueue and before dispatch.
     ///
     /// # Errors
     ///
@@ -250,6 +250,9 @@ impl TaskType {
             }
             Self::ProcessNewsItem | Self::FetchNewsItemDiscussion => {
                 required_integer(&payload, self, "news_item_id", false)?;
+            }
+            Self::EnrichNewsItemArticle => {
+                required_integer(&payload, self, "news_item_id", true)?;
             }
             Self::DiscoverFeeds | Self::DeleteUserAccount => {
                 required_integer(&payload, self, "user_id", false)?;
@@ -362,7 +365,6 @@ impl TaskType {
                 }
                 optional_integer(&mut payload, self, "first_edition_run_id", true)?;
             }
-            Self::EnrichNewsItemArticle => {}
         }
 
         payload.retain(|_, value| !value.is_null());
@@ -772,7 +774,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        ClaimedTask, FinalizationOutcome, ResolvedFinalization, TaskResult, TaskStatus, TaskType,
+        ClaimedTask, FinalizationOutcome, PayloadError, ResolvedFinalization, TaskResult,
+        TaskStatus, TaskType,
     };
 
     #[test]
@@ -811,6 +814,54 @@ mod tests {
         assert_eq!(normalized.get("crawl_links"), Some(&json!(false)));
         assert_eq!(normalized.get("subscribe_to_feed"), Some(&json!(false)));
         assert!(!normalized.contains_key("content_id"));
+    }
+
+    #[test]
+    fn enrich_news_item_article_requires_news_item_id() {
+        assert_eq!(
+            TaskType::EnrichNewsItemArticle.normalize_payload(None),
+            Err(PayloadError::MissingField {
+                task_type: TaskType::EnrichNewsItemArticle,
+                field: "news_item_id",
+            })
+        );
+    }
+
+    #[test]
+    fn enrich_news_item_article_rejects_nonpositive_news_item_id() {
+        for news_item_id in [0, -1] {
+            let payload = json!({"news_item_id": news_item_id}).as_object().cloned();
+            assert_eq!(
+                TaskType::EnrichNewsItemArticle.normalize_payload(payload),
+                Err(PayloadError::OutOfRange {
+                    task_type: TaskType::EnrichNewsItemArticle,
+                    field: "news_item_id",
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn enrich_news_item_article_accepts_positive_news_item_id() {
+        let payload = json!({"news_item_id": 42}).as_object().unwrap().clone();
+
+        assert_eq!(
+            TaskType::EnrichNewsItemArticle.normalize_payload(Some(payload.clone())),
+            Ok(payload)
+        );
+    }
+
+    #[test]
+    fn enrich_news_item_article_preserves_unexpected_fields() {
+        let payload = json!({"news_item_id": 42, "future_field": "value"})
+            .as_object()
+            .unwrap()
+            .clone();
+
+        assert_eq!(
+            TaskType::EnrichNewsItemArticle.normalize_payload(Some(payload.clone())),
+            Ok(payload)
+        );
     }
 
     #[test]

@@ -20,8 +20,8 @@ pub(super) fn knowledge_metadata(namespace: &str) -> Value {
     longform_metadata(
         namespace,
         KNOWLEDGE_TITLE,
-        "The migration succeeds by making ownership explicit and keeping external work outside PostgreSQL transactions.",
-        "These field notes cover the Rust runtime boundary, immutable preparation DTOs, generated wire contracts, SQLx migrations, and the remaining Python extraction and evaluation islands.",
+        "Reliable processing starts with explicit ownership and keeps external work outside PostgreSQL transactions.",
+        "These field notes cover immutable preparation DTOs, generated wire contracts, SQLx transaction boundaries, database-free extraction, and offline evaluation.",
         "Release database connections before waiting on the network.",
     )
 }
@@ -55,14 +55,14 @@ fn longform_metadata(
                     "category": "reliability"
                 },
                 {
-                    "text": "Keep Crawl4AI extraction and offline model evaluations as narrow Python islands.",
+                    "text": "Keep extraction and offline evaluation behind narrow, database-free boundaries.",
                     "category": "scope"
                 }
             ],
-            "quotes": [{"text": quote, "context": "Migration field note"}],
+            "quotes": [{"text": quote, "context": "Reliability field note"}],
             "topics": ["Rust", "evaluation", "typed contracts", "PostgreSQL"],
             "classification": "to_read",
-            "full_markdown": format!("# {title}\n\n{overview}\n\n## Key Points\n\n- Use generated contracts.\n- Keep transactions short.\n- Preserve narrow Python islands.\n\n## Notable Quotes\n\n> {quote}")
+            "full_markdown": format!("# {title}\n\n{overview}\n\n## Key Points\n\n- Use generated contracts.\n- Keep transactions short.\n- Keep auxiliary runtimes database-free.\n\n## Notable Quotes\n\n> {quote}")
         }
     })
 }

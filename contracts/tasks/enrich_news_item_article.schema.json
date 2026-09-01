@@ -1,6 +1,15 @@
 {
   "additionalProperties": true,
-  "properties": {},
+  "properties": {
+    "news_item_id": {
+      "exclusiveMinimum": 0,
+      "title": "News Item Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "news_item_id"
+  ],
   "title": "TaskPayload",
   "type": "object"
 }

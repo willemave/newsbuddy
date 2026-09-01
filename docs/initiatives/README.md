@@ -3,38 +3,17 @@
 Change-oriented docs that used to live under `docs/plans/`, `docs/specs/`, and `docs/research/` now live here, grouped by initiative instead of document type.
 
 ## Layout
+
 - Each initiative gets its own folder.
 - Filenames use sortable prefixes such as `10-design.md`, `20-plan.md`, and `30-summary.md`.
 - Canonical shipped behavior belongs in `docs/laws/`; supporting feature notes may live in `docs/library/features/`.
 
-## Current initiatives
-- `agentic-feed-discovery/`
-- `atom-scraper-2025-10/`
-- `authentication-2025-10/`
-- `briefing-tab-2026-07/` - shipped native Briefing surface; keep follow-up specs here until moved to stable feature docs.
-- `cli-rewrite-2026-03/`
-- `codebase-hardening-2026-03/`
-- `codebase-refactoring/`
-- `dig-deeper-selection-menu/`
-- `ios-chat-stability-2026-04/`
-- `llm-call-sites/`
-- `longform-artifact-system-2026-04/`
-- `news-button-navigation-2025-11/`
-- `news-grouped-view-2025-10/`
-- `news-screenshot-thumbnail/`
-- `onboarding-fast-news-2026-04/`
-- `onboarding-speech-realtime/`
-- `pipeline-reliability/`
-- `podcast-sources-2025-11/`
-- `python-cleanup-2026-07/` - executes the 2026-07 full Python audit: bug fixes, ~13.5k lines of dead-code deletion, perf work, consolidations.
-- `rust-backend-migration-2026-08/` - approved design direction for the schema-first Rust migration, SQLx ownership, retained Python boundaries, and direct E2B integration.
-- `settings-ui-modernization/`
-- `share-sheet-instruction-processing/`
-- `swiftui-list-views-refactor/`
-- `test-simplification-2026-05/`
-- `test-refactor/`
-- `twitter-share-scraper/`
-- `vulture-dead-code-2026-05/`
+## Authority and status
+
+Initiative documents preserve point-in-time change context. Current product
+invariants live in `docs/laws/`, the system design lives in
+`docs/architecture.md`, and dated implementation and validation records live
+in `docs/log.md`.
 
 ## Concat command
 

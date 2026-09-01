@@ -90,4 +90,5 @@ scripts/check_module_size_guardrails.sh
 scripts/check_ios_wire_boundaries.sh
 scripts/build_agent_vm_template.sh --check >/dev/null
 cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+scripts/tests/test_deploy_blue_green.sh
 scripts/check_public_contracts.sh

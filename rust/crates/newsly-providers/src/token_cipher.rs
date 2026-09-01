@@ -8,11 +8,11 @@ use secrecy::{ExposeSecret, SecretString};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-/// Python-compatible Fernet cipher for integration credentials stored by Newsly.
+/// Fernet cipher for persisted Newsly integration credentials.
 ///
-/// Python accepts either an already encoded Fernet key or an arbitrary secret whose SHA-256
-/// digest becomes the Fernet key. Keeping that exact behavior in one provider-layer type lets
-/// API and worker processes share encrypted rows without exposing the key or plaintext tokens.
+/// Existing credentials accept either an already encoded Fernet key or an arbitrary secret whose
+/// SHA-256 digest becomes the Fernet key. Keeping that behavior in one provider-layer type lets API
+/// and worker processes share encrypted rows without exposing the key or plaintext tokens.
 #[derive(Clone)]
 pub struct IntegrationTokenCipher {
     cipher: Arc<Fernet>,
@@ -50,7 +50,7 @@ impl IntegrationTokenCipher {
         Ok(self.cipher.encrypt(plaintext.as_bytes()))
     }
 
-    /// Decrypts one Fernet payload written by either the Python or Rust runtime.
+    /// Decrypts one Fernet payload in the persisted credential format.
     ///
     /// # Errors
     ///

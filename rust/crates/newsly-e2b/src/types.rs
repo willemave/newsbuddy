@@ -558,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_paths_match_the_migration_contract() {
+    fn workspace_paths_match_the_command_stream_contract() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../contracts/llm/e2b-command-stream.json"
         ))

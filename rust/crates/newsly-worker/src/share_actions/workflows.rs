@@ -1,7 +1,7 @@
 use newsly_contracts::{ShareActionAgentResult, ShareActionBriefingTarget, ShareActionCandidate};
 use newsly_db::ShareActionAgentSnapshot;
 use newsly_e2b::ValidatedFeed;
-use newsly_queue::python_canonical_json;
+use newsly_queue::compatibility_canonical_json;
 use reqwest::Url;
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -346,7 +346,7 @@ fn prepare_host_action(
     rationale: Option<String>,
 ) -> PreparedHostAction {
     let action_input = host_input_json(&typed_input);
-    let encoded = python_canonical_json(&Value::Object(action_input.clone()));
+    let encoded = compatibility_canonical_json(&Value::Object(action_input.clone()));
     let digest = Sha256::digest(encoded.as_bytes());
     PreparedHostAction {
         action_name: action_name.to_owned(),

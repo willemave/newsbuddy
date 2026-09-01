@@ -72,8 +72,8 @@ pub(super) fn encode(
 }
 
 fn filters_hash(content_id: Option<i64>, news_item_id: Option<i64>) -> String {
-    // Python's json.dumps uses a space after `:`. Preserve that byte representation so cursors
-    // remain valid in both runtimes during the ownership transition.
+    // Installed cursor hashes use a space after `:`. Preserve that byte representation so cursors
+    // remain valid across releases.
     let normalized = match (content_id, news_item_id) {
         (Some(content_id), None) => format!(r#"{{"content_id": {content_id}}}"#),
         (None, Some(news_item_id)) => format!(r#"{{"news_item_id": {news_item_id}}}"#),
@@ -104,7 +104,7 @@ mod tests {
     use super::{decode, encode, filters_hash};
 
     #[test]
-    fn hash_matches_python_json_dumps_spacing() {
+    fn hash_preserves_installed_cursor_spacing() {
         assert_eq!(
             filters_hash(None, None),
             "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"

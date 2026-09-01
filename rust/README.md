@@ -6,12 +6,12 @@ migrations, and Rust owns the durable queue, workers, scheduler, provider
 integrations, agents, direct E2B transport, admin surfaces, operator tools, and
 the user-facing `newsbuddy` CLI.
 
-The only production Python process is the database-free Crawl4AI service in
-`python/document_extractor`. The package in `python/evals` is offline tooling and
-is not part of a production image. The general Python application, Python
-admin, Alembic, and backend Python test trees have been removed. Their audited
-compatibility evidence survives in `contracts/`, the SQLx baseline, and
-repository history; none is a runtime authority.
+The only production Newsly-owned Python process is the database-free Crawl4AI
+service in `python/document_extractor`. The package in `python/evals` is
+offline tooling and is not part of a production image. Neither package owns
+application state, schemas, queues, authentication, or migrations. The pinned
+third-party `yt-dlp` executable and its Python runtime are a Rust-controlled
+media subprocess, not an application authority.
 
 ## Workspace map
 
@@ -37,7 +37,7 @@ repository history; none is a runtime authority.
   snapshots, network policy, and sandbox lifecycle.
 - `newsly-extraction`: Rust client and types for the private Python extractor.
 - `newsly-eval-driver`: canonical Rust algorithms exposed to offline evals.
-- `newsly-admin`: ownership cutover, health, task, usage, eval-export, and
+- `newsly-admin`: runtime ownership, health, task, usage, eval-export, and
   bounded read-only database-inspection CLI.
 - `newsly-cli`: authenticated `newsbuddy` API client, local configuration,
   terminal QR linking, stable output envelopes, and safe Markdown library sync.
@@ -111,9 +111,9 @@ the established commands, environment aliases, JSON envelope, and text-output
 mode. See [`crates/newsly-cli/README.md`](crates/newsly-cli/README.md) for the
 complete command and configuration reference.
 
-The external `willemave/newsbuddy` Homebrew tap is packaged outside this
-repository. Its formula must be updated separately to distribute the Rust
-binary; a source install does not update the tap.
+The external `willemave/newsbuddy` Homebrew tap is released independently.
+Verify that its current formula packages the Rust `newsbuddy` binary before
+relying on it; a source install always builds the checked-out revision.
 
 ## Configuration and local execution
 
@@ -182,7 +182,7 @@ The removed Alembic tree remains available through repository history when a
 historical database needs explanation. Do not recreate it, add an Alembic
 revision, or add an application SQLAlchemy model.
 
-## Containers and release state
+## Containers and releases
 
 Build from the repository root so the exact tested revision is embedded:
 
@@ -194,9 +194,9 @@ docker build \
   .
 ```
 
-The migration implementation and final Rust authority are present in the local
-working tree. Focused package checks have been run for the implemented slices.
-The consolidated PostgreSQL concurrency/parity suite, complete Rust and native
-client release gate, production container canaries, live provider/E2B checks,
-tested-SHA push, migration adoption, and deployment remain outstanding. Nothing
-in this README asserts that production has already switched.
+The required quality workflow validates the candidate revision before the
+deployment workflow builds and publishes its exact image SHA. Release evidence
+must distinguish checkout validation, the tested SHA, the built image, the
+deployed revision, and live health or provider canaries. See the repository-root
+README and `docs/library/deploy/docker_racknerd.md` for the canonical commands
+and production sequence.

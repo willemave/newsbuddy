@@ -4,31 +4,12 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use newsly_db::DatabaseConfig;
+use newsly_worker::config::WorkerLogFormat;
 use secrecy::SecretString;
 use thiserror::Error;
 use url::Url;
 
 const DEFAULT_X_TOKEN_URL: &str = "https://api.x.com/2/oauth2/token";
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum WorkerLogFormat {
-    Json,
-    Pretty,
-}
-
-impl WorkerLogFormat {
-    fn parse(value: &str) -> Result<Self, ProcessConfigError> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "json" => Ok(Self::Json),
-            "pretty" => Ok(Self::Pretty),
-            _ => Err(ProcessConfigError::InvalidValue {
-                name: "NEWSLY_RUST_LOG_FORMAT",
-                value: value.to_owned(),
-                expected: "json or pretty",
-            }),
-        }
-    }
-}
 
 #[derive(Clone)]
 pub enum ArtifactStorageConfig {
@@ -197,7 +178,7 @@ impl AccountDeletionProcessConfig {
                 "newsly_account_deletion_worker=info,newsly_worker=info,newsly_queue=info"
                     .to_owned()
             }),
-            log_format: WorkerLogFormat::parse(
+            log_format: parse_log_format(
                 &env::var("NEWSLY_RUST_LOG_FORMAT").unwrap_or_else(|_| "json".to_owned()),
             )?,
             media_audio_root,
@@ -215,6 +196,18 @@ impl AccountDeletionProcessConfig {
 
     pub const fn database_url(&self) -> &SecretString {
         &self.database_url
+    }
+}
+
+fn parse_log_format(value: &str) -> Result<WorkerLogFormat, ProcessConfigError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "json" => Ok(WorkerLogFormat::Json),
+        "pretty" => Ok(WorkerLogFormat::Pretty),
+        _ => Err(ProcessConfigError::InvalidValue {
+            name: "NEWSLY_RUST_LOG_FORMAT",
+            value: value.to_owned(),
+            expected: "json or pretty",
+        }),
     }
 }
 

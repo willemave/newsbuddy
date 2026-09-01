@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::{
     ClaimRuntimeScope, ClaimedTask, EnqueueRequest, FinalizationOutcome, OwnedWorkPlan,
     PayloadError, QueueModelError, ResolvedFinalization, TaskExecutorStamp, TaskQueue, TaskResult,
-    TaskStatus, TaskTransition, TaskType, UnknownQueueValue, python_canonical_json,
+    TaskStatus, TaskTransition, TaskType, UnknownQueueValue, compatibility_canonical_json,
 };
 
 const QUEUE_NOTIFY_CHANNEL: &str = "processing_tasks";
@@ -827,7 +827,7 @@ fn build_task_dedupe_key(
 }
 
 fn canonical_json_object(value: &Map<String, Value>) -> String {
-    python_canonical_json(&Value::Object(value.clone()))
+    compatibility_canonical_json(&Value::Object(value.clone()))
 }
 
 #[derive(Debug, FromRow)]

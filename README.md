@@ -153,9 +153,10 @@ cd newsbuddy
 cargo install --locked --path rust/crates/newsly-cli
 ```
 
-The Homebrew formula lives in the external `willemave/newsbuddy` tap. Updating
-that tap to package the Rust binary is separate from this repository cutover;
-use the source install until the tap publishes the Rust build.
+The Homebrew formula lives in the independently released
+`willemave/newsbuddy` tap. Verify that the current formula packages the Rust
+`newsbuddy` binary before relying on it; the source install above always builds
+the checked-out revision.
 
 ```bash
 # Authenticate — scan the QR code in the app to approve, no password needed

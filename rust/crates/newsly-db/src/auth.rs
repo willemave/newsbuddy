@@ -152,7 +152,7 @@ mod tests {
     use super::{extract_key_prefix, hashes_match, is_api_key_token, sha256_hex};
 
     #[test]
-    fn api_key_helpers_match_python_contract() {
+    fn api_key_helpers_preserve_the_wire_contract() {
         let raw = "newsly_ak_a1b2c3d4_secret-value";
         assert!(is_api_key_token(raw));
         assert_eq!(

@@ -70,7 +70,7 @@ pub struct ApiKeyTargetUser {
     pub email: String,
 }
 
-/// Generate a Python-compatible Newsly API key using operating-system entropy.
+/// Generate a Newsly API key in the persisted token format using operating-system entropy.
 ///
 /// # Errors
 ///
@@ -252,7 +252,7 @@ pub async fn list_api_key_target_users(
 }
 
 /// Load or create the system admin identity used to attribute admin-created
-/// keys, preserving the existing Python admin-session behavior.
+/// keys, preserving the existing admin-session behavior.
 ///
 /// # Errors
 ///
@@ -347,7 +347,7 @@ mod tests {
     use super::{extract_api_key_prefix, generate_api_key, hash_api_key, verify_api_key_hash};
 
     #[test]
-    fn generated_key_matches_the_python_wire_format() {
+    fn generated_key_matches_the_persisted_wire_format() {
         let generated = generate_api_key().expect("operating-system entropy");
         let raw = generated.raw_key.expose_secret();
         assert!(raw.starts_with("newsly_ak_"));

@@ -400,7 +400,7 @@ mod hosted_tests {
     }
 
     #[test]
-    fn hosted_asset_content_types_match_python_viewer_types() {
+    fn hosted_asset_content_types_preserve_the_viewer_contract() {
         assert_eq!(hosted_asset_content_type("deck.css"), "text/css");
         assert_eq!(hosted_asset_content_type("deck.js"), "text/javascript");
         assert_eq!(hosted_asset_content_type("diagram.svg"), "image/svg+xml");

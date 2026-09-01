@@ -36,7 +36,7 @@ impl Debug for LearningDeckTokenSigner {
 }
 
 impl LearningDeckTokenSigner {
-    /// Loads the same HS256 key and private-URL lifetime as the coexistence Python runtime.
+    /// Loads the persisted HS256 key and private-URL lifetime.
     ///
     /// # Errors
     ///
@@ -90,7 +90,7 @@ impl LearningDeckTokenSigner {
             exp: expires_at.timestamp(),
         };
         Ok(SignedLearningDeckToken {
-            token: self.encode_python_compatible(&claims)?,
+            token: self.encode_compatible(&claims)?,
             expires_at,
         })
     }
@@ -100,7 +100,7 @@ impl LearningDeckTokenSigner {
         deck_id: i64,
         nonce: &str,
     ) -> Result<String, LearningDeckTokenError> {
-        self.encode_python_compatible(&ShareClaims {
+        self.encode_compatible(&ShareClaims {
             token_type: "learning_deck_share",
             deck_id,
             nonce,
@@ -155,7 +155,7 @@ impl LearningDeckTokenSigner {
         })
     }
 
-    fn encode_python_compatible<T: Serialize>(
+    fn encode_compatible<T: Serialize>(
         &self,
         claims: &T,
     ) -> Result<String, LearningDeckTokenError> {
@@ -238,7 +238,7 @@ pub(super) fn hash_learning_deck_token(token: &str) -> String {
 pub(super) enum LearningDeckTokenError {
     #[error("JWT_SECRET_KEY is required for Learning Deck URLs")]
     MissingSecret,
-    #[error("unsupported JWT algorithm {0:?}; Learning Deck coexistence requires HS256")]
+    #[error("unsupported JWT algorithm {0:?}; the Learning Deck token format requires HS256")]
     UnsupportedAlgorithm(String),
     #[error("invalid Learning Deck signed URL lifetime {0:?}")]
     InvalidLifetime(String),
@@ -256,10 +256,10 @@ pub(super) enum LearningDeckTokenError {
 mod tests {
     use super::*;
 
-    const PYTHON_SHARE_TOKEN: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoibGVhcm5pbmdfZGVja19zaGFyZSIsImRlY2tfaWQiOjQyLCJub25jZSI6InB5dGhvbi1ub25jZSJ9.LcVBk9TI8hESL13uJqEhmDf1XmlI-aDp9Wkc_q0AWP0";
-    const PYTHON_PRIVATE_TOKEN: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoibGVhcm5pbmdfZGVja19zaWduZWQiLCJkZWNrX2lkIjo0MiwidXNlcl9pZCI6NywiZXhwIjo0MTAyNDQ0ODAwfQ.9trgF8avMx4pimf_Z7YeNtMRBpOOPiPGImjiCiA8ixc";
+    const LEGACY_SHARE_TOKEN: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoibGVhcm5pbmdfZGVja19zaGFyZSIsImRlY2tfaWQiOjQyLCJub25jZSI6InB5dGhvbi1ub25jZSJ9.LcVBk9TI8hESL13uJqEhmDf1XmlI-aDp9Wkc_q0AWP0";
+    const LEGACY_PRIVATE_TOKEN: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0eXBlIjoibGVhcm5pbmdfZGVja19zaWduZWQiLCJkZWNrX2lkIjo0MiwidXNlcl9pZCI6NywiZXhwIjo0MTAyNDQ0ODAwfQ.9trgF8avMx4pimf_Z7YeNtMRBpOOPiPGImjiCiA8ixc";
 
-    fn python_signer() -> LearningDeckTokenSigner {
+    fn compatibility_signer() -> LearningDeckTokenSigner {
         LearningDeckTokenSigner {
             secret: SecretString::from("python-coexistence-secret"),
             private_ttl: Duration::from_secs(DEFAULT_SIGNED_URL_TTL_SECONDS),
@@ -267,10 +267,10 @@ mod tests {
     }
 
     #[test]
-    fn decodes_python_generated_share_token() {
+    fn decodes_legacy_share_token() {
         assert_eq!(
-            python_signer()
-                .decode_share_token(PYTHON_SHARE_TOKEN)
+            compatibility_signer()
+                .decode_share_token(LEGACY_SHARE_TOKEN)
                 .unwrap(),
             ShareLearningDeckToken {
                 deck_id: 42,
@@ -280,10 +280,10 @@ mod tests {
     }
 
     #[test]
-    fn decodes_python_generated_private_token() {
+    fn decodes_legacy_private_token() {
         assert_eq!(
-            python_signer()
-                .decode_private_token(PYTHON_PRIVATE_TOKEN)
+            compatibility_signer()
+                .decode_private_token(LEGACY_PRIVATE_TOKEN)
                 .unwrap(),
             PrivateLearningDeckToken {
                 deck_id: 42,
@@ -295,15 +295,15 @@ mod tests {
     #[test]
     fn rejects_share_token_as_private_token() {
         assert!(
-            python_signer()
-                .decode_private_token(PYTHON_SHARE_TOKEN)
+            compatibility_signer()
+                .decode_private_token(LEGACY_SHARE_TOKEN)
                 .is_err()
         );
     }
 
     #[test]
     fn rejects_expired_private_token() {
-        let signer = python_signer();
+        let signer = compatibility_signer();
         let expired = signer
             .private_token(42, 7, DateTime::UNIX_EPOCH)
             .unwrap()

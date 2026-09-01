@@ -17,8 +17,9 @@ struct ConsumedRefreshTokenRow {
     replay_expires_at: Option<DateTime<Utc>>,
 }
 
-/// Atomically consume a refresh token or retrieve the bounded result for the
-/// same idempotency attempt. The advisory-key algorithm matches Python exactly.
+/// Atomically consumes a refresh token or retrieves the bounded result for the
+/// same idempotency attempt. The caller supplies a deterministic advisory key so
+/// concurrent rotations of one token serialize consistently.
 ///
 /// # Errors
 ///

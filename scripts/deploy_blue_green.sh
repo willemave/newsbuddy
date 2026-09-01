@@ -118,8 +118,16 @@ fi
 
 barrier_containers=()
 restore_barrier_on_failure=false
+normal_writer_containers=()
+restore_normal_writers_on_failure=false
 restore_barrier_containers() {
   for container in "${barrier_containers[@]}"; do
+    docker start "${container}" >/dev/null || true
+  done
+}
+
+restore_normal_writers() {
+  for container in "${normal_writer_containers[@]}"; do
     docker start "${container}" >/dev/null || true
   done
 }
@@ -162,27 +170,31 @@ authority_migration_state() {
   fi
 }
 
-restore_barrier_after_failed_deploy() {
+restore_processes_after_failed_deploy() {
   local status=$?
   trap - EXIT
   if [[ "${status}" -ne 0 && "${restore_barrier_on_failure}" == "true" ]]; then
     echo "Deployment failed after entering the SQLx maintenance barrier; restoring prior containers" >&2
     restore_barrier_containers
   fi
+  if [[ "${status}" -ne 0 && "${restore_normal_writers_on_failure}" == "true" ]]; then
+    echo "Deployment failed before writer replacement; restoring prior workers and scheduler" >&2
+    restore_normal_writers
+  fi
   exit "${status}"
 }
-trap restore_barrier_after_failed_deploy EXIT
-
-echo "Entering SQLx authority maintenance barrier"
-for container in newsly-api-blue newsly-api-green newsly-workers newsly-scheduler; do
-  if [[ "$(docker inspect --format '{{.State.Running}}' "${container}" 2>/dev/null || true)" == "true" ]]; then
-    barrier_containers+=("${container}")
-  fi
-done
-restore_barrier_on_failure=true
-compose stop api_blue api_green workers scheduler
+trap restore_processes_after_failed_deploy EXIT
 
 if [[ "${baseline_adoption}" == "true" ]]; then
+  echo "Entering the one-time SQLx baseline-adoption maintenance barrier"
+  for container in newsly-api-blue newsly-api-green newsly-workers newsly-scheduler; do
+    if [[ "$(docker inspect --format '{{.State.Running}}' "${container}" 2>/dev/null || true)" == "true" ]]; then
+      barrier_containers+=("${container}")
+    fi
+  done
+  restore_barrier_on_failure=true
+  compose stop api_blue api_green workers scheduler
+
   if [[ -f "${sqlx_backup_marker}" ]]; then
     sqlx_backup_path="$(tr -d '\r\n' < "${sqlx_backup_marker}")"
     case "${sqlx_backup_path}" in
@@ -223,30 +235,36 @@ if [[ "${baseline_adoption}" == "true" ]]; then
     mv "${backup_marker_temp}" "${sqlx_backup_marker}"
     echo "Verified pre-adoption database backup: ${sqlx_backup_path}"
   fi
-fi
 
-echo "Running database migrations with the exact-image SQLx binary"
-if ! compose --profile ops run --rm --no-deps \
-  -e "NEWSLY_SQLX_BASELINE_ADOPTION=${baseline_adoption}" \
-  -e NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true \
-  migrate; then
-  migration_state="$(authority_migration_state)"
-  if [[ "${migration_state}" == "applied" ]]; then
-    restore_barrier_on_failure=false
-    echo "Rust authority committed before migration validation failed; prior runtime remains stopped" >&2
-  elif [[ "${migration_state}" == "unknown" ]]; then
-    restore_barrier_on_failure=false
-    echo "Could not prove that Rust authority is inactive; prior runtime remains stopped" >&2
+  echo "Running one-time baseline adoption with the exact-image SQLx binary"
+  if ! compose --profile ops run --rm --no-deps \
+    -e NEWSLY_SQLX_BASELINE_ADOPTION=true \
+    -e NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true \
+    migrate; then
+    migration_state="$(authority_migration_state)"
+    if [[ "${migration_state}" == "applied" ]]; then
+      restore_barrier_on_failure=false
+      echo "Rust authority committed before migration validation failed; prior runtime remains stopped" >&2
+    elif [[ "${migration_state}" == "unknown" ]]; then
+      restore_barrier_on_failure=false
+      echo "Could not prove that Rust authority is inactive; prior runtime remains stopped" >&2
+    fi
+    exit 1
   fi
-  exit 1
-fi
-restore_barrier_on_failure=false
-touch "${sqlx_adoption_marker}"
+  restore_barrier_on_failure=false
+  touch "${sqlx_adoption_marker}"
 
-# The authority migration is intentionally one-way. From this point onward, starting an older
-# API or worker could violate the durable route/task fences. Keep the prior processes stopped and
-# fail closed if the new Rust runtime cannot become healthy.
-echo "Rust runtime authority is active; prior application runtime remains stopped during cutover"
+  # The authority migration is intentionally one-way. From this point onward, starting an older
+  # API or worker could violate the durable route/task fences. Keep the prior processes stopped and
+  # fail closed if the new Rust runtime cannot become healthy.
+  echo "Rust runtime authority is active; prior application runtime remains stopped during cutover"
+else
+  echo "Running backward-compatible database migrations while the active API remains online"
+  compose --profile ops run --rm --no-deps \
+    -e NEWSLY_SQLX_BASELINE_ADOPTION=false \
+    -e NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=false \
+    migrate
+fi
 
 echo "Starting database-free document extractor"
 compose up -d --no-deps document-extractor
@@ -287,6 +305,21 @@ if [[ "${public_base_url}" != https://* ]]; then
   exit 1
 fi
 
+if [[ "${baseline_adoption}" == "false" ]]; then
+  echo "Draining workers and scheduler before the API version switch"
+  for container in newsly-workers newsly-scheduler; do
+    if [[ "$(docker inspect --format '{{.State.Running}}' "${container}" 2>/dev/null || true)" == "true" ]]; then
+      normal_writer_containers+=("${container}")
+    fi
+  done
+  restore_normal_writers_on_failure=true
+  compose stop workers scheduler
+fi
+
+# Once target switching begins, the new API may emit work even if the public probe later fails.
+# Never restart an older writer binary after this point.
+restore_normal_writers_on_failure=false
+
 echo "Switching Nginx to ${target_slot}"
 "${switch_script}" "${target_slot}"
 
@@ -304,7 +337,16 @@ for attempt in $(seq 1 3); do
 done
 if [[ "${public_origin_healthy}" != true ]]; then
   echo "Public HTTPS origin did not reach the new API slot" >&2
-  echo "Rust authority is already active; refusing to restart or route to the prior runtime" >&2
+  if [[ "${baseline_adoption}" == "false" && ( "${active_slot}" == "blue" || "${active_slot}" == "green" ) ]]; then
+    echo "Restoring public traffic to the previously active ${active_slot} API slot" >&2
+    if ! "${switch_script}" "${active_slot}"; then
+      echo "Automatic public-route rollback failed; manual intervention is required" >&2
+    else
+      echo "Prior API route restored; writers remain stopped because the target may have emitted new-version tasks" >&2
+    fi
+  else
+    echo "No compatible prior API slot can be restored automatically" >&2
+  fi
   exit 1
 fi
 

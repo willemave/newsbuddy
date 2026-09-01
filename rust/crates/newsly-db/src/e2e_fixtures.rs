@@ -15,13 +15,13 @@ mod metadata;
 use metadata::{detail_metadata, fixture_url, knowledge_metadata};
 
 const DETAIL_TITLE: &str = "A Practical Evaluation Loop for Small AI Teams";
-const KNOWLEDGE_TITLE: &str = "Rust Backend Migration Field Notes";
+const KNOWLEDGE_TITLE: &str = "Reliable Async Systems Field Notes";
 const PROCESSING_TITLE: &str = "Deferred E2E Processing Fixture";
 const CHAT_TITLE: &str = "How should small teams evaluate AI products?";
-const CHAT_USER_MESSAGE: &str = "Summarize the migration lessons.";
+const CHAT_USER_MESSAGE: &str = "Summarize the reliability lessons.";
 const CHAT_ASSISTANT_MESSAGE: &str = "Initial mocked assistant reply.";
-const DECK_TITLE: &str = "A Practical Playbook for Rust Migration";
-const AUDIO_TITLE: &str = "The Rust migration field notes, narrated";
+const DECK_TITLE: &str = "A Practical Playbook for Reliable Async Systems";
+const AUDIO_TITLE: &str = "Reliable async systems field notes, narrated";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IosE2eFixtureNamespace(String);
@@ -400,7 +400,7 @@ async fn upsert_completed_content(
     .bind(source)
     .bind(metadata)
     .bind(publication_date.naive_utc())
-    .bind(format!("{title} Rust migration evaluation systems"))
+    .bind(format!("{title} async reliability evaluation systems"))
     .fetch_one(&mut **transaction)
     .await
 }
@@ -515,8 +515,8 @@ async fn seed_briefing(
             centroid_weight, created_at, updated_at
         )
         VALUES (
-            $1::bigint::integer, $2, 'longform', 'Rust Migration',
-            'Architecture, reliability, and the evidence behind the migration.',
+            $1::bigint::integer, $2, 'longform', 'Async Reliability',
+            'Transactions, contracts, durable queues, and the evidence behind them.',
             10, 'active', 0, timezone('UTC', now()), timezone('UTC', now())
         )
         RETURNING id::bigint
@@ -540,7 +540,7 @@ async fn seed_briefing(
                     },
                     {
                         "kind": "text",
-                        "text": " connects transaction ownership, typed contracts, and deterministic test data into one migration story."
+                        "text": " connects transaction ownership, typed contracts, and deterministic test data into one reliability story."
                     }
                 ]
             }]
@@ -580,7 +580,7 @@ async fn seed_briefing(
     .bind(format!(
         "[{KNOWLEDGE_TITLE}](newsly://briefing/content/{content_id})"
     ))
-    .bind("A short briefing about moving Newsly's backend to Rust.")
+    .bind("A short briefing about reliable asynchronous processing.")
     .bind(json!([source_key]))
     .bind((seeded_at - Duration::minutes(18)).naive_utc())
     .fetch_one(&mut **transaction)
@@ -607,7 +607,7 @@ async fn seed_chat(
             is_hidden_from_history
         )
         VALUES (
-            $1::bigint::integer, $2::bigint::integer, $3, 'knowledge_chat', 'Rust migration',
+            $1::bigint::integer, $2::bigint::integer, $3, 'knowledge_chat', 'Async reliability',
             'openai:gpt-5.6-terra', 'openai', $4, $4, $4, FALSE, FALSE, FALSE
         )
         RETURNING id::bigint
@@ -760,7 +760,7 @@ async fn seed_learning_surfaces(
         "title": AUDIO_TITLE,
         "segments": [{"speaker": "host", "text": "A deterministic narration fixture."}]
     }))
-    .bind("A deterministic narration fixture for the Rust migration field notes.")
+    .bind("A deterministic narration fixture for the async reliability field notes.")
     .bind(&artifacts.audio_storage_path)
     .bind(&artifacts.audio_content_type)
     .bind((seeded_at - Duration::minutes(8)).naive_utc())

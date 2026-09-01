@@ -149,7 +149,7 @@ impl Debug for ReqwestXGrantRevoker {
 }
 
 impl ReqwestXGrantRevoker {
-    /// Builds the best-effort X revocation adapter with Python-compatible Fernet derivation.
+    /// Builds the best-effort X revocation adapter with the persisted Fernet derivation.
     ///
     /// # Errors
     ///
@@ -504,7 +504,7 @@ mod tests {
     };
 
     #[test]
-    fn python_compatible_fernet_key_derivation_round_trips() {
+    fn persisted_fernet_key_derivation_round_trips() {
         let cipher = build_fernet(&SecretString::from("human-readable-key".to_owned())).unwrap();
         let token = cipher.encrypt(b"private-token");
         assert_eq!(cipher.decrypt(&token).unwrap(), b"private-token");

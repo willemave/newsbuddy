@@ -1,9 +1,11 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio::fs;
-use uuid::Uuid;
+
+use crate::local_object::{
+    LocalObjectError, absolute_root, publish, read_optional, sha256_hex, storage_key,
+    validate_relative_path,
+};
 
 use super::model::ContentBodyPointer;
 
@@ -26,20 +28,14 @@ pub(super) struct StagedContentBody {
 }
 
 impl LocalContentBodyStore {
-    /// Create the content-addressed local body store used by the existing Python resolver.
+    /// Creates the content-addressed local body store for persisted source bodies.
     ///
     /// # Errors
     ///
     /// Returns an error for an unsafe prefix or a root path that cannot be made absolute.
     pub fn new(root: PathBuf, prefix: PathBuf) -> Result<Self, ContentBodyStoreError> {
         validate_relative_path(&prefix)?;
-        let root = if root.is_absolute() {
-            root
-        } else {
-            std::env::current_dir()
-                .map_err(ContentBodyStoreError::CurrentDirectory)?
-                .join(root)
-        };
+        let root = absolute_root(root)?;
         Ok(Self { root, prefix })
     }
 
@@ -67,27 +63,8 @@ impl LocalContentBodyStore {
             .join(content_id.to_string())
             .join(format!("source-{digest}.txt"));
         validate_relative_path(&storage_key_path)?;
-        let storage_key = path_to_storage_key(&storage_key_path)?;
-        let destination = self.root.join(&storage_key_path);
-        let parent = destination
-            .parent()
-            .ok_or(ContentBodyStoreError::UnsafeStorageKey)?;
-        fs::create_dir_all(parent)
-            .await
-            .map_err(ContentBodyStoreError::Write)?;
-        if !fs::try_exists(&destination)
-            .await
-            .map_err(ContentBodyStoreError::Write)?
-        {
-            let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
-            fs::write(&temporary, encoded)
-                .await
-                .map_err(ContentBodyStoreError::Write)?;
-            if let Err(error) = fs::rename(&temporary, &destination).await {
-                let _ = fs::remove_file(&temporary).await;
-                return Err(ContentBodyStoreError::Write(error));
-            }
-        }
+        let storage_key = storage_key(&storage_key_path)?;
+        publish(&self.root, &storage_key_path, encoded).await?;
         Ok(StagedContentBody {
             storage_provider: "local",
             storage_key,
@@ -117,11 +94,8 @@ impl LocalContentBodyStore {
         }
         let key = Path::new(&pointer.storage_key);
         validate_relative_path(key)?;
-        let path = self.root.join(key);
-        let bytes = match fs::read(path).await {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(ContentBodyStoreError::Read(error)),
+        let Some(bytes) = read_optional(&self.root, key).await? else {
+            return Ok(None);
         };
         if bytes.len() > MAX_SOURCE_BODY_BYTES {
             return Err(ContentBodyStoreError::BodyTooLarge(bytes.len()));
@@ -130,48 +104,6 @@ impl LocalContentBodyStore {
             .map(Some)
             .map_err(ContentBodyStoreError::InvalidUtf8)
     }
-}
-
-fn validate_relative_path(path: &Path) -> Result<(), ContentBodyStoreError> {
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(ContentBodyStoreError::UnsafeStorageKey);
-    }
-    Ok(())
-}
-
-fn sha256_hex(value: &[u8]) -> String {
-    let digest = Sha256::digest(value);
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        encoded.push(
-            char::from_digit(u32::from(byte >> 4), 16)
-                .expect("a four-bit nibble is always a hexadecimal digit"),
-        );
-        encoded.push(
-            char::from_digit(u32::from(byte & 0x0f), 16)
-                .expect("a four-bit nibble is always a hexadecimal digit"),
-        );
-    }
-    encoded
-}
-
-fn path_to_storage_key(path: &Path) -> Result<String, ContentBodyStoreError> {
-    let parts = path
-        .components()
-        .map(|component| match component {
-            Component::Normal(part) => part
-                .to_str()
-                .map(str::to_owned)
-                .ok_or(ContentBodyStoreError::UnsafeStorageKey),
-            _ => Err(ContentBodyStoreError::UnsafeStorageKey),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(parts.join("/"))
 }
 
 #[derive(Debug, Error)]
@@ -190,8 +122,22 @@ pub enum ContentBodyStoreError {
     Write(#[source] std::io::Error),
     #[error("could not read content body")]
     Read(#[source] std::io::Error),
+    #[error("an existing content-addressed body is unsafe or has different bytes")]
+    UnsafeExistingBody,
     #[error("stored content body is not valid UTF-8")]
     InvalidUtf8(#[source] std::string::FromUtf8Error),
+}
+
+impl From<LocalObjectError> for ContentBodyStoreError {
+    fn from(error: LocalObjectError) -> Self {
+        match error {
+            LocalObjectError::CurrentDirectory(error) => Self::CurrentDirectory(error),
+            LocalObjectError::UnsafePath => Self::UnsafeStorageKey,
+            LocalObjectError::Write(error) => Self::Write(error),
+            LocalObjectError::Read(error) => Self::Read(error),
+            LocalObjectError::UnsafeExistingObject => Self::UnsafeExistingBody,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -210,17 +156,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stages_and_reads_python_compatible_source_pointer() {
+    async fn stages_and_reads_canonical_local_source_pointer() {
         let root = std::env::temp_dir().join(format!("newsly-worker-{}", Uuid::new_v4()));
         let store = LocalContentBodyStore::new(root.clone(), PathBuf::from("content")).unwrap();
-        let staged = store.stage_source(42, "fixture body").await.unwrap();
+        let source = "  fixture body \n";
+        let staged = store.stage_source(42, source).await.unwrap();
+        assert_eq!(staged.byte_size, i32::try_from(source.len()).unwrap());
+        assert_eq!(
+            staged.char_count,
+            i32::try_from(source.chars().count()).unwrap()
+        );
         let pointer = ContentBodyPointer {
             storage_provider: staged.storage_provider.to_owned(),
             storage_key: staged.storage_key.clone(),
         };
         assert_eq!(
             store.read_source(&pointer).await.unwrap().as_deref(),
-            Some("fixture body")
+            Some(source)
         );
         tokio::fs::remove_dir_all(&root).await.unwrap();
     }

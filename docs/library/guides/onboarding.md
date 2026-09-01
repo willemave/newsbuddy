@@ -1,204 +1,102 @@
-# Agentic First Onboarding (iOS)
+# iOS Onboarding
 
-## Overview
-Newsly onboarding is a **three-phase flow**:
-1) **Create User** (Apple login) — create user only if not already in DB.
-2) **Onboarding / Personalization** — build profile, recommend sources, capture selections.
-3) **New User Tutorial** — one-time walkthrough modal; completion stored in DB.
+Newsly onboarding creates a durable, server-owned source configuration without
+blocking the UI on initial ingestion. The iOS app offers voice personalization
+or an explicit non-personalized path, then lets the user choose suggested
+sources and manual aggregators before completion.
 
-Goal: quickly select the right set of sources for the feed and content inbox, then enqueue crawlers **asynchronously after completion** (do not block UI).
+## User flow
 
----
+1. Apple authentication creates the user only when needed.
+2. The user chooses **Personalize with voice** or **Skip personalization**.
+3. Voice personalization submits the final transcript and starts a durable
+   discovery run.
+4. The app polls that run until persisted suggestions or a terminal failure are
+   available.
+5. The user confirms server-owned feed, podcast, and subreddit suggestions and
+   may choose supported aggregators.
+6. Completion persists the selections and queues initial ingestion and Briefing
+   work in one transaction.
+7. The one-time tutorial is shown after onboarding until its completion flag is
+   persisted.
 
-## Goals
-- Personalized feed + inbox in the first session.
-- Discovery completes in **≤45s** (ideal ≤30s).
-- Clear interstitials between steps.
-- User can skip personalization and accept defaults.
+The non-personalized path sends no discovery run or suggestion IDs and continues
+to the manual choices.
 
-## Non‑Goals
-- Web onboarding.
-- Blocking on crawler setup before showing inbox.
+## Durable discovery
 
----
+`POST /api/onboarding/audio-discover` accepts a transcript and optional locale.
+The server builds the discovery plan outside a database transaction, then
+creates the run and enqueues `onboarding_discover` atomically. Its response
+contains:
 
-## UX Flow
+- `run_id`
+- `run_status`
+- optional `topic_summary`
+- `inferred_topics`
+- per-lane status
 
-### Screen 0 — “What is Newsly?”
-Single explainer screen post‑login.
-- CTA: Continue
+`GET /api/onboarding/discovery-status?run_id=<id>` returns the persisted run
+state, lanes, suggestions, and safe error message. The lookup is scoped to the
+authenticated user; clients cannot inspect or complete another user's run.
 
-### Screen 1 — Personalize or Defaults
-- “Build a personalized feed in ~30–45 seconds or start with defaults.”
-- Options: **Personalize my feed** / **Use defaults**
+The iOS app retains the run ID while polling. Reaching the client polling limit
+does not cancel durable work: the user can continue waiting, retry
+personalization, or take the explicit non-personalized path.
 
-### Screen 2 — Voice discovery (personalized path)
-- Speech-first capture with live transcript.
-- The server creates a durable discovery run and owns its inferred profile and search lanes.
-- Interstitial: “Building your profile…”
+A failed audio discovery surfaces its durable failure state.
+`/api/onboarding/fast-discover` returns empty suggestion lists when its
+provider step fails.
 
-### Screen 3 — Recommended Sources (pods/substacks)
-- Polls the durable discovery run and presents persisted suggestions with stable IDs.
-- User selects from the server-owned proposals.
-- CTA: Continue
+## Completion contract
 
-### Screen 4 — Optional Subreddits
-- Suggestions + optional search
-- CTA: Finish
-- Interstitial: “Curating your inbox…”
+`POST /api/onboarding/complete` accepts:
 
-### Completion State
-- Show “100+ unread news articles” immediately (already populated).
-- Long‑form content shows “Loading…”
-- Trigger async crawler setup in background.
+- `discovery_run_id`, or `null` for the non-personalized path;
+- `selected_suggestion_ids`, which must belong to that completed run;
+- supported manual aggregator selections;
+- an optional X username.
 
-### Tutorial Modal (one‑time)
-- Show after first home load post‑onboarding if not completed.
-- Explains:
-  - Read articles
-  - Share an LLM summary
-  - Chat / dig deeper
-  - Join discussion (Reddit / HN)
+The client sends only IDs. The server resolves persisted proposals, validates
+selected feed URLs, rejects unfinished, foreign, stale, or cross-run selections,
+and normalizes manual configuration.
 
----
+Selection persistence and task creation share one transaction. Depending on the
+resulting configuration, completion queues feed backfill, source scraping, feed
+discovery, generated images, and an append-mode Briefing refresh. The response
+is the canonical `OnboardingCompleteResponse`:
 
-## System Design
-
-### Three Phases (Backend)
-1) **Create User**: via `/auth/apple` (only if user doesn’t exist).
-2) **Onboarding**: durable audio discovery + run-owned selections, then async crawler setup.
-3) **Tutorial**: persisted completion flag so it only shows once.
-
-### Fast vs Async Discovery
-- **fast_discover (sync)**
-  - Uses Exa search + LLM to identify the right feeds quickly.
-  - Tight limits (≤10–15s): fewer queries, fewer results, smaller prompts.
-  - Output used to populate Screen 3 immediately.
-  - If timeout/failure → fallback to defaults.
-
-- **feed discovery (async)**
-  - Runs as a separate post-completion workflow when no active discovery task exists.
-  - Expands coverage without replaying the completed onboarding discovery run.
-
-### Source Inputs
-- Exa AI search results based on name + handle.
-- Existing curated config lists (Substack, Podcast, Atom, Reddit) merged in.
-
----
-
-## Data Model
-
-### User
-- `has_completed_new_user_tutorial: bool` (default false)
-
-### Onboarding Selections
-- `discovery_run_id` identifies the authenticated user's completed personalized run.
-- `selected_suggestion_ids` confirms persisted feed, podcast, and subreddit proposals.
-- Aggregator choices remain explicit manual product choices.
-- The server resolves URLs, titles, subreddit names, and inferred profile context; clients do not echo them.
-
----
-
-## API (Proposed)
-
-### 1) Build Profile (Sync)
-`POST /api/onboarding/profile`
-
-Request:
-```json
-{
-  "first_name": "Ada",
-  "interest_topics": ["AI policy", "climate tech"]
-}
-```
-
-Response:
-```json
-{
-  "profile_summary": "AI researcher and writer focused on ML systems...",
-  "inferred_topics": ["machine learning", "AI policy"],
-  "candidate_sources": []
-}
-```
-
-### 2) Fast Discovery (Sync)
-`POST /api/onboarding/fast-discover`
-
-Request:
-```json
-{
-  "profile_summary": "...",
-  "inferred_topics": ["..."]
-}
-```
-
-Response:
-```json
-{
-  "recommended_pods": [ ... ],
-  "recommended_substacks": [ ... ],
-  "recommended_subreddits": [ ... ]
-}
-```
-
-### 3) Complete Onboarding (Async crawler setup)
-`POST /api/onboarding/complete`
-
-Request:
-```json
-{
-  "discovery_run_id": 412,
-  "selected_suggestion_ids": [9102, 9104, 9110],
-  "selected_aggregators": [
-    {"key": "hackernews", "title": "Hacker News", "topics": []}
-  ],
-  "twitter_username": null
-}
-```
-
-The non-personalized path sends `discovery_run_id: null` and an empty
-`selected_suggestion_ids` list. Completion rejects unfinished, foreign, stale,
-duplicate, or cross-run suggestion IDs.
-
-Response:
 ```json
 {
   "status": "queued",
-  "feed_id": null,
+  "task_id": null,
   "inbox_count_estimate": 100,
+  "configured_source_count": 0,
   "longform_status": "loading",
+  "has_completed_onboarding": true,
   "has_completed_new_user_tutorial": false
 }
 ```
 
-### 4) Tutorial Completion
-`POST /api/onboarding/tutorial-complete`
+`task_id` is nullable because the selected configuration may not require one
+primary setup task. The queued Briefing refresh is independent of that field.
+Clients should use the response fields rather than infer completion from local
+selection state.
 
-Response:
+## Tutorial completion
+
+`POST /api/onboarding/tutorial-complete` persists the authenticated user's
+one-time tutorial flag and returns:
+
 ```json
-{ "has_completed_new_user_tutorial": true }
+{"has_completed_new_user_tutorial": true}
 ```
 
----
+## Sources of truth
 
-## Crawler Setup
-- Triggered **after onboarding completion** (async job).
-- Creates user-specific scraper configs from selections.
-- Enqueues scraper run(s) without blocking UI.
-
----
-
-## Performance & Fallbacks
-- Total discovery target ≤45s.
-- If Exa or LLM step >20s → prompt to use defaults.
-- If discovery fails → return curated defaults immediately.
-
----
-
-## Acceptance Criteria
-- New user created only when not present.
-- Profile built from name + handle using Exa + LLM.
-- fast_discover returns within 15s or falls back to defaults.
-- Completion persists selections and triggers async crawler setup.
-- Inbox shows 100+ unread immediately; long‑form shows loading.
-- Tutorial modal shows once per user (DB flag).
+- Public request and response shapes: the Rust Utoipa OpenAPI document and
+  `newsly-contracts`.
+- Durable run, suggestion, selection, and task state: PostgreSQL through
+  `newsly-db` and the queue kernel.
+- iOS orchestration: `OnboardingViewModel` and `OnboardingService`.
+- Behavioral reliability rules: `docs/laws/processing-and-reliability.md`.

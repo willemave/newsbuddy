@@ -770,7 +770,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_summary_enforces_python_wire_constraints() {
+    fn generated_summary_enforces_persisted_wire_constraints() {
         let summary = NewsSummaryOutput {
             title: " A factual headline about Newsly ".to_owned(),
             article_url: Some("http://example.com/story#part".to_owned()),

@@ -75,8 +75,9 @@ Add timestamped reversible pairs under
 scripts/run_sqlx_migrations.sh
 ```
 
-An existing database at the frozen pre-SQLx head is adopted once, with every
-writer stopped and the maintenance barrier explicitly attested:
+A verified legacy database restoration at the frozen pre-SQLx head can be
+adopted once, with every writer stopped and the maintenance barrier explicitly
+attested. This is a recovery path, not part of an ordinary deploy:
 
 ```bash
 NEWSLY_SQLX_BASELINE_ADOPTION=true \
@@ -84,8 +85,9 @@ NEWSLY_MAINTENANCE_BARRIER_CONFIRMED=true \
 scripts/run_sqlx_migrations.sh
 ```
 
-Remove both one-shot flags after successful adoption. Fresh and already
-adopted databases use the ordinary migration command.
+Remove both one-shot flags after successful adoption. Fresh and already adopted
+databases use the ordinary migration command. Keep an active API online only for
+reviewed backward-compatible or expand-contract migrations.
 
 ## Public contracts and admin CSS
 

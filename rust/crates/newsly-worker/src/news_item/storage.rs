@@ -1,9 +1,11 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio::fs;
-use uuid::Uuid;
+
+use crate::local_object::{
+    LocalObjectError, absolute_root, publish, read_optional, sha256_hex, storage_key,
+    validate_relative_path,
+};
 
 use super::model::BodyPointer;
 
@@ -27,7 +29,7 @@ pub(super) struct StagedNewsBody {
 }
 
 impl NewsArticleBodyStore {
-    /// Build a local, content-addressed body store compatible with Python body pointers.
+    /// Builds the local content-addressed store for persisted news article bodies.
     ///
     /// # Errors
     ///
@@ -35,13 +37,7 @@ impl NewsArticleBodyStore {
     /// be resolved for a relative root.
     pub fn new(root: PathBuf, prefix: PathBuf) -> Result<Self, NewsBodyStoreError> {
         validate_relative_path(&prefix)?;
-        let root = if root.is_absolute() {
-            root
-        } else {
-            std::env::current_dir()
-                .map_err(NewsBodyStoreError::CurrentDirectory)?
-                .join(root)
-        };
+        let root = absolute_root(root)?;
         Ok(Self { root, prefix })
     }
 
@@ -65,27 +61,8 @@ impl NewsArticleBodyStore {
             .join(news_item_id.to_string())
             .join(format!("source-{sha256}.txt"));
         validate_relative_path(&relative)?;
-        let storage_key = path_to_storage_key(&relative)?;
-        let destination = self.root.join(&relative);
-        let parent = destination
-            .parent()
-            .ok_or(NewsBodyStoreError::UnsafeStorageKey)?;
-        fs::create_dir_all(parent)
-            .await
-            .map_err(NewsBodyStoreError::Write)?;
-        if !fs::try_exists(&destination)
-            .await
-            .map_err(NewsBodyStoreError::Write)?
-        {
-            let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
-            fs::write(&temporary, bytes)
-                .await
-                .map_err(NewsBodyStoreError::Write)?;
-            if let Err(error) = fs::rename(&temporary, &destination).await {
-                let _ = fs::remove_file(&temporary).await;
-                return Err(NewsBodyStoreError::Write(error));
-            }
-        }
+        let storage_key = storage_key(&relative)?;
+        publish(&self.root, &relative, bytes).await?;
         Ok(StagedNewsBody {
             storage_provider: "local",
             storage_bucket: None,
@@ -110,10 +87,8 @@ impl NewsArticleBodyStore {
         }
         let relative = Path::new(&pointer.storage_key);
         validate_relative_path(relative)?;
-        let bytes = match fs::read(self.root.join(relative)).await {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(NewsBodyStoreError::Read(error)),
+        let Some(bytes) = read_optional(&self.root, relative).await? else {
+            return Ok(None);
         };
         if bytes.len() > MAX_NEWS_BODY_BYTES {
             return Err(NewsBodyStoreError::BodyTooLarge(bytes.len()));
@@ -122,41 +97,6 @@ impl NewsArticleBodyStore {
             .map(Some)
             .map_err(NewsBodyStoreError::InvalidUtf8)
     }
-}
-
-fn validate_relative_path(path: &Path) -> Result<(), NewsBodyStoreError> {
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(NewsBodyStoreError::UnsafeStorageKey);
-    }
-    Ok(())
-}
-
-fn path_to_storage_key(path: &Path) -> Result<String, NewsBodyStoreError> {
-    path.components()
-        .map(|component| match component {
-            Component::Normal(part) => part
-                .to_str()
-                .map(str::to_owned)
-                .ok_or(NewsBodyStoreError::UnsafeStorageKey),
-            _ => Err(NewsBodyStoreError::UnsafeStorageKey),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|parts| parts.join("/"))
-}
-
-fn sha256_hex(value: &[u8]) -> String {
-    Sha256::digest(value)
-        .iter()
-        .fold(String::with_capacity(64), |mut encoded, byte| {
-            use std::fmt::Write as _;
-            write!(encoded, "{byte:02x}").expect("writing to String cannot fail");
-            encoded
-        })
 }
 
 #[derive(Debug, Error)]
@@ -175,23 +115,47 @@ pub enum NewsBodyStoreError {
     Write(#[source] std::io::Error),
     #[error("could not read news article body")]
     Read(#[source] std::io::Error),
+    #[error("an existing content-addressed news article body is unsafe or has different bytes")]
+    UnsafeExistingBody,
     #[error("stored news article body is not valid UTF-8")]
     InvalidUtf8(#[source] std::string::FromUtf8Error),
 }
 
+impl From<LocalObjectError> for NewsBodyStoreError {
+    fn from(error: LocalObjectError) -> Self {
+        match error {
+            LocalObjectError::CurrentDirectory(error) => Self::CurrentDirectory(error),
+            LocalObjectError::UnsafePath => Self::UnsafeStorageKey,
+            LocalObjectError::Write(error) => Self::Write(error),
+            LocalObjectError::Read(error) => Self::Read(error),
+            LocalObjectError::UnsafeExistingObject => Self::UnsafeExistingBody,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use super::*;
 
     #[tokio::test]
-    async fn uses_python_compatible_news_item_storage_key() {
+    async fn uses_canonical_news_item_storage_key() {
         let root = std::env::temp_dir().join(format!("newsly-news-body-{}", Uuid::new_v4()));
         let store = NewsArticleBodyStore::new(root.clone(), PathBuf::from("content")).unwrap();
-        let staged = store.stage(42, "fixture body").await.unwrap();
+        let staged = store.stage(42, "  fixture body \n").await.unwrap();
         assert!(
             staged
                 .storage_key
                 .starts_with("content/news-items/42/source-")
+        );
+        assert_eq!(
+            staged.byte_size,
+            i32::try_from("fixture body".len()).unwrap()
+        );
+        assert_eq!(
+            staged.char_count,
+            i32::try_from("fixture body".chars().count()).unwrap()
         );
         let pointer = BodyPointer {
             storage_provider: "local".to_owned(),

@@ -1,10 +1,10 @@
 use serde_json::Value;
 
-/// Mirrors Python's compact, sorted `json.dumps` representation.
+/// Produces the compact, sorted JSON representation used by durable compatibility keys.
 ///
-/// The retired runtime used the default `ensure_ascii=True` output in durable dedupe and
-/// idempotency keys. Keep that exact byte representation while those keys can coexist with Rust.
-pub fn python_canonical_json(value: &Value) -> String {
+/// Existing dedupe and idempotency keys use ASCII escapes. Keep that exact byte representation
+/// while old and newly generated keys can coexist.
+pub fn compatibility_canonical_json(value: &Value) -> String {
     let mut output = String::new();
     write_value(value, &mut output);
     output
@@ -85,10 +85,10 @@ fn push_unicode_escape(codepoint: u32, output: &mut String) {
 mod tests {
     use serde_json::json;
 
-    use super::python_canonical_json;
+    use super::compatibility_canonical_json;
 
     #[test]
-    fn matches_python_ascii_escaping_and_recursive_key_order() {
+    fn preserves_ascii_escaping_and_recursive_key_order() {
         let value = json!({
             "query": "café",
             "emoji": "🚀",
@@ -97,7 +97,7 @@ mod tests {
         });
 
         assert_eq!(
-            python_canonical_json(&value),
+            compatibility_canonical_json(&value),
             "{\"control\":\"\\u0001\",\"emoji\":\"\\ud83d\\ude80\",\"nested\":{\"a\":2,\"z\":1},\"query\":\"caf\\u00e9\"}"
         );
     }

@@ -12,9 +12,7 @@ mod handler;
 mod registry;
 mod repository;
 
-pub use config::{
-    AccountDeletionProcessConfig, ArtifactStorageConfig, ProcessConfigError, WorkerLogFormat,
-};
+pub use config::{AccountDeletionProcessConfig, ArtifactStorageConfig, ProcessConfigError};
 pub use external::{
     AccountExternalServices, AgentVmDestroyer, ConfiguredArtifactStore, DirectAgentVmDestroyer,
     ObjectArtifactStore, ReqwestXGrantRevoker, UnavailableXGrantRevoker, XGrantRevoker,

@@ -10,12 +10,12 @@ use newsly_queue::{
     ClaimRequest, ClaimRuntimeScope, QueueKernel, QueueNotificationHub, TaskQueue, TaskType,
 };
 use newsly_worker::chat_turn::{ChatAgentRuntime, ChatPartitionHandler, ChatTaskServices};
-use newsly_worker::config::WorkerLogFormat;
+use newsly_worker::process::{
+    initialize_observability, notification_database_url, spawn_shutdown_signal,
+};
 use newsly_worker::queue_process_config::QueueWorkerProcessConfig;
 use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
-use secrecy::{ExposeSecret, SecretString};
-use tokio::sync::watch;
-use tracing_subscriber::EnvFilter;
+use secrecy::SecretString;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -70,21 +70,17 @@ async fn main() -> Result<()> {
     let mut worker_config = WorkerConfig::new(claim);
     worker_config.max_retries = process.max_retries;
 
-    let notification_url = normalize_listener_url(process.database_url().expose_secret());
-    let notification_hub = QueueNotificationHub::spawn(notification_url);
+    let notification_hub =
+        QueueNotificationHub::spawn(notification_database_url(process.database_url()));
     let notifications = notification_hub.subscribe();
     let mut worker = WorkerKernel::new(queue, handlers, worker_config, Some(notifications))?;
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let shutdown_task = tokio::spawn(async move {
-        wait_for_shutdown_signal().await;
-        shutdown_tx.send_replace(true);
-    });
+    let (shutdown_rx, shutdown_task) = spawn_shutdown_signal();
 
     tracing::info!(
         worker_id = %process.worker_id,
         queue = %TaskQueue::Chat,
         task_types = "chat_turn,dig_deeper",
-        "Newsly Rust chat worker started; runtime ownership must be explicitly cut over before rows are claimable"
+        "Newsly Rust chat worker started; only rows stamped for the Rust runtime are claimable"
     );
     let run_result = worker.run(shutdown_rx).await;
     shutdown_task.abort();
@@ -118,60 +114,4 @@ fn parse_positive_u64(name: &'static str, default: u64) -> Result<u64> {
         return Err(anyhow!("{name} must be positive"));
     }
     Ok(value)
-}
-
-fn initialize_observability(filter: &str, format: WorkerLogFormat) -> Result<()> {
-    let filter = EnvFilter::try_new(filter).context("RUST_LOG contains an invalid filter")?;
-    match format {
-        WorkerLogFormat::Json => tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .json()
-            .with_current_span(true)
-            .with_span_list(true)
-            .try_init()
-            .map_err(|error| anyhow!("could not install JSON tracing subscriber: {error}"))?,
-        WorkerLogFormat::Pretty => tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .pretty()
-            .try_init()
-            .map_err(|error| anyhow!("could not install pretty tracing subscriber: {error}"))?,
-    }
-    Ok(())
-}
-
-fn normalize_listener_url(value: &str) -> String {
-    for prefix in [
-        "postgresql+psycopg://",
-        "postgresql+psycopg2://",
-        "postgresql+asyncpg://",
-    ] {
-        if let Some(remainder) = value.strip_prefix(prefix) {
-            return format!("postgresql://{remainder}");
-        }
-    }
-    value.to_owned()
-}
-
-async fn wait_for_shutdown_signal() {
-    let interrupt = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        () = interrupt => {},
-        () = terminate => {},
-    }
 }

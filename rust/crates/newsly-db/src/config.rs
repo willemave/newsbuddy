@@ -64,7 +64,10 @@ impl DatabaseConfig {
     }
 }
 
-fn normalize_database_url(value: &str) -> std::borrow::Cow<'_, str> {
+/// Converts SQLAlchemy-style PostgreSQL URLs into the native spelling accepted by SQLx and
+/// PostgreSQL listeners. Native URLs are returned without allocation.
+#[must_use]
+pub fn normalize_database_url(value: &str) -> std::borrow::Cow<'_, str> {
     for prefix in SQLALCHEMY_POSTGRES_PREFIXES {
         if let Some(remainder) = value.strip_prefix(prefix) {
             return std::borrow::Cow::Owned(format!("postgresql://{remainder}"));
@@ -77,4 +80,31 @@ fn normalize_database_url(value: &str) -> std::borrow::Cow<'_, str> {
 pub enum DatabaseConfigError {
     #[error("DATABASE_URL is not a valid PostgreSQL connection URL")]
     InvalidUrl(#[source] sqlx::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use super::normalize_database_url;
+
+    #[test]
+    fn native_database_urls_are_borrowed_unchanged() {
+        let url = "postgresql://newsly@example.test/newsly";
+        assert_eq!(normalize_database_url(url), Cow::Borrowed(url));
+    }
+
+    #[test]
+    fn sqlalchemy_driver_prefixes_are_normalized() {
+        for prefix in [
+            "postgresql+psycopg://",
+            "postgresql+psycopg2://",
+            "postgresql+asyncpg://",
+        ] {
+            assert_eq!(
+                normalize_database_url(&format!("{prefix}newsly@example.test/newsly")),
+                "postgresql://newsly@example.test/newsly"
+            );
+        }
+    }
 }

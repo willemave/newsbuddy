@@ -20,8 +20,8 @@ const fn owned_relation(
 }
 
 /// Explicit catalog registry. Its fixture test compares this set with every baseline `user_id`
-/// and `owner_user_id` column, including the legacy `daily_news_digests` table that no longer has
-/// a `SQLAlchemy` model.
+/// and `owner_user_id` column, including historical tables such as `daily_news_digests` that no
+/// longer have an active domain model.
 pub const USER_OWNED_RELATIONS: &[UserOwnedRelation] = &[
     owned_relation(
         "analytics_interactions",

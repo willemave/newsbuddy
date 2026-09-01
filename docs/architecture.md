@@ -1,17 +1,8 @@
 # Newsly Architecture
 
-This document describes the authoritative system after the Rust backend
-migration. For behavior that must remain true, use [`docs/laws/`](laws/). For
-the migration rationale, package sequence, and release status, use the
-[`rust-backend-migration-2026-08`](initiatives/rust-backend-migration-2026-08/)
-initiative.
-
-The Rust implementation and final authority migration are present in the local
-working tree. The completed backend, contract, database-tooling, Python-island,
-and native-client gates pass, as do the focused Rust CLI tests. The consolidated
-post-CLI-cutover workspace gate, SQLx production adoption, live
-external-service canaries, image builds, and deployment are still outstanding;
-architecture authority does not imply production state.
+This document describes the authoritative Newsly system. For behavior that must
+remain true, use [`docs/laws/`](laws/). Dated implementation and validation
+records live in [`docs/log.md`](log.md) and repository history.
 
 ## 1. System summary
 
@@ -41,14 +32,11 @@ Newsly-owned Python has two explicit boundaries:
   process used by Rust workers;
 - `python/evals` is offline model, embedding, judge, and report tooling.
 
-No other Newsly Python package owns routes, SQL, migrations, queue rows, product
-state, agents, E2B, admin behavior, or production scheduling. The Rust
-application image does install the pinned third-party `yt-dlp` executable and
-its Python runtime for bounded media downloads; that vendor tool is not Newsly
-application code or an authority boundary. The general `app/`, `admin/`,
-`migrations/`, and backend `tests/` trees have been removed. Their useful
-migration evidence survives in `contracts/`, the SQLx baseline, this initiative
-record, and repository history.
+No other Newsly-owned Python package owns routes, SQL, migrations, queue rows,
+product state, agents, E2B, admin behavior, or production scheduling. The Rust
+application image installs the pinned third-party `yt-dlp` executable and its
+Python runtime for bounded media downloads; that vendor tool is not Newsly
+application code or an authority boundary.
 
 ## 2. Runtime topology
 
@@ -151,8 +139,8 @@ responses are explicit exceptions, not untyped escape hatches.
 
 ### 4.2 Representation rules
 
-The former Python type system supplied the compatibility corpus; Rust preserves
-its semantics rather than its class hierarchy:
+The compatibility corpus captures persisted-data and installed-client
+semantics. Rust preserves those semantics through explicit boundaries:
 
 - Serde owns wire and durable encoding;
 - Utoipa owns public OpenAPI;
@@ -208,7 +196,7 @@ partial indexes, `ON CONFLICT`, transaction timestamps, `SKIP LOCKED`, and
 `LISTEN/NOTIFY`. SQLx keeps that behavior visible as parameterized SQL rather
 than hiding it behind an ORM.
 
-### 5.2 Migration authority
+### 5.2 SQLx migration authority
 
 Alembic was frozen at `20260829_02` before its source tree was removed. Its 91
 historical revisions remain accessible through repository history, while the
@@ -263,15 +251,16 @@ remain in structured logs, not client messages.
 ## 7. Durable queue and worker execution
 
 `processing_tasks` is the only durable work queue. Each task has one payload
-schema, queue/partition, retry and deferral policy, owning runtime/version, and
+schema, queue/partition, retry and deferral policy, runtime namespace, and
 executor.
 
-Claim uses `FOR UPDATE SKIP LOCKED`. Each attempt receives an opaque lease token
-and retry generation. Renewal, progress, defer, retry, terminal failure, and
-success are compare-and-set operations requiring the exact live owner, token,
-generation, and unexpired lease. Expired work is reclaimable. Deferral preserves
-the retry budget. Notifications wake workers; polling remains the correctness
-fallback.
+Claim filters work by the worker's runtime and namespace, then uses `FOR UPDATE
+SKIP LOCKED`. Each claim carries durable owner and executor-version stamps plus
+an opaque lease token and retry generation. Renewal, progress, defer, retry,
+terminal failure, and success are compare-and-set operations requiring those
+exact stamps, token, generation, and an unexpired lease. Expired work is
+reclaimable. Deferral preserves the retry budget. Notifications wake workers;
+polling remains the correctness fallback.
 
 Every provider-backed executor follows:
 
@@ -302,8 +291,16 @@ metadata, finalization performs an unlocked read, locks that user, then locks
 and revalidates the content row; an attribution race releases only the content
 lock and repeats that bounded lock sequence without repeating external work.
 
-Rust owns the final active runtime for every task. Durable owner/version stamps
-remain useful audit and fencing evidence from the migration.
+Rust owns the active runtime for every task. Workers claim only matching runtime
+namespaces; the durable owner and executor-version stamps carried by the claim
+remain authoritative audit and fencing evidence for that attempt.
+
+The executor version is an authority-transition epoch, not an application build
+number. A worker is selected by runtime and namespace, then renews and finalizes
+the exact stamp it claimed. The ownership registry remains because P23 permits
+audited runtime transitions and keeps in-flight work bound to its original
+owner. Removing it would require an explicit change to that law, its schema, and
+the admin transition workflow; it is not a mechanical migration cleanup.
 
 ## 8. Product processing
 
@@ -675,8 +672,8 @@ publication use the same implementations as the app.
 
 Native UI automation is client-owned as well: executable flows live under
 `client/newsly/Maestro/flows/` and reference images under
-`client/newsly/Maestro/baselines/`. There is no repository-root Maestro tree or
-backend Python iOS-E2E package.
+`client/newsly/Maestro/baselines/`. There is no repository-root shadow suite or
+backend-owned iOS E2E runner.
 
 ## 13. Admin, observability, and operations
 
@@ -695,13 +692,15 @@ liveness alone is not product health.
 Local development runs native Rust processes and local PostgreSQL. Docker is
 the production/staging runtime. Deployment builds immutable Rust and extractor
 images from one tested SHA, runs `newsly-db` once, starts and probes the inactive
-API slot, switches public routing, then replaces workers and scheduler. The old
-slot may remain only for a bounded rollback window against expand/contract
-compatible schema.
+API slot, drains the singleton workers and scheduler, switches public routing,
+then replaces those writers from the same image. This prevents old workers from
+claiming tasks emitted by the new API; queue ownership epochs do not act as
+application-build fences. The old API slot may remain only for a bounded
+rollback window against expand/contract-compatible schema.
 
 The required quality workflow precedes build and deployment. Deployment rejects
-a stale tested SHA. Existing production database adoption requires all writers
-to stop and drain; normal deploys cannot infer that authority.
+a stale tested SHA. Baseline adoption of an eligible legacy database requires
+all writers to stop and drain; normal deploys cannot infer that authority.
 
 `PUBLIC_BASE_URL` is the authoritative origin for externally returned artifact,
 audio, and share links. Proxy headers are accepted only from configured proxy
@@ -727,20 +726,10 @@ Required evidence is proportional to the boundary:
 - exact image SHA, public health, queue age, transaction age, provider cost,
   extractor comparison, and leaked-resource proof after deployment.
 
-The backend candidate before the CLI cutover passes warning-denied workspace
-Clippy, all 288 PostgreSQL-enabled backend tests, locked offline compilation,
-fresh-database migration and SQLx prepare checks, and a Rust API health smoke
-against the throwaway migrated schema. The focused Rust CLI tests pass. The 39
-Python-island tests (4 eval and 35 extractor) and their
-style/type/isolation/build checks pass, as do public contract drift, all 632
-native tests (629 unit and 3 UI) with zero failures or skips, both Compose
-configuration checks, and shell syntax checks. The consolidated post-cutover
-workspace gate remains to run. Docker image builds could not run because no
-Docker daemon is available in this environment.
-
-Focused and consolidated local checks do not replace live provider/E2B canaries,
-production database adoption, an exact-SHA image/deploy rehearsal, or post-deploy
-health proof. None of those production or external-service steps has run.
+A release record names the exact revision and the gates that ran against it.
+Checkout validation, tested SHA, built image, deployed revision, and live
+provider/E2B or post-deploy health proof are separate evidence and must not be
+inferred from one another.
 
 ## 15. Architectural invariants
 

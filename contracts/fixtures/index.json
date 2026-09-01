@@ -113,7 +113,7 @@
     {
       "category": "tasks",
       "path": "tasks/catalog.json",
-      "sha256": "3749db2bcb6b5ebbb39bb6de814cff813411d267be6b1a99e9884ce68ad354bc"
+      "sha256": "cd1e21cde68c9ace6239150a5787297a1d53de03e79d6e35776b287385756b87"
     },
     {
       "category": "tasks",
@@ -143,7 +143,7 @@
     {
       "category": "tasks",
       "path": "tasks/enrich_news_item_article.schema.json",
-      "sha256": "df799d417baaa5f846c88657071b2b9a586453195b8f182f94c5cad10a4a1aa2"
+      "sha256": "264fd5603cb75f025f6f32d05624e3c0e9ccbebb7392e012c3839f1701147bac"
     },
     {
       "category": "tasks",

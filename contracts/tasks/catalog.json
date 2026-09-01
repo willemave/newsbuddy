@@ -85,7 +85,7 @@
       "dedupe_by_content": false,
       "handler": "newsly_worker::news_item::EnrichNewsItemArticleHandler",
       "payload_schema": "tasks/enrich_news_item_article.schema.json",
-      "payload_schema_sha256": "df799d417baaa5f846c88657071b2b9a586453195b8f182f94c5cad10a4a1aa2",
+      "payload_schema_sha256": "264fd5603cb75f025f6f32d05624e3c0e9ccbebb7392e012c3839f1701147bac",
       "queue": "content",
       "requires_owner": false,
       "task_type": "enrich_news_item_article"

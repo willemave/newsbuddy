@@ -538,7 +538,7 @@ fn encode_cursor(item: &ContentCardProjection, filters: &Value) -> String {
         .into_iter()
         .map(|(key, value)| (key.to_owned(), value))
         .collect();
-    URL_SAFE.encode(python_json(&Value::Object(payload)).as_bytes())
+    URL_SAFE.encode(cursor_compatibility_json(&Value::Object(payload)).as_bytes())
 }
 
 fn parse_cursor_datetime(value: &str) -> Option<NaiveDateTime> {
@@ -558,7 +558,9 @@ fn parse_cursor_datetime(value: &str) -> Option<NaiveDateTime> {
 }
 
 fn filters_hash(filters: &Value) -> String {
-    hex_encode(&Sha256::digest(python_json(filters).as_bytes()))
+    hex_encode(&Sha256::digest(
+        cursor_compatibility_json(filters).as_bytes(),
+    ))
 }
 
 fn list_filters(content_types: &[String], date: Option<&str>, read_filter: &str) -> Value {
@@ -610,7 +612,7 @@ fn filter_object<const N: usize>(entries: [(&str, Option<Value>); N]) -> Value {
     )
 }
 
-fn python_json(value: &Value) -> String {
+fn cursor_compatibility_json(value: &Value) -> String {
     match value {
         Value::Object(object) => format!(
             "{{{}}}",
@@ -619,7 +621,7 @@ fn python_json(value: &Value) -> String {
                 .map(|(key, value)| format!(
                     "{}: {}",
                     serde_json::to_string(key).expect("JSON key serialization is infallible"),
-                    python_json(value)
+                    cursor_compatibility_json(value)
                 ))
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -628,7 +630,7 @@ fn python_json(value: &Value) -> String {
             "[{}]",
             values
                 .iter()
-                .map(python_json)
+                .map(cursor_compatibility_json)
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -662,13 +664,13 @@ fn bad_request(message: impl Into<String>, request_id: &str) -> ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{filters_hash, list_filters, python_json};
+    use super::{cursor_compatibility_json, filters_hash, list_filters};
 
     #[test]
-    fn filter_hash_matches_python_json_dumps() {
+    fn filter_hash_preserves_the_installed_cursor_format() {
         let filters = list_filters(&["podcast".to_owned(), "article".to_owned()], None, "all");
         assert_eq!(
-            python_json(&filters),
+            cursor_compatibility_json(&filters),
             r#"{"content_type": ["article", "podcast"], "read_filter": "all"}"#
         );
         assert_eq!(filters_hash(&filters).len(), 64);

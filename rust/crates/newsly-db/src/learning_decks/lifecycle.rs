@@ -3,7 +3,7 @@
 use super::{
     ACTIVE_ATTEMPT_STATUSES, BTreeSet, DeletedLearningDeck, DisableLearningDeckShareOutcome,
     EnableLearningDeckShareOutcome, LearningDeckRepositoryError, Postgres, Transaction, Utc, Value,
-    common::{collect_string_values, python_naive_iso, status_history_entry},
+    common::{collect_string_values, legacy_naive_iso, status_history_entry},
     json,
 };
 
@@ -59,7 +59,7 @@ pub async fn delete_learning_deck(
     let run_entry = json!({
         "status": "cancelled",
         "note": "Learning Deck was deleted",
-        "created_at": python_naive_iso(now),
+        "created_at": legacy_naive_iso(now),
     });
     sqlx::query(
         r#"

@@ -32,9 +32,11 @@ pub mod feed_backfill;
 pub mod feed_discovery;
 pub mod image_generation;
 pub mod learning_deck;
+mod local_object;
 pub mod media;
 pub mod news_item;
 pub mod onboarding_discovery;
+pub mod process;
 pub mod queue_process_config;
 pub mod run_llm_task;
 pub mod scrape;
@@ -718,7 +720,7 @@ mod tests {
     use super::{heartbeat_interval, heartbeat_retry_interval};
 
     #[test]
-    fn heartbeat_cadence_matches_python_bounds() {
+    fn heartbeat_cadence_preserves_existing_bounds() {
         assert_eq!(
             heartbeat_interval(Duration::from_secs(300)),
             Duration::from_secs(30)

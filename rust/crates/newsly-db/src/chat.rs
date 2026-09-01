@@ -260,7 +260,7 @@ struct ArticlePresentation {
     thumbnail_url: Option<String>,
 }
 
-/// List visible, unarchived chat sessions using the Python-compatible activity cursor.
+/// List visible, unarchived chat sessions using the stable activity cursor.
 ///
 /// # Errors
 ///

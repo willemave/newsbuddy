@@ -6,7 +6,7 @@ Supervisor commands are available only through repository history.
 ## Runtime and database
 
 - `scripts/start_services.sh` — local Rust API, workers, scheduler, isolated extractor, and SQLx migration launcher.
-- `scripts/run_sqlx_migrations.sh` — apply embedded SQLx migrations or perform one-time baseline adoption.
+- `scripts/run_sqlx_migrations.sh` — apply embedded SQLx migrations or explicitly adopt a verified legacy restore.
 - `scripts/setup_local_postgres.sh` — install/start local PostgreSQL and write the local native URL.
 - `scripts/dev.sh` — background local-service convenience wrapper around `start_services.sh`.
 - `scripts/backup_database.sh` — create and retain PostgreSQL custom-format backups.

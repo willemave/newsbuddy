@@ -40,7 +40,7 @@ pub(crate) struct Gateway {
 }
 
 impl Gateway {
-    /// Creates the owner-aware Rust cutover gate.
+    /// Creates the owner-aware runtime gate.
     ///
     /// # Errors
     ///
@@ -272,9 +272,9 @@ impl Drop for WritePermit {
 ///
 /// Reads may use the last verified owner during a transient registry failure. Writes always prove
 /// current ownership and stop during the prepared transition barrier; they are never replayed to a
-/// second runtime. Python-owned operations fail closed because the general Python backend is no
-/// longer part of the production runtime; the registry is retained to make the final cutover and
-/// rollback window explicit.
+/// second runtime. Operations owned by another runtime fail closed because this process cannot
+/// dispatch them elsewhere; the registry keeps authority transitions and rollback windows
+/// explicit.
 pub(crate) async fn ownership_gateway(
     State(state): State<AppState>,
     mut request: Request,
@@ -363,12 +363,12 @@ pub(crate) async fn ownership_gateway(
         tracing::warn!(
             operation_id = route.operation_id(),
             active_version = ownership.active_version.get(),
-            "request reached the Rust-only runtime before ownership promotion"
+            "request reached the Rust-only runtime for an operation owned by another runtime"
         );
         return ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "ownership_not_promoted",
-            "This operation has not completed its Rust ownership cutover",
+            "This operation is not currently owned by the Rust runtime",
             request_id_from_headers(request.headers()),
         )
         .with_retryable(true)

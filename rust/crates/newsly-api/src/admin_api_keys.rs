@@ -324,18 +324,18 @@ fn render_api_keys_page(
         let last_used = key
             .last_used_at
             .as_ref()
-            .map_or_else(|| "-".to_owned(), format_python_datetime);
+            .map_or_else(|| "-".to_owned(), format_legacy_datetime);
         let revoked = key
             .revoked_at
             .as_ref()
-            .map_or_else(|| "-".to_owned(), format_python_datetime);
+            .map_or_else(|| "-".to_owned(), format_legacy_datetime);
         let _ = write!(
             html,
             "      <tr>\n        <td>{}</td><td>{}</td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>",
             key.id,
             key.user_id,
             escape_html(&key.key_prefix),
-            format_python_datetime(&key.created_at),
+            format_legacy_datetime(&key.created_at),
             last_used,
             revoked,
         );
@@ -378,7 +378,7 @@ pub(super) fn escape_html(value: &str) -> String {
     escaped
 }
 
-fn format_python_datetime(value: &DateTime<Utc>) -> String {
+fn format_legacy_datetime(value: &DateTime<Utc>) -> String {
     if value.nanosecond() == 0 {
         value.format("%Y-%m-%d %H:%M:%S").to_string()
     } else {
@@ -393,7 +393,7 @@ mod tests {
     use super::{admin_session_cookie, escape_html, percent_encode_path};
 
     #[test]
-    fn admin_cookie_and_redirect_encoding_match_python_boundary() {
+    fn admin_cookie_and_redirect_encoding_preserve_the_installed_boundary() {
         let mut headers = HeaderMap::new();
         headers.insert(
             COOKIE,

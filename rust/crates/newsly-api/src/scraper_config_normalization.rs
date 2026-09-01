@@ -26,7 +26,7 @@ pub(super) fn validate_display_name(value: Option<&str>) -> Result<(), ConfigVal
     Ok(())
 }
 
-/// Reproduce the request-model validation that runs before the Python create handler.
+/// Validate and default the canonical scraper-create request shape.
 pub(super) fn normalize_create_input(
     scraper_type: ScraperType,
     config: Map<String, Value>,
@@ -38,7 +38,7 @@ pub(super) fn normalize_create_input(
     Ok(config)
 }
 
-/// Reproduce the shape-directed Pydantic update validator before loading the database row.
+/// Validate the shape-directed scraper-update payload before loading the database row.
 pub(super) fn normalize_update_input(
     config: Map<String, Value>,
 ) -> Result<Map<String, Value>, ConfigValidationError> {
@@ -198,7 +198,9 @@ fn normalize_reddit_config(
 fn normalize_aggregator_config(
     mut config: Map<String, Value>,
 ) -> Result<Map<String, Value>, ConfigValidationError> {
-    let key = python_string(config.get("key")).trim().to_lowercase();
+    let key = compatibility_string(config.get("key"))
+        .trim()
+        .to_lowercase();
     if key.is_empty() {
         return Err(ConfigValidationError::new(
             "config.key is required for aggregator subscriptions",
@@ -285,7 +287,7 @@ fn truthy(value: Option<&Value>) -> bool {
     }
 }
 
-fn python_string(value: Option<&Value>) -> String {
+fn compatibility_string(value: Option<&Value>) -> String {
     match value {
         None | Some(Value::Null) => String::new(),
         Some(Value::String(value)) => value.clone(),

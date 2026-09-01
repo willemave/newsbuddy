@@ -86,12 +86,12 @@ pub(crate) struct AuthConfigInput {
 }
 
 impl AuthConfig {
-    /// Build coexistence authentication configuration.
+    /// Builds authentication configuration.
     ///
     /// # Errors
     ///
-    /// Returns [`AuthConfigError::UnsupportedAlgorithm`] unless the configured
-    /// Python signing algorithm is exactly `HS256`.
+    /// Returns [`AuthConfigError::UnsupportedAlgorithm`] unless the configured JWT signing
+    /// algorithm is exactly `HS256`.
     pub(crate) fn new(input: AuthConfigInput) -> Result<Self, AuthConfigError> {
         let AuthConfigInput {
             jwt_secret,
@@ -751,7 +751,7 @@ fn invalid_credentials(request_id: String) -> ApiError {
 
 #[derive(Debug, Error)]
 pub enum AuthConfigError {
-    #[error("unsupported JWT_ALGORITHM {0:?}; Rust coexistence requires HS256")]
+    #[error("unsupported JWT_ALGORITHM {0:?}; Newsly authentication requires HS256")]
     UnsupportedAlgorithm(String),
     #[error("ADMIN_PASSWORD must be nonempty")]
     InvalidAdminPassword,

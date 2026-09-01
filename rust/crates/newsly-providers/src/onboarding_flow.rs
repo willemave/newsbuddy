@@ -153,7 +153,7 @@ pub struct OnboardingGateway {
 
 impl OnboardingGateway {
     /// Builds the provider boundary without requiring optional keys at process startup. Missing
-    /// Exa credentials produce the same deterministic empty-search fallbacks as Python; missing
+    /// Exa credentials produce deterministic empty-search fallbacks; missing
     /// model credentials remain typed request-time failures for operations that require the LLM.
     ///
     /// # Errors

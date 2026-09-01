@@ -2,14 +2,10 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-case "${1:-all}" in
-  all | --public-only)
-    ;;
-  *)
-    echo "Usage: $0 [--public-only]" >&2
-    exit 2
-    ;;
-esac
+if [[ $# -ne 0 ]]; then
+  echo "Usage: $0" >&2
+  exit 2
+fi
 
 CONTRACT_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/newsly-public-contracts.XXXXXX")"
 trap 'rm -rf -- "$CONTRACT_TMP_DIR"' EXIT
@@ -47,5 +43,5 @@ cp "$CONTRACT_TMP_DIR/ShareContracts.generated.swift" \
 cp "$CONTRACT_TMP_DIR/ShareModels.generated.swift" \
   client/newsly/ShareExtension/Generated/ShareModels.generated.swift
 echo "Wrote Rust public OpenAPI: docs/library/reference/openapi.json"
-echo "Wrote Rust migration OpenAPI: contracts/openapi/public.openapi.json"
+echo "Wrote Rust contract-corpus OpenAPI: contracts/openapi/public.openapi.json"
 echo "Wrote Rust-generated app and Share Extension Swift contracts."

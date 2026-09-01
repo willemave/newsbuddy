@@ -810,7 +810,7 @@ mod tests {
     }
 
     #[test]
-    fn source_routing_matches_python_contract() {
+    fn source_routing_preserves_the_wire_contract() {
         assert_eq!(
             resolve_artifact_source_hint(&source("news", "https://example.com", None)).candidates,
             vec![ArtifactType::Briefing]

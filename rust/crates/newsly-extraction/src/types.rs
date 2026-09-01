@@ -430,6 +430,7 @@ mod tests {
                 serde_json::from_value(case["expected"].clone()).expect("valid result");
 
             assert_eq!(result.request_id(), request.request_id);
+            result.validate_bounds().expect("bounded result");
         }
     }
 

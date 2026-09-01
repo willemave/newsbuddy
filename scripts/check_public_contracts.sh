@@ -2,14 +2,10 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-case "${1:-all}" in
-  all | --public-only)
-    ;;
-  *)
-    echo "Usage: $0 [--public-only]" >&2
-    exit 2
-    ;;
-esac
+if [[ $# -ne 0 ]]; then
+  echo "Usage: $0" >&2
+  exit 2
+fi
 
 CONTRACT_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/newsly-public-contracts-check.XXXXXX")"
 trap 'rm -rf -- "$CONTRACT_TMP_DIR"' EXIT
@@ -56,7 +52,7 @@ check_artifact \
 check_artifact \
   contracts/openapi/public.openapi.json \
   "$CONTRACT_TMP_DIR/public.openapi.json" \
-  "Rust migration OpenAPI"
+  "Rust contract-corpus OpenAPI"
 
 check_artifact \
   client/newsly/newsly/Models/Generated/APIContracts.generated.swift \

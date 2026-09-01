@@ -105,12 +105,12 @@ pub(super) fn status_history_entry(
     json!({
         "status": status,
         "workflow_state": workflow_state,
-        "created_at": python_naive_iso(now),
+        "created_at": legacy_naive_iso(now),
         "note": note,
     })
 }
 
-pub(super) fn python_naive_iso(now: DateTime<Utc>) -> String {
+pub(super) fn legacy_naive_iso(now: DateTime<Utc>) -> String {
     now.naive_utc()
         .and_utc()
         .to_rfc3339_opts(SecondsFormat::Micros, true)

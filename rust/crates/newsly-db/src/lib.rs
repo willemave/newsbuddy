@@ -173,7 +173,7 @@ pub use cli_link::{
     ApprovedCliLink, CliLinkPollStatus, CliLinkRepositoryError, PolledCliLink, StartedCliLink,
     approve_cli_link, poll_cli_link, start_cli_link,
 };
-pub use config::{DatabaseConfig, DatabaseConfigError};
+pub use config::{DatabaseConfig, DatabaseConfigError, normalize_database_url};
 pub use content_actions::{
     BulkReadResult, ContentActionRepositoryError, content_exists, mark_content_read,
     mark_content_unread, mark_contents_read, remove_content_from_knowledge,

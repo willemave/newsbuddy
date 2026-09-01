@@ -1,4 +1,4 @@
-# Migration contract corpus
+# Newsly contract corpus
 
 This directory is the language-neutral contract corpus for Newsly's production
 runtime. The Rust `newsly-api` Utoipa document is the sole public route and
@@ -25,8 +25,8 @@ The corpus contains:
   by Rust production algorithms;
 - `fixtures/index.json`: a frozen hash-indexed inventory of compatibility inputs;
 - `policy-manifest.toml`: audited route, task, state-writer, and E2B namespace
-  ownership plus deletion conditions. PostgreSQL is the live ownership control
-  plane; the manifest is its checked desired-state input.
+  ownership policy. PostgreSQL is the live ownership control plane; the manifest
+  is its checked desired-state input.
 
 Regenerate Rust-owned public schemas after an intentional HTTP-contract change:
 
@@ -36,8 +36,8 @@ scripts/check_public_contracts.sh
 ```
 
 Update a frozen compatibility fixture deliberately beside the Rust test that
-consumes it, including its entry in `fixtures/index.json`. There is no Python
-migration-corpus generator or checker.
+consumes it, including its entry in `fixtures/index.json`. Python does not
+generate or approve the corpus.
 
 The checked-in Swift app and Share Extension sources are generated from the
 Rust OpenAPI document through the reviewed client policy. The Rust `newsbuddy`

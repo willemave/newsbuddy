@@ -1,4 +1,5 @@
 import ast
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -6,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from newsly_document_extractor.models import (
+    EXTRACT_RESULT_ADAPTER,
     SCHEMA_VERSION,
     ExtractIntent,
     ExtractOptions,
@@ -14,6 +16,7 @@ from newsly_document_extractor.models import (
 )
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "newsly_document_extractor"
+EXTRACTION_CONTRACT_ROOT = Path(__file__).resolve().parents[3] / "contracts" / "extraction"
 FORBIDDEN_IMPORT_ROOTS = {
     "alembic",
     "app",
@@ -81,3 +84,38 @@ def test_request_requires_every_wire_field() -> None:
         incomplete = {key: value for key, value in complete.items() if key != field_name}
         with pytest.raises(ValidationError):
             ExtractRequest.model_validate(incomplete)
+
+
+def test_language_neutral_golden_validates_every_result_variant() -> None:
+    corpus = json.loads((EXTRACTION_CONTRACT_ROOT / "crawl4ai-golden.json").read_text())
+
+    assert {case["expected"]["kind"] for case in corpus["cases"]} == {
+        "success",
+        "delegation",
+        "fallback_required",
+        "failure",
+    }
+    for case in corpus["cases"]:
+        request = ExtractRequest.model_validate(case["request"])
+        result = EXTRACT_RESULT_ADAPTER.validate_python(case["expected"])
+        assert result.request_id == request.request_id, case["name"]
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "actual"),
+    [
+        pytest.param(
+            "crawl4ai-request.schema.json", ExtractRequest.model_json_schema(), id="request"
+        ),
+        pytest.param(
+            "crawl4ai-result.schema.json", EXTRACT_RESULT_ADAPTER.json_schema(), id="result"
+        ),
+    ],
+)
+def test_checked_schemas_match_the_python_wire_models(
+    schema_name: str, actual: dict[str, object]
+) -> None:
+    expected = json.loads((EXTRACTION_CONTRACT_ROOT / schema_name).read_text())
+    actual["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+
+    assert actual == expected

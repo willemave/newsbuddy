@@ -34,7 +34,7 @@ impl std::fmt::Debug for LearningDeckArtifactStore {
 }
 
 impl LearningDeckArtifactStore {
-    /// Builds the object-storage boundary shared with Python Learning Deck artifacts.
+    /// Builds the object-storage boundary for persisted Learning Deck artifacts.
     ///
     /// # Errors
     ///
