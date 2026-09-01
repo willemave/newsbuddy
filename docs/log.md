@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-01 — `main` — Concise News Lens composition prompt and related-source trace
+
+- **Status:** Complete locally; not deployed.
+- **Scope:** Tighten News Lens prose without a hard word/character validator, and trace whether related News sources or selected relevant links reach Briefing composition.
+- **Decisions:** Keep the existing one-paragraph, three-sentence, exact-source-link contract; instruct the model to produce concise, information-dense synthesis, combine related sources instead of assigning one sentence per source, and omit low-value detail.
+- **Changes:** Updated the Briefing composition system prompt only; no validation limit or fallback was added. The trace confirmed same-story members are collapsed behind a canonical representative, selected external links remain a News-detail feature, and Briefing event groups keep related representatives together but are not projected into the flat composition request.
+- **Validation:** Rust formatting passed. All 7 focused `briefing_composition` provider tests passed, including the new prompt-contract regression. `git diff --check` passed before the final log update.
+- **Remaining:** A separate follow-up may project each planned event-group identity into the composition request so the model can deliberately synthesize related representatives; surfacing cluster members as independent citations would require a larger source-ownership/read-state design and is not part of this prompt-only change.
+- **Commits:** Uncommitted.
+
 ### 2026-09-01 — `main` — Route onboarding through GPT-5.6 Luna Priority
 
 - **Status:** Complete locally; not pushed or deployed.
@@ -411,6 +421,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Full light and dark ramps retuned to warm cream / warm dark. `onSurfaceTertiary` had to move from `#787261` to `#757060`: at `#787261` it scored 4.44 against the new `surfacePrimary` and failed the project's own contrast test. Dark `brandPrimary` lifted `#93a7c4` → `#9db0cc` to clear the warmer ground, with `AccentColor.colorset` updated in lockstep. The dark app icon and `AppMark`/`BuddyMark` dark variants were regenerated because the old dark icon baked in the previous `#171613` ground and would have sat as a visibly mismatched square on the new one.
 - **Validation:** `ReaderPaletteContrastTests` pass (2/2, both modes). Clean build. On-device pixel samples match exactly: `#faf6ea` light, `#191510` dark.
 - **Verification gap:** The Briefing and Reader surfaces were **not** re-checked on device. The local API will not start — `newsly-db migrate` aborts with "this database already has Alembic schema history; run `newsly-db baseline --maintenance-barrier-confirmed` before ordinary SQLx migrations". That baseline was deliberately not run. Until the local stack is back, the reading surfaces in this palette have only been seen in the HTML mock.
+- **Field bug (2026-09-01):** the gap above was real. A production screenshot showed dark Briefing body text visibly cooler than the title: `appReaderBodyText` in `DesignTokens.swift` hardcoded `#e9ebef` for dark instead of reading the palette, so it kept the cool slate value through the warm retune. Pixel-sampled the screenshot to confirm — title `#efebe1` (warm, B−R = −14), body `#efedf0` (neutral, B−R = +1). Fixed structurally: `readerBodyText` is now a `ReaderPalette` slot (`#24221a` light / `#f3eee1` dark — the same "slightly brighter body at night" intent, in the warm family) and the DesignTokens accessor is a one-line palette read. The contrast test now also asserts `readerBodyText` ≥ 4.5 on both surfaces in both modes. A sweep found the same class of bug in `SelectableMarkdownView`: code-block and inline-code background chips hardcoded cool greys; both now resolve `surfaceTertiary` / `surfaceContainer` from the palette. Remaining intentional hardcode: `statusDestructive` red, which is a distinct semantic hue. Fix verified by build + tests; visual confirmation on the reading surfaces still pending the same API gap — re-check on device.
 - **Commits:** Uncommitted.
 
 ### 2026-08-30 — `main` — Slate brand implemented in the iOS client

@@ -475,10 +475,9 @@ struct MarkdownNSRenderer {
 
     private func appendCodeBlock(_ code: String, to result: NSMutableAttributedString) {
         let codeFont = UIFont.appSans(size: baseFont.pointSize * 0.85)
-        let bgColor: UIColor =
-            traitCollection.userInterfaceStyle == .dark
-            ? UIColor(red: 0.14, green: 0.15, blue: 0.17, alpha: 1)
-            : UIColor(red: 0.95, green: 0.96, blue: 0.97, alpha: 1)
+        // Palette surface, not a hardcoded grey — a cool chip reads as a patch of the old
+        // theme inside warm article text.
+        let bgColor = ReaderPalette.colors.surfaceTertiary.uiColor(for: traitCollection)
 
         if result.length > 0 {
             result.append(NSAttributedString(string: "\n"))
@@ -848,11 +847,9 @@ struct MarkdownNSRenderer {
                 }
                 if inlineIntent.contains(.code) {
                     font = UIFont.appSans(size: baseFont.pointSize * 0.88)
-                    let bgColor: UIColor =
-                        traitCollection.userInterfaceStyle == .dark
-                        ? UIColor(red: 0.2, green: 0.21, blue: 0.23, alpha: 1)
-                        : UIColor(red: 0.95, green: 0.96, blue: 0.97, alpha: 1)
-                    attrs[.backgroundColor] = bgColor
+                    // One rung above the block-code fill so small inline chips stay visible.
+                    attrs[.backgroundColor] =
+                        ReaderPalette.colors.surfaceContainer.uiColor(for: traitCollection)
                 }
                 if inlineIntent.contains(.strikethrough) {
                     attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue

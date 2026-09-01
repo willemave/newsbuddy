@@ -33,6 +33,10 @@ struct ReaderPaletteColors {
     let onSurface: AdaptivePaletteColor
     let onSurfaceSecondary: AdaptivePaletteColor
     let onSurfaceTertiary: AdaptivePaletteColor
+    /// Long-form body text. Matches onSurface by day; lifted slightly at night so body
+    /// copy reads a touch brighter than chrome. Lives here so it warms with the ramp —
+    /// it used to be hardcoded in DesignTokens and stayed cool when the palette changed.
+    let readerBodyText: AdaptivePaletteColor
     let chatUserBubble: AdaptivePaletteColor
     let outlineVariant: AdaptivePaletteColor
     let borderSubtle: AdaptivePaletteColor
@@ -62,6 +66,7 @@ enum ReaderPalette {
         onSurface: adaptive(light: 0x24221a, dark: 0xefe9da),
         onSurfaceSecondary: adaptive(light: 0x716c5c, dark: 0x9d9581),
         onSurfaceTertiary: adaptive(light: 0x757060, dark: 0x8f8876),
+        readerBodyText: adaptive(light: 0x24221a, dark: 0xf3eee1),
         chatUserBubble: adaptive(light: 0xf4ecd8, dark: 0x332b1c),
         outlineVariant: adaptive(light: 0xe8e1cf, dark: 0x352f24),
         borderSubtle: adaptive(light: 0xefe8d6, dark: 0x282219),

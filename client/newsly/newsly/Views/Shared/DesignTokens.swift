@@ -679,12 +679,7 @@ extension UIColor {
         ReaderPalette.selectedUIColor(\.onSurface)
     }
     static var appReaderBodyText: UIColor {
-        UIColor { traitCollection in
-            if traitCollection.userInterfaceStyle == .dark {
-                return UIColor(red: 0.914, green: 0.922, blue: 0.937, alpha: 1.0)  // #e9ebef
-            }
-            return appOnSurface.resolvedColor(with: traitCollection)
-        }
+        ReaderPalette.selectedUIColor(\.readerBodyText)
     }
     static var appOnSurfaceSecondary: UIColor {
         ReaderPalette.selectedUIColor(\.onSurfaceSecondary)

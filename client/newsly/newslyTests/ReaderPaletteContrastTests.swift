@@ -26,6 +26,14 @@ final class ReaderPaletteContrastTests: XCTestCase {
                     4.5,
                     "onSurfaceTertiary must support normal text in \(style) mode"
                 )
+                XCTAssertGreaterThanOrEqual(
+                    contrastRatio(
+                        colors.readerBodyText.uiColor(for: traits),
+                        surface.uiColor(for: traits)
+                    ),
+                    4.5,
+                    "readerBodyText must support normal text in \(style) mode"
+                )
             }
         }
     }
