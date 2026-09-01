@@ -129,6 +129,61 @@ cd ..
 scripts/check_public_contracts.sh
 ```
 
+Before pushing a release commit to `main`, run the canonical local gate from a
+clean checkout. It runs Rust, SQLx, contract, Python-island, native iOS, and AXe
+checks against a disposable PostgreSQL database and records ignored evidence
+under `test-results/release-gate/`:
+
+```bash
+scripts/release_gate.sh --env-file /absolute/path/to/local.env
+```
+
+For backend, deck, chat, Share Extension, provider, or sandbox changes, include
+the production-shaped live smoke in the same invocation:
+
+```bash
+scripts/release_gate.sh \
+  --env-file /absolute/path/to/local-staging.env \
+  --with-live-smoke \
+  --allow-live-provider-costs
+```
+
+The live phase makes paid provider and E2B calls. It builds each Docker image
+once for the full run, then reuses the same isolated stack across every live
+scenario. GitHub does not repeat these source-level release tests: a push to
+`main` builds and smoke-tests the exact-SHA production images, refuses stale
+deployments, and performs the blue/green rollout. Xcode Cloud independently
+builds the pushed `main` revision.
+
+For the opt-in production-shaped local smoke, build the application and
+extractor images once, then run every live API scenario against that same
+disposable Compose stack:
+
+```bash
+scripts/smoke_local_staging.sh \
+  --allow-live-provider-costs \
+  --env-file /absolute/path/to/local-staging.env
+```
+
+This command makes paid provider and E2B calls. It accepts only a loopback API
+origin, creates an isolated PostgreSQL volume and artifact directory, and
+writes redacted evidence under `test-results/local-staging-smoke/` before
+tearing the stack down. Pass `--keep-on-failure` only when the isolated stack
+must remain available for debugging.
+
+Authenticated iOS UI tests default to the local API on port 8000. When another
+checkout owns that port, point the test bundle at the smoke stack without
+changing application defaults:
+
+```bash
+xcodebuild test \
+  -project newsly.xcodeproj \
+  -scheme newsly \
+  -destination 'platform=iOS Simulator,OS=latest,name=iPhone 17' \
+  NEWSLY_E2E_SERVER_PORT=28680 \
+  -only-testing:newslyUITests
+```
+
 For a Python-island change:
 
 ```bash

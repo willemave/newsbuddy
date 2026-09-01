@@ -2622,6 +2622,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "newsly-smoke"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "newsly-contracts",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "newsly-vm-bootstrap"
 version = "0.1.0"
 dependencies = [

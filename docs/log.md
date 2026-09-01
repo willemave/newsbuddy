@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-01 — `main` — Integrate local release gates with current product work
+
+- **Status:** Release validation in progress.
+- **Scope:** Merge the local release-gate and production-shaped smoke work from `origin/main` with the current onboarding, Briefing audio, palette, branding, and Rust steady-state commits.
+- **Decisions:** Preserve both commit stacks without rewriting shared history; resolve the append-only log by retaining every entry; use the repository-owned `scripts/release_gate.sh` as the current source-level release authority.
+- **Changes:** Merged `origin/main` into the local `main` release candidate with no implementation conflicts; the only manual resolution retained both sides of `docs/log.md`.
+- **Validation:** Merge-tree inspection and `git diff --check` are part of the merge commit check; the full local release gate, exact-SHA push, Docker deployment, and production health proof remain in progress.
+- **Remaining:** Complete the repository release gate, push the exact tested SHA, wait for the matching Docker Deploy run, and verify production.
+- **Commits:** This merge commit.
+
 ### 2026-09-01 — `main` — Remove Rust migration remnants and harden steady-state runtime
 
 - **Status:** Complete locally; not pushed or deployed.
@@ -86,6 +96,26 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** All 43 non-live provider tests passed with one live canary ignored by default; warning-denied provider Clippy, Rust formatting, the 696-file module-size guard, stale onboarding DeepSeek/Wafer searches, and `git diff --check` passed. The integrated `main` live Luna Priority structured-output canary passed without deterministic fallback in 3.32 seconds.
 - **Remaining:** Deployment is intentionally out of scope until explicitly requested.
 - **Commits:** This commit.
+
+### 2026-09-01 — `willem/local-release-gates` — Move the complete release gate local
+
+- **Status:** In progress.
+- **Scope:** Local release orchestration, GitHub deployment workflows, iOS/AXe validation, live local-staging smoke, and release documentation.
+- **Decisions:** Make one clean local commit the source-level release authority; use a disposable PostgreSQL database rather than adopting or mutating a developer's legacy database; keep the paid live smoke explicit; build Docker images once per full live run; retain immutable exact-SHA image identity, published-image smoke, stale-main refusal, and blue/green deployment in GitHub; rely on Xcode Cloud for the independent post-push iOS build.
+- **Changes:** Added `scripts/release_gate.sh`; removed the reusable GitHub Quality Gate; changed Docker Deploy to build, smoke, and deploy `github.sha` directly; changed manual E2B template publication to require a locally validated current-main SHA; taught the AXe smoke to recover once from a proven empty zero-size Simulator accessibility tree; documented the new ownership boundary.
+- **Validation:** Workflow definitions pass pinned Actionlint 1.7.7; the release script passes Bash syntax and paid-call guard checks; the project-local release skill passes its validator. The first full invocation stopped before tests when it detected the supplied legacy Alembic database; no baseline was applied, and the runner now provisions an isolated database. On the isolated rerun, architecture/contracts, warning-denied Clippy, the full Rust workspace, SQLx offline/metadata, both Python islands, 629 iOS unit tests, and 3 authenticated UI tests passed before AXe exposed an empty zero-size accessibility bridge; a manual Simulator reboot restored the full tree, and that bounded recovery is now automated. Exact-commit AXe/live-smoke and post-push deploy proof remain pending.
+- **Remaining:** Validate, commit, push the tested SHA to `main`, and verify production.
+- **Commits:** `0d14b01a` contains the rebased local-staging smoke harness; release-pipeline commit pending.
+
+### 2026-08-31 — `main` — Build local-staging live API smoke coverage
+
+- **Status:** Complete locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Dockerized local staging, Rust API smoke harness, Learning Decks, chat, deck-grounded chat, and Share Extension to deck/chat flows.
+- **Decisions:** Use the production application image and worker supervisor in a unique disposable Docker Compose project; assert product behavior through public HTTP APIs; keep real provider calls opt-in and non-retrying; retain Compose rather than introducing a duplicate Testcontainers topology.
+- **Changes:** Added the approved end-to-end design, a typed `newsly-smoke` crate, a one-build-per-full-run Compose wrapper, redacted run evidence, recovery image/template options, the corrected extractor image install order, and a configurable iOS UI-test API port.
+- **Validation:** Live run `20260901T032806Z-18accc` passed all six scenarios: stack/auth, direct two-turn chat, Share-to-Chat, Share-to-Learning-Deck with signed/public artifact lifecycle, two-turn deck-grounded chat, and typed failure/ownership boundaries. It recorded 21 provider calls, 34 requests, 168,404 tokens, and zero failed tasks. Full warning-denied Rust Clippy/tests, SQLx offline and prepare checks, both Python island lint/type/test/build gates, architecture/contract guards, 629 iOS unit tests, and 3/3 authenticated iOS UI tests passed locally.
+- **Remaining:** Rebuild the shared E2B `newsly-agent` template through its owning workflow; it lacks `/usr/local/bin/newsly-vm-bootstrap`. The passing smoke used and then deleted a current, uniquely named template. The local image worker also remains unavailable unless an image provider is configured, but it is not used by these deck/chat/share scenarios.
+- **Commits:** Uncommitted.
 
 ### 2026-08-31 — `main` — Install architecture guard tools in Rust CI
 

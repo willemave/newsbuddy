@@ -16,10 +16,12 @@ Python and Chromium installation layers, coupling those expensive layers to ever
 
 ## Design
 
-1. The quality workflow remains the authority for Rust, SQLx, contracts, the two isolated Python
-   packages, and native iOS tests. It no longer performs disposable production-image builds.
-2. After quality attests the exact SHA, the deployment workflow builds and publishes the Rust and
-   extractor images exactly once, then deploys only those SHA-tagged images.
+1. `scripts/release_gate.sh` is the local authority for Rust, SQLx, contracts, the two isolated
+   Python packages, native iOS tests, and AXe. Its opt-in live phase builds each production image
+   once and shares the disposable stack across the API/LLM/E2B scenarios.
+2. After that exact commit is pushed to `main`, the deployment workflow builds and publishes the
+   Rust and extractor images exactly once, smoke-tests the published artifacts, and deploys only
+   those SHA-tagged images. GitHub does not repeat the source-level gate.
 3. The Rust Dockerfile uses a pinned `cargo-chef` planner/cook layer so dependency compilation is
    keyed by Cargo manifests and the lockfile rather than application source.
 4. The extractor keeps dependency and Chromium installation ahead of source and revision metadata,
@@ -43,8 +45,8 @@ Python and Chromium installation layers, coupling those expensive layers to ever
   exact-history retry paths against a disposable PostgreSQL 15 database.
 - Build both Dockerfiles from a cold cache, then rebuild with a different SHA and verify dependency
   layers are cached.
-- Run Actionlint, architecture/contracts, the full Rust workspace, isolated Python packages, and
-  native iOS release gates.
+- Run the canonical local release gate, including authenticated native iOS and AXe coverage; use
+  the live phase for backend, deck, chat, Share Extension, provider, or sandbox changes.
 - Push only the tested SHA, wait for the SHA-matched workflow, and verify the active image, SQLx
   adoption marker, containers, public health, and Rust operator snapshot.
 

@@ -1,0 +1,22 @@
+[package]
+name = "newsly-smoke"
+description = "Opt-in black-box smoke tests for a local Dockerized Newsly staging stack"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+newsly-contracts = { path = "../newsly-contracts" }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+url = "=2.5.8"
+
+[lints]
+workspace = true
