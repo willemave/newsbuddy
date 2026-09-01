@@ -74,13 +74,13 @@ def recolor(
     d_pro = np.sqrt(((rgb - np.array(protect, dtype=np.float32)) ** 2).sum(axis=2))
     mask = (d_src < radius) & (d_src < d_pro) & (rgba[:, :, 3] > 8)
 
-    s_h, s_l, s_s = colorsys.rgb_to_hls(*[c / 255 for c in source])
+    _s_h, s_l, s_s = colorsys.rgb_to_hls(*[c / 255 for c in source])
     t_h, t_l, t_s = colorsys.rgb_to_hls(*[c / 255 for c in target])
 
     idx = np.argwhere(mask)
     for y, x in idx:
         r, g, b = rgb[y, x] / 255.0
-        h, lightness, s = colorsys.rgb_to_hls(r, g, b)
+        _h, lightness, s = colorsys.rgb_to_hls(r, g, b)
         new_l = float(np.clip(t_l + (lightness - s_l), 0.0, 1.0))
         new_s = float(np.clip(t_s + (s - s_s) * 0.5, 0.0, 1.0))
         nr, ng, nb = colorsys.hls_to_rgb(t_h, new_l, new_s)
@@ -152,6 +152,16 @@ def main() -> None:
     Image.fromarray(composited.astype(np.uint8), "RGB").resize(
         (1024, 1024), Image.Resampling.LANCZOS
     ).save(OUT / "AppIcon-Dark.png")
+
+    # Tinted icon (iOS 18+ tinted home screens): grayscale on alpha; the system paints
+    # the backdrop and tint. Ring maps light, book mid-gray, so hierarchy survives tinting.
+    tint_rgba = np.zeros_like(arr)
+    tint_gray = np.where(is_ring, 235.0, 165.0)
+    tint_rgba[:, :, :3] = tint_gray
+    tint_rgba[:, :, 3:4] = alpha * 255.0
+    Image.fromarray(tint_rgba.astype(np.uint8), "RGBA").resize(
+        (1024, 1024), Image.Resampling.LANCZOS
+    ).save(OUT / "AppIcon-Tinted.png")
 
     dark_mark = Image.open(OUT / "AppIcon-Dark.png")
     for scale in (1, 2, 3):

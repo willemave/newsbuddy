@@ -102,8 +102,10 @@ struct ContentDetailSkeletonView: View {
     }
 
     private func skeletonLine(width: CGFloat, height: CGFloat) -> some View {
+        // Ink-alpha like skeletonBlock — white over the cream ground was 1.02:1, an
+        // effectively blank loading state.
         RoundedRectangle(cornerRadius: height / 2, style: .continuous)
-            .fill(Color.white.opacity(0.32))
+            .fill(Color.onSurface.opacity(0.10))
             .frame(width: width, height: height)
     }
 }

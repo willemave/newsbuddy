@@ -168,10 +168,10 @@ struct OnboardingLoadingStep: View {
         .padding(.vertical, 11)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.onboardingAmbientTertiary.opacity(0.18))
+                .fill(Color.statusDestructive.opacity(0.12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.onboardingAmbientTertiary.opacity(0.32), lineWidth: 0.5)
+                        .stroke(Color.statusDestructive.opacity(0.28), lineWidth: 0.5)
                 )
         )
     }

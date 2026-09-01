@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct GlassCardModifier: ViewModifier {
-    var cornerRadius: CGFloat = 40
+    var cornerRadius: CGFloat = CornerRadius.card
 
     func body(content: Content) -> some View {
         content
@@ -20,7 +20,7 @@ struct GlassCardModifier: ViewModifier {
 }
 
 extension View {
-    func glassCard(cornerRadius: CGFloat = 40) -> some View {
+    func glassCard(cornerRadius: CGFloat = CornerRadius.card) -> some View {
         modifier(GlassCardModifier(cornerRadius: cornerRadius))
     }
 }

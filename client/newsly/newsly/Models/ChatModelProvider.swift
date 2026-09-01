@@ -75,16 +75,6 @@ enum ChatModelProvider: String, Codable, CaseIterable {
     }
 
     /// Accent color for this provider
-    var accentColor: String {
-        switch self {
-        case .openai:
-            return "green"
-        case .anthropic:
-            return "orange"
-        case .deep_research:
-            return "purple"
-        }
-    }
 
     /// Providers offered for new conversations.
     static let selectableProviders: [ChatModelProvider] = [.openai, .anthropic]

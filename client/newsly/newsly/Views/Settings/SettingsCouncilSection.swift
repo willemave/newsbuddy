@@ -139,13 +139,13 @@ struct SettingsCouncilSection: View {
                     if isSaving {
                         ProgressView()
                             .controlSize(.small)
-                            .tint(.white)
+                            .tint(Color.surfacePrimary)
                     } else {
                         Text("Save")
                             .font(.appCallout.weight(.semibold))
                     }
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.surfacePrimary)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .frame(minHeight: 44)

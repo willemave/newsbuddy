@@ -192,7 +192,7 @@ final class SearchViewModelTests: XCTestCase {
         XCTAssertTrue(searchCompleted)
 
         XCTAssertEqual(viewModel.contentResults.map(\.id), [42])
-        XCTAssertEqual(viewModel.mixedErrorMessage, "Newsly couldn't search external sources.")
+        XCTAssertEqual(viewModel.mixedErrorMessage, "Newsbuddy couldn't search external sources.")
         XCTAssertTrue(viewModel.feedResults.isEmpty)
         XCTAssertTrue(viewModel.podcastResults.isEmpty)
     }

@@ -234,7 +234,7 @@ final class SearchViewModel {
             hasLocalSearch = true
         } catch {
             guard tasks.isCurrent(token), trimmedQuery == query else { return }
-            localErrorMessage = "Newsly couldn't search your content."
+            localErrorMessage = "Newsbuddy couldn't search your content."
             contentResults = []
             hasLocalSearch = true
         }
@@ -266,7 +266,7 @@ final class SearchViewModel {
             guard !Task.isCancelled,
                   tasks.isCurrent(token),
                   trimmedQuery == query else { return }
-            mixedErrorMessage = "Newsly couldn't search external sources."
+            mixedErrorMessage = "Newsbuddy couldn't search external sources."
             feedResults = []
             podcastResults = []
             hasSubmittedSearch = true

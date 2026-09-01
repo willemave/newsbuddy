@@ -177,7 +177,7 @@ final class SubmissionStatusViewModelTests: XCTestCase {
 
         XCTAssertEqual(
             item.errorDisplayText,
-            "Newsly couldn't finish processing this item. Try submitting it again."
+            "Newsbuddy couldn't finish processing this item. Try submitting it again."
         )
         XCTAssertFalse(item.errorDisplayText?.contains("sqlalchemy") == true)
         XCTAssertFalse(item.errorDisplayText?.contains("internal-host") == true)

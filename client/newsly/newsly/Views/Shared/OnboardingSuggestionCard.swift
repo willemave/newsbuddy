@@ -12,10 +12,13 @@ struct OnboardingSuggestionCard: View {
     let isSelected: Bool
     let onToggle: () -> Void
 
+    // Three container rungs: warm, mutually distinguishable, and all safe under an
+    // onSurface monogram. The previous ambient trio resolved to two near-identical
+    // creams plus the brand slate, which put near-black text on dark slate at 1.85:1.
     private static let tilePalette: [Color] = [
-        .onboardingAmbientPrimary,
-        .onboardingAmbientTertiary,
-        .onboardingAmbientQuaternary,
+        .surfaceContainer,
+        .surfaceContainerHigh,
+        .surfaceContainerHighest,
     ]
 
     var body: some View {

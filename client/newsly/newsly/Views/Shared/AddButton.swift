@@ -14,7 +14,7 @@ struct AddButton: View {
         Button(action: action) {
             Image(systemName: "plus")
                 .font(.appSymbol(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.surfacePrimary)
                 .frame(width: 52, height: 52)
                 .background(Color.brandPrimary, in: Circle())
                 .appShadow(.floating)

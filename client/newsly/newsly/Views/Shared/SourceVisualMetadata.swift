@@ -31,7 +31,7 @@ struct SourceVisualMetadata {
         case "podcast_rss", "podcast":
             return SourceVisualMetadata(glyph: .system("waveform"), color: .onSurfaceSecondary, label: "Podcast")
         case "youtube":
-            return SourceVisualMetadata(glyph: .system("play.rectangle.fill"), color: .statusDestructive, label: "YouTube")
+            return SourceVisualMetadata(glyph: .system("play.rectangle.fill"), color: .onSurfaceSecondary, label: "YouTube")
         case "substack":
             return SourceVisualMetadata(glyph: .system("newspaper"), color: .onSurfaceSecondary, label: "Newsletter")
         case "atom", "rss", "feed":

@@ -110,7 +110,7 @@ struct ProcessingStatsView: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.appSymbol(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.surfacePrimary)
                 .frame(width: 28, height: 28)
                 .background(color.gradient)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -165,7 +165,7 @@ struct ProcessingStatsView: View {
         HStack(spacing: 12) {
             Image(systemName: "sparkles.rectangle.stack")
                 .font(.appSymbol(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.surfacePrimary)
                 .frame(width: 28, height: 28)
                 .background(Color.brandPrimary.gradient)
                 .clipShape(RoundedRectangle(cornerRadius: 6))

@@ -783,7 +783,7 @@ private struct BriefingFloatingFigurePassage: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                        .stroke(Color.outlineVariant, lineWidth: 1)
                 }
             }
             .buttonStyle(.plain)

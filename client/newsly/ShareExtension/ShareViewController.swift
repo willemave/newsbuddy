@@ -90,9 +90,15 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = ShareExtensionStyle.surface
 
         KeychainManager.shared.configure(accessGroup: SharedContainer.keychainAccessGroup)
+
+        // CALayer border colors freeze at the traits they were resolved with; re-apply on
+        // appearance changes or an open sheet keeps the other mode's hairlines.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: ShareViewController, _) in
+            self.applyDynamicLayerColors()
+        }
 
         configureLayout()
         configureOptions()
@@ -144,7 +150,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         urlStatusLabel.text = "Reading the shared link…"
         urlStatusLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
         urlStatusLabel.adjustsFontForContentSizeCategory = true
-        urlStatusLabel.textColor = .secondaryLabel
+        urlStatusLabel.textColor = ShareExtensionStyle.textSecondary
         urlStatusLabel.numberOfLines = 0
         urlStatusLabel.accessibilityIdentifier = "share.url_status"
 
@@ -206,21 +212,21 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         deckInstructionsLabel.text = "Further instructions (optional)"
         deckInstructionsLabel.font = ShareExtensionStyle.font(textStyle: .subheadline, weight: .medium)
         deckInstructionsLabel.adjustsFontForContentSizeCategory = true
-        deckInstructionsLabel.textColor = .label
+        deckInstructionsLabel.textColor = ShareExtensionStyle.textPrimary
 
         deckInstructionsHelpLabel.text = "Tell the deck builder what else to capture, compare, or investigate."
         deckInstructionsHelpLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
         deckInstructionsHelpLabel.adjustsFontForContentSizeCategory = true
-        deckInstructionsHelpLabel.textColor = .secondaryLabel
+        deckInstructionsHelpLabel.textColor = ShareExtensionStyle.textSecondary
         deckInstructionsHelpLabel.numberOfLines = 0
 
         deckInstructionsTextView.delegate = self
         deckInstructionsTextView.font = ShareExtensionStyle.font(textStyle: .body)
         deckInstructionsTextView.adjustsFontForContentSizeCategory = true
-        deckInstructionsTextView.backgroundColor = .secondarySystemBackground
+        deckInstructionsTextView.backgroundColor = ShareExtensionStyle.surfaceElevated
         deckInstructionsTextView.layer.cornerRadius = 10
         deckInstructionsTextView.layer.borderWidth = 1
-        deckInstructionsTextView.layer.borderColor = UIColor.separator.cgColor
+        deckInstructionsTextView.layer.borderColor = ShareExtensionStyle.hairline.resolvedColor(with: traitCollection).cgColor
         deckInstructionsTextView.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
         deckInstructionsTextView.heightAnchor.constraint(equalToConstant: 104).isActive = true
         deckInstructionsTextView.inputAccessoryView = keyboardAccessoryView
@@ -242,15 +248,15 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         chatPromptLabel.text = "First message"
         chatPromptLabel.font = ShareExtensionStyle.font(textStyle: .subheadline, weight: .medium)
         chatPromptLabel.adjustsFontForContentSizeCategory = true
-        chatPromptLabel.textColor = .secondaryLabel
+        chatPromptLabel.textColor = ShareExtensionStyle.textSecondary
 
         chatPromptTextView.delegate = self
         chatPromptTextView.font = ShareExtensionStyle.font(textStyle: .body)
         chatPromptTextView.adjustsFontForContentSizeCategory = true
-        chatPromptTextView.backgroundColor = .secondarySystemBackground
+        chatPromptTextView.backgroundColor = ShareExtensionStyle.surfaceElevated
         chatPromptTextView.layer.cornerRadius = 10
         chatPromptTextView.layer.borderWidth = 1
-        chatPromptTextView.layer.borderColor = UIColor.separator.cgColor
+        chatPromptTextView.layer.borderColor = ShareExtensionStyle.hairline.resolvedColor(with: traitCollection).cgColor
         chatPromptTextView.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
         chatPromptTextView.heightAnchor.constraint(equalToConstant: 104).isActive = true
         chatPromptTextView.inputAccessoryView = keyboardAccessoryView
@@ -267,7 +273,7 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
         configuration.title = "Submit"
         configuration.cornerStyle = .medium
         configuration.baseBackgroundColor = ShareExtensionStyle.brandAccent
-        configuration.baseForegroundColor = .white
+        configuration.baseForegroundColor = ShareExtensionStyle.onAccent
         submitButton.configuration = configuration
         submitButton.addTarget(self, action: #selector(handleSubmitTapped), for: .touchUpInside)
         submitButton.accessibilityIdentifier = "share.submit"
@@ -669,6 +675,14 @@ final class ShareViewController: UIViewController, UITextViewDelegate {
 
 // MARK: - UI Components
 
+extension ShareViewController {
+    fileprivate func applyDynamicLayerColors() {
+        let hairline = ShareExtensionStyle.hairline.resolvedColor(with: traitCollection).cgColor
+        deckInstructionsTextView.layer.borderColor = hairline
+        chatPromptTextView.layer.borderColor = hairline
+    }
+}
+
 private final class OptionRowView: UIControl {
 
     private let titleLabel = UILabel()
@@ -680,23 +694,27 @@ private final class OptionRowView: UIControl {
 
         layer.cornerRadius = 12
         layer.borderWidth = 1
-        layer.borderColor = UIColor.separator.cgColor
-        backgroundColor = .secondarySystemBackground
+        layer.borderColor = ShareExtensionStyle.hairline.resolvedColor(with: traitCollection).cgColor
+        backgroundColor = ShareExtensionStyle.surfaceElevated
         isUserInteractionEnabled = true
         isAccessibilityElement = true
         accessibilityLabel = title
         accessibilityHint = description
         self.accessibilityIdentifier = accessibilityIdentifier
 
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: OptionRowView, _) in
+            self.updateSelectionState()
+        }
+
         titleLabel.text = title
         titleLabel.font = ShareExtensionStyle.font(textStyle: .body, weight: .medium)
         titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.textColor = .label
+        titleLabel.textColor = ShareExtensionStyle.textPrimary
 
         descriptionLabel.text = description
         descriptionLabel.font = ShareExtensionStyle.font(textStyle: .footnote)
         descriptionLabel.adjustsFontForContentSizeCategory = true
-        descriptionLabel.textColor = .secondaryLabel
+        descriptionLabel.textColor = ShareExtensionStyle.textSecondary
         descriptionLabel.numberOfLines = 0
 
         indicatorView.tintColor = ShareExtensionStyle.brandAccent
@@ -762,16 +780,16 @@ private final class OptionRowView: UIControl {
         alpha = isEnabled ? 1 : 0.55
         if isSelected {
             indicatorView.image = UIImage(systemName: "checkmark.circle.fill")
-            layer.borderColor = ShareExtensionStyle.brandAccent.cgColor
+            layer.borderColor = ShareExtensionStyle.brandAccent.resolvedColor(with: traitCollection).cgColor
         } else {
             indicatorView.image = UIImage(systemName: "circle")
-            layer.borderColor = UIColor.separator.cgColor
+            layer.borderColor = ShareExtensionStyle.hairline.resolvedColor(with: traitCollection).cgColor
         }
 
         if isHighlighted {
-            backgroundColor = UIColor.systemGray6
+            backgroundColor = ShareExtensionStyle.surfaceHighlight
         } else {
-            backgroundColor = isSelected ? UIColor.systemBackground : UIColor.secondarySystemBackground
+            backgroundColor = isSelected ? ShareExtensionStyle.surfaceElevated : ShareExtensionStyle.surface
         }
     }
 }

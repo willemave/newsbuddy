@@ -80,7 +80,7 @@ extension ClientFailure: LocalizedError {
         case .cancelled:
             return "The request was cancelled."
         case .connectivity:
-            return "Newsly could not reach the network."
+            return "Newsbuddy could not reach the network."
         case .authenticationRequired:
             return "Sign in to continue."
         case .authenticationExpired:
@@ -88,7 +88,7 @@ extension ClientFailure: LocalizedError {
         case .invalidRequest:
             return "The request was invalid."
         case .invalidResponse:
-            return "Newsly received an invalid response."
+            return "Newsbuddy received an invalid response."
         case .server(_, let error):
             return error.message
         case .http(let statusCode, let detail):
@@ -100,7 +100,7 @@ extension ClientFailure: LocalizedError {
             }
             return "HTTP error: \(statusCode)"
         case .decoding:
-            return "Newsly could not read the server response."
+            return "Newsbuddy could not read the server response."
         case .unexpected:
             return "An unexpected error occurred."
         }

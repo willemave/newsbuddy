@@ -183,7 +183,7 @@ struct StructuredSummaryView: View {
             Text("\(index)")
                 .font(.appCaption)
                 .fontWeight(.bold)
-                .foregroundColor(.white)
+                .foregroundColor(Color.surfacePrimary)
                 .frame(width: 22, height: 22)
                 .background(
                     Circle()

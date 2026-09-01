@@ -38,6 +38,40 @@ final class ReaderPaletteContrastTests: XCTestCase {
         }
     }
 
+    /// Content placed on the accent must invert with it. `.white` fails against the
+    /// light dark-mode accent — the on-accent foreground is `surfacePrimary`.
+    func testSurfacePrimaryReadsOnAccentFills() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            let colors = ReaderPalette.colors
+
+            for accent in [colors.brandPrimary, colors.brandPrimaryStrong] {
+                XCTAssertGreaterThanOrEqual(
+                    contrastRatio(
+                        colors.surfacePrimary.uiColor(for: traits),
+                        accent.uiColor(for: traits)
+                    ),
+                    4.5,
+                    "surfacePrimary must stay readable on accent fills in \(style) mode"
+                )
+            }
+        }
+    }
+
+    /// The launch colorset is a hand-copied second source of `surfacePrimary`. If the
+    /// palette moves and this asset does not, cold start flashes the old ground.
+    func testLaunchBackgroundAssetMatchesSurfacePrimary() throws {
+        let launch = try XCTUnwrap(UIColor(named: "LaunchBackground"))
+
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            assertEqualRGB(
+                launch.resolvedColor(with: traits),
+                ReaderPalette.colors.surfacePrimary.uiColor(for: traits)
+            )
+        }
+    }
+
     func testGlobalAccentAssetMatchesBrandPrimary() throws {
         let accent = try XCTUnwrap(UIColor(named: "AccentColor"))
 

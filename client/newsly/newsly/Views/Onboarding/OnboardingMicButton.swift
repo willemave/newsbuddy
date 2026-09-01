@@ -50,13 +50,7 @@ struct OnboardingMicButton: View {
                 }
 
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.onboardingSurface, Color.onboardingAmbientPrimary.opacity(0.42)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(Color.surfaceSecondary)
                     .overlay(
                         Circle()
                             .stroke(sheenColor(0.35), lineWidth: 1)

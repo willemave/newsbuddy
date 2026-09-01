@@ -47,7 +47,7 @@ extension Color {
     static var brandTertiary: Color {
         Color(UIColor.appTertiaryAccent)
     }
-    // Fixed platform chrome tint. Reader palettes recolor content, not navigation selection.
+    // Chrome tint — the single brand accent (see UIColor.appChromeAccent).
     static var appChromeAccent: Color {
         Color(UIColor.appChromeAccent)
     }
@@ -120,12 +120,6 @@ extension Color {
     static var onboardingSelectionAccent: Color {
         Color.brandPrimary
     }
-    // Ambient accents. The animated watercolor wash these were built for is gone; they
-    // survive as flat palette-derived tints for the few surfaces that still use them.
-    static var onboardingAmbientPrimary: Color { Color.surfaceContainer }
-    static var onboardingAmbientTertiary: Color { Color.brandPrimary }
-    static var onboardingAmbientQuaternary: Color { Color.surfaceTertiary }
-    static var onboardingAmbientMascot: Color { Color.brandPrimaryStrong }
 }
 
 // MARK: - Typography
@@ -198,9 +192,7 @@ extension Font {
     // Editorial typography.
     static let editorialMeta = Font.appSans(size: 11, relativeTo: .caption2, weight: .bold)
 
-    // Watercolor typography (Landing & Onboarding) follows the app title/body split.
-    // Onboarding display type, matched to the Briefing masthead scale rather than the
-    // oversized 54pt the watercolor treatment used.
+    // Onboarding display type, matched to the Briefing masthead scale.
     static let onboardingDisplay = Font.appSerif(size: 40, relativeTo: .largeTitle, weight: .semibold)
     static let onboardingSubtitle = Font.appSans(size: 16, relativeTo: .body)
 
@@ -663,8 +655,10 @@ private struct TopScreenEdgeFade: View {
 
 extension UIColor {
     static var appChromeAccent: UIColor {
-        // Muted neutral nav selection (palette-independent, same across all themes).
-        .secondaryLabel
+        // Chrome shares the single brand accent. The old "palette-independent neutral"
+        // rationale dated from the multi-palette era; with one palette, tinting chrome
+        // .secondaryLabel just painted every control a cool system grey.
+        ReaderPalette.selectedUIColor(\.brandPrimary)
     }
     static var appAccent: UIColor {
         ReaderPalette.selectedUIColor(\.brandPrimary)

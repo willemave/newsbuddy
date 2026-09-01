@@ -22,7 +22,7 @@ extension EnvironmentValues {
 enum AppChrome {
     static func configure(textSize: DynamicTypeSize = .large) {
         let chromeAccent = UIColor.appChromeAccent
-        let unselected = UIColor.tertiaryLabel
+        let unselected = UIColor.appOnSurfaceTertiary
         let surface = UIColor.appSurfacePrimary
         let traitCollection = UITraitCollection(
             preferredContentSizeCategory: textSize.uiContentSizeCategory
@@ -49,7 +49,7 @@ enum AppChrome {
         let tabAppearance = UITabBarAppearance()
         tabAppearance.configureWithTransparentBackground()
         tabAppearance.backgroundColor = surface.withAlphaComponent(0.92)
-        tabAppearance.shadowColor = UIColor.separator
+        tabAppearance.shadowColor = ReaderPalette.selectedUIColor(\.outlineVariant)
         tabAppearance.stackedLayoutAppearance = itemAppearance
         tabAppearance.inlineLayoutAppearance = itemAppearance
         tabAppearance.compactInlineLayoutAppearance = itemAppearance
@@ -60,7 +60,7 @@ enum AppChrome {
         let navigationAppearance = UINavigationBarAppearance()
         navigationAppearance.configureWithTransparentBackground()
         navigationAppearance.backgroundColor = surface.withAlphaComponent(0.92)
-        navigationAppearance.shadowColor = UIColor.separator
+        navigationAppearance.shadowColor = ReaderPalette.selectedUIColor(\.outlineVariant)
         navigationAppearance.titleTextAttributes = [
             .foregroundColor: UIColor.appOnSurface,
             .font: UIFontMetrics(forTextStyle: .headline).scaledFont(

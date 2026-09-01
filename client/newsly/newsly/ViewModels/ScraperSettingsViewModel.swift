@@ -118,7 +118,7 @@ final class ScraperSettingsViewModel {
             return false
         } catch {
             logger.error("Failed to load scraper configs: \(error.localizedDescription, privacy: .public)")
-            errorMessage = "Newsly couldn't load your sources. Please try again."
+            errorMessage = "Newsbuddy couldn't load your sources. Please try again."
             return false
         }
     }
@@ -138,7 +138,7 @@ final class ScraperSettingsViewModel {
             return true
         } catch {
             logger.error("Failed to add scraper config: \(error.localizedDescription, privacy: .public)")
-            errorMessage = "Newsly couldn't add this source. Check the URL and try again."
+            errorMessage = "Newsbuddy couldn't add this source. Check the URL and try again."
             return false
         }
     }
@@ -162,7 +162,7 @@ final class ScraperSettingsViewModel {
             upsert(updated)
         } catch {
             logger.error("Failed to update scraper config: \(error.localizedDescription, privacy: .public)")
-            errorMessage = "Newsly couldn't update this source. Please try again."
+            errorMessage = "Newsbuddy couldn't update this source. Please try again."
         }
     }
 
@@ -174,7 +174,7 @@ final class ScraperSettingsViewModel {
             configs.removeAll { $0.id == config.id }
         } catch {
             logger.error("Failed to delete scraper config: \(error.localizedDescription, privacy: .public)")
-            errorMessage = "Newsly couldn't remove this source. Please try again."
+            errorMessage = "Newsbuddy couldn't remove this source. Please try again."
         }
     }
 

@@ -45,7 +45,7 @@ final class ScraperSettingsViewModelTests: XCTestCase {
         XCTAssertFalse(didAdd)
         XCTAssertEqual(
             viewModel.errorMessage,
-            "Newsly couldn't add this source. Check the URL and try again."
+            "Newsbuddy couldn't add this source. Check the URL and try again."
         )
         XCTAssertEqual(viewModel.configs.map(\.id), [1])
     }

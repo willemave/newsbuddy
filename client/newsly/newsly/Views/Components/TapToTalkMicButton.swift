@@ -17,7 +17,10 @@ struct TapToTalkMicButton: View {
                         LinearGradient(
                             colors: isEnabled || isRecording
                                 ? [tint, tint.opacity(0.82)]
-                                : [Color.gray.opacity(0.5), Color.gray.opacity(0.42)],
+                                : [
+                                    Color.surfaceContainerHighest.opacity(0.9),
+                                    Color.surfaceContainerHighest.opacity(0.75),
+                                ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -32,16 +35,16 @@ struct TapToTalkMicButton: View {
 
                 if isBusy {
                     ProgressView()
-                        .tint(.white)
+                        .tint(Color.surfacePrimary)
                         .controlSize(.small)
                 } else if isRecording {
                     Image(systemName: "stop.fill")
                         .font(.appSymbol(size: size * 0.3, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.surfacePrimary)
                 } else {
                     Image(systemName: "mic.fill")
                         .font(.appSymbol(size: size * 0.34, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.surfacePrimary)
                 }
             }
             .frame(width: size, height: size)

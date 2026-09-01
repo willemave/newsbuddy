@@ -276,11 +276,11 @@ struct SubmissionStatusItem: Identifiable {
         case .feed_not_found:
             return "No RSS or Atom feed was found for this URL."
         case .feed_fetch_failed:
-            return "Newsly couldn't check this page for feeds. Try submitting it again."
+            return "Newsbuddy couldn't check this page for feeds. Try submitting it again."
         case .feed_subscription_failed:
-            return "Newsly couldn't add this feed. Try submitting it again."
+            return "Newsbuddy couldn't add this feed. Try submitting it again."
         default:
-            return "Newsly couldn't finish processing this item. Try submitting it again."
+            return "Newsbuddy couldn't finish processing this item. Try submitting it again."
         }
     }
 
@@ -289,7 +289,7 @@ struct SubmissionStatusItem: Identifiable {
             return errorDisplayText
         }
         if effectiveOutcome == .no_action {
-            return rationale ?? "Newsly could not find an action to take for this link."
+            return rationale ?? "Newsbuddy could not find an action to take for this link."
         }
         if isLearningDeck {
             switch effectiveOutcome {

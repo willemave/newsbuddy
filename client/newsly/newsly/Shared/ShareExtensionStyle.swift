@@ -13,6 +13,38 @@ enum ShareExtensionStyle {
         ReaderPalette.selectedUIColor(\.brandPrimary)
     }
 
+    // The sheet used stock system colors, which read as an iOS-default panel bolted onto
+    // a warm-cream app. These mirror the app's surface roles.
+    static var surface: UIColor {
+        ReaderPalette.selectedUIColor(\.surfacePrimary)
+    }
+
+    static var surfaceElevated: UIColor {
+        ReaderPalette.selectedUIColor(\.surfaceSecondary)
+    }
+
+    static var surfaceHighlight: UIColor {
+        ReaderPalette.selectedUIColor(\.surfaceContainer)
+    }
+
+    static var textPrimary: UIColor {
+        ReaderPalette.selectedUIColor(\.onSurface)
+    }
+
+    static var textSecondary: UIColor {
+        ReaderPalette.selectedUIColor(\.onSurfaceSecondary)
+    }
+
+    static var hairline: UIColor {
+        ReaderPalette.selectedUIColor(\.outlineVariant)
+    }
+
+    /// Foreground for content on `brandAccent`. Inverts with the accent — white fails
+    /// against the light dark-mode accent.
+    static var onAccent: UIColor {
+        ReaderPalette.selectedUIColor(\.surfacePrimary)
+    }
+
     static func font(textStyle: UIFont.TextStyle, weight: UIFont.Weight = .regular) -> UIFont {
         scaledFont(named: bodyFamily, textStyle: textStyle, weight: weight)
     }

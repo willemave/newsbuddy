@@ -3,8 +3,8 @@
 //  newsly
 //
 //  The single, opinionated reader palette shared by SwiftUI tokens and UIKit chrome.
-//  Cool "slate" neutrals with one amber accent. The former multi-palette switcher
-//  was removed — there is intentionally no user-facing color selection.
+//  Warm cream neutrals with one slate accent, drawn from the ensō app icon. The former
+//  multi-palette switcher was removed — there is intentionally no user-facing selection.
 //
 
 import SwiftUI

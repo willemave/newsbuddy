@@ -312,7 +312,7 @@ struct ContentDetailSwipeContainer<Content: View>: View {
                 if direction == .next { Spacer() }
                 Image(systemName: iconName)
                     .font(.appSymbol(size: 24, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(Color.surfacePrimary)
                     .frame(width: 44, height: 44)
                     .background(
                         Circle()

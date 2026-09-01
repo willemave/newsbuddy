@@ -339,13 +339,13 @@ private struct KnowledgePreparationStatusSheet: View {
 
     private var message: String {
         if content.hasStalledKnowledgePreparation {
-            return "Newsly has not finished preparing this save. Refresh its status or open the original source."
+            return "Newsbuddy has not finished preparing this save. Refresh its status or open the original source."
         }
         switch content.savedLibraryItemState {
         case .processing:
-            return "Newsly is still preparing this save. You can refresh its status or read the original source now."
+            return "Newsbuddy is still preparing this save. You can refresh its status or read the original source now."
         case .unavailable:
-            return "Newsly could not prepare this save, but the original source may still be available."
+            return "Newsbuddy could not prepare this save, but the original source may still be available."
         case .ready:
             return "This save is ready."
         }

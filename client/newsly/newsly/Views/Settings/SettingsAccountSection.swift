@@ -81,7 +81,7 @@ private struct AccountCard: View {
         HStack(spacing: 12) {
             Text(user.email.prefix(1).uppercased())
                 .font(.appSans(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.surfacePrimary)
                 .frame(width: Spacing.iconSize, height: Spacing.iconSize)
                 .background(Color.brandPrimary, in: Circle())
                 .accessibilityHidden(true)
