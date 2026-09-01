@@ -12,6 +12,8 @@ simulator_udid="${NEWSLY_RELEASE_SIMULATOR_UDID:-}"
 with_live_smoke=false
 allow_live_provider_costs=false
 service_pid=""
+gate_database_name=""
+maintenance_database_url=""
 
 usage() {
   cat <<'EOF'
@@ -19,8 +21,8 @@ Usage: scripts/release_gate.sh [options]
 
 Run the complete deterministic Newsly release gate locally against one clean
 commit: Rust/SQLx/contracts, both Python islands, native iOS tests, and AXe.
-The script starts one local Rust API for the iOS/AXe phase and does not build
-Docker images.
+The script creates one disposable PostgreSQL database, starts one local Rust
+API for the iOS/AXe phase, and does not build Docker images.
 
 Options:
   --env-file PATH              Local runtime environment (defaults to normal lookup).
@@ -80,7 +82,7 @@ if [[ "$with_live_smoke" == true && "$allow_live_provider_costs" != true ]]; the
   die "--with-live-smoke requires --allow-live-provider-costs"
 fi
 
-for command_name in cargo curl docker git jq uv xcodebuild xcrun; do
+for command_name in cargo createdb curl docker dropdb git jq uv xcodebuild xcrun; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing required command: $command_name"
 done
 command -v axe >/dev/null 2>&1 || die "missing required command: axe"
@@ -97,6 +99,16 @@ env_file="$(newsly_resolve_env_file "$repo_root" "$env_file_option")"
 newsly_load_dotenv "$env_file"
 newsly_normalize_database_environment
 newsly_require_database_url
+maintenance_database_url="$DATABASE_URL"
+gate_database_name="newsly_gate_${release_sha:0:12}_$$"
+createdb --maintenance-db="$maintenance_database_url" "$gate_database_name"
+database_url_without_query="${maintenance_database_url%%\?*}"
+database_url_query=""
+if [[ "$maintenance_database_url" == *\?* ]]; then
+  database_url_query="?${maintenance_database_url#*\?}"
+fi
+export DATABASE_URL="${database_url_without_query%/*}/${gate_database_name}${database_url_query}"
+export NEWSLY_DATABASE_URL="$DATABASE_URL"
 
 IFS=$'\t' read -r api_scheme api_host api_port api_use_https \
   < <(newsly_parse_api_base_url "$api_base_url")
@@ -112,14 +124,22 @@ derived_data="$result_root/DerivedData"
 xcresult_path="$result_root/newsly-tests.xcresult"
 mkdir -p "$result_root"
 
-stop_local_api() {
+cleanup() {
   if [[ -n "$service_pid" ]]; then
     kill -TERM "$service_pid" >/dev/null 2>&1 || true
     wait "$service_pid" 2>/dev/null || true
     service_pid=""
   fi
+  if [[ -n "$gate_database_name" ]]; then
+    dropdb --if-exists --force \
+      --maintenance-db="$maintenance_database_url" \
+      "$gate_database_name" >/dev/null 2>&1 || true
+    gate_database_name=""
+  fi
 }
-trap stop_local_api EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 echo "Release SHA: $release_sha"
 echo "Evidence: $result_root"
@@ -171,9 +191,13 @@ env -u DATABASE_URL -u NEWSLY_DATABASE_URL \
   --out-dir "$result_root/document-extractor-dist"
 
 echo "== Local Rust API for authenticated iOS tests =="
-scripts/start_services.sh server \
-  --env-file "$env_file" \
-  --port "$api_port" \
+(
+  cd rust
+  cargo build --locked --package newsly-api --bin newsly-api
+)
+ENVIRONMENT=development \
+  NEWSLY_RUST_BIND_ADDR="0.0.0.0:${api_port}" \
+  rust/target/debug/newsly-api \
   >"$result_root/local-api.log" 2>&1 &
 service_pid="$!"
 for _ in {1..240}; do
@@ -242,7 +266,11 @@ APP_BUNDLE_PATH="$derived_data/Build/Products/Debug-iphonesimulator/newsly.app" 
   --udid "$simulator_udid" \
   --api-base-url "$api_base_url" \
   --output-dir "$result_root/axe"
-stop_local_api
+if [[ -n "$service_pid" ]]; then
+  kill -TERM "$service_pid" >/dev/null 2>&1 || true
+  wait "$service_pid" 2>/dev/null || true
+  service_pid=""
+fi
 
 if [[ "$with_live_smoke" == true ]]; then
   echo "== Production-shaped live API/LLM/E2B smoke =="

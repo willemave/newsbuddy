@@ -45,8 +45,9 @@ The complete source-level release gate runs locally, not in GitHub Actions:
 scripts/release_gate.sh --env-file /absolute/path/to/local.env
 ```
 
-It requires a clean commit, starts one local Rust API for authenticated iOS and
-AXe validation, and records the exact tested SHA. Add `--with-live-smoke
+It requires a clean commit, creates a disposable PostgreSQL database, starts
+one local Rust API for authenticated iOS and AXe validation, and records the
+exact tested SHA. Add `--with-live-smoke
 --allow-live-provider-costs` when the release needs the real API/LLM/E2B,
 Learning Deck, chat, and Share Extension matrix. That phase builds the two
 Docker images once and shares them across the full run.

@@ -131,7 +131,8 @@ scripts/check_public_contracts.sh
 
 Before pushing a release commit to `main`, run the canonical local gate from a
 clean checkout. It runs Rust, SQLx, contract, Python-island, native iOS, and AXe
-checks and records ignored evidence under `test-results/release-gate/`:
+checks against a disposable PostgreSQL database and records ignored evidence
+under `test-results/release-gate/`:
 
 ```bash
 scripts/release_gate.sh --env-file /absolute/path/to/local.env

@@ -31,9 +31,9 @@ Use this append-only log to preserve implementation context across sessions and 
 
 - **Status:** In progress.
 - **Scope:** Local release orchestration, GitHub deployment workflows, iOS/AXe validation, live local-staging smoke, and release documentation.
-- **Decisions:** Make one clean local commit the source-level release authority; keep the paid live smoke explicit; build Docker images once per full live run; retain immutable exact-SHA image identity, published-image smoke, stale-main refusal, and blue/green deployment in GitHub; rely on Xcode Cloud for the independent post-push iOS build.
+- **Decisions:** Make one clean local commit the source-level release authority; use a disposable PostgreSQL database rather than adopting or mutating a developer's legacy database; keep the paid live smoke explicit; build Docker images once per full live run; retain immutable exact-SHA image identity, published-image smoke, stale-main refusal, and blue/green deployment in GitHub; rely on Xcode Cloud for the independent post-push iOS build.
 - **Changes:** Added `scripts/release_gate.sh`; removed the reusable GitHub Quality Gate; changed Docker Deploy to build, smoke, and deploy `github.sha` directly; changed manual E2B template publication to require a locally validated current-main SHA; documented the new ownership boundary.
-- **Validation:** Pending the exact-commit local gate and post-push deploy proof.
+- **Validation:** Workflow definitions pass pinned Actionlint 1.7.7; the release script passes Bash syntax and paid-call guard checks; the project-local release skill passes its validator. The first full invocation stopped before tests when it detected the supplied legacy Alembic database; no baseline was applied, and the runner now provisions an isolated database. Exact-commit local gate and post-push deploy proof remain pending.
 - **Remaining:** Validate, commit, push the tested SHA to `main`, and verify production.
 - **Commits:** `0d14b01a` contains the rebased local-staging smoke harness; release-pipeline commit pending.
 
