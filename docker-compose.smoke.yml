@@ -1,0 +1,32 @@
+services:
+  migrate:
+    environment:
+      ENVIRONMENT: test
+
+  api:
+    restart: "no"
+    environment:
+      ENVIRONMENT: test
+      DEBUG: "true"
+      NEWSLY_RUST_LOG_FORMAT: json
+
+  workers:
+    restart: "no"
+    environment:
+      ENVIRONMENT: test
+      NEWSLY_AGENT_VM_TEMPLATE_ID: ${NEWSLY_AGENT_VM_TEMPLATE_ID:-newsly-agent}
+      NEWSLY_RUST_LOG_FORMAT: json
+
+  scheduler:
+    restart: "no"
+    environment:
+      ENVIRONMENT: test
+      NEWSLY_RUST_LOG_FORMAT: json
+
+  document-extractor:
+    restart: "no"
+    environment:
+      DOCUMENT_EXTRACTOR_ENVIRONMENT: test
+
+  bgutil-provider:
+    restart: "no"

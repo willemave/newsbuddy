@@ -103,6 +103,7 @@ The Cargo workspace is under `rust/`.
 | `newsly-eval-driver` | Canonical algorithms exposed to offline evaluations |
 | `newsly-admin` | Ownership, health, task, usage, and eval-export operations |
 | `newsly-cli` | Authenticated user-facing `newsbuddy` HTTP client, local config, and Markdown library sync |
+| `newsly-smoke` | Opt-in black-box API scenarios for the disposable local-staging Compose stack |
 | `newsly-vm-bootstrap` | Credential-free sandbox corpus/feed/capability helper |
 | `newsly-account-deletion-worker` | Idempotent account and external-resource deletion |
 

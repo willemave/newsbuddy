@@ -2,6 +2,12 @@ import Foundation
 import XCTest
 
 final class newslyUITests: XCTestCase {
+    private var e2eServerPort: String {
+        (Bundle(for: type(of: self)).object(
+            forInfoDictionaryKey: "NEWSLY_E2E_SERVER_PORT"
+        ) as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "8000"
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -55,7 +61,7 @@ final class newslyUITests: XCTestCase {
             "-newslyE2EEnabled", "true",
             "-newslyE2EAutoLogin", "true",
             "-newslyE2EServerHost", "127.0.0.1",
-            "-newslyE2EServerPort", "8000",
+            "-newslyE2EServerPort", e2eServerPort,
             "-newslyE2EUseHTTPS", "false",
             "-newslyE2EUserId", String(userID),
             "-newslyE2ECompleteOnboarding", "true",
@@ -72,7 +78,7 @@ final class newslyUITests: XCTestCase {
         defer { session.invalidateAndCancel() }
 
         var request = URLRequest(
-            url: URL(string: "http://127.0.0.1:8000/auth/debug/new-user")!
+            url: URL(string: "http://127.0.0.1:\(e2eServerPort)/auth/debug/new-user")!
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -90,7 +96,7 @@ final class newslyUITests: XCTestCase {
         } catch {
             throw XCTSkip(
                 "Authenticated lifecycle UI tests require the local debug API at "
-                    + "http://127.0.0.1:8000 (\(error.localizedDescription))."
+                    + "http://127.0.0.1:\(e2eServerPort) (\(error.localizedDescription))."
             )
         }
 

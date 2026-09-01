@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-08-31 — `main` — Build local-staging live API smoke coverage
+
+- **Status:** Complete locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Dockerized local staging, Rust API smoke harness, Learning Decks, chat, deck-grounded chat, and Share Extension to deck/chat flows.
+- **Decisions:** Use the production application image and worker supervisor in a unique disposable Docker Compose project; assert product behavior through public HTTP APIs; keep real provider calls opt-in and non-retrying; retain Compose rather than introducing a duplicate Testcontainers topology.
+- **Changes:** Added the approved end-to-end design, a typed `newsly-smoke` crate, a one-build-per-full-run Compose wrapper, redacted run evidence, recovery image/template options, the corrected extractor image install order, and a configurable iOS UI-test API port.
+- **Validation:** Live run `20260901T032806Z-18accc` passed all six scenarios: stack/auth, direct two-turn chat, Share-to-Chat, Share-to-Learning-Deck with signed/public artifact lifecycle, two-turn deck-grounded chat, and typed failure/ownership boundaries. It recorded 21 provider calls, 34 requests, 168,404 tokens, and zero failed tasks. Full warning-denied Rust Clippy/tests, SQLx offline and prepare checks, both Python island lint/type/test/build gates, architecture/contract guards, 629 iOS unit tests, and 3/3 authenticated iOS UI tests passed locally.
+- **Remaining:** Rebuild the shared E2B `newsly-agent` template through its owning workflow; it lacks `/usr/local/bin/newsly-vm-bootstrap`. The passing smoke used and then deleted a current, uniquely named template. The local image worker also remains unavailable unless an image provider is configured, but it is not used by these deck/chat/share scenarios.
+- **Commits:** Uncommitted.
+
 ### 2026-08-31 — `main` — Install architecture guard tools in Rust CI
 
 - **Status:** Complete locally; queued for the replacement release.
