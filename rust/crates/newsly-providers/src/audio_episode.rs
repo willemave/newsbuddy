@@ -449,6 +449,18 @@ fn script_user_prompt(kind: &str, snapshot: &Value) -> Result<String, AudioEpiso
         "custom_narration" => format!(
             "Create one cohesive podcast-style narration from the selected articles, podcast transcripts, and Fast Reads. Synthesize them as one episode, explaining shared themes, contradictions, evidence, and implications while preserving material source-specific details. Stay grounded in the selected sources. Use 500-700 spoken words and as many turns as needed. Use host for setup and transitions, cohost for synthesis, and expert for sharper analysis. Start by framing why the sources belong together and end with the concise takeaway the listener should remember.\n\nSelected source JSON:\n{source}"
         ),
+        "briefing_narration" => {
+            let news = snapshot.get("scope").and_then(Value::as_str) == Some("news_program");
+            if news {
+                format!(
+                    "Create one concise Newsly news chapter from this bounded multi-lens source window. Curate the highest-signal events instead of reading every source or naming each lens. Group sources about the same event, lead with the most consequential developments, retain concrete names, numbers, stakes, and what to watch, and omit details that do not improve understanding. It is acceptable not to mention every supplied source; finishing the chapter represents consuming the complete input window. Use only host turns, 500-700 spoken words, no markdown, and only facts present in the supplied summaries, key points, and metadata.\n\nBriefing chapter JSON:\n{source}"
+                )
+            } else {
+                format!(
+                    "Create one compact Newsly audio chapter about the single supplied article or podcast. Tell the story rather than reading the visible Briefing summary: use the exact title and available publication or show name, then explain the thesis, strongest details, stakes, and memorable takeaway using the longer summary, key points, and bounded context. Do not add external facts or claim quotations that are not supplied. Use only host turns, 180-320 spoken words, and no markdown.\n\nBriefing chapter JSON:\n{source}"
+                )
+            }
+        }
         unsupported => {
             return Err(AudioEpisodeGatewayError::UnsupportedKind(
                 unsupported.to_owned(),
@@ -639,5 +651,50 @@ impl AudioEpisodeGatewayError {
             | Self::ProviderClosed
             | Self::Io(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::script_user_prompt;
+
+    #[test]
+    fn briefing_document_prompt_uses_long_context_without_reading_visible_copy() {
+        let prompt = script_user_prompt(
+            "briefing_narration",
+            &json!({
+                "scope": "podcast_tier",
+                "items": [{
+                    "title": "A conversation worth hearing",
+                    "summary": "Longer summary",
+                    "key_points": ["A concrete point"]
+                }]
+            }),
+        )
+        .expect("prompt");
+
+        assert!(prompt.contains("single supplied article or podcast"));
+        assert!(prompt.contains("Tell the story rather than reading the visible Briefing summary"));
+        assert!(prompt.contains("longer summary, key points, and bounded context"));
+        assert!(prompt.contains("Use only host turns"));
+    }
+
+    #[test]
+    fn briefing_news_prompt_curates_across_lenses_and_allows_omissions() {
+        let prompt = script_user_prompt(
+            "briefing_narration",
+            &json!({
+                "scope": "news_program",
+                "items": [{"title": "First"}, {"title": "Second"}]
+            }),
+        )
+        .expect("prompt");
+
+        assert!(prompt.contains("multi-lens source window"));
+        assert!(prompt.contains("Curate the highest-signal events"));
+        assert!(prompt.contains("acceptable not to mention every supplied source"));
+        assert!(prompt.contains("complete input window"));
     }
 }

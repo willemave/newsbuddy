@@ -1178,6 +1178,29 @@ fn present_audio_episode(episode: &AudioEpisodeRecord) -> AudioEpisodeResponse {
         source_content_ids: episode_source_content_ids(episode),
         source_count: episode_source_count(episode),
         source_titles: episode_source_titles(episode),
+        subtitle: episode
+            .source_snapshot
+            .get("items")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("source_name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+        artwork_url: episode
+            .source_snapshot
+            .get("items")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|item| {
+                item.get("image_url")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.get("thumbnail_url").and_then(Value::as_str))
+            })
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
         read_on_play_content_ids: json_i64_array(
             episode
                 .source_snapshot

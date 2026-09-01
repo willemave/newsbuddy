@@ -2218,6 +2218,8 @@ struct APIAudioEpisodeResponse: Codable {
     let sourceContentIds: [Int]
     let sourceCount: Int
     let sourceTitles: [String]
+    let subtitle: String?
+    let artworkUrl: String?
     let readOnPlayContentIds: [Int]
     let readOnPlayNewsItemIds: [Int]
     let durationSeconds: Int?
@@ -2238,6 +2240,8 @@ struct APIAudioEpisodeResponse: Codable {
         sourceContentIds: [Int] = [],
         sourceCount: Int = 0,
         sourceTitles: [String] = [],
+        subtitle: String?,
+        artworkUrl: String?,
         readOnPlayContentIds: [Int] = [],
         readOnPlayNewsItemIds: [Int] = [],
         durationSeconds: Int?,
@@ -2257,6 +2261,8 @@ struct APIAudioEpisodeResponse: Codable {
         self.sourceContentIds = sourceContentIds
         self.sourceCount = sourceCount
         self.sourceTitles = sourceTitles
+        self.subtitle = subtitle
+        self.artworkUrl = artworkUrl
         self.readOnPlayContentIds = readOnPlayContentIds
         self.readOnPlayNewsItemIds = readOnPlayNewsItemIds
         self.durationSeconds = durationSeconds
@@ -2278,6 +2284,8 @@ struct APIAudioEpisodeResponse: Codable {
         case sourceContentIds = "source_content_ids"
         case sourceCount = "source_count"
         case sourceTitles = "source_titles"
+        case subtitle = "subtitle"
+        case artworkUrl = "artwork_url"
         case readOnPlayContentIds = "read_on_play_content_ids"
         case readOnPlayNewsItemIds = "read_on_play_news_item_ids"
         case durationSeconds = "duration_seconds"
@@ -2300,6 +2308,8 @@ struct APIAudioEpisodeResponse: Codable {
         sourceContentIds = try container.decode([Int].self, forKey: .sourceContentIds)
         sourceCount = try container.decode(Int.self, forKey: .sourceCount)
         sourceTitles = try container.decode([String].self, forKey: .sourceTitles)
+        subtitle = try container.decode(String?.self, forKey: .subtitle)
+        artworkUrl = try container.decode(String?.self, forKey: .artworkUrl)
         readOnPlayContentIds = try container.decode([Int].self, forKey: .readOnPlayContentIds)
         readOnPlayNewsItemIds = try container.decode([Int].self, forKey: .readOnPlayNewsItemIds)
         durationSeconds = try container.decode(Int?.self, forKey: .durationSeconds)
@@ -2333,6 +2343,8 @@ struct APIAudioEpisodeResponse: Codable {
         try container.encode(sourceContentIds, forKey: .sourceContentIds)
         try container.encode(sourceCount, forKey: .sourceCount)
         try container.encode(sourceTitles, forKey: .sourceTitles)
+        try container.encode(subtitle, forKey: .subtitle)
+        try container.encode(artworkUrl, forKey: .artworkUrl)
         try container.encode(readOnPlayContentIds, forKey: .readOnPlayContentIds)
         try container.encode(readOnPlayNewsItemIds, forKey: .readOnPlayNewsItemIds)
         try container.encode(durationSeconds, forKey: .durationSeconds)
@@ -3085,6 +3097,36 @@ struct APIBriefingDigSummarizeResponse: Codable {
 }
 
 struct APIBriefingNarrationRequest: Codable {
+    let scope: APIBriefingNarrationScope?
+    let lensKey: String?
+
+    init(
+        scope: APIBriefingNarrationScope? = nil,
+        lensKey: String? = nil
+    ) {
+        self.scope = scope
+        self.lensKey = lensKey
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case scope = "scope"
+        case lensKey = "lens_key"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        scope = try container.decodeIfPresent(APIBriefingNarrationScope.self, forKey: .scope)
+        lensKey = try container.decodeIfPresent(String.self, forKey: .lensKey)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(scope, forKey: .scope)
+        try container.encodeIfPresent(lensKey, forKey: .lensKey)
+    }
+}
+
+struct APILegacyBriefingNarrationRequest: Codable {
     let lensKey: String
 
     init(
@@ -3111,6 +3153,7 @@ struct APIBriefingNarrationRequest: Codable {
 struct APIBriefingNarrationResponse: Codable {
     let episodeGroupId: String
     let lensKey: String
+    let scope: APIBriefingNarrationScope?
     let title: String
     let status: APIAudioEpisodeStatus
     let playable: Bool
@@ -3120,6 +3163,7 @@ struct APIBriefingNarrationResponse: Codable {
     init(
         episodeGroupId: String,
         lensKey: String,
+        scope: APIBriefingNarrationScope?,
         title: String,
         status: APIAudioEpisodeStatus,
         playable: Bool,
@@ -3128,6 +3172,7 @@ struct APIBriefingNarrationResponse: Codable {
     ) {
         self.episodeGroupId = episodeGroupId
         self.lensKey = lensKey
+        self.scope = scope
         self.title = title
         self.status = status
         self.playable = playable
@@ -3138,6 +3183,7 @@ struct APIBriefingNarrationResponse: Codable {
     enum CodingKeys: String, CodingKey {
         case episodeGroupId = "episode_group_id"
         case lensKey = "lens_key"
+        case scope = "scope"
         case title = "title"
         case status = "status"
         case playable = "playable"
@@ -3149,6 +3195,7 @@ struct APIBriefingNarrationResponse: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         episodeGroupId = try container.decode(String.self, forKey: .episodeGroupId)
         lensKey = try container.decode(String.self, forKey: .lensKey)
+        scope = try container.decode(APIBriefingNarrationScope?.self, forKey: .scope)
         title = try container.decode(String.self, forKey: .title)
         status = try container.decode(APIAudioEpisodeStatus.self, forKey: .status)
         playable = try container.decode(Bool.self, forKey: .playable)
@@ -3160,6 +3207,7 @@ struct APIBriefingNarrationResponse: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(episodeGroupId, forKey: .episodeGroupId)
         try container.encode(lensKey, forKey: .lensKey)
+        try container.encode(scope, forKey: .scope)
         try container.encode(title, forKey: .title)
         try container.encode(status, forKey: .status)
         try container.encode(playable, forKey: .playable)

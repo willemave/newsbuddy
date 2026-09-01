@@ -116,14 +116,15 @@ pub use auth::{
 pub use briefing::{
     AudioEpisodeProjection, BriefingDiscussionProjection, BriefingFirstRunProjection,
     BriefingIndexProjection, BriefingIndexValidatorProjection, BriefingLensCursorProjection,
-    BriefingLensPageProjection, BriefingLensProjection, BriefingReadMarkProjection,
-    BriefingRepositoryError, BriefingSegmentMetadataProjection, BriefingSegmentProjection,
-    BriefingSourceProjection, BriefingStateProjection, ContentBriefingSourceProjection,
-    FirstRunSourceProjection, NewsBriefingSourceProjection, PrepareNarrationOutcome,
-    ensure_briefing_state_version, expedite_pending_briefing_refresh, load_briefing_index,
-    load_briefing_index_validator, load_briefing_lens_page, load_briefing_narration,
-    mark_briefing_lens_read, mark_briefing_sources_read, prepare_briefing_narration,
-    public_audio_episode_error_message, recent_briefing_dig_count, record_briefing_dig_usage,
+    BriefingLensPageProjection, BriefingLensProjection, BriefingNarrationSelection,
+    BriefingReadMarkProjection, BriefingRepositoryError, BriefingSegmentMetadataProjection,
+    BriefingSegmentProjection, BriefingSourceProjection, BriefingStateProjection,
+    ContentBriefingSourceProjection, FirstRunSourceProjection, NewsBriefingSourceProjection,
+    PrepareNarrationOutcome, ensure_briefing_state_version, expedite_pending_briefing_refresh,
+    load_briefing_index, load_briefing_index_validator, load_briefing_lens_page,
+    load_briefing_narration, mark_briefing_lens_read, mark_briefing_sources_read,
+    prepare_briefing_narration, public_audio_episode_error_message, recent_briefing_dig_count,
+    record_briefing_dig_usage,
 };
 pub use briefing_refresh::{
     ApplyBriefingLensAssignmentOutcome, BriefingAppendBatch, BriefingCompactionBatch,

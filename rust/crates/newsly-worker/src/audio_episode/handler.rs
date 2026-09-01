@@ -231,7 +231,7 @@ async fn prepare_script(
     attempt: &PreparedAudioEpisodeAttempt,
     lease: &mut LeaseHealth,
 ) -> Result<PreparedScript, GenerationStageError> {
-    if attempt.kind == "briefing_narration" {
+    if attempt.kind == "briefing_narration" && attempt.source_snapshot.get("scope").is_none() {
         let text = attempt
             .source_snapshot
             .get("script_text")

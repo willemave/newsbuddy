@@ -27,6 +27,26 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-01 — `main` — Briefing audio cleanup follow-up
+
+- **Status:** Complete locally; physical-device Lock Screen verification remains.
+- **Scope:** Scoped narration planning and compatibility contract, iOS playback/Now Playing lifecycle, chapter-row presentation, and focused tests.
+- **Decisions:** Keep scope as the sole script-generation discriminator; preserve the legacy lens endpoint with a dedicated required-key request; treat each unique Article or Podcast source as exactly one chapter; resume after an interruption only when the interrupted playback session is still current.
+- **Changes:** Split malformed multi-source document segments and deduplicated repeated sources; removed the redundant audio script marker; refreshed Now Playing metadata and remote actions on same-target playback; separated current and preferred playback rates; added source artwork loading with stale-request fencing and caching; removed notification and remote-command observers at owner teardown; unified seek state updates; suppressed empty chapter detail copy and accessibility punctuation. Extracted narration presentation and planning into focused API and DB sibling modules to keep the owning modules below their size guardrails.
+- **Validation:** Rust formatting, module-size guardrails, warning-denied affected-crate Clippy, four document-planning tests, nine focused provider tests, all 39 API unit tests, public-contract regeneration/drift checks, plist validation, and `git diff --check` passed. The focused iOS run passed all 13 Briefing narration-controller and 4 playback-service tests after correcting remote-command target teardown to use each owning command.
+- **Remaining:** Verify exact artwork, metadata, continued playback, controls, chapter transitions, interruption handling, and route loss on a locked physical device. Broader presentation-metadata deduplication and stronger DB narration-plan types were intentionally left for separate changes because they cross module boundaries without improving this feature's behavior.
+- **Commits:** Uncommitted.
+
+### 2026-09-01 — `main` — Briefing audio story chapters and iOS system playback
+
+- **Status:** Complete locally; device Lock Screen verification remains.
+- **Scope:** Briefing narration contracts, scoped repository planning, audio script generation, SwiftUI chapter presentation, AVPlayer background ownership, Now Playing, and remote commands.
+- **Decisions:** Generate grounded scripts only when Listen is requested; keep one exact-title chapter per Article or Podcast document; combine all News lenses into one curated program whose planned source window remains the read-on-finish unit; retain the released lens-key request as an exactly-one compatibility field.
+- **Changes:** Added scoped manifests and source-derived chapter metadata; stored versioned long-summary/key-point snapshots for worker-generated scripts; routed News and document chapters through distinct prompts; switched the iOS client from lens programs to Article/Podcast/News programs; published chapter metadata and queue state to iOS Now Playing; added system play, pause, seek, previous, next, interruption, route-loss, and background-audio support.
+- **Validation:** Rust formatting and warning-denied Clippy passed across contracts, DB, providers, worker, and API. The two document-planning tests and nine Briefing/provider tests passed; API and contract unit suites passed during the affected-package run. Public OpenAPI and both Swift clients regenerated cleanly and the contract drift check passed. Both plists validate. The native iOS target built for testing and all 13 focused Briefing narration-controller tests passed, including chapter metadata and automatic advance. `git diff --check` passed.
+- **Remaining:** Verify exact metadata, continued playback, controls, chapter transitions, and route loss on a locked physical device. No commit, push, deployment, or Apple distribution was requested.
+- **Commits:** Uncommitted.
+
 ### 2026-09-01 — `main` — Concise News Lens composition prompt and related-source trace
 
 - **Status:** Complete locally; not deployed.

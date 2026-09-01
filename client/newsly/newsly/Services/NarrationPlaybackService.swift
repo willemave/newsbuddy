@@ -55,7 +55,7 @@ final class NarrationPlaybackProgress {
 @MainActor
 @Observable
 final class NarrationPlaybackService {
-    static let shared = NarrationPlaybackService()
+    static let shared = NarrationPlaybackService(nowPlayingController: .shared)
     nonisolated static let defaultPlaybackRate: Float = 1.0
     nonisolated static let longPressPlaybackRate: Float = 1.5
 
@@ -68,6 +68,9 @@ final class NarrationPlaybackService {
 
     @ObservationIgnored
     private let preferenceStore: NarrationPlaybackPreferenceStore
+
+    @ObservationIgnored
+    private let nowPlayingController: NarrationNowPlayingController?
 
     @ObservationIgnored
     private var streamPlayer: AVPlayer?
@@ -114,9 +117,34 @@ final class NarrationPlaybackService {
     @ObservationIgnored
     private var playbackFinishedHandler: NarrationPlaybackFinishedHandler?
 
-    init(preferenceStore: NarrationPlaybackPreferenceStore = .shared) {
+    @ObservationIgnored
+    private var interruptionObserver: NSObjectProtocol?
+
+    @ObservationIgnored
+    private var routeChangeObserver: NSObjectProtocol?
+
+    @ObservationIgnored
+    private var interruptedPlaybackSessionID: UUID?
+
+    init(
+        preferenceStore: NarrationPlaybackPreferenceStore = .shared,
+        nowPlayingController: NarrationNowPlayingController? = nil
+    ) {
         self.preferenceStore = preferenceStore
+        self.nowPlayingController = nowPlayingController
         self.playbackRate = preferenceStore.preferredPlaybackRate()
+        if nowPlayingController != nil {
+            observeAudioSession()
+        }
+    }
+
+    deinit {
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+        }
+        if let routeChangeObserver {
+            NotificationCenter.default.removeObserver(routeChangeObserver)
+        }
     }
 
     var playbackSpeedTitle: String {
@@ -138,16 +166,23 @@ final class NarrationPlaybackService {
         if let streamPlayer, isSpeaking {
             streamPlayer.rate = normalizedRate
         }
+        updateNowPlaying()
     }
 
     func playStreamingNarration(
         for target: NarrationTarget,
+        metadata: NarrationPlaybackMetadata? = nil,
+        remotePrevious: (@MainActor () -> Void)? = nil,
+        remoteNext: (@MainActor () -> Void)? = nil,
         onFinished: NarrationPlaybackFinishedHandler? = nil,
         fetchStreamResource: () async throws -> AuthorizedMediaResource
     ) async throws {
         try await playStreamingNarration(
             for: target,
             rate: playbackRate,
+            metadata: metadata,
+            remotePrevious: remotePrevious,
+            remoteNext: remoteNext,
             onFinished: onFinished,
             fetchStreamResource: fetchStreamResource
         )
@@ -156,6 +191,9 @@ final class NarrationPlaybackService {
     func playStreamingNarration(
         for target: NarrationTarget,
         rate: Float,
+        metadata: NarrationPlaybackMetadata? = nil,
+        remotePrevious: (@MainActor () -> Void)? = nil,
+        remoteNext: (@MainActor () -> Void)? = nil,
         onFinished: NarrationPlaybackFinishedHandler? = nil,
         fetchStreamResource: () async throws -> AuthorizedMediaResource
     ) async throws {
@@ -168,12 +206,24 @@ final class NarrationPlaybackService {
         if speakingTarget == target {
             playbackFinishedHandler = onFinished
             if try resumeStreamIfNeeded(for: target) {
+                activateNowPlaying(
+                    metadata: metadata,
+                    target: target,
+                    remotePrevious: remotePrevious,
+                    remoteNext: remoteNext
+                )
                 narrationPlaybackLogger.info(
                     "Streaming narration resumed | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt))"
                 )
                 return
             }
             if isSpeaking {
+                activateNowPlaying(
+                    metadata: metadata,
+                    target: target,
+                    remotePrevious: remotePrevious,
+                    remoteNext: remoteNext
+                )
                 narrationPlaybackLogger.info(
                     "Streaming narration already active | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt))"
                 )
@@ -192,7 +242,14 @@ final class NarrationPlaybackService {
             narrationPlaybackLogger.info(
                 "Streaming narration resource ready | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt))"
             )
-            try playAudioStream(resource, for: target, onFinished: onFinished)
+            try playAudioStream(
+                resource,
+                for: target,
+                metadata: metadata,
+                remotePrevious: remotePrevious,
+                remoteNext: remoteNext,
+                onFinished: onFinished
+            )
         } catch where ClientFailure.classify(error) == .cancelled {
             throw CancellationError()
         } catch {
@@ -207,6 +264,9 @@ final class NarrationPlaybackService {
     func playAudioStream(
         _ resource: AuthorizedMediaResource,
         for target: NarrationTarget,
+        metadata: NarrationPlaybackMetadata? = nil,
+        remotePrevious: (@MainActor () -> Void)? = nil,
+        remoteNext: (@MainActor () -> Void)? = nil,
         onFinished: NarrationPlaybackFinishedHandler? = nil
     ) throws -> AVPlayerItem {
         let startedAt = Date()
@@ -251,6 +311,12 @@ final class NarrationPlaybackService {
                 )
             }
             player.playImmediately(atRate: playbackRate)
+            activateNowPlaying(
+                metadata: metadata,
+                target: target,
+                remotePrevious: remotePrevious,
+                remoteNext: remoteNext
+            )
             narrationPlaybackLogger.info(
                 "AVPlayer stream play called | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt)) resumeSeconds=\(resumeTime, privacy: .public) headerCount=\(resource.headers.count) minimizeStalling=\(player.automaticallyWaitsToMinimizeStalling)"
             )
@@ -279,6 +345,7 @@ final class NarrationPlaybackService {
             isSpeaking = false
             isPaused = true
             stopProgressTimer()
+            updateNowPlaying()
             narrationPlaybackLogger.info(
                 "Streaming narration paused | target=\(String(describing: target), privacy: .public) currentSeconds=\(currentSeconds, privacy: .public)"
             )
@@ -302,17 +369,24 @@ final class NarrationPlaybackService {
     }
 
     func seek(to progress: Double, for target: NarrationTarget) {
-        guard speakingTarget == target else { return }
         let clampedProgress = min(max(progress, 0), 1)
         guard let streamPlayer, let streamDuration = streamDuration(streamPlayer) else { return }
-        let nextTime = streamDuration * clampedProgress
+        seek(toTime: streamDuration * clampedProgress, for: target)
+    }
+
+    private func seek(toTime time: TimeInterval, for target: NarrationTarget) {
+        guard speakingTarget == target,
+              let streamPlayer,
+              let streamDuration = streamDuration(streamPlayer) else { return }
+        let nextTime = min(max(time, 0), streamDuration)
         streamPlayer.seek(
             to: CMTime(seconds: nextTime, preferredTimescale: 600),
             toleranceBefore: .zero,
             toleranceAfter: .zero
         )
         savedPlaybackPositions[target] = nextTime
-        syncProgressFromPlayer()
+        progress.update(currentTime: nextTime, duration: streamDuration, force: true)
+        updateNowPlaying()
     }
 
     private func configurePlaybackSession() throws {
@@ -332,6 +406,7 @@ final class NarrationPlaybackService {
         playbackFirstProgressLogged = false
         syncProgressFromPlayer()
         startProgressTimer()
+        updateNowPlaying()
         return true
     }
 
@@ -520,6 +595,7 @@ final class NarrationPlaybackService {
                 currentTime: currentSeconds,
                 duration: streamDuration(streamPlayer) ?? duration
             )
+            updateNowPlaying()
             return
         }
         progress.reset()
@@ -543,6 +619,8 @@ final class NarrationPlaybackService {
         playbackTimeControlPlayingLogged = false
         playbackTimeControlWaitingLogged = false
         playbackFirstProgressLogged = false
+        interruptedPlaybackSessionID = nil
+        nowPlayingController?.clear()
         try? AVAudioSession.sharedInstance().setActive(
             false,
             options: [.notifyOthersOnDeactivation]
@@ -568,6 +646,91 @@ final class NarrationPlaybackService {
     private func finiteSeconds(_ seconds: Double) -> TimeInterval? {
         guard seconds.isFinite, seconds > 0 else { return nil }
         return seconds
+    }
+
+    private func updateNowPlaying() {
+        nowPlayingController?.update(
+            duration: duration,
+            elapsed: currentTime,
+            currentRate: isSpeaking ? playbackRate : 0,
+            defaultRate: playbackRate
+        )
+    }
+
+    private func activateNowPlaying(
+        metadata: NarrationPlaybackMetadata?,
+        target: NarrationTarget,
+        remotePrevious: (@MainActor () -> Void)?,
+        remoteNext: (@MainActor () -> Void)?
+    ) {
+        guard let metadata else { return }
+        nowPlayingController?.activate(
+            metadata: metadata,
+            duration: duration,
+            elapsed: currentTime,
+            currentRate: isSpeaking ? playbackRate : 0,
+            defaultRate: playbackRate,
+            actions: NarrationRemoteCommandActions(
+                play: { [weak self] in
+                    _ = try? self?.resumeStreamIfNeeded(for: target)
+                },
+                pause: { [weak self] in self?.pause() },
+                seek: { [weak self] position in self?.seek(toTime: position, for: target) },
+                previous: remotePrevious,
+                next: remoteNext
+            )
+        )
+    }
+
+    private func observeAudioSession() {
+        let center = NotificationCenter.default
+        interruptionObserver = center.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor [weak self] in
+                self?.handleAudioInterruption(notification)
+            }
+        }
+        routeChangeObserver = center.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor [weak self] in
+                self?.handleAudioRouteChange(notification)
+            }
+        }
+    }
+
+    private func handleAudioInterruption(_ notification: Notification) {
+        guard let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: rawType) else { return }
+        switch type {
+        case .began:
+            interruptedPlaybackSessionID = isSpeaking ? playbackSessionID : nil
+            if interruptedPlaybackSessionID != nil {
+                pause()
+            }
+        case .ended:
+            defer { interruptedPlaybackSessionID = nil }
+            guard let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt,
+                  AVAudioSession.InterruptionOptions(rawValue: rawOptions).contains(.shouldResume),
+                  interruptedPlaybackSessionID == playbackSessionID,
+                  let target = speakingTarget else { return }
+            _ = try? resumeStreamIfNeeded(for: target)
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleAudioRouteChange(_ notification: Notification) {
+        guard let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              AVAudioSession.RouteChangeReason(rawValue: rawReason) == .oldDeviceUnavailable else {
+            return
+        }
+        pause()
     }
 }
 

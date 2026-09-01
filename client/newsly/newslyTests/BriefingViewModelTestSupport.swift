@@ -228,11 +228,11 @@ final class MockBriefingService: BriefingServicing {
         return APIBriefingDigSummarizeResponse(summary: summary, model: "test", elapsedMs: 0)
     }
 
-    func requestNarration(lensKey: String) async throws -> BriefingNarration {
-        narrationLensKeys.append(lensKey)
-        if narrationRequestWaitLensKeys.contains(lensKey) {
+    func requestNarration(programKey: String) async throws -> BriefingNarration {
+        narrationLensKeys.append(programKey)
+        if narrationRequestWaitLensKeys.contains(programKey) {
             await withCheckedContinuation { continuation in
-                narrationRequestContinuations[lensKey] = continuation
+                narrationRequestContinuations[programKey] = continuation
             }
         }
         if let narrationRequestDelayNanoseconds {
@@ -250,7 +250,7 @@ final class MockBriefingService: BriefingServicing {
             throw narrationError
         }
         let narration: BriefingNarration
-        if let lensNarration = narrationManifestsByLens[lensKey] {
+        if let lensNarration = narrationManifestsByLens[programKey] {
             narration = lensNarration
         } else if !narrationManifests.isEmpty {
             narration = narrationManifests.removeFirst()
@@ -304,6 +304,7 @@ final class MockBriefingNarrationPlaybackService: BriefingNarrationPlaybackContr
     private(set) var playbackRate: Float = 1
     private(set) var speakingTarget: NarrationTarget?
     private(set) var playedTargets: [NarrationTarget] = []
+    private(set) var playedMetadata: [NarrationPlaybackMetadata] = []
     private var finishedHandler: NarrationPlaybackFinishedHandler?
 
     func pause() {
@@ -319,6 +320,9 @@ final class MockBriefingNarrationPlaybackService: BriefingNarrationPlaybackContr
     func playStreamingNarration(
         for target: NarrationTarget,
         rate: Float,
+        metadata: NarrationPlaybackMetadata?,
+        remotePrevious: (@MainActor () -> Void)?,
+        remoteNext: (@MainActor () -> Void)?,
         onFinished: NarrationPlaybackFinishedHandler?,
         fetchStreamResource: () async throws -> AuthorizedMediaResource
     ) async throws {
@@ -327,6 +331,9 @@ final class MockBriefingNarrationPlaybackService: BriefingNarrationPlaybackContr
         speakingTarget = target
         isSpeaking = true
         playedTargets.append(target)
+        if let metadata {
+            playedMetadata.append(metadata)
+        }
         finishedHandler = onFinished
     }
 
@@ -576,16 +583,20 @@ func makeSegment(
 func makeAudioEpisode(
     id: Int,
     status: APIAudioEpisodeStatus = .completed,
+    title: String = "Briefing",
+    subtitle: String? = nil,
     errorMessage: String? = nil
 ) -> AudioEpisode {
     AudioEpisode(
         id: id,
         kind: .briefing_narration,
         status: status,
-        title: "Briefing",
+        title: title,
         sourceContentId: nil,
         sourceCount: 1,
         sourceTitles: ["Long report"],
+        subtitle: subtitle,
+        artworkUrl: nil,
         durationSeconds: nil,
         audioUrl: nil,
         streamUrl: nil,
@@ -616,6 +627,7 @@ func makeBriefingNarration(
     return BriefingNarration(
         episodeGroupId: episodeGroupID,
         lensKey: lensKey,
+        scope: nil,
         title: "Today briefing",
         status: status,
         playable: playable,

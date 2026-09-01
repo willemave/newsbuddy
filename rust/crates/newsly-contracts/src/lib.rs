@@ -54,9 +54,10 @@ pub use briefing::{
     BriefingDiscussionDto, BriefingFigureAlignment, BriefingFigurePlacement, BriefingFirstRunPhase,
     BriefingFirstRunProgress, BriefingFirstRunSourceOutcome, BriefingFirstRunSourceProgress,
     BriefingIndexResponse, BriefingLensResponse, BriefingLensSummary, BriefingNarrationRequest,
-    BriefingNarrationResponse, BriefingParagraphDto, BriefingReadMarkRequest,
-    BriefingReadMarkResponse, BriefingRefreshResponse, BriefingRunDto, BriefingRunKind,
-    BriefingSegmentDto, BriefingSourceDto, BriefingTier,
+    BriefingNarrationResponse, BriefingNarrationScope, BriefingParagraphDto,
+    BriefingReadMarkRequest, BriefingReadMarkResponse, BriefingRefreshResponse, BriefingRunDto,
+    BriefingRunKind, BriefingSegmentDto, BriefingSourceDto, BriefingTier,
+    LegacyBriefingNarrationRequest,
 };
 pub use chat::{
     AssistantFeedOption, AssistantScreenContextDto, AssistantTurnRequest, AssistantTurnResponse,

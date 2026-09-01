@@ -1,15 +1,15 @@
 //! Eligible source loading and conversion into provider-independent Briefing projections.
 
 use super::{
-    AssertSqlSafe, BTreeSet, BriefingRefreshRepositoryError, BriefingRefreshSource, HashMap,
-    HashSet, Map, NaiveDateTime, Postgres, SourceContentRow, SourceNewsRow, Transaction, Value,
+    AssertSqlSafe, BTreeSet, BriefingRefreshSource, HashMap, HashSet, Map, NaiveDateTime, Postgres,
+    SourceContentRow, SourceNewsRow, Transaction, Value,
 };
 
-pub(super) async fn load_eligible_sources_for_keys(
+pub(crate) async fn load_eligible_sources_for_keys(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
     keys: &[String],
-) -> Result<HashMap<String, BriefingRefreshSource>, BriefingRefreshRepositoryError> {
+) -> Result<HashMap<String, BriefingRefreshSource>, sqlx::Error> {
     let (content_ids, news_ids) = parse_source_ids(keys);
     let mut sources = HashMap::new();
     if !content_ids.is_empty() {

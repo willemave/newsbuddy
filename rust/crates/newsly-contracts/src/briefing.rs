@@ -289,11 +289,27 @@ pub struct BriefingDigSummarizeResponse {
     pub elapsed_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BriefingNarrationScope {
+    ArticleTier,
+    PodcastTier,
+    NewsProgram,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema, ToSchema)]
-pub struct BriefingNarrationRequest {
+pub struct LegacyBriefingNarrationRequest {
     #[schemars(length(min = 1, max = 64))]
     #[schema(min_length = 1, max_length = 64)]
     pub lens_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema, ToSchema)]
+pub struct BriefingNarrationRequest {
+    pub scope: Option<BriefingNarrationScope>,
+    #[schemars(length(min = 1, max = 64))]
+    #[schema(min_length = 1, max_length = 64)]
+    pub lens_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -359,6 +375,8 @@ pub struct AudioEpisodeResponse {
     pub source_count: usize,
     #[serde(default)]
     pub source_titles: Vec<String>,
+    pub subtitle: Option<String>,
+    pub artwork_url: Option<String>,
     #[serde(default)]
     pub read_on_play_content_ids: Vec<i64>,
     #[serde(default)]
@@ -384,6 +402,7 @@ pub struct BriefingNarrationResponse {
     #[schemars(length(min = 1, max = 64))]
     #[schema(min_length = 1, max_length = 64)]
     pub lens_key: String,
+    pub scope: Option<BriefingNarrationScope>,
     #[schemars(length(min = 1))]
     #[schema(min_length = 1)]
     pub title: String,

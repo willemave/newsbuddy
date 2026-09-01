@@ -529,6 +529,8 @@ mod preparation;
 mod publication;
 mod sources;
 
+pub(crate) use sources::load_eligible_sources_for_keys;
+
 pub use lens_assignment::apply_briefing_lens_assignment;
 pub use preparation::prepare_briefing_refresh;
 pub use publication::apply_briefing_refresh;

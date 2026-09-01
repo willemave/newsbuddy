@@ -168,6 +168,8 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
             sourceContentIds: sourceContentIDs,
             sourceCount: sourceContentIDs.count,
             sourceTitles: ["Source"],
+            subtitle: nil,
+            artworkUrl: nil,
             durationSeconds: nil,
             audioUrl: nil,
             streamUrl: nil,

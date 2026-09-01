@@ -347,7 +347,8 @@ struct BriefingNarrationChapterControls: View {
         let duration = selectedChapter?.durationSeconds ?? 0
         let roundedMinutes = max(1, Int((Double(duration) / 60).rounded()))
         let durationLabel = duration > 0 ? " · ~\(roundedMinutes) min" : ""
-        return "Chapter \(boundedIndex + 1) of \(count)\(durationLabel)"
+        let titleLabel = selectedChapter.map { " · \($0.title)" } ?? ""
+        return "Chapter \(boundedIndex + 1) of \(count)\(titleLabel)\(durationLabel)"
     }
 
     private func chapterNavigationButton(

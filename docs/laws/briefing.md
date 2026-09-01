@@ -29,3 +29,5 @@ B13. Read-only styling preserves scroll position and cannot be reversed by an in
 B14. Links, figures, discussions, and citations resolve to sources owned by their segment, while invalid references are repaired or rejected before publication. Article and podcast passages identify each work by its title and its available publication or show name. Pullquotes are editorial callouts and never claim to be source quotations, while Dig Deeper uses the selected passage with user-visible support.
 
 B15. First-run progress is durable and incremental. One unavailable source cannot block later sources or remove categories already ready to read.
+
+B16. Briefing audio is a grounded listening adaptation, not a reading of visible prose. Article and podcast programs keep one titled source per chapter. News is one cross-lens program whose chapters may curate only the highest-signal details; naturally finishing a News chapter marks its complete planned source window read even when some sources were not spoken.
