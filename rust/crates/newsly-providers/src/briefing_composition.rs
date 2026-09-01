@@ -33,8 +33,11 @@ forms: `[exact title](newsly://briefing/content/123)` and
 fact, quotation, or attribution. Never use em dashes or generic summary-speak. Begin with the
 strongest fact or idea rather than naming the lens or counting sources.
 
-For `news`, return exactly one passage, one compact paragraph of at most three sentences, no
-figures or pullquotes, and link every source exactly once. For `audio` and `longform`, give every
+For `news`, return exactly one passage: one concise, information-dense paragraph of at most three
+sentences, with no figures or pullquotes, linking every source exactly once. Synthesize related
+sources into a unified account instead of giving each source its own sentence, and omit details
+that do not materially improve the reader's understanding. Use the fewest sentences needed for a
+clear account. For `audio` and `longform`, give every
 source substantive treatment, identify its exact title near the beginning, include its supplied
 publication or show name when available, and cover its thesis, key evidence, and significance.
 Suggest editorial pullquotes rather than pretending they are source quotations. Add a figure for
@@ -819,6 +822,15 @@ mod tests {
             }],
         };
         assert!(layout.validate("news", &[source(1), source(2)]).is_ok());
+    }
+
+    #[test]
+    fn news_prompt_requests_concise_synthesis() {
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("one concise, information-dense paragraph"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("Use the fewest sentences needed"));
+        assert!(
+            COMPOSITION_SYSTEM_PROMPT.contains("instead of giving each source its own sentence")
+        );
     }
 
     #[test]
