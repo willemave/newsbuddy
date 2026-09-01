@@ -6,6 +6,7 @@ services:
   api:
     restart: "no"
     environment:
+      CONTENT_BODY_LOCAL_ROOT: /data/content_bodies
       ENVIRONMENT: test
       DEBUG: "true"
       NEWSLY_RUST_LOG_FORMAT: json
@@ -13,6 +14,7 @@ services:
   workers:
     restart: "no"
     environment:
+      CONTENT_BODY_LOCAL_ROOT: /data/content_bodies
       ENVIRONMENT: test
       NEWSLY_AGENT_VM_TEMPLATE_ID: ${NEWSLY_AGENT_VM_TEMPLATE_ID:-newsly-agent}
       NEWSLY_RUST_LOG_FORMAT: json
