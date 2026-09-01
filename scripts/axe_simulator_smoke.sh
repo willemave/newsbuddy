@@ -190,19 +190,55 @@ debug_user_id="$(
     "${API_BASE_URL%/}/auth/debug/new-user" |
     jq -er '.user.id'
 )"
-xcrun simctl launch "$UDID" "$BUNDLE_ID" \
-  -newslyE2EEnabled true \
-  -newslyE2EAutoLogin true \
-  -newslyE2EServerHost "${api_host}" \
-  -newslyE2EServerPort "${api_port}" \
-  -newslyE2EUseHTTPS "${api_use_https}" \
-  -newslyE2EUserId "$debug_user_id" \
-  -newslyE2ECompleteOnboarding true \
-  -newslyE2ECompleteTutorial true >/dev/null
+
+launch_authenticated_app() {
+  xcrun simctl launch "$UDID" "$BUNDLE_ID" \
+    -newslyE2EEnabled true \
+    -newslyE2EAutoLogin true \
+    -newslyE2EServerHost "${api_host}" \
+    -newslyE2EServerPort "${api_port}" \
+    -newslyE2EUseHTTPS "${api_use_https}" \
+    -newslyE2EUserId "$debug_user_id" \
+    -newslyE2ECompleteOnboarding true \
+    -newslyE2ECompleteTutorial true >/dev/null
+}
+
+capture_nonempty_ui_tree() {
+  local output_path="$1"
+  local attempt
+  for attempt in {1..5}; do
+    axe describe-ui --udid "$UDID" >"$output_path"
+    if ! jq -e '
+      length == 1
+      and .[0].type == "Application"
+      and ((.[0].children // []) | length == 0)
+      and ((.[0].frame.width // 0) == 0)
+      and ((.[0].frame.height // 0) == 0)
+    ' "$output_path" >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+launch_authenticated_app
 sleep 1
 
 echo "Capturing launch artifacts..."
-axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/00_launch_ui.json"
+if ! capture_nonempty_ui_tree "$OUTPUT_DIR/00_launch_ui.json"; then
+  echo "AXe returned an empty zero-size application tree; rebooting the Simulator bridge once..."
+  xcrun simctl terminate "$UDID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+  xcrun simctl shutdown "$UDID"
+  xcrun simctl boot "$UDID"
+  xcrun simctl bootstatus "$UDID" -b >/dev/null
+  launch_authenticated_app
+  sleep 1
+  if ! capture_nonempty_ui_tree "$OUTPUT_DIR/00_launch_ui.json"; then
+    echo "AXe accessibility tree remained empty after one Simulator reboot." >&2
+    exit 1
+  fi
+fi
 axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/00_launch.png" >/dev/null
 
 assert_id() {
