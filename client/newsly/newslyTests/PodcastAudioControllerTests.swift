@@ -178,6 +178,8 @@ final class PodcastAudioControllerTests: XCTestCase {
             sourceContentIds: [contentID],
             sourceCount: 1,
             sourceTitles: ["Content \(contentID)"],
+            subtitle: nil,
+            artworkUrl: nil,
             durationSeconds: nil,
             audioUrl: nil,
             streamUrl: nil,

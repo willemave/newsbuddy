@@ -175,6 +175,8 @@ final class KnowledgeTimelineItemTests: XCTestCase {
             status: .completed,
             title: "Narration \(id)",
             sourceContentId: nil,
+            subtitle: nil,
+            artworkUrl: nil,
             durationSeconds: nil,
             audioUrl: nil,
             streamUrl: nil,

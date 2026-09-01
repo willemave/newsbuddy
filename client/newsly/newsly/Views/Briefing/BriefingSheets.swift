@@ -131,7 +131,7 @@ struct BriefingSafariItem: Identifiable {
 }
 
 struct BriefingNarrationChapterSheetItem: Identifiable {
-    let lensKey: String
+    let programKey: String
     let episodeGroupID: String
 
     var id: String { episodeGroupID }
@@ -197,15 +197,18 @@ struct BriefingNarrationChapterSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Chapter \(index + 1)")
+                Text(chapter.title)
                     .font(
                         .appCallout.weight(index == selectedIndex ? .semibold : .regular)
                     )
                     .foregroundStyle(Color.onSurface)
 
-                Text(chapterDetail(chapter))
-                    .font(.appCaption)
-                    .foregroundStyle(Color.onSurfaceSecondary)
+                let detail = chapterDetail(chapter)
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.appCaption)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                }
             }
 
             Spacer(minLength: 8)
@@ -247,11 +250,12 @@ struct BriefingNarrationChapterSheet: View {
 
     private func chapterDetail(_ chapter: AudioEpisode) -> String {
         var parts: [String] = []
+        if let subtitle = chapter.subtitle, !subtitle.isEmpty {
+            parts.append(subtitle)
+        }
         if let duration = chapter.durationSeconds, duration > 0 {
             parts.append("~\(max(1, Int((Double(duration) / 60).rounded()))) min")
         }
-        let sourceNoun = chapter.sourceCount == 1 ? "source" : "sources"
-        parts.append("\(chapter.sourceCount) \(sourceNoun)")
         if chapter.isGenerating {
             parts.append("preparing")
         } else if chapter.isFailed {
@@ -261,6 +265,8 @@ struct BriefingNarrationChapterSheet: View {
     }
 
     private func chapterAccessibilityLabel(_ chapter: AudioEpisode, index: Int) -> String {
-        "Chapter \(index + 1) of \(narration.chapters.count), \(chapterDetail(chapter))"
+        let detail = chapterDetail(chapter)
+        let detailSuffix = detail.isEmpty ? "" : ", \(detail)"
+        return "Chapter \(index + 1) of \(narration.chapters.count), \(chapter.title)\(detailSuffix)"
     }
 }

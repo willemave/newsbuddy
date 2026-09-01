@@ -684,6 +684,12 @@ enum APIBriefingTier: String, Codable, CaseIterable {
     case news = "news"
 }
 
+enum APIBriefingNarrationScope: String, Codable, CaseIterable {
+    case article_tier = "article_tier"
+    case podcast_tier = "podcast_tier"
+    case news_program = "news_program"
+}
+
 enum APIBriefingFirstRunPhase: String, Codable, CaseIterable {
     case active = "active"
     case ready = "ready"

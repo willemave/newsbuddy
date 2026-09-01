@@ -25,6 +25,9 @@ protocol BriefingNarrationPlaybackControlling: AnyObject {
     func playStreamingNarration(
         for target: NarrationTarget,
         rate: Float,
+        metadata: NarrationPlaybackMetadata?,
+        remotePrevious: (@MainActor () -> Void)?,
+        remoteNext: (@MainActor () -> Void)?,
         onFinished: NarrationPlaybackFinishedHandler?,
         fetchStreamResource: () async throws -> AuthorizedMediaResource
     ) async throws
@@ -188,9 +191,42 @@ final class BriefingNarrationController {
         do {
             let episode = try await prepareNarrationChapter(at: chapterIndex, for: lensKey)
             guard self.playbackIntentID == playbackIntentID else { return }
+            guard let narration = narration(for: lensKey),
+                  narration.chapters.indices.contains(chapterIndex) else { return }
+            let metadata = NarrationPlaybackMetadata(
+                title: episode.title,
+                collectionTitle: narration.collectionTitle,
+                subtitle: episode.subtitle,
+                artworkURL: ServerImageURL.resolve(episode.artworkUrl),
+                chapterIndex: chapterIndex,
+                chapterCount: narration.chapters.count
+            )
+            let remotePrevious: (@MainActor () -> Void)?
+            if chapterIndex > 0 {
+                remotePrevious = { [weak self] in
+                    Task<Void, Never> { @MainActor [weak self] in
+                        await self?.playChapter(at: chapterIndex - 1, for: lensKey)
+                    }
+                }
+            } else {
+                remotePrevious = nil
+            }
+            let remoteNext: (@MainActor () -> Void)?
+            if narration.chapters.indices.contains(chapterIndex + 1) {
+                remoteNext = { [weak self] in
+                    Task<Void, Never> { @MainActor [weak self] in
+                        await self?.playChapter(at: chapterIndex + 1, for: lensKey)
+                    }
+                }
+            } else {
+                remoteNext = nil
+            }
             try await playbackService.playStreamingNarration(
                 for: .audioEpisode(episode.id),
                 rate: playbackService.playbackRate,
+                metadata: metadata,
+                remotePrevious: remotePrevious,
+                remoteNext: remoteNext,
                 onFinished: { [weak self] finishedTarget in
                     Task { @MainActor [weak self] in
                         await self?.advanceNarration(
@@ -251,7 +287,7 @@ final class BriefingNarrationController {
         updateSession(for: lensKey) { $0.selectedChapterIndex = chapterIndex }
 
         if currentNarration.chapters[chapterIndex].isFailed {
-            currentNarration = try await briefingService.requestNarration(lensKey: lensKey)
+            currentNarration = try await briefingService.requestNarration(programKey: lensKey)
             try Task.checkCancellation()
             storeNarration(currentNarration, for: lensKey)
         }
@@ -358,7 +394,7 @@ final class BriefingNarrationController {
             }
 
             if current?.isGenerating != true {
-                current = try await briefingService.requestNarration(lensKey: lensKey)
+                current = try await briefingService.requestNarration(programKey: lensKey)
                 try Task.checkCancellation()
             }
 

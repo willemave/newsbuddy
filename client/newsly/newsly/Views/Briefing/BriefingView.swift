@@ -158,16 +158,16 @@ struct BriefingView: View {
         }
         .sensoryFeedback(.success, trigger: markAllReadFeedbackTrigger)
         .sheet(item: $activeNarrationChapters) { item in
-            if let narration = narrationController.narration(for: item.lensKey) {
+            if let narration = narrationController.narration(for: item.programKey) {
                 BriefingNarrationChapterSheet(
                     narration: narration,
-                    selectedIndex: narrationController.narrationChapterIndex(for: item.lensKey),
-                    isPreparing: narrationController.session(for: item.lensKey).isPreparing,
+                    selectedIndex: narrationController.narrationChapterIndex(for: item.programKey),
+                    isPreparing: narrationController.session(for: item.programKey).isPreparing,
                     onSelect: { chapterIndex in
                         Task {
                             await narrationController.playChapter(
                                 at: chapterIndex,
-                                for: item.lensKey
+                                for: item.programKey
                             )
                         }
                     }
@@ -381,11 +381,12 @@ struct BriefingView: View {
     }
 
     private func listenAccessory(lensKey: String) -> some View {
-        BriefingListenButton(
-            isPreparing: narrationController.session(for: lensKey).isPreparing,
-            isPlaying: narrationController.isPlaying(lensKey: lensKey),
+        let programKey = viewModel.narrationProgramKey(for: lensKey)
+        return BriefingListenButton(
+            isPreparing: narrationController.session(for: programKey).isPreparing,
+            isPlaying: narrationController.isPlaying(lensKey: programKey),
             onToggle: {
-                Task { await narrationController.togglePlayback(for: lensKey) }
+                Task { await narrationController.togglePlayback(for: programKey) }
             }
         )
     }
@@ -394,11 +395,12 @@ struct BriefingView: View {
     /// lens is preparing or active, so the resting chrome stays quiet.
     @ViewBuilder
     private func listenPanel(lensKey: String) -> some View {
-        let session = narrationController.session(for: lensKey)
+        let programKey = viewModel.narrationProgramKey(for: lensKey)
+        let session = narrationController.session(for: programKey)
         let isPreparing = session.isPreparing
         let narration = session.manifest
         let chapterIndex = session.selectedChapterIndex
-        let target = narrationController.narrationEpisode(for: lensKey)
+        let target = narrationController.narrationEpisode(for: programKey)
             .map { NarrationTarget.audioEpisode($0.id) }
         let isActive = isPreparing || (target != nil && target == playbackService.speakingTarget)
 
@@ -423,29 +425,29 @@ struct BriefingView: View {
                                 Task {
                                     await narrationController.playChapter(
                                         at: chapterIndex - 1,
-                                        for: lensKey
+                                        for: programKey
                                     )
                                 }
                             },
                             onShowChapters: {
                                 activeNarrationChapters = BriefingNarrationChapterSheetItem(
-                                    lensKey: lensKey,
+                                    programKey: programKey,
                                     episodeGroupID: narration.episodeGroupId
                                 )
                                 Task {
-                                    await narrationController.refresh(for: lensKey)
+                                    await narrationController.refresh(for: programKey)
                                 }
                             },
                             onNext: {
                                 Task {
                                     await narrationController.playChapter(
                                         at: chapterIndex + 1,
-                                        for: lensKey
+                                        for: programKey
                                     )
                                 }
                             },
                             onTogglePlayback: {
-                                Task { await narrationController.togglePlayback(for: lensKey) }
+                                Task { await narrationController.togglePlayback(for: programKey) }
                             }
                         )
                     } else {
@@ -454,7 +456,7 @@ struct BriefingView: View {
                             target: target,
                             isPreparing: isPreparing,
                             onTogglePlayback: {
-                                Task { await narrationController.togglePlayback(for: lensKey) }
+                                Task { await narrationController.togglePlayback(for: programKey) }
                             }
                         )
                         .overlay {

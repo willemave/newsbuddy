@@ -33,7 +33,7 @@ protocol BriefingServicing: AnyObject {
         passageContext: String,
         results: [APIBriefingDigSearchResult]
     ) async throws -> APIBriefingDigSummarizeResponse
-    func requestNarration(lensKey: String) async throws -> BriefingNarration
+    func requestNarration(programKey: String) async throws -> BriefingNarration
     func fetchNarration(episodeGroupID: String) async throws -> BriefingNarration
 }
 
@@ -177,8 +177,14 @@ final class LiveBriefingService: BriefingServicing {
         )
     }
 
-    func requestNarration(lensKey: String) async throws -> BriefingNarration {
-        let body = try encoder.encode(APIBriefingNarrationRequest(lensKey: lensKey))
+    func requestNarration(programKey: String) async throws -> BriefingNarration {
+        let scope = BriefingNarrationProgram.scope(for: programKey)
+        let body = try encoder.encode(
+            APIBriefingNarrationRequest(
+                scope: scope,
+                lensKey: scope == nil ? programKey : nil
+            )
+        )
         return try await apiClient.request(
             APIEndpoints.briefingNarration,
             method: .post,

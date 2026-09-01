@@ -103,6 +103,8 @@ private func makeEpisode(
         sourceContentId: nil,
         sourceCount: 1,
         sourceTitles: ["Long report"],
+        subtitle: nil,
+        artworkUrl: nil,
         durationSeconds: nil,
         audioUrl: nil,
         streamUrl: nil,

@@ -132,6 +132,20 @@ final class BriefingViewModel {
         return lenses[selectedLensKey]
     }
 
+    func narrationProgramKey(for lensKey: String) -> String {
+        guard let tier = orderedLenses.first(where: { $0.key == lensKey })?.tier else {
+            return lensKey
+        }
+        switch tier {
+        case .audio:
+            return BriefingNarrationProgram.podcasts
+        case .longform:
+            return BriefingNarrationProgram.articles
+        case .news:
+            return BriefingNarrationProgram.news
+        }
+    }
+
     func noteFirstPassageVisible(for lensKey: String) {
         BriefingPerformance.signposter.emitEvent("first-passage-visible")
         briefingRefreshLogger.info(

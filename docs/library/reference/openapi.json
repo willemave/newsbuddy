@@ -2173,7 +2173,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/BriefingNarrationRequest"
+                "$ref": "#/components/schemas/LegacyBriefingNarrationRequest"
               }
             }
           },
@@ -12938,6 +12938,8 @@
           "source_content_ids",
           "source_count",
           "source_titles",
+          "subtitle",
+          "artwork_url",
           "read_on_play_content_ids",
           "read_on_play_news_item_ids",
           "duration_seconds",
@@ -12992,6 +12994,18 @@
             "items": {
               "type": "string"
             }
+          },
+          "subtitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artwork_url": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "read_on_play_content_ids": {
             "type": "array",
@@ -13631,12 +13645,22 @@
       },
       "BriefingNarrationRequest": {
         "type": "object",
-        "required": [
-          "lens_key"
-        ],
         "properties": {
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BriefingNarrationScope"
+              }
+            ]
+          },
           "lens_key": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "maxLength": 64,
             "minLength": 1
           }
@@ -13647,6 +13671,7 @@
         "required": [
           "episode_group_id",
           "lens_key",
+          "scope",
           "title",
           "status",
           "playable",
@@ -13663,6 +13688,16 @@
             "type": "string",
             "maxLength": 64,
             "minLength": 1
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BriefingNarrationScope"
+              }
+            ]
           },
           "title": {
             "type": "string",
@@ -13687,6 +13722,14 @@
             "minItems": 1
           }
         }
+      },
+      "BriefingNarrationScope": {
+        "type": "string",
+        "enum": [
+          "article_tier",
+          "podcast_tier",
+          "news_program"
+        ]
       },
       "BriefingParagraphDto": {
         "type": "object",
@@ -16630,6 +16673,19 @@
               "null"
             ],
             "format": "date-time"
+          }
+        }
+      },
+      "LegacyBriefingNarrationRequest": {
+        "type": "object",
+        "required": [
+          "lens_key"
+        ],
+        "properties": {
+          "lens_key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1
           }
         }
       },

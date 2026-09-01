@@ -278,7 +278,10 @@ final class BriefingNarrationControllerTests: XCTestCase {
     func testPlaybackCompletionAdvancesThroughControllerAndStopsAtEnd() async throws {
         let service = MockBriefingService()
         service.narrationManifest = makeBriefingNarration(
-            chapters: [makeAudioEpisode(id: 41), makeAudioEpisode(id: 42)]
+            chapters: [
+                makeAudioEpisode(id: 41, title: "First article", subtitle: "The Daily"),
+                makeAudioEpisode(id: 42, title: "Second article"),
+            ]
         )
         let playbackService = MockBriefingNarrationPlaybackService()
         let controller = makeController(
@@ -288,6 +291,19 @@ final class BriefingNarrationControllerTests: XCTestCase {
 
         await controller.playChapter(at: 0, for: "today")
         XCTAssertEqual(playbackService.playedTargets, [.audioEpisode(41)])
+        XCTAssertEqual(
+            playbackService.playedMetadata,
+            [
+                NarrationPlaybackMetadata(
+                    title: "First article",
+                    collectionTitle: "Today briefing",
+                    subtitle: "The Daily",
+                    artworkURL: nil,
+                    chapterIndex: 0,
+                    chapterCount: 2
+                )
+            ]
+        )
 
         playbackService.finishCurrent()
         await waitFor { playbackService.playedTargets.count == 2 }

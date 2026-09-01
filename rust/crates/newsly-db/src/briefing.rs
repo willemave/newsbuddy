@@ -1,11 +1,18 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fmt::Write as _;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
-use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
+use serde_json::{Value, json};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
+
+use crate::briefing_refresh::load_eligible_sources_for_keys;
+
+mod narration;
+
+use narration::{
+    document_narration_plans, episode_group_id, legacy_narration_plan, narration_chapter_plans,
+    source_snapshot, stable_hash,
+};
 
 const DEFAULT_MASTHEAD_TITLE: &str = "The Unread Times";
 const DEFAULT_MASTHEAD_DECK: &str = "A fresh edition will appear as unread sources arrive.";
@@ -180,6 +187,14 @@ pub enum PrepareNarrationOutcome {
     Empty,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BriefingNarrationSelection {
+    Lens(String),
+    ArticleTier,
+    PodcastTier,
+    NewsProgram,
+}
+
 #[derive(Debug, FromRow)]
 struct StateRow {
     version: i32,
@@ -190,6 +205,17 @@ struct StateRow {
 #[derive(Debug, FromRow)]
 struct SegmentRow {
     id: i64,
+    created_at: NaiveDateTime,
+    status: String,
+    narration_text: String,
+    blocks: Value,
+    source_keys: Value,
+}
+
+#[derive(Debug, FromRow)]
+struct SegmentWithLensRow {
+    id: i64,
+    lens_id: i64,
     created_at: NaiveDateTime,
     status: String,
     narration_text: String,
@@ -636,57 +662,141 @@ pub async fn record_briefing_dig_usage(
 pub async fn prepare_briefing_narration(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
-    lens_key: &str,
+    selection: &BriefingNarrationSelection,
     chaptered: bool,
 ) -> Result<PrepareNarrationOutcome, BriefingRepositoryError> {
-    let lens = sqlx::query_as::<_, BriefingLensProjection>(
+    let (lens_key, tier, program_key, program_title, scope) = match selection {
+        BriefingNarrationSelection::Lens(key) => {
+            (Some(key.as_str()), None, key.as_str(), "Briefing", None)
+        }
+        BriefingNarrationSelection::ArticleTier => (
+            None,
+            Some("longform"),
+            "articles",
+            "Articles",
+            Some("article_tier"),
+        ),
+        BriefingNarrationSelection::PodcastTier => (
+            None,
+            Some("audio"),
+            "podcasts",
+            "Podcasts",
+            Some("podcast_tier"),
+        ),
+        BriefingNarrationSelection::NewsProgram => (
+            None,
+            Some("news"),
+            "news",
+            "News Briefing",
+            Some("news_program"),
+        ),
+    };
+    let lenses = sqlx::query_as::<_, BriefingLensProjection>(
         r#"
         SELECT id::bigint AS id, key, tier, title, deck, position
         FROM briefing_lenses
-        WHERE user_id::bigint = $1 AND key = $2 AND status = 'active'
-        LIMIT 1
+        WHERE user_id::bigint = $1 AND status = 'active'
+          AND ($2::text IS NULL OR key = $2)
+          AND ($3::text IS NULL OR tier = $3)
+        ORDER BY position, id
         "#,
     )
     .bind(user_id)
     .bind(lens_key)
-    .fetch_optional(&mut **transaction)
+    .bind(tier)
+    .fetch_all(&mut **transaction)
     .await?;
-    let Some(lens) = lens else {
+    if lenses.is_empty() && lens_key.is_some() {
         return Ok(PrepareNarrationOutcome::LensNotFound);
-    };
-    let segments = sqlx::query_as::<_, SegmentRow>(
+    }
+    if lenses.is_empty() {
+        return Ok(PrepareNarrationOutcome::Empty);
+    }
+    let lens_ids = lenses.iter().map(|lens| lens.id).collect::<Vec<_>>();
+    let segment_rows = sqlx::query_as::<_, SegmentWithLensRow>(
         r#"
-        SELECT id::bigint AS id, created_at, status, narration_text,
-               blocks::jsonb AS blocks, source_keys::jsonb AS source_keys
+        SELECT id::bigint AS id, lens_id::bigint AS lens_id, created_at, status,
+               narration_text, blocks::jsonb AS blocks, source_keys::jsonb AS source_keys
         FROM briefing_segments
-        WHERE lens_id::bigint = $1 AND status IN ('active', 'degraded')
-        ORDER BY created_at DESC, id DESC
+        WHERE lens_id::bigint = ANY($1::bigint[]) AND status IN ('active', 'degraded')
+        ORDER BY lens_id, created_at DESC, id DESC
         "#,
     )
-    .bind(lens.id)
+    .bind(&lens_ids)
     .fetch_all(&mut **transaction)
-    .await?
-    .into_iter()
-    .map(segment_from_row)
-    .collect::<Vec<_>>();
-    let plans = if chaptered {
-        narration_chapter_plans(&segments, 5 * 60)
+    .await?;
+    let mut segments_by_lens = HashMap::<i64, Vec<BriefingSegmentProjection>>::new();
+    for row in segment_rows {
+        segments_by_lens
+            .entry(row.lens_id)
+            .or_default()
+            .push(segment_from_parts(
+                row.id,
+                row.created_at,
+                row.status,
+                row.narration_text,
+                row.blocks,
+                &row.source_keys,
+            ));
+    }
+    let ordered_segments = lenses
+        .iter()
+        .flat_map(|lens| segments_by_lens.remove(&lens.id).unwrap_or_default())
+        .collect::<Vec<_>>();
+    let source_keys = dedupe_source_keys(
+        ordered_segments
+            .iter()
+            .flat_map(|segment| &segment.source_keys),
+    );
+    let sources = load_eligible_sources_for_keys(transaction, user_id, &source_keys).await?;
+    let mut plans = if !chaptered {
+        legacy_narration_plan(&ordered_segments)
+    } else if scope == Some("article_tier") || scope == Some("podcast_tier") {
+        document_narration_plans(&ordered_segments)
     } else {
-        legacy_narration_plan(&segments)
+        narration_chapter_plans(&ordered_segments, 5 * 60)
     };
+    for plan in &mut plans {
+        plan.source_keys.retain(|key| sources.contains_key(key));
+    }
+    plans.retain(|plan| !plan.source_keys.is_empty());
     if plans.is_empty() {
         return Ok(PrepareNarrationOutcome::Empty);
     }
-    let prompt_version = if chaptered { 3 } else { 2 };
-    let episode_group_id = chaptered.then(|| episode_group_id(&lens, &plans));
+    let prompt_version = if scope.is_some() {
+        4
+    } else if chaptered {
+        3
+    } else {
+        2
+    };
+    let first_lens = &lenses[0];
+    let display_title = if scope.is_some() {
+        program_title.to_owned()
+    } else {
+        first_lens.title.clone()
+    };
+    let episode_group_id = chaptered.then(|| {
+        episode_group_id(
+            program_key,
+            &display_title,
+            scope,
+            prompt_version,
+            &plans,
+            &sources,
+        )
+    });
     let chapter_count = plans.len();
     let mut episodes = Vec::with_capacity(chapter_count);
     for plan in plans {
         let snapshot = source_snapshot(
-            &lens,
+            program_key,
+            &display_title,
+            scope,
             episode_group_id.as_deref(),
             chapter_count,
             &plan,
+            &sources,
             chaptered,
         );
         let input_hash = if let Some(group_id) = &episode_group_id {
@@ -702,10 +812,18 @@ pub async fn prepare_briefing_narration(
                 "source_snapshot": snapshot,
             }))
         };
-        let title = if chaptered {
-            format!("{} briefing — Chapter {}", lens.title, plan.index + 1)
+        let title = if scope == Some("article_tier") || scope == Some("podcast_tier") {
+            plan.source_keys
+                .first()
+                .and_then(|key| sources.get(key))
+                .map_or_else(
+                    || format!("Chapter {}", plan.index + 1),
+                    |source| source.title.clone(),
+                )
+        } else if chaptered {
+            format!("{} — Chapter {}", display_title, plan.index + 1)
         } else {
-            format!("{} briefing", lens.title)
+            format!("{} briefing", first_lens.title)
         };
         let estimated_duration = if chaptered {
             plan.duration_seconds
@@ -715,11 +833,15 @@ pub async fn prepare_briefing_narration(
                 i32::try_from(plan.narration_text.len() / 14).unwrap_or(i32::MAX),
             )
         };
-        let script = json!({
-            "title": title,
-            "estimated_duration_seconds": estimated_duration,
-            "turns": [{"speaker": "host", "text": plan.narration_text}],
+        let script = scope.is_none().then(|| {
+            json!({
+                "title": title,
+                "estimated_duration_seconds": estimated_duration,
+                "turns": [{"speaker": "host", "text": plan.narration_text}],
+            })
         });
+        let script_text = scope.is_none().then_some(plan.narration_text.as_str());
+        let model = scope.is_none().then_some("deterministic");
         let row = sqlx::query_as::<_, AudioEpisodeRow>(
             r#"
             INSERT INTO audio_episodes (
@@ -730,7 +852,7 @@ pub async fn prepare_briefing_narration(
             ) VALUES (
                 $1::bigint::integer, 'briefing_narration', 'pending', $2, $3,
                 $4, $5, '[]'::jsonb, $6::jsonb, $7::jsonb, $8, $9,
-                'deterministic', 'audio/mpeg', $10, FALSE,
+                $10, 'audio/mpeg', $11, FALSE,
                 timezone('UTC', now()), timezone('UTC', now())
             )
             ON CONFLICT (user_id, kind, input_hash) DO UPDATE SET
@@ -739,10 +861,13 @@ pub async fn prepare_briefing_narration(
                 chapter_index = EXCLUDED.chapter_index,
                 source_item_ids = EXCLUDED.source_item_ids,
                 source_snapshot = EXCLUDED.source_snapshot,
-                script = EXCLUDED.script,
-                script_text = EXCLUDED.script_text,
+                script = CASE WHEN audio_episodes.status = 'completed' THEN audio_episodes.script
+                              ELSE EXCLUDED.script END,
+                script_text = CASE WHEN audio_episodes.status = 'completed' THEN audio_episodes.script_text
+                                   ELSE EXCLUDED.script_text END,
                 prompt_version = EXCLUDED.prompt_version,
-                model = EXCLUDED.model,
+                model = CASE WHEN audio_episodes.status = 'completed' THEN audio_episodes.model
+                             ELSE EXCLUDED.model END,
                 status = CASE WHEN audio_episodes.status = 'failed' THEN 'pending'
                               ELSE audio_episodes.status END,
                 error_message = CASE WHEN audio_episodes.status = 'failed' THEN NULL
@@ -774,8 +899,9 @@ pub async fn prepare_briefing_narration(
         .bind(chaptered.then_some(plan.index))
         .bind(snapshot)
         .bind(script)
-        .bind(&plan.narration_text)
+        .bind(script_text)
         .bind(prompt_version)
+        .bind(model)
         .bind(chaptered.then_some(plan.duration_seconds))
         .fetch_one(&mut **transaction)
         .await?;
@@ -1279,158 +1405,32 @@ async fn mark_sources_locked(
     })
 }
 
-#[derive(Debug, Clone)]
-struct NarrationPlan {
-    index: i32,
-    segment_ids: Vec<i64>,
-    source_keys: Vec<String>,
-    narration_text: String,
-    duration_seconds: i32,
-}
-
-fn narration_chapter_plans(
-    segments: &[BriefingSegmentProjection],
-    target_seconds: i32,
-) -> Vec<NarrationPlan> {
-    let speakable = segments
-        .iter()
-        .filter(|segment| !segment.narration_text.trim().is_empty())
-        .collect::<Vec<_>>();
-    let mut groups = Vec::<Vec<&BriefingSegmentProjection>>::new();
-    let mut current = Vec::new();
-    let mut current_duration = 0_i32;
-    for segment in speakable {
-        let duration = estimate_duration_seconds(&segment.narration_text).max(1);
-        let combined = current_duration.saturating_add(duration);
-        if !current.is_empty()
-            && (target_seconds - current_duration).abs() < (target_seconds - combined).abs()
-        {
-            groups.push(current);
-            current = vec![segment];
-            current_duration = duration;
-        } else {
-            current.push(segment);
-            current_duration = combined;
-        }
-    }
-    if !current.is_empty() {
-        groups.push(current);
-    }
-    groups
-        .into_iter()
-        .enumerate()
-        .map(|(index, group)| plan_from_segments(i32::try_from(index).unwrap_or(i32::MAX), &group))
-        .collect()
-}
-
-fn legacy_narration_plan(segments: &[BriefingSegmentProjection]) -> Vec<NarrationPlan> {
-    let speakable = segments
-        .iter()
-        .filter(|segment| !segment.narration_text.trim().is_empty())
-        .collect::<Vec<_>>();
-    if speakable.is_empty() {
-        Vec::new()
-    } else {
-        vec![plan_from_segments(0, &speakable)]
-    }
-}
-
-fn plan_from_segments(index: i32, segments: &[&BriefingSegmentProjection]) -> NarrationPlan {
-    let narration_text = segments
-        .iter()
-        .map(|segment| segment.narration_text.trim())
-        .filter(|text| !text.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    NarrationPlan {
-        index,
-        segment_ids: segments.iter().map(|segment| segment.id).collect(),
-        source_keys: dedupe_source_keys(segments.iter().flat_map(|segment| &segment.source_keys)),
-        duration_seconds: estimate_duration_seconds(&narration_text).max(1),
-        narration_text,
-    }
-}
-
-fn source_snapshot(
-    lens: &BriefingLensProjection,
-    episode_group_id: Option<&str>,
-    chapter_count: usize,
-    plan: &NarrationPlan,
-    chaptered: bool,
-) -> Value {
-    let (content_ids, news_item_ids) = parse_source_ids(&plan.source_keys);
-    let mut snapshot = Map::from_iter([
-        (
-            "kind".to_owned(),
-            Value::String(BRIEFING_NARRATION_KIND.to_owned()),
-        ),
-        ("lens_key".to_owned(), Value::String(lens.key.clone())),
-        ("lens_title".to_owned(), Value::String(lens.title.clone())),
-        ("source_count".to_owned(), json!(plan.source_keys.len())),
-        ("segment_ids".to_owned(), json!(plan.segment_ids)),
-        ("source_keys".to_owned(), json!(plan.source_keys)),
-        (
-            "read_on_play".to_owned(),
-            json!({"content_ids": content_ids, "news_item_ids": news_item_ids}),
-        ),
-        (
-            "script_text".to_owned(),
-            Value::String(plan.narration_text.clone()),
-        ),
-    ]);
-    if chaptered {
-        snapshot.insert(
-            "episode_group_id".to_owned(),
-            Value::String(episode_group_id.unwrap_or_default().to_owned()),
-        );
-        snapshot.insert("chapter_index".to_owned(), json!(plan.index));
-        snapshot.insert("chapter_count".to_owned(), json!(chapter_count));
-    }
-    Value::Object(snapshot)
-}
-
-fn episode_group_id(lens: &BriefingLensProjection, plans: &[NarrationPlan]) -> String {
-    stable_hash(&json!({
-        "prompt_version": 3,
-        "kind": BRIEFING_NARRATION_KIND,
-        "lens_key": lens.key,
-        "lens_title": lens.title,
-        "chapters": plans.iter().map(|plan| json!({
-            "chapter_index": plan.index,
-            "segment_ids": plan.segment_ids,
-            "source_keys": plan.source_keys,
-            "script_text": plan.narration_text,
-        })).collect::<Vec<_>>(),
-    }))
-}
-
-fn estimate_duration_seconds(text: &str) -> i32 {
-    let words = text.split_whitespace().count();
-    if words == 0 {
-        return 0;
-    }
-    let seconds = words.saturating_mul(60).div_ceil(145);
-    i32::try_from(seconds).unwrap_or(i32::MAX)
-}
-
-fn stable_hash(value: &Value) -> String {
-    let encoded = serde_json::to_vec(value).expect("JSON values always serialize");
-    let digest = Sha256::digest(encoded);
-    let mut encoded_digest = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        write!(&mut encoded_digest, "{byte:02x}").expect("writing to a String cannot fail");
-    }
-    encoded_digest
-}
-
 fn segment_from_row(row: SegmentRow) -> BriefingSegmentProjection {
+    segment_from_parts(
+        row.id,
+        row.created_at,
+        row.status,
+        row.narration_text,
+        row.blocks,
+        &row.source_keys,
+    )
+}
+
+fn segment_from_parts(
+    id: i64,
+    created_at: NaiveDateTime,
+    status: String,
+    narration_text: String,
+    blocks: Value,
+    source_keys: &Value,
+) -> BriefingSegmentProjection {
     BriefingSegmentProjection {
-        id: row.id,
-        created_at: row.created_at.and_utc(),
-        status: row.status,
-        narration_text: row.narration_text,
-        blocks: row.blocks,
-        source_keys: json_string_array(&row.source_keys),
+        id,
+        created_at: created_at.and_utc(),
+        status,
+        narration_text,
+        blocks,
+        source_keys: json_string_array(source_keys),
     }
 }
 

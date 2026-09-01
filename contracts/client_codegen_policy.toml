@@ -130,6 +130,11 @@ targets = ["app_swift"]
 open = false
 
 [[enums]]
+schema = "BriefingNarrationScope"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
 schema = "BriefingFirstRunPhase"
 targets = ["app_swift"]
 open = false
@@ -438,6 +443,9 @@ schema = "BriefingDigSummarizeResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "BriefingNarrationRequest"
+targets = ["app_swift"]
+[[models]]
+schema = "LegacyBriefingNarrationRequest"
 targets = ["app_swift"]
 [[models]]
 schema = "BriefingNarrationResponse"
