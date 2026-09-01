@@ -12,14 +12,14 @@ use reqwest::Url;
 use rig_core::schemars::{JsonSchema, schema_for};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::Map;
 use thiserror::Error;
 
 use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
+#[path = "onboarding_model.rs"]
+mod model_config;
+use model_config::{AUDIO_PLAN_SYSTEM_PROMPT, ONBOARDING_MODEL, onboarding_provider_parameters};
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
-const ONBOARDING_MODEL: &str = "openrouter:deepseek/deepseek-v4-flash-0731";
-const ONBOARDING_PROVIDER: &str = "wafer/fast";
 const EXA_MAX_CONCURRENCY: usize = 8;
 const PROFILE_TIMEOUT: Duration = Duration::from_secs(8);
 const VOICE_TIMEOUT: Duration = Duration::from_secs(6);
@@ -40,7 +40,6 @@ const EXCLUDED_DOMAINS: [&str; 8] = [
 
 const PROFILE_SYSTEM_PROMPT: &str = "You are building a short onboarding profile for a user. Use the provided interests and web snippets to infer a concise profile summary and 3-6 topical interests. Do not invent interests that contradict the user-provided topics. Return structured output only.";
 const VOICE_SYSTEM_PROMPT: &str = "You extract onboarding fields from a transcript. Return a first name if explicitly stated and a concise list of interest topics. Do not guess missing information. Return structured output only.";
-const AUDIO_PLAN_SYSTEM_PROMPT: &str = "You design onboarding discovery lanes based on a user's spoken interests. Return a concise topic_summary, 3-6 inferred_topics, and 3-5 lanes. Each lane must include name, goal, target (feeds, podcasts, reddit), and 2-4 web search queries. Queries must be varied and specific: each query should be a compact search phrase (5-10 words) with concrete keywords tied to the lane goal, and avoid repeating the same wording pattern. Include at least one reddit lane. Return structured output only.";
 const FAST_DISCOVER_SYSTEM_PROMPT: &str = "You are selecting high-quality sources for a new user. Use only the profile summary, topics, and search snippets to suggest Substack/Atom feeds, podcast RSS feeds, and relevant subreddits. Every suggestion must be grounded in web_results; do not use static defaults, curated backups, or general prior knowledge as source candidates. Podcast suggestions must come from web_results only. If web_results contain no suitable sources for a category, return zero suggestions for that category. Every suggestion must include a concise, specific rationale sentence. Prefer sources with clear RSS URLs when possible. For feed-like sources, always provide a best-effort feed_url when available. If uncertain, include candidate_feed_url and set is_likely_feed plus feed_confidence (0-1). For reddit entries, include subreddit. Return structured output only.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,10 +167,7 @@ impl OnboardingGateway {
             ))
             .build()?;
         let exa_search_url = exa_search_url()?;
-        let policy = OpenRouterPrivacyPolicy {
-            provider_order: vec![ONBOARDING_PROVIDER.to_owned()],
-            ..OpenRouterPrivacyPolicy::default()
-        };
+        let policy = OpenRouterPrivacyPolicy::default();
         let engine = RigAgentEngine::new(
             ProviderCredentials {
                 openai: secret_env("OPENAI_API_KEY"),
@@ -474,7 +470,7 @@ impl OnboardingGateway {
                         output_token_limit: Some(1_500),
                         deadline,
                     },
-                    provider_parameters: Map::new(),
+                    provider_parameters: onboarding_provider_parameters(),
                 },
                 Arc::new(NoTools),
                 Arc::new(NoEvents),
@@ -1117,3 +1113,7 @@ pub enum OnboardingGatewayError {
     #[error("onboarding model returned invalid structured output: {0}")]
     InvalidStructuredOutput(String),
 }
+
+#[cfg(test)]
+#[path = "onboarding_flow_tests.rs"]
+mod tests;

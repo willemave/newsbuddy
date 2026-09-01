@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-01 — `main` — Route onboarding through GPT-5.6 Luna Priority
+
+- **Status:** Complete locally; not pushed or deployed.
+- **Scope:** Rust onboarding provider routing, low-reasoning priority request settings, audio-lane discovery prompt, and focused regression coverage.
+- **Decisions:** Apply the selected Luna route consistently to every onboarding LLM stage; preserve the existing structured contracts, timeouts, deterministic fallback, and grounded final-selection behavior. Use the evaluated source-diversity prompt for audio planning.
+- **Changes:** Replaced the pinned DeepSeek/Wafer model with `openai:gpt-5.6-luna`; added `reasoning.effort=low`, `service_tier=priority`, and `store=false`; removed the obsolete onboarding-specific Wafer pin; moved static model/prompt settings into a small sibling module to preserve the file-size ratchet; and added prompt/routing plus opt-in live-canary coverage.
+- **Validation:** All 43 non-live provider tests passed with one live canary ignored by default; warning-denied provider Clippy, Rust formatting, the 696-file module-size guard, stale onboarding DeepSeek/Wafer searches, and `git diff --check` passed. The integrated `main` live Luna Priority structured-output canary passed without deterministic fallback in 3.32 seconds.
+- **Remaining:** Deployment is intentionally out of scope until explicitly requested.
+- **Commits:** This commit.
+
 ### 2026-08-31 — `main` — Install architecture guard tools in Rust CI
 
 - **Status:** Complete locally; queued for the replacement release.
