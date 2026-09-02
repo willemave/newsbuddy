@@ -41,13 +41,12 @@ pub(crate) async fn main() -> Result<()> {
         .context("onboarding-discovery provider initialization failed")?;
     let feed_validator = FeedValidator::new(
         optional_secret_alias(&["LLM_TASK_SANDBOX_E2B_API_KEY", "E2B_API_KEY"]),
-        &env::var("NEWSLY_AGENT_VM_TEMPLATE_ID").unwrap_or_else(|_| "newsly-agent".to_owned()),
+        &env::var("NEWSLY_TASK_SANDBOX_TEMPLATE_ID").unwrap_or_else(|_| "newsly-agent".to_owned()),
         Duration::from_secs(parse_positive_u64("LLM_TASK_SANDBOX_TIMEOUT_SECONDS", 300)?),
     )
     .context("onboarding-discovery feed validator initialization failed")?;
     let services = Arc::new(OnboardingDiscoveryWorkerServices::new(
         database.pool().clone(),
-        queue.clone(),
         provider,
         feed_validator,
         config.max_retries,

@@ -7,23 +7,34 @@ use newsly_agent_runtime::{
     AgentEvent, AgentEventSink, AgentRuntimeError, BoxToolFuture, ToolCall, ToolExecutor,
     ToolOutput,
 };
+use newsly_db::search_agent_knowledge;
 use newsly_e2b::{
-    BoxByteStream, CommandRequest, DirectE2bProvider, E2bError, ExecutionTag, OutputLimits,
-    SandboxHandle, SandboxPath, SandboxProvider, SandboxUser, WorkspacePath,
+    BoxByteStream, CommandRequest, DirectE2bProvider, E2bError, ExecutionTag, ExitStatus,
+    OutputLimits, SandboxHandle, SandboxPath, SandboxProvider, SandboxUser, WorkspacePath,
 };
 use reqwest::Url;
 use schemars::{JsonSchema, schema_for};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::PgPool;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+
+use crate::content_body_store::ContentBodyStore;
+use crate::knowledge_tools::{
+    KnowledgeReferenceInput, ReadKnowledgeInput, authorized_knowledge_items, knowledge_body_prefix,
+    read_authorized_knowledge_item, sha256_hex,
+};
 
 const DEFAULT_FILE_LIMIT: usize = 100_000;
 const MAX_FILE_LIMIT: usize = 1_000_000;
 const MAX_WRITE_BYTES: usize = 1_000_000;
 const MAX_SEARCH_QUERY_CHARS: usize = 2_000;
 const MAX_SEARCH_RESULTS: usize = 8;
+const MAX_KNOWLEDGE_WRITE_ITEMS: usize = 20;
+const MAX_KNOWLEDGE_WRITE_ITEM_BYTES: usize = 200_000;
+const MAX_KNOWLEDGE_WRITE_TOTAL_BYTES: usize = 4_000_000;
 const EXCLUDED_SEARCH_DOMAINS: [&str; 8] = [
     "facebook.com",
     "linkedin.com",
@@ -36,7 +47,7 @@ const EXCLUDED_SEARCH_DOMAINS: [&str; 8] = [
 ];
 
 #[derive(Debug, Clone)]
-pub(crate) struct ShareActionToolExecutor {
+pub(crate) struct TaskToolExecutor {
     provider: Arc<DirectE2bProvider>,
     sandbox: SandboxHandle,
     workspace_root: SandboxPath,
@@ -45,9 +56,13 @@ pub(crate) struct ShareActionToolExecutor {
     max_output_chars: usize,
     exa: ExaSearchClient,
     sandbox_user: SandboxUser,
+    pool: PgPool,
+    user_id: i64,
+    body_store: ContentBodyStore,
 }
 
-impl ShareActionToolExecutor {
+impl TaskToolExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         provider: Arc<DirectE2bProvider>,
         sandbox: SandboxHandle,
@@ -56,10 +71,13 @@ impl ShareActionToolExecutor {
         cancellation: CancellationToken,
         max_output_chars: usize,
         exa: ExaSearchClient,
+        pool: PgPool,
+        user_id: i64,
+        body_store: ContentBodyStore,
     ) -> Result<Self, E2bError> {
-        if max_output_chars == 0 {
+        if max_output_chars == 0 || user_id <= 0 {
             return Err(E2bError::InvalidInput(
-                "Share Action output limit must be positive".to_owned(),
+                "task tool output limit and user id must be positive".to_owned(),
             ));
         }
         Ok(Self {
@@ -71,6 +89,9 @@ impl ShareActionToolExecutor {
             max_output_chars,
             exa,
             sandbox_user: SandboxUser::parse("user")?,
+            pool,
+            user_id,
+            body_store,
         })
     }
 
@@ -90,15 +111,27 @@ impl ShareActionToolExecutor {
             ),
             tool_definition::<ReadFileInput>(
                 "read_file",
-                "Read bounded UTF-8 text from a workspace-relative file or the read-only /data corpus.",
+                "Read bounded UTF-8 text from a workspace-relative file.",
             ),
             tool_definition::<ListFilesInput>(
                 "list_files",
-                "List files recursively below a workspace-relative directory or the read-only /data corpus.",
+                "List files recursively below a workspace-relative directory.",
             ),
             tool_definition::<WebSearchInput>(
                 "web_search",
                 "Search the public web and return bounded title, URL, and snippet records.",
+            ),
+            tool_definition::<SearchKnowledgeInput>(
+                "search_knowledge",
+                "Search the user's canonical Knowledge library and return typed references.",
+            ),
+            tool_definition::<ReadKnowledgeInput>(
+                "read_knowledge_item",
+                "Read one authorized Knowledge item through the host without using the sandbox.",
+            ),
+            tool_definition::<WriteKnowledgeInput>(
+                "write_knowledge_items",
+                "Copy 1-20 authorized Knowledge items into input/knowledge in this task workspace.",
             ),
         ]
     }
@@ -309,8 +342,133 @@ impl ShareActionToolExecutor {
                     is_error: false,
                 })
             }
+            "search_knowledge" => {
+                let input = parse_arguments::<SearchKnowledgeInput>(call)?;
+                let limit = i64::try_from(input.limit.unwrap_or(5).clamp(1, 10)).unwrap_or(10);
+                let results =
+                    search_agent_knowledge(&self.pool, self.user_id, input.query.trim(), limit)
+                        .await
+                        .map_err(tool_error)?;
+                Ok(ToolOutput {
+                    content: json!({"ok": true, "results": results}),
+                    is_error: false,
+                })
+            }
+            "read_knowledge_item" => {
+                let input = parse_arguments::<ReadKnowledgeInput>(call)?;
+                let output = read_authorized_knowledge_item(
+                    &self.pool,
+                    self.user_id,
+                    &self.body_store,
+                    input,
+                )
+                .await
+                .map_err(tool_error)?;
+                let mut content = serde_json::to_value(output).map_err(tool_error)?;
+                content
+                    .as_object_mut()
+                    .expect("serialized Knowledge output is an object")
+                    .insert("ok".to_owned(), serde_json::Value::Bool(true));
+                Ok(ToolOutput {
+                    content,
+                    is_error: false,
+                })
+            }
+            "write_knowledge_items" => {
+                let input = parse_arguments::<WriteKnowledgeInput>(call)?;
+                if input.references.is_empty() || input.references.len() > MAX_KNOWLEDGE_WRITE_ITEMS
+                {
+                    return Err(AgentRuntimeError::Tool(
+                        "write_knowledge_items requires 1-20 references".to_owned(),
+                    ));
+                }
+                let directory = input
+                    .directory
+                    .unwrap_or_else(|| "input/knowledge".to_owned());
+                validate_knowledge_directory(&directory)?;
+                let items = authorized_knowledge_items(&self.pool, self.user_id, &input.references)
+                    .await
+                    .map_err(tool_error)?;
+                let staging_directory =
+                    format!("{directory}.staging-{}", uuid::Uuid::new_v4().simple());
+                let mut prepared = Vec::with_capacity(items.len());
+                let mut total_bytes = 0usize;
+                for item in items {
+                    let (text, truncated) = knowledge_body_prefix(
+                        &self.body_store,
+                        &item,
+                        MAX_KNOWLEDGE_WRITE_ITEM_BYTES,
+                    )
+                    .await
+                    .map_err(tool_error)?;
+                    total_bytes = total_bytes.saturating_add(text.len());
+                    if total_bytes > MAX_KNOWLEDGE_WRITE_TOTAL_BYTES {
+                        return Err(AgentRuntimeError::Tool(format!(
+                            "Knowledge selection exceeds the {MAX_KNOWLEDGE_WRITE_TOTAL_BYTES}-byte aggregate limit"
+                        )));
+                    }
+                    let checksum = sha256_hex(text.as_bytes());
+                    prepared.push((item, text, truncated, checksum));
+                }
+                let mut manifest = Vec::with_capacity(prepared.len());
+                let mut paths = Vec::with_capacity(prepared.len());
+                for (index, (item, text, truncated, checksum)) in prepared.into_iter().enumerate() {
+                    let path = format!(
+                        "{staging_directory}/{:02}-content-{}.md",
+                        index + 1,
+                        item.content_id
+                    );
+                    let published_path = format!(
+                        "{directory}/{:02}-content-{}.md",
+                        index + 1,
+                        item.content_id
+                    );
+                    let byte_count = text.len();
+                    if let Err(error) = self.write_text(&path, text).await {
+                        self.remove_directory_best_effort(&staging_directory).await;
+                        return Err(error);
+                    }
+                    paths.push(published_path.clone());
+                    manifest.push(json!({
+                        "reference": {"kind": "content", "id": item.content_id},
+                        "title": item.title,
+                        "source_url": item.url,
+                        "checksum_sha256": checksum,
+                        "byte_count": byte_count,
+                        "truncated": truncated,
+                        "path": published_path,
+                    }));
+                }
+                let staging_manifest_path = format!("{staging_directory}/manifest.json");
+                let manifest_path = format!("{directory}/manifest.json");
+                if let Err(error) = self
+                    .write_text(
+                        &staging_manifest_path,
+                        serde_json::to_string_pretty(&json!({"version": 1, "items": manifest}))
+                            .map_err(tool_error)?,
+                    )
+                    .await
+                {
+                    self.remove_directory_best_effort(&staging_directory).await;
+                    return Err(error);
+                }
+                if let Err(error) = self.publish_directory(&staging_directory, &directory).await {
+                    self.remove_directory_best_effort(&staging_directory).await;
+                    return Err(error);
+                }
+                Ok(ToolOutput {
+                    content: json!({
+                        "ok": true,
+                        "paths": paths,
+                        "manifest_path": manifest_path,
+                        "item_count": paths.len(),
+                        "total_bytes": total_bytes,
+                    }),
+                    is_error: false,
+                })
+            }
             other => Err(AgentRuntimeError::Tool(format!(
-                "unsupported Share Action tool {other}"
+                "unsupported task tool {other}"
             ))),
         }
     }
@@ -332,8 +490,79 @@ impl ShareActionToolExecutor {
             self.remaining()?,
         );
         tokio::select! {
-            () = self.cancellation.cancelled() => Err(AgentRuntimeError::Tool("Share Action VM operation was cancelled".to_owned())),
+            () = self.cancellation.cancelled() => Err(AgentRuntimeError::Tool("task sandbox operation was cancelled".to_owned())),
             result = upload => result.map_err(tool_error),
+        }
+    }
+
+    async fn publish_directory(
+        &self,
+        staging: &str,
+        destination: &str,
+    ) -> Result<(), AgentRuntimeError> {
+        let staging = self.workspace_file(staging)?;
+        let destination = self.workspace_file(destination)?;
+        let timeout = Duration::from_secs(30);
+        let stream = self
+            .provider
+            .start_process(
+                &self.sandbox,
+                CommandRequest {
+                    command: "/bin/bash".to_owned(),
+                    args: vec![
+                        "-c".to_owned(),
+                        "test ! -e \"$2\" && /bin/mv -- \"$1\" \"$2\"".to_owned(),
+                        "newsly-publish-knowledge".to_owned(),
+                        staging.as_str().to_owned(),
+                        destination.as_str().to_owned(),
+                    ],
+                    env: BTreeMap::new(),
+                    cwd: Some(self.workspace_root.as_str().to_owned()),
+                    username: Some(self.sandbox_user.clone()),
+                    tag: ExecutionTag::new(),
+                    stdin_enabled: false,
+                    absolute_deadline: self.bounded_deadline(timeout)?,
+                    idle_timeout: timeout,
+                    output_limits: output_limits(4_000),
+                },
+                self.cancellation.child_token(),
+            )
+            .await
+            .map_err(tool_error)?;
+        let result = stream.collect_result().await.map_err(tool_error)?;
+        if result.status != ExitStatus::Exited || result.exit_code != 0 {
+            return Err(AgentRuntimeError::Tool(
+                "Knowledge output directory already exists or could not be published".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn remove_directory_best_effort(&self, relative: &str) {
+        let Ok(path) = self.workspace_file(relative) else {
+            return;
+        };
+        let Ok(deadline) = self.bounded_deadline(Duration::from_secs(15)) else {
+            return;
+        };
+        let request = CommandRequest {
+            command: "/bin/rm".to_owned(),
+            args: vec!["-rf".to_owned(), "--".to_owned(), path.as_str().to_owned()],
+            env: BTreeMap::new(),
+            cwd: Some(self.workspace_root.as_str().to_owned()),
+            username: Some(self.sandbox_user.clone()),
+            tag: ExecutionTag::new(),
+            stdin_enabled: false,
+            absolute_deadline: deadline,
+            idle_timeout: Duration::from_secs(15),
+            output_limits: output_limits(2_000),
+        };
+        if let Ok(stream) = self
+            .provider
+            .start_process(&self.sandbox, request, CancellationToken::new())
+            .await
+        {
+            let _ = stream.collect_result().await;
         }
     }
 
@@ -360,7 +589,7 @@ impl ShareActionToolExecutor {
             self.remaining()?,
         );
         let mut stream = tokio::select! {
-            () = self.cancellation.cancelled() => return Err(AgentRuntimeError::Tool("Share Action VM operation was cancelled".to_owned())),
+            () = self.cancellation.cancelled() => return Err(AgentRuntimeError::Tool("task sandbox operation was cancelled".to_owned())),
             result = download => result.map_err(tool_error)?,
         };
         let mut bytes = Vec::new();
@@ -390,11 +619,7 @@ impl ShareActionToolExecutor {
     }
 
     fn readable_file(&self, path: &str) -> Result<SandboxPath, AgentRuntimeError> {
-        let path = path.trim();
-        if path == "/data" || path.starts_with("/data/") {
-            return SandboxPath::parse(path.to_owned()).map_err(tool_error);
-        }
-        self.workspace_file(path)
+        self.workspace_file(path.trim())
     }
 
     fn bounded_deadline(&self, requested: Duration) -> Result<Instant, AgentRuntimeError> {
@@ -412,7 +637,7 @@ impl ShareActionToolExecutor {
     }
 }
 
-impl ToolExecutor for ShareActionToolExecutor {
+impl ToolExecutor for TaskToolExecutor {
     fn execute(&self, call: ToolCall, events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
         Box::pin(async move { self.execute_tool(&call, &events).await })
     }
@@ -561,6 +786,20 @@ struct WebSearchInput {
     category: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchKnowledgeInput {
+    query: String,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WriteKnowledgeInput {
+    references: Vec<KnowledgeReferenceInput>,
+    directory: Option<String>,
+}
+
 fn tool_definition<T: JsonSchema>(
     name: &str,
     description: &str,
@@ -605,4 +844,29 @@ fn nonempty(value: Option<String>) -> Option<String> {
         let trimmed = value.trim();
         (!trimmed.is_empty()).then(|| trimmed.chars().take(1_500).collect())
     })
+}
+
+fn validate_knowledge_directory(value: &str) -> Result<(), AgentRuntimeError> {
+    let path = WorkspacePath::parse(value.to_owned()).map_err(tool_error)?;
+    if path.as_str() != "input/knowledge" && !path.as_str().starts_with("input/knowledge/") {
+        return Err(AgentRuntimeError::Tool(
+            "Knowledge output directory must be input/knowledge or a child directory".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_knowledge_directory;
+
+    #[test]
+    fn knowledge_output_stays_below_the_canonical_task_directory() {
+        assert!(validate_knowledge_directory("input/knowledge").is_ok());
+        assert!(validate_knowledge_directory("input/knowledge/research").is_ok());
+        assert!(validate_knowledge_directory("input").is_err());
+        assert!(validate_knowledge_directory("input/knowledge-elsewhere").is_err());
+        assert!(validate_knowledge_directory("../input/knowledge").is_err());
+        assert!(validate_knowledge_directory("/data").is_err());
+    }
 }

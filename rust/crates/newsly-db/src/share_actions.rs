@@ -51,9 +51,7 @@ pub struct ShareActionPreparationDraft {
     pub allowed_actions: Vec<String>,
     pub tool_policy: Map<String, Value>,
     pub input: Map<String, Value>,
-    pub vm_namespace: String,
     pub workspace_path: String,
-    pub shared_workspace_path: String,
     pub prepare_shared_source: bool,
     pub deterministic_chat: bool,
 }
@@ -74,9 +72,7 @@ pub struct ShareActionAgentSnapshot {
     pub allowed_actions: Vec<String>,
     pub tool_policy: Map<String, Value>,
     pub input: Map<String, Value>,
-    pub vm_namespace: String,
     pub workspace_path: String,
-    pub shared_workspace_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,9 +138,7 @@ struct TaskRow {
     allowed_actions: Value,
     tool_policy: Value,
     input_json: Value,
-    vm_namespace: Option<String>,
     workspace_path: Option<String>,
-    shared_workspace_path: Option<String>,
     user_is_active: bool,
 }
 
@@ -224,16 +218,12 @@ pub async fn insert_share_action_task(
     sqlx::query(
         r#"
         UPDATE llm_tasks
-        SET vm_namespace = $2,
-            workspace_path = $3,
-            shared_workspace_path = $4
+        SET workspace_path = $2
         WHERE id::bigint = $1
         "#,
     )
     .bind(id)
-    .bind(format!("user:{}", input.user_id))
     .bind(format!("{root}/tasks/{id}"))
-    .bind(format!("{root}/users/{}/shared", input.user_id))
     .execute(&mut **transaction)
     .await?;
 
@@ -312,9 +302,7 @@ pub async fn begin_share_action_preparation(
         allowed_actions: json_strings(row.allowed_actions),
         tool_policy: json_object(row.tool_policy),
         input: json_object(row.input_json),
-        vm_namespace: required_text(row.vm_namespace, "vm_namespace")?,
         workspace_path: required_text(row.workspace_path, "workspace_path")?,
-        shared_workspace_path: required_text(row.shared_workspace_path, "shared_workspace_path")?,
         prepare_shared_source,
         deterministic_chat: row.mode == "chat",
     }))
@@ -379,9 +367,7 @@ pub async fn finish_share_action_preparation(
         allowed_actions: draft.allowed_actions,
         tool_policy: draft.tool_policy,
         input: task_input,
-        vm_namespace: draft.vm_namespace,
         workspace_path: draft.workspace_path,
-        shared_workspace_path: draft.shared_workspace_path,
     })
 }
 
@@ -920,8 +906,7 @@ async fn load_task_for_update(
         SELECT task.id::bigint, task.user_id::bigint, task.task_kind, task.mode,
                task.workflow_key,
                task.status, task.approval_policy, task.allowed_actions,
-               task.tool_policy, task.input_json, task.vm_namespace, task.workspace_path,
-               task.shared_workspace_path,
+               task.tool_policy, task.input_json, task.workspace_path,
                users.is_active AS user_is_active
         FROM llm_tasks AS task
         JOIN users ON users.id = task.user_id

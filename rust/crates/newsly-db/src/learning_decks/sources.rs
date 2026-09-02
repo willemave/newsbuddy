@@ -93,13 +93,11 @@ pub async fn find_visible_news_item_for_learning_deck(
 
 /// Converts a previously resolved Fast Read article URL to a saved content source.
 ///
-/// The caller must enqueue `PROCESS_CONTENT` when requested and enqueue the Knowledge corpus sync
-/// in the same transaction.
+/// The caller must enqueue `PROCESS_CONTENT` when requested in the same transaction.
 ///
 /// # Errors
 ///
-/// Returns [`LearningDeckRepositoryError`] when the source changed, persistence failed, or the
-/// Knowledge overlay could not be saved.
+/// Returns [`LearningDeckRepositoryError`] when the source changed or persistence failed.
 pub async fn convert_news_item_to_learning_deck_source(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
@@ -156,7 +154,6 @@ pub async fn convert_news_item_to_learning_deck_source(
     Ok(ConvertedNewsSource {
         source: content_source_from_row(&row),
         enqueue_process_content: inserted_id.is_some(),
-        enqueue_agent_data_sync: true,
     })
 }
 

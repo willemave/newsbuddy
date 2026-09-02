@@ -4,17 +4,16 @@ use std::sync::Arc;
 use newsly_db::{
     NewOnboardingSuggestion, OnboardingAttemptStatus, OnboardingTaskSnapshot,
     PrepareOnboardingTaskOutcome, complete_onboarding_discovery_task,
-    ensure_weekly_discovery_session, prepare_agent_data_sync_dedupe_key,
-    prepare_onboarding_discovery_task, settle_onboarding_discovery_attempt,
+    ensure_weekly_discovery_session, prepare_onboarding_discovery_task,
+    settle_onboarding_discovery_attempt,
 };
 use newsly_e2b::{FeedValidationError, FeedValidator};
 use newsly_providers::{
     OnboardingAudioLane, OnboardingDiscoverySeeds, OnboardingGateway, OnboardingLaneTarget,
     OnboardingSuggestionSeed,
 };
-use newsly_queue::{EnqueueRequest, OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
+use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::{
@@ -27,7 +26,6 @@ const MAX_SUGGESTIONS_PER_KIND: usize = 5;
 #[derive(Debug, Clone)]
 pub struct OnboardingDiscoveryWorkerServices {
     pool: PgPool,
-    queue: QueueKernel,
     provider: OnboardingGateway,
     feed_validator: FeedValidator,
     max_retries: i32,
@@ -36,14 +34,12 @@ pub struct OnboardingDiscoveryWorkerServices {
 impl OnboardingDiscoveryWorkerServices {
     pub const fn new(
         pool: PgPool,
-        queue: QueueKernel,
         provider: OnboardingGateway,
         feed_validator: FeedValidator,
         max_retries: i32,
     ) -> Self {
         Self {
             pool,
-            queue,
             provider,
             feed_validator,
             max_retries,
@@ -170,7 +166,6 @@ async fn execute_audio_discovery(
     HandlerExecution::with_finalizer(
         TaskResult::ok(),
         OnboardingSuccessFinalizer {
-            queue: services.queue.clone(),
             task_id: task.task_id,
             retry_count: task.retry_count,
             snapshot,
@@ -377,7 +372,6 @@ fn normalize_subreddits(
 
 #[derive(Debug)]
 struct OnboardingSuccessFinalizer {
-    queue: QueueKernel,
     task_id: i64,
     retry_count: i32,
     snapshot: OnboardingTaskSnapshot,
@@ -401,12 +395,7 @@ impl OnboardingSuccessFinalizer {
             return Ok(TaskFinalizerResult::Keep);
         }
         let user_id = self.snapshot.user_id;
-        if let Some(session) = ensure_weekly_discovery_session(transaction, user_id).await?
-            && session.changed
-        {
-            enqueue_weekly_session_sync(transaction, &self.queue, user_id, session.session_id)
-                .await?;
-        }
+        ensure_weekly_discovery_session(transaction, user_id).await?;
         Ok(TaskFinalizerResult::Keep)
     }
 }
@@ -449,36 +438,6 @@ impl TaskFinalizer for OnboardingFailureFinalizer {
             Ok(TaskFinalizerResult::Keep)
         })
     }
-}
-
-pub(crate) async fn enqueue_weekly_session_sync(
-    transaction: &mut Transaction<'static, Postgres>,
-    queue: &QueueKernel,
-    user_id: i64,
-    session_id: i64,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let payload = json!({
-        "user_id": user_id,
-        "content_ids": [],
-        "news_item_ids": [],
-        "chat_session_ids": [session_id],
-        "briefing_dates": [],
-    });
-    let digest = Sha256::digest(serde_json::to_vec(&payload)?);
-    let base_key = format!(
-        "agent-sync|user:{user_id}|payload:{}",
-        hex_prefix(&digest, 24)
-    );
-    let dedupe_key = prepare_agent_data_sync_dedupe_key(transaction, user_id, &base_key).await?;
-    let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-    request.payload = payload.as_object().cloned();
-    request.owner_user_id = Some(user_id);
-    request.dedupe = Some(true);
-    request.dedupe_key = Some(dedupe_key);
-    queue
-        .enqueue_many_in_transaction(transaction, vec![request])
-        .await?;
-    Ok(())
 }
 
 fn infer_feed_url(site_url: &str) -> Option<String> {
@@ -572,20 +531,6 @@ fn clean_text(value: &str, max_chars: usize) -> String {
         .chars()
         .take(max_chars)
         .collect()
-}
-
-fn hex_prefix(value: &[u8], length: usize) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(length);
-    for byte in value {
-        output.push(char::from(HEX[usize::from(byte >> 4)]));
-        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
-        if output.len() >= length {
-            output.truncate(length);
-            break;
-        }
-    }
-    output
 }
 
 #[cfg(test)]

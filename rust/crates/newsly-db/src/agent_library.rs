@@ -4,6 +4,16 @@ use sqlx::{FromRow, PgPool};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentKnowledgeItem {
+    pub content_id: i64,
+    pub title: String,
+    pub source: Option<String>,
+    pub url: String,
+    pub storage_key: Option<String>,
+    pub fallback_text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentLibraryBodyPointer {
     pub storage_key: String,
     pub updated_at: Option<DateTime<Utc>>,
@@ -158,10 +168,85 @@ pub async fn list_agent_library_content(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
+/// Reauthorizes and resolves a bounded set of canonical Knowledge items.
+///
+/// The returned values contain only copied scalars and immutable object keys. Callers must release
+/// PostgreSQL before reading the referenced objects.
+pub async fn find_agent_knowledge_items(
+    pool: &PgPool,
+    user_id: i64,
+    content_ids: &[i64],
+) -> Result<Vec<AgentKnowledgeItem>, AgentLibraryRepositoryError> {
+    if user_id <= 0
+        || content_ids.is_empty()
+        || content_ids.len() > 20
+        || content_ids.iter().any(|value| *value <= 0)
+    {
+        return Err(AgentLibraryRepositoryError::InvalidInput);
+    }
+    let rows = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            Option<String>,
+            String,
+            Option<String>,
+            Option<String>,
+        ),
+    >(
+        r#"
+        SELECT
+            content.id::bigint,
+            COALESCE(
+                NULLIF(BTRIM(content.content_metadata->'summary'->>'title'), ''),
+                NULLIF(BTRIM(content.title), ''),
+                'Untitled'
+            ),
+            NULLIF(BTRIM(content.source), ''),
+            content.url,
+            COALESCE(rendered.storage_key, source.storage_key),
+            NULLIF(BTRIM(content.search_text), '')
+        FROM users AS account
+        JOIN content_knowledge_saves AS saved
+          ON saved.user_id = account.id
+        JOIN contents AS content
+          ON content.id = saved.content_id
+        LEFT JOIN content_bodies AS rendered
+          ON rendered.content_id = content.id AND rendered.variant = 'rendered'
+        LEFT JOIN content_bodies AS source
+          ON source.content_id = content.id AND source.variant = 'source'
+        WHERE account.id::bigint = $1
+          AND account.is_active = TRUE
+          AND content.id::bigint = ANY($2)
+        ORDER BY array_position($2::bigint[], content.id::bigint)
+        "#,
+    )
+    .bind(user_id)
+    .bind(content_ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(content_id, title, source, url, storage_key, fallback_text)| AgentKnowledgeItem {
+                content_id,
+                title,
+                source,
+                url,
+                storage_key,
+                fallback_text,
+            },
+        )
+        .collect())
+}
+
 #[derive(Debug, Error)]
 pub enum AgentLibraryRepositoryError {
     #[error("user id must be positive")]
     InvalidUserId,
+    #[error("Knowledge item input is invalid")]
+    InvalidInput,
     #[error("PostgreSQL agent-library query failed")]
     Sqlx(#[from] sqlx::Error),
 }

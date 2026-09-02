@@ -137,8 +137,6 @@ fn snapshot(mode: &str) -> ShareActionAgentSnapshot {
             "url".to_owned(),
             Value::from("https://this-week-in-rust.org/"),
         )]),
-        vm_namespace: "user:4".to_owned(),
         workspace_path: "/data/workspace/tasks/7".to_owned(),
-        shared_workspace_path: "/data/workspace/users/4/shared".to_owned(),
     }
 }

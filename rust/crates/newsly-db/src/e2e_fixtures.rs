@@ -847,7 +847,7 @@ async fn seed_task_surfaces(
         INSERT INTO llm_tasks (
             user_id, task_kind, mode, workflow_key, workflow_version,
             workflow_state, status, approval_policy, allowed_actions, tool_policy,
-            vm_namespace, prompt_pack, input_json, output_json, artifact_manifest,
+            prompt_pack, input_json, output_json, artifact_manifest,
             usage_json, status_history, created_at, updated_at, started_at,
             completed_at, subject_id
         )
@@ -855,15 +855,14 @@ async fn seed_task_surfaces(
             $1::bigint::integer, 'share_action', 'bookmark_only',
             'share_action.bookmark_only.v1', 1, 'completed', 'completed',
             '{"default":"auto_apply"}'::jsonb, '["save_to_knowledge"]'::jsonb,
-            '{}'::jsonb, $2, 'share_action.bookmark_only', $3, $4,
-            '{}'::jsonb, '{}'::jsonb, $5, $6, $7, $6, $7,
-            $8::bigint::integer
+            '{}'::jsonb, 'share_action.bookmark_only', $2, $3,
+            '{}'::jsonb, '{}'::jsonb, $4, $5, $6, $5, $6,
+            $7::bigint::integer
         )
         RETURNING id::bigint
         "#,
     )
     .bind(user_id)
-    .bind(format!("user:{user_id}"))
     .bind(json!({
         "url": knowledge_url,
         "mode": "bookmark_only",

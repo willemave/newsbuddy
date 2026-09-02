@@ -33,21 +33,16 @@ pub(crate) struct XGrant {
 #[derive(Debug, Clone)]
 pub(crate) struct AccountCleanupPlan {
     pub user_id: i64,
-    pub sandbox_id: Option<String>,
-    pub snapshot_id: Option<String>,
     pub x_grants: Vec<XGrant>,
     pub audio_paths: Vec<PathBuf>,
     pub object_keys: Vec<String>,
     pub media_audio_root: PathBuf,
     pub personal_markdown_root: PathBuf,
-    pub agent_data_root: PathBuf,
 }
 
 #[derive(Debug, FromRow)]
 struct UserCleanupRow {
     is_active: bool,
-    agent_vm_sandbox_id: Option<String>,
-    agent_vm_snapshot_id: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -78,15 +73,11 @@ pub(crate) async fn prepare_cleanup_plan(
     user_id: i64,
     media_audio_root: &Path,
     personal_markdown_root: &Path,
-    agent_data_mirror_root: &Path,
 ) -> Result<Option<AccountCleanupPlan>, AccountRepositoryError> {
     let mut transaction = pool.begin().await?;
     let user = sqlx::query_as::<_, UserCleanupRow>(
         r"
-        SELECT
-            is_active,
-            agent_vm_sandbox_id,
-            agent_vm_snapshot_id
+        SELECT is_active
         FROM users
         WHERE id::bigint = $1
         FOR SHARE
@@ -202,18 +193,14 @@ pub(crate) async fn prepare_cleanup_plan(
     }
 
     let personal_markdown_root = user_directory(personal_markdown_root, user_id)?;
-    let agent_data_root = user_directory(agent_data_mirror_root, user_id)?;
     transaction.commit().await?;
     Ok(Some(AccountCleanupPlan {
         user_id,
-        sandbox_id: clean_optional_id(user.agent_vm_sandbox_id),
-        snapshot_id: clean_optional_id(user.agent_vm_snapshot_id),
         x_grants,
         audio_paths: audio_paths.into_iter().collect(),
         object_keys: object_keys.into_iter().collect(),
         media_audio_root: media_audio_root.to_path_buf(),
         personal_markdown_root,
-        agent_data_root,
     }))
 }
 
@@ -255,12 +242,6 @@ fn collect_optional_key(value: Option<String>, keys: &mut BTreeSet<String>) {
     {
         keys.insert(value);
     }
-}
-
-fn clean_optional_id(value: Option<String>) -> Option<String> {
-    value
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
 }
 
 fn validate_audio_path(

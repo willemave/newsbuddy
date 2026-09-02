@@ -11,15 +11,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::agent_data::BackfillAgentDataHandler",
-      "payload_schema": "tasks/backfill_agent_data.schema.json",
-      "payload_schema_sha256": "fcca4db7e7c7e5807ec3aeb97ad4c338597c87f58bd7fcf5e8a5c099e87204a3",
-      "queue": "backfill",
-      "requires_owner": true,
-      "task_type": "backfill_agent_data"
-    },
-    {
-      "dedupe_by_content": false,
       "handler": "newsly_worker::feed_backfill::BackfillFeedsHandler",
       "payload_schema": "tasks/backfill_feeds.schema.json",
       "payload_schema_sha256": "f7ab630c55f900787eec11e76de76e0460be686014657ac8b7ccc8a20983d565",
@@ -118,15 +109,6 @@
       "task_type": "generate_image"
     },
     {
-      "dedupe_by_content": false,
-      "handler": "newsly_worker::agent_data::IndexAgentDataHandler",
-      "payload_schema": "tasks/index_agent_data.schema.json",
-      "payload_schema_sha256": "deac2bd86acde3353db0f0151d1a2d7af2ce848693199aab9f75f99ba74a61bb",
-      "queue": "backfill",
-      "requires_owner": true,
-      "task_type": "index_agent_data"
-    },
-    {
       "dedupe_by_content": true,
       "handler": "newsly_worker::onboarding_discovery::OnboardingDiscoverHandler",
       "payload_schema": "tasks/onboarding_discover.schema.json",
@@ -164,15 +146,6 @@
     },
     {
       "dedupe_by_content": false,
-      "handler": "newsly_worker::agent_data::ReconcileAgentDataHandler",
-      "payload_schema": "tasks/reconcile_agent_data.schema.json",
-      "payload_schema_sha256": "ba1b6bee05c1433be7bb92245c67700bb6eae68b52bb7f5bba574a1ddca6af46",
-      "queue": "backfill",
-      "requires_owner": true,
-      "task_type": "reconcile_agent_data"
-    },
-    {
-      "dedupe_by_content": false,
       "handler": "newsly_worker::run_llm_task::RunLlmTaskHandler",
       "payload_schema": "tasks/run_llm_task.schema.json",
       "payload_schema_sha256": "ccfec97dc428186578483f7515d0ce17a603a8c60bd77d1a0c9baeab2dca27c8",
@@ -197,15 +170,6 @@
       "queue": "content",
       "requires_owner": false,
       "task_type": "summarize"
-    },
-    {
-      "dedupe_by_content": false,
-      "handler": "newsly_worker::agent_data::SyncAgentDataHandler",
-      "payload_schema": "tasks/sync_agent_data.schema.json",
-      "payload_schema_sha256": "8a77544f3f42525aa0437d59b7edf8fb28189043ad0af05cd4c388c657299454",
-      "queue": "backfill",
-      "requires_owner": true,
-      "task_type": "sync_agent_data"
     },
     {
       "dedupe_by_content": true,

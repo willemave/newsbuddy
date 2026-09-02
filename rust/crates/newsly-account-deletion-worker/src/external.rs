@@ -7,10 +7,6 @@ use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
 use fernet::Fernet;
-use newsly_e2b::{
-    ControlPlaneConfig, DirectE2bProvider, E2bError, FileLimits, SandboxId, SandboxProvider,
-    SnapshotId,
-};
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path as ObjectPath;
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt};
@@ -25,7 +21,6 @@ use crate::repository::AccountCleanupPlan;
 
 #[derive(Clone)]
 pub struct AccountExternalServices {
-    pub vm: Arc<dyn AgentVmDestroyer>,
     pub x: Arc<dyn XGrantRevoker>,
     pub objects: Arc<dyn ObjectArtifactStore>,
 }
@@ -34,84 +29,9 @@ impl Debug for AccountExternalServices {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("AccountExternalServices")
-            .field("vm", &self.vm)
             .field("x", &self.x)
             .field("objects", &self.objects)
             .finish()
-    }
-}
-
-#[async_trait]
-pub trait AgentVmDestroyer: Debug + Send + Sync + 'static {
-    async fn destroy(
-        &self,
-        sandbox_id: Option<&str>,
-        snapshot_id: Option<&str>,
-    ) -> Result<(), ExternalCleanupError>;
-}
-
-#[derive(Clone)]
-pub struct DirectAgentVmDestroyer {
-    provider: Option<Arc<dyn SandboxProvider>>,
-}
-
-impl Debug for DirectAgentVmDestroyer {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("DirectAgentVmDestroyer")
-            .field("provider_configured", &self.provider.is_some())
-            .finish()
-    }
-}
-
-impl DirectAgentVmDestroyer {
-    /// Builds the direct E2B cleanup boundary, remaining unconfigured when no key is supplied.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when a supplied E2B key cannot initialize the direct provider.
-    pub fn from_api_key(api_key: Option<SecretString>) -> Result<Self, ExternalCleanupError> {
-        let provider = api_key
-            .map(|api_key| {
-                let config = ControlPlaneConfig::production(api_key)?;
-                DirectE2bProvider::new(config, FileLimits::default())
-                    .map(|provider| Arc::new(provider) as Arc<dyn SandboxProvider>)
-            })
-            .transpose()?;
-        Ok(Self { provider })
-    }
-
-    pub fn new(provider: Arc<dyn SandboxProvider>) -> Self {
-        Self {
-            provider: Some(provider),
-        }
-    }
-}
-
-#[async_trait]
-impl AgentVmDestroyer for DirectAgentVmDestroyer {
-    async fn destroy(
-        &self,
-        sandbox_id: Option<&str>,
-        snapshot_id: Option<&str>,
-    ) -> Result<(), ExternalCleanupError> {
-        if sandbox_id.is_none() && snapshot_id.is_none() {
-            return Ok(());
-        }
-        let provider = self
-            .provider
-            .as_ref()
-            .ok_or(ExternalCleanupError::MissingE2bApiKey)?;
-        if let Some(value) = sandbox_id {
-            let sandbox_id = SandboxId::parse(value.to_owned())?;
-            // The provider normalizes a documented 404 to `false`, making retries idempotent.
-            let _existed = provider.kill_sandbox(&sandbox_id).await?;
-        }
-        if let Some(value) = snapshot_id {
-            let snapshot_id = SnapshotId::parse(value.to_owned())?;
-            let _existed = provider.delete_snapshot(&snapshot_id).await?;
-        }
-        Ok(())
     }
 }
 
@@ -340,7 +260,6 @@ pub(crate) async fn remove_local_files(
         remove_file_beneath_root(&plan.media_audio_root, path).await?;
     }
     remove_directory_if_present(&plan.personal_markdown_root).await?;
-    remove_directory_if_present(&plan.agent_data_root).await?;
     Ok(())
 }
 
@@ -449,10 +368,6 @@ fn build_fernet(raw_key: &SecretString) -> Result<Fernet, XRevokeError> {
 
 #[derive(Debug, Error)]
 pub enum ExternalCleanupError {
-    #[error("E2B_API_KEY is required to destroy this user's external sandbox data")]
-    MissingE2bApiKey,
-    #[error(transparent)]
-    E2b(#[from] E2bError),
     #[error("unsafe object-storage key: {0}")]
     UnsafeObjectKey(String),
     #[error("local account artifact {path} escapes configured root {root}")]

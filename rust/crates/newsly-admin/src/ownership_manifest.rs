@@ -18,8 +18,6 @@ pub struct OwnershipPolicyManifest {
     routes: Vec<RoutePolicy>,
     #[serde(default)]
     tasks: Vec<TaskPolicy>,
-    #[serde(default)]
-    e2b_namespaces: Vec<NamespacePolicy>,
     #[serde(skip)]
     source_directory: PathBuf,
 }
@@ -37,8 +35,7 @@ impl OwnershipPolicyManifest {
     pub fn registry_seeds(&self) -> Result<Vec<OwnershipSeed>, ManifestValidationError> {
         self.validate_header()?;
         let mut seen = BTreeSet::new();
-        let mut seeds =
-            Vec::with_capacity(self.routes.len() + self.tasks.len() + self.e2b_namespaces.len());
+        let mut seeds = Vec::with_capacity(self.routes.len() + self.tasks.len());
         for route in &self.routes {
             validate_policy_fields(
                 &route.operation_id,
@@ -80,21 +77,7 @@ impl OwnershipPolicyManifest {
                 &task.current_owner,
             )?;
         }
-        for namespace in &self.e2b_namespaces {
-            validate_policy_fields(
-                &namespace.namespace,
-                &namespace.current_owner,
-                &namespace.database_writer,
-            )?;
-            push_seed(
-                &mut seeds,
-                &mut seen,
-                ResourceKind::VmNamespace,
-                &namespace.namespace,
-                &namespace.current_owner,
-            )?;
-        }
-        if self.routes.is_empty() || self.tasks.is_empty() || self.e2b_namespaces.is_empty() {
+        if self.routes.is_empty() || self.tasks.is_empty() {
             return Err(ManifestValidationError::MissingResourceFamily);
         }
         Ok(seeds)
@@ -195,13 +178,6 @@ struct TaskPolicy {
     queue: String,
     payload_schema: String,
     handler: String,
-    current_owner: String,
-    database_writer: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct NamespacePolicy {
-    namespace: String,
     current_owner: String,
     database_writer: String,
 }

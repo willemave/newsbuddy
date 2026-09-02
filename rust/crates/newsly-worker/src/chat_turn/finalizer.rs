@@ -1,17 +1,15 @@
 use newsly_agent_runtime::{NewslyTranscript, ProviderUsage};
 use newsly_db::{
     ChatTaskRejection, ChatTaskSnapshot, ChatTerminalMutationOutcome, ChatTurnPublication,
-    cancel_chat_llm_task_attempt, fail_chat_turn, publish_chat_turn, visible_council_session_id,
+    cancel_chat_llm_task_attempt, fail_chat_turn, publish_chat_turn,
 };
-use newsly_queue::{QueueKernel, TaskResult};
+use newsly_queue::TaskResult;
 use serde_json::Value;
 
-use crate::share_actions::submission::enqueue_chat_session_sync;
 use crate::{HandlerFinalizerFuture, TaskFinalizer, TaskFinalizerResult};
 
 #[derive(Debug)]
 pub(super) struct ChatSuccessFinalizer {
-    queue: QueueKernel,
     snapshot: ChatTaskSnapshot,
     transcript: NewslyTranscript,
     render_metadata: Option<Value>,
@@ -27,7 +25,6 @@ pub(super) struct ChatSuccessFinalizer {
 impl ChatSuccessFinalizer {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        queue: QueueKernel,
         snapshot: ChatTaskSnapshot,
         transcript: NewslyTranscript,
         render_metadata: Option<Value>,
@@ -40,7 +37,6 @@ impl ChatSuccessFinalizer {
         usage_source: String,
     ) -> Self {
         Self {
-            queue,
             snapshot,
             transcript,
             render_metadata,
@@ -78,25 +74,7 @@ impl TaskFinalizer for ChatSuccessFinalizer {
             )
             .await?;
             let result = match outcome {
-                ChatTerminalMutationOutcome::Applied => {
-                    enqueue_chat_session_sync(
-                        transaction,
-                        &self.queue,
-                        self.snapshot.user_id,
-                        self.snapshot.session_id,
-                    )
-                    .await?;
-                    if self.snapshot.visible_session_id != self.snapshot.session_id {
-                        enqueue_chat_session_sync(
-                            transaction,
-                            &self.queue,
-                            self.snapshot.user_id,
-                            self.snapshot.visible_session_id,
-                        )
-                        .await?;
-                    }
-                    TaskFinalizerResult::Keep
-                }
+                ChatTerminalMutationOutcome::Applied => TaskFinalizerResult::Keep,
                 ChatTerminalMutationOutcome::AlreadyCompleted
                 | ChatTerminalMutationOutcome::AlreadyFailed
                 | ChatTerminalMutationOutcome::Superseded
@@ -124,13 +102,12 @@ impl TaskFinalizer for ChatSuccessFinalizer {
 
 #[derive(Debug)]
 pub(super) struct ChatFailureFinalizer {
-    queue: QueueKernel,
     rejection: ChatTaskRejection,
 }
 
 impl ChatFailureFinalizer {
-    pub(super) fn new(queue: QueueKernel, rejection: ChatTaskRejection) -> Self {
-        Self { queue, rejection }
+    pub(super) const fn new(rejection: ChatTaskRejection) -> Self {
+        Self { rejection }
     }
 }
 
@@ -141,20 +118,6 @@ impl TaskFinalizer for ChatFailureFinalizer {
     ) -> HandlerFinalizerFuture<'a> {
         Box::pin(async move {
             let outcome = fail_chat_turn(transaction, &self.rejection).await?;
-            if outcome == ChatTerminalMutationOutcome::Applied
-                && let Some(session_id) = self.rejection.session_id
-                && let Some(visible_session_id) =
-                    visible_council_session_id(transaction, self.rejection.user_id, session_id)
-                        .await?
-            {
-                enqueue_chat_session_sync(
-                    transaction,
-                    &self.queue,
-                    self.rejection.user_id,
-                    visible_session_id,
-                )
-                .await?;
-            }
             if outcome != ChatTerminalMutationOutcome::Applied
                 && let Some(task_id) = self.rejection.llm_task_id
             {

@@ -23,7 +23,6 @@
   "rust/crates/newsly-providers/src/onboarding_flow.rs": 1119,
   "rust/crates/newsly-providers/src/scraping.rs": 1273,
   "rust/crates/newsly-queue/src/kernel.rs": 1587,
-  "rust/crates/newsly-vm-bootstrap/src/corpus.rs": 1010,
   "rust/crates/newsly-worker/src/chat_turn/tools.rs": 1218,
   "rust/crates/newsly-worker/src/config.rs": 1309,
   "rust/crates/newsly-worker/src/content/repository.rs": 1806,

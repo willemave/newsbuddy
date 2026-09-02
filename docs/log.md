@@ -37,6 +37,16 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** Measure the first GitHub-hosted release build and its warm successor after the workflow is committed; no commit, push, or deployment requested.
 - **Commits:** Uncommitted.
 
+### 2026-09-01 — `willem/task-scoped-agent-sandboxes` — Task-scoped agent sandboxes
+
+- **Status:** Complete locally; merged to `main`; not deployed.
+- **Scope:** E2B lifecycle, agent Knowledge tools, agent-data projection, queue ownership, persistence, deployment, architecture, and behavioral laws.
+- **Decisions:** Replace persistent per-user hydrated VMs with fresh task-scoped sandboxes; persist only validated product output and attempt-scoped sandbox cleanup identity; expose host-owned `search_knowledge`, `read_knowledge_item`, and `write_knowledge_items` to all agents; allow one coordinated destructive production cutover instead of a dual-path or multi-release migration.
+- **Changes:** Added the approved design; replaced persistent per-user VM acquisition with fresh task-attempt sandboxes and immediate attempt identity recording; added typed host Knowledge tools; made chat sandbox acquisition lazy; removed corpus hydration, agent-data workers/tasks/fanout, mirror configuration, namespace ownership, persistent VM account cleanup, and obsolete persistence fields through a roll-forward migration. Cleanup removed obsolete E2B lifecycle surfaces, moved shared task tools and content-body storage out of feature modules, made creation delivery-safe and cleanup durable, preserved successful chat output when cleanup remains pending, bounded object reads, and atomically published copied Knowledge directories.
+- **Validation:** The full SQLx migration chain and SQLx-backed suites passed earlier against disposable PostgreSQL 17. After review fixes, 86 database-independent worker tests and 42 database-independent `newsly-db` tests passed. Rust format and warning-denied Clippy passed for `newsly-worker`, `newsly-db`, and `newsly-api`; architecture, module-size, public-contract, and diff checks passed.
+- **Remaining:** Production migration, deletion of old provider sandboxes/snapshots, deployment, and live proof remain outside this merge.
+- **Commits:** `47357926` plus the local `main` merge commit.
+
 ### 2026-09-01 — `main` — Integrate and harden local release gates with current product work
 
 - **Status:** Release validation in progress.

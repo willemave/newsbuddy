@@ -53,10 +53,6 @@ impl SchedulerRepository {
                     ('generate_audio_episode', 'audio_episode'),
                     ('run_llm_task', 'llm'),
                     ('briefing_refresh', 'llm'),
-                    ('sync_agent_data', 'backfill'),
-                    ('index_agent_data', 'backfill'),
-                    ('backfill_agent_data', 'backfill'),
-                    ('reconcile_agent_data', 'backfill'),
                     ('delete_user_account', 'backfill')
             ),
             repaired AS (

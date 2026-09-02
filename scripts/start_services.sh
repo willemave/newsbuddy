@@ -134,7 +134,6 @@ worker_processes=(
   scrape
   summarization
   x_sync
-  agent_data
   feed_backfill
   feed_discovery
   onboarding_discovery

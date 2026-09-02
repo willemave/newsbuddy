@@ -20,17 +20,17 @@
     clippy::too_many_lines
 )]
 
-pub mod agent_data;
-pub mod agent_vm;
 pub mod audio_episode;
 pub mod briefing_refresh;
 pub mod chat_turn;
 pub mod config;
 pub mod content;
+mod content_body_store;
 pub mod discussion;
 pub mod feed_backfill;
 pub mod feed_discovery;
 pub mod image_generation;
+mod knowledge_tools;
 pub mod learning_deck;
 mod local_object;
 pub mod media;
@@ -42,6 +42,8 @@ pub mod run_llm_task;
 pub mod scrape;
 pub mod share_actions;
 pub mod summarization;
+pub mod task_sandbox;
+mod task_tools;
 pub mod x_sync;
 
 use std::collections::HashMap;

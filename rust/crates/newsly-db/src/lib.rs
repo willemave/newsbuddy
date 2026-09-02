@@ -22,7 +22,6 @@
 mod admin;
 mod adoption;
 mod agent_library;
-mod agent_vm;
 mod api_keys;
 mod audio_episodes;
 mod auth;
@@ -66,6 +65,7 @@ mod scraper_configs;
 mod scraper_stats;
 mod share_actions;
 mod stats;
+mod task_sandboxes;
 mod users;
 mod vendor_usage;
 mod x_sync;
@@ -82,15 +82,8 @@ pub use adoption::{
     verify_existing_baseline,
 };
 pub use agent_library::{
-    AgentLibraryBodyPointer, AgentLibraryContentProjection, AgentLibraryRepositoryError,
-    list_agent_library_content,
-};
-pub use agent_vm::{
-    AgentCorpusFile, AgentVmNamespaceLeaseGrant, AgentVmPersistentState, AgentVmRepositoryError,
-    AgentVmStateReplacement, PreparedAgentCorpusTransfer, acquire_agent_vm_namespace_lease,
-    count_active_agent_vm_namespace_leases, prepare_agent_corpus_transfer,
-    release_agent_vm_namespace_lease, renew_agent_vm_namespace_lease,
-    replace_agent_vm_persistent_state,
+    AgentKnowledgeItem, AgentLibraryBodyPointer, AgentLibraryContentProjection,
+    AgentLibraryRepositoryError, find_agent_knowledge_items, list_agent_library_content,
 };
 pub use api_keys::{
     ApiKeyRepositoryError, ApiKeySummaryProjection, ApiKeyTargetUser, CreatedApiKey,
@@ -166,7 +159,7 @@ pub use chat_tasks::{
 pub use chat_tooling::{
     ChatArticleConversionSource, ChatContentHit, ChatNewsHit, ChatToolRepositoryError,
     ChatUnreadNewsPage, create_deep_research_handoff, list_unread_chat_news,
-    prepare_chat_article_conversion, search_chat_content, search_chat_knowledge, search_chat_news,
+    prepare_chat_article_conversion, search_agent_knowledge, search_chat_content, search_chat_news,
     search_chat_subscription_content,
 };
 pub use cli_link::{
@@ -205,7 +198,7 @@ pub use content_read::{
 };
 pub use content_submission::{
     AppliedContentSubmission, ContentSubmissionInput, ContentSubmissionRepositoryError,
-    SubmissionTaskResolution, apply_content_submission, prepare_agent_data_sync_dedupe_key,
+    SubmissionTaskResolution, apply_content_submission,
 };
 pub use discussions::{
     ContentDiscussionProjection, DiscussionRepositoryError, NewsDiscussionProjection,
@@ -331,6 +324,11 @@ pub use share_actions::{
 pub use stats::{
     ProcessingCountsProjection, StatsRepositoryError, UnreadCountsProjection,
     get_long_form_unread_count, get_processing_counts, get_unread_counts,
+};
+pub use task_sandboxes::{
+    TaskSandboxCleanupCandidate, TaskSandboxRepositoryError, clear_task_sandbox,
+    find_recorded_task_sandbox, list_task_sandbox_cleanup_candidates,
+    mark_task_sandbox_cleanup_required, record_task_sandbox,
 };
 pub use users::{
     AppleUserUpsert, DebugUserPatch, UserProfilePatch, UserProfileProjection,

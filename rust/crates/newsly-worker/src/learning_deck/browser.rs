@@ -11,7 +11,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::share_actions::tools::ShareActionToolExecutor;
+use crate::task_tools::TaskToolExecutor;
 
 const VALIDATION_VIEWER_PATH: &str = "output/.newsly-viewer-validation.html";
 const VALIDATION_SCRIPT_PATH: &str = "input/.newsly-browser-validation.cjs";
@@ -72,7 +72,7 @@ struct BrowserValidationOutcome {
 pub(super) async fn validate_in_browser(
     provider: &DirectE2bProvider,
     sandbox: &SandboxHandle,
-    tools: &ShareActionToolExecutor,
+    tools: &TaskToolExecutor,
     workspace_path: &str,
     index_html: &str,
     deadline: Instant,

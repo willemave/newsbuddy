@@ -22,7 +22,8 @@ pub(super) fn allowed_tools(
             "execute_bash" => policy_enabled(task.tool_policy.get("execute_bash"), true),
             "web_search" => policy_enabled(task.tool_policy.get("web_search"), true),
             "read_file" | "list_files" => files_enabled,
-            "write_file" | "edit_file" => write_enabled,
+            "write_file" | "edit_file" | "write_knowledge_items" => write_enabled,
+            "search_knowledge" | "read_knowledge_item" => true,
             _ => false,
         })
         .map(|tool| tool.name.clone())

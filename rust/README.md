@@ -34,7 +34,7 @@ media subprocess, not an application authority.
 - `newsly-agent-runtime`: Newsly-owned agent interface backed by pinned Rig;
   persisted transcripts never use Rig-native serialization.
 - `newsly-e2b`: direct E2B control-plane HTTP, envd ConnectRPC streaming, files,
-  snapshots, network policy, and sandbox lifecycle.
+  network policy, and task-sandbox lifecycle.
 - `newsly-extraction`: Rust client and types for the private Python extractor.
 - `newsly-eval-driver`: canonical Rust algorithms exposed to offline evals.
 - `newsly-admin`: runtime ownership, health, task, usage, eval-export, and

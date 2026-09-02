@@ -12,7 +12,6 @@ mod finalizer;
 mod handler;
 mod prompts;
 mod routing;
-mod storage;
 mod tools;
 
 pub use agent::{ChatAgentBuildError, ChatAgentConfig, ChatAgentRuntime};

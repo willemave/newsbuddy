@@ -60,12 +60,6 @@ pub enum E2bError {
     },
     #[error("unsupported envd capability {capability} on version {version}")]
     UnsupportedCapability { capability: String, version: String },
-    #[error("cannot snapshot sandbox while {active_commands} command lease(s) are active")]
-    ActiveCommandLease { active_commands: u32 },
-    #[error("VM namespace {namespace} is owned by {owner}, not Rust")]
-    NamespaceOwnership { namespace: String, owner: String },
-    #[error("VM namespace lease for {namespace} has expired")]
-    NamespaceLeaseExpired { namespace: String },
     #[error("{channel} output exceeded {limit_bytes} bytes (observed {observed_bytes})")]
     OutputLimitExceeded {
         channel: &'static str,
@@ -115,9 +109,6 @@ impl E2bError {
             | Self::Protocol(_)
             | Self::Remote { .. }
             | Self::UnsupportedCapability { .. }
-            | Self::ActiveCommandLease { .. }
-            | Self::NamespaceOwnership { .. }
-            | Self::NamespaceLeaseExpired { .. }
             | Self::OutputLimitExceeded { .. }
             | Self::FileTooLarge { .. }
             | Self::MissingTerminalEvent

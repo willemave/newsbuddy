@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::net::IpAddr;
-use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -29,11 +28,11 @@ use thiserror::Error;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent_vm::{
-    AcquiredAgentVmSession, AgentVmLifecycle, AgentVmLifecycleConfig, AgentVmLifecycleError,
+use crate::content_body_store::{ContentBodyStore, ContentBodyStoreError};
+use crate::task_sandbox::{
+    AcquiredTaskSandbox, TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner,
 };
-
-use super::tools::{ExaSearchClient, ShareActionToolExecutor};
+use crate::task_tools::{ExaSearchClient, TaskToolExecutor};
 
 const OUTPUT_RESULT_JSON: &str = "output/result.json";
 const INPUT_REQUEST_JSON: &str = "input/request.json";
@@ -42,11 +41,9 @@ const INPUT_OUTPUT_SCHEMA: &str = "input/output-schema.json";
 const DEFAULT_MODEL_SPEC: &str = "openai:gpt-5.6-luna";
 const DEFAULT_TEMPLATE_ID: &str = "newsly-agent";
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai/search";
-const DEFAULT_AGENT_DATA_MIRROR_ROOT: &str = "./data/agent_user_data";
-const NAMESPACE_LEASE_GRACE_SECONDS: u64 = 60;
 const MAX_REQUEST_LIMIT: u32 = 50;
 const ADD_FEED_REQUEST_HEADROOM: u32 = 4;
-const TEMPLATE_REVISION_INPUTS: [(&str, &[u8]); 14] = [
+const TEMPLATE_REVISION_INPUTS: [(&str, &[u8]); 12] = [
     (
         "e2b.Dockerfile",
         include_bytes!("../../../../../e2b.Dockerfile"),
@@ -60,10 +57,6 @@ const TEMPLATE_REVISION_INPUTS: [(&str, &[u8]); 14] = [
     (
         "rust/crates/newsly-vm-bootstrap/src/capabilities.rs",
         include_bytes!("../../../newsly-vm-bootstrap/src/capabilities.rs"),
-    ),
-    (
-        "rust/crates/newsly-vm-bootstrap/src/corpus.rs",
-        include_bytes!("../../../newsly-vm-bootstrap/src/corpus.rs"),
     ),
     (
         "rust/crates/newsly-vm-bootstrap/src/error.rs",
@@ -82,20 +75,16 @@ const TEMPLATE_REVISION_INPUTS: [(&str, &[u8]); 14] = [
         include_bytes!("../../../newsly-vm-bootstrap/src/main.rs"),
     ),
     (
-        "rust/crates/newsly-worker/src/agent_vm/corpus.rs",
-        include_bytes!("../agent_vm/corpus.rs"),
-    ),
-    (
-        "rust/crates/newsly-worker/src/agent_vm/lifecycle.rs",
-        include_bytes!("../agent_vm/lifecycle.rs"),
+        "rust/crates/newsly-worker/src/task_sandbox/lifecycle.rs",
+        include_bytes!("../task_sandbox/lifecycle.rs"),
     ),
     (
         "rust/crates/newsly-worker/src/share_actions/agent.rs",
         include_bytes!("agent.rs"),
     ),
     (
-        "rust/crates/newsly-worker/src/share_actions/tools.rs",
-        include_bytes!("tools.rs"),
+        "rust/crates/newsly-worker/src/task_tools.rs",
+        include_bytes!("../task_tools.rs"),
     ),
 ];
 const PRIVATE_NETWORK_DENIALS: [&str; 9] = [
@@ -110,10 +99,10 @@ const PRIVATE_NETWORK_DENIALS: [&str; 9] = [
     "fe80::/10",
 ];
 
-const VM_INSTRUCTIONS: &str = r"VM execution environment:
+const SANDBOX_INSTRUCTIONS: &str = r"Sandbox execution environment:
 - Commands start in a task-specific directory below /data/workspace. Keep scratch files there.
-- The user's credential-free corpus may be mounted at /data: index.jsonl plus knowledge/,
-  content/, news/, briefings/, and chats/.
+- No user library is mounted. Use search_knowledge and read_knowledge_item for host-side access,
+  and write_knowledge_items only when selected copies are needed as workspace files.
 - rg, jq, python3, node, curl, and git are available. Combine related fetch-and-process work in
   one execute_bash call when practical.
 - Use edit_file for a localized exact replacement instead of rewriting a whole existing file.
@@ -125,8 +114,6 @@ pub struct ShareActionAgentConfig {
     pub template_id: String,
     pub template_revision: String,
     pub sandbox_timeout: Duration,
-    pub namespace_lease_duration: Duration,
-    pub agent_data_mirror_root: PathBuf,
     pub public_base_url: Option<Url>,
     pub request_limit: u32,
     pub tool_call_limit: u32,
@@ -145,38 +132,29 @@ impl ShareActionAgentConfig {
         let tool_call_limit = parse_bounded("LLM_TASK_SANDBOX_TOOL_CALL_LIMIT", 32, 1, 200)?;
         let max_output_chars =
             parse_bounded("LLM_TASK_SANDBOX_MAX_OUTPUT_CHARS", 20_000, 1_000, 200_000)?;
-        let template_id = env::var("NEWSLY_AGENT_VM_TEMPLATE_ID")
+        let template_id = env::var("NEWSLY_TASK_SANDBOX_TEMPLATE_ID")
             .unwrap_or_else(|_| DEFAULT_TEMPLATE_ID.to_owned())
             .trim()
             .to_owned();
         if template_id.is_empty() || template_id.len() > 255 {
             return Err(ShareActionAgentConfigError::InvalidValue(
-                "NEWSLY_AGENT_VM_TEMPLATE_ID",
+                "NEWSLY_TASK_SANDBOX_TEMPLATE_ID",
             ));
         }
-        let template_revision = match env::var("NEWSLY_AGENT_VM_TEMPLATE_REVISION") {
+        let template_revision = match env::var("NEWSLY_TASK_SANDBOX_TEMPLATE_REVISION") {
             Ok(value) => value.trim().to_owned(),
             Err(env::VarError::NotPresent) => canonical_template_revision(&template_id),
             Err(env::VarError::NotUnicode(_)) => {
                 return Err(ShareActionAgentConfigError::InvalidValue(
-                    "NEWSLY_AGENT_VM_TEMPLATE_REVISION",
+                    "NEWSLY_TASK_SANDBOX_TEMPLATE_REVISION",
                 ));
             }
         };
         if template_revision.is_empty() || template_revision.len() > 255 {
             return Err(ShareActionAgentConfigError::InvalidValue(
-                "NEWSLY_AGENT_VM_TEMPLATE_REVISION",
+                "NEWSLY_TASK_SANDBOX_TEMPLATE_REVISION",
             ));
         }
-        let namespace_lease_duration = Duration::from_secs(
-            sandbox_seconds
-                .checked_add(NAMESPACE_LEASE_GRACE_SECONDS)
-                .ok_or(ShareActionAgentConfigError::InvalidValue(
-                    "LLM_TASK_SANDBOX_TIMEOUT_SECONDS",
-                ))?,
-        );
-        let agent_data_mirror_root =
-            absolute_path_from_env("AGENT_DATA_MIRROR_ROOT", DEFAULT_AGENT_DATA_MIRROR_ROOT)?;
         let public_base_url = env::var("PUBLIC_BASE_URL")
             .ok()
             .map(|value| Url::parse(value.trim()))
@@ -192,8 +170,6 @@ impl ShareActionAgentConfig {
             template_id,
             template_revision,
             sandbox_timeout: Duration::from_secs(sandbox_seconds),
-            namespace_lease_duration,
-            agent_data_mirror_root,
             public_base_url,
             request_limit: u32::try_from(request_limit).map_err(|_| {
                 ShareActionAgentConfigError::InvalidValue("LLM_TASK_SANDBOX_REQUEST_LIMIT")
@@ -234,11 +210,13 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 #[derive(Debug, Clone)]
 pub struct ShareActionAgentRuntime {
+    pool: PgPool,
     provider: Arc<DirectE2bProvider>,
-    lifecycle: AgentVmLifecycle,
+    lifecycle: TaskSandboxOwner,
     engine: RigAgentEngine,
     exa: ExaSearchClient,
     feed_validator: FeedValidator,
+    body_store: ContentBodyStore,
     config: ShareActionAgentConfig,
 }
 
@@ -275,23 +253,24 @@ impl ShareActionAgentRuntime {
             ExaSearchClient::new(secret_env("EXA_API_KEY"), endpoint, Duration::from_secs(60))?;
         let feed_validator =
             FeedValidator::new(Some(e2b_key), &config.template_id, config.sandbox_timeout)?;
-        let lifecycle = AgentVmLifecycle::new(
-            pool,
+        let body_store = ContentBodyStore::from_env()?;
+        let lifecycle = TaskSandboxOwner::new(
+            pool.clone(),
             Arc::clone(&provider),
-            AgentVmLifecycleConfig {
+            TaskSandboxConfig {
                 template_id: config.template_id.clone(),
                 template_revision: config.template_revision.clone(),
                 sandbox_timeout: config.sandbox_timeout,
-                namespace_lease_duration: config.namespace_lease_duration,
-                agent_data_mirror_root: config.agent_data_mirror_root.clone(),
             },
         )?;
         Ok(Self {
+            pool,
             provider,
             lifecycle,
             engine,
             exa,
             feed_validator,
+            body_store,
             config,
         })
     }
@@ -308,7 +287,6 @@ impl ShareActionAgentRuntime {
             .lifecycle
             .acquire_for_task(
                 task.user_id,
-                &task.vm_namespace,
                 task.id,
                 &format!("share_action.{}", task.mode),
                 deadline,
@@ -321,14 +299,13 @@ impl ShareActionAgentRuntime {
             .map_err(|source| ShareActionAgentError::SandboxExecution {
                 source: Box::new(source),
                 sandbox_provider: "e2b".to_owned(),
-                sandbox_id: acquired.session.sandbox.sandbox_id.as_str().to_owned(),
+                sandbox_id: acquired.sandbox.sandbox_id.as_str().to_owned(),
             });
         if let Err(error) = acquired.release().await {
             tracing::error!(
                 task_id = task.id,
-                vm_namespace = %task.vm_namespace,
                 error = %error,
-                "failed to release Share Action agent VM namespace"
+                "failed to destroy Share Action task sandbox"
             );
         }
         result
@@ -337,14 +314,14 @@ impl ShareActionAgentRuntime {
     async fn run_acquired(
         &self,
         task: &ShareActionAgentSnapshot,
-        acquired: &AcquiredAgentVmSession,
+        acquired: &AcquiredTaskSandbox,
         deadline: Instant,
         cancellation: CancellationToken,
     ) -> Result<ShareActionAgentRunResult, ShareActionAgentError> {
-        let sandbox = &acquired.session.sandbox;
+        let sandbox = &acquired.sandbox;
         self.prepare_workspace(sandbox, task, deadline, cancellation.child_token())
             .await?;
-        let tools = Arc::new(ShareActionToolExecutor::new(
+        let tools = Arc::new(TaskToolExecutor::new(
             Arc::clone(&self.provider),
             sandbox.clone(),
             &task.workspace_path,
@@ -352,10 +329,13 @@ impl ShareActionAgentRuntime {
             cancellation.child_token(),
             self.config.max_output_chars,
             self.exa.clone(),
+            self.pool.clone(),
+            task.user_id,
+            self.body_store.clone(),
         )?);
         self.write_inputs(&tools, task).await?;
 
-        let definitions = ShareActionToolExecutor::definitions();
+        let definitions = TaskToolExecutor::definitions();
         let allowed = allowed_tools(task, &definitions);
         let events = Arc::new(ShareActionEvents::default());
         let request = AgentRequest {
@@ -455,7 +435,6 @@ impl ShareActionAgentRuntime {
             model_provider,
             sandbox_provider: "e2b".to_owned(),
             sandbox_id: sandbox.sandbox_id.as_str().to_owned(),
-            sandbox_created: acquired.created,
             template_revision: acquired.template_revision.clone(),
             events: events.values(),
         })
@@ -508,7 +487,6 @@ impl ShareActionAgentRuntime {
     ) -> Result<(), ShareActionAgentError> {
         let directories = [
             task.workspace_path.clone(),
-            task.shared_workspace_path.clone(),
             format!("{}/input", task.workspace_path),
             format!("{}/output", task.workspace_path),
             format!("{}/scratch", task.workspace_path),
@@ -579,7 +557,7 @@ impl ShareActionAgentRuntime {
 
     async fn write_inputs(
         &self,
-        tools: &ShareActionToolExecutor,
+        tools: &TaskToolExecutor,
         task: &ShareActionAgentSnapshot,
     ) -> Result<(), ShareActionAgentError> {
         let request = json!({
@@ -614,7 +592,6 @@ pub struct ShareActionAgentRunResult {
     pub model_provider: String,
     pub sandbox_provider: String,
     pub sandbox_id: String,
-    pub sandbox_created: bool,
     pub template_revision: String,
     pub events: Vec<AgentEvent>,
 }
@@ -653,7 +630,7 @@ fn build_system_prompt(task: &ShareActionAgentSnapshot) -> Result<String, ShareA
          Always write output/result.json matching input/output-schema.json. The host validates \
          that artifact and applies any product action.\n\n{}\n\n{}",
         mode_prompt(&task.mode)?,
-        VM_INSTRUCTIONS,
+        SANDBOX_INSTRUCTIONS,
     ))
 }
 
@@ -713,7 +690,8 @@ fn allowed_tools(
             "execute_bash" => policy_enabled(task.tool_policy.get("execute_bash"), true),
             "web_search" => policy_enabled(task.tool_policy.get("web_search"), true),
             "read_file" | "list_files" => read_enabled,
-            "write_file" | "edit_file" => write_enabled,
+            "write_file" | "edit_file" | "write_knowledge_items" => write_enabled,
+            "search_knowledge" | "read_knowledge_item" => true,
             _ => false,
         })
         .map(|tool| tool.name.clone())
@@ -758,33 +736,6 @@ fn parse_bounded(
     Ok(value)
 }
 
-fn absolute_path_from_env(
-    name: &'static str,
-    default: &'static str,
-) -> Result<PathBuf, ShareActionAgentConfigError> {
-    let raw = env::var(name).unwrap_or_else(|_| default.to_owned());
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return Err(ShareActionAgentConfigError::InvalidValue(name));
-    }
-    let path = PathBuf::from(raw);
-    let path = if path.is_absolute() {
-        path
-    } else {
-        env::current_dir()
-            .map_err(|_| ShareActionAgentConfigError::InvalidValue(name))?
-            .join(path)
-    };
-    if path == Path::new("/")
-        || path
-            .components()
-            .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
-    {
-        return Err(ShareActionAgentConfigError::InvalidValue(name));
-    }
-    Ok(path)
-}
-
 fn ip_selector(address: IpAddr) -> String {
     let prefix = if address.is_ipv4() { 32 } else { 128 };
     format!("{address}/{prefix}")
@@ -825,9 +776,11 @@ pub enum ShareActionAgentBuildError {
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error(transparent)]
-    Lifecycle(#[from] AgentVmLifecycleError),
+    Lifecycle(#[from] TaskSandboxError),
     #[error(transparent)]
     FeedValidation(#[from] FeedValidationError),
+    #[error(transparent)]
+    BodyStore(#[from] ContentBodyStoreError),
 }
 
 #[derive(Debug, Error)]
@@ -856,7 +809,7 @@ pub enum ShareActionAgentError {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
-    Lifecycle(#[from] AgentVmLifecycleError),
+    Lifecycle(#[from] TaskSandboxError),
     #[error(transparent)]
     FeedValidation(#[from] FeedValidationError),
 }
@@ -879,7 +832,6 @@ impl ShareActionAgentError {
         match self {
             Self::SandboxExecution { source, .. } => source.deferral_seconds(),
             Self::Cancelled => Some(5),
-            Self::Lifecycle(error) => error.deferral_seconds(),
             _ => None,
         }
     }

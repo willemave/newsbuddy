@@ -4,7 +4,6 @@
 #![allow(clippy::missing_errors_doc)]
 
 pub mod capabilities;
-pub mod corpus;
 pub mod error;
 pub mod feed;
 

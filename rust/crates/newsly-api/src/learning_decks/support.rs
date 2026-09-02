@@ -6,15 +6,12 @@ use axum::extract::rejection::PathRejection;
 use axum::http::header::HOST;
 use axum::http::{HeaderMap, StatusCode};
 use newsly_db::{
-    ContentSubmissionRepositoryError, LearningDeckRepositoryError,
-    is_active_learning_deck_conflict, prepare_agent_data_sync_dedupe_key,
+    ContentSubmissionRepositoryError, LearningDeckRepositoryError, is_active_learning_deck_conflict,
 };
 use newsly_queue::{EnqueueRequest, QueueError, TaskType};
 use reqwest::Url;
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 
-use crate::encoding::hex_encode;
 use crate::error::ApiError;
 use crate::learning_deck_tokens::LearningDeckTokenSigner;
 use crate::write_support::internal_error;
@@ -37,37 +34,6 @@ pub(super) fn run_llm_task_request(task_id: i64, user_id: i64) -> EnqueueRequest
     ]));
     request.owner_user_id = Some(user_id);
     request
-}
-
-pub(super) async fn agent_data_sync_request(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    user_id: i64,
-    content_id: i64,
-    request_id: &str,
-) -> Result<EnqueueRequest, ApiError> {
-    let payload_value = json!({
-        "user_id": user_id,
-        "content_ids": [content_id],
-        "news_item_ids": [],
-        "chat_session_ids": [],
-        "briefing_dates": [],
-    });
-    let serialized =
-        serde_json::to_string(&payload_value).map_err(|error| internal_error(error, request_id))?;
-    let digest = Sha256::digest(serialized.as_bytes());
-    let base_key = format!(
-        "agent-sync|user:{user_id}|payload:{}",
-        &hex_encode(&digest)[..24]
-    );
-    let dedupe_key = prepare_agent_data_sync_dedupe_key(transaction, user_id, &base_key)
-        .await
-        .map_err(|error| submission_error(error, request_id))?;
-    let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-    request.payload = payload_value.as_object().cloned();
-    request.owner_user_id = Some(user_id);
-    request.dedupe = Some(true);
-    request.dedupe_key = Some(dedupe_key);
-    Ok(request)
 }
 
 pub(super) fn sandbox_root(request_id: &str) -> Result<String, ApiError> {

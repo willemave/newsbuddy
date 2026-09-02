@@ -19,19 +19,14 @@ const fn owned_relation(
     }
 }
 
-/// Explicit catalog registry. Its fixture test compares this set with every baseline `user_id`
-/// and `owner_user_id` column, including historical tables such as `daily_news_digests` that no
-/// longer have an active domain model.
+/// Explicit catalog registry. Its fixture test compares this set with every non-retired baseline
+/// `user_id` and `owner_user_id` column, including historical tables such as
+/// `daily_news_digests` that no longer have an active domain model.
 pub const USER_OWNED_RELATIONS: &[UserOwnedRelation] = &[
     owned_relation(
         "analytics_interactions",
         "user_id",
         "DELETE FROM analytics_interactions WHERE user_id::bigint = $1",
-    ),
-    owned_relation(
-        "agent_data_files",
-        "user_id",
-        "DELETE FROM agent_data_files WHERE user_id::bigint = $1",
     ),
     owned_relation(
         "user_api_keys",
@@ -211,6 +206,8 @@ mod tests {
             .columns
             .into_iter()
             .filter(|column| matches!(column.name.as_str(), "user_id" | "owner_user_id"))
+            // The immutable Alembic baseline predates the SQLx migration that retires this table.
+            .filter(|column| column.relation != "agent_data_files")
             .map(|column| (column.relation, column.name))
             .collect::<BTreeSet<_>>();
         let registered = USER_OWNED_RELATIONS

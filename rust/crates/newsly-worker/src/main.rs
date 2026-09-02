@@ -4,8 +4,6 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 
-#[path = "bin/agent_data_worker.rs"]
-mod agent_data_worker;
 #[path = "bin/audio_episode_worker.rs"]
 mod audio_episode_worker;
 #[path = "bin/briefing_refresh_worker.rs"]
@@ -50,7 +48,6 @@ enum WorkerProcess {
     Scrape,
     Summarization,
     XSync,
-    AgentData,
     FeedBackfill,
     FeedDiscovery,
     OnboardingDiscovery,
@@ -86,7 +83,6 @@ impl WorkerProcess {
             "newsly-scrape-worker" | "scrape" => Ok(Self::Scrape),
             "newsly-summarization-worker" | "summarization" => Ok(Self::Summarization),
             "newsly-x-sync-worker" | "x_sync" => Ok(Self::XSync),
-            "newsly-agent-data-worker" | "agent_data" => Ok(Self::AgentData),
             "newsly-feed-backfill-worker" | "feed_backfill" => Ok(Self::FeedBackfill),
             "newsly-feed-discovery-worker" | "feed_discovery" => Ok(Self::FeedDiscovery),
             "newsly-onboarding-discovery-worker" | "onboarding_discovery" => {
@@ -112,7 +108,6 @@ impl WorkerProcess {
             Self::Scrape => scrape_worker::main(),
             Self::Summarization => summarization_worker::main(),
             Self::XSync => x_sync_worker::main(),
-            Self::AgentData => agent_data_worker::main(),
             Self::FeedBackfill => feed_backfill_worker::main(),
             Self::FeedDiscovery => feed_discovery_worker::main(),
             Self::OnboardingDiscovery => onboarding_discovery_worker::main(),
@@ -144,7 +139,6 @@ mod tests {
             ("newsly-scrape-worker", WorkerProcess::Scrape),
             ("newsly-summarization-worker", WorkerProcess::Summarization),
             ("newsly-x-sync-worker", WorkerProcess::XSync),
-            ("newsly-agent-data-worker", WorkerProcess::AgentData),
             ("newsly-feed-backfill-worker", WorkerProcess::FeedBackfill),
             ("newsly-feed-discovery-worker", WorkerProcess::FeedDiscovery),
             (

@@ -36,9 +36,7 @@ pub struct LearningDeckTaskSnapshot {
     pub tool_policy: Map<String, Value>,
     pub input: Map<String, Value>,
     pub interests_prompt: Option<String>,
-    pub vm_namespace: String,
     pub workspace_path: String,
-    pub shared_workspace_path: String,
     pub created_at: DateTime<Utc>,
     pub source: LearningDeckSourceMaterial,
 }
@@ -152,9 +150,7 @@ struct TaskRow {
     allowed_actions: Value,
     tool_policy: Value,
     input_json: Value,
-    vm_namespace: Option<String>,
     workspace_path: Option<String>,
-    shared_workspace_path: Option<String>,
     subject_id: Option<i64>,
     created_at: NaiveDateTime,
 }
@@ -285,13 +281,7 @@ pub async fn begin_learning_deck_preparation(
             });
         }
     };
-    let Some(vm_namespace) = clean_string(task.vm_namespace.as_deref()) else {
-        return fail_invalid_workspace(transaction, task.id).await;
-    };
     let Some(workspace_path) = clean_string(task.workspace_path.as_deref()) else {
-        return fail_invalid_workspace(transaction, task.id).await;
-    };
-    let Some(shared_workspace_path) = clean_string(task.shared_workspace_path.as_deref()) else {
         return fail_invalid_workspace(transaction, task.id).await;
     };
 
@@ -312,9 +302,7 @@ pub async fn begin_learning_deck_preparation(
                 .get("interests_prompt")
                 .and_then(Value::as_str)
                 .and_then(|value| clean_string(Some(value))),
-            vm_namespace,
             workspace_path,
-            shared_workspace_path,
             created_at: task.created_at.and_utc(),
             source,
         },
@@ -743,9 +731,7 @@ async fn load_task_for_update(
             allowed_actions,
             tool_policy,
             input_json,
-            vm_namespace,
             workspace_path,
-            shared_workspace_path,
             subject_id::bigint AS subject_id,
             created_at
         FROM llm_tasks

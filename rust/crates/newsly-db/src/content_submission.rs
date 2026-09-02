@@ -52,7 +52,6 @@ pub struct AppliedContentSubmission {
     pub task_resolution: SubmissionTaskResolution,
     pub enqueue_dig_deeper: bool,
     pub enqueue_generated_image: bool,
-    pub enqueue_agent_data_sync: bool,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -72,13 +71,6 @@ struct ContentRow {
 struct ActiveTaskRow {
     id: i64,
     payload: Value,
-}
-
-#[derive(Debug, FromRow)]
-struct AgentSyncTaskRow {
-    id: i64,
-    status: String,
-    dedupe_key: String,
 }
 
 /// Applies the durable, database-owned portion of one URL submission.
@@ -173,44 +165,6 @@ pub async fn apply_content_submission(
         task_resolution,
         enqueue_dig_deeper,
         enqueue_generated_image,
-        enqueue_agent_data_sync: behavior.save_to_knowledge_and_mark_read,
-    })
-}
-
-/// Selects a non-lossy dedupe identity for a Knowledge corpus event.
-///
-/// The submission transaction already holds the active user row `FOR SHARE`, preventing a corpus
-/// handler from starting its exclusive render until the domain event and this task commit.
-///
-/// # Errors
-///
-/// Returns a database error when the active task identity cannot be read.
-pub async fn prepare_agent_data_sync_dedupe_key(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: i64,
-    base_key: &str,
-) -> Result<String, ContentSubmissionRepositoryError> {
-    let active = sqlx::query_as::<_, AgentSyncTaskRow>(
-        r"
-        SELECT id::bigint AS id, status, dedupe_key
-        FROM processing_tasks
-        WHERE
-            owner_user_id::bigint = $1::bigint
-            AND task_type = 'sync_agent_data'
-            AND status IN ('pending', 'processing')
-            AND (dedupe_key = $2 OR dedupe_key LIKE ($2 || '|after:%'))
-        ORDER BY id DESC
-        LIMIT 1
-        ",
-    )
-    .bind(user_id)
-    .bind(base_key)
-    .fetch_optional(&mut **transaction)
-    .await?;
-    Ok(match active {
-        None => base_key.to_owned(),
-        Some(task) if task.status == "pending" => task.dedupe_key,
-        Some(task) => format!("{base_key}|after:{}", task.id),
     })
 }
 

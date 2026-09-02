@@ -19261,10 +19261,6 @@
           "generate_audio_episode",
           "run_llm_task",
           "briefing_refresh",
-          "sync_agent_data",
-          "index_agent_data",
-          "backfill_agent_data",
-          "reconcile_agent_data",
           "delete_user_account"
         ]
       },

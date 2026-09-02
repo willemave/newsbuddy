@@ -6,15 +6,13 @@ use newsly_db::{
     NewXSyncUsage, SubmissionTaskResolution, XSyncConnectionUpdate, XSyncRepositoryError,
     apply_content_submission, complete_x_sync, find_reusable_x_bookmark_content,
     lock_current_x_sync_connection, mark_x_sync_failed, mark_x_sync_reauth_required,
-    persist_x_bookmark_snapshot, persist_x_sync_connection_update,
-    prepare_agent_data_sync_dedupe_key, record_x_sync_usage, remove_stale_x_bookmark_save,
-    resolve_x_bookmark_destination, save_x_bookmark_destination, upsert_x_bookmark_ledger,
-    x_bookmark_destination_needs_image,
+    persist_x_bookmark_snapshot, persist_x_sync_connection_update, record_x_sync_usage,
+    remove_stale_x_bookmark_save, resolve_x_bookmark_destination, save_x_bookmark_destination,
+    upsert_x_bookmark_ledger, x_bookmark_destination_needs_image,
 };
 use newsly_providers::XTweet;
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
 use thiserror::Error;
 
@@ -186,39 +184,19 @@ impl XSyncFinalizer {
                 seen_at,
             )
             .await?;
-            let save_created = save_x_bookmark_destination(
+            let _save_created = save_x_bookmark_destination(
                 transaction,
                 self.plan.prepared.user_id,
                 destination_content_id,
             )
             .await?;
-            let stale_save_removed = remove_stale_x_bookmark_save(
+            let _stale_save_removed = remove_stale_x_bookmark_save(
                 transaction,
                 self.plan.prepared.user_id,
                 shell_content_id,
                 destination_content_id,
             )
             .await?;
-            if save_created {
-                requests.push(
-                    agent_data_sync_request(
-                        transaction,
-                        self.plan.prepared.user_id,
-                        destination_content_id,
-                    )
-                    .await?,
-                );
-            }
-            if stale_save_removed {
-                requests.push(
-                    agent_data_sync_request(
-                        transaction,
-                        self.plan.prepared.user_id,
-                        shell_content_id,
-                    )
-                    .await?,
-                );
-            }
             if x_bookmark_destination_needs_image(transaction, destination_content_id).await?
                 && generated_image_ids.insert(destination_content_id)
             {
@@ -333,33 +311,6 @@ async fn append_submission_handoffs(
     Ok(())
 }
 
-async fn agent_data_sync_request(
-    transaction: &mut Transaction<'static, Postgres>,
-    user_id: i64,
-    content_id: i64,
-) -> Result<EnqueueRequest, ContentSubmissionRepositoryError> {
-    let payload_value = json!({
-        "user_id": user_id,
-        "content_ids": [content_id],
-        "news_item_ids": [],
-        "chat_session_ids": [],
-        "briefing_dates": [],
-    });
-    let serialized = serde_json::to_string(&payload_value).expect("agent sync payload serializes");
-    let digest = Sha256::digest(serialized.as_bytes());
-    let base_key = format!(
-        "agent-sync|user:{user_id}|payload:{}",
-        &hex_encode(&digest)[..24]
-    );
-    let dedupe_key = prepare_agent_data_sync_dedupe_key(transaction, user_id, &base_key).await?;
-    let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-    request.payload = payload_value.as_object().cloned();
-    request.owner_user_id = Some(user_id);
-    request.dedupe = Some(true);
-    request.dedupe_key = Some(dedupe_key);
-    Ok(request)
-}
-
 fn build_snapshot(
     tweet: &XTweet,
     included: &BTreeMap<String, XTweet>,
@@ -388,16 +339,6 @@ fn build_snapshot(
 
 fn canonical_tweet_url(tweet_id: &str) -> String {
     format!("https://x.com/i/status/{tweet_id}")
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
 }
 
 #[derive(Debug, Default)]

@@ -95,9 +95,7 @@ pub struct ChatTaskSnapshot {
     pub deep_research_response_id: Option<String>,
     pub encrypted_provider_key: Option<String>,
     pub content: Option<ChatContentMaterial>,
-    pub vm_namespace: String,
     pub workspace_path: String,
-    pub shared_workspace_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

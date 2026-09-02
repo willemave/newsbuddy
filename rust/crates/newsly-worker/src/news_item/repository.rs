@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{Duration, NaiveDateTime, Utc};
-use newsly_db::prepare_agent_data_sync_dedupe_key;
 use newsly_domain::{
     NewsRelationDocument, RelationExactKey, aggregate_relation_representative,
     can_bridge_relation_clusters,
@@ -1374,9 +1373,6 @@ async fn enqueue_ready_fanout(
         .await?;
     }
     let mut requests = Vec::new();
-    for user_id in visible_users {
-        requests.push(agent_data_sync_request(transaction, user_id, plan.snapshot.id).await?);
-    }
     let mut deadlines = Vec::new();
     for user_id in briefing_users {
         let pending_count = sqlx::query_scalar::<_, i64>(
@@ -1506,32 +1502,6 @@ async fn visible_user_ids(
     .bind(topic)
     .fetch_all(&mut **transaction)
     .await
-}
-
-async fn agent_data_sync_request(
-    transaction: &mut Transaction<'static, Postgres>,
-    user_id: i64,
-    news_item_id: i64,
-) -> Result<EnqueueRequest, NewsRepositoryError> {
-    let payload = json!({
-        "user_id": user_id,
-        "content_ids": [],
-        "news_item_ids": [news_item_id],
-        "chat_session_ids": [],
-        "briefing_dates": [],
-    });
-    let digest = Sha256::digest(serde_json::to_vec(&payload)?);
-    let base_key = format!(
-        "agent-sync|user:{user_id}|payload:{}",
-        hex_encode(&digest)[..24].to_owned()
-    );
-    let dedupe_key = prepare_agent_data_sync_dedupe_key(transaction, user_id, &base_key).await?;
-    let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-    request.payload = payload.as_object().cloned();
-    request.owner_user_id = Some(user_id);
-    request.dedupe = Some(true);
-    request.dedupe_key = Some(dedupe_key);
-    Ok(request)
 }
 
 async fn persist_model_usage(
@@ -1714,16 +1684,6 @@ fn saturating_i32(value: u64) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
-}
-
 #[derive(Debug, Error)]
 pub(super) enum NewsRepositoryError {
     #[error("content-analysis usage was passed to a news-item extraction finalizer")]
@@ -1737,7 +1697,7 @@ pub(super) enum NewsRepositoryError {
     #[error(transparent)]
     Queue(#[from] QueueError),
     #[error(transparent)]
-    AgentData(#[from] newsly_db::ContentSubmissionRepositoryError),
+    ContentSubmission(#[from] newsly_db::ContentSubmissionRepositoryError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 }

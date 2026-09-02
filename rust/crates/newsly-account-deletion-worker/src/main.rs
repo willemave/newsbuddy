@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use newsly_account_deletion_worker::{
     AccountDeletionHandler, AccountDeletionProcessConfig, AccountDeletionServices,
-    AccountExternalServices, ConfiguredArtifactStore, DirectAgentVmDestroyer, ReqwestXGrantRevoker,
+    AccountExternalServices, ConfiguredArtifactStore, ReqwestXGrantRevoker,
     UnavailableXGrantRevoker, XGrantRevoker,
 };
 use newsly_db::Database;
@@ -31,10 +31,6 @@ async fn main() -> Result<()> {
         .context("account-deletion worker PostgreSQL readiness check failed")?;
     let queue = QueueKernel::new(database.pool().clone());
 
-    let vm = Arc::new(
-        DirectAgentVmDestroyer::from_api_key(config.e2b_api_key.clone())
-            .context("account-deletion E2B client configuration failed")?,
-    );
     let x: Arc<dyn XGrantRevoker> = match ReqwestXGrantRevoker::new(
         &config.x_oauth_token_url,
         config.x_client_id.clone(),
@@ -54,10 +50,9 @@ async fn main() -> Result<()> {
     let services = Arc::new(AccountDeletionServices::new(
         database.pool().clone(),
         queue.clone(),
-        AccountExternalServices { vm, x, objects },
+        AccountExternalServices { x, objects },
         config.media_audio_root.clone(),
         config.personal_markdown_root.clone(),
-        config.agent_data_mirror_root.clone(),
     ));
 
     let mut handlers = HandlerRegistry::new();

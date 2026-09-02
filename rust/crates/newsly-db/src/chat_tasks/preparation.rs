@@ -411,9 +411,10 @@ pub(super) async fn prepare_linked_turn(
         deep_research_response_id: message.deep_research_response_id,
         encrypted_provider_key,
         content,
-        vm_namespace: format!("user:{user_id}"),
-        workspace_path: format!("/data/workspace/chat/{session_id}"),
-        shared_workspace_path: "/data/workspace/shared".to_owned(),
+        workspace_path: llm_task_id.map_or_else(
+            || format!("/data/workspace/chat/{session_id}"),
+            |task_id| format!("/data/workspace/tasks/{task_id}"),
+        ),
     }))
 }
 

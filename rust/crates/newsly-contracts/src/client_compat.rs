@@ -41,10 +41,6 @@ string_enum!(TaskType {
     GenerateAudioEpisode,
     RunLlmTask,
     BriefingRefresh,
-    SyncAgentData,
-    IndexAgentData,
-    BackfillAgentData,
-    ReconcileAgentData,
     DeleteUserAccount,
 });
 

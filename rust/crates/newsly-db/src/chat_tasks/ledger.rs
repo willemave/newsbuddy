@@ -111,14 +111,14 @@ pub(super) async fn create_chat_llm_task(
         INSERT INTO llm_tasks (
             user_id, task_kind, mode, workflow_key, workflow_version,
             workflow_state, status, approval_policy, allowed_actions, tool_policy,
-            vm_namespace, workspace_path, shared_workspace_path, prompt_pack,
+            workspace_path, prompt_pack,
             input_json, output_json, artifact_manifest, usage_json, status_history,
             model_provider, model_name, created_at, updated_at, started_at
         )
         VALUES (
             $1::bigint::integer, $2, $3, $4, 1,
             'running', 'running', $5, $6, $7,
-            NULL, NULL, NULL, $8,
+            NULL, $8,
             $9, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
             jsonb_build_array($10::jsonb, $11::jsonb),
             $12, $13,
@@ -149,19 +149,12 @@ pub(super) async fn create_chat_llm_task(
     sqlx::query(
         r#"
         UPDATE llm_tasks
-        SET vm_namespace = $2,
-            workspace_path = $3,
-            shared_workspace_path = $4
+        SET workspace_path = $2
         WHERE id::bigint = $1
         "#,
     )
     .bind(task_id)
-    .bind(format!("user:{}", context.session.user_id))
     .bind(format!("/data/workspace/tasks/{task_id}"))
-    .bind(format!(
-        "/data/workspace/users/{}/shared",
-        context.session.user_id
-    ))
     .execute(&mut **transaction)
     .await?;
     Ok(task_id)

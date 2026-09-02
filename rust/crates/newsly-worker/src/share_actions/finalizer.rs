@@ -18,8 +18,7 @@ use crate::{HandlerFinalizerFuture, TaskFinalizer, TaskFinalizerResult};
 
 use super::agent::ShareActionAgentRunResult;
 use super::submission::{
-    ShareSubmissionPolicy, apply_validated_feed_action, enqueue_chat_session_sync,
-    submit_content_action,
+    ShareSubmissionPolicy, apply_validated_feed_action, submit_content_action,
 };
 use super::workflows::{
     BriefingActionInput, ContentActionInput, LearningDeckActionInput, PreparedHostAction,
@@ -333,12 +332,8 @@ impl ShareActionApplicator<'_> {
                     .await?;
                     (submitted.content_id, submitted.task_id)
                 };
-                let (session_id, created) =
+                let (session_id, _created) =
                     get_or_create_share_chat_session(transaction, task.user_id, content_id).await?;
-                if created {
-                    enqueue_chat_session_sync(transaction, self.queue, task.user_id, session_id)
-                        .await?;
-                }
                 Ok(Map::from_iter([
                     ("content_id".to_owned(), Value::from(content_id)),
                     ("task_id".to_owned(), option_i64(content_task_id)),

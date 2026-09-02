@@ -1,13 +1,9 @@
 use std::error::Error;
 
 use chrono::{Duration, Utc};
-use newsly_db::{
-    BriefingRefreshConfig, BriefingRefreshPublication, apply_briefing_refresh,
-    prepare_agent_data_sync_dedupe_key,
-};
+use newsly_db::{BriefingRefreshConfig, BriefingRefreshPublication, apply_briefing_refresh};
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
-use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
+use serde_json::{Map, Value};
 use sqlx::{Postgres, Transaction};
 
 use crate::{HandlerFinalizerFuture, TaskFinalizer, TaskFinalizerResult};
@@ -38,20 +34,7 @@ impl BriefingRefreshFinalizer {
     ) -> Result<TaskFinalizerResult, Box<dyn Error + Send + Sync>> {
         let outcome = apply_briefing_refresh(transaction, &self.publication, &self.config).await?;
         let user_id = self.publication.prepared.user_id;
-        let mut requests = vec![sweep_request(user_id, outcome.next_sweep_delay_seconds)];
-        if outcome.appended_segments > 0
-            || outcome.compacted_segments > 0
-            || outcome.retired_segments > 0
-        {
-            requests.push(
-                agent_sync_request(
-                    transaction,
-                    user_id,
-                    self.publication.finalized_at.format("%Y-%m-%d").to_string(),
-                )
-                .await?,
-            );
-        }
+        let requests = vec![sweep_request(user_id, outcome.next_sweep_delay_seconds)];
         self.queue
             .enqueue_many_in_transaction(transaction, requests)
             .await?;
@@ -91,42 +74,6 @@ fn sweep_request(user_id: i64, delay_seconds: i64) -> EnqueueRequest {
     request.dedupe_key = Some(format!("briefing_refresh:{user_id}:sweep"));
     request.available_at = Some(Utc::now() + Duration::seconds(delay_seconds.clamp(0, 86_400)));
     request
-}
-
-async fn agent_sync_request(
-    transaction: &mut Transaction<'static, Postgres>,
-    user_id: i64,
-    briefing_date: String,
-) -> Result<EnqueueRequest, Box<dyn Error + Send + Sync>> {
-    let payload = json!({
-        "user_id": user_id,
-        "content_ids": [],
-        "news_item_ids": [],
-        "chat_session_ids": [],
-        "briefing_dates": [briefing_date],
-    });
-    let digest = Sha256::digest(serde_json::to_vec(&payload)?);
-    let base_key = format!(
-        "agent-sync|user:{user_id}|payload:{}",
-        &hex_encode(&digest)[..24]
-    );
-    let dedupe_key = prepare_agent_data_sync_dedupe_key(transaction, user_id, &base_key).await?;
-    let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-    request.payload = payload.as_object().cloned();
-    request.owner_user_id = Some(user_id);
-    request.dedupe = Some(true);
-    request.dedupe_key = Some(dedupe_key);
-    Ok(request)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
 }
 
 #[cfg(test)]

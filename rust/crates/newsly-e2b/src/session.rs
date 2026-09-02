@@ -2,7 +2,6 @@
 
 use std::future::Future;
 use std::time::Duration;
-use std::time::SystemTime;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -15,28 +14,13 @@ use crate::control_plane::{ControlPlaneClient, ControlPlaneConfig, SandboxHealth
 use crate::envd_process::{CommandEventStream, EnvdProcessClient, ProcessSignal};
 use crate::error::E2bError;
 use crate::files::{BoxByteStream, EnvdFileClient, FileLimits};
-use crate::lifecycle::{CommandLeaseState, NamespaceLease};
 use crate::network::NetworkPolicy;
 use crate::types::{
     CommandOutput, CommandRequest, CommandResult, ExecutionTag, ExitStatus, OutputLimits,
-    ProcessInfo, ProcessSelector, SandboxHandle, SandboxId, SandboxRequest, SnapshotId,
-    SnapshotInfo, WorkspacePath,
+    ProcessInfo, ProcessSelector, SandboxHandle, SandboxId, SandboxRequest, WorkspacePath,
 };
 
 const RESULT_MANIFEST_LIMIT_BYTES: usize = 1024 * 1024;
-
-/// E2B handle plus the caller-owned durable namespace lease authorizing its use.
-#[derive(Clone, Debug)]
-pub struct SandboxSession {
-    pub sandbox: SandboxHandle,
-    pub lease: NamespaceLease,
-}
-
-impl SandboxSession {
-    pub fn require_active(&self, now: SystemTime) -> Result<(), E2bError> {
-        self.lease.require_active(now)
-    }
-}
 
 /// Optional terminal-result fallback used only after reconnect-by-tag finds no live process.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,37 +43,12 @@ pub enum RecoveredCommand {
 pub trait SandboxProvider: Send + Sync {
     async fn create_sandbox(&self, request: &SandboxRequest) -> Result<SandboxHandle, E2bError>;
 
-    async fn get_sandbox(&self, sandbox_id: &SandboxId) -> Result<SandboxHandle, E2bError>;
-
-    async fn connect_sandbox(
-        &self,
-        sandbox_id: &SandboxId,
-        timeout: Duration,
-    ) -> Result<SandboxHandle, E2bError>;
-
-    async fn resume_sandbox(
-        &self,
-        sandbox_id: &SandboxId,
-        timeout: Duration,
-    ) -> Result<SandboxHandle, E2bError>;
-
-    async fn pause_sandbox(&self, sandbox_id: &SandboxId, memory: bool) -> Result<bool, E2bError>;
-
     async fn kill_sandbox(&self, sandbox_id: &SandboxId) -> Result<bool, E2bError>;
 
     async fn check_sandbox_health(
         &self,
         sandbox: &SandboxHandle,
     ) -> Result<SandboxHealth, E2bError>;
-
-    async fn create_snapshot(
-        &self,
-        sandbox_id: &SandboxId,
-        name: Option<&str>,
-        command_leases: CommandLeaseState,
-    ) -> Result<SnapshotInfo, E2bError>;
-
-    async fn delete_snapshot(&self, snapshot_id: &SnapshotId) -> Result<bool, E2bError>;
 
     async fn update_network(
         &self,
@@ -426,30 +385,6 @@ impl SandboxProvider for DirectE2bProvider {
         self.control.create(request).await
     }
 
-    async fn get_sandbox(&self, sandbox_id: &SandboxId) -> Result<SandboxHandle, E2bError> {
-        self.control.get(sandbox_id).await
-    }
-
-    async fn connect_sandbox(
-        &self,
-        sandbox_id: &SandboxId,
-        timeout: Duration,
-    ) -> Result<SandboxHandle, E2bError> {
-        self.control.connect(sandbox_id, timeout).await
-    }
-
-    async fn resume_sandbox(
-        &self,
-        sandbox_id: &SandboxId,
-        timeout: Duration,
-    ) -> Result<SandboxHandle, E2bError> {
-        self.control.resume(sandbox_id, timeout).await
-    }
-
-    async fn pause_sandbox(&self, sandbox_id: &SandboxId, memory: bool) -> Result<bool, E2bError> {
-        self.control.pause(sandbox_id, memory).await
-    }
-
     async fn kill_sandbox(&self, sandbox_id: &SandboxId) -> Result<bool, E2bError> {
         self.control.kill(sandbox_id).await
     }
@@ -459,21 +394,6 @@ impl SandboxProvider for DirectE2bProvider {
         sandbox: &SandboxHandle,
     ) -> Result<SandboxHealth, E2bError> {
         self.control.check_envd_health(sandbox).await
-    }
-
-    async fn create_snapshot(
-        &self,
-        sandbox_id: &SandboxId,
-        name: Option<&str>,
-        command_leases: CommandLeaseState,
-    ) -> Result<SnapshotInfo, E2bError> {
-        self.control
-            .create_snapshot(sandbox_id, name, command_leases)
-            .await
-    }
-
-    async fn delete_snapshot(&self, snapshot_id: &SnapshotId) -> Result<bool, E2bError> {
-        self.control.delete_snapshot(snapshot_id).await
     }
 
     async fn update_network(

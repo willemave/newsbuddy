@@ -104,7 +104,7 @@ COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-wo
 COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-account-deletion-worker /usr/local/bin/newsly-account-deletion-worker
 
 RUN for worker in \
-      content media audio image discussion news-item scrape summarization x-sync agent-data \
+      content media audio image discussion news-item scrape summarization x-sync \
       feed-backfill feed-discovery onboarding-discovery briefing-refresh chat run-llm-task; \
       do ln -s newsly-worker "/usr/local/bin/newsly-${worker}-worker"; done \
     && chmod +x /usr/local/bin/newsly-* /app/docker/*.sh

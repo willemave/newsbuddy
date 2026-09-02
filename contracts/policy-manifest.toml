@@ -1176,15 +1176,6 @@ database_writer = "rust"
 e2b_namespace = "none"
 
 [[tasks]]
-task_type = "backfill_agent_data"
-queue = "backfill"
-payload_schema = "tasks/backfill_agent_data.schema.json"
-handler = "newsly_worker::agent_data::BackfillAgentDataHandler"
-current_owner = "rust"
-database_writer = "rust"
-e2b_namespace = "none"
-
-[[tasks]]
 task_type = "backfill_feeds"
 queue = "backfill"
 payload_schema = "tasks/backfill_feeds.schema.json"
@@ -1284,15 +1275,6 @@ database_writer = "rust"
 e2b_namespace = "none"
 
 [[tasks]]
-task_type = "index_agent_data"
-queue = "backfill"
-payload_schema = "tasks/index_agent_data.schema.json"
-handler = "newsly_worker::agent_data::IndexAgentDataHandler"
-current_owner = "rust"
-database_writer = "rust"
-e2b_namespace = "none"
-
-[[tasks]]
 task_type = "onboarding_discover"
 queue = "onboarding"
 payload_schema = "tasks/onboarding_discover.schema.json"
@@ -1329,15 +1311,6 @@ database_writer = "rust"
 e2b_namespace = "none"
 
 [[tasks]]
-task_type = "reconcile_agent_data"
-queue = "backfill"
-payload_schema = "tasks/reconcile_agent_data.schema.json"
-handler = "newsly_worker::agent_data::ReconcileAgentDataHandler"
-current_owner = "rust"
-database_writer = "rust"
-e2b_namespace = "none"
-
-[[tasks]]
 task_type = "run_llm_task"
 queue = "llm"
 payload_schema = "tasks/run_llm_task.schema.json"
@@ -1365,15 +1338,6 @@ database_writer = "rust"
 e2b_namespace = "none"
 
 [[tasks]]
-task_type = "sync_agent_data"
-queue = "backfill"
-payload_schema = "tasks/sync_agent_data.schema.json"
-handler = "newsly_worker::agent_data::SyncAgentDataHandler"
-current_owner = "rust"
-database_writer = "rust"
-e2b_namespace = "none"
-
-[[tasks]]
 task_type = "sync_integration"
 queue = "twitter"
 payload_schema = "tasks/sync_integration.schema.json"
@@ -1390,13 +1354,3 @@ handler = "newsly_worker::media::TranscribeTweetVideoHandler"
 current_owner = "rust"
 database_writer = "rust"
 e2b_namespace = "none"
-
-[[e2b_namespaces]]
-namespace = "user:*"
-current_owner = "rust"
-database_writer = "rust"
-
-[[e2b_namespaces]]
-namespace = "user:0"
-current_owner = "rust"
-database_writer = "rust"

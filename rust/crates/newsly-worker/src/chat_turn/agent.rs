@@ -24,14 +24,14 @@ use thiserror::Error;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent_vm::{AgentVmLifecycle, AgentVmLifecycleConfig, AgentVmLifecycleError};
-use crate::share_actions::tools::ExaSearchClient;
+use crate::content_body_store::{ContentBodyStore, ContentBodyStoreError};
 use crate::share_actions::{ShareActionAgentConfig, ShareActionAgentConfigError};
+use crate::task_sandbox::{TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner};
+use crate::task_tools::ExaSearchClient;
 
 use super::events::ChatEvents;
 use super::prompts::{ChatPromptError, system_prompt};
 use super::routing::{article_tools, route_assistant_turn};
-use super::storage::{ChatBodyStore, ChatBodyStoreError};
 use super::tools::{ChatToolDependencies, ChatToolExecutor};
 
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai/search";
@@ -82,11 +82,11 @@ pub struct ChatAgentRuntime {
     pool: PgPool,
     queue: QueueKernel,
     provider: Arc<DirectE2bProvider>,
-    lifecycle: AgentVmLifecycle,
+    lifecycle: TaskSandboxOwner,
     exa: ExaSearchClient,
     onboarding: OnboardingGateway,
     feed_validator: FeedValidator,
-    body_store: ChatBodyStore,
+    body_store: ContentBodyStore,
     credentials: ProviderCredentials,
     cipher: Option<IntegrationTokenCipher>,
     openrouter_policy: OpenRouterPrivacyPolicy,
@@ -106,15 +106,13 @@ impl ChatAgentRuntime {
                 download_bytes: 1_000_000,
             },
         )?);
-        let lifecycle = AgentVmLifecycle::new(
+        let lifecycle = TaskSandboxOwner::new(
             pool.clone(),
             Arc::clone(&provider),
-            AgentVmLifecycleConfig {
+            TaskSandboxConfig {
                 template_id: shared.template_id.clone(),
                 template_revision: shared.template_revision,
                 sandbox_timeout: shared.sandbox_timeout,
-                namespace_lease_duration: shared.namespace_lease_duration,
-                agent_data_mirror_root: shared.agent_data_mirror_root,
             },
         )?;
         let endpoint = env::var("EXA_API_BASE_URL")
@@ -148,7 +146,7 @@ impl ChatAgentRuntime {
             exa,
             onboarding,
             feed_validator,
-            body_store: ChatBodyStore::from_env()?,
+            body_store: ContentBodyStore::from_env()?,
             credentials,
             cipher,
             openrouter_policy: OpenRouterPrivacyPolicy::default(),
@@ -212,6 +210,7 @@ impl ChatAgentRuntime {
                 exa: self.exa.clone(),
                 onboarding: self.onboarding.clone(),
                 feed_validator: self.feed_validator.clone(),
+                body_store: self.body_store.clone(),
                 max_output_chars: self.config.max_output_chars,
                 deadline,
                 cancellation: cancellation.child_token(),
@@ -263,20 +262,17 @@ impl ChatAgentRuntime {
         let result = tokio::select! {
             result = &mut execution => result.map_err(ChatAgentError::Agent),
             () = cancellation.cancelled() => {
-                // Let the cancelled tool future unwind through its cleanup guards. In particular,
-                // do not drop an in-flight persistent-VM network mutation: its compensating
-                // deny-by-default reset must finish before the namespace lease is released.
+                // Let the cancelled tool future unwind through its sandbox cleanup guards.
                 let _ = execution.await;
                 Err(ChatAgentError::Cancelled)
             }
         };
         let cleanup = tools.close().await;
         events.finish().await;
-        let outcome = match (result, cleanup) {
-            (Ok(outcome), Ok(())) => outcome,
-            (Ok(_), Err(error)) => return Err(ChatAgentError::Agent(error)),
-            (Err(error), _) => return Err(error),
-        };
+        if let Err(error) = cleanup {
+            tracing::error!(error = %error, "chat sandbox cleanup remains pending");
+        }
+        let outcome = result?;
         if outcome.output_text.trim().is_empty() {
             return Err(ChatAgentError::EmptyOutput);
         }
@@ -494,7 +490,7 @@ pub enum ChatAgentBuildError {
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error(transparent)]
-    Lifecycle(#[from] AgentVmLifecycleError),
+    Lifecycle(#[from] TaskSandboxError),
     #[error(transparent)]
     Onboarding(#[from] OnboardingGatewayError),
     #[error(transparent)]
@@ -505,8 +501,8 @@ pub enum ChatAgentBuildError {
     Cipher(#[from] newsly_providers::IntegrationTokenCipherError),
 }
 
-impl From<ChatBodyStoreError> for ChatAgentBuildError {
-    fn from(error: ChatBodyStoreError) -> Self {
+impl From<ContentBodyStoreError> for ChatAgentBuildError {
+    fn from(error: ContentBodyStoreError) -> Self {
         Self::Storage(error.to_string())
     }
 }
@@ -532,7 +528,7 @@ pub(super) enum ChatAgentError {
     #[error(transparent)]
     Prompt(#[from] ChatPromptError),
     #[error(transparent)]
-    Storage(#[from] ChatBodyStoreError),
+    Storage(#[from] ContentBodyStoreError),
     #[error(transparent)]
     Model(#[from] newsly_providers::ModelSpecError),
     #[error(transparent)]

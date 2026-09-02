@@ -37,7 +37,7 @@ pub(crate) async fn main() -> Result<()> {
         OnboardingGateway::from_env().context("feed-discovery provider initialization failed")?;
     let feed_validator = FeedValidator::new(
         optional_secret_alias(&["LLM_TASK_SANDBOX_E2B_API_KEY", "E2B_API_KEY"]),
-        &env::var("NEWSLY_AGENT_VM_TEMPLATE_ID").unwrap_or_else(|_| "newsly-agent".to_owned()),
+        &env::var("NEWSLY_TASK_SANDBOX_TEMPLATE_ID").unwrap_or_else(|_| "newsly-agent".to_owned()),
         Duration::from_secs(parse_positive_u64("LLM_TASK_SANDBOX_TIMEOUT_SECONDS", 300)?),
     )
     .context("feed-discovery E2B validator initialization failed")?;
@@ -45,7 +45,6 @@ pub(crate) async fn main() -> Result<()> {
     let minimum_favorites = parse_positive_u64("DISCOVERY_MIN_FAVORITES", 3)?;
     let services = Arc::new(FeedDiscoveryWorkerServices::new(
         database.pool().clone(),
-        queue.clone(),
         provider,
         feed_validator,
         config.max_retries,

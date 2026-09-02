@@ -55,8 +55,6 @@ macro_rules! string_id {
 }
 
 string_id!(SandboxId, "sandbox id");
-string_id!(SnapshotId, "snapshot id");
-string_id!(VmNamespace, "VM namespace");
 
 /// Operating-system account selected for an envd operation.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -302,12 +300,6 @@ impl SandboxRequest {
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct SnapshotInfo {
-    pub snapshot_id: SnapshotId,
-    pub names: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

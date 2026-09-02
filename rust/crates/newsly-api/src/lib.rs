@@ -184,7 +184,7 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         .transpose()?;
     let feed_validator = feed_validation::FeedValidator::new(
         config.e2b_api_key.clone(),
-        &config.agent_vm_template_id,
+        &config.task_sandbox_template_id,
         config.feed_validation_sandbox_timeout,
     )?;
     let content_body_store = Arc::new(content_body_storage::ContentBodyStore::from_environment()?);
