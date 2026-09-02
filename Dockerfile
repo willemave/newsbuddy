@@ -71,7 +71,6 @@ COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-api /usr/l
 COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-admin /usr/local/bin/newsly-admin
 COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-scheduler /usr/local/bin/newsly-scheduler
 COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-worker /usr/local/bin/newsly-content-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/agent_data_worker /usr/local/bin/newsly-agent-data-worker
 COPY --from=newsly-rust-builder /workspace/rust/target/release/audio_episode_worker /usr/local/bin/newsly-audio-worker
 COPY --from=newsly-rust-builder /workspace/rust/target/release/discussion_worker /usr/local/bin/newsly-discussion-worker
 COPY --from=newsly-rust-builder /workspace/rust/target/release/image_worker /usr/local/bin/newsly-image-worker

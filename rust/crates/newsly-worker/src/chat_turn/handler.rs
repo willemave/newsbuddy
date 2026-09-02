@@ -25,7 +25,6 @@ const DIG_DEEPER_FAILURE_MESSAGE: &str = "Dig-deeper chat turn failed";
 #[derive(Debug, Clone)]
 pub struct ChatTaskServices {
     pool: PgPool,
-    queue: newsly_queue::QueueKernel,
     agent: Arc<ChatAgentRuntime>,
     deep_research: Arc<dyn OpenAiBackgroundResponses>,
     max_retries: i32,
@@ -34,14 +33,12 @@ pub struct ChatTaskServices {
 impl ChatTaskServices {
     pub fn new(
         pool: PgPool,
-        queue: newsly_queue::QueueKernel,
         agent: Arc<ChatAgentRuntime>,
         deep_research: Arc<dyn OpenAiBackgroundResponses>,
         max_retries: i32,
     ) -> Self {
         Self {
             pool,
-            queue,
             agent,
             deep_research,
             max_retries: max_retries.max(0),
@@ -126,7 +123,7 @@ impl ChatPartitionHandler {
                     let task_message = rejection.task_message.clone();
                     return HandlerExecution::with_finalizer(
                         TaskResult::fail(Some(task_message), false),
-                        ChatFailureFinalizer::new(self.services.queue.clone(), rejection),
+                        ChatFailureFinalizer::new(rejection),
                     );
                 }
             }
@@ -166,7 +163,7 @@ impl ChatPartitionHandler {
                 let rejection = rejection_for_snapshot(&snapshot, &message, self.kind);
                 return HandlerExecution::with_finalizer(
                     TaskResult::fail(Some(message), false),
-                    ChatFailureFinalizer::new(self.services.queue.clone(), rejection),
+                    ChatFailureFinalizer::new(rejection),
                 );
             }
         };
@@ -226,7 +223,6 @@ impl ChatPartitionHandler {
         HandlerExecution::with_finalizer(
             TaskResult::ok(),
             ChatSuccessFinalizer::new(
-                self.services.queue.clone(),
                 snapshot,
                 completed.transcript,
                 completed.render_metadata,

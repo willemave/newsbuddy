@@ -27,10 +27,10 @@ use newsly_db::{
     ContentMiscRepositoryError, DiscussionRefreshPlan, DiscussionTargetKind, FeedBackfillEntry,
     FeedBackfillPreparation, SubmissionProjection, finalize_article_conversion,
     list_active_feed_urls, list_submission_projections, persist_content_discussion,
-    persist_feed_backfill, persist_news_discussion, prepare_agent_data_sync_dedupe_key,
-    prepare_content_conversion, prepare_content_discussion_refresh, prepare_content_narration,
-    prepare_feed_backfill, prepare_news_conversion, prepare_news_discussion_refresh,
-    prepare_tweet_content, search_visible_content,
+    persist_feed_backfill, persist_news_discussion, prepare_content_conversion,
+    prepare_content_discussion_refresh, prepare_content_narration, prepare_feed_backfill,
+    prepare_news_conversion, prepare_news_discussion_refresh, prepare_tweet_content,
+    search_visible_content,
 };
 use newsly_providers::{
     ContentMiscGatewayError, DiscussionRefreshResult, FeedDiscoveryHit, PodcastEpisodeHit,
@@ -38,11 +38,9 @@ use newsly_providers::{
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 
 use crate::auth::AuthenticatedUser;
 use crate::content_read::presentation;
-use crate::encoding::hex_encode;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::write_support::{
@@ -244,16 +242,6 @@ async fn finalize_conversion(
         request.content_id = Some(converted.content_id);
         requests.push(request);
     }
-    let (payload, base_key) = agent_data_sync_payload(user_id, converted.content_id);
-    let dedupe_key = prepare_agent_data_sync_dedupe_key(&mut transaction, user_id, &base_key)
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    let mut sync_request = EnqueueRequest::new(TaskType::SyncAgentData);
-    sync_request.payload = Some(payload);
-    sync_request.owner_user_id = Some(user_id);
-    sync_request.dedupe = Some(true);
-    sync_request.dedupe_key = Some(dedupe_key);
-    requests.push(sync_request);
     QueueKernel::new(state.database.pool().clone())
         .enqueue_many_in_transaction(&mut transaction, requests)
         .await
@@ -1388,26 +1376,6 @@ fn present_feed_hit(
 
 fn canonical_feed_url(value: &str) -> String {
     value.trim().trim_end_matches('/').to_ascii_lowercase()
-}
-
-fn agent_data_sync_payload(user_id: i64, content_id: i64) -> (Map<String, Value>, String) {
-    let payload = json!({
-        "user_id": user_id,
-        "content_ids": [content_id],
-        "news_item_ids": [],
-        "chat_session_ids": [],
-        "briefing_dates": [],
-    });
-    let serialized = serde_json::to_vec(&payload).expect("agent sync payload serializes");
-    let digest = Sha256::digest(serialized);
-    let encoded = hex_encode(&digest);
-    (
-        payload
-            .as_object()
-            .cloned()
-            .expect("agent sync payload is an object"),
-        format!("agent-sync|user:{user_id}|payload:{}", &encoded[..24]),
-    )
 }
 
 fn parse_external_query<T>(

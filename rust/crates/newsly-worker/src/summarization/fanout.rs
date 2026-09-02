@@ -1,9 +1,8 @@
 use std::collections::BTreeSet;
 
 use chrono::{Duration, Utc};
-use newsly_db::prepare_agent_data_sync_dedupe_key;
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
 use thiserror::Error;
@@ -20,11 +19,6 @@ pub(super) async fn enqueue_summary_followups(
 ) -> Result<(), SummarizationFanoutError> {
     let mut requests = Vec::new();
     enqueue_pending_chats(transaction, applied, &mut requests).await?;
-
-    let associated_user_ids = active_associated_users(transaction, applied.content_id).await?;
-    for user_id in associated_user_ids {
-        requests.push(agent_data_sync_request(transaction, user_id, applied.content_id).await?);
-    }
 
     if image_is_eligible(transaction, applied).await? {
         let mut request = EnqueueRequest::new(TaskType::GenerateImage);
@@ -110,56 +104,6 @@ fn dig_deeper_request(content_id: i64, pending: &PendingChatRequest) -> EnqueueR
         &hex_encode(&digest)[..16]
     ));
     request
-}
-
-async fn active_associated_users(
-    transaction: &mut Transaction<'static, Postgres>,
-    content_id: i64,
-) -> Result<Vec<i64>, sqlx::Error> {
-    sqlx::query_scalar::<_, i64>(
-        r"
-        SELECT DISTINCT users.id::bigint
-        FROM users
-        JOIN (
-            SELECT user_id FROM content_status WHERE content_id::bigint = $1
-            UNION
-            SELECT user_id FROM content_knowledge_saves WHERE content_id::bigint = $1
-            UNION
-            SELECT user_id FROM chat_sessions WHERE content_id::bigint = $1
-        ) AS owners ON owners.user_id = users.id
-        WHERE users.is_active IS TRUE
-        ORDER BY users.id::bigint
-        ",
-    )
-    .bind(content_id)
-    .fetch_all(&mut **transaction)
-    .await
-}
-
-async fn agent_data_sync_request(
-    transaction: &mut Transaction<'static, Postgres>,
-    user_id: i64,
-    content_id: i64,
-) -> Result<EnqueueRequest, SummarizationFanoutError> {
-    let payload = json!({
-        "user_id": user_id,
-        "content_ids": [content_id],
-        "news_item_ids": [],
-        "chat_session_ids": [],
-        "briefing_dates": [],
-    });
-    let digest = Sha256::digest(serde_json::to_vec(&payload)?);
-    let base_key = format!(
-        "agent-sync|user:{user_id}|payload:{}",
-        &hex_encode(&digest)[..24]
-    );
-    let dedupe_key = prepare_agent_data_sync_dedupe_key(transaction, user_id, &base_key).await?;
-    let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-    request.payload = payload.as_object().cloned();
-    request.owner_user_id = Some(user_id);
-    request.dedupe = Some(true);
-    request.dedupe_key = Some(dedupe_key);
-    Ok(request)
 }
 
 async fn image_is_eligible(

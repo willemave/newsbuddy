@@ -9,11 +9,11 @@ use newsly_db::{
 };
 use newsly_e2b::FeedValidator;
 use newsly_providers::OnboardingGateway;
-use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
+use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
-use crate::onboarding_discovery::{enqueue_weekly_session_sync, normalize_seeds};
+use crate::onboarding_discovery::normalize_seeds;
 use crate::{
     HandlerExecution, HandlerFinalizerFuture, HandlerFuture, LeaseHealth, TaskFinalizer,
     TaskFinalizerResult, TaskHandler,
@@ -22,7 +22,6 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct FeedDiscoveryWorkerServices {
     pool: PgPool,
-    queue: QueueKernel,
     provider: OnboardingGateway,
     feed_validator: FeedValidator,
     max_retries: i32,
@@ -34,7 +33,6 @@ impl FeedDiscoveryWorkerServices {
     #[allow(clippy::too_many_arguments)]
     pub const fn new(
         pool: PgPool,
-        queue: QueueKernel,
         provider: OnboardingGateway,
         feed_validator: FeedValidator,
         max_retries: i32,
@@ -43,7 +41,6 @@ impl FeedDiscoveryWorkerServices {
     ) -> Self {
         Self {
             pool,
-            queue,
             provider,
             feed_validator,
             max_retries,
@@ -113,7 +110,6 @@ async fn execute_feed_discovery(
             return HandlerExecution::with_finalizer(
                 TaskResult::ok(),
                 FeedDiscoverySuccessFinalizer {
-                    queue: services.queue.clone(),
                     task_id: task.task_id,
                     retry_count: task.retry_count,
                     publication: FeedDiscoveryPublication::Reuse {
@@ -182,7 +178,7 @@ async fn execute_feed_discovery(
 }
 
 fn success(
-    services: &FeedDiscoveryWorkerServices,
+    _services: &FeedDiscoveryWorkerServices,
     task: &OwnedWorkPlan,
     snapshot: FeedDiscoveryTaskSnapshot,
     suggestions: Vec<newsly_db::NewOnboardingSuggestion>,
@@ -190,7 +186,6 @@ fn success(
     HandlerExecution::with_finalizer(
         TaskResult::ok(),
         FeedDiscoverySuccessFinalizer {
-            queue: services.queue.clone(),
             task_id: task.task_id,
             retry_count: task.retry_count,
             publication: FeedDiscoveryPublication::Complete {
@@ -320,7 +315,6 @@ enum FeedDiscoveryPublication {
 
 #[derive(Debug)]
 struct FeedDiscoverySuccessFinalizer {
-    queue: QueueKernel,
     task_id: i64,
     retry_count: i32,
     publication: FeedDiscoveryPublication,
@@ -351,12 +345,7 @@ impl FeedDiscoverySuccessFinalizer {
             }
             FeedDiscoveryPublication::Reuse { user_id } => *user_id,
         };
-        if let Some(session) = ensure_weekly_discovery_session(transaction, user_id).await?
-            && session.changed
-        {
-            enqueue_weekly_session_sync(transaction, &self.queue, user_id, session.session_id)
-                .await?;
-        }
+        ensure_weekly_discovery_session(transaction, user_id).await?;
         Ok(TaskFinalizerResult::Keep)
     }
 }

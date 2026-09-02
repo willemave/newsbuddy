@@ -7,11 +7,11 @@ use newsly_agent_runtime::{
     AgentEventSink, AgentRuntimeError, BoxToolFuture, ToolCall, ToolDefinition, ToolExecutor,
     ToolOutput,
 };
-use newsly_contracts::{AssistantFeedOption, FeedFormat, FeedType};
+use newsly_contracts::{AssistantFeedOption, FeedType};
 use newsly_db::{
     ChatTaskSnapshot, create_deep_research_handoff, list_unread_chat_news, mark_content_read,
     mark_content_unread, prepare_chat_article_conversion, remove_content_from_knowledge,
-    save_content_to_knowledge, search_chat_content, search_chat_knowledge, search_chat_news,
+    save_content_to_knowledge, search_agent_knowledge, search_chat_content, search_chat_news,
     search_chat_subscription_content,
 };
 use newsly_e2b::{
@@ -24,25 +24,31 @@ use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Value, json};
-use sha1::{Digest, Sha1};
 use sqlx::PgPool;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent_vm::{AcquiredAgentVmSession, AgentVmLifecycle};
+use crate::content_body_store::ContentBodyStore;
+use crate::knowledge_tools::{
+    KnowledgeReferenceInput, ReadKnowledgeInput, read_authorized_knowledge_item,
+};
 use crate::onboarding_discovery::normalize_seeds;
 use crate::share_actions::submission::{
-    ShareSubmissionPolicy, apply_validated_feed_action, enqueue_content_sync, submit_content_action,
+    ShareSubmissionPolicy, apply_validated_feed_action, submit_content_action,
 };
-use crate::share_actions::tools::{ExaSearchClient, ShareActionToolExecutor};
 use crate::share_actions::workflows::{
     ContentActionInput, FeedActionInput, validated_scraper_type,
 };
+use crate::task_sandbox::{AcquiredTaskSandbox, TaskSandboxOwner};
+use crate::task_tools::{ExaSearchClient, TaskToolExecutor};
 
 #[path = "tools/support.rs"]
 mod support;
-use support::{bounded_query, chat_output_limits, clean, tail_chars, valid_url};
+use support::{
+    assistant_feed_option, bounded_query, chat_output_limits, clean, looks_like_podcast_query,
+    tail_chars, valid_url,
+};
 
 const DEEP_RESEARCH_MODEL: &str = "o4-mini-deep-research-2025-06-26";
 const PRIVATE_NETWORK_DENIALS: [&str; 9] = [
@@ -62,10 +68,11 @@ pub(super) struct ChatToolDependencies {
     pub pool: PgPool,
     pub queue: QueueKernel,
     pub provider: Arc<DirectE2bProvider>,
-    pub lifecycle: AgentVmLifecycle,
+    pub lifecycle: TaskSandboxOwner,
     pub exa: ExaSearchClient,
     pub onboarding: OnboardingGateway,
     pub feed_validator: FeedValidator,
+    pub body_store: ContentBodyStore,
     pub max_output_chars: usize,
     pub deadline: Instant,
     pub cancellation: CancellationToken,
@@ -75,19 +82,18 @@ pub(super) struct ChatToolDependencies {
 pub(super) struct ChatToolExecutor {
     dependencies: ChatToolDependencies,
     snapshot: ChatTaskSnapshot,
-    vm: Mutex<Option<ChatVmState>>,
+    sandbox: Mutex<Option<ChatSandboxState>>,
     render_metadata: StdMutex<Option<Value>>,
 }
 
 #[derive(Debug)]
-struct ChatVmState {
-    acquired: AcquiredAgentVmSession,
-    executor: ShareActionToolExecutor,
+struct ChatSandboxState {
+    acquired: AcquiredTaskSandbox,
+    executor: TaskToolExecutor,
 }
 
-struct PendingChatVm {
-    provider: Arc<DirectE2bProvider>,
-    acquired: Option<AcquiredAgentVmSession>,
+struct PendingChatSandbox {
+    acquired: Option<AcquiredTaskSandbox>,
     message_id: i64,
 }
 
@@ -96,7 +102,7 @@ impl ChatToolExecutor {
         Self {
             dependencies,
             snapshot,
-            vm: Mutex::new(None),
+            sandbox: Mutex::new(None),
             render_metadata: StdMutex::new(None),
         }
     }
@@ -105,7 +111,7 @@ impl ChatToolExecutor {
         vec![
             definition::<ExecuteBashInput>(
                 "execute_bash",
-                "Run one bounded bash command inside the persistent user VM.",
+                "Run one bounded bash command inside this turn's task sandbox.",
             ),
             definition::<WriteFileInput>(
                 "write_file",
@@ -117,11 +123,11 @@ impl ChatToolExecutor {
             ),
             definition::<ReadFileInput>(
                 "read_file",
-                "Read bounded UTF-8 text from the chat workspace or read-only /data corpus.",
+                "Read bounded UTF-8 text from the task-scoped chat workspace.",
             ),
             definition::<ListFilesInput>(
                 "list_files",
-                "List files below the chat workspace or read-only /data corpus.",
+                "List files below the task-scoped chat workspace.",
             ),
             definition::<WebSearchInput>(
                 "exa_web_search",
@@ -134,6 +140,14 @@ impl ChatToolExecutor {
             definition::<SearchInput>(
                 "search_knowledge",
                 "Search the user's saved Newsly knowledge library.",
+            ),
+            definition::<ReadKnowledgeInput>(
+                "read_knowledge_item",
+                "Read one typed Knowledge reference through the host without starting a sandbox.",
+            ),
+            definition::<WriteKnowledgeInput>(
+                "write_knowledge_items",
+                "Copy selected Knowledge references into input/knowledge in this turn's task sandbox.",
             ),
             definition::<SearchInput>(
                 "search_content",
@@ -189,46 +203,10 @@ impl ChatToolExecutor {
     }
 
     pub(super) async fn close(&self) -> Result<(), AgentRuntimeError> {
-        let state = self.vm.lock().await.take();
+        let state = self.sandbox.lock().await.take();
         let Some(state) = state else { return Ok(()) };
-        let mut cleanup_error = None;
-        if let Err(error) = self
-            .dependencies
-            .provider
-            .reset_network(&state.acquired.session.sandbox.sandbox_id)
-            .await
-        {
-            tracing::error!(
-                message_id = self.snapshot.message_id,
-                error = %error,
-                "failed to reset chat agent VM network policy"
-            );
-            cleanup_error = Some(error.to_string());
-            if let Err(kill_error) = self
-                .dependencies
-                .provider
-                .kill_sandbox(&state.acquired.session.sandbox.sandbox_id)
-                .await
-            {
-                tracing::error!(
-                    message_id = self.snapshot.message_id,
-                    error = %kill_error,
-                    "failed to destroy chat agent VM after network reset failure"
-                );
-            }
-        }
-        if let Err(error) = state.acquired.release().await {
-            tracing::error!(
-                message_id = self.snapshot.message_id,
-                error = %error,
-                "failed to release chat agent VM namespace"
-            );
-            cleanup_error.get_or_insert_with(|| error.to_string());
-        }
-        cleanup_error.map_or(Ok(()), |error| {
-            Err(AgentRuntimeError::Tool(format!(
-                "chat VM cleanup failed: {error}"
-            )))
+        state.acquired.release().await.map_err(|error| {
+            AgentRuntimeError::Tool(format!("chat sandbox cleanup failed: {error}"))
         })
     }
 
@@ -238,12 +216,16 @@ impl ChatToolExecutor {
         events: Arc<dyn AgentEventSink>,
     ) -> Result<ToolOutput, AgentRuntimeError> {
         match call.name.as_str() {
-            "execute_bash" | "write_file" | "edit_file" | "read_file" | "list_files" => {
-                self.execute_vm(call, events).await
-            }
+            "execute_bash"
+            | "write_file"
+            | "edit_file"
+            | "read_file"
+            | "list_files"
+            | "write_knowledge_items" => self.execute_sandbox(call, events).await,
             "exa_web_search" | "search_web" => self.search_web(call).await,
             "find_feed_options" => self.find_feed_options(call).await,
             "search_knowledge" => self.search_content_kind(call, SearchKind::Knowledge).await,
+            "read_knowledge_item" => self.read_knowledge_item(call).await,
             "search_content" => self.search_content_kind(call, SearchKind::Content).await,
             "search_news" => self.search_news(call).await,
             "search_subscription_feeds" => {
@@ -265,16 +247,16 @@ impl ChatToolExecutor {
         }
     }
 
-    async fn execute_vm(
+    async fn execute_sandbox(
         &self,
         call: ToolCall,
         events: Arc<dyn AgentEventSink>,
     ) -> Result<ToolOutput, AgentRuntimeError> {
-        let mut state = self.vm.lock().await;
+        let mut state = self.sandbox.lock().await;
         if state.is_none() {
-            *state = Some(self.acquire_vm().await?);
+            *state = Some(self.acquire_sandbox().await?);
         }
-        let state = state.as_ref().expect("chat VM state was initialized");
+        let state = state.as_ref().expect("chat sandbox state was initialized");
         if call.name == "execute_bash" {
             self.execute_bash_streaming(state, &call, &events).await
         } else {
@@ -284,7 +266,7 @@ impl ChatToolExecutor {
 
     async fn execute_bash_streaming(
         &self,
-        state: &ChatVmState,
+        state: &ChatSandboxState,
         call: &ToolCall,
         events: &Arc<dyn AgentEventSink>,
     ) -> Result<ToolOutput, AgentRuntimeError> {
@@ -313,7 +295,7 @@ impl ChatToolExecutor {
             .dependencies
             .provider
             .start_process(
-                &state.acquired.session.sandbox,
+                &state.acquired.sandbox,
                 request,
                 self.dependencies.cancellation.child_token(),
             )
@@ -367,17 +349,17 @@ impl ChatToolExecutor {
         })
     }
 
-    async fn acquire_vm(&self) -> Result<ChatVmState, AgentRuntimeError> {
-        let task_id = self
-            .snapshot
-            .llm_task_id
-            .unwrap_or(self.snapshot.queue_task_id);
+    async fn acquire_sandbox(&self) -> Result<ChatSandboxState, AgentRuntimeError> {
+        let task_id = self.snapshot.llm_task_id.ok_or_else(|| {
+            AgentRuntimeError::Tool(
+                "chat task has no LLM attempt available for a task sandbox".to_owned(),
+            )
+        })?;
         let acquired = self
             .dependencies
             .lifecycle
             .acquire_for_task(
                 self.snapshot.user_id,
-                &self.snapshot.vm_namespace,
                 task_id,
                 "chat",
                 self.dependencies.deadline,
@@ -385,17 +367,13 @@ impl ChatToolExecutor {
             )
             .await
             .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
-        let mut pending = PendingChatVm::new(
-            Arc::clone(&self.dependencies.provider),
-            acquired,
-            self.snapshot.message_id,
-        );
+        let mut pending = PendingChatSandbox::new(acquired, self.snapshot.message_id);
         let sandbox = pending.sandbox().clone();
-        if let Err(error) = self.prepare_vm(&sandbox).await {
+        if let Err(error) = self.prepare_sandbox(&sandbox).await {
             pending.cleanup().await;
             return Err(error);
         }
-        let executor = match ShareActionToolExecutor::new(
+        let executor = match TaskToolExecutor::new(
             Arc::clone(&self.dependencies.provider),
             sandbox.clone(),
             &self.snapshot.workspace_path,
@@ -403,6 +381,9 @@ impl ChatToolExecutor {
             self.dependencies.cancellation.child_token(),
             self.dependencies.max_output_chars,
             self.dependencies.exa.clone(),
+            self.dependencies.pool.clone(),
+            self.snapshot.user_id,
+            self.dependencies.body_store.clone(),
         ) {
             Ok(executor) => executor,
             Err(error) => {
@@ -411,10 +392,10 @@ impl ChatToolExecutor {
             }
         };
         let acquired = pending.disarm();
-        Ok(ChatVmState { acquired, executor })
+        Ok(ChatSandboxState { acquired, executor })
     }
 
-    async fn prepare_vm(
+    async fn prepare_sandbox(
         &self,
         sandbox: &newsly_e2b::SandboxHandle,
     ) -> Result<(), AgentRuntimeError> {
@@ -440,11 +421,7 @@ impl ChatToolExecutor {
                 sandbox,
                 CommandRequest {
                     command: "/bin/mkdir".to_owned(),
-                    args: vec![
-                        "-p".to_owned(),
-                        self.snapshot.workspace_path.clone(),
-                        self.snapshot.shared_workspace_path.clone(),
-                    ],
+                    args: vec!["-p".to_owned(), self.snapshot.workspace_path.clone()],
                     env: BTreeMap::new(),
                     cwd: None,
                     username: Some(
@@ -467,7 +444,7 @@ impl ChatToolExecutor {
             .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
         if result.exit_code != 0 {
             return Err(AgentRuntimeError::Tool(format!(
-                "chat VM workspace bootstrap exited with {}: {}",
+                "chat sandbox workspace bootstrap exited with {}: {}",
                 result.exit_code, result.output.stderr
             )));
         }
@@ -539,7 +516,7 @@ impl ChatToolExecutor {
         let limit = i64::try_from(input.limit.unwrap_or(5).clamp(1, 10)).unwrap_or(10);
         let results = match kind {
             SearchKind::Knowledge => {
-                search_chat_knowledge(&self.dependencies.pool, self.snapshot.user_id, query, limit)
+                search_agent_knowledge(&self.dependencies.pool, self.snapshot.user_id, query, limit)
                     .await
             }
             SearchKind::Content => {
@@ -635,16 +612,6 @@ impl ChatToolExecutor {
                     > 0
             }
         };
-        if matches!(mutation, Mutation::Save | Mutation::Remove) {
-            enqueue_content_sync(
-                &mut transaction,
-                &self.dependencies.queue,
-                self.snapshot.user_id,
-                input.content_id,
-            )
-            .await
-            .map_err(db_tool_error)?;
-        }
         transaction.commit().await.map_err(db_tool_error)?;
         Ok(success(json!({
             "content_id": input.content_id,
@@ -813,16 +780,26 @@ impl ChatToolExecutor {
             "message": format!("Started a deep research handoff in session {session_id}."),
         })))
     }
+
+    async fn read_knowledge_item(&self, call: ToolCall) -> Result<ToolOutput, AgentRuntimeError> {
+        let input: ReadKnowledgeInput = arguments(&call)?;
+        let output = read_authorized_knowledge_item(
+            &self.dependencies.pool,
+            self.snapshot.user_id,
+            &self.dependencies.body_store,
+            input,
+        )
+        .await
+        .map_err(db_tool_error)?;
+        Ok(success(
+            serde_json::to_value(output).map_err(db_tool_error)?,
+        ))
+    }
 }
 
-impl PendingChatVm {
-    fn new(
-        provider: Arc<DirectE2bProvider>,
-        acquired: AcquiredAgentVmSession,
-        message_id: i64,
-    ) -> Self {
+impl PendingChatSandbox {
+    fn new(acquired: AcquiredTaskSandbox, message_id: i64) -> Self {
         Self {
-            provider,
             acquired: Some(acquired),
             message_id,
         }
@@ -832,90 +809,57 @@ impl PendingChatVm {
         &self
             .acquired
             .as_ref()
-            .expect("pending chat VM must own its acquired session")
-            .session
+            .expect("pending chat sandbox must own its acquired session")
             .sandbox
     }
 
-    fn disarm(mut self) -> AcquiredAgentVmSession {
+    fn disarm(mut self) -> AcquiredTaskSandbox {
         self.acquired
             .take()
-            .expect("pending chat VM must own its acquired session")
+            .expect("pending chat sandbox must own its acquired session")
     }
 
     async fn cleanup(&mut self) {
         let Some(acquired) = self.acquired.take() else {
             return;
         };
-        cleanup_chat_vm(
-            Arc::clone(&self.provider),
-            acquired,
-            self.message_id,
-            "chat VM bootstrap",
-        )
-        .await;
+        cleanup_chat_sandbox(acquired, self.message_id, "chat sandbox bootstrap").await;
     }
 }
 
-impl Drop for PendingChatVm {
+impl Drop for PendingChatSandbox {
     fn drop(&mut self) {
         let Some(acquired) = self.acquired.take() else {
             return;
         };
-        let provider = Arc::clone(&self.provider);
         let message_id = self.message_id;
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             tracing::error!(
                 message_id,
-                "cannot schedule cancellation cleanup for a pending chat VM"
+                "cannot schedule cancellation cleanup for a pending chat sandbox"
             );
             drop(acquired);
             return;
         };
         runtime.spawn(async move {
-            cleanup_chat_vm(
-                provider,
-                acquired,
-                message_id,
-                "cancelled chat VM bootstrap",
-            )
-            .await;
+            cleanup_chat_sandbox(acquired, message_id, "cancelled chat sandbox bootstrap").await;
         });
     }
 }
 
-async fn cleanup_chat_vm(
-    provider: Arc<DirectE2bProvider>,
-    acquired: AcquiredAgentVmSession,
+async fn cleanup_chat_sandbox(
+    acquired: AcquiredTaskSandbox,
     message_id: i64,
     operation: &'static str,
 ) {
-    let sandbox_id = acquired.session.sandbox.sandbox_id.clone();
-    if let Err(reset_error) = provider.reset_network(&sandbox_id).await {
-        tracing::warn!(
-            message_id,
-            sandbox_id = ?sandbox_id,
-            error = %reset_error,
-            operation,
-            "failed to restore deny-by-default policy for chat VM"
-        );
-        if let Err(kill_error) = provider.kill_sandbox(&sandbox_id).await {
-            tracing::error!(
-                message_id,
-                sandbox_id = ?sandbox_id,
-                error = %kill_error,
-                operation,
-                "failed to destroy chat VM after network cleanup failure"
-            );
-        }
-    }
+    let sandbox_id = acquired.sandbox.sandbox_id.clone();
     if let Err(release_error) = acquired.release().await {
         tracing::error!(
             message_id,
             sandbox_id = ?sandbox_id,
             error = %release_error,
             operation,
-            "failed to release chat VM namespace after cleanup"
+            "failed to destroy chat sandbox after cleanup"
         );
     }
 }
@@ -968,7 +912,7 @@ struct ExecuteBashInput {
 #[serde(deny_unknown_fields)]
 #[expect(
     dead_code,
-    reason = "fields define the E2B tool schema; execution is delegated to the shared VM executor"
+    reason = "fields define the E2B tool schema; execution is delegated to the shared sandbox executor"
 )]
 struct WriteFileInput {
     path: String,
@@ -979,7 +923,7 @@ struct WriteFileInput {
 #[serde(deny_unknown_fields)]
 #[expect(
     dead_code,
-    reason = "fields define the E2B tool schema; execution is delegated to the shared VM executor"
+    reason = "fields define the E2B tool schema; execution is delegated to the shared sandbox executor"
 )]
 struct EditFileInput {
     path: String,
@@ -993,7 +937,7 @@ struct EditFileInput {
 #[serde(deny_unknown_fields)]
 #[expect(
     dead_code,
-    reason = "fields define the E2B tool schema; execution is delegated to the shared VM executor"
+    reason = "fields define the E2B tool schema; execution is delegated to the shared sandbox executor"
 )]
 struct ReadFileInput {
     path: String,
@@ -1004,7 +948,7 @@ struct ReadFileInput {
 #[serde(deny_unknown_fields)]
 #[expect(
     dead_code,
-    reason = "fields define the E2B tool schema; execution is delegated to the shared VM executor"
+    reason = "fields define the E2B tool schema; execution is delegated to the shared sandbox executor"
 )]
 struct ListFilesInput {
     path: Option<String>,
@@ -1024,6 +968,17 @@ struct WebSearchInput {
 struct SearchInput {
     query: String,
     limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[expect(
+    dead_code,
+    reason = "fields define the E2B tool schema; execution is delegated to the shared task executor"
+)]
+struct WriteKnowledgeInput {
+    references: Vec<KnowledgeReferenceInput>,
+    directory: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1068,95 +1023,6 @@ struct AssistantFeedOptionsResult {
 #[derive(Debug, Serialize)]
 struct ChatRenderMetadata {
     feed_options: Vec<AssistantFeedOption>,
-}
-
-fn assistant_feed_option(
-    suggestion: newsly_db::NewOnboardingSuggestion,
-) -> Option<AssistantFeedOption> {
-    let feed_url = suggestion
-        .feed_url
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty() && value.chars().count() <= 2_048)?;
-    let site_url = suggestion
-        .site_url
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty() && value.chars().count() <= 2_048)
-        .unwrap_or_else(|| feed_url.clone());
-    let feed_type = match suggestion.suggestion_type.as_str() {
-        "atom" => FeedType::Atom,
-        "substack" => FeedType::Substack,
-        "podcast_rss" => FeedType::PodcastRss,
-        _ => return None,
-    };
-    let title = suggestion
-        .title
-        .as_deref()
-        .and_then(|value| bounded_text(value, 300))
-        .or_else(|| feed_host_label(&site_url))
-        .unwrap_or_else(|| feed_url.clone());
-    let rationale = suggestion
-        .rationale
-        .as_deref()
-        .and_then(|value| bounded_text(value, 600));
-    let digest = Sha1::digest(feed_url.as_bytes());
-    let id = format!("{digest:x}").chars().take(16).collect();
-    let feed_format =
-        if feed_type == FeedType::Atom || feed_url.to_ascii_lowercase().contains("atom") {
-            FeedFormat::Atom
-        } else {
-            FeedFormat::Rss
-        };
-    Some(AssistantFeedOption {
-        id,
-        title,
-        site_url: site_url.clone(),
-        feed_url,
-        feed_type,
-        feed_format,
-        description: None,
-        rationale,
-        evidence_url: Some(site_url),
-        is_subscribed: false,
-    })
-}
-
-fn bounded_text(value: &str, maximum: usize) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() {
-        return None;
-    }
-    let count = value.chars().count();
-    if count <= maximum {
-        Some(value.to_owned())
-    } else if maximum > 3 {
-        Some(format!(
-            "{}...",
-            value
-                .chars()
-                .take(maximum - 3)
-                .collect::<String>()
-                .trim_end()
-        ))
-    } else {
-        Some(value.chars().take(maximum).collect())
-    }
-}
-
-fn feed_host_label(value: &str) -> Option<String> {
-    reqwest::Url::parse(value)
-        .ok()?
-        .host_str()
-        .map(|host| host.trim_start_matches("www.").to_owned())
-        .filter(|host| !host.is_empty())
-}
-
-fn looks_like_podcast_query(value: &str) -> bool {
-    let value = value.to_ascii_lowercase();
-    [
-        "podcast", "podcasts", "episode", "episodes", "show", "shows",
-    ]
-    .into_iter()
-    .any(|hint| value.contains(hint))
 }
 
 fn definition<T: JsonSchema>(name: &str, description: &str) -> ToolDefinition {

@@ -14,7 +14,7 @@ usage() {
 #   --allow-live-provider-costs  Required acknowledgement for live LLM/E2B calls.
 #   --env-file PATH              Defaults to .env.smoke.local, then .env.
 #   --source-url URL             Public source used by all live scenarios.
-#   --agent-vm-template-id ID    Override the E2B template used by local workers.
+#   --task-sandbox-template-id ID Override the E2B template used by local workers.
 #   --reuse-application-image I  Reuse a previously built image after infrastructure failure.
 #   --reuse-extractor-image I    Reuse a previously built image after infrastructure failure.
 #   --keep-on-failure            Preserve the scoped stack after failure.
@@ -34,7 +34,7 @@ source_url="https://raw.githubusercontent.com/rust-lang/book/main/src/ch04-01-wh
 report_root="$repo_root/test-results/local-staging-smoke"
 reused_application_image=""
 reused_extractor_image=""
-agent_vm_template_id=""
+task_sandbox_template_id=""
 
 while (($#)); do
   case "$1" in
@@ -52,9 +52,9 @@ while (($#)); do
       source_url="$2"
       shift 2
       ;;
-    --agent-vm-template-id)
-      (($# >= 2)) || die "--agent-vm-template-id requires an ID"
-      agent_vm_template_id="$2"
+    --task-sandbox-template-id)
+      (($# >= 2)) || die "--task-sandbox-template-id requires an ID"
+      task_sandbox_template_id="$2"
       shift 2
       ;;
     --reuse-application-image)
@@ -165,8 +165,8 @@ export JWT_SECRET_KEY="smoke-$suffix-jwt-secret"
 export ADMIN_PASSWORD="smoke-$suffix-admin"
 export DOCUMENT_EXTRACTOR_SHARED_SECRET="smoke-$suffix-extractor"
 export PUBLIC_BASE_URL="http://127.0.0.1:$api_port"
-if [[ -n "$agent_vm_template_id" ]]; then
-  export NEWSLY_AGENT_VM_TEMPLATE_ID="$agent_vm_template_id"
+if [[ -n "$task_sandbox_template_id" ]]; then
+  export NEWSLY_TASK_SANDBOX_TEMPLATE_ID="$task_sandbox_template_id"
 fi
 
 compose=(

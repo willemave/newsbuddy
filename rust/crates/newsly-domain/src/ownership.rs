@@ -47,7 +47,6 @@ impl FromStr for RuntimeOwner {
 pub enum ResourceKind {
     RouteGroup,
     TaskType,
-    VmNamespace,
     StateWriter,
 }
 
@@ -56,7 +55,6 @@ impl ResourceKind {
         match self {
             Self::RouteGroup => "route_group",
             Self::TaskType => "task_type",
-            Self::VmNamespace => "vm_namespace",
             Self::StateWriter => "state_writer",
         }
     }
@@ -75,7 +73,6 @@ impl FromStr for ResourceKind {
         match value {
             "route_group" => Ok(Self::RouteGroup),
             "task_type" => Ok(Self::TaskType),
-            "vm_namespace" => Ok(Self::VmNamespace),
             "state_writer" => Ok(Self::StateWriter),
             _ => Err(InvalidOwnershipValue::ResourceKind(value.to_owned())),
         }

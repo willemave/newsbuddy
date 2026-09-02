@@ -24,12 +24,14 @@ CH11. Learning Deck chat stays grounded in the deck and its sources, remains sec
 
 CH12. A chat turn that invokes no VM tool performs no sandbox operation.
 
-CH13. The VM sees the user's readable corpus as credential-free files. Newsly mutations, product credentials, and vendor credentials remain on the host.
+CH13. A task sandbox starts without a mounted user corpus. Knowledge stays authoritative on the host; only explicitly selected, reauthorized, bounded items may be copied into that task workspace. Newsly mutations, product credentials, and vendor credentials remain on the host.
 
-CH14. VM-capable agents expose the same five execution tools: execute, read, write, exact edit, and list. Tool progress remains retry-fenced and separate from visible transcript text.
+CH14. Sandbox-capable agents expose execute, read, write, exact edit, and list for task-workspace files, plus typed host Knowledge search, read, and bounded-copy tools. Tool progress remains retry-fenced and separate from visible transcript text.
 
 CH15. Every E2B-backed product workflow uses the canonical Newsly agent template. Provider-default and per-workflow template selection are not runtime fallbacks.
 
 CH16. Model history contains newest complete user turns within the remaining request budget. Output, tool schemas, system/context material, and the current prompt are reserved before history; trimming never leaves an orphaned assistant or tool sequence.
 
 CH17. Knowledge lookup in chat is served by a host-side search tool over the user's saved library. Searching knowledge alone never acquires a sandbox.
+
+CH18. Reading a Knowledge reference alone never acquires a sandbox. A chat sandbox is created lazily on the first execution or file-writing tool and is killed when the turn ends.

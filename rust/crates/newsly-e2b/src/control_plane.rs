@@ -6,13 +6,11 @@ use std::time::Duration;
 use reqwest::{Method, RequestBuilder, Response, StatusCode};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use serde_json::json;
 use url::Url;
 
 use crate::error::E2bError;
-use crate::lifecycle::CommandLeaseState;
 use crate::network::NetworkPolicy;
-use crate::types::{SandboxHandle, SandboxId, SandboxRequest, SnapshotId, SnapshotInfo};
+use crate::types::{SandboxHandle, SandboxId, SandboxRequest};
 
 const ENVD_PORT: u16 = 49_983;
 const DEFAULT_ERROR_BODY_LIMIT: usize = 16 * 1024;
@@ -114,15 +112,6 @@ struct SandboxWire {
     traffic_access_token: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SnapshotWire {
-    #[serde(rename = "snapshotID")]
-    snapshot_id: String,
-    #[serde(default)]
-    names: Vec<String>,
-}
-
 impl ControlPlaneClient {
     pub fn new(config: ControlPlaneConfig) -> Result<Self, E2bError> {
         config.validate()?;
@@ -153,76 +142,6 @@ impl ControlPlaneClient {
         self.decode_sandbox(response).await
     }
 
-    pub async fn get(&self, sandbox_id: &SandboxId) -> Result<SandboxHandle, E2bError> {
-        let path = format!("sandboxes/{}", encode_segment(sandbox_id.as_str()));
-        let response = self
-            .send(
-                self.api_request(Method::GET, &path)?,
-                "get_sandbox",
-                true,
-                None,
-            )
-            .await?;
-        self.decode_sandbox(response).await
-    }
-
-    pub async fn connect(
-        &self,
-        sandbox_id: &SandboxId,
-        timeout: Duration,
-    ) -> Result<SandboxHandle, E2bError> {
-        let timeout = seconds_u32(timeout)?;
-        let path = format!("sandboxes/{}/connect", encode_segment(sandbox_id.as_str()));
-        let response = self
-            .send(
-                self.api_request(Method::POST, &path)?
-                    .json(&json!({ "timeout": timeout })),
-                "connect_sandbox",
-                false,
-                None,
-            )
-            .await?;
-        self.decode_sandbox(response).await
-    }
-
-    /// Explicit deprecated resume endpoint retained until all existing paused sandboxes support
-    /// the canonical connect-or-resume path.
-    pub async fn resume(
-        &self,
-        sandbox_id: &SandboxId,
-        timeout: Duration,
-    ) -> Result<SandboxHandle, E2bError> {
-        let timeout = seconds_u32(timeout)?;
-        let path = format!("sandboxes/{}/resume", encode_segment(sandbox_id.as_str()));
-        let response = self
-            .send(
-                self.api_request(Method::POST, &path)?
-                    .json(&json!({ "timeout": timeout })),
-                "resume_sandbox",
-                false,
-                None,
-            )
-            .await?;
-        self.decode_sandbox(response).await
-    }
-
-    pub async fn pause(&self, sandbox_id: &SandboxId, memory: bool) -> Result<bool, E2bError> {
-        let path = format!("sandboxes/{}/pause", encode_segment(sandbox_id.as_str()));
-        let response = self
-            .api_request(Method::POST, &path)?
-            .json(&json!({ "memory": memory }))
-            .send()
-            .await
-            .map_err(|error| transport_error(&error, "pause_sandbox", true, None))?;
-        if response.status() == StatusCode::CONFLICT {
-            return Ok(false);
-        }
-        if response.status().is_success() {
-            return Ok(true);
-        }
-        Err(response_error(response, self.config.error_body_limit).await)
-    }
-
     pub async fn kill(&self, sandbox_id: &SandboxId) -> Result<bool, E2bError> {
         let path = format!("sandboxes/{}", encode_segment(sandbox_id.as_str()));
         Ok(self
@@ -233,56 +152,6 @@ impl ControlPlaneClient {
             )
             .await?
             .is_some())
-    }
-
-    pub async fn create_snapshot(
-        &self,
-        sandbox_id: &SandboxId,
-        name: Option<&str>,
-        command_leases: CommandLeaseState,
-    ) -> Result<SnapshotInfo, E2bError> {
-        command_leases.require_idle()?;
-        if let Some(name) = name
-            && (name.trim().is_empty() || name.trim() != name || name.len() > 256)
-        {
-            return Err(E2bError::InvalidInput(
-                "snapshot name must be non-empty, unpadded, and at most 256 bytes".to_owned(),
-            ));
-        }
-        let path = format!(
-            "sandboxes/{}/snapshots",
-            encode_segment(sandbox_id.as_str())
-        );
-        let response = self
-            .send(
-                self.api_request(Method::POST, &path)?
-                    .json(&json!({ "name": name })),
-                "create_snapshot",
-                false,
-                None,
-            )
-            .await?;
-        let wire = response
-            .json::<SnapshotWire>()
-            .await
-            .map_err(|error| E2bError::Protocol(error.to_string()))?;
-        Ok(SnapshotInfo {
-            snapshot_id: SnapshotId::parse(wire.snapshot_id)?,
-            names: wire.names,
-        })
-    }
-
-    /// E2B snapshots are template builds; deletion uses the documented template endpoint.
-    pub async fn delete_snapshot(&self, snapshot_id: &SnapshotId) -> Result<bool, E2bError> {
-        let path = format!("templates/{}", encode_segment(snapshot_id.as_str()));
-        let request = self.api_request(Method::DELETE, &path)?;
-        match self
-            .send_allow_missing(request, "delete_snapshot", true)
-            .await?
-        {
-            Some(_) => Ok(true),
-            None => Ok(false),
-        }
     }
 
     pub async fn update_network(
@@ -431,19 +300,6 @@ impl ControlPlaneClient {
         }
         Err(response_error(response, self.config.error_body_limit).await)
     }
-}
-
-fn seconds_u32(duration: Duration) -> Result<u32, E2bError> {
-    if duration.is_zero() {
-        return Err(E2bError::InvalidInput(
-            "sandbox timeout must be greater than zero".to_owned(),
-        ));
-    }
-    let seconds = duration
-        .as_secs()
-        .saturating_add(u64::from(duration.subsec_nanos() > 0));
-    u32::try_from(seconds)
-        .map_err(|_| E2bError::InvalidInput("sandbox timeout exceeds E2B's u32 range".to_owned()))
 }
 
 fn encode_segment(value: &str) -> String {

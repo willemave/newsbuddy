@@ -71,10 +71,6 @@ string_enum!(TaskType {
     GenerateAudioEpisode => "generate_audio_episode",
     RunLlmTask => "run_llm_task",
     BriefingRefresh => "briefing_refresh",
-    SyncAgentData => "sync_agent_data",
-    IndexAgentData => "index_agent_data",
-    BackfillAgentData => "backfill_agent_data",
-    ReconcileAgentData => "reconcile_agent_data",
     DeleteUserAccount => "delete_user_account",
 });
 
@@ -127,11 +123,7 @@ impl TaskType {
             Self::SyncIntegration => (TaskQueue::Twitter, true, true),
             Self::GenerateAudioEpisode => (TaskQueue::AudioEpisode, true, true),
             Self::RunLlmTask | Self::BriefingRefresh => (TaskQueue::Llm, false, true),
-            Self::BackfillFeeds
-            | Self::SyncAgentData
-            | Self::IndexAgentData
-            | Self::BackfillAgentData
-            | Self::ReconcileAgentData => (TaskQueue::Backfill, false, true),
+            Self::BackfillFeeds => (TaskQueue::Backfill, false, true),
             Self::DeleteUserAccount => (TaskQueue::Backfill, false, false),
         };
         TaskSpec {
@@ -171,10 +163,6 @@ impl TaskType {
             }
             Self::RunLlmTask => "newsly_worker::run_llm_task::RunLlmTaskHandler",
             Self::BriefingRefresh => "newsly_worker::briefing_refresh::BriefingRefreshHandler",
-            Self::SyncAgentData => "newsly_worker::agent_data::SyncAgentDataHandler",
-            Self::IndexAgentData => "newsly_worker::agent_data::IndexAgentDataHandler",
-            Self::BackfillAgentData => "newsly_worker::agent_data::BackfillAgentDataHandler",
-            Self::ReconcileAgentData => "newsly_worker::agent_data::ReconcileAgentDataHandler",
             Self::DeleteUserAccount => "newsly_account_deletion_worker::AccountDeletionHandler",
         }
     }
@@ -198,34 +186,6 @@ impl TaskType {
         payload: Option<Map<String, Value>>,
     ) -> Result<Map<String, Value>, PayloadError> {
         let mut payload = payload.unwrap_or_default();
-
-        if matches!(
-            self,
-            Self::SyncAgentData
-                | Self::IndexAgentData
-                | Self::BackfillAgentData
-                | Self::ReconcileAgentData
-        ) {
-            let allowed: &[&str] = match self {
-                Self::SyncAgentData => &[
-                    "user_id",
-                    "content_ids",
-                    "news_item_ids",
-                    "chat_session_ids",
-                    "briefing_dates",
-                ],
-                Self::IndexAgentData => &["user_id"],
-                Self::BackfillAgentData => &["user_id", "stage", "before_id"],
-                Self::ReconcileAgentData => &["user_id", "before_id"],
-                _ => unreachable!(),
-            };
-            if let Some(key) = payload.keys().find(|key| !allowed.contains(&key.as_str())) {
-                return Err(PayloadError::UnexpectedField {
-                    task_type: self,
-                    field: key.clone(),
-                });
-            }
-        }
 
         match self {
             Self::AnalyzeUrl => {
@@ -307,38 +267,6 @@ impl TaskType {
                         "user_id" | "config_ids" | "count" | "first_edition_run_id"
                     )
                 });
-            }
-            Self::SyncAgentData => {
-                required_integer(&payload, self, "user_id", true)?;
-                default_array(&mut payload, self, "content_ids", ValueKind::Integer)?;
-                default_array(&mut payload, self, "news_item_ids", ValueKind::Integer)?;
-                default_array(&mut payload, self, "chat_session_ids", ValueKind::Integer)?;
-                default_array(&mut payload, self, "briefing_dates", ValueKind::String)?;
-            }
-            Self::IndexAgentData => {
-                required_integer(&payload, self, "user_id", true)?;
-            }
-            Self::BackfillAgentData => {
-                required_integer(&payload, self, "user_id", true)?;
-                optional_integer(&mut payload, self, "before_id", true)?;
-                default_string(&mut payload, self, "stage", "knowledge")?;
-                let stage = payload
-                    .get("stage")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                if !matches!(
-                    stage,
-                    "knowledge" | "content" | "news" | "chats" | "briefings"
-                ) {
-                    return Err(PayloadError::OutOfRange {
-                        task_type: self,
-                        field: "stage",
-                    });
-                }
-            }
-            Self::ReconcileAgentData => {
-                required_integer(&payload, self, "user_id", true)?;
-                optional_integer(&mut payload, self, "before_id", true)?;
             }
             Self::Scrape => {
                 if payload.contains_key("sources") {
@@ -638,12 +566,6 @@ pub enum QueueModelError {
     Ownership(#[from] newsly_domain::InvalidOwnershipValue),
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ValueKind {
-    Integer,
-    String,
-}
-
 fn required_integer(
     payload: &Map<String, Value>,
     task_type: TaskType,
@@ -741,29 +663,6 @@ fn required_integer_array(
         .iter()
         .any(|value| value.as_i64().is_none_or(|value| positive && value <= 0))
     {
-        return Err(PayloadError::WrongType { task_type, field });
-    }
-    Ok(())
-}
-
-fn default_array(
-    payload: &mut Map<String, Value>,
-    task_type: TaskType,
-    field: &'static str,
-    kind: ValueKind,
-) -> Result<(), PayloadError> {
-    let Some(value) = payload.get(field) else {
-        payload.insert(field.to_owned(), Value::Array(Vec::new()));
-        return Ok(());
-    };
-    let values = value
-        .as_array()
-        .ok_or(PayloadError::WrongType { task_type, field })?;
-    let valid = values.iter().all(|value| match kind {
-        ValueKind::Integer => value.as_i64().is_some(),
-        ValueKind::String => value.is_string(),
-    });
-    if !valid {
         return Err(PayloadError::WrongType { task_type, field });
     }
     Ok(())

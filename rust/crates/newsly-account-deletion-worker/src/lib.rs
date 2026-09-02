@@ -14,8 +14,8 @@ mod repository;
 
 pub use config::{AccountDeletionProcessConfig, ArtifactStorageConfig, ProcessConfigError};
 pub use external::{
-    AccountExternalServices, AgentVmDestroyer, ConfiguredArtifactStore, DirectAgentVmDestroyer,
-    ObjectArtifactStore, ReqwestXGrantRevoker, UnavailableXGrantRevoker, XGrantRevoker,
+    AccountExternalServices, ConfiguredArtifactStore, ObjectArtifactStore, ReqwestXGrantRevoker,
+    UnavailableXGrantRevoker, XGrantRevoker,
 };
 pub use handler::{AccountDeletionHandler, AccountDeletionServices};
 pub use registry::{USER_OWNED_RELATIONS, UserOwnedRelation};

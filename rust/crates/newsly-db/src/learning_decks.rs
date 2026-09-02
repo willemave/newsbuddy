@@ -100,7 +100,6 @@ pub struct VisibleNewsItemProjection {
 pub struct ConvertedNewsSource {
     pub source: LearningDeckSourceProjection,
     pub enqueue_process_content: bool,
-    pub enqueue_agent_data_sync: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

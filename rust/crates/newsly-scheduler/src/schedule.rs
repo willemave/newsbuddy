@@ -8,7 +8,6 @@ pub enum SchedulerJob {
     BriefingSweepReconcile,
     FeedDiscovery,
     TerminalTaskCleanup,
-    AgentDataReconcile,
 }
 
 impl SchedulerJob {
@@ -20,7 +19,6 @@ impl SchedulerJob {
             Self::BriefingSweepReconcile => "briefing_sweep_reconcile",
             Self::FeedDiscovery => "feed_discovery",
             Self::TerminalTaskCleanup => "terminal_task_cleanup",
-            Self::AgentDataReconcile => "agent_data_reconcile",
         }
     }
 
@@ -34,7 +32,6 @@ impl SchedulerJob {
                 minute.weekday() == Weekday::Mon && minute.hour() == 3 && minute_of_hour == 0
             }
             Self::TerminalTaskCleanup => minute.hour() == 4 && minute_of_hour == 45,
-            Self::AgentDataReconcile => minute.hour() == 5 && minute_of_hour == 15,
         }
     }
 
@@ -47,14 +44,13 @@ impl SchedulerJob {
     }
 }
 
-const JOBS: [SchedulerJob; 7] = [
+const JOBS: [SchedulerJob; 6] = [
     SchedulerJob::Scrape,
     SchedulerJob::IntegrationSync,
     SchedulerJob::QueueWatchdog,
     SchedulerJob::BriefingSweepReconcile,
     SchedulerJob::FeedDiscovery,
     SchedulerJob::TerminalTaskCleanup,
-    SchedulerJob::AgentDataReconcile,
 ];
 
 pub(crate) fn minute_bucket(now: DateTime<Utc>) -> DateTime<Utc> {
@@ -87,11 +83,6 @@ mod tests {
         let due = due_jobs(minute_bucket(cleanup));
         assert!(due.contains(&SchedulerJob::TerminalTaskCleanup));
         assert!(due.contains(&SchedulerJob::Scrape));
-
-        let reconcile = Utc.with_ymd_and_hms(2026, 8, 31, 5, 15, 1).unwrap();
-        let due = due_jobs(minute_bucket(reconcile));
-        assert!(due.contains(&SchedulerJob::AgentDataReconcile));
-        assert!(due.contains(&SchedulerJob::IntegrationSync));
     }
 
     #[test]

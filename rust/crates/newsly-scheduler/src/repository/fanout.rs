@@ -213,35 +213,6 @@ impl SchedulerRepository {
         .await
     }
 
-    pub(super) async fn enqueue_agent_data_reconcile(
-        &self,
-        transaction: &mut Transaction<'static, Postgres>,
-    ) -> Result<ScheduledJobReport, SchedulerRepositoryError> {
-        let user_ids = active_user_ids(transaction).await?;
-        let requests = user_ids
-            .iter()
-            .map(|user_id| {
-                let mut request = EnqueueRequest::new(TaskType::ReconcileAgentData);
-                request.payload = Some(Map::from_iter([(
-                    "user_id".to_owned(),
-                    Value::from(*user_id),
-                )]));
-                request.owner_user_id = Some(*user_id);
-                request.dedupe = Some(true);
-                request.dedupe_key = Some(format!("scheduled-agent-reconcile:user:{user_id}"));
-                request
-            })
-            .collect();
-        self.enqueue_fanout(
-            transaction,
-            SchedulerJob::AgentDataReconcile,
-            user_ids.len(),
-            requests,
-            "agent_data_reconcile_enqueued",
-        )
-        .await
-    }
-
     async fn enqueue_fanout(
         &self,
         transaction: &mut Transaction<'static, Postgres>,
@@ -264,20 +235,4 @@ impl SchedulerRepository {
             maintenance: None,
         })
     }
-}
-
-async fn active_user_ids(
-    transaction: &mut Transaction<'static, Postgres>,
-) -> Result<Vec<i64>, sqlx::Error> {
-    sqlx::query_scalar::<_, i64>(
-        r"
-        SELECT id::bigint
-        FROM users
-        WHERE is_active IS TRUE
-        ORDER BY id
-        FOR SHARE
-        ",
-    )
-    .fetch_all(&mut **transaction)
-    .await
 }

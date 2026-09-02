@@ -34,9 +34,9 @@ use super::source::{
     normalize_submitted_url,
 };
 use super::support::{
-    agent_data_sync_request, content_task_request, create_repository_error, deck_error,
-    external_url, queue_error, repository_error, run_llm_task_request, sandbox_root,
-    submission_error, token_signer, valid_deck_id,
+    content_task_request, create_repository_error, deck_error, external_url, queue_error,
+    repository_error, run_llm_task_request, sandbox_root, submission_error, token_signer,
+    valid_deck_id,
 };
 
 const CREATE_OPERATION_ID: &str = "createLearningDeck";
@@ -175,20 +175,6 @@ pub(crate) async fn create_deck(
                         .expect("converted source has content id"),
                 ));
             }
-            if converted.enqueue_agent_data_sync {
-                requests.push(
-                    agent_data_sync_request(
-                        &mut transaction,
-                        current_user.id,
-                        converted
-                            .source
-                            .source_content_id
-                            .expect("converted source has content id"),
-                        &request_id,
-                    )
-                    .await?,
-                );
-            }
             (converted.source, requests)
         }
         CreateSource::Url(url) => {
@@ -236,17 +222,6 @@ pub(crate) async fn create_deck(
                         TaskType::GenerateImage,
                         applied.content_id,
                     ));
-                }
-                if applied.enqueue_agent_data_sync {
-                    requests.push(
-                        agent_data_sync_request(
-                            &mut transaction,
-                            current_user.id,
-                            applied.content_id,
-                            &request_id,
-                        )
-                        .await?,
-                    );
                 }
                 let source = load_submitted_content_learning_deck_source(
                     &mut transaction,

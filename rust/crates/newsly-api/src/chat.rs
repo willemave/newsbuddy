@@ -17,17 +17,14 @@ use newsly_db::{
     ChatMutationOutcome, ChatRecordAccess, CreateChatSessionInput, CreateChatSessionOutcome,
     StageAssistantTurnInput, StageChatMessageInput, StageChatTurnOutcome, StagedChatTurn,
     UpdateChatSessionInput, archive_chat_session, create_chat_session, get_chat_message_status,
-    get_chat_session_detail, get_chat_session_summary, list_chat_sessions,
-    prepare_agent_data_sync_dedupe_key, stage_assistant_turn, stage_chat_message,
-    update_chat_session,
+    get_chat_session_detail, get_chat_session_summary, list_chat_sessions, stage_assistant_turn,
+    stage_chat_message, update_chat_session,
 };
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
+use serde_json::{Map, Value};
 
 use crate::auth::AuthenticatedUser;
-use crate::encoding::hex_encode;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::write_support::{
@@ -266,10 +263,6 @@ pub(super) async fn create_session(
         .await
         .map_err(|error| internal_error(error, &request_id))?;
 
-    if let Some(content_id) = payload.content_id {
-        enqueue_content_sync_best_effort(&state, &stamp, current_user.id, content_id, &request_id)
-            .await;
-    }
     let session = require_session_summary(&state, current_user.id, session_id, &request_id).await?;
     Ok(Json(CreateChatSessionResponse { session }))
 }
@@ -822,58 +815,6 @@ async fn enqueue_chat_turn(
         .await
         .map_err(|error| queue_error(error, request_id))?;
     Ok(())
-}
-
-async fn enqueue_content_sync_best_effort(
-    state: &AppState,
-    stamp: &RouteOwnershipStamp,
-    user_id: i64,
-    content_id: i64,
-    request_id: &str,
-) {
-    let result = async {
-        let mut transaction = begin_write(state, request_id).await?;
-        verify_stamp(&mut transaction, stamp, request_id).await?;
-        let payload_value = json!({
-            "user_id": user_id,
-            "content_ids": [content_id],
-            "news_item_ids": [],
-            "chat_session_ids": [],
-            "briefing_dates": [],
-        });
-        let serialized = serde_json::to_string(&payload_value)
-            .map_err(|error| internal_error(error, request_id))?;
-        let digest = Sha256::digest(serialized.as_bytes());
-        let base_key = format!(
-            "agent-sync|user:{user_id}|payload:{}",
-            &hex_encode(&digest)[..24]
-        );
-        let dedupe_key = prepare_agent_data_sync_dedupe_key(&mut transaction, user_id, &base_key)
-            .await
-            .map_err(|error| internal_error(error, request_id))?;
-        let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-        request.payload = payload_value.as_object().cloned();
-        request.owner_user_id = Some(user_id);
-        request.dedupe = Some(true);
-        request.dedupe_key = Some(dedupe_key);
-        QueueKernel::new(state.database.pool().clone())
-            .enqueue_many_in_transaction(&mut transaction, vec![request])
-            .await
-            .map_err(|error| queue_error(error, request_id))?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| internal_error(error, request_id))?;
-        Ok::<(), ApiError>(())
-    }
-    .await;
-    if result.is_err() {
-        tracing::warn!(
-            user_id,
-            content_id,
-            "chat session was created but agent-data synchronization could not be queued"
-        );
-    }
 }
 
 fn staged_result(

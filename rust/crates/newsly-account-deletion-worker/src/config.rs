@@ -64,9 +64,7 @@ pub struct AccountDeletionProcessConfig {
     pub log_format: WorkerLogFormat,
     pub media_audio_root: PathBuf,
     pub personal_markdown_root: PathBuf,
-    pub agent_data_mirror_root: PathBuf,
     pub artifact_storage: ArtifactStorageConfig,
-    pub e2b_api_key: Option<SecretString>,
     pub x_client_id: Option<SecretString>,
     pub x_client_secret: Option<SecretString>,
     pub x_token_encryption_key: Option<SecretString>,
@@ -86,12 +84,7 @@ impl Debug for AccountDeletionProcessConfig {
             .field("log_format", &self.log_format)
             .field("media_audio_root", &self.media_audio_root)
             .field("personal_markdown_root", &self.personal_markdown_root)
-            .field("agent_data_mirror_root", &self.agent_data_mirror_root)
             .field("artifact_storage", &self.artifact_storage)
-            .field(
-                "e2b_api_key",
-                &self.e2b_api_key.as_ref().map(|_| "[REDACTED]"),
-            )
             .field(
                 "x_client_id",
                 &self.x_client_id.as_ref().map(|_| "[REDACTED]"),
@@ -161,11 +154,6 @@ impl AccountDeletionProcessConfig {
             env::var_os("PERSONAL_MARKDOWN_ROOT")
                 .map_or_else(|| PathBuf::from("./data/personal_markdown"), PathBuf::from),
         )?;
-        let agent_data_mirror_root = absolute_safe_root(
-            "AGENT_DATA_MIRROR_ROOT",
-            env::var_os("AGENT_DATA_MIRROR_ROOT")
-                .map_or_else(|| PathBuf::from("./data/agent_user_data"), PathBuf::from),
-        )?;
         let artifact_storage = artifact_storage_from_env()?;
 
         Ok(Self {
@@ -183,9 +171,7 @@ impl AccountDeletionProcessConfig {
             )?,
             media_audio_root,
             personal_markdown_root,
-            agent_data_mirror_root,
             artifact_storage,
-            e2b_api_key: optional_secret_alias("LLM_TASK_SANDBOX_E2B_API_KEY", "E2B_API_KEY")?,
             x_client_id: optional_secret("X_CLIENT_ID")?,
             x_client_secret: optional_secret("X_CLIENT_SECRET")?,
             x_token_encryption_key: optional_secret("X_TOKEN_ENCRYPTION_KEY")?,
@@ -315,16 +301,6 @@ fn optional_secret(name: &'static str) -> Result<Option<SecretString>, ProcessCo
         Ok(value) => Ok(Some(SecretString::from(value))),
         Err(env::VarError::NotPresent) => Ok(None),
         Err(env::VarError::NotUnicode(_)) => Err(ProcessConfigError::InvalidUnicode(name)),
-    }
-}
-
-fn optional_secret_alias(
-    primary: &'static str,
-    fallback: &'static str,
-) -> Result<Option<SecretString>, ProcessConfigError> {
-    match optional_secret(primary)? {
-        Some(value) => Ok(Some(value)),
-        None => optional_secret(fallback),
     }
 }
 

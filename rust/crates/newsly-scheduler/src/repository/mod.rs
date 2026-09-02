@@ -94,9 +94,6 @@ impl SchedulerRepository {
                 self.enqueue_feed_discovery(&mut transaction, config)
                     .await?
             }
-            SchedulerJob::AgentDataReconcile => {
-                self.enqueue_agent_data_reconcile(&mut transaction).await?
-            }
             SchedulerJob::TerminalTaskCleanup => {
                 return Err(SchedulerRepositoryError::WrongExecutionMode(job));
             }

@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-01 — `detached@82f6cee5` — Task-scoped agent sandboxes
+
+- **Status:** Complete locally; not deployed.
+- **Scope:** E2B lifecycle, agent Knowledge tools, agent-data projection, queue ownership, persistence, deployment, architecture, and behavioral laws.
+- **Decisions:** Replace persistent per-user hydrated VMs with fresh task-scoped sandboxes; persist only validated product output and attempt-scoped sandbox cleanup identity; expose host-owned `search_knowledge`, `read_knowledge_item`, and `write_knowledge_items` to all agents; allow one coordinated destructive production cutover instead of a dual-path or multi-release migration.
+- **Changes:** Added the approved design; replaced persistent per-user VM acquisition with fresh task-attempt sandboxes and immediate attempt identity recording; added typed host `search_knowledge`, `read_knowledge_item`, and bounded `write_knowledge_items` tools; made chat sandbox acquisition lazy; removed corpus hydration, agent-data workers/tasks/fanout, mirror configuration, namespace ownership, persistent VM account cleanup, and obsolete persistence fields through a roll-forward migration; updated architecture and behavioral laws. Cleanup then removed the unused E2B connect, pause, resume, snapshot, lease, and lifecycle-contract surface; moved shared task tools and content-body storage out of feature modules; made sandbox creation delivery-safe and cleanup durable/reapable; preserved successful chat output when cleanup remains pending; changed Knowledge references to a closed tagged type; distinguished missing canonical objects from legacy fallback text; bounded object reads; and atomically published copied Knowledge directories.
+- **Validation:** Applied the full SQLx migration chain to a disposable PostgreSQL 17 database; the full workspace test suite passed through all crates, followed by the complete SQLx-backed worker suite after the final path assertion correction. After review fixes, 86 database-independent worker tests and 42 database-independent `newsly-db` tests pass; the SQLx-backed tests require `DATABASE_URL` and were green in the earlier disposable-PostgreSQL run. Rust format and warning-denied Clippy pass for `newsly-worker`, `newsly-db`, and `newsly-api`; architecture, contract, and final diff checks remain part of handoff validation.
+- **Remaining:** Production migration, deletion of old provider sandboxes/snapshots, deployment, and live proof are explicitly outside this implementation turn.
+- **Commits:** Uncommitted.
+
 ### 2026-09-01 — `main` — Integrate and harden local release gates with current product work
 
 - **Status:** Release validation in progress.

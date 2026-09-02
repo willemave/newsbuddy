@@ -10,10 +10,10 @@ use newsly_contracts::{
 };
 use newsly_db::{
     ContentSubmissionInput, ContentSubmissionRepositoryError, SubmissionTaskResolution,
-    apply_content_submission, prepare_agent_data_sync_dedupe_key,
+    apply_content_submission,
 };
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::auth::AuthenticatedUser;
@@ -122,20 +122,6 @@ pub(super) async fn submit_content(
         request.content_id = Some(applied.content_id);
         requests.push(request);
     }
-    if applied.enqueue_agent_data_sync {
-        let (payload, base_key) = agent_data_sync_payload(current_user.id, applied.content_id);
-        let dedupe_key =
-            prepare_agent_data_sync_dedupe_key(&mut transaction, current_user.id, &base_key)
-                .await
-                .map_err(|error| repository_error(error, &request_id))?;
-        let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-        request.payload = Some(payload);
-        request.owner_user_id = Some(current_user.id);
-        request.dedupe = Some(true);
-        request.dedupe_key = Some(dedupe_key);
-        requests.push(request);
-    }
-
     if !requests.is_empty() {
         let enqueued = queue
             .enqueue_many_in_transaction(&mut transaction, requests)
@@ -319,29 +305,6 @@ fn dig_deeper_request(
     request
 }
 
-fn agent_data_sync_payload(user_id: i64, content_id: i64) -> (Map<String, Value>, String) {
-    let payload_value = json!({
-        "user_id": user_id,
-        "content_ids": [content_id],
-        "news_item_ids": [],
-        "chat_session_ids": [],
-        "briefing_dates": [],
-    });
-    let serialized = serde_json::to_string(&payload_value).expect("agent sync payload serializes");
-    let digest = Sha256::digest(serialized.as_bytes());
-    let base_key = format!(
-        "agent-sync|user:{user_id}|payload:{}",
-        &hex_encode(&digest)[..24]
-    );
-    (
-        payload_value
-            .as_object()
-            .cloned()
-            .expect("agent sync payload is an object"),
-        base_key,
-    )
-}
-
 fn validation_error(message: impl Into<String>, request_id: &str) -> ApiError {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,
@@ -390,7 +353,7 @@ mod tests {
     use axum::{http::StatusCode, response::IntoResponse};
     use newsly_contracts::SubmitContentRequest;
 
-    use super::{NormalizedSubmission, agent_data_sync_payload, normalize_http_url};
+    use super::{NormalizedSubmission, normalize_http_url};
 
     #[test]
     fn request_normalization_preserves_submission_defaults() {
@@ -446,13 +409,5 @@ mod tests {
         .expect_err("legacy content subscription must use the canonical feed endpoint");
 
         assert_eq!(error.into_response().status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[test]
-    fn agent_sync_key_matches_canonical_payload_shape() {
-        let (payload, key) = agent_data_sync_payload(7, 42);
-        assert_eq!(payload["content_ids"], serde_json::json!([42]));
-        assert!(key.starts_with("agent-sync|user:7|payload:"));
-        assert_eq!(key.rsplit(':').next().unwrap().len(), 24);
     }
 }

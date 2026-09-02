@@ -49,7 +49,6 @@ async fn main() -> Result<()> {
     );
     let services = Arc::new(ChatTaskServices::new(
         database.pool().clone(),
-        queue.clone(),
         agent,
         deep_research,
         process.max_retries,

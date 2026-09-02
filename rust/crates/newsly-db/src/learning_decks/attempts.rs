@@ -348,16 +348,12 @@ pub(super) async fn insert_learning_deck_attempt(
     sqlx::query(
         r#"
         UPDATE llm_tasks
-        SET vm_namespace = $2,
-            workspace_path = $3,
-            shared_workspace_path = $4
+        SET workspace_path = $2
         WHERE id::bigint = $1
         "#,
     )
     .bind(task_id)
-    .bind(format!("user:{user_id}"))
     .bind(format!("{normalized_root}/tasks/{task_id}"))
-    .bind(format!("{normalized_root}/users/{user_id}/shared"))
     .execute(&mut **transaction)
     .await?;
     Ok(task_id)

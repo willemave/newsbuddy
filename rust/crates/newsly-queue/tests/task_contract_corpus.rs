@@ -77,7 +77,7 @@ fn task_contract_corpus_is_complete_and_rust_owned() {
     assert_eq!(manifest.runtime_registry, "runtime_ownership");
     assert_eq!(
         TaskType::ALL.len(),
-        25,
+        21,
         "update the frozen task-count assertion"
     );
 

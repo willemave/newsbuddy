@@ -23,11 +23,12 @@ use thiserror::Error;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent_vm::{
-    AcquiredAgentVmSession, AgentVmLifecycle, AgentVmLifecycleConfig, AgentVmLifecycleError,
-};
+use crate::content_body_store::{ContentBodyStore, ContentBodyStoreError};
 use crate::share_actions::ShareActionAgentConfig;
-use crate::share_actions::tools::{ExaSearchClient, ShareActionToolExecutor};
+use crate::task_sandbox::{
+    AcquiredTaskSandbox, TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner,
+};
+use crate::task_tools::{ExaSearchClient, TaskToolExecutor};
 
 use super::artifacts::{
     LearningDeckArtifactError, LearningDeckArtifactLimits, LearningDeckAsset,
@@ -58,10 +59,10 @@ const PRIVATE_NETWORK_DENIALS: [&str; 9] = [
     "fe80::/10",
 ];
 
-const VM_INSTRUCTIONS: &str = r"VM execution environment:
+const SANDBOX_INSTRUCTIONS: &str = r"Sandbox execution environment:
 - Commands start in a task-specific directory below /data/workspace. Keep scratch files there.
-- The user's credential-free corpus is mounted read-only at /data: index.jsonl plus knowledge/,
-  content/, news/, briefings/, and chats/.
+- No user library is mounted. Use search_knowledge and read_knowledge_item for host-side access,
+  and write_knowledge_items only when selected copies are needed as workspace files.
 - rg, jq, node, curl, and git are available. Combine related fetch-and-process work in one
   execute_bash call when practical.
 - Use edit_file for localized exact replacement instead of rewriting a whole existing file.
@@ -107,10 +108,12 @@ impl LearningDeckAgentConfig {
 
 #[derive(Debug, Clone)]
 pub(super) struct LearningDeckAgentRuntime {
+    pool: PgPool,
     provider: Arc<DirectE2bProvider>,
-    lifecycle: AgentVmLifecycle,
+    lifecycle: TaskSandboxOwner,
     engine: RigAgentEngine,
     exa: ExaSearchClient,
+    body_store: ContentBodyStore,
     config: LearningDeckAgentConfig,
 }
 
@@ -154,22 +157,23 @@ impl LearningDeckAgentRuntime {
             .map_err(|_| LearningDeckAgentBuildError::InvalidExaUrl)?;
         let exa =
             ExaSearchClient::new(secret_env("EXA_API_KEY"), endpoint, Duration::from_secs(60))?;
-        let lifecycle = AgentVmLifecycle::new(
-            pool,
+        let body_store = ContentBodyStore::from_env()?;
+        let lifecycle = TaskSandboxOwner::new(
+            pool.clone(),
             Arc::clone(&provider),
-            AgentVmLifecycleConfig {
+            TaskSandboxConfig {
                 template_id: config.base.template_id.clone(),
                 template_revision: config.base.template_revision.clone(),
                 sandbox_timeout: config.base.sandbox_timeout,
-                namespace_lease_duration: config.base.namespace_lease_duration,
-                agent_data_mirror_root: config.base.agent_data_mirror_root.clone(),
             },
         )?;
         Ok(Self {
+            pool,
             provider,
             lifecycle,
             engine,
             exa,
+            body_store,
             config,
         })
     }
@@ -187,14 +191,13 @@ impl LearningDeckAgentRuntime {
             .lifecycle
             .acquire_for_task(
                 task.user_id,
-                &task.vm_namespace,
                 task.id,
                 "learning_deck",
                 deadline,
                 cancellation.child_token(),
             )
             .await?;
-        let sandbox_id = acquired.session.sandbox.sandbox_id.as_str().to_owned();
+        let sandbox_id = acquired.sandbox.sandbox_id.as_str().to_owned();
         let events = Arc::new(LearningDeckEvents::default());
         let result = self
             .run_acquired(
@@ -215,9 +218,8 @@ impl LearningDeckAgentRuntime {
         if let Err(error) = acquired.release().await {
             tracing::error!(
                 task_id = task.id,
-                vm_namespace = %task.vm_namespace,
                 error = %error,
-                "failed to release Learning Deck agent VM namespace"
+                "failed to destroy Learning Deck task sandbox"
             );
         }
         result
@@ -227,15 +229,15 @@ impl LearningDeckAgentRuntime {
         &self,
         task: &LearningDeckTaskSnapshot,
         source_snapshot: &Map<String, Value>,
-        acquired: &AcquiredAgentVmSession,
+        acquired: &AcquiredTaskSandbox,
         deadline: Instant,
         cancellation: CancellationToken,
         events: Arc<LearningDeckEvents>,
     ) -> Result<LearningDeckAgentRunResult, LearningDeckAgentError> {
-        let sandbox = &acquired.session.sandbox;
+        let sandbox = &acquired.sandbox;
         self.prepare_workspace(sandbox, task, deadline, cancellation.child_token())
             .await?;
-        let tools = Arc::new(ShareActionToolExecutor::new(
+        let tools = Arc::new(TaskToolExecutor::new(
             Arc::clone(&self.provider),
             sandbox.clone(),
             &task.workspace_path,
@@ -243,6 +245,9 @@ impl LearningDeckAgentRuntime {
             cancellation.child_token(),
             self.config.base.max_output_chars,
             self.exa.clone(),
+            self.pool.clone(),
+            task.user_id,
+            self.body_store.clone(),
         )?);
         self.write_inputs(&tools, task, source_snapshot).await?;
 
@@ -251,13 +256,12 @@ impl LearningDeckAgentRuntime {
             json!({
                 "provider": "e2b",
                 "sandbox_id": sandbox.sandbox_id.as_str(),
-                "created": acquired.created,
-                "restored_snapshot": acquired.restored_snapshot,
+                "created": true,
                 "template_revision": acquired.template_revision,
                 "capabilities": acquired.capabilities.values(),
             }),
         );
-        let definitions = ShareActionToolExecutor::definitions();
+        let definitions = TaskToolExecutor::definitions();
         let request = self.agent_request(
             task,
             source_snapshot,
@@ -385,7 +389,7 @@ impl LearningDeckAgentRuntime {
         Ok(AgentRequest {
             feature: "learning_deck_generation".to_owned(),
             model_spec: self.config.model_spec.clone(),
-            system_prompt: format!("{}\n\n{VM_INSTRUCTIONS}", system_prompt()?),
+            system_prompt: format!("{}\n\n{SANDBOX_INSTRUCTIONS}", system_prompt()?),
             user_prompt,
             transcript,
             response_contract: ResponseContract::Text,
@@ -405,7 +409,7 @@ impl LearningDeckAgentRuntime {
 
     async fn write_inputs(
         &self,
-        tools: &ShareActionToolExecutor,
+        tools: &TaskToolExecutor,
         task: &LearningDeckTaskSnapshot,
         source_snapshot: &Map<String, Value>,
     ) -> Result<(), LearningDeckAgentError> {
@@ -457,7 +461,7 @@ impl LearningDeckAgentRuntime {
     async fn read_and_validate(
         &self,
         sandbox: &SandboxHandle,
-        tools: &ShareActionToolExecutor,
+        tools: &TaskToolExecutor,
         task: &LearningDeckTaskSnapshot,
         deadline: Instant,
         cancellation: CancellationToken,
@@ -528,7 +532,7 @@ impl LearningDeckAgentRuntime {
     async fn collect_assets(
         &self,
         sandbox: &SandboxHandle,
-        tools: &ShareActionToolExecutor,
+        tools: &TaskToolExecutor,
         task: &LearningDeckTaskSnapshot,
         deadline: Instant,
         cancellation: CancellationToken,
@@ -677,7 +681,6 @@ impl LearningDeckAgentRuntime {
             vec![
                 "-p".to_owned(),
                 task.workspace_path.clone(),
-                task.shared_workspace_path.clone(),
                 format!("{}/input", task.workspace_path),
                 format!("{}/output/assets", task.workspace_path),
                 format!("{}/scratch", task.workspace_path),
@@ -782,7 +785,7 @@ impl AgentEventSink for LearningDeckEvents {
     }
 }
 
-async fn read_source_metadata(tools: &ShareActionToolExecutor) -> Map<String, Value> {
+async fn read_source_metadata(tools: &TaskToolExecutor) -> Map<String, Value> {
     let Ok(raw) = tools.read_text(OUTPUT_SOURCE_METADATA, 100_000).await else {
         return Map::new();
     };
@@ -941,7 +944,9 @@ pub(super) enum LearningDeckAgentBuildError {
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error(transparent)]
-    Lifecycle(#[from] AgentVmLifecycleError),
+    Lifecycle(#[from] TaskSandboxError),
+    #[error(transparent)]
+    BodyStore(#[from] ContentBodyStoreError),
 }
 
 #[derive(Debug, Error)]
@@ -975,7 +980,7 @@ pub(super) enum LearningDeckAgentError {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
-    Lifecycle(#[from] AgentVmLifecycleError),
+    Lifecycle(#[from] TaskSandboxError),
 }
 
 impl LearningDeckAgentError {
@@ -1067,7 +1072,6 @@ impl LearningDeckAgentError {
         match self {
             Self::SandboxExecution { source, .. } => source.deferral_seconds(),
             Self::Cancelled => Some(5),
-            Self::Lifecycle(error) => error.deferral_seconds(),
             _ => None,
         }
     }

@@ -130,7 +130,7 @@ impl FeedValidator {
             metadata: BTreeMap::from([
                 ("feature".to_owned(), "feed_research".to_owned()),
                 ("user_id".to_owned(), "0".to_owned()),
-                ("vm_namespace".to_owned(), "user:0".to_owned()),
+                ("reuse_scope".to_owned(), "validation_attempt".to_owned()),
             ]),
             env_vars: BTreeMap::from([("NEWSLY_USER_ID".to_owned(), "0".to_owned())]),
             network: Some(NetworkPolicy::deny_all()),

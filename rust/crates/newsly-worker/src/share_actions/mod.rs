@@ -2,7 +2,6 @@ mod agent;
 mod finalizer;
 mod handler;
 pub(crate) mod submission;
-pub(crate) mod tools;
 pub(crate) mod workflows;
 
 pub use agent::{

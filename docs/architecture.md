@@ -86,13 +86,13 @@ The Cargo workspace is under `rust/`.
 | `newsly-scheduler` | Recurring task fan-out and queue maintenance |
 | `newsly-providers` | External model, search, media, social, and storage adapters |
 | `newsly-agent-runtime` | Newsly agent loop and replaceable Rig engine |
-| `newsly-e2b` | Direct sandbox lifecycle, streaming, files, network, snapshots, and corpus transport |
+| `newsly-e2b` | Direct task-sandbox creation, streaming, files, network policy, and teardown |
 | `newsly-extraction` | Typed client for the private Python extractor |
 | `newsly-eval-driver` | Canonical algorithms exposed to offline evaluations |
 | `newsly-admin` | Ownership, health, task, usage, and eval-export operations |
 | `newsly-cli` | Authenticated user-facing `newsbuddy` HTTP client, local config, and Markdown library sync |
 | `newsly-smoke` | Opt-in black-box API scenarios for the disposable local-staging Compose stack |
-| `newsly-vm-bootstrap` | Credential-free sandbox corpus/feed/capability helper |
+| `newsly-vm-bootstrap` | Credential-free sandbox feed/capability helper |
 | `newsly-account-deletion-worker` | Idempotent account and external-resource deletion |
 
 The dependency direction is:
@@ -187,9 +187,7 @@ PostgreSQL stores:
 - durable `processing_tasks`, queue leases, retries, ownership stamps, and
   failure diagnostics;
 - Briefing, Learning Deck/LLM-task, audio, onboarding, discovery, discussion,
-  usage, feedback, and agent-data state;
-- persistent E2B sandbox, snapshot, namespace, corpus revision, and lifecycle
-  records;
+  usage, feedback, and task-sandbox attempt state;
 - runtime ownership, replica acknowledgement, and audit records.
 
 The schema uses PostgreSQL-specific JSONB, GIN/trigram/FTS, advisory locks,
@@ -411,12 +409,11 @@ contract canaries, not a toy prompt.
 ### 9.2 E2B
 
 `newsly-e2b` uses typed `reqwest` calls for the E2B control plane and
-ConnectRPC-over-HTTP/2 for envd processes. It owns:
+ConnectRPC-over-HTTP/2 for envd processes. Product agents use a fresh sandbox
+per LLM task attempt. It owns:
 
-- create, connect, replace, kill, and account-deletion cleanup;
-- sandbox/snapshot identities, per-namespace locks, pooling, and idle eviction;
-- template revision, root hardening, capability probing, and recovery snapshots;
-- corpus full/delta hydration with manifest-last publication;
+- delivery-safe creation, kill, and provider-timeout cleanup;
+- attempt sandbox identity, durable cleanup intent, root hardening, and capability probing;
 - files, process start/connect/signal, command progress, and output bounds;
 - candidate network allow/reset and diagnostics/usage.
 
@@ -434,15 +431,16 @@ result. Cancellation resets the stream and signals the process when needed.
 
 Only connection failures proven to occur before delivery may retry `Start`.
 After ambiguous delivery, Rust health-checks the sandbox, finds the uniquely
-tagged process, and reattaches; it never starts the command twice. Snapshotting
-is prohibited while a command lease is active because snapshots break live
-streams.
+tagged process, and reattaches; it never starts the command twice.
 
-The host is authoritative for the credential-free agent corpus. The VM cannot
-call back into Newsly, read provider credentials, use passwordless sudo, or
-write outside its task workspace. `newsly-vm-bootstrap` performs static corpus,
-feed, and capability operations inside the sandbox. Other sandbox workload
-languages are not backend authorities.
+The host is authoritative for Knowledge. Agents search and read authorized
+items through host tools, and atomically publish only explicitly selected, bounded items into
+`input/knowledge` when local files are required. Canonical object pointers never silently fall
+back when their object is missing. The sandbox cannot call back
+into Newsly, read provider credentials, use passwordless sudo, or write outside
+its task workspace. `newsly-vm-bootstrap` performs feed and capability
+operations inside the sandbox. Other sandbox workload languages are not
+backend authorities.
 
 ## 10. Python islands
 
@@ -724,7 +722,7 @@ Required evidence is proportional to the boundary:
 - provider structured-output, routing/privacy, usage, timeout, and cancellation
   canaries;
 - E2B split-UTF-8, event order, output bound, reconnect/no-duplicate-start,
-  snapshots, network reset, corpus, hardening, cleanup, and product canaries;
+  network reset, hardening, teardown, Knowledge-tool, and product canaries;
 - exact image SHA, public health, queue age, transaction age, provider cost,
   extractor comparison, and leaked-resource proof after deployment.
 

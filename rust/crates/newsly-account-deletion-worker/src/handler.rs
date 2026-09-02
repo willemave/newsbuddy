@@ -20,7 +20,6 @@ pub struct AccountDeletionServices {
     external: AccountExternalServices,
     media_audio_root: PathBuf,
     personal_markdown_root: PathBuf,
-    agent_data_mirror_root: PathBuf,
 }
 
 impl AccountDeletionServices {
@@ -30,7 +29,6 @@ impl AccountDeletionServices {
         external: AccountExternalServices,
         media_audio_root: PathBuf,
         personal_markdown_root: PathBuf,
-        agent_data_mirror_root: PathBuf,
     ) -> Self {
         Self {
             pool,
@@ -38,7 +36,6 @@ impl AccountDeletionServices {
             external,
             media_audio_root,
             personal_markdown_root,
-            agent_data_mirror_root,
         }
     }
 }
@@ -103,7 +100,6 @@ async fn execute_account_deletion(
         user_id,
         &services.media_audio_root,
         &services.personal_markdown_root,
-        &services.agent_data_mirror_root,
     )
     .await
     {
@@ -138,16 +134,6 @@ async fn run_external_cleanup(
     lease: &LeaseHealth,
 ) -> Result<(), String> {
     debug_assert!(plan.user_id > 0);
-    services
-        .external
-        .vm
-        .destroy(plan.sandbox_id.as_deref(), plan.snapshot_id.as_deref())
-        .await
-        .map_err(|error| error.to_string())?;
-    if lease.ownership_lost() {
-        return Err("account deletion lease was lost after E2B cleanup".to_owned());
-    }
-
     // X revocation intentionally cannot block local account deletion. Credentials are removed by
     // the fenced database purge even when the provider, key, or remote endpoint is unavailable.
     for grant in &plan.x_grants {

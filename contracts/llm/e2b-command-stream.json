@@ -40,26 +40,6 @@
       "start_delivery": "unknown"
     }
   ],
-  "lifecycle": [
-    {
-      "event": "acquired",
-      "provider": "e2b",
-      "reuse_scope": "persistent_namespace",
-      "reused": false,
-      "sandbox_id": "fixture-sandbox",
-      "template_revision": "fixture-revision",
-      "vm_namespace": "user:51"
-    },
-    {
-      "event": "corpus_installed",
-      "manifest_written_last": true,
-      "revision": 17
-    },
-    {
-      "event": "released",
-      "sandbox_retained": true
-    }
-  ],
   "path_cases": [
     {
       "accepted": true,

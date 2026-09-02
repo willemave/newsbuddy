@@ -1,7 +1,7 @@
 use newsly_db::{
     AppliedContentSubmission, ContentSubmissionInput, ContentSubmissionRepositoryError,
     ScraperConfigRepositoryError, SubmissionTaskResolution, apply_content_submission,
-    apply_validated_feed_subscription, prepare_agent_data_sync_dedupe_key,
+    apply_validated_feed_subscription,
 };
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde_json::{Map, Value, json};
@@ -202,10 +202,6 @@ async fn submit(
         request.content_id = Some(applied.content_id);
         requests.push(request);
     }
-    if applied.enqueue_agent_data_sync {
-        requests
-            .push(agent_data_sync_request(transaction, user_id, &[applied.content_id], &[]).await?);
-    }
     if !requests.is_empty() {
         let enqueued = queue
             .enqueue_many_in_transaction(transaction, requests)
@@ -222,32 +218,6 @@ async fn submit(
         task_id,
         already_exists: applied.already_exists,
     })
-}
-
-pub(crate) async fn enqueue_chat_session_sync(
-    transaction: &mut Transaction<'_, Postgres>,
-    queue: &QueueKernel,
-    user_id: i64,
-    session_id: i64,
-) -> Result<(), ShareSubmissionError> {
-    let request = agent_data_sync_request(transaction, user_id, &[], &[session_id]).await?;
-    queue
-        .enqueue_many_in_transaction(transaction, vec![request])
-        .await?;
-    Ok(())
-}
-
-pub(crate) async fn enqueue_content_sync(
-    transaction: &mut Transaction<'_, Postgres>,
-    queue: &QueueKernel,
-    user_id: i64,
-    content_id: i64,
-) -> Result<(), ShareSubmissionError> {
-    let request = agent_data_sync_request(transaction, user_id, &[content_id], &[]).await?;
-    queue
-        .enqueue_many_in_transaction(transaction, vec![request])
-        .await?;
-    Ok(())
 }
 
 fn analyze_request(
@@ -290,34 +260,6 @@ fn dig_deeper_request(
     ));
     request.owner_user_id = Some(user_id);
     request
-}
-
-async fn agent_data_sync_request(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: i64,
-    content_ids: &[i64],
-    chat_session_ids: &[i64],
-) -> Result<EnqueueRequest, ShareSubmissionError> {
-    let payload_value = json!({
-        "user_id": user_id,
-        "content_ids": content_ids,
-        "news_item_ids": [],
-        "chat_session_ids": chat_session_ids,
-        "briefing_dates": [],
-    });
-    let serialized = serde_json::to_vec(&payload_value)?;
-    let digest = Sha256::digest(serialized);
-    let base_key = format!(
-        "agent-sync|user:{user_id}|payload:{}",
-        &hex_encode(&digest)[..24]
-    );
-    let dedupe_key = prepare_agent_data_sync_dedupe_key(transaction, user_id, &base_key).await?;
-    let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-    request.payload = payload_value.as_object().cloned();
-    request.owner_user_id = Some(user_id);
-    request.dedupe = Some(true);
-    request.dedupe_key = Some(dedupe_key);
-    Ok(request)
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

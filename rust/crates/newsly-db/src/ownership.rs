@@ -865,26 +865,6 @@ async fn verify_drain(
         // Rollback only changes ownership for newly enqueued work, so stamped tasks keep draining
         // under Rust. Route and state-writer drain is proven by each replica's Ready barrier ack.
         ResourceKind::TaskType | ResourceKind::RouteGroup | ResourceKind::StateWriter => {}
-        ResourceKind::VmNamespace => {
-            let active_count = sqlx::query_scalar::<_, i64>(
-                r"
-                SELECT count(*)::bigint
-                FROM agent_vm_namespace_leases
-                WHERE ownership_resource_key = $1
-                  AND lease_expires_at > clock_timestamp()
-                ",
-            )
-            .bind(target.resource_key.as_str())
-            .fetch_one(&mut **transaction)
-            .await?;
-            if active_count != 0 {
-                return Err(OwnershipRepositoryError::SourceNotDrained {
-                    resource_kind: target.resource_kind,
-                    resource_key: target.resource_key.to_string(),
-                    active_count,
-                });
-            }
-        }
     }
     Ok(())
 }

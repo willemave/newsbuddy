@@ -13,21 +13,16 @@ use newsly_contracts::{
 use newsly_db::{
     ChatRecordAccess, CouncilPersonaSeed, CouncilSelectOutcome, CouncilStageOutcome,
     SelectCouncilBranchInput, StageCouncilRetryInput, StageCouncilStartInput, StagedCouncilWork,
-    find_user_profile, get_chat_message_status, get_chat_session_detail,
-    prepare_agent_data_sync_dedupe_key, select_council_branch, stage_council_retry,
-    stage_council_start,
+    find_user_profile, get_chat_message_status, get_chat_session_detail, select_council_branch,
+    stage_council_retry, stage_council_start,
 };
-use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
-use serde_json::json;
-use sha2::{Digest, Sha256};
 use tokio::time::{Instant, sleep};
 
 use super::{
     begin_write, enqueue_chat_turn, forbidden_session, inactive_user, not_found, positive_path,
-    queue_error, validation_error,
+    validation_error,
 };
 use crate::auth::AuthenticatedUser;
-use crate::encoding::hex_encode;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
 use crate::write_support::{
@@ -176,17 +171,7 @@ pub(crate) async fn select_council_mode_branch(
     )
     .await
     .map_err(|error| internal_error(error, &request_id))?;
-    let changed = select_outcome(outcome, &request_id)?;
-    if changed {
-        enqueue_session_sync(
-            &state,
-            &mut transaction,
-            current_user.id,
-            session_id,
-            &request_id,
-        )
-        .await?;
-    }
+    select_outcome(outcome, &request_id)?;
     transaction
         .commit()
         .await
@@ -345,42 +330,6 @@ async fn enqueue_council_turns(
     for turn in &staged.turns {
         enqueue_chat_turn(state, transaction, user_id, turn, request_id).await?;
     }
-    Ok(())
-}
-
-async fn enqueue_session_sync(
-    state: &AppState,
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    user_id: i64,
-    session_id: i64,
-    request_id: &str,
-) -> Result<(), ApiError> {
-    let payload = json!({
-        "user_id": user_id,
-        "content_ids": [],
-        "news_item_ids": [],
-        "chat_session_ids": [session_id],
-        "briefing_dates": [],
-    });
-    let digest = Sha256::digest(
-        serde_json::to_vec(&payload).map_err(|error| internal_error(error, request_id))?,
-    );
-    let base_key = format!(
-        "agent-sync|user:{user_id}|payload:{}",
-        &hex_encode(&digest)[..24]
-    );
-    let dedupe_key = prepare_agent_data_sync_dedupe_key(transaction, user_id, &base_key)
-        .await
-        .map_err(|error| internal_error(error, request_id))?;
-    let mut request = EnqueueRequest::new(TaskType::SyncAgentData);
-    request.payload = payload.as_object().cloned();
-    request.owner_user_id = Some(user_id);
-    request.dedupe = Some(true);
-    request.dedupe_key = Some(dedupe_key);
-    QueueKernel::new(state.database.pool().clone())
-        .enqueue_many_in_transaction(transaction, vec![request])
-        .await
-        .map_err(|error| queue_error(error, request_id))?;
     Ok(())
 }
 

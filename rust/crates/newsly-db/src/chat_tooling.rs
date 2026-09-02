@@ -13,6 +13,7 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ChatContentHit {
+    pub reference: ChatKnowledgeReference,
     pub content_id: i64,
     pub content_type: String,
     pub title: String,
@@ -21,7 +22,12 @@ pub struct ChatContentHit {
     pub snippet: Option<String>,
     pub is_read: bool,
     pub is_saved_to_knowledge: bool,
-    pub corpus_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChatKnowledgeReference {
+    pub kind: &'static str,
+    pub id: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -60,12 +66,15 @@ struct ContentHitRow {
     snippet: Option<String>,
     is_read: bool,
     is_saved_to_knowledge: bool,
-    corpus_path: Option<String>,
 }
 
 impl From<ContentHitRow> for ChatContentHit {
     fn from(row: ContentHitRow) -> Self {
         Self {
+            reference: ChatKnowledgeReference {
+                kind: "content",
+                id: row.content_id,
+            },
             content_id: row.content_id,
             content_type: row.content_type,
             title: row.title,
@@ -74,9 +83,6 @@ impl From<ContentHitRow> for ChatContentHit {
             snippet: row.snippet,
             is_read: row.is_read,
             is_saved_to_knowledge: row.is_saved_to_knowledge,
-            corpus_path: row
-                .corpus_path
-                .map(|path| format!("/data/{}", path.trim_start_matches('/'))),
         }
     }
 }
@@ -118,7 +124,7 @@ impl From<NewsHitRow> for ChatNewsHit {
     }
 }
 
-pub async fn search_chat_knowledge(
+pub async fn search_agent_knowledge(
     pool: &PgPool,
     user_id: i64,
     query: &str,
@@ -474,19 +480,13 @@ fn content_select() -> &'static str {
                 NULLIF(BTRIM(content.search_text), '')
             ) AS snippet,
             read.id IS NOT NULL AS is_read,
-            saved.id IS NOT NULL AS is_saved_to_knowledge,
-            agent_file.path AS corpus_path
+            saved.id IS NOT NULL AS is_saved_to_knowledge
         FROM contents AS content
         JOIN users AS account ON account.id::bigint = $1 AND account.is_active = TRUE
         LEFT JOIN content_read_status AS read
           ON read.content_id = content.id AND read.user_id::bigint = $1
         LEFT JOIN content_knowledge_saves AS saved
           ON saved.content_id = content.id AND saved.user_id::bigint = $1
-        LEFT JOIN agent_data_files AS agent_file
-          ON agent_file.user_id::bigint = $1
-         AND agent_file.document_kind = 'content'
-         AND agent_file.document_key = content.id::text
-         AND agent_file.deleted_at IS NULL
     "#
 }
 
