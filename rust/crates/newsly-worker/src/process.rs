@@ -1,6 +1,6 @@
 //! Shared queue-worker process plumbing.
 //!
-//! Service construction stays in each binary so provider and task ownership remain explicit.
+//! Service construction stays in each process entrypoint so provider and task ownership remain explicit.
 //! This module owns only the identical observability, database-listener URL, and shutdown setup.
 
 use anyhow::{Context, Result, anyhow};

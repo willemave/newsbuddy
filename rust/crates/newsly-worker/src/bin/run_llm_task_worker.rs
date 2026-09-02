@@ -19,7 +19,7 @@ use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 const DEFAULT_SANDBOX_ROOT: &str = "/data/workspace";
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let process =
         QueueWorkerProcessConfig::from_env("newsly-run-llm-task-worker", "rust-run-llm-task")
             .context("invalid Newsly Rust run-llm-task worker process configuration")?;

@@ -16,7 +16,7 @@ use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 use secrecy::ExposeSecret;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let config = XSyncWorkerProcessConfig::from_env()
         .context("invalid Newsly Rust X-sync worker configuration")?;
     initialize_observability(&config.log_filter, config.log_format)

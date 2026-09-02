@@ -210,6 +210,7 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         )?)),
         _ => None,
     };
+    let application_sha = config.application_sha.clone();
     let gateway = gateway::Gateway::new(
         OwnershipRepository::new(database.pool().clone()),
         config.replica_id,
@@ -239,7 +240,7 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         bind_address = %config.bind_address,
         environment = %config.environment,
         version = env!("CARGO_PKG_VERSION"),
-        revision = option_env!("NEWSLY_BUILD_SHA").unwrap_or("development"),
+        revision = application_sha.as_str(),
         "Newsly Rust API listening"
     );
 

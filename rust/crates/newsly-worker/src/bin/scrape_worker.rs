@@ -15,7 +15,7 @@ use newsly_worker::scrape::{ScrapeHandler, ScrapeWorkerServices};
 use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let config = QueueWorkerProcessConfig::from_env("newsly-scrape-worker", "rust-scrape")
         .context("invalid Newsly Rust scrape-worker configuration")?;
     initialize_observability(&config.log_filter, config.log_format)

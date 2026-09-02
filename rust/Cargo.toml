@@ -85,3 +85,12 @@ must_use_candidate = "allow"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# Production services prioritize bounded release latency. The API and workers are
+# dominated by database, queue, and provider I/O; retain the aggressive default
+# profile for explicit CPU-sensitive builds rather than paying its LTO cost for
+# every production process.
+[profile.release-service]
+inherits = "release"
+lto = "off"
+codegen-units = 16

@@ -15,7 +15,7 @@ use newsly_worker::process::{
 use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let config = ImageWorkerProcessConfig::from_env()
         .context("invalid Newsly Rust image-worker configuration")?;
     initialize_observability(&config.log_filter, config.log_format)

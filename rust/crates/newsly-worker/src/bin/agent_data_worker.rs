@@ -17,7 +17,7 @@ use newsly_worker::process::{
 use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let config = AgentDataWorkerProcessConfig::from_env()
         .context("invalid Newsly Rust Agent Data worker configuration")?;
     initialize_observability(&config.log_filter, config.log_format)

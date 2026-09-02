@@ -245,7 +245,6 @@ impl ServerConfig {
         let application_sha = ApplicationSha::new(
             env::var("NEWSLY_APPLICATION_SHA")
                 .ok()
-                .or_else(|| option_env!("NEWSLY_BUILD_SHA").map(str::to_owned))
                 .unwrap_or_else(|| "0".repeat(40)),
         )?;
 

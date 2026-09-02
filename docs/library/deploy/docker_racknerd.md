@@ -58,7 +58,8 @@ production Docker network uses a different, explicitly known subnet.
 
 GitHub Actions:
 
-1. builds the Docker image
+1. builds the Docker image with the service release profile, `lld`, and a
+   persistent `sccache` mount
 2. pushes it to GHCR and pulls it on RackNerd
 3. starts or verifies the external PostgreSQL container
 4. runs the exact-image embedded SQLx migrations once
@@ -70,6 +71,13 @@ GitHub Actions:
    Nginx back if that probe fails
 9. updates the single workers and scheduler containers
 10. retains the previous API slot and image as the immediate rollback target
+
+The build job uses `ubuntu-latest` by default. Set the repository variable
+`NEWSLY_BUILD_RUNNER` to the label of a persistent self-hosted Linux builder to
+retain BuildKit and compilation state between releases. GitHub-hosted runners
+restore the same compilation cache through the workflow cache. Docker layer
+exports use the minimal cache graph so source-dependent binary layers are not
+uploaded as reusable dependency cache.
 
 The production services are defined in `docker-compose.production.yml`.
 `scripts/deploy_blue_green.sh` owns the release sequence. The active slot is

@@ -58,9 +58,13 @@ flowchart TD
 
 Production images are split by responsibility:
 
-- the Rust application image supplies API, worker, scheduler, database, admin,
-  account-deletion, and sandbox-helper binaries, plus the pinned third-party
-  `yt-dlp` executable/runtime used only as a Rust-controlled media subprocess;
+- the Rust application image supplies API, scheduler, database, admin,
+  account-deletion, sandbox-helper, and one multicall queue-worker binary. The
+  worker is exposed under process-specific aliases so Supervisor retains
+  independent process, restart, queue-scope, and shutdown boundaries without
+  linking the shared worker graph once per queue. The image also includes the
+  pinned third-party `yt-dlp` executable/runtime used only as a Rust-controlled
+  media subprocess;
 - the isolated extractor image contains Crawl4AI, browser dependencies, and
   extraction policy but receives no application database environment or volume;
 - eval dependencies are excluded from production images.
@@ -82,7 +86,7 @@ The Cargo workspace is under `rust/`.
 | `newsly-domain` | Product identifiers, states, ownership, and durable vocabulary |
 | `newsly-db` | Shared SQLx repositories, cross-feature PostgreSQL operations, migrations, database CLI |
 | `newsly-queue` | Claim, lease, retry, defer, cancel, notification, and finalization kernel |
-| `newsly-worker` | Task executors and queue-specific worker binaries |
+| `newsly-worker` | Task executors and typed process dispatch for queue-specific worker aliases |
 | `newsly-scheduler` | Recurring task fan-out and queue maintenance |
 | `newsly-providers` | External model, search, media, social, and storage adapters |
 | `newsly-agent-runtime` | Newsly agent loop and replaceable Rig engine |

@@ -17,7 +17,7 @@ use newsly_worker::queue_process_config::QueueWorkerProcessConfig;
 use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let process = QueueWorkerProcessConfig::from_env(
         "newsly-briefing-refresh-worker",
         "rust-briefing-refresh",

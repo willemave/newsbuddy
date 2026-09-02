@@ -21,7 +21,7 @@ use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 use secrecy::SecretString;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let config = QueueWorkerProcessConfig::from_env(
         "newsly-onboarding-discovery-worker",
         "rust-onboarding-discovery",

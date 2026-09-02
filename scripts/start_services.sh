@@ -124,24 +124,23 @@ start_extractor() {
   exec env -u DATABASE_URL -u NEWSLY_DATABASE_URL "${extractor_binary}"
 }
 
-worker_binaries=(
-  newsly-worker
-  media_worker
-  audio_episode_worker
-  image_worker
-  discussion_worker
-  news_item_worker
-  scrape_worker
-  summarization_worker
-  x_sync_worker
-  agent_data_worker
-  feed_backfill_worker
-  feed_discovery_worker
-  onboarding_discovery_worker
-  briefing_refresh_worker
-  chat_worker
-  run_llm_task_worker
-  newsly-account-deletion-worker
+worker_processes=(
+  content
+  media
+  audio_episode
+  image
+  discussion
+  news_item
+  scrape
+  summarization
+  x_sync
+  agent_data
+  feed_backfill
+  feed_discovery
+  onboarding_discovery
+  briefing_refresh
+  chat
+  run_llm_task
 )
 
 supervise_children() {
@@ -210,16 +209,19 @@ supervise_children() {
 start_worker_group() {
   newsly_require_database_url
   build_packages \
-    --package newsly-worker --bins \
+    --package newsly-worker --bin newsly-worker \
     --package newsly-account-deletion-worker --bin newsly-account-deletion-worker
 
   local -a worker_pids=()
-  local binary
-  for binary in "${worker_binaries[@]}"; do
-    echo "starting native worker: ${binary}"
-    "${rust_target}/${binary}" &
+  local process
+  for process in "${worker_processes[@]}"; do
+    echo "starting native worker: ${process}"
+    NEWSLY_WORKER_PROCESS="${process}" "${rust_target}/newsly-worker" &
     worker_pids+=("$!")
   done
+  echo "starting native worker: account_deletion"
+  "${rust_target}/newsly-account-deletion-worker" &
+  worker_pids+=("$!")
 
   supervise_children "worker group" "${worker_pids[@]}"
 }
@@ -232,7 +234,7 @@ start_all() {
   build_packages \
     --package newsly-api --bin newsly-api \
     --package newsly-scheduler --bin newsly-scheduler \
-    --package newsly-worker --bins \
+    --package newsly-worker --bin newsly-worker \
     --package newsly-account-deletion-worker --bin newsly-account-deletion-worker
 
   prepare_extractor
@@ -247,11 +249,13 @@ start_all() {
   "${rust_target}/newsly-scheduler" &
   service_pids+=("$!")
 
-  local binary
-  for binary in "${worker_binaries[@]}"; do
-    "${rust_target}/${binary}" &
+  local process
+  for process in "${worker_processes[@]}"; do
+    NEWSLY_WORKER_PROCESS="${process}" "${rust_target}/newsly-worker" &
     service_pids+=("$!")
   done
+  "${rust_target}/newsly-account-deletion-worker" &
+  service_pids+=("$!")
 
   supervise_children "runtime" "${service_pids[@]}"
 }

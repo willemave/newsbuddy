@@ -13,7 +13,7 @@ env:
 jobs:
   build-image:
     name: Build release image
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NEWSLY_BUILD_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -46,9 +46,15 @@ jobs:
         run: docker compose -f docker-compose.production.yml config --quiet
 
       - name: Set up Docker Buildx
+        id: setup-buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          name: newsly-release-builder
+          keep-state: ${{ runner.environment == 'self-hosted' }}
+          cleanup: ${{ runner.environment != 'self-hosted' }}
 
       - name: Free runner disk space
+        if: runner.environment == 'github-hosted'
         run: |
           set -euo pipefail
           sudo rm -rf \
@@ -59,6 +65,25 @@ jobs:
             /opt/hostedtoolcache/CodeQL || true
           docker system prune -af || true
           df -h
+
+      - name: Restore Rust compilation cache
+        if: runner.environment == 'github-hosted'
+        id: rust-compilation-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/newsly-sccache
+          key: newsly-sccache-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            newsly-sccache-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}-
+
+      - name: Inject Rust compilation cache into BuildKit
+        if: runner.environment == 'github-hosted'
+        uses: reproducible-containers/buildkit-cache-dance@4b2444fec0c0fb9dbf175a96c094720a692ef810
+        with:
+          builder: ${{ steps.setup-buildx.outputs.name }}
+          cache-dir: ${{ runner.temp }}/newsly-sccache
+          dockerfile: Dockerfile
+          skip-extraction: ${{ steps.rust-compilation-cache.outputs.cache-hit }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -79,7 +104,7 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ env.RELEASE_SHA }}
           cache-from: type=gha,scope=newsly-rust-image
-          cache-to: type=gha,mode=max,scope=newsly-rust-image
+          cache-to: type=gha,mode=min,scope=newsly-rust-image
 
       - name: Build database-free document extractor image
         uses: docker/build-push-action@v6
@@ -94,7 +119,7 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ env.RELEASE_SHA }}
           cache-from: type=gha,scope=document-extractor
-          cache-to: type=gha,mode=max,scope=document-extractor
+          cache-to: type=gha,mode=min,scope=document-extractor
 
       - name: Smoke-test published deployment images
         env:

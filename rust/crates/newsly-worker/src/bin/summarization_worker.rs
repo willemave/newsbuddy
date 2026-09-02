@@ -17,7 +17,7 @@ use newsly_worker::summarization::{
 use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let config = SummarizationWorkerProcessConfig::from_env()
         .context("invalid Newsly Rust summarization-worker configuration")?;
     initialize_observability(&config.log_filter, config.log_format)

@@ -18,7 +18,7 @@ use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 use secrecy::SecretString;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let process = QueueWorkerProcessConfig::from_env("newsly-chat-worker", "rust-chat")
         .context("invalid Newsly Rust chat-worker process configuration")?;
     initialize_observability(&process.log_filter, process.log_format)

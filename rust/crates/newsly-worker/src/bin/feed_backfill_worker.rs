@@ -15,7 +15,7 @@ use newsly_worker::queue_process_config::QueueWorkerProcessConfig;
 use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+pub(crate) async fn main() -> Result<()> {
     let config =
         QueueWorkerProcessConfig::from_env("newsly-feed-backfill-worker", "rust-feed-backfill")
             .context("invalid Newsly Rust feed-backfill worker configuration")?;

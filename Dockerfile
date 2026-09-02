@@ -2,9 +2,41 @@
 
 FROM rust:1.94.1-bookworm AS newsly-rust-chef
 
+ARG SCCACHE_VERSION=0.17.0
+ARG TARGETARCH
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl lld \
+    && case "${TARGETARCH}" in \
+        amd64) \
+          sccache_arch="x86_64"; \
+          sccache_sha="67c4a96dd237c1f518f6b36083f270f9976d516f1e57fce891755ea782e50006" \
+          ;; \
+        arm64) \
+          sccache_arch="aarch64"; \
+          sccache_sha="821a86343191aa1cbab74bd42f9e93c9a63bf85e4742945f40d3ae84193c1c77" \
+          ;; \
+        *) echo "unsupported build architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+      esac \
+    && sccache_archive="sccache-v${SCCACHE_VERSION}-${sccache_arch}-unknown-linux-musl.tar.gz" \
+    && curl --fail --silent --show-error --location \
+      "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${sccache_archive}" \
+      --output "/tmp/${sccache_archive}" \
+    && echo "${sccache_sha}  /tmp/${sccache_archive}" | sha256sum --check --strict \
+    && tar --extract --gzip --file "/tmp/${sccache_archive}" --directory /tmp \
+    && install --mode 0755 \
+      "/tmp/sccache-v${SCCACHE_VERSION}-${sccache_arch}-unknown-linux-musl/sccache" \
+      /usr/local/bin/sccache \
+    && rm -rf /var/lib/apt/lists/* /tmp/sccache-v* /tmp/sccache-*.tar.gz
+
 RUN cargo install cargo-chef --version 0.1.78 --locked
 
 WORKDIR /workspace/rust
+
+ENV RUSTC_WRAPPER=/usr/local/bin/sccache \
+    RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+    SCCACHE_DIR=/workspace/.cache/sccache \
+    SCCACHE_CACHE_SIZE=10G
 
 FROM newsly-rust-chef AS newsly-rust-planner
 
@@ -16,22 +48,20 @@ FROM newsly-rust-chef AS newsly-rust-builder
 COPY --from=newsly-rust-planner /workspace/rust/recipe.json recipe.json
 COPY contracts/ /workspace/contracts/
 COPY e2b.Dockerfile /workspace/e2b.Dockerfile
-RUN cargo chef cook --locked --release --recipe-path recipe.json
+RUN --mount=type=cache,id=newsly-sccache,target=/workspace/.cache/sccache,sharing=locked \
+    cargo chef cook --locked --profile release-service --recipe-path recipe.json
 
 COPY rust/ /workspace/rust/
 
-ARG NEWSLY_BUILD_SHA
-ENV NEWSLY_BUILD_SHA=${NEWSLY_BUILD_SHA}
-
-RUN test -n "${NEWSLY_BUILD_SHA}" \
-    && cargo build --locked --release --jobs 1 \
+RUN --mount=type=cache,id=newsly-sccache,target=/workspace/.cache/sccache,sharing=locked \
+    cargo build --locked --profile release-service \
     --package newsly-db \
     --package newsly-api \
     --package newsly-admin \
     --package newsly-worker \
     --package newsly-scheduler \
-    --package newsly-account-deletion-worker \
-    --bins
+    --package newsly-account-deletion-worker --bins \
+    && sccache --show-stats
 
 FROM debian:bookworm-slim
 
@@ -66,29 +96,22 @@ COPY docker/ /app/docker/
 COPY contracts/ /app/contracts/
 COPY rust/assets/admin-static/ /app/static/
 
-COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-db /usr/local/bin/newsly-db
-COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-api /usr/local/bin/newsly-api
-COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-admin /usr/local/bin/newsly-admin
-COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-scheduler /usr/local/bin/newsly-scheduler
-COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-worker /usr/local/bin/newsly-content-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/agent_data_worker /usr/local/bin/newsly-agent-data-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/audio_episode_worker /usr/local/bin/newsly-audio-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/discussion_worker /usr/local/bin/newsly-discussion-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/image_worker /usr/local/bin/newsly-image-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/feed_backfill_worker /usr/local/bin/newsly-feed-backfill-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/feed_discovery_worker /usr/local/bin/newsly-feed-discovery-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/media_worker /usr/local/bin/newsly-media-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/news_item_worker /usr/local/bin/newsly-news-item-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/scrape_worker /usr/local/bin/newsly-scrape-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/onboarding_discovery_worker /usr/local/bin/newsly-onboarding-discovery-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/summarization_worker /usr/local/bin/newsly-summarization-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/x_sync_worker /usr/local/bin/newsly-x-sync-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/briefing_refresh_worker /usr/local/bin/newsly-briefing-refresh-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/chat_worker /usr/local/bin/newsly-chat-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/run_llm_task_worker /usr/local/bin/newsly-run-llm-task-worker
-COPY --from=newsly-rust-builder /workspace/rust/target/release/newsly-account-deletion-worker /usr/local/bin/newsly-account-deletion-worker
+COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-db /usr/local/bin/newsly-db
+COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-api /usr/local/bin/newsly-api
+COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-admin /usr/local/bin/newsly-admin
+COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-scheduler /usr/local/bin/newsly-scheduler
+COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-worker /usr/local/bin/newsly-worker
+COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-account-deletion-worker /usr/local/bin/newsly-account-deletion-worker
 
-RUN chmod +x /usr/local/bin/newsly-* /app/docker/*.sh
+RUN for worker in \
+      content media audio image discussion news-item scrape summarization x-sync agent-data \
+      feed-backfill feed-discovery onboarding-discovery briefing-refresh chat run-llm-task; \
+      do ln -s newsly-worker "/usr/local/bin/newsly-${worker}-worker"; done \
+    && chmod +x /usr/local/bin/newsly-* /app/docker/*.sh
+
+ARG NEWSLY_BUILD_SHA
+RUN test -n "${NEWSLY_BUILD_SHA}"
+ENV NEWSLY_APPLICATION_SHA=${NEWSLY_BUILD_SHA}
 
 VOLUME ["/data"]
 

@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-01 — `main` — Reduce production Rust image build latency
+
+- **Status:** Complete locally; not committed or deployed.
+- **Scope:** Production Rust profiles, worker executable packaging, Docker/BuildKit caching, release workflow runner selection, and runtime revision metadata.
+- **Decisions:** Preserve every worker as an independent Supervisor process and queue authority while dispatching through one typed multicall binary; keep account deletion separate; use a service-specific non-LTO profile with parallel codegen and `lld`; retain the aggressive default release profile for explicit CPU-sensitive builds; support a persistent self-hosted builder without making it mandatory.
+- **Changes:** Replaced 16 separately linked queue-worker executables with aliases to one binary, moved the release SHA from compile-time input to runtime image metadata, added pinned `sccache` plus persistent BuildKit cache mounts, enabled an optional persistent runner, and reduced external Docker cache exports from maximal to minimal mode.
+- **Validation:** Rust formatting and warning-denied focused Clippy passed; all 84 `newsly-worker` library tests and both multicall-dispatch tests passed; shell syntax, workflow syntax, architecture/contract guards, production Compose validation, Dockerfile checks, and `git diff --check` passed. A cold exact image build completed in 2m42s locally (1m13s dependency cook, 56s application build/link), and image inspection confirmed all 16 worker aliases, the separate account-deletion executable, runtime revision metadata, migration CLI smoke, and fail-closed unknown dispatch. A follow-up cache validation recorded a 76.92% Rust compile cache hit rate.
+- **Remaining:** Measure the first GitHub-hosted release build and its warm successor after the workflow is committed; no commit, push, or deployment requested.
+- **Commits:** Uncommitted.
+
 ### 2026-09-01 — `main` — Integrate and harden local release gates with current product work
 
 - **Status:** Release validation in progress.

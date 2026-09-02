@@ -184,7 +184,8 @@ revision, or add an application SQLAlchemy model.
 
 ## Containers and releases
 
-Build from the repository root so the exact tested revision is embedded:
+Build from the repository root so the exact tested revision is recorded in the
+runtime image metadata without invalidating the Rust compilation layer:
 
 ```bash
 docker build \
