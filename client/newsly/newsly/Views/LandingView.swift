@@ -48,7 +48,9 @@ struct LandingView: View {
 
     private func titleContent() -> some View {
         VStack(spacing: 24) {
-            Image("BuddyMark")
+            // BrandMark, not AppMark: this is the brand on the page, not the icon chip, so
+            // it carries no field of its own to sit as a pale box on the surface.
+            Image("BrandMark")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 220, height: 220)
@@ -101,19 +103,6 @@ struct LandingView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("auth.continue_with_apple")
             .disabled(isLoading)
-
-            Text("Newsbuddy uses external AI services to process content and instructions you submit. By continuing, you agree to the Terms and acknowledge the Privacy Policy.")
-                .font(.appCaption)
-                .foregroundColor(.onboardingText.opacity(0.62))
-                .multilineTextAlignment(.center)
-
-            HStack(spacing: 16) {
-                Link("Privacy", destination: URL(string: "https://news.willemsavenue.com/privacy")!)
-                Link("Terms", destination: URL(string: "https://news.willemsavenue.com/terms")!)
-                Link("Support", destination: URL(string: "https://news.willemsavenue.com/support")!)
-            }
-            .font(.appCaption.weight(.semibold))
-            .tint(.onboardingText)
 
             if let errorMessage = authViewModel.errorMessage {
                 Text(errorMessage)

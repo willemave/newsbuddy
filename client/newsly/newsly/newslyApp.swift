@@ -81,7 +81,10 @@ struct newslyApp: App {
             Group {
                 #if DEBUG
                 if let visualState = E2ETestLaunch.visualState {
-                    E2EVisualStateView(state: visualState)
+                    E2EVisualStateView(
+                        state: visualState,
+                        authViewModel: authViewModel
+                    )
                 } else {
                     authenticatedPresentation
                 }

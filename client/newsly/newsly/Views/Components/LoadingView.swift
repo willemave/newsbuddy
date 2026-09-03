@@ -48,23 +48,18 @@ struct BuddyLoadingIndicator: View {
     }
 
     var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.brandPrimary.opacity(0.12), lineWidth: 1)
-                .frame(width: size * 1.12, height: size * 1.12)
-                .scaleEffect(breathing ? 1.06 : 0.92)
-                .opacity(breathing ? 0.25 : 0.7)
-
-            Image("BuddyMark")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: size, height: size)
-                .appShadow(.floating)
-                .scaleEffect(breathing ? 1.03 : 0.97)
-                .offset(y: breathing ? -3 : 2)
-                .rotationEffect(.degrees(breathing ? 1.5 : -1.5), anchor: .bottom)
-        }
-        .frame(width: size * 1.18, height: size * 1.18)
+        // The Buddy alone: his own motion is the waiting signal, and a ring around him read
+        // as a stray disc on the surface rather than as part of the mark.
+        Image("BuddyMark")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
+            .appShadow(.floating)
+            .scaleEffect(breathing ? 1.03 : 0.97)
+            .offset(y: breathing ? -3 : 2)
+            .rotationEffect(.degrees(breathing ? 1.5 : -1.5), anchor: .bottom)
+            // Room for the breathing, so nothing below it shifts as he moves.
+            .frame(width: size * 1.18, height: size * 1.18)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Newsbuddy is working")
         .onAppear {

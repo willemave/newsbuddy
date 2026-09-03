@@ -27,6 +27,117 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-02 — `main` — Cut and rewrite the first-run welcome copy
+
+- **Status:** Complete locally; not committed.
+- **Scope:** `BriefingStartHereView`, the welcome page shown while the first briefing is being built, plus a DEBUG visual state for it.
+- **Decisions:** Drop the page title, which restated the paragraph under it and sat directly beneath the Briefing header and the Welcome pill. Drop the "first pass is complete" headline for the waiting phase, where the narration line below already said the same thing; that headline is now optional rather than a string every phase has to supply. Rewrite the rest to the owner's voice via the writing-assistant skill, which also bans colons and em dashes in prose, so the two list headings and one bullet were rephrased rather than merely tightened.
+- **Changes:** Title removed. Intro cut from 45 words to 30. Twelve further strings rewritten across the phase headlines, narration, ready call-to-action, list headings and feature bullets. Added a `briefing-start-here` visual state with a mid-run fixture, since this screen had no backend-free way to see it.
+- **Validation:** Warning-free build; full iOS test target green at 633 passed, 0 failed. No test or Maestro flow asserted any of the copy. Captured the new visual state and read the accessibility tree, which confirms every rewritten string renders and that the waiting phase now shows chips and narration with no headline above them. Checked the file for straight apostrophes, colons and em dashes in user-facing strings; none remain.
+- **Remaining:** The other first-run surfaces were not touched; only this page was in scope.
+- **Commits:** Uncommitted.
+
+### 2026-09-02 — `main` — Remove E2B from feed validation
+
+- **Status:** Complete locally; not committed.
+- **Scope:** Onboarding, weekly discovery, Add Feed, scraper configuration, and agent-tool RSS/Atom validation; E2B sandbox creation wire compatibility.
+- **Decisions:** Validate feed documents as inert bytes through a hardened Rust HTTP boundary instead of provisioning E2B compute. Preserve the actual security invariant with public-address checks, DNS-pinned dispatch, redirect revalidation, bounded response/time limits, and host-side `feed-rs` parsing. Keep E2B for browser, shell, artifact, and model-authored execution. Probe onboarding candidates concurrently, isolate individual candidate failures, retry only when every feed candidate fails operationally, and require parsed audio evidence before accepting a podcast feed.
+- **Changes:** Moved the canonical validator from `newsly-e2b` to `newsly-providers`, removed E2B credentials/template configuration from API and discovery-worker initialization, added reusable public-address resolution for pinned HTTP dispatch, and corrected the E2B create request to serialize the provider's documented `allow_internet_access` field. Audio discovery now makes one concurrent Exa search-only request per lane, requests no page extraction, deduplicates candidates before probing, and treats a wholly failed lane search as retryable instead of publishing a false empty success.
+- **Validation:** `cargo fmt --all -- --check` passed. `newsly-providers` passed 51 tests with 1 live test ignored; `newsly-e2b` passed 24 tests with its live sandbox smoke ignored; `newsly-extraction` passed 8 tests; and the onboarding worker passed its 4 focused tests. Warning-denied Clippy passed across `newsly-providers`, `newsly-extraction`, `newsly-e2b`, `newsly-worker`, and `newsly-api`; `git diff --check` passed. The current iOS checkout built, installed, and launched on an iPhone 17 Pro simulator. The final Rust API and workers were restarted successfully. Two earlier local canaries established that direct host validation completes with real validated feeds, but they preceded the final search-only request shape; a fresh external canary was not sent because it requires explicit approval to transmit a test interest profile to Exa and discovered hosts.
+- **Remaining:** With explicit approval, run one fresh external local canary for the final search-only request shape. Full workspace/release gates were not requested or run.
+- **Commits:** Uncommitted.
+
+### 2026-09-02 — `main` — Drop the ring from the Buddy loading indicator
+
+- **Status:** Complete locally; not committed.
+- **Scope:** `BuddyLoadingIndicator`, which is the waiting state on onboarding's source-matching step and on the briefing.
+- **Decisions:** Remove the faint stroked circle that pulsed behind the Buddy. It read as a stray disc sitting on the surface rather than as part of the mark, and his own breathing already carries the waiting signal. The change lands on both callers because they share the component; keeping the ring on one would split the same waiting state into two treatments.
+- **Changes:** The indicator is now the Buddy alone. The outer frame is kept at 1.18x his size so his motion still has room and nothing below him shifts as he breathes.
+- **Validation:** Warning-free build; full iOS test target green at 633 passed, 0 failed. Captured the DEBUG `onboarding-loading` state: sampling outward from his centre, deviation from the page colour now falls off monotonically past his edge with no bump, so no ring remains — only his own floating shadow, which is intended.
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
+### 2026-09-02 — `main` — Re-render the landing mark instead of cutting a ground out of it
+
+- **Status:** Complete locally; not committed.
+- **Scope:** The transparent BrandMark, and one latent bug shared with the icon script.
+- **Decisions:** Stop deriving the mark by cutting. Cutting a ground out of a finished render cannot survive a change of ground: every soft edge in it is part mark and part cream, and distance-to-cream saturates long before that blend finishes, so those pixels come out fully opaque while still carrying cream — invisible over cream, a pale halo over charcoal. Instead the light render is reduced to two mattes, the brush's ink density and the Buddy's silhouette, which are painted with flat palette colours and composited onto transparency. No pixel carries a ground, so the appearances differ only by the ring's colour and either drops onto any surface cleanly.
+- **Changes:** `build_brand_mark.py` rewritten around that model. Ink density is measured against the stroke's own darkest reading rather than a distance threshold, and gated on hue so the Buddy's cast shadow is not mistaken for ink. His silhouette is hole-filled — the brightest specular on the spectacles is barely warmer than it is bright and punched a hole clean through him — and softened by a blur with no dilated mask gating it, since a square-kernel dilation cuts a smooth ramp into a comb of teeth.
+- **Bug found:** Both scripts grew a colour outward from a known region by averaging four neighbours while taking the frontier from `dilate(known, 1)`. That dilation applies its shifts in place, so it reaches further than the four neighbours being averaged, and a frontier pixel could have no known neighbour at all — averaging to black. It showed as opaque black specks on the mark. Both now derive the frontier from the neighbour count itself.
+- **Validation:** Warning-free build; full iOS test target green at 633 passed, 0 failed. Inspected with nearest-neighbour sampling at 6x, which is what finally made the defects legible — LANCZOS upscaling rings at hard edges and had been dressing them up as something else. Zero opaque near-black pixels remain in the mark, and the halo, the teeth and the speck are all gone. Landing captured in both appearances. Restoring the originals and re-running both scripts reproduced all 15 assets byte-identically.
+- **Remaining:** The dark ring is painted flat; the brush still reads because its texture lives in the coverage rather than the colour.
+- **Commits:** Uncommitted.
+
+### 2026-09-02 — `main` — Stop the landing mark carrying a light fringe in dark mode
+
+- **Status:** Complete locally; not committed.
+- **Scope:** The transparent BrandMark used by the signed-out landing.
+- **Decisions:** Build both appearances from the light render alone. The dark icon is unusable as a cut source: it was made by classifying the light render into ring and not-ring and recolouring each, which sends the paper showing through the dry brush to a warm cream rather than to its own ground. Opaque over charcoal that reads as brush texture, but cut to transparency those pixels measure as *mark* and leave a tan outline tracing every stroke. Coverage therefore comes from the light render, where paper is the ground and measures as zero, and the dark appearance repaints the ring flat in its dark-ground value — flat because coverage already carries the brush, and modulating colour by the light render's brightness would double-count it and invert it, since brighter there means less ink.
+- **Changes:** `build_brand_mark.py` now measures coverage once, shares one content-bounds box across both appearances so they register, and derives the dark variant by repainting the ring. The Buddy is isolated by eroding and regrowing the warm mask, so the paper flecks in the brush are not mistaken for him and left warm.
+- **Validation:** Warning-free build; full iOS test target green at 633 passed, 0 failed. The mark was inspected at roughly 4x on charcoal: the tan outline that traced every stroke is gone, as are the scattered warm flecks around the ring. Landing screenshots captured before and after in dark, plus light for comparison. Restoring the originals and re-running both scripts reproduced all 15 assets byte-identically.
+- **Remaining:** Superseded the same day — see the entry above; the mark is now re-rendered from mattes rather than cut.
+- **Commits:** Uncommitted.
+
+### 2026-09-02 — `main` — Keep the Buddy in the ensō's mouth rather than centred in it
+
+- **Status:** Complete locally; not committed.
+- **Scope:** All three app-icon appearances, the derived AppMark, and the landing's BrandMark.
+- **Decisions:** Keep the Buddy part of the ring rather than a separate element floating inside it. Raising him clear of the ensō's mouth reads as two objects and forces the stroke behind him to be invented, so instead he stays in the mouth at 1.25x and 0.86 of the ring's radius below its centre — off the bottom edge and more present than as drawn, without becoming the subject. Owner chose that size from four rendered options. This settles the brush-end problem by removing it: he covers the blunt cut himself, so no part of the ring is invented, and the whole taper/dry-brush reconstruction is deleted. Stop un-premultiplying the transparent mark too — it existed only to keep that invented fade from carrying a halo, and it was amplifying the dark render's warm brush flecks into gold speckle across the ring.
+- **Changes:** `recentre_icon.py` gained a Buddy scale and lost `taper`, the ring's cut angle, and the dry-brush constants; the placement now samples through a scale about the Buddy's centre and re-softens the rim, since magnifying the original feather leaves a stair-step. The removal's dilation dropped from 6px to 3px, which was eating a seam of ring next to him and leaving a hairline of ground where the stroke should meet him. `build_brand_mark.py` now takes colours as painted and only writes alpha.
+- **Validation:** Warning-free build; full iOS test target green at 633 passed, 0 failed. Close-ups at roughly 3x confirm the ring's cut is fully covered in the new position, with no straight edge anywhere along the mouth. The transparent mark was checked against cream, charcoal and a mid-grey it will never actually meet; the gold speckle that made the dark mark look dirty is gone in all three. Landing screenshots captured in both appearances.
+- **Remaining:** None outstanding on the mark; every pixel of the ring is now the original artwork.
+- **Commits:** Uncommitted.
+
+### 2026-09-02 — `main` — Give the landing a mark with no field of its own
+
+- **Status:** Complete locally; not committed.
+- **Scope:** The signed-out landing hero and a new transparent brand mark.
+- **Decisions:** Add `BrandMark` rather than cutting AppMark's field away. AppMark's three other callers are all showing the app icon *as an icon* — Settings and the launch state clip it into the home-screen rounded rect, and it is the now-playing artwork — so they need the opaque square. Un-premultiply each pixel out of the ground when cutting, so the dry brush and the ensō's fading end composite over any surface instead of carrying a cream halo. Square the mark to its own content so the hero fills its frame.
+- **Changes:** Added `build_brand_mark.py` and the `BrandMark` imageset (light and dark, 220pt at 1x/2x/3x); the landing hero now uses it. Retuned the ensō's rebuilt end: the radial clip that was sawing the brush's soft edges into straight lines is gone, and the lift is now textured with the ensō's own dry-brush tail so it runs out in streaks rather than as an even smudge. Law A15 was extended to say which mark belongs where.
+- **Validation:** Warning-free build. Screenshots of the DEBUG `landing` state in both appearances confirm the pale box is gone and the mark sits directly on the surface, light and dark. Close-ups at roughly 5x confirm the rebuilt end dissolves without the hard edge the earlier alpha floor was cutting into it.
+- **Remaining:** Superseded the same day — see the entry above; the rebuilt end was dropped entirely.
+- **Commits:** Uncommitted.
+
+### 2026-09-02 — `main` — Centre the Buddy in the icon, and let him introduce himself
+
+- **Status:** Complete locally; not committed.
+- **Scope:** The three app-icon appearances and the derived AppMark, the signed-out landing card, and the onboarding guide's arrival.
+- **Decisions:** Place the Buddy at a fixed fraction of each ring's own radius rather than at a shared pixel offset, because the light, dark and tinted icons are independent renders at different scales. Rebuild the brush end he used to hide by continuing the stroke around its own arc and fading it out, matching the ensō's other end, rather than tapering it to a geometric point. Give the guide its own timeline instead of gating docking on the Continue tap, so reading time and animation are independent. Blink by swapping to a generated second frame, since the mark is a raster.
+- **Changes:** Added `docs/brand-exploration-2026-08/recentre_icon.py`, which fits each icon's ring, lifts the Buddy into its aperture, closes the exposed cut, and regenerates AppMark. Added `build_blink_mark.py` and the `BuddyMarkBlink` imageset, derived from the Buddy mark's own pupil and lens colours. The onboarding guide now arrives, blinks twice and docks upper-left on its own, and the now-dead intro continuation sequencing was removed. The landing card dropped its AI-services disclaimer and its Privacy/Terms/Support links; both already exist in Settings.
+- **Validation:** Warning-free `newsly` build. Full iOS test target run twice on an iPhone 17 Pro Simulator running iOS 26.5: 633 passed, 0 failed on the second run; the first run's single `testWarmResumeReturnsForegroundWithoutRelaunch` failure did not reproduce and its sibling test, which shares the same setup and assertion, passed both times. A 30fps screen recording of the DEBUG `onboarding-intro` state confirms the sequence: expand at frame 64, closed eyes at 75-78 and 85-87, dock beginning at frame 100, settled upper-left by 117. Screenshots confirm the docked guide persists onto the choice step and that the landing card now offers only Continue with Apple. Re-running the icon script against the restored originals reproduced all nine assets byte-identically. Ruff check and format are clean on both new scripts.
+- **Remaining:** `recentre_icon.py` is a one-shot: it must only ever be run against the pre-move icons.
+- **Commits:** Uncommitted.
+
+### 2026-09-01 — `main` — Keep visual onboarding from faking a microphone failure
+
+- **Status:** Complete locally.
+- **Scope:** DEBUG-only onboarding visual states and microphone-path verification.
+- **Decisions:** Keep screenshot states backend-free, but make them behaviorally complete enough that navigating past the captured screen cannot throw a synthetic cancellation. Verify the real authenticated path separately from the deterministic preview path.
+- **Changes:** Replaced the visual onboarding service's deliberate `CancellationError` responses with deterministic discovery and completion responses; added a direct audio visual state for focused voice-flow verification.
+- **Validation:** On iPhone 17 Pro Simulator running iOS 26.5, the normal authenticated flow entered recording and stopped with the correct no-speech message when automation supplied no audio. The deterministic audio state then recorded, accepted a scripted transcript, completed discovery, and reached suggestions without exposing a cancellation error. Current-checkout builds passed for both paths, and all 10 focused `OnboardingStateStoreTests` passed with zero failures or skips.
+- **Remaining:** Physical-device microphone acoustics and route handling remain device-level acceptance concerns.
+- **Commits:** Uncommitted.
+
+### 2026-09-01 — `main` — Make the onboarding Buddy wait for Continue
+
+- **Status:** Complete locally.
+- **Scope:** The onboarding welcome-to-choice transition and its deterministic visual evidence.
+- **Decisions:** Keep Buddy large for as long as the welcome screen is visible; label the primary action Continue; after the tap, dock Buddy first and wait 700 milliseconds before advancing. Use a short settled transition for Reduce Motion.
+- **Changes:** Removed the guide's automatic timer, tied docking to explicit continuation, moved the expanded mark above the welcome copy, disabled repeated taps during transition, and kept the docked guide continuous on the choice screen.
+- **Validation:** Built and launched the current checkout with scheme `newsly` on an iPhone 17 Pro Simulator running iOS 26.5. After waiting beyond the former automatic timeout, the accessibility tree still exposed Continue and the screenshot retained the large Buddy. Tapping Continue reached the choice screen with the guide docked upper-right and exposed both expected choice actions.
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
+### 2026-09-01 — `main` — Restore the complete landing mark
+
+- **Status:** Complete locally.
+- **Scope:** The signed-out iOS landing hero.
+- **Decisions:** Use the complete slate ring and warm-clay Buddy composition as the primary landing image; reserve the standalone Buddy mark for onboarding guidance and loading states.
+- **Changes:** Switched the landing hero from `BuddyMark` to the adaptive `AppMark` asset.
+- **Validation:** Built and launched the current checkout on an iPhone 17 Pro Simulator running iOS 26.5. A DEBUG-only deterministic landing state rendered the real `LandingView`; its accessibility tree exposed the expected Apple, Privacy, Terms, and Support controls, and the captured screenshot confirmed the complete mark without the oversized standalone Buddy. `git diff --check` passed.
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
 ### 2026-09-01 — `main` — Reduce production Rust image build latency
 
 - **Status:** Complete locally; not committed or deployed.

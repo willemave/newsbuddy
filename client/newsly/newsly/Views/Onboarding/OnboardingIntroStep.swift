@@ -5,8 +5,8 @@
 
 import SwiftUI
 
-/// The guide has already arrived and docked in the flow-level overlay. This screen introduces
-/// it in the first person while keeping the copy unobstructed during the arrival animation.
+/// The guide arrives, blinks and docks itself in the flow-level overlay while this screen
+/// introduces it in the first person, so the copy is never waiting on the animation.
 struct OnboardingIntroStep: View {
     let viewModel: OnboardingViewModel
 
@@ -49,7 +49,7 @@ struct OnboardingIntroStep: View {
                     viewModel.advanceToChoice()
                 }
             } label: {
-                Text("Nice to meet you")
+                Text("Continue")
                     .font(.appCallout.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)

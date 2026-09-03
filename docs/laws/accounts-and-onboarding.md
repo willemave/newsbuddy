@@ -26,4 +26,8 @@ A12. A credential publication binds one complete access/refresh pair to one user
 
 A13. Completing a discovery run never schedules that discovery again. Later source expansion belongs to the separate durable feed-discovery workflow.
 
-A14. Onboarding guidance never obscures or intercepts actionable controls. The Buddy may expand for the welcome and then dock in the upper-right to guide the flow; loading states use the centered Buddy indicator, and reduced-motion users receive a settled presentation.
+A14. Onboarding guidance never obscures or intercepts actionable controls. The Buddy arrives expanded on the welcome, blinks, and then withdraws to the upper-left corner on its own, where it stays for the rest of the flow; advancing a step never waits on that animation. Loading states use the centered Buddy indicator, and reduced-motion users receive the settled docked presentation without the arrival.
+
+A15. The signed-out landing presents the complete slate ring and Buddy mark as the primary brand image, on transparency so it sits on the surface rather than in a field of its own. The icon's own square field is reserved for places that are showing the app icon as an icon. The standalone Buddy is reserved for in-flow guidance and loading feedback.
+
+A16. The signed-out landing offers sign-in and nothing else. Legal and support destinations, and the disclosure that external AI services process submitted content, live in Settings, which must keep reachable links to the privacy policy, terms and support.

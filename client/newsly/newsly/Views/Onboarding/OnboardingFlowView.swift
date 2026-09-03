@@ -11,6 +11,8 @@ struct OnboardingFlowView: View {
     @State private var viewModel: OnboardingViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let onFinish: (OnboardingCompleteResponse) -> Void
+    /// Captured at construction: a resumed flow skips the guide's arrival.
+    private let startsAtIntro: Bool
 
     init(
         viewModel: OnboardingViewModel,
@@ -18,6 +20,7 @@ struct OnboardingFlowView: View {
     ) {
         _viewModel = State(initialValue: viewModel)
         self.onFinish = onFinish
+        self.startsAtIntro = viewModel.step == .intro
     }
 
     var body: some View {
@@ -44,8 +47,11 @@ struct OnboardingFlowView: View {
             }
 
             if viewModel.step != .loading {
-                OnboardingBuddyGuide(reduceMotion: reduceMotion)
-                    .transition(.opacity)
+                OnboardingBuddyGuide(
+                    reduceMotion: reduceMotion,
+                    introducing: startsAtIntro
+                )
+                .transition(.opacity)
             }
         }
         .onChange(of: viewModel.completionResponse) { _, response in
@@ -103,6 +109,8 @@ struct OnboardingFlowView: View {
     }
 }
 
+/// The guide introduces itself at full size, blinks, then withdraws to the upper-left
+/// corner and stays there as a small companion for the rest of the flow.
 private struct OnboardingBuddyGuide: View {
     private enum Phase {
         case hidden
@@ -111,13 +119,16 @@ private struct OnboardingBuddyGuide: View {
     }
 
     let reduceMotion: Bool
+    /// False when the flow resumes past the welcome, where an arrival would be a non sequitur.
+    let introducing: Bool
 
     @State private var phase = Phase.hidden
     @State private var floating = false
+    @State private var eyesClosed = false
 
     var body: some View {
         GeometryReader { proxy in
-            Image("BuddyMark")
+            Image(eyesClosed ? "BuddyMarkBlink" : "BuddyMark")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: buddySize, height: buddySize)
@@ -134,30 +145,42 @@ private struct OnboardingBuddyGuide: View {
                 .accessibilityLabel("Newsbuddy onboarding guide")
         }
         .allowsHitTesting(false)
-        .task {
-            guard phase == .hidden else { return }
+        .task { await performArrival() }
+    }
 
-            if reduceMotion {
-                phase = .docked
-                return
-            }
+    /// Arrive, blink twice, then dock. Reduced motion gets the settled end state directly.
+    private func performArrival() async {
+        guard phase == .hidden else { return }
 
-            withAnimation(.spring(response: 0.52, dampingFraction: 0.68)) {
-                phase = .expanded
-            }
-            try? await Task.sleep(for: .milliseconds(700))
-            guard !Task.isCancelled else { return }
-
-            withAnimation(.spring(response: 0.68, dampingFraction: 0.82)) {
-                phase = .docked
-            }
-            try? await Task.sleep(for: .milliseconds(520))
-            guard !Task.isCancelled else { return }
-
-            withAnimation(AppMotion.landingFloat) {
-                floating = true
-            }
+        guard introducing, !reduceMotion else {
+            phase = .docked
+            return
         }
+
+        withAnimation(.spring(response: 0.52, dampingFraction: 0.68)) {
+            phase = .expanded
+        }
+        guard await pause(for: .milliseconds(620)) else { return }
+
+        for gap in [Duration.milliseconds(200), .milliseconds(360)] {
+            eyesClosed = true
+            guard await pause(for: .milliseconds(110)) else { return }
+            eyesClosed = false
+            guard await pause(for: gap) else { return }
+        }
+
+        withAnimation(.spring(response: 0.68, dampingFraction: 0.82)) {
+            phase = .docked
+        }
+        guard await pause(for: .milliseconds(520)) else { return }
+
+        withAnimation(AppMotion.landingFloat) { floating = true }
+    }
+
+    /// Sleep, reporting whether the sequence should carry on.
+    private func pause(for duration: Duration) async -> Bool {
+        try? await Task.sleep(for: duration)
+        return !Task.isCancelled
     }
 
     private var buddySize: CGFloat {
@@ -167,14 +190,14 @@ private struct OnboardingBuddyGuide: View {
     private func position(in proxy: GeometryProxy) -> CGPoint {
         if phase == .docked {
             return CGPoint(
-                x: proxy.size.width - Spacing.appHorizontalMargin - 14,
+                x: Spacing.appHorizontalMargin + 14,
                 y: proxy.safeAreaInsets.top + 58
             )
         }
 
         return CGPoint(
             x: proxy.size.width / 2,
-            y: max(210, proxy.size.height * 0.34)
+            y: max(190, proxy.safeAreaInsets.top + 150)
         )
     }
 }

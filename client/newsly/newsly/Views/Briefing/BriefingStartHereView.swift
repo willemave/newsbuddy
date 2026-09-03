@@ -14,13 +14,7 @@ struct BriefingStartHereView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Your sources become one briefing.")
-                        .font(.appTitle)
-                        .foregroundStyle(Color.onSurface)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.bottom, 14)
-
-                    Text("Newsbuddy reads across the sources you chose, connects different coverage of the same story, and writes the useful context into one briefing. Categories appear as patterns emerge, then keep updating as new reporting comes in.")
+                    Text("Newsbuddy reads everything you picked and pulls the coverage of each story into one place. Categories show up as they take shape and keep filling in as more reporting arrives.")
                         .font(.appBody)
                         .foregroundStyle(Color.onSurfaceSecondary)
                         .lineSpacing(5)
@@ -32,12 +26,14 @@ struct BriefingStartHereView: View {
                         .padding(.vertical, 28)
 
                 VStack(alignment: .leading, spacing: 16) {
-                    Text(headlineText)
-                        .font(.appTitle3)
-                        .foregroundStyle(Color.onSurface)
-                        .monospacedDigit()
-                        .fixedSize(horizontal: false, vertical: true)
-                        .contentTransition(.interpolate)
+                    if let headlineText {
+                        Text(headlineText)
+                            .font(.appTitle3)
+                            .foregroundStyle(Color.onSurface)
+                            .monospacedDigit()
+                            .fixedSize(horizontal: false, vertical: true)
+                            .contentTransition(.interpolate)
+                    }
 
                     if !sourceChips.isEmpty {
                         FlowLayout(spacing: 8) {
@@ -102,16 +98,17 @@ struct BriefingStartHereView: View {
         .accessibilityIdentifier("briefing.start_here")
     }
 
-    private var headlineText: String {
+    private var headlineText: String? {
         if progress.connectedSourceCount == 0 {
-            return "We have your interests and are preparing the first edition."
+            return "We have your interests and the first edition is on the way."
         }
         switch progress.phase {
         case .active:
             let noun = progress.connectedSourceCount == 1 ? "source" : "sources"
-            return "We connected \(progress.connectedSourceCount) \(noun)."
+            return "We’ve connected \(progress.connectedSourceCount) \(noun)."
         case .waiting_for_content:
-            return "The first pass is complete."
+            // The narration below says what is happening; a headline here only said it twice.
+            return nil
         case .ready:
             return "Your first edition is ready."
         }
@@ -124,7 +121,7 @@ struct BriefingStartHereView: View {
         }
         switch progress.phase {
         case .waiting_for_content:
-            return "We’re shaping the first stories into categories now…"
+            return "Sorting the first stories into categories now…"
         case .ready:
             // The ready block below the guide carries the call to action.
             return unavailableNote
@@ -141,14 +138,14 @@ struct BriefingStartHereView: View {
             .map(\.displayName)
         guard !unavailable.isEmpty else { return nil }
         let sourceList = ListFormatter.localizedString(byJoining: unavailable)
-        return "We couldn’t read \(sourceList) this time."
+        return "We couldn’t get to \(sourceList) this time."
     }
 
     private var readyText: String {
         if progress.phase == .ready {
-            return "Open any category above to begin. This welcome page will step aside, and your briefing will keep updating as new stories arrive."
+            return "Open any category above to start. This page steps aside once you do, and your briefing keeps updating as stories arrive."
         }
-        return "A category is ready above. You can start reading it while the rest of your sources continue in the background."
+        return "A category is ready above. Start there while the rest of your sources finish."
     }
 
     /// One chip per connected source: completed first (in completion order),
@@ -294,30 +291,30 @@ private struct BriefingStartHereGuide: View {
     private static let expectations = [
         BriefingStartHereFeature(
             title: "Categories appear above.",
-            detail: "Each one becomes a pill beside Welcome as its stories are ready, with a count of what’s new. Open one any time — the rest keeps working."
+            detail: "Each one appears beside Welcome as its stories are ready, with a count of what’s new. Open one whenever you like and the rest keeps working."
         ),
         BriefingStartHereFeature(
             title: "Your briefing stays current.",
-            detail: "New reporting folds into the same categories as it arrives, so there’s always a reason to come back."
+            detail: "New reporting folds into the same categories as it lands, so there’s always something waiting when you come back."
         ),
     ]
 
     private static let features = [
         BriefingStartHereFeature(
             title: "Listen instead.",
-            detail: "Turn any category into narration when you’re away from the screen."
+            detail: "Turn any category into narration when you’d rather listen than read."
         ),
         BriefingStartHereFeature(
             title: "Dig deeper.",
-            detail: "Touch and hold text while reading, then choose Dig Deeper to pull fresh context from the web."
+            detail: "Touch and hold any passage while reading, then choose Dig Deeper to pull fresh context from the web."
         ),
         BriefingStartHereFeature(
             title: "Save to Knowledge.",
-            detail: "Keep the stories and ideas you want to remember; they live in the Knowledge tab."
+            detail: "Keep the stories and ideas worth remembering. They live in the Knowledge tab."
         ),
         BriefingStartHereFeature(
             title: "Search Newsbuddy.",
-            detail: "Find a story or detail across everything Newsbuddy has read for you."
+            detail: "Find any story or detail across everything Newsbuddy has read for you."
         ),
         BriefingStartHereFeature(
             title: "Ask and learn.",
@@ -332,11 +329,11 @@ private struct BriefingStartHereGuide: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             BriefingStartHereFeatureGroup(
-                heading: "While you wait, here’s what to expect:",
+                heading: "While you wait, here’s what happens next.",
                 features: Self.expectations
             )
             BriefingStartHereFeatureGroup(
-                heading: "And once you’re reading, Newsbuddy can also:",
+                heading: "Once you’re reading, there’s more Newsbuddy can do.",
                 features: Self.features
             )
         }

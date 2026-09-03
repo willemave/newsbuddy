@@ -1,0 +1,23 @@
+{
+  "images": [
+    {
+      "filename": "buddymark-blink.png",
+      "idiom": "universal",
+      "scale": "1x"
+    },
+    {
+      "filename": "buddymark-blink@2x.png",
+      "idiom": "universal",
+      "scale": "2x"
+    },
+    {
+      "filename": "buddymark-blink@3x.png",
+      "idiom": "universal",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}
