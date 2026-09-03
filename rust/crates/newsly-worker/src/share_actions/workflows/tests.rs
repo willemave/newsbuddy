@@ -1,6 +1,6 @@
 use newsly_contracts::{ShareActionAgentResult, ShareActionBriefingTarget};
 use newsly_db::ShareActionAgentSnapshot;
-use newsly_e2b::{ValidatedFeed, ValidatedFeedFormat};
+use newsly_providers::{ValidatedFeed, ValidatedFeedFormat};
 use serde_json::{Map, Value};
 
 use super::{ShareActionHostInput, build_host_action, validated_scraper_type};

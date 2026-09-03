@@ -8,12 +8,11 @@ use newsly_agent_runtime::{
     MessageRole, NewslyMessage, NewslyTranscript, RequestPart, ResponseContract, ToolPolicy,
 };
 use newsly_db::{ChatTaskSnapshot, ChatTurnKind};
-use newsly_e2b::{
-    ControlPlaneConfig, DirectE2bProvider, E2bError, FeedValidationError, FeedValidator, FileLimits,
-};
+use newsly_e2b::{ControlPlaneConfig, DirectE2bProvider, E2bError, FileLimits};
 use newsly_providers::{
-    IntegrationTokenCipher, ModelProvider, ModelSpec, OnboardingGateway, OnboardingGatewayError,
-    OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine, RigAgentEngineError,
+    FeedValidationError, FeedValidator, IntegrationTokenCipher, ModelProvider, ModelSpec,
+    OnboardingGateway, OnboardingGatewayError, OpenRouterPrivacyPolicy, ProviderCredentials,
+    RigAgentEngine, RigAgentEngineError,
 };
 use newsly_queue::QueueKernel;
 use reqwest::Url;
@@ -126,8 +125,7 @@ impl ChatAgentRuntime {
         let exa =
             ExaSearchClient::new(secret_env("EXA_API_KEY"), endpoint, Duration::from_secs(60))?;
         let onboarding = OnboardingGateway::from_env()?;
-        let feed_validator =
-            FeedValidator::new(Some(e2b_key), &shared.template_id, shared.sandbox_timeout)?;
+        let feed_validator = FeedValidator::new();
         let credentials = ProviderCredentials {
             openai: secret_env("OPENAI_API_KEY"),
             anthropic: secret_env("ANTHROPIC_API_KEY"),

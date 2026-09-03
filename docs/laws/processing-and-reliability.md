@@ -24,7 +24,7 @@ P11. Queue notifications, client caches, and progress indicators reconcile with 
 
 P12. Public APIs and generated clients change together, while active external contracts keep compatibility until their stated removal condition. Every response field promised by the contract is present on the wire, including explicit `null` for nullable values; request construction defaults do not weaken response guarantees, and server-owned timestamps use typed RFC 3339 UTC values rather than sentinel strings.
 
-P13. New feed discovery and validation run in bounded isolation with candidate-scoped egress and batched probes. Accepted RSS and Atom documents have no byte cap and download through the application client; page analysis and non-YouTube media remain size-limited. Every redirect stays on the public network, and downloaded data cannot execute work on the application host.
+P13. New RSS and Atom candidates are validated through bounded public HTTP with DNS-pinned dispatch, public-network redirect revalidation, concurrent probes, strict time and size limits, and inert Rust parsing. Accepted RSS and Atom documents have no byte cap and download through the application client; page analysis and non-YouTube media remain size-limited. Downloaded data cannot execute work on the application host. Browser, shell, or model-authored execution remains sandbox-only.
 
 P14. Sandbox-backed work writes only inside its task workspace, rejects every other path, and never exposes provider paths in user-facing failures. Every fresh canonical sandbox must lose the provider's default passwordless sudo grant before model or tool access.
 

@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use futures_util::{StreamExt, stream};
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError,
-    BoxToolFuture, NewslyTranscript, ResponseContract, ToolCall, ToolExecutor, ToolPolicy,
+    AgentEngine, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ResponseContract,
+    ToolPolicy,
 };
 use reqwest::Url;
 use rig_core::schemars::{JsonSchema, schema_for};
@@ -16,8 +16,11 @@ use thiserror::Error;
 
 use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
+#[path = "onboarding_agent_support.rs"]
+mod agent_support;
 #[path = "onboarding_model.rs"]
 mod model_config;
+use agent_support::{NoEvents, NoTools};
 use model_config::{AUDIO_PLAN_SYSTEM_PROMPT, ONBOARDING_MODEL, onboarding_provider_parameters};
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
 const EXA_MAX_CONCURRENCY: usize = 8;
@@ -143,6 +146,19 @@ struct WebResult {
     query: String,
 }
 
+#[derive(Debug, Default)]
+struct SearchManyOutcome {
+    results: Vec<WebResult>,
+    attempted: usize,
+    succeeded: usize,
+}
+
+impl SearchManyOutcome {
+    const fn all_attempts_failed(&self) -> bool {
+        self.attempted > 0 && self.succeeded == 0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct OnboardingGateway {
     client: reqwest::Client,
@@ -196,7 +212,10 @@ impl OnboardingGateway {
         interest_topics: &[String],
     ) -> Result<OnboardingProfile, OnboardingGatewayError> {
         let queries = profile_queries(interest_topics, first_name);
-        let results = self.search_many(queries, 3, false, PROFILE_TIMEOUT).await;
+        let results = self
+            .search_many(queries, 3, false, PROFILE_TIMEOUT)
+            .await
+            .results;
         if results.is_empty() {
             return Ok(OnboardingProfile {
                 profile_summary: profile_fallback_summary(first_name, interest_topics),
@@ -336,9 +355,13 @@ impl OnboardingGateway {
         inferred_topics: &[String],
     ) -> Result<OnboardingDiscoverySeeds, OnboardingGatewayError> {
         let queries = discovery_queries(profile_summary, inferred_topics, 6);
-        let mut results = self
+        let outcome = self
             .search_many(queries, 12, false, FAST_DISCOVER_TIMEOUT)
             .await;
+        if outcome.all_attempts_failed() {
+            return Err(OnboardingGatewayError::SearchUnavailable);
+        }
+        let mut results = outcome.results;
         dedupe_web_results(&mut results);
         results.truncate(DISCOVERY_PROMPT_MAX_RESULTS);
         self.discovery_from_results(
@@ -350,10 +373,9 @@ impl OnboardingGateway {
         .await
     }
 
-    /// Executes the persisted audio-discovery lane queries and balances prompt evidence across
-    /// lanes before the structured model call. Search failures remain candidate-local, matching
-    /// the existing fast-discovery behavior; a completely empty result set is a valid empty
-    /// discovery rather than a model request with ungrounded fallback suggestions.
+    /// Executes one search-only request per persisted audio-discovery lane concurrently, then
+    /// balances prompt evidence across lanes before the structured model call. A lane whose search
+    /// request fails is retried by the durable task instead of being published as an empty success.
     ///
     /// # Errors
     ///
@@ -364,19 +386,32 @@ impl OnboardingGateway {
         inferred_topics: &[String],
         lanes: &[OnboardingAudioLane],
     ) -> Result<OnboardingDiscoverySeeds, OnboardingGatewayError> {
-        let mut groups = Vec::with_capacity(lanes.len());
-        for lane in lanes {
-            let mut results = self
-                .search_many(
-                    lane.queries.clone(),
-                    12,
-                    lane.target == OnboardingLaneTarget::Reddit,
-                    FAST_DISCOVER_TIMEOUT,
-                )
-                .await;
-            dedupe_web_results(&mut results);
-            groups.push(results);
-        }
+        let gateway = self.clone();
+        let groups = stream::iter(lanes.to_vec())
+            .map(move |lane| {
+                let gateway = gateway.clone();
+                async move {
+                    let query = lane_search_query(&lane);
+                    let outcome = gateway
+                        .search_many(
+                            vec![query],
+                            20,
+                            lane.target == OnboardingLaneTarget::Reddit,
+                            FAST_DISCOVER_TIMEOUT,
+                        )
+                        .await;
+                    if outcome.all_attempts_failed() {
+                        return Err(OnboardingGatewayError::SearchUnavailable);
+                    }
+                    let mut results = outcome.results;
+                    dedupe_web_results(&mut results);
+                    Ok(results)
+                }
+            })
+            .buffered(lanes.len().max(1))
+            .collect::<Vec<Result<Vec<_>, OnboardingGatewayError>>>()
+            .await;
+        let groups = groups.into_iter().collect::<Result<Vec<_>, _>>()?;
         let results = balanced_web_results(groups, DISCOVERY_PROMPT_MAX_RESULTS);
         self.discovery_from_results(
             "onboarding.audio_discover",
@@ -489,10 +524,10 @@ impl OnboardingGateway {
         num_results: usize,
         include_social: bool,
         timeout: Duration,
-    ) -> Vec<WebResult> {
+    ) -> SearchManyOutcome {
         let Some(api_key) = self.exa_api_key.clone() else {
             tracing::warn!("Exa is not configured; onboarding search returned no results");
-            return Vec::new();
+            return SearchManyOutcome::default();
         };
         let client = self.client.clone();
         let endpoint = self.exa_search_url.clone();
@@ -518,25 +553,30 @@ impl OnboardingGateway {
         .collect::<Vec<_>>()
         .await;
         grouped.sort_by_key(|(index, _, _)| *index);
-        grouped
-            .into_iter()
-            .flat_map(|(_, query, result)| match result {
-                Ok(results) => results
-                    .into_iter()
-                    .map(|result| WebResult {
-                        title: clean(result.title).unwrap_or_else(|| "Untitled".to_owned()),
-                        url: result.url,
-                        snippet: clean(result.summary).or_else(|| clean(result.text)),
-                        published_date: clean(result.published_date),
-                        query: query.clone(),
-                    })
-                    .collect::<Vec<_>>(),
+        let mut outcome = SearchManyOutcome {
+            attempted: grouped.len(),
+            ..SearchManyOutcome::default()
+        };
+        for (_, query, result) in grouped {
+            match result {
+                Ok(results) => {
+                    outcome.succeeded += 1;
+                    outcome
+                        .results
+                        .extend(results.into_iter().map(|result| WebResult {
+                            title: clean(result.title).unwrap_or_else(|| "Untitled".to_owned()),
+                            url: result.url,
+                            snippet: clean(result.summary).or_else(|| clean(result.text)),
+                            published_date: clean(result.published_date),
+                            query: query.clone(),
+                        }));
+                }
                 Err(error) => {
                     tracing::error!(error = %error, query, "Exa onboarding search failed");
-                    Vec::new()
                 }
-            })
-            .collect()
+            }
+        }
+        outcome
     }
 }
 
@@ -547,25 +587,6 @@ struct ExaSearchRequest<'a> {
     num_results: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     exclude_domains: Option<Vec<&'static str>>,
-    contents: ExaContentsRequest<'a>,
-}
-
-#[derive(Debug, Serialize)]
-struct ExaContentsRequest<'a> {
-    livecrawl: &'a str,
-    summary: ExaSummaryRequest<'a>,
-    text: ExaTextRequest,
-}
-
-#[derive(Debug, Serialize)]
-struct ExaSummaryRequest<'a> {
-    query: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaTextRequest {
-    max_characters: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -597,15 +618,6 @@ async fn search_exa(
         query,
         num_results,
         exclude_domains: (!include_social).then(|| EXCLUDED_DOMAINS.to_vec()),
-        contents: ExaContentsRequest {
-            livecrawl: "fallback",
-            summary: ExaSummaryRequest {
-                query: "Key points and main takeaways",
-            },
-            text: ExaTextRequest {
-                max_characters: 1_200,
-            },
-        },
     };
     let response = client
         .post(endpoint)
@@ -663,6 +675,15 @@ fn discovery_queries(summary: &str, topics: &[String], max_queries: usize) -> Ve
     }
     queries.truncate(max_queries);
     queries
+}
+
+fn lane_search_query(lane: &OnboardingAudioLane) -> String {
+    let query = format!(
+        "{} Source requirements: {}",
+        lane.goal.trim(),
+        lane.queries.join("; ")
+    );
+    query.chars().take(1_000).collect()
 }
 
 fn profile_fallback_summary(first_name: &str, topics: &[String]) -> String {
@@ -1075,35 +1096,14 @@ fn env_u64(name: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-#[derive(Debug)]
-struct NoEvents;
-
-impl AgentEventSink for NoEvents {
-    fn publish(&self, _event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolExecutor for NoTools {
-    fn execute(&self, call: ToolCall, _events: Arc<dyn AgentEventSink>) -> BoxToolFuture<'_> {
-        Box::pin(async move {
-            Err(AgentRuntimeError::Tool(format!(
-                "onboarding does not expose tool {}",
-                call.name
-            )))
-        })
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum OnboardingGatewayError {
     #[error("onboarding HTTP client failed")]
     Http(#[from] reqwest::Error),
     #[error("onboarding provider URL is invalid: {0}")]
     Url(String),
+    #[error("onboarding search provider was unavailable for an entire discovery lane")]
+    SearchUnavailable,
     #[error("onboarding agent configuration failed")]
     AgentConfiguration(#[from] crate::RigAgentEngineError),
     #[error("onboarding agent request failed")]

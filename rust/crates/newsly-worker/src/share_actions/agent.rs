@@ -11,12 +11,12 @@ use newsly_agent_runtime::{
 use newsly_contracts::{ShareActionAgentResult, ShareActionBriefingTarget};
 use newsly_db::ShareActionAgentSnapshot;
 use newsly_e2b::{
-    CommandRequest, ControlPlaneConfig, DirectE2bProvider, E2bError, ExecutionTag,
-    FeedValidationError, FeedValidator, FileLimits, NetworkPolicy, OutputLimits, SandboxHandle,
-    SandboxProvider, SandboxUser, ValidatedFeed,
+    CommandRequest, ControlPlaneConfig, DirectE2bProvider, E2bError, ExecutionTag, FileLimits,
+    NetworkPolicy, OutputLimits, SandboxHandle, SandboxProvider, SandboxUser,
 };
 use newsly_providers::{
-    OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine, RigAgentEngineError,
+    FeedValidationError, FeedValidator, OpenRouterPrivacyPolicy, ProviderCredentials,
+    RigAgentEngine, RigAgentEngineError, ValidatedFeed,
 };
 use reqwest::Url;
 use schemars::schema_for;
@@ -251,8 +251,7 @@ impl ShareActionAgentRuntime {
             .map_err(|_| ShareActionAgentBuildError::InvalidExaUrl)?;
         let exa =
             ExaSearchClient::new(secret_env("EXA_API_KEY"), endpoint, Duration::from_secs(60))?;
-        let feed_validator =
-            FeedValidator::new(Some(e2b_key), &config.template_id, config.sandbox_timeout)?;
+        let feed_validator = FeedValidator::new();
         let body_store = ContentBodyStore::from_env()?;
         let lifecycle = TaskSandboxOwner::new(
             pool.clone(),

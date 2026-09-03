@@ -1,6 +1,6 @@
 use newsly_contracts::{ShareActionAgentResult, ShareActionBriefingTarget, ShareActionCandidate};
 use newsly_db::ShareActionAgentSnapshot;
-use newsly_e2b::ValidatedFeed;
+use newsly_providers::ValidatedFeed;
 use newsly_queue::compatibility_canonical_json;
 use reqwest::Url;
 use serde::Deserialize;

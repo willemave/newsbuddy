@@ -12,7 +12,6 @@ pub mod control_plane;
 pub mod envd_process;
 pub mod error;
 pub mod feed;
-mod feed_validation;
 pub mod files;
 pub mod network;
 pub mod session;
@@ -39,7 +38,6 @@ pub use envd_process::{
 };
 pub use error::{DeliveryState, E2bError, ErrorDisposition};
 pub use feed::{FeedFetchRequest, FeedFetchResult, MAX_FEED_RESPONSE_BYTES, VmFeedProvider};
-pub use feed_validation::{FeedValidationError, FeedValidator, ValidatedFeed, ValidatedFeedFormat};
 pub use files::{BoxByteStream, EnvdFileClient, FileLimits};
 pub use network::{NetworkPolicy, NetworkRule, NetworkTransform};
 pub use session::{DirectE2bProvider, RecoveredCommand, ResultManifestLocation, SandboxProvider};

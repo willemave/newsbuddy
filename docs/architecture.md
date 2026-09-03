@@ -389,8 +389,12 @@ deduplication, synced-item ledger/checkpoints, canonical ingestion, Knowledge
 routing, and reauthentication state. Other scheduled sources follow the same
 durable checkpoint and bounded-provider model.
 
-Feed research changes E2B network policy only for the candidate-scoped work and
-always restores deny-by-default on success, failure, timeout, or cancellation.
+Feed discovery validates RSS and Atom candidates without a VM: public DNS is
+resolved and pinned for dispatch, every redirect is revalidated, candidate
+requests run concurrently under strict time and body bounds, and `feed-rs`
+parses inert bytes. E2B remains the boundary for browser, shell, and
+model-authored execution, where network policy is restored to deny-by-default
+on success, failure, timeout, or cancellation.
 
 ## 9. Agents, providers, and direct E2B
 

@@ -12,6 +12,7 @@ mod briefing_dig;
 mod content_analysis;
 mod content_misc;
 mod discussion_fetch;
+mod feed_validation;
 mod image_generation;
 mod media;
 mod model;
@@ -52,6 +53,7 @@ pub use content_misc::{
     FeedEntryHit, GeneratedDiscussionSummary, GeneratedTweetSuggestion, GeneratedTweetSuggestions,
     PodcastEpisodeHit,
 };
+pub use feed_validation::{FeedValidationError, FeedValidator, ValidatedFeed, ValidatedFeedFormat};
 pub use image_generation::{
     GeneratedImage, GoogleImageAuth, ImageGenerationError, ImageGenerationGateway,
     ImageGenerationGatewayConfig, ImageGenerationUsage, InfographicProvider,

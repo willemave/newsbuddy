@@ -21,7 +21,6 @@ const DEFAULT_APPLE_SIGNIN_AUDIENCE: &str = "org.willemaw.newsly";
 const DEFAULT_APPLE_TOKEN_URL: &str = "https://appleid.apple.com/auth/token";
 const DEFAULT_APPLE_REVOKE_URL: &str = "https://appleid.apple.com/auth/revoke";
 const DEFAULT_APPLE_CLIENT_ID: &str = "org.willemaw.newsly";
-const DEFAULT_TASK_SANDBOX_TEMPLATE_ID: &str = "newsly-agent";
 const DEFAULT_X_OAUTH_AUTHORIZE_URL: &str = "https://x.com/i/oauth2/authorize";
 const DEFAULT_X_OAUTH_TOKEN_URL: &str = "https://api.x.com/2/oauth2/token";
 const DEFAULT_X_API_BASE_URL: &str = "https://api.x.com/2";
@@ -58,9 +57,6 @@ pub struct ServerConfig {
     pub checkout_timeout: Duration,
     pub database: DatabaseConfig,
     pub auth: AuthConfig,
-    pub e2b_api_key: Option<SecretString>,
-    pub task_sandbox_template_id: String,
-    pub feed_validation_sandbox_timeout: Duration,
     pub openai_api_key: Option<SecretString>,
     pub openai_api_base: Option<String>,
     pub openai_transcription_timeout: Duration,
@@ -89,15 +85,6 @@ impl Debug for ServerConfig {
             .field("checkout_timeout", &self.checkout_timeout)
             .field("database", &self.database)
             .field("auth", &self.auth)
-            .field(
-                "e2b_api_key",
-                &self.e2b_api_key.as_ref().map(|_| "[REDACTED]"),
-            )
-            .field("task_sandbox_template_id", &self.task_sandbox_template_id)
-            .field(
-                "feed_validation_sandbox_timeout",
-                &self.feed_validation_sandbox_timeout,
-            )
             .field("openai_api_key_configured", &self.openai_api_key.is_some())
             .field("openai_api_base", &self.openai_api_base)
             .field(
@@ -212,20 +199,6 @@ impl ServerConfig {
             apple_key_id,
             apple_private_key,
         })?;
-        let e2b_api_key = optional_secret_alias(&["LLM_TASK_SANDBOX_E2B_API_KEY", "E2B_API_KEY"]);
-        let task_sandbox_template_id = value_or_default(
-            "NEWSLY_TASK_SANDBOX_TEMPLATE_ID",
-            DEFAULT_TASK_SANDBOX_TEMPLATE_ID,
-        );
-        if task_sandbox_template_id.trim().is_empty() || task_sandbox_template_id.len() > 256 {
-            return Err(ConfigError::InvalidValue {
-                name: "NEWSLY_TASK_SANDBOX_TEMPLATE_ID",
-                value: task_sandbox_template_id,
-                expected: "a non-empty template id of at most 256 bytes",
-            });
-        }
-        let feed_validation_sandbox_timeout =
-            Duration::from_secs(parse_u64("LLM_TASK_SANDBOX_TIMEOUT_SECONDS", 300)?);
         let openai_api_key = optional_string("OPENAI_API_KEY").map(SecretString::from);
         let openai_api_base = optional_string("OPENAI_BASE_URL");
         let openai_transcription_timeout =
@@ -274,12 +247,6 @@ impl ServerConfig {
                 requirement: "must be greater than zero",
             });
         }
-        if feed_validation_sandbox_timeout.is_zero() {
-            return Err(ConfigError::OutOfRange {
-                name: "LLM_TASK_SANDBOX_TIMEOUT_SECONDS",
-                requirement: "must be greater than zero",
-            });
-        }
         if openai_transcription_timeout.is_zero() {
             return Err(ConfigError::OutOfRange {
                 name: "OPENAI_TRANSCRIPTION_TIMEOUT_SECONDS",
@@ -298,9 +265,6 @@ impl ServerConfig {
             checkout_timeout,
             database,
             auth,
-            e2b_api_key,
-            task_sandbox_template_id,
-            feed_validation_sandbox_timeout,
             openai_api_key,
             openai_api_base,
             openai_transcription_timeout,
@@ -326,12 +290,6 @@ fn optional_string(name: &'static str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
-}
-
-fn optional_secret_alias(names: &[&'static str]) -> Option<SecretString> {
-    names
-        .iter()
-        .find_map(|name| optional_string(name).map(SecretString::from))
 }
 
 fn parse_https_url(name: &'static str, default: &'static str) -> Result<Url, ConfigError> {

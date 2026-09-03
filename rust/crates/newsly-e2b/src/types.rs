@@ -268,6 +268,7 @@ pub struct SandboxRequest {
     #[serde(skip_serializing_if = "is_false")]
     pub auto_pause_memory: bool,
     pub secure: bool,
+    #[serde(rename = "allow_internet_access")]
     pub allow_internet_access: bool,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
@@ -515,6 +516,8 @@ mod tests {
 
         let value = serde_json::to_value(request).expect("sandbox request serializes");
         assert_eq!(value["autoPause"], false);
+        assert_eq!(value["allow_internet_access"], false);
+        assert!(value.get("allowInternetAccess").is_none());
         assert!(value.get("autoPauseMemory").is_none());
     }
 

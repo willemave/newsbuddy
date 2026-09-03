@@ -22,7 +22,6 @@ jsonwebtoken.workspace = true
 newsly-contracts = { path = "../newsly-contracts" }
 newsly-db = { path = "../newsly-db" }
 newsly-domain = { path = "../newsly-domain" }
-newsly-e2b = { path = "../newsly-e2b" }
 newsly-providers = { path = "../newsly-providers" }
 newsly-queue = { path = "../newsly-queue" }
 newsly-worker = { path = "../newsly-worker" }

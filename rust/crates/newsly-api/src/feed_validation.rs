@@ -1,1 +1,1 @@
-pub(crate) use newsly_e2b::{FeedValidationError, FeedValidator};
+pub(crate) use newsly_providers::{FeedValidationError, FeedValidator};

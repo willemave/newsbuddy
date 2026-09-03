@@ -7,10 +7,9 @@ use newsly_db::{
     ensure_weekly_discovery_session, prepare_onboarding_discovery_task,
     settle_onboarding_discovery_attempt,
 };
-use newsly_e2b::{FeedValidationError, FeedValidator};
 use newsly_providers::{
-    OnboardingAudioLane, OnboardingDiscoverySeeds, OnboardingGateway, OnboardingLaneTarget,
-    OnboardingSuggestionSeed,
+    FeedValidationError, FeedValidator, OnboardingAudioLane, OnboardingDiscoverySeeds,
+    OnboardingGateway, OnboardingLaneTarget, OnboardingSuggestionSeed,
 };
 use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
@@ -245,7 +244,7 @@ pub(crate) async fn normalize_seeds(
     inferred_topics: &[String],
 ) -> Result<Vec<NewOnboardingSuggestion>, FeedValidationError> {
     let mut output = Vec::new();
-    normalize_feed_seeds(
+    let mut validation_failures = normalize_feed_seeds(
         validator,
         seeds.substacks,
         "substack",
@@ -253,22 +252,30 @@ pub(crate) async fn normalize_seeds(
         inferred_topics,
         &mut output,
     )
-    .await?;
-    normalize_feed_seeds(
-        validator,
-        seeds.podcasts,
-        "podcast_rss",
-        profile_summary,
-        inferred_topics,
-        &mut output,
-    )
-    .await?;
+    .await;
+    validation_failures.extend(
+        normalize_feed_seeds(
+            validator,
+            seeds.podcasts,
+            "podcast_rss",
+            profile_summary,
+            inferred_topics,
+            &mut output,
+        )
+        .await,
+    );
+    let validated_feed_count = output.len();
     normalize_subreddits(
         seeds.subreddits,
         profile_summary,
         inferred_topics,
         &mut output,
     );
+    if validated_feed_count == 0
+        && let Some(error) = validation_failures.into_iter().next()
+    {
+        return Err(error);
+    }
     Ok(output)
 }
 
@@ -279,8 +286,10 @@ async fn normalize_feed_seeds(
     profile_summary: &str,
     inferred_topics: &[String],
     output: &mut Vec<NewOnboardingSuggestion>,
-) -> Result<(), FeedValidationError> {
+) -> Vec<FeedValidationError> {
     let mut seen = HashSet::new();
+    let mut requested = HashSet::new();
+    let mut candidates = Vec::new();
     for seed in seeds {
         let site_url = clean_optional(seed.site_url, 2_048);
         let mut candidate = clean_optional(seed.feed_url, 2_048)
@@ -296,15 +305,48 @@ async fn normalize_feed_seeds(
         let Some(candidate) = candidate else {
             continue;
         };
-        let Some(feed_url) = validator.validate_feed_url(&candidate).await? else {
+        if requested.insert(candidate.clone()) {
+            candidates.push((seed.title, seed.rationale, seed.score, site_url, candidate));
+        }
+    }
+    let urls = candidates
+        .iter()
+        .map(|(_, _, _, _, candidate)| candidate.clone())
+        .collect::<Vec<_>>();
+    let validations = validator.validate_feeds(&urls).await;
+    let mut failures = Vec::new();
+    for ((title, rationale, score, site_url, candidate), validation) in
+        candidates.into_iter().zip(validations)
+    {
+        let Some(feed_url) = (match validation {
+            Ok(Some(validated))
+                if suggestion_type == "podcast_rss" && !validated.has_audio_entries =>
+            {
+                tracing::debug!(
+                    url = %candidate,
+                    "onboarding podcast candidate had no audio entries"
+                );
+                None
+            }
+            Ok(validated) => validated.map(|feed| feed.effective_url),
+            Err(error) => {
+                tracing::warn!(
+                    url = %candidate,
+                    error = %error,
+                    "onboarding feed candidate validation failed"
+                );
+                failures.push(error);
+                None
+            }
+        }) else {
             continue;
         };
         let feed_url = newsly_db::canonicalize_feed_url(&feed_url);
         if !seen.insert(feed_url.clone()) {
             continue;
         }
-        let title = clean_optional(seed.title, 500);
-        let rationale = clean_optional(seed.rationale, 2_000).or_else(|| {
+        let title = clean_optional(title, 500);
+        let rationale = clean_optional(rationale, 2_000).or_else(|| {
             Some(default_rationale(
                 suggestion_type,
                 title.as_deref().unwrap_or(&feed_url),
@@ -319,13 +361,13 @@ async fn normalize_feed_seeds(
             feed_url: Some(feed_url),
             subreddit: None,
             rationale,
-            score: normalized_score(seed.score),
+            score: normalized_score(score),
         });
         if seen.len() >= MAX_SUGGESTIONS_PER_KIND {
             break;
         }
     }
-    Ok(())
+    failures
 }
 
 fn normalize_subreddits(

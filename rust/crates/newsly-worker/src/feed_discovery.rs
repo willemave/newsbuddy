@@ -7,8 +7,7 @@ use newsly_db::{
     complete_feed_discovery_task, ensure_weekly_discovery_session, prepare_feed_discovery_task,
     settle_feed_discovery_attempt,
 };
-use newsly_e2b::FeedValidator;
-use newsly_providers::OnboardingGateway;
+use newsly_providers::{FeedValidator, OnboardingGateway};
 use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};

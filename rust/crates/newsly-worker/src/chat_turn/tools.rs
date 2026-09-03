@@ -15,10 +15,10 @@ use newsly_db::{
     search_chat_subscription_content,
 };
 use newsly_e2b::{
-    CommandEvent, CommandRequest, DirectE2bProvider, ExecutionTag, FeedValidator, NetworkPolicy,
-    OutputLimits, SandboxProvider, SandboxUser,
+    CommandEvent, CommandRequest, DirectE2bProvider, ExecutionTag, NetworkPolicy, OutputLimits,
+    SandboxProvider, SandboxUser,
 };
-use newsly_providers::OnboardingGateway;
+use newsly_providers::{FeedValidator, OnboardingGateway};
 use newsly_queue::QueueKernel;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;

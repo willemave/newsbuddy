@@ -17,7 +17,6 @@ base64.workspace = true
 buffa = { version = "=0.9.1", features = ["json"] }
 bytes = { version = "=1.11.1", features = ["serde"] }
 connectrpc = { version = "=0.9.0", features = ["client-tls"] }
-feed-rs.workspace = true
 futures-core = "=0.3.34"
 futures-util.workspace = true
 http = "=1.4.0"

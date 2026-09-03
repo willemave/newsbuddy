@@ -1,5 +1,5 @@
 use std::fmt::{self, Display, Formatter};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -83,6 +83,19 @@ impl PublicUrl {
     /// Returns an error when DNS resolution fails, returns no addresses, or includes a local,
     /// private, documentation, multicast, or otherwise non-public address.
     pub async fn validate_dns(&self) -> Result<(), ExtractionClientError> {
+        self.resolve_public_addresses().await.map(|_| ())
+    }
+
+    /// Resolve the URL to the exact public socket addresses an HTTP client may use.
+    ///
+    /// Returning the validated addresses lets callers pin request dispatch to this resolution,
+    /// closing the gap where a second resolver lookup could be DNS-rebound to a private address.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when DNS resolution fails, yields no addresses, or yields any address
+    /// outside the public network.
+    pub async fn resolve_public_addresses(&self) -> Result<Vec<SocketAddr>, ExtractionClientError> {
         let host = self
             .0
             .host_str()
@@ -90,9 +103,6 @@ impl PublicUrl {
                 reason: "URL hostname is required",
                 source: None,
             })?;
-        if host.parse::<IpAddr>().is_ok() {
-            return Ok(());
-        }
         let port =
             self.0
                 .port_or_known_default()
@@ -100,27 +110,30 @@ impl PublicUrl {
                     reason: "URL port could not be inferred",
                     source: None,
                 })?;
-        let addresses = tokio::net::lookup_host((host, port))
-            .await
-            .map_err(|source| ExtractionClientError::DnsResolution {
-                host: host.to_owned(),
-                source,
-            })?
-            .map(|socket| socket.ip())
-            .collect::<Vec<_>>();
+        let addresses = if let Ok(address) = host.parse::<IpAddr>() {
+            vec![SocketAddr::new(address, port)]
+        } else {
+            tokio::net::lookup_host((host, port))
+                .await
+                .map_err(|source| ExtractionClientError::DnsResolution {
+                    host: host.to_owned(),
+                    source,
+                })?
+                .collect::<Vec<_>>()
+        };
         if addresses.is_empty() {
             return Err(ExtractionClientError::NoDnsAddresses(host.to_owned()));
         }
-        for address in addresses {
-            let public = match address {
+        for socket in &addresses {
+            let public = match socket.ip() {
                 IpAddr::V4(ipv4) => is_public_ipv4(ipv4),
                 IpAddr::V6(ipv6) => is_public_ipv6(ipv6),
             };
             if !public {
-                return Err(ExtractionClientError::NonPublicAddress(address));
+                return Err(ExtractionClientError::NonPublicAddress(socket.ip()));
             }
         }
-        Ok(())
+        Ok(addresses)
     }
 }
 
