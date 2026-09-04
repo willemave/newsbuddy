@@ -206,7 +206,7 @@ async fn check_readiness(state: &AppState) -> (StatusCode, Json<HealthResponse>)
         crate::content_feeds::search_contents,
         crate::content_misc::convert_content_news_to_article,
         crate::content_misc::convert_news_item_to_article,
-        crate::content_misc::download_more_from_series,
+        crate::content_misc::download_more::download_more_from_series,
         crate::content_misc::get_narration,
         crate::content_misc::get_tweet_suggestions,
         crate::content_misc::list_submission_statuses,

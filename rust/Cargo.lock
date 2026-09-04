@@ -2569,6 +2569,7 @@ dependencies = [
  "jsonschema",
  "newsly-agent-runtime",
  "newsly-extraction",
+ "quick-xml",
  "reqwest",
  "rig-core",
  "schemars",

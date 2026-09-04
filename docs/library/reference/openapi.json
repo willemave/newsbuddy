@@ -6918,6 +6918,16 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Feed provider failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [

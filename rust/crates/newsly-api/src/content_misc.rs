@@ -14,23 +14,20 @@ use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use newsly_contracts::{
     ContentDiscussionResponse, ContentStatus, ContentType, ConvertNewsItemResponse,
-    ConvertNewsResponse, DiscussionCommentResponse, DiscussionMode, DownloadMoreRequest,
-    DownloadMoreResponse, MixedSearchFeedResultResponse, MixedSearchResponse, NarrationResponse,
-    NarrationTargetType, PaginationMetadata, PodcastEpisodeSearchResponse,
-    PodcastEpisodeSearchResultResponse, SubmissionContentResult,
+    ConvertNewsResponse, DiscussionCommentResponse, DiscussionMode, MixedSearchFeedResultResponse,
+    MixedSearchResponse, NarrationResponse, NarrationTargetType, PaginationMetadata,
+    PodcastEpisodeSearchResponse, PodcastEpisodeSearchResultResponse, SubmissionContentResult,
     SubmissionFeedSubscriptionResponse, SubmissionFeedSubscriptionResult, SubmissionKind,
     SubmissionLearningDeckResult, SubmissionNoActionResult, SubmissionOutcome, SubmissionResult,
     SubmissionStatusListResponse, SubmissionStatusResponse, TweetSuggestion,
     TweetSuggestionsRequest, TweetSuggestionsResponse,
 };
 use newsly_db::{
-    ContentMiscRepositoryError, DiscussionRefreshPlan, DiscussionTargetKind, FeedBackfillEntry,
-    FeedBackfillPreparation, SubmissionProjection, finalize_article_conversion,
-    list_active_feed_urls, list_submission_projections, persist_content_discussion,
-    persist_feed_backfill, persist_news_discussion, prepare_content_conversion,
-    prepare_content_discussion_refresh, prepare_content_narration, prepare_feed_backfill,
-    prepare_news_conversion, prepare_news_discussion_refresh, prepare_tweet_content,
-    search_visible_content,
+    ContentMiscRepositoryError, DiscussionRefreshPlan, DiscussionTargetKind, SubmissionProjection,
+    finalize_article_conversion, list_active_feed_urls, list_submission_projections,
+    persist_content_discussion, persist_news_discussion, prepare_content_conversion,
+    prepare_content_discussion_refresh, prepare_content_narration, prepare_news_conversion,
+    prepare_news_discussion_refresh, prepare_tweet_content, search_visible_content,
 };
 use newsly_providers::{
     ContentMiscGatewayError, DiscussionRefreshResult, FeedDiscoveryHit, PodcastEpisodeHit,
@@ -48,9 +45,12 @@ use crate::write_support::{
 };
 use crate::{AppState, request_id_from_headers};
 
+pub(crate) mod download_more;
+
+pub(crate) use download_more::download_more_from_series;
+
 const CONVERT_CONTENT_OPERATION_ID: &str = "convertContentNewsToArticle";
 const CONVERT_NEWS_OPERATION_ID: &str = "convertNewsItemToArticle";
-const DOWNLOAD_MORE_OPERATION_ID: &str = "downloadContentMoreFromSeries";
 const TWEET_OPERATION_ID: &str = "getContentTweetSuggestions";
 const REFRESH_CONTENT_DISCUSSION_OPERATION_ID: &str = "refreshContentDiscussion";
 const REFRESH_NEWS_DISCUSSION_OPERATION_ID: &str = "refreshNewsItemDiscussion";
@@ -251,140 +251,6 @@ async fn finalize_conversion(
         .await
         .map_err(|error| internal_error(error, request_id))?;
     Ok(converted)
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/content/{content_id}/download-more",
-    operation_id = "downloadContentMoreFromSeries",
-    tag = "content",
-    params(("content_id" = i64, Path, minimum = 1)),
-    request_body = DownloadMoreRequest,
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Backfill completed", body = DownloadMoreResponse),
-        (status = 400, description = "Feed could not be resolved", body = newsly_contracts::ErrorEnvelope),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 403, description = "Content not accessible", body = newsly_contracts::ErrorEnvelope),
-        (status = 404, description = "Content not found", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "the route keeps ownership fencing and its one feed-backfill transaction linear"
-)]
-pub(super) async fn download_more_from_series(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    path: Result<Path<i64>, PathRejection>,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    payload: Result<Json<DownloadMoreRequest>, JsonRejection>,
-) -> Result<Json<DownloadMoreResponse>, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    require_operation(&stamp, DOWNLOAD_MORE_OPERATION_ID, &request_id)?;
-    let content_id = positive_path_id(path, "content_id", &request_id)?;
-    let Json(payload) = decode_json(payload, &request_id)?;
-    if !(1..=50).contains(&payload.count) {
-        return Err(validation_error(
-            "count must be between 1 and 50",
-            &request_id,
-        ));
-    }
-    verify_operation_now(&state, &stamp, &request_id).await?;
-    let plan = match prepare_feed_backfill(
-        state.database.pool(),
-        current_user.id,
-        content_id,
-        payload.count,
-    )
-    .await
-    .map_err(|error| internal_error(error, &request_id))?
-    {
-        FeedBackfillPreparation::Ready(plan) => plan,
-        FeedBackfillPreparation::ContentNotFound => {
-            return Err(not_found_message("Content not found", &request_id));
-        }
-        FeedBackfillPreparation::ContentNotAccessible => {
-            return Err(ApiError::new(
-                StatusCode::FORBIDDEN,
-                "forbidden",
-                "Content not accessible",
-                request_id,
-            ));
-        }
-        FeedBackfillPreparation::NotLongForm => {
-            return Err(bad_request("Content is not long-form", &request_id));
-        }
-        FeedBackfillPreparation::FeedConfigNotFound => {
-            return Err(bad_request(
-                "Feed config not found for content",
-                &request_id,
-            ));
-        }
-    };
-    let provider_entries = state
-        .content_misc
-        .fetch_feed_entries(&plan.feed_url, plan.target_limit)
-        .await
-        .map_err(|error| provider_bad_gateway(&error, &request_id))?;
-    let scraped = provider_entries.len();
-    let entries = provider_entries
-        .into_iter()
-        .map(|entry| FeedBackfillEntry {
-            url: entry.url,
-            title: entry.title,
-            source: entry.source.or_else(|| plan.display_name.clone()),
-            published_at: entry.published_at,
-            content_type: if plan.scraper_type == "podcast_rss" {
-                "podcast".to_owned()
-            } else {
-                "article".to_owned()
-            },
-        })
-        .collect::<Vec<_>>();
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, &stamp, &request_id).await?;
-    let persisted = persist_feed_backfill(&mut transaction, current_user.id, &plan, &entries)
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    if !persisted.content_ids.is_empty() {
-        let requests = persisted
-            .content_ids
-            .iter()
-            .map(|content_id| {
-                let mut request = EnqueueRequest::new(TaskType::ProcessContent);
-                request.content_id = Some(*content_id);
-                request
-            })
-            .collect();
-        QueueKernel::new(state.database.pool().clone())
-            .enqueue_many_in_transaction(&mut transaction, requests)
-            .await
-            .map_err(|error| queue_error(error, &request_id))?;
-    }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    Ok(Json(DownloadMoreResponse {
-        status: "completed".to_owned(),
-        requested_count: payload.count,
-        base_limit: plan.base_limit,
-        target_limit: plan.target_limit,
-        scraped,
-        saved: persisted.saved,
-        duplicates: persisted.duplicates,
-        errors: 0,
-    }))
 }
 
 #[utoipa::path(

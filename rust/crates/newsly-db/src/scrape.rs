@@ -216,8 +216,7 @@ pub async fn persist_scraped_content(
         r#"
         INSERT INTO content_status (user_id, content_id, status, created_at, updated_at)
         VALUES ($1::bigint::integer, $2::bigint::integer, 'inbox', timezone('UTC', now()), timezone('UTC', now()))
-        ON CONFLICT (user_id, content_id) DO UPDATE
-        SET status = 'inbox', updated_at = EXCLUDED.updated_at
+        ON CONFLICT (user_id, content_id) DO NOTHING
         "#,
     )
     .bind(record.user_id)

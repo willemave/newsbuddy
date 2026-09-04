@@ -50,7 +50,7 @@ pub use content_misc::{
     ContentMiscGateway, ContentMiscGatewayError, DiscussionCommentHit, DiscussionLinkHit,
     DiscussionRefreshResult, DiscussionSummaryArtifact, DiscussionSummaryComment,
     DiscussionSummaryLink, DiscussionSummaryTopic, DiscussionThreadHit, FeedDiscoveryHit,
-    FeedEntryHit, GeneratedDiscussionSummary, GeneratedTweetSuggestion, GeneratedTweetSuggestions,
+    GeneratedDiscussionSummary, GeneratedTweetSuggestion, GeneratedTweetSuggestions,
     PodcastEpisodeHit,
 };
 pub use feed_validation::{FeedValidationError, FeedValidator, ValidatedFeed, ValidatedFeedFormat};

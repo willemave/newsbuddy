@@ -1,7 +1,10 @@
 use serde_json::json;
 use sqlx::PgPool;
 
-use super::{ScrapedNewsRecord, news_ingest_key, persist_scraped_news};
+use super::{
+    ScrapedContentRecord, ScrapedNewsRecord, news_ingest_key, persist_scraped_content,
+    persist_scraped_news,
+};
 
 fn record() -> ScrapedNewsRecord {
     ScrapedNewsRecord {
@@ -158,4 +161,66 @@ async fn canonical_item_identity_does_not_match_a_story_alias(pool: PgPool) {
             .await
             .expect("representative should remain");
     assert_eq!(representative_key, "representative-key");
+}
+
+#[sqlx::test]
+async fn duplicate_scrape_does_not_reactivate_existing_membership(pool: PgPool) {
+    let user_id = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO users (apple_id, email, is_admin, is_active)
+        VALUES ('scrape-membership-test', 'scrape-membership@example.com', false, true)
+        RETURNING id::bigint
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("test user should insert");
+    let record = ScrapedContentRecord {
+        url: "https://example.com/article".to_owned(),
+        source_url: "https://example.com/article".to_owned(),
+        title: Some("Article".to_owned()),
+        content_type: "article".to_owned(),
+        user_id,
+        source: Some("Example".to_owned()),
+        platform: "atom".to_owned(),
+        metadata: json!({}),
+        published_at: None,
+    };
+    let mut transaction = pool.begin().await.expect("transaction should begin");
+    let inserted = persist_scraped_content(&mut transaction, &record)
+        .await
+        .expect("content should persist");
+    transaction
+        .commit()
+        .await
+        .expect("transaction should commit");
+    assert!(inserted.created);
+
+    sqlx::query(
+        "UPDATE content_status SET status = 'archived' WHERE user_id::bigint = $1 AND content_id::bigint = $2",
+    )
+    .bind(user_id)
+    .bind(inserted.content_id)
+    .execute(&pool)
+    .await
+    .expect("membership should update");
+
+    let mut transaction = pool.begin().await.expect("transaction should begin");
+    let duplicate = persist_scraped_content(&mut transaction, &record)
+        .await
+        .expect("duplicate scrape should persist");
+    transaction
+        .commit()
+        .await
+        .expect("transaction should commit");
+    assert!(!duplicate.created);
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM content_status WHERE user_id::bigint = $1 AND content_id::bigint = $2",
+    )
+    .bind(user_id)
+    .bind(inserted.content_id)
+    .fetch_one(&pool)
+    .await
+    .expect("membership should exist");
+    assert_eq!(status, "archived");
 }

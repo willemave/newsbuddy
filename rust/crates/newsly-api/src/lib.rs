@@ -63,7 +63,7 @@ use axum::http::{HeaderMap, HeaderName};
 use newsly_db::{Database, OwnershipRepository};
 use newsly_providers::{
     ContentMiscGateway, IntegrationTokenCipher, OnboardingGateway, OpenAiTranscriptionGateway,
-    XOAuthGateway,
+    ScrapeGateway, XOAuthGateway,
 };
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
@@ -89,6 +89,7 @@ pub struct AppState {
     audio_storage: Arc<audio_storage::AudioStorage>,
     content_body_store: Arc<content_body_storage::ContentBodyStore>,
     content_misc: Arc<ContentMiscGateway>,
+    scrape: Arc<ScrapeGateway>,
     feed_validator: feed_validation::FeedValidator,
     onboarding: Arc<OnboardingGateway>,
     transcription: Option<Arc<OpenAiTranscriptionGateway>>,
@@ -185,6 +186,7 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
     let feed_validator = feed_validation::FeedValidator::new();
     let content_body_store = Arc::new(content_body_storage::ContentBodyStore::from_environment()?);
     let content_misc = Arc::new(ContentMiscGateway::from_env()?);
+    let scrape = Arc::new(ScrapeGateway::from_env()?);
     let onboarding = Arc::new(OnboardingGateway::from_env()?);
     let audio_storage = Arc::new(audio_storage::AudioStorage::from_environment()?);
     let integration_token_cipher = config
@@ -223,6 +225,7 @@ pub async fn serve(config: ServerConfig) -> anyhow::Result<()> {
         audio_storage,
         content_body_store,
         content_misc,
+        scrape,
         feed_validator,
         onboarding,
         transcription,

@@ -183,9 +183,9 @@ pub use content_feeds::{
 };
 pub use content_misc::{
     ContentConversionPlan, ContentMiscRepositoryError, ContentNarrationPlan, ConvertedArticle,
-    DiscussionRefreshPlan, DiscussionTargetKind, FeedBackfillEntry, FeedBackfillPersistence,
-    FeedBackfillPlan, FeedBackfillPreparation, NewsConversionPlan, SubmissionPage,
-    SubmissionProjection, TweetContentPlan, finalize_article_conversion,
+    DiscussionRefreshPlan, DiscussionTargetKind, FeedBackfillEntry, FeedBackfillOrigin,
+    FeedBackfillPersistence, FeedBackfillPlan, FeedBackfillPreparation, NewsConversionPlan,
+    SubmissionPage, SubmissionProjection, TweetContentPlan, finalize_article_conversion,
     list_submission_projections, persist_content_discussion, persist_feed_backfill,
     persist_news_discussion, prepare_content_conversion, prepare_content_discussion_refresh,
     prepare_content_narration, prepare_feed_backfill, prepare_news_conversion,

@@ -5,13 +5,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use futures_util::StreamExt;
 use newsly_agent_runtime::{
     AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError,
     BoxToolFuture, NewslyTranscript, ProviderUsage, ResponseContract, ToolCall, ToolExecutor,
     ToolPolicy,
 };
-use newsly_extraction::PublicUrl;
 use reqwest::Url;
 use rig_core::schemars::{JsonSchema, schema_for};
 use secrecy::{ExposeSecret, SecretString};
@@ -26,8 +24,6 @@ const DEFAULT_ELEVENLABS_API_BASE: &str = "https://api.elevenlabs.io";
 const DEFAULT_TWEET_MODEL: &str = "openai:gpt-5.6-luna";
 const DEFAULT_ANTHROPIC_TWEET_MODEL: &str = "anthropic:claude-sonnet-4-5";
 const DEFAULT_DISCUSSION_MODEL: &str = "openai:gpt-5.6-luna";
-const MAX_FEED_RESPONSE_BYTES: usize = 20 * 1024 * 1024;
-const MAX_FEED_REDIRECTS: usize = 5;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PodcastEpisodeHit {
@@ -52,14 +48,6 @@ pub struct FeedDiscoveryHit {
     pub feed_format: String,
     pub description: Option<String>,
     pub evidence_url: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FeedEntryHit {
-    pub url: String,
-    pub title: Option<String>,
-    pub source: Option<String>,
-    pub published_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,7 +226,6 @@ pub struct GeneratedTweetSuggestions {
 #[derive(Debug, Clone)]
 pub struct ContentMiscGateway {
     client: reqwest::Client,
-    public_feed_client: reqwest::Client,
     itunes_search_url: Url,
     agent_engine: RigAgentEngine,
     tweet_model: String,
@@ -261,12 +248,6 @@ impl ContentMiscGateway {
     pub fn from_env() -> Result<Self, ContentMiscGatewayError> {
         let timeout = Duration::from_secs(env_u64("HTTP_TIMEOUT_SECONDS", 60).max(1));
         let client = reqwest::Client::builder().timeout(timeout).build()?;
-        let public_feed_client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(timeout)
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .build()?;
         let itunes_search_url = Url::parse(
             &env::var("APPLE_ITUNES_SEARCH_URL")
                 .unwrap_or_else(|_| DEFAULT_ITUNES_SEARCH_URL.to_owned()),
@@ -288,7 +269,6 @@ impl ContentMiscGateway {
         )?;
         Ok(Self {
             client,
-            public_feed_client,
             itunes_search_url,
             agent_engine,
             tweet_model: env::var("TWEET_SUGGESTION_MODEL")
@@ -411,102 +391,6 @@ impl ContentMiscGateway {
         feeds.dedup_by(|left, right| left.feed_url == right.feed_url);
         feeds.truncate(limit);
         Ok(feeds)
-    }
-
-    /// Fetches and normalizes a bounded collection of entries from one feed URL.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the feed cannot be fetched, parsed, or normalized.
-    pub async fn fetch_feed_entries(
-        &self,
-        feed_url: &str,
-        limit: usize,
-    ) -> Result<Vec<FeedEntryHit>, ContentMiscGatewayError> {
-        let bytes = self.fetch_public_feed_bytes(feed_url).await?;
-        let feed = feed_rs::parser::parse(bytes.as_slice())
-            .map_err(|error| ContentMiscGatewayError::Feed(error.to_string()))?;
-        let feed_title = feed.title.and_then(|value| clean(Some(value.content)));
-        let mut entries = Vec::new();
-        for entry in feed.entries {
-            let Some(url) = entry
-                .links
-                .iter()
-                .find(|link| link.rel.as_deref().is_none_or(|rel| rel == "alternate"))
-                .or_else(|| entry.links.first())
-                .and_then(|link| clean(Some(link.href.clone())))
-            else {
-                continue;
-            };
-            if !is_http_url(&url) {
-                continue;
-            }
-            entries.push(FeedEntryHit {
-                url,
-                title: entry.title.and_then(|value| clean(Some(value.content))),
-                source: feed_title.clone(),
-                published_at: entry
-                    .published
-                    .or(entry.updated)
-                    .map(|value| value.to_utc()),
-            });
-        }
-        entries.sort_by(|left, right| right.published_at.cmp(&left.published_at));
-        entries.dedup_by(|left, right| left.url == right.url);
-        entries.truncate(limit.clamp(1, 100));
-        Ok(entries)
-    }
-
-    async fn fetch_public_feed_bytes(
-        &self,
-        feed_url: &str,
-    ) -> Result<Vec<u8>, ContentMiscGatewayError> {
-        let mut current = PublicUrl::parse(feed_url)?;
-        for redirect_count in 0..=MAX_FEED_REDIRECTS {
-            current.validate_dns().await?;
-            let response = self
-                .public_feed_client
-                .get(current.as_url().clone())
-                .header(
-                    reqwest::header::USER_AGENT,
-                    "Mozilla/5.0 (compatible; Newsly/1.0; Feed Discovery)",
-                )
-                .header(
-                    reqwest::header::ACCEPT,
-                    "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.1",
-                )
-                .send()
-                .await?;
-            if response.status().is_redirection() {
-                if redirect_count == MAX_FEED_REDIRECTS {
-                    return Err(ContentMiscGatewayError::FeedTooManyRedirects);
-                }
-                let location = response
-                    .headers()
-                    .get(reqwest::header::LOCATION)
-                    .and_then(|value| value.to_str().ok())
-                    .ok_or(ContentMiscGatewayError::FeedRedirectLocationMissing)?;
-                current = resolve_public_feed_redirect(&current, location)?;
-                continue;
-            }
-            let response = response.error_for_status()?;
-            if response
-                .content_length()
-                .is_some_and(|length| length > MAX_FEED_RESPONSE_BYTES as u64)
-            {
-                return Err(ContentMiscGatewayError::FeedResponseTooLarge {
-                    limit: MAX_FEED_RESPONSE_BYTES,
-                });
-            }
-            let mut body = Vec::new();
-            let mut stream = response.bytes_stream();
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk?;
-                append_bounded_feed_chunk(&mut body, &chunk)?;
-            }
-            return Ok(body);
-        }
-        Err(ContentMiscGatewayError::FeedTooManyRedirects)
     }
 
     /// Generates structured tweet suggestions for the supplied content and guidance.
@@ -827,30 +711,6 @@ fn stable_feed_id(feed_url: &str) -> String {
     format!("feed-{}", &encoded[..20])
 }
 
-fn resolve_public_feed_redirect(
-    current: &PublicUrl,
-    location: &str,
-) -> Result<PublicUrl, ContentMiscGatewayError> {
-    let next = current
-        .as_url()
-        .join(location)
-        .map_err(|error| ContentMiscGatewayError::FeedInvalidRedirect(error.to_string()))?;
-    PublicUrl::parse(next.as_str()).map_err(ContentMiscGatewayError::from)
-}
-
-fn append_bounded_feed_chunk(
-    body: &mut Vec<u8>,
-    chunk: &[u8],
-) -> Result<(), ContentMiscGatewayError> {
-    if body.len().saturating_add(chunk.len()) > MAX_FEED_RESPONSE_BYTES {
-        return Err(ContentMiscGatewayError::FeedResponseTooLarge {
-            limit: MAX_FEED_RESPONSE_BYTES,
-        });
-    }
-    body.extend_from_slice(chunk);
-    Ok(())
-}
-
 fn is_http_url(value: &str) -> bool {
     Url::parse(value)
         .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host().is_some())
@@ -919,18 +779,6 @@ pub enum ContentMiscGatewayError {
     Json(#[from] serde_json::Error),
     #[error("tweet output is invalid: {0}")]
     InvalidTweetOutput(String),
-    #[error("feed document is invalid: {0}")]
-    Feed(String),
-    #[error("public feed URL validation failed")]
-    PublicUrl(#[from] newsly_extraction::ExtractionClientError),
-    #[error("feed response exceeded the {limit}-byte limit")]
-    FeedResponseTooLarge { limit: usize },
-    #[error("feed redirect did not include a valid Location header")]
-    FeedRedirectLocationMissing,
-    #[error("feed redirect target was invalid: {0}")]
-    FeedInvalidRedirect(String),
-    #[error("feed request exceeded the redirect limit")]
-    FeedTooManyRedirects,
     #[error("discussion platform is not supported")]
     UnsupportedDiscussionPlatform,
     #[error("discussion external identity is missing")]
@@ -975,52 +823,8 @@ impl ContentMiscGatewayError {
             | Self::TweetConfiguration(_)
             | Self::TweetGeneration(_)
             | Self::InvalidTweetOutput(_)
-            | Self::Feed(_)
-            | Self::PublicUrl(_)
-            | Self::FeedResponseTooLarge { .. }
-            | Self::FeedRedirectLocationMissing
-            | Self::FeedInvalidRedirect(_)
-            | Self::FeedTooManyRedirects
             | Self::NarrationUnavailable
             | Self::EmptyNarrationAudio => false,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        ContentMiscGatewayError, MAX_FEED_RESPONSE_BYTES, PublicUrl, append_bounded_feed_chunk,
-        resolve_public_feed_redirect,
-    };
-
-    #[test]
-    fn feed_redirects_are_revalidated_as_public_urls() {
-        let current = PublicUrl::parse("https://example.com/feeds/main.xml")
-            .expect("public source URL should parse");
-        let relative = resolve_public_feed_redirect(&current, "../latest.xml")
-            .expect("relative public redirect should parse");
-        assert_eq!(relative.as_str(), "https://example.com/latest.xml");
-
-        let error = resolve_public_feed_redirect(&current, "http://127.0.0.1/private")
-            .expect_err("redirects to loopback must be rejected");
-        assert!(matches!(error, ContentMiscGatewayError::PublicUrl(_)));
-    }
-
-    #[test]
-    fn feed_body_limit_is_enforced_before_appending() {
-        let mut body = vec![0; MAX_FEED_RESPONSE_BYTES - 1];
-        append_bounded_feed_chunk(&mut body, &[1]).expect("exact limit should be accepted");
-        assert_eq!(body.len(), MAX_FEED_RESPONSE_BYTES);
-
-        let error = append_bounded_feed_chunk(&mut body, &[2])
-            .expect_err("one byte over the limit must be rejected");
-        assert!(matches!(
-            error,
-            ContentMiscGatewayError::FeedResponseTooLarge {
-                limit: MAX_FEED_RESPONSE_BYTES
-            }
-        ));
-        assert_eq!(body.len(), MAX_FEED_RESPONSE_BYTES);
     }
 }

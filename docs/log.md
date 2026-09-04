@@ -27,6 +27,24 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-04 — `main` — Restore substantive Briefing article composition
+
+- **Status:** Complete; release validation pending.
+- **Scope:** Rust Briefing composition guidance, enriched article source projection, focused regressions, and the Briefing behavioral law.
+- **Decisions:** Restore the Python-era deep-source treatment and bounded context richness without changing `briefing-v6` or adding a hard output-length validator. Keep the compact News contract unchanged.
+- **Changes:** Deep-tier composition again treats each article or podcast as a full work and asks for 3–5 sentences, roughly 100–200 words, grounded in thesis, evidence, counterpoints, significance, and supplied context. Rust source projection now restores the bounded Python-era overview, narrative, lists, source details, artifact payload, feed preview, excerpt, and transcript context while retaining the 2,400-character request bound. Added focused prompt, rich-artifact, and context-bound regressions and documented the substantive-treatment invariant.
+- **Validation:** Rust formatting and `git diff --check` pass. Warning-denied all-target Clippy passed for `newsly-db`, `newsly-providers`, and `newsly-worker`; all 64 `newsly-db` library tests, all 63 `newsly-providers` tests with one live-provider test intentionally ignored, and 14 focused Briefing worker tests passed.
+- **Remaining:** Canonical release gate, exact-SHA push, deployment, and production proof.
+
+### 2026-09-04 — `main` — Harden feed backfill and podcast ingestion
+
+- **Status:** Complete; release validation pending.
+- **Scope:** Canonical RSS normalization, API and worker feed backfill, content persistence, downstream media metadata, and duplicate membership behavior.
+- **Decisions:** Use `ScrapeGateway::fetch_feed` as the single feed parser for scheduled ingestion and both backfill paths. Treat an all-invalid feed as a failed attempt while allowing partial progress, preserve provider retryability, and never reactivate an existing read or archived membership during re-ingestion. Prefer a unique audio enclosure when podcast entries expose only a repeated feed homepage. Keep `feed-rs` authoritative for document parsing, with a small inert XML metadata pass only for iTunes fields that `feed-rs` omits or misinterprets.
+- **Changes:** Removed the duplicate lossy backfill parser and its separate response-size ceiling. Backfills now persist the full normalized source, platform, audio, tags, description, word-count, iTunes episode, and duration metadata; preserve configured show names and feed/episode authors; accept enclosure-only and legacy audio-extension episodes; filter Substack podcast/transcript posts; and emit bounded config-ID diagnostics. Canonical URLs no longer split on non-root trailing slashes, RSS body structure is preserved, source attribution falls back to the feed domain when titles are absent, manual and background provenance are distinct, and the download-more OpenAPI contract includes provider failures. Split feed normalization, iTunes metadata, and the download-more route into focused modules. Added PostgreSQL-backed feed-pipeline integration coverage for article/podcast persistence, atomic queue finalization, cross-user deduplication and membership, partial onboarding progress, and changed-config publication fencing.
+- **Validation:** `cargo fmt --all`, warning-denied workspace Clippy, architecture guard, public-contract drift check, and `git diff --check` pass. The complete `newsly-api`, `newsly-db`, `newsly-providers`, and `newsly-worker` suites pass: 271 tests passed and one live-provider test was intentionally ignored.
+- **Remaining:** Canonical release gate with live smoke, exact-SHA push, deployment, and production proof.
+
 ### 2026-09-03 — `main` — Restore standard podcast RSS enclosure ingestion
 
 - **Status:** Complete and committed; release validation pending.

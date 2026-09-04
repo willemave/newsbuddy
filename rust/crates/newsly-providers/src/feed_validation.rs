@@ -261,9 +261,11 @@ fn is_audio_link(media_type: Option<&str>, href: &str) -> bool {
     media_type.is_some_and(|value| value.to_ascii_lowercase().starts_with("audio/"))
         || href.split(['?', '#']).next().is_some_and(|path| {
             let path = path.to_ascii_lowercase();
-            [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav"]
-                .iter()
-                .any(|extension| path.ends_with(extension))
+            [
+                ".aac", ".flac", ".m4a", ".mp3", ".mpga", ".oga", ".ogg", ".opus", ".wav", ".webm",
+            ]
+            .iter()
+            .any(|extension| path.ends_with(extension))
         })
 }
 
@@ -364,5 +366,19 @@ mod tests {
         )
         .expect("publication fixture parses");
         assert!(!has_audio_entries(&publication));
+    }
+
+    #[test]
+    fn podcast_classification_accepts_legacy_untyped_audio_extensions() {
+        for extension in ["flac", "mpga", "oga", "webm"] {
+            let document = format!(
+                "<rss version=\"2.0\"><channel><title>Podcast</title><item><title>Episode</title><enclosure url=\"https://cdn.example/episode.{extension}\" /></item></channel></rss>"
+            );
+            let feed = feed_rs::parser::parse(document.as_bytes()).expect("fixture parses");
+            assert!(
+                has_audio_entries(&feed),
+                "extension {extension} was rejected"
+            );
+        }
     }
 }

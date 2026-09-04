@@ -1,5 +1,5 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
-use serde_json::{Value, json};
+use serde_json::Value;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
@@ -479,8 +479,11 @@ async fn resolve_feed_config(
 #[derive(Debug, Clone, PartialEq)]
 pub struct FeedBackfillEntry {
     pub url: String,
+    pub source_url: String,
     pub title: Option<String>,
     pub source: Option<String>,
+    pub platform: String,
+    pub metadata: Value,
     pub published_at: Option<DateTime<Utc>>,
     pub content_type: String,
 }
@@ -492,20 +495,37 @@ pub struct FeedBackfillPersistence {
     pub content_ids: Vec<i64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedBackfillOrigin {
+    Background,
+    DownloadMore,
+}
+
+impl FeedBackfillOrigin {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Background => "feed_backfill",
+            Self::DownloadMore => "download_more",
+        }
+    }
+}
+
 pub async fn persist_feed_backfill(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
-    plan: &FeedBackfillPlan,
+    origin: FeedBackfillOrigin,
     entries: &[FeedBackfillEntry],
 ) -> Result<FeedBackfillPersistence, ContentMiscRepositoryError> {
     let mut content_ids = Vec::new();
     let mut duplicates = 0_usize;
     for entry in entries {
-        let metadata = json!({
-            "feed_config_id": plan.config_id,
-            "feed_url": plan.feed_url,
-            "submitted_via": "download_more",
-        });
+        let mut metadata = entry.metadata.clone();
+        if let Some(object) = metadata.as_object_mut() {
+            object.insert(
+                "submitted_via".to_owned(),
+                Value::String(origin.as_str().to_owned()),
+            );
+        }
         let inserted = sqlx::query_scalar::<_, i64>(
             r#"
             INSERT INTO contents (
@@ -514,9 +534,9 @@ pub async fn persist_feed_backfill(
                 created_at, updated_at, publication_date
             )
             VALUES (
-                $1, $2, $2, $3, $4, NULL, FALSE,
-                'pending', 0, NULL, $5,
-                timezone('UTC', now()), timezone('UTC', now()), $6
+                $1, $2, $3, $4, $5, $6, FALSE,
+                'pending', 0, NULL, $7,
+                timezone('UTC', now()), timezone('UTC', now()), $8
             )
             ON CONFLICT (url, content_type) DO NOTHING
             RETURNING id::bigint
@@ -524,8 +544,10 @@ pub async fn persist_feed_backfill(
         )
         .bind(&entry.content_type)
         .bind(&entry.url)
+        .bind(&entry.source_url)
         .bind(&entry.title)
         .bind(&entry.source)
+        .bind(&entry.platform)
         .bind(metadata)
         .bind(entry.published_at.map(|value| value.naive_utc()))
         .fetch_optional(&mut **transaction)
@@ -555,7 +577,7 @@ pub async fn persist_feed_backfill(
             r#"
             INSERT INTO content_status (user_id, content_id, status, created_at, updated_at)
             VALUES ($1::bigint::integer, $2::bigint::integer, 'inbox', timezone('UTC', now()), timezone('UTC', now()))
-            ON CONFLICT (user_id, content_id) DO UPDATE SET status = 'inbox', updated_at = EXCLUDED.updated_at
+            ON CONFLICT (user_id, content_id) DO NOTHING
             "#,
         )
         .bind(user_id)
@@ -928,3 +950,6 @@ pub enum ContentMiscRepositoryError {
     #[error("feed config has no feed URL")]
     FeedUrlMissing,
 }
+
+#[cfg(test)]
+mod tests;

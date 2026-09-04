@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use newsly_db::Database;
 use newsly_domain::{ResourceKey, RuntimeOwner};
-use newsly_providers::ContentMiscGateway;
+use newsly_providers::ScrapeGateway;
 use newsly_queue::{
     ClaimRequest, ClaimRuntimeScope, QueueKernel, QueueNotificationHub, TaskQueue, TaskType,
 };
@@ -30,7 +30,7 @@ pub(crate) async fn main() -> Result<()> {
         .context("feed-backfill worker PostgreSQL readiness check failed")?;
     let queue = QueueKernel::new(database.pool().clone());
     let provider =
-        ContentMiscGateway::from_env().context("feed-backfill provider initialization failed")?;
+        ScrapeGateway::from_env().context("feed-backfill provider initialization failed")?;
     let services = Arc::new(FeedBackfillWorkerServices::new(
         database.pool().clone(),
         queue.clone(),

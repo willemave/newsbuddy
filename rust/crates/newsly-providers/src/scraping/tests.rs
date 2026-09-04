@@ -22,6 +22,14 @@ fn result_urls_are_normalized_and_fragments_removed() {
         normalize_http_url("http://example.com/post#section").as_deref(),
         Some("https://example.com/post")
     );
+    assert_eq!(
+        normalize_http_url("https://example.com/post/?page=1#section").as_deref(),
+        Some("https://example.com/post?page=1")
+    );
+    assert_eq!(
+        normalize_http_url("https://example.com/").as_deref(),
+        Some("https://example.com/")
+    );
 }
 
 #[test]
@@ -55,13 +63,16 @@ fn podcast_feed_normalization_keeps_audio_and_episode_identity() {
     let document = br#"<?xml version="1.0" encoding="UTF-8"?>
         <rss version="2.0">
           <channel>
-            <title>Test show</title>
+            <title>Raw feed title</title>
             <description>A fixture podcast</description>
+            <itunes:author xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">Feed author</itunes:author>
             <item>
               <guid>episode-1</guid>
               <title>Episode one</title>
               <link>https://example.test/episodes/1</link>
               <enclosure url="https://cdn.example.test/episodes/1.mp3" type="audio/mpeg" />
+              <itunes:episode xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">7</itunes:episode>
+              <itunes:duration xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">20:34</itunes:duration>
               <description>Episode notes</description>
             </item>
           </channel>
@@ -78,12 +89,164 @@ fn podcast_feed_normalization_keeps_audio_and_episode_identity() {
     assert_eq!(item.content_type, "podcast");
     assert_eq!(item.platform, "podcast");
     assert_eq!(item.config_id, 42);
+    assert_eq!(item.source.as_deref(), Some("Test show"));
+    assert_eq!(item.metadata["feed_name"], "Test show");
+    assert_eq!(item.metadata["feed_title"], "Raw feed title");
+    assert_eq!(item.metadata["author"], "Feed author");
     assert_eq!(
         item.metadata
             .get("audio_url")
             .and_then(|value| value.as_str()),
         Some("https://cdn.example.test/episodes/1.mp3")
     );
+    assert_eq!(item.metadata["description"], "Episode notes");
+    assert_eq!(item.metadata["word_count"], 2);
+    assert_eq!(item.metadata["episode_number"], 7);
+    assert_eq!(item.metadata["duration"], 1_234);
+    assert_eq!(item.metadata["duration_seconds"], 1_234);
+}
+
+#[test]
+fn podcast_feed_uses_unique_enclosures_when_entries_share_a_homepage() {
+    let document = br#"<rss version="2.0">
+        <channel>
+          <title>Test show</title>
+          <item>
+            <guid>episode-2</guid>
+            <title>Episode two</title>
+            <link>https://example.test/shows/test-show</link>
+            <enclosure url="https://cdn.example.test/episodes/2.mp3" type="audio/mpeg" />
+          </item>
+          <item>
+            <guid>episode-1</guid>
+            <title>Episode one</title>
+            <link>https://example.test/shows/test-show</link>
+            <enclosure url="https://cdn.example.test/episodes/1.mp3" type="audio/mpeg" />
+          </item>
+        </channel>
+      </rss>"#;
+
+    let outcome =
+        normalize_feed_document(&podcast_target(), document).expect("feed should normalize");
+
+    assert!(outcome.item_errors.is_empty());
+    let urls = outcome
+        .items
+        .iter()
+        .map(|item| match item {
+            ScrapedItem::Content(item) => item.url.as_str(),
+            ScrapedItem::News(_) => panic!("expected podcast content"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        urls,
+        [
+            "https://cdn.example.test/episodes/2.mp3",
+            "https://cdn.example.test/episodes/1.mp3"
+        ]
+    );
+}
+
+#[test]
+fn podcast_feed_uses_enclosure_when_entry_has_no_page_link() {
+    let document = br#"<rss version="2.0">
+        <channel>
+          <title>Test show</title>
+          <item>
+            <guid>episode-1</guid>
+            <title>Episode one</title>
+            <enclosure url="https://cdn.example.test/episodes/1.mp3" type="audio/mpeg" />
+          </item>
+        </channel>
+      </rss>"#;
+
+    let outcome =
+        normalize_feed_document(&podcast_target(), document).expect("feed should normalize");
+
+    let [ScrapedItem::Content(item)] = outcome.items.as_slice() else {
+        panic!("expected one podcast item: {outcome:#?}");
+    };
+    assert_eq!(item.url, "https://cdn.example.test/episodes/1.mp3");
+    assert_eq!(item.metadata["audio_url"], item.url);
+}
+
+#[test]
+fn substack_feed_filters_audio_posts_by_title() {
+    let target = FeedScrapeTarget {
+        config_id: 42,
+        user_id: 7,
+        scraper_type: "substack".to_owned(),
+        display_name: Some("Test publication".to_owned()),
+        feed_url: "https://example.substack.com/feed".to_owned(),
+        limit: 10,
+        fingerprint: "fixture".to_owned(),
+    };
+    let document = br#"<rss version="2.0"><channel><title>Test publication</title>
+        <item><guid>article</guid><title>An article</title><link>https://example.substack.com/p/article</link></item>
+        <item><guid>audio</guid><title>Podcast: an interview</title><link>https://example.substack.com/p/audio</link></item>
+      </channel></rss>"#;
+
+    let outcome = normalize_feed_document(&target, document).expect("feed should normalize");
+
+    assert_eq!(outcome.items.len(), 1);
+    let ScrapedItem::Content(item) = &outcome.items[0] else {
+        panic!("expected article content");
+    };
+    assert_eq!(item.url, "https://example.substack.com/p/article");
+}
+
+#[test]
+fn feed_body_preserves_internal_whitespace() {
+    let target = FeedScrapeTarget {
+        config_id: 42,
+        user_id: 7,
+        scraper_type: "atom".to_owned(),
+        display_name: Some("Test publication".to_owned()),
+        feed_url: "https://example.test/feed.xml".to_owned(),
+        limit: 10,
+        fingerprint: "fixture".to_owned(),
+    };
+    let document = br#"<feed xmlns="http://www.w3.org/2005/Atom">
+        <title>Test publication</title>
+        <entry>
+          <id>article</id><title>An article</title>
+          <link href="https://example.test/article" />
+          <content type="html">  &lt;pre&gt;first
+    second&lt;/pre&gt;  </content>
+        </entry>
+      </feed>"#;
+
+    let outcome = normalize_feed_document(&target, document).expect("feed should normalize");
+    let [ScrapedItem::Content(item)] = outcome.items.as_slice() else {
+        panic!("expected one article: {outcome:#?}");
+    };
+    assert_eq!(item.metadata["rss_content"], "<pre>first\n    second</pre>");
+}
+
+#[test]
+fn feed_source_falls_back_to_feed_domain() {
+    let target = FeedScrapeTarget {
+        config_id: 42,
+        user_id: 7,
+        scraper_type: "atom".to_owned(),
+        display_name: None,
+        feed_url: "https://www.example.test/feeds/main.xml".to_owned(),
+        limit: 10,
+        fingerprint: "fixture".to_owned(),
+    };
+    let document = br#"<feed xmlns="http://www.w3.org/2005/Atom">
+        <entry>
+          <id>article</id><title>An article</title>
+          <link href="https://example.test/article" />
+        </entry>
+      </feed>"#;
+
+    let outcome = normalize_feed_document(&target, document).expect("feed should normalize");
+    let [ScrapedItem::Content(item)] = outcome.items.as_slice() else {
+        panic!("expected one article: {outcome:#?}");
+    };
+    assert_eq!(item.source.as_deref(), Some("example.test"));
+    assert_eq!(item.metadata["source"], "example.test");
 }
 
 #[test]

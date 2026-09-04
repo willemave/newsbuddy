@@ -3,8 +3,8 @@ use std::error::Error;
 use std::sync::Arc;
 
 use futures_util::stream::{self, StreamExt};
-use newsly_db::{FeedBackfillEntry, FeedBackfillPlan, persist_feed_backfill};
-use newsly_providers::{ContentMiscGateway, FeedEntryHit};
+use newsly_db::{FeedBackfillEntry, FeedBackfillOrigin, persist_feed_backfill};
+use newsly_providers::{FeedScrapeTarget, ScrapeGateway, ScrapeProviderOutcome, ScrapedItem};
 use newsly_queue::{EnqueueRequest, OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -21,11 +21,11 @@ const MAX_CONCURRENT_FEEDS: usize = 4;
 pub struct FeedBackfillWorkerServices {
     pool: PgPool,
     queue: QueueKernel,
-    provider: ContentMiscGateway,
+    provider: ScrapeGateway,
 }
 
 impl FeedBackfillWorkerServices {
-    pub const fn new(pool: PgPool, queue: QueueKernel, provider: ContentMiscGateway) -> Self {
+    pub const fn new(pool: PgPool, queue: QueueKernel, provider: ScrapeGateway) -> Self {
         Self {
             pool,
             queue,
@@ -79,30 +79,82 @@ async fn execute_backfill(
         }
     };
     let provider = services.provider.clone();
+    let user_id = request.user_id;
     let results = stream::iter(prepared.plans.iter().cloned())
         .map(move |plan| {
             let provider = provider.clone();
             async move {
                 let result = provider
-                    .fetch_feed_entries(&plan.feed_url, plan.target_limit)
+                    .fetch_feed(&FeedScrapeTarget {
+                        config_id: plan.id,
+                        user_id,
+                        scraper_type: plan.scraper_type.clone(),
+                        display_name: plan.display_name.clone(),
+                        feed_url: plan.feed_url.clone(),
+                        limit: plan.target_limit,
+                        fingerprint: plan.fingerprint.clone(),
+                    })
                     .await
-                    .map_err(|error| error.to_string());
+                    .map_err(|error| FeedFetchError {
+                        message: format!(
+                            "feed fetch failed (code={}, retryable={})",
+                            error.diagnostic_code(),
+                            error.retryable()
+                        ),
+                        retryable: error.retryable(),
+                    });
                 FeedFetchOutcome { plan, result }
             }
         })
         .buffer_unordered(MAX_CONCURRENT_FEEDS)
         .collect::<Vec<_>>()
         .await;
+    for outcome in &results {
+        match &outcome.result {
+            Ok(result) if !result.item_errors.is_empty() => tracing::warn!(
+                config_id = outcome.plan.id,
+                usable_item_count = result.items.len(),
+                diagnostic_count = result.item_errors.len(),
+                "feed backfill completed with item diagnostics"
+            ),
+            Err(error) => tracing::warn!(
+                config_id = outcome.plan.id,
+                error = error.message,
+                retryable = error.retryable,
+                "feed backfill provider request failed"
+            ),
+            Ok(_) => {}
+        }
+    }
     let successes = results
         .iter()
-        .filter(|outcome| outcome.result.is_ok())
+        .filter(|outcome| outcome.result.as_ref().is_ok_and(feed_outcome_succeeded))
         .count();
     let task_result = if successes > 0 {
         TaskResult::ok()
     } else {
+        let retryable = results.iter().any(|outcome| {
+            outcome
+                .result
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.retryable)
+        });
         TaskResult::fail(
-            Some("All onboarding feed backfills failed".to_owned()),
-            true,
+            Some(format!(
+                "All onboarding feed backfills failed for config IDs {:?}",
+                results
+                    .iter()
+                    .filter(|outcome| {
+                        outcome
+                            .result
+                            .as_ref()
+                            .map_or(true, |result| !feed_outcome_succeeded(result))
+                    })
+                    .map(|outcome| outcome.plan.id)
+                    .collect::<Vec<_>>()
+            )),
+            retryable,
         )
     };
     HandlerExecution::with_finalizer(
@@ -282,7 +334,17 @@ fn config_fingerprint(row: &FeedConfigRow) -> String {
 #[derive(Debug)]
 struct FeedFetchOutcome {
     plan: FeedConfigPlan,
-    result: Result<Vec<FeedEntryHit>, String>,
+    result: Result<ScrapeProviderOutcome, FeedFetchError>,
+}
+
+#[derive(Debug)]
+struct FeedFetchError {
+    message: String,
+    retryable: bool,
+}
+
+fn feed_outcome_succeeded(outcome: &ScrapeProviderOutcome) -> bool {
+    !outcome.items.is_empty() || outcome.item_errors.is_empty()
 }
 
 #[derive(Debug)]
@@ -325,36 +387,38 @@ impl FeedBackfillFinalizer {
         let mut successful_ids = BTreeSet::<i64>::new();
         let mut process_requests = Vec::new();
         for outcome in &self.results {
-            let Ok(provider_entries) = &outcome.result else {
+            let Ok(provider_outcome) = &outcome.result else {
                 continue;
             };
+            if !feed_outcome_succeeded(provider_outcome) {
+                continue;
+            }
             successful_ids.insert(outcome.plan.id);
-            let plan = FeedBackfillPlan {
-                content_id: 0,
-                config_id: outcome.plan.id,
-                scraper_type: outcome.plan.scraper_type.clone(),
-                display_name: outcome.plan.display_name.clone(),
-                feed_url: outcome.plan.feed_url.clone(),
-                base_limit: outcome.plan.target_limit.saturating_sub(self.request.count),
-                target_limit: outcome.plan.target_limit,
-            };
-            let entries = provider_entries
+            let entries = provider_outcome
+                .items
                 .iter()
                 .cloned()
-                .map(|entry| FeedBackfillEntry {
-                    url: entry.url,
-                    title: entry.title,
-                    source: entry.source.or_else(|| outcome.plan.display_name.clone()),
-                    published_at: entry.published_at,
-                    content_type: if outcome.plan.scraper_type == "podcast_rss" {
-                        "podcast".to_owned()
-                    } else {
-                        "article".to_owned()
-                    },
+                .filter_map(|item| match item {
+                    ScrapedItem::Content(entry) => Some(FeedBackfillEntry {
+                        url: entry.url,
+                        source_url: entry.source_url,
+                        title: entry.title,
+                        source: entry.source,
+                        platform: entry.platform,
+                        metadata: entry.metadata,
+                        published_at: entry.published_at,
+                        content_type: entry.content_type,
+                    }),
+                    ScrapedItem::News(_) => None,
                 })
                 .collect::<Vec<_>>();
-            let persisted =
-                persist_feed_backfill(transaction, self.request.user_id, &plan, &entries).await?;
+            let persisted = persist_feed_backfill(
+                transaction,
+                self.request.user_id,
+                FeedBackfillOrigin::Background,
+                &entries,
+            )
+            .await?;
             processed_counts.insert(
                 outcome.plan.id,
                 i64::try_from(persisted.saved.saturating_add(persisted.duplicates))
@@ -526,3 +590,6 @@ fn hex_sha256(value: &[u8]) -> String {
     }
     output
 }
+
+#[cfg(test)]
+mod tests;

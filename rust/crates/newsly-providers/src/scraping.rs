@@ -18,7 +18,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::feed_validation::entry_audio_url;
+mod feed;
+
+use feed::normalize_feed_document;
 
 const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
@@ -817,105 +819,6 @@ fn exceeds_response_limit(size: u64, max_response_bytes: Option<usize>) -> bool 
     max_response_bytes.is_some_and(|limit| size > limit as u64)
 }
 
-fn normalize_feed_document(
-    target: &FeedScrapeTarget,
-    bytes: &[u8],
-) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
-    let feed = feed_rs::parser::parse(bytes)
-        .map_err(|error| ScrapeGatewayError::Feed(error.to_string()))?;
-    let feed_title = feed
-        .title
-        .as_ref()
-        .and_then(|title| clean(Some(title.content.clone())))
-        .or_else(|| target.display_name.clone());
-    let feed_description = feed
-        .description
-        .as_ref()
-        .and_then(|value| clean(Some(value.content.clone())));
-    let mut items = Vec::new();
-    let mut errors = Vec::new();
-    let mut seen = BTreeSet::new();
-    for entry in feed.entries.into_iter().take(target.limit.clamp(1, 100)) {
-        let title = entry
-            .title
-            .as_ref()
-            .and_then(|value| clean(Some(value.content.clone())));
-        let published_at = entry.published.or(entry.updated);
-        let author = entry
-            .authors
-            .first()
-            .and_then(|person| clean(Some(person.name.clone())));
-        let body = entry
-            .content
-            .as_ref()
-            .and_then(|content| clean(content.body.clone()))
-            .or_else(|| {
-                entry
-                    .summary
-                    .as_ref()
-                    .and_then(|summary| clean(Some(summary.content.clone())))
-            });
-        let audio_url = entry_audio_url(&entry);
-        if target.scraper_type == "podcast_rss" && audio_url.is_none() {
-            errors.push(format!(
-                "{}: podcast entry has no usable audio enclosure",
-                entry.id
-            ));
-            continue;
-        }
-        let url = if target.scraper_type == "podcast_rss" {
-            entry_html_url(&entry).or_else(|| audio_url.clone())
-        } else {
-            entry_html_url(&entry)
-        };
-        let Some(url) = url.and_then(|value| normalize_http_url(&value)) else {
-            errors.push(format!("{}: feed entry has no usable URL", entry.id));
-            continue;
-        };
-        if !seen.insert(url.clone()) {
-            continue;
-        }
-        let platform = match target.scraper_type.as_str() {
-            "podcast_rss" => "podcast",
-            "substack" => "substack",
-            _ => "atom",
-        };
-        let content_type = if target.scraper_type == "podcast_rss" {
-            "podcast"
-        } else {
-            "article"
-        };
-        let source = target.display_name.clone().or_else(|| feed_title.clone());
-        let metadata = json!({
-            "platform": platform,
-            "source": source,
-            "source_domain": domain_of(&url),
-            "feed_url": target.feed_url,
-            "feed_config_id": target.config_id,
-            "feed_name": feed_title,
-            "feed_description": feed_description,
-            "author": author,
-            "publication_date": published_at.map(|value| value.to_rfc3339()),
-            "rss_content": body,
-            "audio_url": audio_url,
-            "entry_id": entry.id,
-        });
-        items.push(ScrapedItem::Content(Box::new(ScrapedContentItem {
-            url: url.clone(),
-            source_url: url,
-            title,
-            content_type: content_type.to_owned(),
-            user_id: target.user_id,
-            source,
-            platform: platform.to_owned(),
-            metadata,
-            published_at,
-            config_id: target.config_id,
-        })));
-    }
-    Ok(ScrapeProviderOutcome::new(items, errors))
-}
-
 fn cluster_anchors(fragment: &Html, selector: &Selector) -> Vec<(String, Option<String>)> {
     fragment
         .select(selector)
@@ -1085,6 +988,10 @@ fn normalize_http_url(value: &str) -> Option<String> {
     }
     if url.scheme() == "http" {
         let _ = url.set_scheme("https");
+    }
+    if url.path() != "/" && url.path().ends_with('/') {
+        let path = url.path().trim_end_matches('/').to_owned();
+        url.set_path(&path);
     }
     url.set_fragment(None);
     Some(url.to_string())
