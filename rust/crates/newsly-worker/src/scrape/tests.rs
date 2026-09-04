@@ -8,7 +8,7 @@ use sqlx::PgPool;
 
 use super::{
     AggregatorKey, RequestedSource, ScrapeFinalizationFailures, ScrapeFinalizer, ScrapeRequest,
-    SourceOutcome,
+    SourceOutcome, combine_config_outcomes,
 };
 use crate::TaskFinalizerResult;
 
@@ -113,6 +113,41 @@ fn persistence_failure_keeps_an_existing_retryable_source_failure() {
         failures.into_result(),
         TaskFinalizerResult::Override(ref result) if result.retryable
     ));
+}
+
+#[test]
+fn configured_feed_partial_progress_keeps_config_diagnostics_without_failing_source() {
+    let outcome = combine_config_outcomes(
+        "podcast".to_owned(),
+        vec![
+            (
+                41,
+                Ok(ScrapeProviderOutcome {
+                    items: vec![scraped_content(
+                        "https://example.com/episode",
+                        "podcast",
+                        7,
+                        41,
+                    )],
+                    item_errors: vec!["episode missing audio".to_owned()],
+                }),
+            ),
+            (42, Err("scraper HTTP request failed".to_owned())),
+        ],
+    );
+
+    assert!(!outcome.failed_without_progress());
+    let result = outcome
+        .result
+        .expect("combined source should preserve partial progress");
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(
+        result.item_errors,
+        [
+            "config 41: episode missing audio",
+            "config 42: scraper HTTP request failed",
+        ]
+    );
 }
 
 #[sqlx::test]

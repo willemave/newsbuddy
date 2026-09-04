@@ -416,14 +416,37 @@ async fn execute_source(gateway: &ScrapeGateway, plan: SourcePlan) -> SourceOutc
         },
         SourcePlanKind::Feed(targets) => {
             let gateway = gateway.clone();
+            let source = plan.source.clone();
             let results = stream::iter(targets)
                 .map(move |target| {
                     let gateway = gateway.clone();
+                    let source = source.clone();
                     async move {
-                        let result = gateway
-                            .fetch_feed(&target)
-                            .await
-                            .map_err(|error| error.to_string());
+                        let result = match gateway.fetch_feed(&target).await {
+                            Ok(outcome) => {
+                                if outcome.items.is_empty() || !outcome.item_errors.is_empty() {
+                                    tracing::warn!(
+                                        source,
+                                        config_id = target.config_id,
+                                        item_count = outcome.items.len(),
+                                        item_error_count = outcome.item_errors.len(),
+                                        "scraper feed produced incomplete results"
+                                    );
+                                }
+                                Ok(outcome)
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    source,
+                                    config_id = target.config_id,
+                                    error_code = error.diagnostic_code(),
+                                    http_status = error.http_status(),
+                                    retryable = error.retryable(),
+                                    "scraper feed fetch failed"
+                                );
+                                Err(error.to_string())
+                            }
+                        };
                         (target.config_id, result)
                     }
                 })
@@ -463,20 +486,39 @@ fn combine_config_outcomes(
     source: String,
     results: Vec<(i64, Result<ScrapeProviderOutcome, String>)>,
 ) -> SourceOutcome {
+    let config_count = results.len();
     let required_config_ids = results.iter().map(|(id, _)| *id).collect::<Vec<_>>();
     let mut items = Vec::new();
     let mut item_errors = Vec::new();
+    let mut successful_configs = 0_usize;
+    let mut failed_configs = 0_usize;
     for (config_id, result) in results {
         match result {
             Ok(mut outcome) => {
+                successful_configs += 1;
                 items.append(&mut outcome.items);
-                item_errors.append(&mut outcome.item_errors);
+                item_errors.extend(
+                    outcome
+                        .item_errors
+                        .drain(..)
+                        .map(|error| format!("config {config_id}: {error}")),
+                );
             }
             Err(error) => {
+                failed_configs += 1;
                 item_errors.push(format!("config {config_id}: {error}"));
             }
         }
     }
+    tracing::info!(
+        source,
+        config_count,
+        successful_configs,
+        failed_configs,
+        item_count = items.len(),
+        item_error_count = item_errors.len(),
+        "scraper configured-feed source completed"
+    );
     SourceOutcome {
         source,
         required_config_ids,

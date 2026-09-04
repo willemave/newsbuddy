@@ -13,6 +13,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use uuid::Uuid;
 
+use crate::feed_validation::entry_audio_url;
+
 const DEFAULT_MAX_MEDIA_BYTES: u64 = 500_000_000;
 const APPLE_LOOKUP_MAX_BYTES: u64 = 2_000_000;
 const APPLE_FEED_MAX_BYTES: u64 = 20_000_000;
@@ -577,21 +579,6 @@ fn resolve_feed_audio(
         3.max(target_tokens.len() / 2)
     };
     Ok((best_score >= minimum_score).then_some(best_url).flatten())
-}
-
-fn entry_audio_url(entry: &feed_rs::model::Entry) -> Option<String> {
-    entry.links.iter().find_map(|link| {
-        let media_type = link.media_type.as_deref().unwrap_or_default();
-        let is_enclosure = link.rel.as_deref() == Some("enclosure");
-        let looks_like_audio = media_type.starts_with("audio/")
-            || matches!(
-                media_extension(&link.href).as_str(),
-                "aac" | "flac" | "m4a" | "mp3" | "mpga" | "oga" | "ogg" | "opus" | "wav" | "webm"
-            );
-        (is_enclosure || looks_like_audio)
-            .then(|| clean(Some(link.href.as_str())))
-            .flatten()
-    })
 }
 
 fn apple_show_id(url: &Url) -> Option<String> {

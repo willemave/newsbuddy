@@ -18,6 +18,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
+use crate::feed_validation::entry_audio_url;
+
 const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
 const MAX_HN_CONCURRENCY: usize = 8;
@@ -239,96 +241,8 @@ impl ScrapeGateway {
         &self,
         target: &FeedScrapeTarget,
     ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
-        let bytes = self.fetch_public_bytes(&target.feed_url).await?;
-        let feed = feed_rs::parser::parse(bytes.as_slice())
-            .map_err(|error| ScrapeGatewayError::Feed(error.to_string()))?;
-        let feed_title = feed
-            .title
-            .as_ref()
-            .and_then(|title| clean(Some(title.content.clone())))
-            .or_else(|| target.display_name.clone());
-        let feed_description = feed
-            .description
-            .as_ref()
-            .and_then(|value| clean(Some(value.content.clone())));
-        let mut items = Vec::new();
-        let mut errors = Vec::new();
-        let mut seen = BTreeSet::new();
-        for entry in feed.entries.into_iter().take(target.limit.clamp(1, 100)) {
-            let title = entry
-                .title
-                .as_ref()
-                .and_then(|value| clean(Some(value.content.clone())));
-            let published_at = entry.published.or(entry.updated);
-            let author = entry
-                .authors
-                .first()
-                .and_then(|person| clean(Some(person.name.clone())));
-            let body = entry
-                .content
-                .as_ref()
-                .and_then(|content| clean(content.body.clone()))
-                .or_else(|| {
-                    entry
-                        .summary
-                        .as_ref()
-                        .and_then(|summary| clean(Some(summary.content.clone())))
-                });
-            let audio_url = podcast_audio_url(&entry);
-            let url = if target.scraper_type == "podcast_rss" {
-                entry_html_url(&entry).or_else(|| audio_url.clone())
-            } else {
-                entry_html_url(&entry)
-            };
-            let Some(url) = url.and_then(|value| normalize_http_url(&value)) else {
-                errors.push(format!("{}: feed entry has no usable URL", entry.id));
-                continue;
-            };
-            if target.scraper_type == "podcast_rss" && audio_url.is_none() {
-                continue;
-            }
-            if !seen.insert(url.clone()) {
-                continue;
-            }
-            let platform = match target.scraper_type.as_str() {
-                "podcast_rss" => "podcast",
-                "substack" => "substack",
-                _ => "atom",
-            };
-            let content_type = if target.scraper_type == "podcast_rss" {
-                "podcast"
-            } else {
-                "article"
-            };
-            let source = target.display_name.clone().or_else(|| feed_title.clone());
-            let metadata = json!({
-                "platform": platform,
-                "source": source,
-                "source_domain": domain_of(&url),
-                "feed_url": target.feed_url,
-                "feed_config_id": target.config_id,
-                "feed_name": feed_title,
-                "feed_description": feed_description,
-                "author": author,
-                "publication_date": published_at.map(|value| value.to_rfc3339()),
-                "rss_content": body,
-                "audio_url": audio_url,
-                "entry_id": entry.id,
-            });
-            items.push(ScrapedItem::Content(Box::new(ScrapedContentItem {
-                url: url.clone(),
-                source_url: url,
-                title,
-                content_type: content_type.to_owned(),
-                user_id: target.user_id,
-                source,
-                platform: platform.to_owned(),
-                metadata,
-                published_at,
-                config_id: target.config_id,
-            })));
-        }
-        Ok(ScrapeProviderOutcome::new(items, errors))
+        let bytes = self.fetch_public_bytes(&target.feed_url, None).await?;
+        normalize_feed_document(target, bytes.as_slice())
     }
 
     /// Fetches all configured Reddit targets with one shared application access token.
@@ -458,7 +372,9 @@ impl ScrapeGateway {
         limit: usize,
         max_related: usize,
     ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
-        let bytes = self.fetch_public_bytes(feed_url).await?;
+        let bytes = self
+            .fetch_public_bytes(feed_url, Some(MAX_RESPONSE_BYTES))
+            .await?;
         let feed = feed_rs::parser::parse(bytes.as_slice())
             .map_err(|error| ScrapeGatewayError::Feed(error.to_string()))?;
         let feed_title = feed
@@ -555,7 +471,9 @@ impl ScrapeGateway {
         url: &str,
         limit: usize,
     ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
-        let bytes = self.fetch_public_bytes(url).await?;
+        let bytes = self
+            .fetch_public_bytes(url, Some(MAX_RESPONSE_BYTES))
+            .await?;
         let document = Html::parse_document(std::str::from_utf8(&bytes).map_err(|error| {
             ScrapeGatewayError::Html(format!("{} returned non-UTF-8 HTML: {error}", key.as_str()))
         })?);
@@ -640,7 +558,10 @@ impl ScrapeGateway {
         let mut seen = BTreeSet::new();
         for topic in topics {
             let topic_url = format!("https://brutalist.report/topic/{topic}?limit=25&hours=24");
-            let bytes = match self.fetch_public_bytes(&topic_url).await {
+            let bytes = match self
+                .fetch_public_bytes(&topic_url, Some(MAX_RESPONSE_BYTES))
+                .await
+            {
                 Ok(bytes) => bytes,
                 Err(error) => {
                     errors.push(format!("{topic}: {error}"));
@@ -835,7 +756,11 @@ impl ScrapeGateway {
         Ok(ScrapeProviderOutcome::new(items, Vec::new()))
     }
 
-    async fn fetch_public_bytes(&self, source_url: &str) -> Result<Vec<u8>, ScrapeGatewayError> {
+    async fn fetch_public_bytes(
+        &self,
+        source_url: &str,
+        max_response_bytes: Option<usize>,
+    ) -> Result<Vec<u8>, ScrapeGatewayError> {
         let mut current = PublicUrl::parse(source_url)?;
         for redirect_count in 0..=MAX_REDIRECTS {
             current.validate_dns().await?;
@@ -868,7 +793,7 @@ impl ScrapeGateway {
             let response = response.error_for_status()?;
             if response
                 .content_length()
-                .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+                .is_some_and(|length| exceeds_response_limit(length, max_response_bytes))
             {
                 return Err(ScrapeGatewayError::ResponseTooLarge);
             }
@@ -876,7 +801,8 @@ impl ScrapeGateway {
             let mut stream = response.bytes_stream();
             while let Some(chunk) = stream.next().await {
                 let chunk = chunk?;
-                if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                let next_size = body.len().saturating_add(chunk.len()) as u64;
+                if exceeds_response_limit(next_size, max_response_bytes) {
                     return Err(ScrapeGatewayError::ResponseTooLarge);
                 }
                 body.extend_from_slice(&chunk);
@@ -885,6 +811,109 @@ impl ScrapeGateway {
         }
         Err(ScrapeGatewayError::TooManyRedirects)
     }
+}
+
+fn exceeds_response_limit(size: u64, max_response_bytes: Option<usize>) -> bool {
+    max_response_bytes.is_some_and(|limit| size > limit as u64)
+}
+
+fn normalize_feed_document(
+    target: &FeedScrapeTarget,
+    bytes: &[u8],
+) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
+    let feed = feed_rs::parser::parse(bytes)
+        .map_err(|error| ScrapeGatewayError::Feed(error.to_string()))?;
+    let feed_title = feed
+        .title
+        .as_ref()
+        .and_then(|title| clean(Some(title.content.clone())))
+        .or_else(|| target.display_name.clone());
+    let feed_description = feed
+        .description
+        .as_ref()
+        .and_then(|value| clean(Some(value.content.clone())));
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    let mut seen = BTreeSet::new();
+    for entry in feed.entries.into_iter().take(target.limit.clamp(1, 100)) {
+        let title = entry
+            .title
+            .as_ref()
+            .and_then(|value| clean(Some(value.content.clone())));
+        let published_at = entry.published.or(entry.updated);
+        let author = entry
+            .authors
+            .first()
+            .and_then(|person| clean(Some(person.name.clone())));
+        let body = entry
+            .content
+            .as_ref()
+            .and_then(|content| clean(content.body.clone()))
+            .or_else(|| {
+                entry
+                    .summary
+                    .as_ref()
+                    .and_then(|summary| clean(Some(summary.content.clone())))
+            });
+        let audio_url = entry_audio_url(&entry);
+        if target.scraper_type == "podcast_rss" && audio_url.is_none() {
+            errors.push(format!(
+                "{}: podcast entry has no usable audio enclosure",
+                entry.id
+            ));
+            continue;
+        }
+        let url = if target.scraper_type == "podcast_rss" {
+            entry_html_url(&entry).or_else(|| audio_url.clone())
+        } else {
+            entry_html_url(&entry)
+        };
+        let Some(url) = url.and_then(|value| normalize_http_url(&value)) else {
+            errors.push(format!("{}: feed entry has no usable URL", entry.id));
+            continue;
+        };
+        if !seen.insert(url.clone()) {
+            continue;
+        }
+        let platform = match target.scraper_type.as_str() {
+            "podcast_rss" => "podcast",
+            "substack" => "substack",
+            _ => "atom",
+        };
+        let content_type = if target.scraper_type == "podcast_rss" {
+            "podcast"
+        } else {
+            "article"
+        };
+        let source = target.display_name.clone().or_else(|| feed_title.clone());
+        let metadata = json!({
+            "platform": platform,
+            "source": source,
+            "source_domain": domain_of(&url),
+            "feed_url": target.feed_url,
+            "feed_config_id": target.config_id,
+            "feed_name": feed_title,
+            "feed_description": feed_description,
+            "author": author,
+            "publication_date": published_at.map(|value| value.to_rfc3339()),
+            "rss_content": body,
+            "audio_url": audio_url,
+            "entry_id": entry.id,
+        });
+        items.push(ScrapedItem::Content(Box::new(ScrapedContentItem {
+            url: url.clone(),
+            source_url: url,
+            title,
+            content_type: content_type.to_owned(),
+            user_id: target.user_id,
+            source,
+            platform: platform.to_owned(),
+            metadata,
+            published_at,
+            config_id: target.config_id,
+        })));
+    }
+    Ok(ScrapeProviderOutcome::new(items, errors))
 }
 
 fn cluster_anchors(fragment: &Html, selector: &Selector) -> Vec<(String, Option<String>)> {
@@ -1027,32 +1056,6 @@ fn entry_html_url(entry: &feed_rs::model::Entry) -> Option<String> {
                 .find(|link| link.rel.as_deref() != Some("enclosure"))
         })
         .map(|link| link.href.clone())
-}
-
-fn podcast_audio_url(entry: &feed_rs::model::Entry) -> Option<String> {
-    entry
-        .content
-        .as_ref()
-        .and_then(|content| content.src.as_ref())
-        .filter(|link| is_audio_link(link.media_type.as_deref(), &link.href))
-        .map(|link| link.href.clone())
-        .or_else(|| {
-            entry
-                .links
-                .iter()
-                .find(|link| {
-                    link.rel.as_deref() == Some("enclosure")
-                        && is_audio_link(link.media_type.as_deref(), &link.href)
-                })
-                .map(|link| link.href.clone())
-        })
-}
-
-fn is_audio_link(media_type: Option<&str>, href: &str) -> bool {
-    media_type.is_some_and(|value| value.to_ascii_lowercase().starts_with("audio/"))
-        || [".mp3", ".m4a", ".wav", ".ogg"]
-            .iter()
-            .any(|suffix| href.to_ascii_lowercase().contains(suffix))
 }
 
 fn next_element_matching<'a>(element: ElementRef<'a>, tag: &str) -> Option<ElementRef<'a>> {
@@ -1221,6 +1224,31 @@ pub enum ScrapeGatewayError {
 }
 
 impl ScrapeGatewayError {
+    pub fn diagnostic_code(&self) -> &'static str {
+        match self {
+            Self::Http(error) if error.is_timeout() => "http_timeout",
+            Self::Http(error) if error.is_connect() => "http_connect",
+            Self::Http(error) if error.status().is_some() => "http_status",
+            Self::Http(_) => "http_request",
+            Self::Url(_) => "invalid_url",
+            Self::PublicUrl(_) => "public_url_validation",
+            Self::ResponseTooLarge => "response_too_large",
+            Self::RedirectLocationMissing => "redirect_location_missing",
+            Self::TooManyRedirects => "too_many_redirects",
+            Self::Feed(_) => "invalid_feed",
+            Self::Html(_) => "invalid_html",
+            Self::RedditNotConfigured => "reddit_not_configured",
+            Self::RedditTokenMissing => "reddit_token_missing",
+        }
+    }
+
+    pub fn http_status(&self) -> Option<u16> {
+        match self {
+            Self::Http(error) => error.status().map(|status| status.as_u16()),
+            _ => None,
+        }
+    }
+
     pub fn retryable(&self) -> bool {
         match self {
             Self::Http(error) => error.status().is_none_or(|status| {
@@ -1239,35 +1267,4 @@ impl ScrapeGatewayError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{AggregatorKey, is_external_reddit_url, normalize_http_url};
-
-    #[test]
-    fn aggregator_names_accept_legacy_display_aliases() {
-        assert_eq!(
-            AggregatorKey::parse("Hacker News"),
-            Some(AggregatorKey::HackerNews)
-        );
-        assert_eq!(
-            AggregatorKey::parse("BrutalistReport"),
-            Some(AggregatorKey::Brutalist)
-        );
-        assert_eq!(AggregatorKey::parse("missing"), None);
-    }
-
-    #[test]
-    fn result_urls_are_normalized_and_fragments_removed() {
-        assert_eq!(
-            normalize_http_url("http://example.com/post#section").as_deref(),
-            Some("https://example.com/post")
-        );
-    }
-
-    #[test]
-    fn reddit_internal_links_do_not_enter_news_ingestion() {
-        assert!(!is_external_reddit_url(
-            "https://www.reddit.com/r/rust/comments/1"
-        ));
-        assert!(is_external_reddit_url("https://blog.rust-lang.org/post"));
-    }
-}
+mod tests;

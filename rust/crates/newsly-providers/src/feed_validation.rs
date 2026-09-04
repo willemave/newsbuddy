@@ -223,25 +223,38 @@ fn has_feed_semantics(feed: &feed_rs::model::Feed) -> bool {
 }
 
 fn has_audio_entries(feed: &feed_rs::model::Feed) -> bool {
-    feed.entries.iter().any(|entry| {
-        entry
-            .content
-            .as_ref()
-            .and_then(|content| content.src.as_ref())
-            .is_some_and(|link| is_audio_link(link.media_type.as_deref(), &link.href))
-            || entry
-                .links
+    feed.entries
+        .iter()
+        .any(|entry| entry_audio_url(entry).is_some())
+}
+
+pub(crate) fn entry_audio_url(entry: &feed_rs::model::Entry) -> Option<String> {
+    entry
+        .content
+        .as_ref()
+        .and_then(|content| content.src.as_ref())
+        .filter(|link| is_audio_link(link.media_type.as_deref(), &link.href))
+        .map(|link| link.href.clone())
+        .or_else(|| {
+            entry
+                .media
                 .iter()
-                .any(|link| is_audio_link(link.media_type.as_deref(), &link.href))
-            || entry.media.iter().any(|media| {
-                media.content.iter().any(|content| {
+                .flat_map(|media| media.content.iter())
+                .find_map(|content| {
+                    let url = content.url.as_ref()?;
                     let media_type = content.content_type.as_ref().map(ToString::to_string);
-                    let url = content.url.as_ref().map(ToString::to_string);
-                    url.as_deref()
-                        .is_some_and(|url| is_audio_link(media_type.as_deref(), url))
+                    is_audio_link(media_type.as_deref(), url.as_str()).then(|| url.to_string())
                 })
+        })
+        .or_else(|| {
+            entry.links.iter().find_map(|link| {
+                let is_enclosure = link.rel.as_deref() == Some("enclosure");
+                let has_no_declared_type = link.media_type.is_none();
+                (is_audio_link(link.media_type.as_deref(), &link.href)
+                    || (is_enclosure && has_no_declared_type))
+                    .then(|| link.href.clone())
             })
-    })
+        })
 }
 
 fn is_audio_link(media_type: Option<&str>, href: &str) -> bool {
