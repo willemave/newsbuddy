@@ -232,6 +232,33 @@ assert_id() {
   fi
 }
 
+tap_id_from_tree() {
+  local identifier="$1"
+  local ui_file="$2"
+  local match_count
+  local tap_x
+  local tap_y
+
+  match_count="$(
+    jq -r --arg identifier "$identifier" \
+      '[.. | objects | select(.AXUniqueId == $identifier)] | length' \
+      "$ui_file"
+  )"
+  if [[ "$match_count" != "1" ]]; then
+    echo "Expected exactly one accessibility element for $identifier; found $match_count" >&2
+    exit 1
+  fi
+
+  IFS=$'\t' read -r tap_x tap_y < <(
+    jq -r --arg identifier "$identifier" '
+      [.. | objects | select(.AXUniqueId == $identifier)][0].frame
+      | [(.x + (.width / 2)), (.y + (.height / 2))]
+      | @tsv
+    ' "$ui_file"
+  )
+  axe tap -x "$tap_x" -y "$tap_y" --udid "$UDID" --post-delay 1 >/dev/null
+}
+
 launch_authenticated_app
 sleep 1
 
@@ -274,7 +301,10 @@ axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/02_settings.png" >/dev/null
 assert_id "settings.screen" "$OUTPUT_DIR/02_settings_ui.json"
 
 echo "Opening Search from Settings..."
-axe tap --id "settings.search" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
+# AXe 1.6.0's identifier resolver expects a dictionary after a modal sheet even
+# though describe-ui correctly returns its documented top-level array. Resolve
+# the already-asserted unique element from that captured tree and tap its center.
+tap_id_from_tree "settings.search" "$OUTPUT_DIR/02_settings_ui.json"
 axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/03_search_ui.json"
 axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/03_search.png" >/dev/null
 assert_id "search.input" "$OUTPUT_DIR/03_search_ui.json"
