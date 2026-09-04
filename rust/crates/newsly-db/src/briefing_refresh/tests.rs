@@ -6,7 +6,7 @@ use super::{
     ComposedBriefingAppend, ComposedBriefingSegment, PrepareBriefingRefreshOutcome,
     PreparedBriefingRefresh, PreparedBriefingRefreshSeed, ProviderUsage, Utc,
     apply_briefing_lens_assignment, apply_briefing_refresh, json, prepare_briefing_refresh,
-    sources::{news_topic, parse_source_ids},
+    sources::{briefing_context, news_topic, parse_source_ids},
 };
 
 fn test_config() -> BriefingRefreshConfig {
@@ -224,6 +224,53 @@ fn embedding_text_keeps_title_summary_and_points() {
         briefing_context: None,
     };
     assert_eq!(source.embedding_text(), "A title\nA summary\nOne Two");
+}
+
+#[test]
+fn briefing_context_preserves_enriched_article_artifacts() {
+    let metadata = json!({
+        "summary": {
+            "one_line": "A concise thesis.",
+            "artifact": {
+                "payload": {
+                    "key_points": [
+                        {"heading": "Evidence", "text": "A concrete supporting result."},
+                        "A second supporting result."
+                    ],
+                    "quotes": [
+                        {"attribution": "Researcher", "text": "An attributable quotation."}
+                    ],
+                    "takeaway": "The practical consequence.",
+                    "extras": {"counterpoint": "A meaningful limitation."}
+                }
+            },
+            "feed_preview": {
+                "reason_to_read": "It connects the evidence to practice.",
+                "preview_bullets": ["First preview point."]
+            }
+        },
+        "excerpt": "A source excerpt."
+    });
+    let context = briefing_context(metadata.as_object().expect("object metadata"))
+        .expect("rich metadata should produce context");
+
+    assert!(context.contains("One line: A concise thesis."));
+    assert!(context.contains("Artifact context:"));
+    assert!(context.contains("Evidence: A concrete supporting result."));
+    assert!(context.contains("Researcher: An attributable quotation."));
+    assert!(context.contains("Counterpoint: A meaningful limitation."));
+    assert!(context.contains("Feed preview:"));
+    assert!(context.contains("Excerpt: A source excerpt."));
+}
+
+#[test]
+fn briefing_context_remains_bounded() {
+    let metadata = json!({"summary": {"one_line": "word ".repeat(1_000)}});
+    let context = briefing_context(metadata.as_object().expect("object metadata"))
+        .expect("long metadata should produce context");
+
+    assert!((2_300..=2_400).contains(&context.chars().count()));
+    assert!(context.ends_with("..."));
 }
 
 #[sqlx::test]

@@ -37,12 +37,15 @@ For `news`, return exactly one passage: one concise, information-dense paragraph
 sentences, with no figures or pullquotes, linking every source exactly once. Synthesize related
 sources into a unified account instead of giving each source its own sentence, and omit details
 that do not materially improve the reader's understanding. Use the fewest sentences needed for a
-clear account. For `audio` and `longform`, give every
-source substantive treatment, identify its exact title near the beginning, include its supplied
-publication or show name when available, and cover its thesis, key evidence, and significance.
-Suggest editorial pullquotes rather than pretending they are source quotations. Add a figure for
-each deep source that has an image, normally inset, with alternating alignment and at most one full
-figure. Cover every supplied source at least once.";
+clear account. For `audio` and `longform`, treat every source as a full work rather than a headline.
+Give each source its own substantive treatment of 3-5 sentences, roughly 100-200 words, covering
+its thesis, key points, concrete evidence or counterpoints, and why it matters to the reader. Use
+the supplied `briefing_context` when present, including specific facts and attributable quotations
+when the context supports them. Identify the exact title near the beginning and include the
+supplied publication or show name when available. Suggest editorial pullquotes rather than
+pretending they are source quotations. Add a figure for each deep source that has an image,
+normally inset, with alternating alignment and at most one full figure. Cover every supplied source
+at least once.";
 
 const LENS_NAMING_SYSTEM_PROMPT: &str = r"Name one semantic cluster of unread Fast Reads for Newsly.
 
@@ -831,6 +834,14 @@ mod tests {
         assert!(
             COMPOSITION_SYSTEM_PROMPT.contains("instead of giving each source its own sentence")
         );
+    }
+
+    #[test]
+    fn deep_prompt_requests_full_source_treatment() {
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("treat every source as a full work"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("3-5 sentences, roughly 100-200 words"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("concrete evidence or counterpoints"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("supplied `briefing_context`"));
     }
 
     #[test]

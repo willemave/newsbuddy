@@ -5,6 +5,11 @@ use super::{
     SourceContentRow, SourceNewsRow, Transaction, Value,
 };
 
+const BRIEFING_CONTEXT_MAX_CHARS: usize = 2_400;
+const BRIEFING_SOURCE_EXCERPT_MAX_CHARS: usize = 900;
+const BRIEFING_CONTEXT_LIST_MAX_ITEMS: usize = 6;
+const BRIEFING_CONTEXT_ITEM_MAX_CHARS: usize = 700;
+
 pub(crate) async fn load_eligible_sources_for_keys(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
@@ -302,22 +307,293 @@ pub(super) fn briefing_context(metadata: &Map<String, Value>) -> Option<String> 
             for (label, key) in [
                 ("Overview", "overview"),
                 ("Summary", "summary"),
+                ("Hook", "hook"),
                 ("One line", "one_line"),
-                ("Takeaway", "takeaway"),
+                ("Narrative", "editorial_narrative"),
             ] {
-                if let Some(value) = clean_value(object.get(key)) {
-                    parts.push(format!("{label}: {value}"));
-                }
+                append_labeled_text(&mut parts, label, object.get(key));
             }
-        } else if let Some(value) = clean_value(Some(summary)) {
-            parts.push(format!("Summary: {value}"));
+            append_items(
+                &mut parts,
+                "Key points",
+                ["key_points", "bullet_points", "points"]
+                    .into_iter()
+                    .find_map(|key| {
+                        object
+                            .get(key)
+                            .filter(|value| value.as_array().is_some_and(|items| !items.is_empty()))
+                    }),
+                BRIEFING_CONTEXT_LIST_MAX_ITEMS,
+            );
+            append_items(
+                &mut parts,
+                "Insights",
+                object.get("insights"),
+                BRIEFING_CONTEXT_LIST_MAX_ITEMS,
+            );
+            append_items(
+                &mut parts,
+                "Topics",
+                object.get("topics"),
+                BRIEFING_CONTEXT_LIST_MAX_ITEMS,
+            );
+            append_items(&mut parts, "Quotes", object.get("quotes"), 3);
+            append_items(&mut parts, "Questions", object.get("questions"), 3);
+            append_items(
+                &mut parts,
+                "Counterarguments",
+                object.get("counter_arguments"),
+                3,
+            );
+            append_labeled_text(&mut parts, "Takeaway", object.get("takeaway"));
+            append_source_details(&mut parts, object.get("source_details"));
+            append_artifact(&mut parts, object.get("artifact"));
+            append_feed_preview(&mut parts, object.get("feed_preview"));
+            append_source_excerpt(&mut parts, "Source excerpt", object.get("full_markdown"));
+        } else {
+            append_labeled_text(&mut parts, "Summary", Some(summary));
         }
     }
-    if let Some(value) = clean_value(metadata.get("excerpt")) {
-        parts.push(format!("Excerpt: {value}"));
-    }
+    append_labeled_text(&mut parts, "Excerpt", metadata.get("excerpt"));
+    append_source_excerpt(
+        &mut parts,
+        "Source excerpt",
+        metadata.get("content_to_summarize"),
+    );
+    append_source_excerpt(&mut parts, "Source excerpt", metadata.get("content"));
+    append_source_excerpt(&mut parts, "Transcript excerpt", metadata.get("transcript"));
     let value = parts.join("\n\n");
-    (!value.is_empty()).then(|| value.chars().take(2_400).collect())
+    (!value.is_empty()).then(|| truncate_text(&value, BRIEFING_CONTEXT_MAX_CHARS))
+}
+
+fn append_labeled_text(parts: &mut Vec<String>, label: &str, value: Option<&Value>) {
+    if let Some(text) = text_from_value(value) {
+        parts.push(format!("{label}: {text}"));
+    }
+}
+
+fn append_items(parts: &mut Vec<String>, label: &str, value: Option<&Value>, max_items: usize) {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return;
+    };
+    let lines = items
+        .iter()
+        .take(max_items)
+        .filter_map(|item| text_from_value(Some(item)))
+        .map(|item| format!("- {item}"))
+        .collect::<Vec<_>>();
+    if !lines.is_empty() {
+        parts.push(format!("{label}:\n{}", lines.join("\n")));
+    }
+}
+
+fn append_source_details(parts: &mut Vec<String>, value: Option<&Value>) {
+    let Some(details) = value.and_then(Value::as_object) else {
+        return;
+    };
+    let mut lines = Vec::new();
+    for (key, value) in details {
+        if key == "template" {
+            continue;
+        }
+        let label = display_label(key);
+        if let Some(items) = value.as_array() {
+            let items = items
+                .iter()
+                .take(BRIEFING_CONTEXT_LIST_MAX_ITEMS)
+                .filter_map(|item| text_from_value(Some(item)))
+                .collect::<Vec<_>>();
+            if !items.is_empty() {
+                lines.push(format!("{label}: {}", items.join("; ")));
+            }
+        } else if let Some(text) = text_from_value(Some(value)) {
+            lines.push(format!("{label}: {text}"));
+        }
+    }
+    if !lines.is_empty() {
+        parts.push(format!(
+            "Source details:\n{}",
+            lines
+                .into_iter()
+                .map(|line| format!("- {line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+}
+
+fn append_artifact(parts: &mut Vec<String>, value: Option<&Value>) {
+    let Some(payload) = value
+        .and_then(Value::as_object)
+        .and_then(|artifact| artifact.get("payload"))
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    let mut lines = Vec::new();
+    for key in [
+        "overview",
+        "thesis",
+        "primary_claim",
+        "counterpoint",
+        "takeaway",
+        "reason_to_read",
+    ] {
+        if let Some(text) = text_from_value(payload.get(key)) {
+            lines.push(format!("{}: {text}", display_label(key)));
+        }
+    }
+    for key in [
+        "key_points",
+        "supporting_arguments",
+        "evidence",
+        "implications",
+        "quotes",
+    ] {
+        let Some(items) = payload.get(key).and_then(Value::as_array) else {
+            continue;
+        };
+        let items = items
+            .iter()
+            .take(BRIEFING_CONTEXT_LIST_MAX_ITEMS)
+            .filter_map(|item| text_from_value(Some(item)))
+            .collect::<Vec<_>>();
+        if !items.is_empty() {
+            lines.push(format!("{}: {}", display_label(key), items.join("; ")));
+        }
+    }
+    if let Some(extras) = payload.get("extras").and_then(Value::as_object) {
+        for (key, value) in extras {
+            if let Some(text) = text_from_value(Some(value)) {
+                lines.push(format!("{}: {text}", display_label(key)));
+            }
+        }
+    }
+    if !lines.is_empty() {
+        parts.push(format!(
+            "Artifact context:\n{}",
+            lines
+                .into_iter()
+                .map(|line| format!("- {line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+}
+
+fn append_feed_preview(parts: &mut Vec<String>, value: Option<&Value>) {
+    let Some(preview) = value.and_then(Value::as_object) else {
+        return;
+    };
+    let mut lines = Vec::new();
+    for key in ["one_line", "reason_to_read"] {
+        if let Some(text) = text_from_value(preview.get(key)) {
+            lines.push(format!("{}: {text}", display_label(key)));
+        }
+    }
+    if let Some(items) = preview.get("preview_bullets").and_then(Value::as_array) {
+        let items = items
+            .iter()
+            .take(3)
+            .filter_map(|item| text_from_value(Some(item)))
+            .collect::<Vec<_>>();
+        if !items.is_empty() {
+            lines.push(format!("Preview bullets: {}", items.join("; ")));
+        }
+    }
+    if !lines.is_empty() {
+        parts.push(format!(
+            "Feed preview:\n{}",
+            lines
+                .into_iter()
+                .map(|line| format!("- {line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+}
+
+fn append_source_excerpt(parts: &mut Vec<String>, label: &str, value: Option<&Value>) {
+    if let Some(text) = text_from_value(value) {
+        parts.push(format!(
+            "{label}: {}",
+            truncate_text(&text, BRIEFING_SOURCE_EXCERPT_MAX_CHARS)
+        ));
+    }
+}
+
+fn text_from_value(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    if let Some(value) = value.as_str() {
+        return clean_text(Some(value));
+    }
+    let object = value.as_object()?;
+    let heading = [
+        "heading",
+        "topic",
+        "title",
+        "category",
+        "attribution",
+        "context",
+    ]
+    .into_iter()
+    .find_map(|key| clean_value(object.get(key)));
+    let body = [
+        "text",
+        "point",
+        "detail",
+        "content",
+        "summary",
+        "insight",
+        "overview",
+        "thesis",
+        "primary_claim",
+        "takeaway",
+    ]
+    .into_iter()
+    .find_map(|key| clean_value(object.get(key)));
+    let nested = object
+        .get("bullets")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(3)
+        .filter_map(|item| text_from_value(Some(item)))
+        .collect::<Vec<_>>();
+    let mut text = match (heading, body) {
+        (Some(heading), Some(body)) if !body.to_lowercase().contains(&heading.to_lowercase()) => {
+            Some(format!("{heading}: {body}"))
+        }
+        (heading, body) => body.or(heading),
+    };
+    if !nested.is_empty() {
+        let nested = nested.join("; ");
+        text = Some(text.map_or(nested.clone(), |text| format!("{text} ({nested})")));
+    }
+    text.map(|text| truncate_text(&text, BRIEFING_CONTEXT_ITEM_MAX_CHARS))
+}
+
+fn display_label(key: &str) -> String {
+    let value = key.replace('_', " ");
+    let mut chars = value.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+        .unwrap_or_default()
+}
+
+fn truncate_text(value: &str, max_chars: usize) -> String {
+    let cleaned = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.chars().count() <= max_chars {
+        return cleaned;
+    }
+    let available = max_chars.saturating_sub(3);
+    let prefix = cleaned.chars().take(available).collect::<String>();
+    let truncated = prefix
+        .rsplit_once(char::is_whitespace)
+        .map_or(prefix.as_str(), |(head, _)| head)
+        .trim_end_matches(['.', ',', ';', ':']);
+    format!("{truncated}...").chars().take(max_chars).collect()
 }
 
 pub(super) fn metadata_key_points(metadata: &Map<String, Value>) -> Vec<String> {
