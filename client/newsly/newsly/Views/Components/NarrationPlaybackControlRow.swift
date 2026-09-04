@@ -228,7 +228,7 @@ private struct PlaybackProgressScrubber: View {
                 Text(durationText)
             }
             .font(.appSans(size: 10, weight: .medium).monospacedDigit())
-            .foregroundStyle(Color.onSurfaceSecondary.opacity(0.75))
+            .foregroundStyle(Color.onSurfaceTertiary)
         }
         .opacity(isEnabled ? 1 : 0.55)
         .accessibilityElement(children: .ignore)

@@ -16,7 +16,7 @@ struct KnowledgeView: View {
     let onSearch: () -> Void
     let chatTransitionNamespace: Namespace.ID?
     let contentTextSize: DynamicTypeSize
-    var onOpenMore: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
 
     @State private var viewModel: KnowledgeTimelineViewModel
     @State private var settings: AppSettings
@@ -35,7 +35,7 @@ struct KnowledgeView: View {
         onSelectContent: @escaping (ContentDetailRoute) -> Void,
         onSelectSession: @escaping (ChatSessionRoute) -> Void,
         onSearch: @escaping () -> Void,
-        onOpenMore: (() -> Void)? = nil,
+        onOpenSettings: (() -> Void)? = nil,
         viewModel: KnowledgeTimelineViewModel,
         settings: AppSettings,
         toastPresenter: any ToastPresenting,
@@ -47,7 +47,7 @@ struct KnowledgeView: View {
         self.onSelectContent = onSelectContent
         self.onSelectSession = onSelectSession
         self.onSearch = onSearch
-        self.onOpenMore = onOpenMore
+        self.onOpenSettings = onOpenSettings
         self.viewModel = viewModel
         _settings = State(initialValue: settings)
         self.toastPresenter = toastPresenter
@@ -87,6 +87,7 @@ struct KnowledgeView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .contentMargins(.top, 0, for: .scrollContent)
             .contentMargins(.bottom, 32, for: .scrollContent)
             .environment(\.defaultMinListRowHeight, 1)
             .onPaginationThresholdReached {
@@ -434,15 +435,15 @@ struct KnowledgeView: View {
             .accessibilityLabel("Search saved knowledge")
             .accessibilityIdentifier("knowledge.search")
 
-            if let onOpenMore {
-                Button(action: onOpenMore) {
-                    Image(systemName: "line.3.horizontal")
+            if let onOpenSettings {
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
                         .font(.appSymbol(size: 19, weight: .semibold))
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Settings and more")
-                .accessibilityIdentifier("knowledge.more_menu")
+                .accessibilityLabel("Settings")
+                .accessibilityIdentifier("knowledge.settings")
             }
         }
         .foregroundStyle(Color.onSurface)

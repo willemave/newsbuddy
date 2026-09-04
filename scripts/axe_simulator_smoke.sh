@@ -267,14 +267,14 @@ axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/01_knowledge_ui.json"
 axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/01_knowledge.png" >/dev/null
 assert_id "knowledge.screen" "$OUTPUT_DIR/01_knowledge_ui.json"
 
-echo "Opening More sheet..."
-axe tap --id "knowledge.more_menu" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
-axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/02_more_ui.json"
-axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/02_more.png" >/dev/null
-assert_id "more.screen" "$OUTPUT_DIR/02_more_ui.json"
+echo "Opening Settings sheet..."
+axe tap --id "knowledge.settings" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
+axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/02_settings_ui.json"
+axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/02_settings.png" >/dev/null
+assert_id "settings.screen" "$OUTPUT_DIR/02_settings_ui.json"
 
-echo "Opening Search from More..."
-axe tap --id "more.search" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
+echo "Opening Search from Settings..."
+axe tap --id "settings.search" --udid "$UDID" --wait-timeout 5 --post-delay 1 >/dev/null
 axe describe-ui --udid "$UDID" > "$OUTPUT_DIR/03_search_ui.json"
 axe screenshot --udid "$UDID" --output "$OUTPUT_DIR/03_search.png" >/dev/null
 assert_id "search.input" "$OUTPUT_DIR/03_search_ui.json"

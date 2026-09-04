@@ -51,7 +51,7 @@ enum ReaderPalette {
         // character here rather than lightness. Dark is a matching brown-black.
         surfacePrimary: adaptive(light: 0xfaf6ea, dark: 0x191510),
         surfaceSecondary: adaptive(light: 0xfffdf6, dark: 0x231e17),
-        surfaceTertiary: adaptive(light: 0xf2ecdc, dark: 0x282219),
+        surfaceTertiary: adaptive(light: 0xf4eedf, dark: 0x282219),
         surfaceContainer: adaptive(light: 0xe6dfc9, dark: 0x332c1f),
         surfaceContainerHigh: adaptive(light: 0xd8d0b7, dark: 0x3e3626),
         surfaceContainerHighest: adaptive(light: 0xc8bfa3, dark: 0x4b422f),

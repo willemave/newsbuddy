@@ -204,9 +204,7 @@ private struct BriefingStripPill: View {
                 if unreadCount > 0 {
                     Text("\(unreadCount)")
                         .font(.appCaption2.weight(.bold).monospacedDigit())
-                        .foregroundStyle(
-                            isSelected ? Color.surfacePrimary.opacity(0.65) : Color.brandPrimary
-                        )
+                        .foregroundStyle(isSelected ? Color.surfacePrimary : Color.brandPrimary)
                         .contentTransition(.numericText(countsDown: true))
                         .animation(.easeInOut(duration: 0.3), value: unreadCount)
                 }
@@ -225,7 +223,7 @@ private struct BriefingStripPill: View {
     }
 }
 
-/// Compact capsule that lives in the lens header; playback controls expand
+/// Icon-only playback control in the lens header; playback controls expand
 /// below the header only while this lens is preparing or playing.
 struct BriefingListenButton: View {
     let isPreparing: Bool
@@ -234,28 +232,23 @@ struct BriefingListenButton: View {
 
     var body: some View {
         Button(action: onToggle) {
-            HStack(spacing: 5) {
+            Group {
                 if isPreparing {
                     ProgressView()
-                        .controlSize(.mini)
+                        .controlSize(.small)
                         .tint(Color.brandPrimary)
                 } else {
-                    Image(systemName: isPlaying ? "pause.fill" : "headphones")
-                        .font(.appSymbol(size: 11, weight: .semibold))
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.appSymbol(size: 22, weight: .semibold))
+                        .offset(x: isPlaying ? 0 : 1)
                 }
-
-                Text(isPlaying ? "Pause" : "Listen")
-                    .font(.appCaption.weight(.semibold))
             }
             .foregroundStyle(Color.brandPrimary)
-            .padding(.horizontal, 12)
-            .frame(height: 30)
-            .background(Capsule().fill(Color.brandPrimary.opacity(0.12)))
-            .contentShape(Capsule())
+            .frame(width: 52, height: 52)
+            .background(Circle().fill(Color.brandPrimary.opacity(0.14)))
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
         .disabled(isPreparing)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier("briefing.narration.play")

@@ -36,12 +36,11 @@ struct OnboardingSuggestionCard: View {
                         if let detail = secondaryDetail {
                             Text(detail)
                                 .font(.appCaption)
-                                .foregroundColor(.onboardingText.opacity(0.55))
+                                .foregroundColor(.onSurfaceSecondary)
                                 .lineLimit(1)
                         }
                     }
                 }
-                .opacity(isSelected ? 1.0 : 0.55)
 
                 Spacer(minLength: 0)
 

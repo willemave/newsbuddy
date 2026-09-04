@@ -27,7 +27,7 @@ struct OnboardingLoadingStep: View {
                 if viewModel.discoveryLanes.isEmpty {
                     Text("Preparing search...")
                         .font(.appCallout)
-                        .foregroundColor(.onboardingText.opacity(0.7))
+                        .foregroundColor(.onSurfaceSecondary)
                 } else {
                     VStack(spacing: 6) {
                         ForEach(Array(viewModel.discoveryLanes.enumerated()), id: \.element.id) { index, lane in
@@ -70,7 +70,7 @@ struct OnboardingLoadingStep: View {
             if let loadingFootnote {
                 Text(loadingFootnote)
                     .font(.appCaption)
-                    .foregroundColor(.onboardingText.opacity(0.62))
+                    .foregroundColor(.onSurfaceSecondary)
             }
 
             if let message = viewModel.discoveryErrorMessage {
@@ -131,7 +131,7 @@ struct OnboardingLoadingStep: View {
                 viewModel.chooseDefaults()
             }
             .font(.appFootnote.weight(.medium))
-            .foregroundColor(.onboardingText.opacity(0.6))
+            .foregroundColor(.onSurfaceSecondary)
             .buttonStyle(OnboardingTextButtonStyle())
             .accessibilityIdentifier("onboarding.loading.skip_personalization")
             .padding(.top, 2)
@@ -155,11 +155,11 @@ struct OnboardingLoadingStep: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "clock.arrow.circlepath")
                 .font(.appSymbol(size: 13, weight: .semibold))
-                .foregroundColor(.onboardingText.opacity(0.78))
+                .foregroundColor(.onSurfaceSecondary)
                 .padding(.top, 1)
             Text(message)
                 .font(.appFootnote)
-                .foregroundColor(.onboardingText.opacity(0.84))
+                .foregroundColor(.onSurfaceSecondary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -198,10 +198,10 @@ struct OnboardingLoadingStep: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Finalizing")
                     .font(.appCallout.weight(.medium))
-                    .foregroundColor(.onboardingText.opacity(0.95))
+                    .foregroundColor(.onboardingText)
                 Text("Shaping your first picks")
                     .font(.appCaption)
-                    .foregroundColor(.onboardingText.opacity(0.55))
+                    .foregroundColor(.onSurfaceSecondary)
             }
 
             Spacer()

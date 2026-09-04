@@ -41,9 +41,9 @@ struct BriefingTab: View {
                 viewModel: viewModel,
                 playbackService: dependencyFactory.narrationPlaybackService,
                 scrollToTopRequest: scrollToTopRequest,
+                contentTextSize: contentTextSize,
                 onOpenContent: pushDetail
             )
-                .dynamicTypeSize(contentTextSize)
                 .withContentRoutes(
                     path: $path,
                     readingStateStore: readingStateStore,
@@ -71,7 +71,7 @@ struct KnowledgeTab: View {
     let readingStateStore: ReadingStateStore
     let contentTextSize: DynamicTypeSize
     let dependencyFactory: RootDependencyFactory
-    let onOpenMore: () -> Void
+    let onOpenSettings: () -> Void
     let onSelectSession: (ChatSessionRoute) -> Void
 
     var body: some View {
@@ -82,7 +82,7 @@ struct KnowledgeTab: View {
                 onSelectContent: pushContent,
                 onSelectSession: onSelectSession,
                 onSearch: { path.append(KnowledgeSearchRoute()) },
-                onOpenMore: onOpenMore,
+                onOpenSettings: onOpenSettings,
                 viewModel: viewModel,
                 settings: dependencyFactory.appSettings,
                 toastPresenter: dependencyFactory.toastService,

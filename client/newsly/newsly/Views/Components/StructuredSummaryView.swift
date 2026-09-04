@@ -131,7 +131,7 @@ struct StructuredSummaryView: View {
                     Image(systemName: "chevron.right")
                         .font(.appCaption2)
                         .fontWeight(.bold)
-                        .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
+                        .foregroundColor(Color.onSurfaceTertiary)
                         .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
                 }
             }
@@ -317,7 +317,7 @@ struct ModernKeyPointRow: View {
                             .font(.appCaption)
                             .fontWeight(.medium)
                     }
-                    .foregroundColor(config.color.opacity(0.9))
+                    .foregroundColor(config.color)
                 }
             }
         }

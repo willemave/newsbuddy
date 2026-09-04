@@ -154,6 +154,22 @@ Order SwiftUI view files this way:
 - Respect `accessibilityReduceMotion` for decorative movement, staggered
   entrances, and long-running pulses.
 
+## Color Roles And Contrast
+
+- Use the named palette roles for every user-facing foreground. `readerBodyText`
+  is reserved for reading prose; titles and primary controls use `onSurface`,
+  supporting copy and subordinate text actions use `onSurfaceSecondary`, and
+  quiet metadata or decorative controls use `onSurfaceTertiary`.
+- Do not create text hierarchy on app surfaces by applying opacity to a
+  foreground color. Choose the semantic secondary or tertiary role so contrast
+  remains valid in both appearances. Opacity remains appropriate for disabled
+  controls, backgrounds, borders, and decorative rendering.
+- Inline links and active controls use `brandPrimary`; navigational or card-link
+  titles use `onSurface`; content placed on an accent fill uses `surfacePrimary`.
+  Fixed overlay foregrounds are reserved for image-backed content with a
+  contrast-providing scrim. Do not substitute fixed white, black, or system
+  label colors for adaptive roles on ordinary app surfaces.
+
 ## Type And Accessibility
 
 - Use App Text Size for chrome, settings, controls, and navigation-heavy

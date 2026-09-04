@@ -36,7 +36,7 @@ struct SubmissionStatusRow: View {
                         if let date = submission.statusDateDisplay {
                             Text("·")
                                 .font(.listCaption)
-                                .foregroundStyle(Color.onSurfaceSecondary.opacity(0.5))
+                                .foregroundStyle(Color.onSurfaceTertiary)
                             Text(date)
                                 .font(.listCaption)
                                 .foregroundStyle(Color.onSurfaceSecondary)
@@ -61,7 +61,7 @@ struct SubmissionStatusRow: View {
                         HStack(alignment: .top, spacing: 4) {
                             Image(systemName: submission.isError ? "info.circle" : "checkmark.circle")
                                 .font(.appCaption2)
-                                .foregroundStyle(statusColor.opacity(0.7))
+                                .foregroundStyle(statusColor)
                                 .padding(.top, 1)
                             Text(detail)
                                 .font(.appCaption)
@@ -141,9 +141,9 @@ struct SubmissionStatusRow: View {
     private var statusColor: Color {
         switch submission.effectiveOutcome {
         case .failed, .feed_not_found, .feed_fetch_failed, .feed_subscription_failed:
-            return .statusDestructive.opacity(0.9)
+            return .statusDestructive
         case .skipped:
-            return .onSurfaceSecondary.opacity(0.9)
+            return .onSurfaceSecondary
         case .subscribed, .already_subscribed, .completed:
             return .statusActive
         case .no_action:

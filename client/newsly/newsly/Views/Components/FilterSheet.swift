@@ -59,17 +59,6 @@ struct FilterSheet: View {
                         .accessibilityValue(selectedDateTitle)
                     }
                     
-                    // Settings Section
-                    Section {
-                        NavigationLink(destination: SettingsView()) {
-                            HStack {
-                                Image(systemName: "gear")
-                                    .foregroundColor(.brandPrimary)
-                                    .accessibilityHidden(true)
-                                Text("Settings")
-                            }
-                        }
-                    }
                 }
             }
             .navigationTitle("Filters")

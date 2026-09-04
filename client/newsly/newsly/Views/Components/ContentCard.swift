@@ -112,7 +112,7 @@ struct ContentCard: View {
             .overlay(
                 Image(systemName: contentTypeIcon)
                     .font(.appSymbol(size: 20))
-                    .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
+                    .foregroundColor(Color.onSurfaceTertiary)
             )
     }
 

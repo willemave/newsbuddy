@@ -141,6 +141,37 @@ final class TypographyScalingTests: XCTestCase {
 }
 
 final class BriefingAttributedTextBuilderTests: XCTestCase {
+    func testPassagesUseTheCanonicalReaderBodyColor() throws {
+        let result = BriefingAttributedTextBuilder().build(
+            paragraphs: [
+                APIBriefingParagraph(
+                    runs: [
+                        APIBriefingRun(
+                            kind: .text,
+                            text: "Briefing body",
+                            sourceKey: nil,
+                            insightId: nil
+                        )
+                    ]
+                )
+            ],
+            weight: nil
+        )
+        let actual = try XCTUnwrap(
+            result.attributedText.attribute(.foregroundColor, at: 0, effectiveRange: nil)
+                as? UIColor
+        )
+
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            XCTAssertTrue(
+                actual.resolvedColor(with: traits).isEqual(
+                    UIColor.appReaderBodyText.resolvedColor(with: traits)
+                )
+            )
+        }
+    }
+
     func testFeaturePassagesUseBodyTypography() throws {
         let builder = BriefingAttributedTextBuilder()
         let result = builder.build(

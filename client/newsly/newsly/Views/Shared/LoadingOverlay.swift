@@ -16,7 +16,7 @@ struct LoadingOverlay: View {
                 .tint(.onboardingText)
             Text(message)
                 .font(.appCallout)
-                .foregroundColor(.onboardingText.opacity(0.6))
+                .foregroundColor(.onSurfaceSecondary)
         }
         .padding(20)
         .glassCard(cornerRadius: 14)

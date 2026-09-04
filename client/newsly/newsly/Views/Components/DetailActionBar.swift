@@ -28,7 +28,7 @@ struct DetailActionBar: View {
     let onOpenKnowledgeActions: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 8) {
             if let externalURL {
                 Button {
                     onOpenExternal(externalURL)
@@ -140,12 +140,11 @@ struct DetailActionBar: View {
     @ViewBuilder
     private func actionIcon(
         _ icon: String,
-        color: Color = .readerBodyText,
         verticalOffset: CGFloat = 0
     ) -> some View {
         Image(systemName: icon)
             .font(.appSymbol(size: 20, weight: .regular))
-            .foregroundColor(overlaid ? .white : color)
+            .foregroundColor(overlaid ? .white : .onSurface)
             .appShadow(overlaid ? .overlayText : .none)
             .offset(y: verticalOffset)
             .frame(width: 44, height: 44)
@@ -154,7 +153,7 @@ struct DetailActionBar: View {
 
     @ViewBuilder
     private func knowledgeActionIcon(isSaved: Bool) -> some View {
-        let unsavedColor: Color = overlaid ? .white : .readerBodyText
+        let unsavedColor: Color = overlaid ? .white : .onSurface
         KnowledgeSaveIcon(
             isSaved: isSaved,
             savedColor: .brandPrimary,
@@ -176,9 +175,9 @@ struct DetailActionBar: View {
                 .scaleEffect(0.8)
                 .frame(width: 44, height: 44)
         } else if isPodcastAudioActive {
-            actionIcon("speaker.wave.3.fill", color: .readerBodyText)
+            actionIcon("pause.fill")
         } else {
-            actionIcon("speaker.wave.2")
+            actionIcon("play.fill")
         }
     }
 }

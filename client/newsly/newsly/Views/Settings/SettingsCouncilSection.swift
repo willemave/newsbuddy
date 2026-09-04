@@ -86,7 +86,7 @@ struct SettingsCouncilSection: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.appSymbol(size: 18))
-                            .foregroundStyle(Color.onSurfaceSecondary.opacity(0.5))
+                            .foregroundStyle(Color.onSurfaceTertiary)
                             .frame(width: 44, height: 44, alignment: .trailing)
                     }
                     .buttonStyle(.plain)

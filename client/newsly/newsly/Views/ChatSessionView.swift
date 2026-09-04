@@ -146,10 +146,8 @@ private struct ChatSessionContent: View {
             .sheet(item: $activeSheet) { destination in
                 switch destination {
                 case .councilSettings:
-                    NavigationStack {
-                        SettingsView(scrollToCouncilOnAppear: true)
-                            .environment(authViewModel)
-                    }
+                    SettingsNavigationStack(scrollToCouncilOnAppear: true)
+                        .environment(authViewModel)
                 case .share(let content):
                     ShareSheet(content: content)
                 }

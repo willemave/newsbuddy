@@ -76,7 +76,6 @@ struct DetailDownloadSheet: View {
             VStack(spacing: 8) {
                 MiniSheetOptionRow(
                     icon: "square.stack",
-                    iconColor: .readerBodyText,
                     title: "3 episodes",
                     subtitle: "Quick catch-up",
                     accessibilityIdentifier: "content.download.3",
@@ -84,7 +83,6 @@ struct DetailDownloadSheet: View {
                 )
                 MiniSheetOptionRow(
                     icon: "square.stack",
-                    iconColor: .readerBodyText,
                     title: "5 episodes",
                     subtitle: "Recent backlog",
                     accessibilityIdentifier: "content.download.5",
@@ -92,7 +90,6 @@ struct DetailDownloadSheet: View {
                 )
                 MiniSheetOptionRow(
                     icon: "square.stack.3d.up",
-                    iconColor: .readerBodyText,
                     title: "10 episodes",
                     subtitle: "Deep dive into the series",
                     accessibilityIdentifier: "content.download.10",
@@ -100,7 +97,6 @@ struct DetailDownloadSheet: View {
                 )
                 MiniSheetOptionRow(
                     icon: "square.stack.3d.up.fill",
-                    iconColor: .readerBodyText,
                     title: "20 episodes",
                     subtitle: "Full archive pull",
                     accessibilityIdentifier: "content.download.20",

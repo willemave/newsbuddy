@@ -12,7 +12,7 @@ struct ChatEmptyState: View {
         VStack(spacing: 16) {
             Image(systemName: "bubble.left.and.bubble.right")
                 .font(.appSymbol(size: 44))
-                .foregroundStyle(Color.onSurfaceSecondary.opacity(0.4))
+                .foregroundStyle(Color.onSurfaceTertiary)
             Text("Start the conversation")
                 .font(.appHeadline)
                 .foregroundStyle(Color.onSurfaceSecondary)

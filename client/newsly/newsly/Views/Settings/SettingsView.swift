@@ -17,11 +17,50 @@ private enum SettingsSheetDestination: String, Identifiable {
     var id: String { rawValue }
 }
 
+struct SettingsNavigationStack: View {
+    @Environment(ReadingStateStore.self) private var readingStateStore
+    @Environment(ReadStateCache.self) private var readStateCache
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
+
+    let scrollToCouncilOnAppear: Bool
+    let showsDismissButton: Bool
+
+    @State private var path = NavigationPath()
+
+    init(
+        scrollToCouncilOnAppear: Bool = false,
+        showsDismissButton: Bool = false
+    ) {
+        self.scrollToCouncilOnAppear = scrollToCouncilOnAppear
+        self.showsDismissButton = showsDismissButton
+    }
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            SettingsView(
+                scrollToCouncilOnAppear: scrollToCouncilOnAppear,
+                showsDismissButton: showsDismissButton
+            )
+            .withContentRoutes(
+                path: $path,
+                readingStateStore: readingStateStore,
+                readStateCache: readStateCache,
+                contentTextSize: ContentTextSize(
+                    index: dependencyFactory.appSettings.contentTextSizeIndex
+                ).dynamicTypeSize,
+                dependencyFactory: dependencyFactory
+            )
+        }
+    }
+}
+
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(AuthenticationViewModel.self) private var authViewModel
     @Environment(BadgeStatsStore.self) private var badgeStatsStore
     @Environment(RootDependencyFactory.self) private var dependencyFactory
     private let scrollToCouncilOnAppear: Bool
+    private let showsDismissButton: Bool
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var showMarkAllDialog = false
@@ -37,8 +76,12 @@ struct SettingsView: View {
     @State private var isSavingCouncilPersonas = false
     @State private var xConnection: XConnectionResponse?
 
-    init(scrollToCouncilOnAppear: Bool = false) {
+    init(
+        scrollToCouncilOnAppear: Bool = false,
+        showsDismissButton: Bool = false
+    ) {
         self.scrollToCouncilOnAppear = scrollToCouncilOnAppear
+        self.showsDismissButton = showsDismissButton
     }
 
     private var settings: AppSettings {
@@ -87,6 +130,21 @@ struct SettingsView: View {
             "Settings",
             accessibilityIdentifier: "settings.screen"
         )
+        .toolbar {
+            if showsDismissButton {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: dismiss.callAsFunction) {
+                        Image(systemName: "xmark")
+                            .font(.appSymbol(size: 14, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .accessibilityLabel("Close Settings")
+                    .accessibilityIdentifier("settings.close")
+                }
+            }
+        }
         .alert("Settings", isPresented: $showingAlert) {
             Button("OK", role: .cancel) { }
         } message: {

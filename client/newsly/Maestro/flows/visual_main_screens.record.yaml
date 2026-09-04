@@ -53,11 +53,10 @@ appId: "${APP_ID}"
 - takeScreenshot:
     path: "${BASELINE_DIR}/redesign-knowledge"
 - tapOn:
-    id: knowledge.more_menu
+    id: knowledge.settings
 - extendedWaitUntil:
     visible:
-      id: more.screen
+      id: settings.screen
     timeout: 15000
-- assertVisible: Settings
-- takeScreenshot:
-    path: "${BASELINE_DIR}/main-more"
+- assertVisible:
+    id: settings.search

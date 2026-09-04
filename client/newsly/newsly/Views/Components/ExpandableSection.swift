@@ -30,11 +30,11 @@ struct ExpandableSection<Content: View>: View {
                     HStack(spacing: 8) {
                         Image(systemName: icon)
                             .font(.readerBody.weight(.bold))
-                            .foregroundColor(Color.readerBodyText)
+                            .foregroundColor(Color.onSurface)
 
                         Text(title.uppercased())
                             .font(.readerBody.weight(.bold))
-                            .foregroundColor(Color.readerBodyText)
+                            .foregroundColor(Color.onSurface)
                             .tracking(0.4)
                     }
 
@@ -43,7 +43,7 @@ struct ExpandableSection<Content: View>: View {
                     Image(systemName: "chevron.right")
                         .font(.appCaption2)
                         .fontWeight(.bold)
-                        .foregroundColor(Color.onSurfaceSecondary.opacity(0.6))
+                        .foregroundColor(Color.onSurfaceTertiary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
                 .padding(ExpandableSectionDesign.cardPadding)

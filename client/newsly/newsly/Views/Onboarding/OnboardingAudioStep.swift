@@ -37,7 +37,7 @@ struct OnboardingAudioStep: View {
                     viewModel.chooseDefaults()
                 }
                 .font(.appCallout.weight(.medium))
-                .foregroundColor(.onboardingText.opacity(0.72))
+                .foregroundColor(.onSurfaceSecondary)
                 .buttonStyle(OnboardingTextButtonStyle())
                 .padding(.bottom, 8)
                 .accessibilityIdentifier("onboarding.audio.skip")
@@ -64,7 +64,7 @@ struct OnboardingAudioStep: View {
                 .tint(.onboardingText)
             Text("Processing your interests...")
                 .font(.appCallout)
-                .foregroundColor(.onboardingText.opacity(0.7))
+                .foregroundColor(.onSurfaceSecondary)
                 .accessibilityIdentifier("onboarding.audio.state.transcribing")
 
             if hasTopicPreview {

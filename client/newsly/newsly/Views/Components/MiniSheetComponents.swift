@@ -64,7 +64,7 @@ struct MiniSheetOptionRow: View {
 
     init(
         icon: String,
-        iconColor: Color = .readerBodyText,
+        iconColor: Color = .onSurface,
         title: String,
         subtitle: String,
         badge: String? = nil,

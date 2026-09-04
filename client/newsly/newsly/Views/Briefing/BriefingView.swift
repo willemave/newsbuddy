@@ -25,6 +25,7 @@ private enum BriefingViewAlert: Identifiable {
 struct BriefingView: View {
     let viewModel: BriefingViewModel
     let scrollToTopRequest: Int
+    let contentTextSize: DynamicTypeSize
     private let narrationController: BriefingNarrationController
     /// Sources push onto the tab's navigation stack rather than opening a sheet,
     /// so the reader gets the standard back stack and edge-swipe.
@@ -45,10 +46,12 @@ struct BriefingView: View {
         viewModel: BriefingViewModel,
         playbackService: NarrationPlaybackService,
         scrollToTopRequest: Int = 0,
+        contentTextSize: DynamicTypeSize,
         onOpenContent: @escaping (ContentDetailRoute) -> Void
     ) {
         self.viewModel = viewModel
         self.scrollToTopRequest = scrollToTopRequest
+        self.contentTextSize = contentTextSize
         self.narrationController = viewModel.narrationController
         self.onOpenContent = onOpenContent
         self._digViewModel = State(
@@ -104,7 +107,7 @@ struct BriefingView: View {
         Group {
             switch viewModel.state {
             case .idle, .loading:
-                BuddyLoadingView(message: "Preparing your briefing")
+                BriefingLoadingView()
             case .empty:
                 emptyState
             case .error(let message):
@@ -196,6 +199,7 @@ struct BriefingView: View {
                     scrollToTopRequest: scrollToTopRequest,
                     onRefresh: viewModel.refreshIndex
                 )
+                .dynamicTypeSize(contentTextSize)
                 .padding(.top, expandedChromeHeight)
             } else {
                 TabView(selection: selectedLensBinding) {
@@ -232,6 +236,7 @@ struct BriefingView: View {
                             }
                         )
                         .equatable()
+                        .dynamicTypeSize(contentTextSize)
                         .tag(lens.key)
                     }
                 }
@@ -549,4 +554,18 @@ struct BriefingView: View {
             .map(\.id)
     }
 
+}
+
+struct BriefingLoadingView: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            EditorialMastheadHeader(
+                title: "Briefing",
+                titleAccessibilityIdentifier: "briefing.screen"
+            )
+
+            BuddyLoadingView(message: "Preparing your briefing")
+        }
+        .background(Color.surfacePrimary)
+    }
 }

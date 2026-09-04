@@ -19,7 +19,25 @@ struct E2EVisualStateView: View {
         case "onboarding-loading":
             OnboardingFlowView(viewModel: makeOnboardingViewModel(step: .loading)) { _ in }
         case "briefing-loading":
-            BuddyLoadingView(message: "Preparing your briefing")
+            BriefingLoadingView()
+        case "briefing-header":
+            VStack(spacing: 0) {
+                EditorialMastheadHeader(
+                    title: "Briefing",
+                    titleAccessibilityIdentifier: "briefing.screen",
+                    trailingAccessory: AnyView(
+                        BriefingListenButton(
+                            isPreparing: false,
+                            isPlaying: false,
+                            onToggle: {}
+                        )
+                    )
+                )
+                Spacer()
+            }
+            .background(Color.surfacePrimary)
+        case "detail-action-bar":
+            E2EDetailActionBarVisualState()
         case "briefing-start-here":
             BriefingStartHereView(
                 progress: Self.startHereProgress,
@@ -86,7 +104,90 @@ struct E2EVisualStateView: View {
         )
         viewModel.step = step
         viewModel.isPersonalized = step == .audio || step == .loading
+        if step == .audio {
+            viewModel.audioState = .recording
+            viewModel.audioDurationSeconds = 2
+        }
         return viewModel
+    }
+}
+
+private struct E2EDetailActionBarVisualState: View {
+    private static let content = try! ContentDetail(
+        api: APIContentDetailResponse(
+            id: 999_902,
+            contentType: .podcast,
+            url: "https://example.invalid/episode",
+            sourceUrl: nil,
+            discussionUrl: nil,
+            title: "A calmer way to follow the news",
+            displayTitle: "A calmer way to follow the news",
+            source: "Newsbuddy Radio",
+            status: .completed,
+            errorMessage: nil,
+            retryCount: 0,
+            metadata: [:],
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: nil,
+            processedAt: nil,
+            checkedOutBy: nil,
+            checkedOutAt: nil,
+            publicationDate: nil,
+            summary: nil,
+            shortSummary: nil,
+            summaryKind: nil,
+            summaryVersion: nil,
+            structuredSummary: nil,
+            longformArtifact: nil,
+            feedPreview: nil,
+            artifactType: nil,
+            previewBullets: nil,
+            reasonToRead: nil,
+            fullMarkdown: nil,
+            bodyKind: nil,
+            bodyFormat: nil,
+            newsArticleUrl: nil,
+            newsDiscussionUrl: nil,
+            newsKeyPoints: nil,
+            newsSummary: nil,
+            imageUrl: nil,
+            thumbnailUrl: nil,
+            detectedFeed: nil
+        )
+    )
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("DETAIL ACTIONS")
+                .kicker()
+
+            DetailActionBar(
+                content: Self.content,
+                overlaid: false,
+                externalURL: URL(string: Self.content.url),
+                canShowReader: true,
+                isLoadingReaderBody: false,
+                isConverting: false,
+                supportsPodcastAudio: true,
+                isPodcastAudioLoading: false,
+                isPodcastAudioActive: false,
+                podcastAudioAccessibilityLabel: "Play episode",
+                onOpenExternal: { _ in },
+                onShare: {},
+                readerTransitionNamespace: nil,
+                onOpenReader: {},
+                onDownloadMore: {},
+                onConvertLinkedArticle: {},
+                onToggleKnowledgeSave: {},
+                onPodcastAudio: {},
+                onPodcastAudioSpeed: { _ in },
+                onOpenKnowledgeActions: {}
+            )
+        }
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 120)
+        .background(Color.surfacePrimary)
     }
 }
 

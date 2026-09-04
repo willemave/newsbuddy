@@ -42,7 +42,7 @@ struct OnboardingAggregatorsStep: View {
             Text("\(viewModel.selectedAggregators.count) selected")
                 .font(.appCaption.weight(.semibold))
                 .monospacedDigit()
-                .foregroundColor(.onboardingText.opacity(0.65))
+                .foregroundColor(.onSurfaceSecondary)
 
             onboardingPrimaryButton("Continue") {
                 withAnimation(AppMotion.panel) {
@@ -58,7 +58,7 @@ struct OnboardingAggregatorsStep: View {
                 }
             }
             .font(.appCallout.weight(.medium))
-            .foregroundColor(.onboardingText.opacity(0.72))
+            .foregroundColor(.onSurfaceSecondary)
             .buttonStyle(OnboardingTextButtonStyle())
             .accessibilityIdentifier("onboarding.aggregators.back")
 
@@ -113,7 +113,7 @@ private struct OnboardingAggregatorSection: View {
                             .foregroundColor(.onboardingText)
                         Text(option.subtitle)
                             .font(.appCaption)
-                            .foregroundColor(.onboardingText.opacity(0.62))
+                            .foregroundColor(.onSurfaceSecondary)
                             .lineLimit(2)
                     }
 
@@ -158,7 +158,7 @@ private struct OnboardingAggregatorSection: View {
             Text("TOPICS")
                 .font(.editorialMeta)
                 .tracking(1.4)
-                .foregroundColor(.onboardingText.opacity(0.55))
+                .foregroundColor(.onSurfaceTertiary)
 
             FlowLayout(spacing: 6) {
                 ForEach(onboardingBrutalistTopics, id: \.self) { topic in
@@ -170,8 +170,8 @@ private struct OnboardingAggregatorSection: View {
                             .font(.appCaption.weight(.semibold))
                             .foregroundColor(
                                 isOn
-                                    ? Color.onboardingText.opacity(0.95)
-                                    : Color.onboardingText.opacity(0.62)
+                                    ? Color.onboardingText
+                                    : Color.onSurfaceSecondary
                             )
                             .padding(.horizontal, 11)
                             .padding(.vertical, 6)

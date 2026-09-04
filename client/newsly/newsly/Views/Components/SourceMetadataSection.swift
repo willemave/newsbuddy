@@ -49,7 +49,7 @@ struct SourceMetadataSection: View {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "person")
                             .font(.appCaption)
-                            .foregroundColor(Color.onSurfaceSecondary.opacity(0.75))
+                            .foregroundColor(Color.onSurfaceTertiary)
                             .frame(width: 18, height: 18)
                             .accessibilityHidden(true)
 
@@ -105,7 +105,7 @@ struct SourceMetadataSection: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: icon)
                 .font(.appCaption2)
-                .foregroundColor(Color.onSurfaceSecondary.opacity(0.72))
+                .foregroundColor(Color.onSurfaceTertiary)
                 .frame(width: 16)
                 .accessibilityHidden(true)
 

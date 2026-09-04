@@ -131,7 +131,7 @@ struct LearningDeckCreateSheet: View {
                         if normalizedInterestsText == nil {
                             Text("What should this deck zoom in on? — e.g. the security tradeoffs, or just the key takeaways")
                                 .font(.terracottaBodyMedium)
-                                .foregroundStyle(Color.onSurfaceSecondary.opacity(0.55))
+                                .foregroundStyle(Color.onSurfaceTertiary)
                                 .padding(.horizontal, 15)
                                 .padding(.vertical, 18)
                                 .allowsHitTesting(false)

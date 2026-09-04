@@ -114,21 +114,23 @@ struct OnboardingMicButton: View {
                         .appSans(size: 20, relativeTo: .title3, weight: .semibold)
                             .monospacedDigit()
                     )
-                    .foregroundColor(.onboardingText.opacity(0.66))
+                    .foregroundColor(.onSurfaceSecondary)
             }
 
             Text(statusText)
                 .font(.appSans(size: 11, weight: .medium))
                 .tracking(2.5)
-                .foregroundColor(.onboardingText.opacity(0.55))
+                .foregroundColor(.onSurfaceTertiary)
                 .accessibilityIdentifier(
                     "onboarding.audio.state.\(audioState.accessibilityIdentifier)"
                 )
 
-            Text(statusDetail)
-                .font(.appCaption)
-                .foregroundColor(.onboardingText.opacity(0.68))
-                .multilineTextAlignment(.center)
+            if let statusDetail {
+                Text(statusDetail)
+                    .font(.appCaption)
+                    .foregroundColor(.onSurfaceSecondary)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
 
@@ -142,14 +144,14 @@ struct OnboardingMicButton: View {
         }
     }
 
-    private var statusDetail: String {
+    private var statusDetail: String? {
         switch audioState {
         case .idle:
             return "Say a few topics, names, or newsletters."
         case .starting:
             return "Getting the microphone ready."
         case .recording:
-            return "Tap again when you're done."
+            return nil
         case .transcribing:
             return "Matching newsletters, podcasts, and Reddit."
         case .failed:

@@ -23,9 +23,9 @@ struct ContentView: View {
     @State private var e2eRouteInjector = E2ERouteInjector()
     @State private var briefingPath = NavigationPath()
     @State private var knowledgePath = NavigationPath()
-    @State private var morePath = NavigationPath()
-    @State private var showMoreSheet = false
-    @State private var isMoreSheetActive = false
+    @State private var settingsPath = NavigationPath()
+    @State private var showSettingsSheet = false
+    @State private var isSettingsSheetActive = false
     @State private var compactTabBarHeight: CGFloat = 0
 
     @MainActor
@@ -66,7 +66,7 @@ struct ContentView: View {
                     readingStateStore: readingStateStore,
                     contentTextSize: contentTextSize,
                     dependencyFactory: dependencyFactory,
-                    onOpenMore: { showMoreSheet = true },
+                    onOpenSettings: { showSettingsSheet = true },
                     onSelectSession: openChatSession
                 )
             }
@@ -87,20 +87,15 @@ struct ContentView: View {
                 compactTabBarHeight = max(height, 0)
             }
         }
-        .sheet(isPresented: $showMoreSheet, onDismiss: {
-            isMoreSheetActive = false
-            morePath = NavigationPath()
+        .sheet(isPresented: $showSettingsSheet, onDismiss: {
+            isSettingsSheetActive = false
+            settingsPath = NavigationPath()
             drainPendingChatRoute()
         }) {
-            NavigationStack(path: $morePath) {
-                MoreView(
-                    submissionsViewModel: submissionStatusViewModel,
-                    readStateCache: readStateCache,
-                    showsDismissButton: true,
-                    dependencyFactory: dependencyFactory
-                )
+            NavigationStack(path: $settingsPath) {
+                SettingsView(showsDismissButton: true)
                 .withContentRoutes(
-                    path: $morePath,
+                    path: $settingsPath,
                     readingStateStore: readingStateStore,
                     readStateCache: readStateCache,
                     contentTextSize: contentTextSize,
@@ -109,7 +104,7 @@ struct ContentView: View {
             }
             .presentationDragIndicator(.visible)
             .onAppear {
-                isMoreSheetActive = true
+                isSettingsSheetActive = true
             }
         }
         .tint(Color.appChromeAccent)
@@ -118,6 +113,7 @@ struct ContentView: View {
         .environment(readingStateStore)
         .environment(readStateCache)
         .environment(session.badgeStatsStore)
+        .environment(submissionStatusViewModel)
         .environment(session.activeChatSessionManager)
         .environment(session.chatNavigation)
         .onAppear {
@@ -154,9 +150,6 @@ struct ContentView: View {
         .onChange(of: chatNavigation.queuedRoute) { _, route in
             guard route != nil else { return }
             drainPendingChatRoute()
-        }
-        .task {
-            await submissionStatusViewModel.load()
         }
         .onDisappear {
             tabCoordinator.briefingVM.setActive(false)
@@ -209,8 +202,8 @@ struct ContentView: View {
 
     private func openChatSession(route: ChatSessionRoute) {
         chatNavigation.open(route)
-        guard !showMoreSheet, !isMoreSheetActive else {
-            showMoreSheet = false
+        guard !showSettingsSheet, !isSettingsSheetActive else {
+            showSettingsSheet = false
             return
         }
         drainPendingChatRoute()
@@ -218,8 +211,8 @@ struct ContentView: View {
 
     private func drainPendingChatRoute() {
         guard let route = chatNavigation.queuedRoute else { return }
-        guard !showMoreSheet, !isMoreSheetActive else {
-            showMoreSheet = false
+        guard !showSettingsSheet, !isSettingsSheetActive else {
+            showSettingsSheet = false
             return
         }
         let replacesBackgroundChat = chatNavigation.presentedRoute != nil

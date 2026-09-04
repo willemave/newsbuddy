@@ -855,7 +855,7 @@ private struct BriefingPullquoteView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(block.text ?? "")
                 .font(.appSerifItalic(size: 15, relativeTo: .title3))
-                .foregroundStyle(Color.onSurface)
+                .foregroundStyle(Color.readerBodyText)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .accessibilityIdentifier("briefing.pullquote.text")

@@ -22,7 +22,7 @@ struct OnboardingRedditStep: View {
                     if viewModel.subredditSuggestions.isEmpty {
                         Text("No matches.")
                             .font(.appCallout)
-                            .foregroundColor(.onboardingText.opacity(0.7))
+                            .foregroundColor(.onSurfaceSecondary)
                             .padding(.vertical, 20)
                     } else {
                         OnboardingSuggestionSection(
@@ -47,7 +47,7 @@ struct OnboardingRedditStep: View {
             Text("\(viewModel.selectedSubredditSuggestionCount) selected")
                 .font(.appCaption.weight(.semibold))
                 .monospacedDigit()
-                .foregroundColor(.onboardingText.opacity(0.65))
+                .foregroundColor(.onSurfaceSecondary)
 
             onboardingPrimaryButton(completionPrimaryTitle) {
                 Task { await viewModel.completeOnboarding() }
@@ -61,7 +61,7 @@ struct OnboardingRedditStep: View {
                 }
             }
             .font(.appCallout.weight(.medium))
-            .foregroundColor(.onboardingText.opacity(0.72))
+            .foregroundColor(.onSurfaceSecondary)
             .buttonStyle(OnboardingTextButtonStyle())
             .accessibilityIdentifier("onboarding.reddit.back")
 

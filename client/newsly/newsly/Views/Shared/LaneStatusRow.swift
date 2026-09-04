@@ -19,7 +19,7 @@ struct LaneStatusRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(lane.name)
                         .font(.appCallout.weight(isCompleted ? .regular : .medium))
-                        .foregroundColor(.onboardingText.opacity(isCompleted ? 0.7 : 0.95))
+                        .foregroundColor(isCompleted ? .onSurfaceSecondary : .onboardingText)
                         .lineLimit(1)
 
                     Spacer(minLength: 0)
@@ -28,7 +28,7 @@ struct LaneStatusRow: View {
                         Text("\(lane.completedQueries)/\(lane.queryCount)")
                             .font(.appCaption2.weight(.semibold))
                             .monospacedDigit()
-                            .foregroundColor(.onboardingText.opacity(0.55))
+                            .foregroundColor(.onSurfaceSecondary)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
                             .background(
@@ -46,13 +46,12 @@ struct LaneStatusRow: View {
                 } else if !isCompleted {
                     Text(statusLabel)
                         .font(.appCaption)
-                        .foregroundColor(.onboardingText.opacity(0.55))
+                        .foregroundColor(.onSurfaceSecondary)
                         .transition(.opacity)
                 }
             }
         }
         .padding(.vertical, 4)
-        .opacity(rowOpacity)
         .animation(
             AppMotion.respectingReduceMotion(reduceMotion, AppMotion.panel),
             value: lane.status
@@ -99,14 +98,6 @@ struct LaneStatusRow: View {
         case "failed": return Color.statusDestructive.opacity(0.14)
         case "processing": return Color.statusProcessing.opacity(0.14)
         default: return Color.onboardingText.opacity(0.05)
-        }
-    }
-
-    private var rowOpacity: Double {
-        switch lane.status {
-        case "completed": return 0.88
-        case "failed", "processing": return 1.0
-        default: return 0.6
         }
     }
 

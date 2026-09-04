@@ -19,13 +19,13 @@ appId: "${APP_ID}"
       id: knowledge.screen
     timeout: 15000
 - tapOn:
-    id: knowledge.more_menu
+    id: knowledge.settings
 - extendedWaitUntil:
     visible:
-      id: more.screen
+      id: settings.screen
     timeout: 8000
 - tapOn:
-    id: more.search
+    id: settings.search
 - extendedWaitUntil:
     visible:
       id: search.input
@@ -56,4 +56,4 @@ appId: "${APP_ID}"
       id: knowledge.chat_input
     timeout: 12000
 - assertNotVisible:
-    id: more.screen
+    id: settings.screen

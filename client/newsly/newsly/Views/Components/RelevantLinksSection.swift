@@ -49,7 +49,7 @@ struct RelevantLinksSection: View {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(link.title ?? link.url)
                             .font(.appCallout.weight(.semibold))
-                            .foregroundColor(Color.readerBodyText)
+                            .foregroundColor(Color.onSurface)
                             .multilineTextAlignment(.leading)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
@@ -98,7 +98,7 @@ struct RelevantLinksSection: View {
                         }
                     }
                     .font(.appSubheadline.weight(.medium))
-                    .foregroundColor(state == .added ? .brandPrimary : Color.onSurfaceSecondary.opacity(0.78))
+                    .foregroundColor(state == .added ? .brandPrimary : .onSurfaceTertiary)
                     .frame(width: 40, height: 40)
                     .contentShape(Rectangle())
                 }

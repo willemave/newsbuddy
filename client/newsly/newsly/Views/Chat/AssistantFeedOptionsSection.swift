@@ -92,7 +92,7 @@ struct AssistantFeedOptionsSection: View {
                             .foregroundStyle(Color.onSurfaceSecondary)
                         Text("·")
                             .font(.appCaption2)
-                            .foregroundStyle(Color.onSurfaceSecondary.opacity(0.6))
+                            .foregroundStyle(Color.onSurfaceTertiary)
                         Text(option.hostLabel)
                             .font(.appCaption2)
                             .foregroundStyle(Color.onSurfaceSecondary)

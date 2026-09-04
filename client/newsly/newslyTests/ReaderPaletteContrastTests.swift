@@ -3,38 +3,47 @@ import XCTest
 @testable import newsly
 
 final class ReaderPaletteContrastTests: XCTestCase {
-    func testTextColorsMeetNormalTextContrastOnAppSurfaces() {
+    func testTextColorsMeetNormalTextContrastOnPrimaryAndSecondarySurfaces() {
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
             let colors = ReaderPalette.colors
             let surfaces = [colors.surfacePrimary, colors.surfaceSecondary]
+            let textRoles = [
+                ("onSurface", colors.onSurface),
+                ("readerBodyText", colors.readerBodyText),
+                ("onSurfaceSecondary", colors.onSurfaceSecondary),
+                ("onSurfaceTertiary", colors.onSurfaceTertiary),
+                ("brandPrimary", colors.brandPrimary)
+            ]
 
             for surface in surfaces {
-                XCTAssertGreaterThanOrEqual(
-                    contrastRatio(
-                        colors.brandPrimary.uiColor(for: traits),
-                        surface.uiColor(for: traits)
-                    ),
-                    4.5,
-                    "brandPrimary must support normal text in \(style) mode"
-                )
-                XCTAssertGreaterThanOrEqual(
-                    contrastRatio(
-                        colors.onSurfaceTertiary.uiColor(for: traits),
-                        surface.uiColor(for: traits)
-                    ),
-                    4.5,
-                    "onSurfaceTertiary must support normal text in \(style) mode"
-                )
-                XCTAssertGreaterThanOrEqual(
-                    contrastRatio(
-                        colors.readerBodyText.uiColor(for: traits),
-                        surface.uiColor(for: traits)
-                    ),
-                    4.5,
-                    "readerBodyText must support normal text in \(style) mode"
-                )
+                for (name, textColor) in textRoles {
+                    XCTAssertGreaterThanOrEqual(
+                        contrastRatio(
+                            textColor.uiColor(for: traits),
+                            surface.uiColor(for: traits)
+                        ),
+                        4.5,
+                        "\(name) must support normal text in \(style) mode"
+                    )
+                }
             }
+        }
+    }
+
+    func testSecondaryTextMeetsNormalTextContrastOnTertiarySurface() {
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            let colors = ReaderPalette.colors
+
+            XCTAssertGreaterThanOrEqual(
+                contrastRatio(
+                    colors.onSurfaceSecondary.uiColor(for: traits),
+                    colors.surfaceTertiary.uiColor(for: traits)
+                ),
+                4.5,
+                "onSurfaceSecondary must support normal text on surfaceTertiary in \(style) mode"
+            )
         }
     }
 

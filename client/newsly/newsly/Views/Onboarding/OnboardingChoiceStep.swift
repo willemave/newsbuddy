@@ -35,33 +35,16 @@ struct OnboardingChoiceStep: View {
             Spacer()
 
             VStack(spacing: 12) {
-                Button {
+                onboardingPrimaryButton("Personalize") {
                     withAnimation(AppMotion.panel) {
                         viewModel.startPersonalized()
                     }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "mic.fill")
-                            .font(.appBody.weight(.medium))
-                        Text("Personalize with voice")
-                            .font(.appCallout.weight(.semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .foregroundColor(.surfacePrimary)
-                    .background(primaryButtonBackground)
                 }
-                .buttonStyle(OnboardingPrimaryPressStyle())
                 .accessibilityIdentifier("onboarding.choice.personalized")
 
-                Button {
+                onboardingPrimaryButton("Skip") {
                     viewModel.chooseDefaults()
-                } label: {
-                    Text("Skip personalization")
-                        .font(.appCallout.weight(.medium))
-                        .foregroundColor(.onSurfaceSecondary)
                 }
-                .buttonStyle(OnboardingTextButtonStyle())
                 .accessibilityIdentifier("onboarding.choice.skip")
             }
 

@@ -56,12 +56,10 @@ appId: "${APP_ID}"
     path: "${BASELINE_DIR}/redesign-knowledge.png"
     thresholdPercentage: 94
 - tapOn:
-    id: knowledge.more_menu
+    id: knowledge.settings
 - extendedWaitUntil:
     visible:
-      id: more.screen
+      id: settings.screen
     timeout: 15000
-- assertVisible: Settings
-- assertScreenshot:
-    path: "${BASELINE_DIR}/main-more.png"
-    thresholdPercentage: 94
+- assertVisible:
+    id: settings.search

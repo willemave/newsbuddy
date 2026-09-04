@@ -24,7 +24,7 @@ struct OnboardingSuggestionsStep: View {
                     {
                         Text(emptyStateMessage)
                             .font(.appCallout)
-                            .foregroundColor(.onboardingText.opacity(0.7))
+                            .foregroundColor(.onSurfaceSecondary)
                             .padding(.vertical, 20)
                     }
 
@@ -72,7 +72,7 @@ struct OnboardingSuggestionsStep: View {
                     }
                 }
                 .font(.appCallout.weight(.medium))
-                .foregroundColor(.onboardingText.opacity(0.78))
+                .foregroundColor(.onSurfaceSecondary)
                 .buttonStyle(OnboardingTextButtonStyle())
                 .accessibilityIdentifier("onboarding.suggestions.retry")
             } else if viewModel.isShowingDefaultConfirmation {
@@ -82,7 +82,7 @@ struct OnboardingSuggestionsStep: View {
                     }
                 }
                 .font(.appCallout.weight(.medium))
-                .foregroundColor(.onboardingText.opacity(0.78))
+                .foregroundColor(.onSurfaceSecondary)
                 .buttonStyle(OnboardingTextButtonStyle())
                 .accessibilityIdentifier("onboarding.suggestions.personalize")
             }

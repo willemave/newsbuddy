@@ -16,7 +16,7 @@ struct OnboardingSuggestionSection: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(title)
                     .font(.editorialMeta)
-                    .foregroundColor(.onboardingText.opacity(0.55))
+                    .foregroundColor(.onSurfaceTertiary)
                     .tracking(1.5)
 
                 Spacer()
@@ -24,7 +24,7 @@ struct OnboardingSuggestionSection: View {
                 Text("\(items.count)")
                     .font(.appCaption)
                     .monospacedDigit()
-                    .foregroundColor(.onboardingText.opacity(0.45))
+                    .foregroundColor(.onSurfaceTertiary)
             }
             .padding(.top, 16)
             .padding(.bottom, 4)
@@ -123,7 +123,7 @@ func topicPreviewCard(
         Text(eyebrow)
             .font(.editorialMeta)
             .tracking(1.6)
-            .foregroundColor(.onboardingText.opacity(0.58))
+            .foregroundColor(.onSurfaceTertiary)
 
         Text(title)
             .font(.appCallout.weight(.semibold))

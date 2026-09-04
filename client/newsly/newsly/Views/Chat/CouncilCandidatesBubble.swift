@@ -93,7 +93,7 @@ private struct CouncilCandidateCard: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Color.statusDestructive.opacity(0.8))
+                            .foregroundStyle(Color.statusDestructive)
                         Text("This perspective could not be generated.")
                             .foregroundStyle(Color.onSurfaceSecondary)
                     }

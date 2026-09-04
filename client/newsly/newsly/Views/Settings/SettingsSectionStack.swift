@@ -32,6 +32,7 @@ struct SettingsSectionStack: View {
         // so the stack adds none of its own — otherwise every gap was doubled.
         VStack(spacing: 0) {
             SettingsBrandHeader()
+            SettingsLibrarySection()
             SettingsAccountSection(
                 authState: authState,
                 isApprovingCLILink: isApprovingCLILink,
