@@ -95,6 +95,14 @@ pub enum TaskFinalizerResult {
     Override(TaskResult),
 }
 
+/// Queue policy for an unexpected finalizer error after its product transaction is rolled back.
+/// Expected domain outcomes should use [`TaskFinalizerResult`] instead of this error path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinalizerErrorDisposition {
+    Retryable,
+    Terminal,
+}
+
 /// Product-state writes applied only after the queue kernel has locked the exact live lease.
 /// Implementations must remain bounded database work; external calls belong in `TaskHandler`.
 pub trait TaskFinalizer: Debug + Send + Sync + 'static {
@@ -102,6 +110,16 @@ pub trait TaskFinalizer: Debug + Send + Sync + 'static {
         &'a self,
         transaction: &'a mut Transaction<'static, Postgres>,
     ) -> HandlerFinalizerFuture<'a>;
+
+    /// Classifies an unexpected error after the fenced product transaction is rolled back.
+    /// Database, storage, and serialization failures are retryable by default. Finalizers whose
+    /// error type also contains deterministic failures must classify those explicitly.
+    fn error_disposition(
+        &self,
+        _source: &(dyn std::error::Error + Send + Sync),
+    ) -> FinalizerErrorDisposition {
+        FinalizerErrorDisposition::Retryable
+    }
 
     /// Runs best-effort local cleanup only after the fenced transaction has committed. Product
     /// state must never depend on this hook; failures leave recoverable orphaned files rather than
@@ -533,13 +551,35 @@ impl WorkerKernel {
         };
         let finalizer = execution.finalizer;
         if let Some(finalizer) = finalizer.as_ref() {
-            let finalizer_result = finalizer
-                .apply(finalization.transaction_mut())
-                .await
-                .map_err(|source| WorkerError::HandlerFinalization {
-                    task_id: claim.id,
-                    source,
-                })?;
+            let finalizer_result = match finalizer.apply(finalization.transaction_mut()).await {
+                Ok(result) => result,
+                Err(source) => {
+                    let disposition = finalizer.error_disposition(source.as_ref());
+                    error!(
+                        task_id = claim.id,
+                        task_type = %claim.task_type,
+                        ?disposition,
+                        error = ?source,
+                        "task product finalization failed"
+                    );
+                    drop(finalization);
+                    let failure = TaskResult::fail(
+                        Some(format!("{} product finalization failed", claim.task_type)),
+                        disposition == FinalizerErrorDisposition::Retryable,
+                    );
+                    let transition = self
+                        .queue
+                        .finalize(claim, &failure, self.config.max_retries)
+                        .await?;
+                    return Ok(transition.map_or(
+                        WorkerAttempt::FinalizationRejected {
+                            task_id: claim.id,
+                            handler_succeeded,
+                        },
+                        classify_transition,
+                    ));
+                }
+            };
             if let TaskFinalizerResult::Override(result) = finalizer_result {
                 finalization
                     .replace_result(&result, self.config.max_retries)
@@ -707,33 +747,7 @@ pub enum WorkerError {
     InvalidExecutorNamespace(String),
     #[error("invalid worker configuration: {0}")]
     InvalidConfig(&'static str),
-    #[error("task {task_id} product finalization failed")]
-    HandlerFinalization {
-        task_id: i64,
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
 }
 
 #[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::{heartbeat_interval, heartbeat_retry_interval};
-
-    #[test]
-    fn heartbeat_cadence_preserves_existing_bounds() {
-        assert_eq!(
-            heartbeat_interval(Duration::from_secs(300)),
-            Duration::from_secs(30)
-        );
-        assert_eq!(
-            heartbeat_interval(Duration::from_secs(15)),
-            Duration::from_secs(5)
-        );
-        assert_eq!(
-            heartbeat_retry_interval(Duration::from_secs(2)),
-            Duration::from_secs(2)
-        );
-    }
-}
+mod tests;

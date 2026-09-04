@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-03 — `main` — Restore scheduled news, article, and podcast ingestion
+
+- **Status:** Release in progress; not yet pushed or deployed.
+- **Scope:** News-item identity resolution, scrape-result persistence, and worker finalization after product-state errors.
+- **Decisions:** Prefer the exact ingest key, compare URL identities only within their semantic fields, isolate each scraped item with a database savepoint, compose persistence retryability with inherited source failures, and classify unexpected finalizer errors through a typed retryable/terminal policy.
+- **Changes:** Removed cross-field URL alias matching that selected representative rows and collided with child ingest keys. Successful news, article, and podcast results now commit independently of a malformed or database-failing sibling item and still enqueue their downstream work. Deterministic malformed records remain terminal unless another source failure requires a retry; database failures remain retryable. A failed finalizer now releases its transaction and uses a fresh exact-lease queue transition instead of leaving a task in `processing` for repeated lease reclamation. Large inline test modules were split into dedicated test files.
+- **Validation:** All 60 `newsly-db` and 92 `newsly-worker` library tests passed, including production-shaped representative/child identity regressions, recovery after a real PostgreSQL statement abort inside a savepoint, preservation and downstream enqueueing of later news, article, and podcast rows, preservation of an inherited retryable source failure, retry-budget consumption, and explicit terminal finalizer behavior. Rust formatting, warning-denied all-target Clippy for both crates, the complete architecture guard, and `git diff --check` passed.
+- **Remaining:** Run the canonical live-smoke release gate on the clean commit, push the exact tested SHA, wait for Docker Deploy, and prove the live revision and health.
+- **Commits:** Uncommitted.
+
 ### 2026-09-02 — `main` — Cut and rewrite the first-run welcome copy
 
 - **Status:** Complete locally; not committed.

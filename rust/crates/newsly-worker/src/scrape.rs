@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use futures_util::stream::{self, StreamExt};
 use newsly_db::{
-    PreparedScrapeSources, ScrapeConfigSnapshot, ScrapedContentRecord, ScrapedNewsRecord,
-    due_discussion_refresh_ids, matching_scrape_config_ids, persist_scraped_content,
-    persist_scraped_news, prepare_scrape_sources, record_first_edition_scrape_result,
+    PersistedContentRecord, PersistedNewsRecord, PreparedScrapeSources, ScrapeConfigSnapshot,
+    ScrapeRepositoryError, ScrapedContentRecord, ScrapedNewsRecord, due_discussion_refresh_ids,
+    matching_scrape_config_ids, persist_scraped_content, persist_scraped_news,
+    prepare_scrape_sources, record_first_edition_scrape_result,
 };
 use newsly_providers::{
     AggregatorKey, FeedScrapeTarget, RedditScrapeTarget, ScrapeGateway, ScrapeProviderOutcome,
@@ -14,7 +15,7 @@ use newsly_providers::{
 };
 use newsly_queue::{EnqueueRequest, OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Map, Value};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Acquire, PgPool, Postgres, Transaction};
 
 use crate::{
     HandlerExecution, HandlerFinalizerFuture, HandlerFuture, LeaseHealth, TaskFinalizer,
@@ -492,6 +493,136 @@ struct ScrapeFinalizer {
     outcomes: Vec<SourceOutcome>,
 }
 
+enum PersistedScrapeItem {
+    Content(PersistedContentRecord),
+    News(PersistedNewsRecord),
+}
+
+#[derive(Default)]
+struct ScrapeFinalizationFailures {
+    persistence_count: u64,
+    retryable: bool,
+    configuration: ScrapeConfigurationState,
+    progress: ScrapeProgressState,
+}
+
+#[derive(Default)]
+enum ScrapeConfigurationState {
+    #[default]
+    Current,
+    Changed,
+}
+
+#[derive(Default)]
+enum ScrapeProgressState {
+    #[default]
+    Recorded,
+    Failed,
+}
+
+impl ScrapeFinalizationFailures {
+    fn new(outcomes: &[SourceOutcome], config_mismatch: bool) -> Self {
+        Self {
+            retryable: config_mismatch
+                || outcomes.iter().any(SourceOutcome::failed_without_progress),
+            configuration: if config_mismatch {
+                ScrapeConfigurationState::Changed
+            } else {
+                ScrapeConfigurationState::Current
+            },
+            ..Self::default()
+        }
+    }
+
+    fn configuration_is_current(&self) -> bool {
+        matches!(self.configuration, ScrapeConfigurationState::Current)
+    }
+
+    fn record_persistence(&mut self, error: &ScrapeRepositoryError) {
+        self.persistence_count += 1;
+        self.retryable |= error.retryable();
+    }
+
+    fn record_progress_failure(&mut self) {
+        self.progress = ScrapeProgressState::Failed;
+        self.retryable = true;
+    }
+
+    fn into_result(self) -> TaskFinalizerResult {
+        if self.persistence_count > 0 {
+            return TaskFinalizerResult::Override(TaskResult::fail(
+                Some(format!(
+                    "{} scraper items could not be persisted",
+                    self.persistence_count
+                )),
+                self.retryable,
+            ));
+        }
+        if matches!(self.progress, ScrapeProgressState::Failed) {
+            return TaskFinalizerResult::Override(TaskResult::fail(
+                Some("Could not record onboarding scraper progress".to_owned()),
+                true,
+            ));
+        }
+        if matches!(self.configuration, ScrapeConfigurationState::Changed) {
+            return TaskFinalizerResult::Override(TaskResult::fail(
+                Some("scraper configuration changed before finalization".to_owned()),
+                true,
+            ));
+        }
+        TaskFinalizerResult::Keep
+    }
+}
+
+async fn persist_scrape_item(
+    transaction: &mut Transaction<'_, Postgres>,
+    item: &ScrapedItem,
+) -> Result<PersistedScrapeItem, ScrapeRepositoryError> {
+    match item {
+        ScrapedItem::Content(item) => persist_scraped_content(
+            transaction,
+            &ScrapedContentRecord {
+                url: item.url.clone(),
+                source_url: item.source_url.clone(),
+                title: item.title.clone(),
+                content_type: item.content_type.clone(),
+                user_id: item.user_id,
+                source: item.source.clone(),
+                platform: item.platform.clone(),
+                metadata: item.metadata.clone(),
+                published_at: item.published_at,
+            },
+        )
+        .await
+        .map(PersistedScrapeItem::Content),
+        ScrapedItem::News(item) => persist_scraped_news(
+            transaction,
+            &ScrapedNewsRecord {
+                visibility_scope: item.visibility_scope.clone(),
+                owner_user_id: item.owner_user_id,
+                platform: item.platform.clone(),
+                source_type: item.source_type.clone(),
+                source_label: item.source_label.clone(),
+                source_external_id: item.source_external_id.clone(),
+                user_scraper_config_id: item.user_scraper_config_id,
+                canonical_item_url: item.canonical_item_url.clone(),
+                canonical_story_url: item.canonical_story_url.clone(),
+                article_url: item.article_url.clone(),
+                article_domain: item.article_domain.clone(),
+                discussion_url: item.discussion_url.clone(),
+                article_title: item.title.clone(),
+                summary_key_points: item.summary_key_points.clone(),
+                summary_text: item.summary_text.clone(),
+                raw_metadata: item.raw_metadata.clone(),
+                status: item.status.clone(),
+                published_at: item.published_at,
+            },
+        )
+        .await
+        .map(PersistedScrapeItem::News),
+    }
+}
+
 impl ScrapeFinalizer {
     async fn apply_inner(
         &self,
@@ -509,7 +640,7 @@ impl ScrapeFinalizer {
                 .iter()
                 .any(|id| !valid_config_ids.contains(id))
         });
-        let mut progress_failed = false;
+        let mut failures = ScrapeFinalizationFailures::new(&self.outcomes, config_mismatch);
 
         for outcome in &self.outcomes {
             let mut processed = 0_i64;
@@ -520,58 +651,35 @@ impl ScrapeFinalizer {
                     if config_id.is_some_and(|id| !valid_config_ids.contains(&id)) {
                         continue;
                     }
-                    match item {
-                        ScrapedItem::Content(item) => {
-                            let persisted = persist_scraped_content(
-                                transaction,
-                                &ScrapedContentRecord {
-                                    url: item.url.clone(),
-                                    source_url: item.source_url.clone(),
-                                    title: item.title.clone(),
-                                    content_type: item.content_type.clone(),
-                                    user_id: item.user_id,
-                                    source: item.source.clone(),
-                                    platform: item.platform.clone(),
-                                    metadata: item.metadata.clone(),
-                                    published_at: item.published_at,
-                                },
-                            )
-                            .await?;
+                    let mut savepoint = transaction.begin().await?;
+                    match persist_scrape_item(&mut savepoint, item).await {
+                        Ok(PersistedScrapeItem::Content(persisted)) => {
+                            savepoint.commit().await?;
                             if persisted.created {
                                 process_content_ids.insert(persisted.content_id);
                             }
                         }
-                        ScrapedItem::News(item) => {
-                            let persisted = persist_scraped_news(
-                                transaction,
-                                &ScrapedNewsRecord {
-                                    visibility_scope: item.visibility_scope.clone(),
-                                    owner_user_id: item.owner_user_id,
-                                    platform: item.platform.clone(),
-                                    source_type: item.source_type.clone(),
-                                    source_label: item.source_label.clone(),
-                                    source_external_id: item.source_external_id.clone(),
-                                    user_scraper_config_id: item.user_scraper_config_id,
-                                    canonical_item_url: item.canonical_item_url.clone(),
-                                    canonical_story_url: item.canonical_story_url.clone(),
-                                    article_url: item.article_url.clone(),
-                                    article_domain: item.article_domain.clone(),
-                                    discussion_url: item.discussion_url.clone(),
-                                    article_title: item.title.clone(),
-                                    summary_key_points: item.summary_key_points.clone(),
-                                    summary_text: item.summary_text.clone(),
-                                    raw_metadata: item.raw_metadata.clone(),
-                                    status: item.status.clone(),
-                                    published_at: item.published_at,
-                                },
-                            )
-                            .await?;
-                            if persisted.created && item.status != "ready" {
+                        Ok(PersistedScrapeItem::News(persisted)) => {
+                            savepoint.commit().await?;
+                            if persisted.created
+                                && !matches!(item, ScrapedItem::News(item) if item.status == "ready")
+                            {
                                 enrich_news_ids.insert(persisted.news_item_id);
                             }
                             if persisted.discussion_refresh_ready {
                                 discussion_ids.insert(persisted.news_item_id);
                             }
+                        }
+                        Err(error) => {
+                            savepoint.rollback().await?;
+                            failures.record_persistence(&error);
+                            tracing::error!(
+                                source = outcome.source,
+                                config_id,
+                                error = ?error,
+                                "scraper item persistence failed"
+                            );
+                            continue;
                         }
                     }
                     processed = processed.saturating_add(1);
@@ -587,7 +695,7 @@ impl ScrapeFinalizer {
             }
             if let Some(run_id) = self.request.first_edition_run_id
                 && (outcome.source == "reddit" || AggregatorKey::parse(&outcome.source).is_some())
-                && !config_mismatch
+                && failures.configuration_is_current()
             {
                 let recorded = record_first_edition_scrape_result(
                     transaction,
@@ -598,7 +706,9 @@ impl ScrapeFinalizer {
                     &processed_by_config,
                 )
                 .await?;
-                progress_failed |= !recorded;
+                if !recorded {
+                    failures.record_progress_failure();
+                }
             }
         }
 
@@ -628,19 +738,7 @@ impl ScrapeFinalizer {
             .enqueue_many_in_transaction(transaction, downstream)
             .await?;
 
-        if progress_failed {
-            return Ok(TaskFinalizerResult::Override(TaskResult::fail(
-                Some("Could not record onboarding scraper progress".to_owned()),
-                true,
-            )));
-        }
-        if config_mismatch {
-            return Ok(TaskFinalizerResult::Override(TaskResult::fail(
-                Some("scraper configuration changed before finalization".to_owned()),
-                true,
-            )));
-        }
-        Ok(TaskFinalizerResult::Keep)
+        Ok(failures.into_result())
     }
 }
 
@@ -678,63 +776,4 @@ fn clean_string(value: Option<&Value>) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use newsly_domain::RuntimeOwner;
-    use newsly_queue::{OwnedWorkPlan, TaskQueue, TaskType};
-    use serde_json::{Map, Value};
-
-    use super::{AggregatorKey, RequestedSource, ScrapeRequest};
-
-    fn task(sources: Vec<Value>) -> OwnedWorkPlan {
-        OwnedWorkPlan {
-            task_id: 1,
-            owner_user_id: None,
-            task_type: TaskType::Scrape,
-            content_id: None,
-            payload: Map::from_iter([("sources".to_owned(), Value::Array(sources))]),
-            retry_count: 0,
-            queue_name: TaskQueue::Content,
-            executor_runtime: RuntimeOwner::Rust,
-            executor_version: 1,
-            executor_namespace: "scrape".to_owned(),
-        }
-    }
-
-    #[test]
-    fn all_expands_to_every_native_source() {
-        let request =
-            ScrapeRequest::parse(&task(vec![Value::from("all")])).expect("all should normalize");
-        assert!(request.sources.contains(&RequestedSource::Reddit));
-        assert!(request.sources.contains(&RequestedSource::Podcast));
-        assert!(
-            request
-                .sources
-                .contains(&RequestedSource::Aggregator(AggregatorKey::HackerNews))
-        );
-    }
-
-    #[test]
-    fn unknown_source_is_rejected_before_provider_work() {
-        let error = ScrapeRequest::parse(&task(vec![Value::from("unknown")]))
-            .expect_err("unknown source should fail");
-        assert!(error.contains("unknown scrape source"));
-    }
-
-    #[test]
-    fn display_names_normalize_to_canonical_aggregators() {
-        let request = ScrapeRequest::parse(&task(vec![Value::from("Hacker News")]))
-            .expect("legacy display name should normalize");
-        assert_eq!(
-            request.sources,
-            vec![RequestedSource::Aggregator(AggregatorKey::HackerNews)]
-        );
-    }
-
-    #[allow(dead_code)]
-    fn _assert_send_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<Arc<ScrapeRequest>>();
-    }
-}
+mod tests;

@@ -391,6 +391,15 @@ async fn find_existing_news(
     record: &ScrapedNewsRecord,
     ingest_key: &str,
 ) -> Result<Option<i64>, sqlx::Error> {
+    let id = sqlx::query_scalar::<_, i64>(
+        "SELECT id::bigint FROM news_items WHERE ingest_key = $1 FOR UPDATE",
+    )
+    .bind(ingest_key)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if id.is_some() {
+        return Ok(id);
+    }
     if let Some(external_id) = record.source_external_id.as_deref() {
         let id = sqlx::query_scalar::<_, i64>(
             r#"
@@ -411,34 +420,32 @@ async fn find_existing_news(
             return Ok(id);
         }
     }
-    for value in [
-        record.canonical_item_url.as_deref(),
-        record.discussion_url.as_deref(),
-        record.canonical_story_url.as_deref(),
-    ] {
-        let Some(value) = value else { continue };
-        let id = sqlx::query_scalar::<_, i64>(
-            r#"
-            SELECT id::bigint FROM news_items
-            WHERE visibility_scope = $1
-              AND owner_user_id IS NOT DISTINCT FROM $2::bigint::integer
-              AND (canonical_item_url = $3 OR discussion_url = $3 OR canonical_story_url = $3)
-            ORDER BY id LIMIT 1 FOR UPDATE
-            "#,
-        )
-        .bind(&record.visibility_scope)
-        .bind(record.owner_user_id)
-        .bind(value)
-        .fetch_optional(&mut **transaction)
-        .await?;
-        if id.is_some() {
-            return Ok(id);
-        }
-    }
     sqlx::query_scalar::<_, i64>(
-        "SELECT id::bigint FROM news_items WHERE ingest_key = $1 FOR UPDATE",
+        r#"
+        SELECT id::bigint FROM news_items
+        WHERE visibility_scope = $1
+          AND owner_user_id IS NOT DISTINCT FROM $2::bigint::integer
+          AND (
+               canonical_item_url = $3
+            OR discussion_url = $4
+            OR canonical_story_url = $5
+          )
+        ORDER BY
+            CASE
+                WHEN canonical_item_url = $3 THEN 0
+                WHEN discussion_url = $4 THEN 1
+                ELSE 2
+            END,
+            id
+        LIMIT 1
+        FOR UPDATE
+        "#,
     )
-    .bind(ingest_key)
+    .bind(&record.visibility_scope)
+    .bind(record.owner_user_id)
+    .bind(&record.canonical_item_url)
+    .bind(&record.discussion_url)
+    .bind(&record.canonical_story_url)
     .fetch_optional(&mut **transaction)
     .await
 }
@@ -834,42 +841,4 @@ impl ScrapeRepositoryError {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::{ScrapedNewsRecord, news_ingest_key};
-
-    fn record() -> ScrapedNewsRecord {
-        ScrapedNewsRecord {
-            visibility_scope: "global".to_owned(),
-            owner_user_id: None,
-            platform: "hackernews".to_owned(),
-            source_type: "Hacker News".to_owned(),
-            source_label: Some("example.com".to_owned()),
-            source_external_id: Some("123".to_owned()),
-            user_scraper_config_id: None,
-            canonical_item_url: Some("https://news.ycombinator.com/item?id=123".to_owned()),
-            canonical_story_url: Some("https://example.com/story".to_owned()),
-            article_url: Some("https://example.com/story".to_owned()),
-            article_domain: Some("example.com".to_owned()),
-            discussion_url: Some("https://news.ycombinator.com/item?id=123".to_owned()),
-            article_title: Some("Story".to_owned()),
-            summary_key_points: Vec::new(),
-            summary_text: None,
-            raw_metadata: json!({}),
-            status: "new".to_owned(),
-            published_at: None,
-        }
-    }
-
-    #[test]
-    fn ingest_key_prefers_platform_external_identity() {
-        let first = news_ingest_key(&record()).expect("identity should serialize");
-        let mut changed = record();
-        changed.article_url = Some("https://mirror.example/story".to_owned());
-        assert_eq!(
-            first,
-            news_ingest_key(&changed).expect("identity should serialize")
-        );
-    }
-}
+mod tests;
