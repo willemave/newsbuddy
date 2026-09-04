@@ -27,14 +27,63 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-03 — `main` — Restore standard podcast RSS enclosure ingestion
+
+- **Status:** Complete and committed; release validation pending.
+- **Scope:** Podcast feed parsing, media fallback resolution, configured-feed diagnostics, and worker partial-progress behavior.
+- **Decisions:** Use one shared feed-audio extractor for validation, scheduled ingestion, and playback fallback. Log bounded configuration identifiers and typed failure metadata without logging private feed URLs or names. Treat a parsed podcast entry without audio as an explicit item error instead of silently dropping it.
+- **Changes:** Added support for the `feed-rs` representation of ordinary RSS `<enclosure>` elements under `entry.media`, retained Atom/content and link-enclosure support, and removed the Rust rewrite's arbitrary 20 MiB ceiling for accepted configured feeds while leaving aggregator bounds and all network safeguards intact. Added stable provider diagnostic codes and HTTP status fields, attached config IDs to normalization errors, and added per-config plus source-level outcome counts.
+- **Validation:** A regression fixture first reproduced the silent zero-item result for a normal RSS 2.0 podcast enclosure and now passes. All 55 active `newsly-providers` tests and all 93 `newsly-worker` tests pass, including PostgreSQL-backed persistence. Warning-denied all-target Clippy for both crates, the full architecture guard, Rust formatting, and `git diff --check` pass.
+- **Remaining:** The local database contains no podcast configurations, so the exact 19 production feeds were not replayed locally. Doing that safely requires explicit authorization to consume their private URLs without displaying or persisting them. Run the canonical release gate and deploy before treating the new diagnostics as active.
+- **Commits:** `4e64d0752dc5019d67874cecdbe31c390803b8bf`.
+
 ### 2026-09-03 — `main` — Restore scheduled news, article, and podcast ingestion
 
-- **Status:** Release in progress; not yet pushed or deployed.
+- **Status:** Complete; committed, pushed, and deployed.
 - **Scope:** News-item identity resolution, scrape-result persistence, and worker finalization after product-state errors.
 - **Decisions:** Prefer the exact ingest key, compare URL identities only within their semantic fields, isolate each scraped item with a database savepoint, compose persistence retryability with inherited source failures, and classify unexpected finalizer errors through a typed retryable/terminal policy.
 - **Changes:** Removed cross-field URL alias matching that selected representative rows and collided with child ingest keys. Successful news, article, and podcast results now commit independently of a malformed or database-failing sibling item and still enqueue their downstream work. Deterministic malformed records remain terminal unless another source failure requires a retry; database failures remain retryable. A failed finalizer now releases its transaction and uses a fresh exact-lease queue transition instead of leaving a task in `processing` for repeated lease reclamation. Large inline test modules were split into dedicated test files.
-- **Validation:** All 60 `newsly-db` and 92 `newsly-worker` library tests passed, including production-shaped representative/child identity regressions, recovery after a real PostgreSQL statement abort inside a savepoint, preservation and downstream enqueueing of later news, article, and podcast rows, preservation of an inherited retryable source failure, retry-budget consumption, and explicit terminal finalizer behavior. Rust formatting, warning-denied all-target Clippy for both crates, the complete architecture guard, and `git diff --check` passed.
-- **Remaining:** Run the canonical live-smoke release gate on the clean commit, push the exact tested SHA, wait for Docker Deploy, and prove the live revision and health.
+- **Validation:** Exact clean commit `c3ec01dd8fcb57dba704b9c1a72603f719fba814` passed the canonical release gate with Rust/SQLx/contracts, both Python islands, 631 native iOS tests, 3 lifecycle UI tests, AXe smoke, and every production-shaped live-provider scenario. Docker Deploy `33835184621` built and smoke-tested immutable SHA-tagged application/extractor images and completed the blue-green deployment. Production serves the exact SHA from green; the active API, workers, scheduler, extractor, and PostgreSQL are healthy; public `/health` and `/server-health` pass; 8 migrations are successful through `20260901000000`; and the one-hour queue snapshot shows active ingestion fanout with zero recent failures or expired leases.
+- **Remaining:** None. The post-deploy documentation update is intentionally uncommitted so the tested and deployed SHA remains unchanged.
+- **Commits:** `c3ec01dd8fcb57dba704b9c1a72603f719fba814`.
+
+### 2026-09-03 — `main` — Standardize iOS foreground color roles
+
+- **Status:** Complete and committed; release validation pending.
+- **Scope:** Briefing and detail reading text, shared content controls, onboarding and secondary labels, palette contrast tests, and iOS coding guidance.
+- **Decisions:** Keep `ReaderPalette` as the core editorial color-value authority. Reserve `readerBodyText` for prose, use `onSurface` for titles and primary controls, use `onSurfaceSecondary` for subordinate actions, and replace opacity-derived readable foregrounds on app surfaces with semantic roles.
+- **Changes:** Normalized the Briefing pullquote with other reading prose, removed reader-body styling from icons and headers, removed compounded row/card text opacity, lifted the light tertiary surface enough for secondary text contrast, and expanded the palette test matrix plus Briefing attributed-color coverage.
+- **Validation:** Focused `ReaderPaletteContrastTests` and `BriefingAttributedTextBuilderTests` passed 16 tests with 0 failures on iPhone 17 Pro Simulator after cleanup. The multiline-aware audit leaves only intentional scrim-backed or full-screen image-overlay foreground opacity, every remaining `readerBodyText` use is reading prose, and `git diff --check` passed.
+- **Remaining:** None within this scope. Concurrent uncommitted navigation and visual-polish changes were preserved.
+- **Commits:** `66abd623f2c8926a309624c152db253ae48e2955`.
+
+### 2026-09-03 — `main` — Consolidate iOS navigation and polish annotated screens
+
+- **Status:** Complete and committed; release validation pending.
+- **Scope:** Onboarding intro/choice/audio, Briefing masthead and narration control, Knowledge masthead/menu, content-detail actions, Settings navigation, and affected Maestro flows.
+- **Decisions:** Make Settings the single library-and-preferences hub and remove the separate More screen. Reuse the shared editorial masthead for Briefing loading, and keep playback controls icon-only with explicit accessibility labels.
+- **Changes:** Settings now contains Search, Recently Read, Submissions, and Processing; Knowledge opens Settings directly. Updated onboarding copy and choice hierarchy, removed the recording hint, enlarged playback controls, changed detail audio to play/pause, widened detail-action spacing, and normalized Knowledge's top content margin. Cleanup consolidated submission-state ownership, reused the shared onboarding button, removed dead icon configuration and the unused Settings visual fixture, gave sheet-hosted Settings a complete content-route stack, removed the circular Settings link from Recently Read filters, and retired stale More automation names and identifiers.
+- **Validation:** Final iPhone 17 Pro Simulator build succeeded. After cleanup, the native `newslyTests` target passed 633 tests with 0 failures. Accessibility inspection confirmed the unified Settings destinations and retained playback/recording labels. Captured and visually inspected onboarding intro, choice, active recording, Briefing loading, and unified Settings in light and dark. Maestro YAML, the native smoke script, and `git diff --check` passed syntax/whitespace checks.
+- **Remaining:** The authenticated full-screen Maestro flow was updated but not run against a local fixture API; final UI verification used deterministic DEBUG visual states. The obsolete More pixel baseline was removed instead of replacing it with an image from a different synthetic data path; record a canonical Settings baseline during the next authenticated visual run. None of the pre-existing or concurrently arriving unrelated worktree edits were changed.
+- **Commits:** `66abd623f2c8926a309624c152db253ae48e2955`.
+
+### 2026-09-03 — `main` — Correct stale-build verification and align Briefing masthead
+
+- **Status:** Complete and committed; release validation pending.
+- **Scope:** Briefing masthead sizing, Briefing narration control, deterministic detail-action evidence, and the local light/dark screenshot set.
+- **Decisions:** Keep app chrome on the app text-size preference and scope the separate reading-size preference to Briefing prose pages only. Make the resting narration control visibly icon-first at 52 points with a 22-point play glyph.
+- **Changes:** Removed the Briefing-wide dynamic type override, applied it only to Start Here and lens content, enlarged the Briefing play control, and added narrow DEBUG visual states for the real Briefing header and detail action bar components.
+- **Validation:** Reproduced that the installed simulator app was stale because its accessibility tree still exposed `more.screen`. Installed the current build, confirmed unified Settings and its four Library destinations, then measured the mismatch: Briefing date 137×17 points versus Knowledge 104×12. After the fix both dates measure 104×12, the Briefing play control measures 52×52, and the detail podcast action exposes `Play episode` in a seven-action row. Captured all affected states in light and dark. The iPhone 17 Pro Simulator build succeeded, `newslyTests` passed 633 tests with 0 failures, and `git diff --check` passed.
+- **Remaining:** The local fixture API was not running, so the loaded Briefing and full content-detail screens were verified through deterministic renders of their real header/action components rather than server-backed navigation.
+- **Commits:** `66abd623f2c8926a309624c152db253ae48e2955`.
+
+### 2026-09-02 — `main` — Validate the aggregator warm-corpus proposal and cost model
+
+- **Status:** Design only; implementation remains out of scope for this release.
+- **Scope:** `docs/initiatives/2026-09-02-aggregator-corpus-first-run-design.md`, covering aggregator refresh cadence, enrichment cost gating, the onboarding attach path, and first-run tier progress for the fixed Articles and Podcasts lenses.
+- **Decisions:** The shared aggregator corpus already exists (all seven keys scraped and processed globally every 15 minutes regardless of subscribers), so the design keeps it warm and gates enrichment by demand instead: discussion summaries, Firecrawl fallback, and Brutalist topics only where a subscriber exists. Two cadence tiers (15 minutes subscribed, 60 minutes unsubscribed) rather than four. Drop the onboarding aggregator scrape, bound the first-edition seed, re-enqueue on stale publication, and derive tier progress from existing content and news status columns instead of a new run-to-item table.
+- **Validation:** Repriced the pipeline from `vendor_usage_records` token totals in the local `newsly_dev` import (962 summarizations, 643 link selections, 2.57M embedding tokens, 322 Firecrawl pages) at GPT-5.6 Luna $0.20/$1.20, Qwen3-Embedding-8B $0.01, Firecrawl $0.00083: $0.00147 per processed item, unchanged from the earlier estimate, but the earlier volume was a mid-import snapshot. June 2026 production-synced data shows Hacker News discussion enrichment at about $0.021 per item ($54/month at Luna prices), the line the earlier model omitted. Steady-state intake is about 680 unique items per day, 64% Brutalist.
+- **Remaining:** The production-synced copy shows no aggregator intake after 2026-07-21 and one news summarization in the last 14 days; confirm the Rust scheduler's scrape job is running in production before tuning cadence. Confirm the Firecrawl plan. Observe SciURLs and FinURLs yield for a week.
 - **Commits:** Uncommitted.
 
 ### 2026-09-02 — `main` — Cut and rewrite the first-run welcome copy
