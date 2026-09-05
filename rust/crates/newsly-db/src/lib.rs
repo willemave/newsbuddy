@@ -186,10 +186,10 @@ pub use content_misc::{
     DiscussionRefreshPlan, DiscussionTargetKind, FeedBackfillEntry, FeedBackfillOrigin,
     FeedBackfillPersistence, FeedBackfillPlan, FeedBackfillPreparation, NewsConversionPlan,
     SubmissionPage, SubmissionProjection, TweetContentPlan, finalize_article_conversion,
-    list_submission_projections, persist_content_discussion, persist_feed_backfill,
-    persist_news_discussion, prepare_content_conversion, prepare_content_discussion_refresh,
-    prepare_content_narration, prepare_feed_backfill, prepare_news_conversion,
-    prepare_news_discussion_refresh, prepare_tweet_content,
+    known_feed_urls, list_submission_projections, persist_content_discussion,
+    persist_feed_backfill, persist_news_discussion, prepare_content_conversion,
+    prepare_content_discussion_refresh, prepare_content_narration, prepare_feed_backfill,
+    prepare_news_conversion, prepare_news_discussion_refresh, prepare_tweet_content,
 };
 pub use content_read::{
     ContentDetailProjection, ContentReadRepositoryError, NewsItemProjection, NewsListCursor,
@@ -346,4 +346,15 @@ pub use x_sync::{
     persist_x_sync_connection_update, prepare_x_sync, record_x_sync_usage,
     remove_stale_x_bookmark_save, resolve_x_bookmark_destination, save_x_bookmark_destination,
     upsert_x_bookmark_ledger, x_bookmark_destination_needs_image,
+};
+
+mod task_failure;
+pub use task_failure::settle_failed_task;
+
+mod source_health;
+pub use source_health::{PipelineHealthCounts, pipeline_health_counts, record_source_health};
+
+mod artifact_cleanup;
+pub use artifact_cleanup::{
+    artifact_cleanup_candidates, forget_cleaned_artifact, track_artifact, track_image_artifact,
 };

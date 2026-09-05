@@ -1,6 +1,6 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
-use sqlx::{FromRow, PgPool, Postgres, Transaction};
+use sqlx::{Acquire, FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
 use crate::content_read::{
@@ -492,6 +492,7 @@ pub struct FeedBackfillEntry {
 pub struct FeedBackfillPersistence {
     pub saved: usize,
     pub duplicates: usize,
+    pub rejected: usize,
     pub content_ids: Vec<i64>,
 }
 
@@ -517,17 +518,55 @@ pub async fn persist_feed_backfill(
     entries: &[FeedBackfillEntry],
 ) -> Result<FeedBackfillPersistence, ContentMiscRepositoryError> {
     let mut content_ids = Vec::new();
-    let mut duplicates = 0_usize;
+    let mut duplicates = 0;
+    let mut rejected = 0;
     for entry in entries {
-        let mut metadata = entry.metadata.clone();
-        if let Some(object) = metadata.as_object_mut() {
-            object.insert(
-                "submitted_via".to_owned(),
-                Value::String(origin.as_str().to_owned()),
-            );
+        let mut item_tx = transaction.begin().await?;
+        match persist_backfill_entry(&mut item_tx, user_id, origin, entry).await {
+            Ok((id, created)) => {
+                item_tx.commit().await?;
+                if created {
+                    content_ids.push(id);
+                } else {
+                    duplicates += 1;
+                }
+            }
+            Err(error)
+                if error.as_database_error().is_some_and(|e| {
+                    e.code()
+                        .is_some_and(|c| c.starts_with("22") || c.starts_with("23"))
+                }) =>
+            {
+                item_tx.rollback().await?;
+                rejected += 1;
+                tracing::warn!(user_id, error_code = ?error.as_database_error().and_then(sqlx::error::DatabaseError::code), "feed entry rejected; siblings preserved");
+            }
+            Err(error) => return Err(error.into()),
         }
-        let inserted = sqlx::query_scalar::<_, i64>(
-            r#"
+    }
+    Ok(FeedBackfillPersistence {
+        saved: content_ids.len(),
+        duplicates,
+        rejected,
+        content_ids,
+    })
+}
+
+async fn persist_backfill_entry(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: i64,
+    origin: FeedBackfillOrigin,
+    entry: &FeedBackfillEntry,
+) -> Result<(i64, bool), sqlx::Error> {
+    let mut metadata = entry.metadata.clone();
+    if let Some(object) = metadata.as_object_mut() {
+        object.insert(
+            "submitted_via".to_owned(),
+            Value::String(origin.as_str().to_owned()),
+        );
+    }
+    let inserted = sqlx::query_scalar::<_, i64>(
+        r#"
             INSERT INTO contents (
                 content_type, url, source_url, title, source, platform, is_aggregate,
                 status, retry_count, classification, content_metadata,
@@ -541,39 +580,36 @@ pub async fn persist_feed_backfill(
             ON CONFLICT (url, content_type) DO NOTHING
             RETURNING id::bigint
             "#,
-        )
-        .bind(&entry.content_type)
-        .bind(&entry.url)
-        .bind(&entry.source_url)
-        .bind(&entry.title)
-        .bind(&entry.source)
-        .bind(&entry.platform)
-        .bind(metadata)
-        .bind(entry.published_at.map(|value| value.naive_utc()))
-        .fetch_optional(&mut **transaction)
-        .await?;
-        let (content_id, was_created) = if let Some(content_id) = inserted {
-            (content_id, true)
-        } else {
-            let content_id = sqlx::query_scalar::<_, i64>(
-                r#"
+    )
+    .bind(&entry.content_type)
+    .bind(&entry.url)
+    .bind(&entry.source_url)
+    .bind(&entry.title)
+    .bind(&entry.source)
+    .bind(&entry.platform)
+    .bind(metadata)
+    .bind(entry.published_at.map(|value| value.naive_utc()))
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let (content_id, was_created) = if let Some(content_id) = inserted {
+        (content_id, true)
+    } else {
+        let content_id = sqlx::query_scalar::<_, i64>(
+            r#"
                 SELECT id::bigint
                 FROM contents
                 WHERE url = $1 AND content_type = $2
                 ORDER BY id
                 LIMIT 1
                 "#,
-            )
-            .bind(&entry.url)
-            .bind(&entry.content_type)
-            .fetch_one(&mut **transaction)
-            .await?;
-            (content_id, false)
-        };
-        if !was_created {
-            duplicates = duplicates.saturating_add(1);
-        }
-        sqlx::query(
+        )
+        .bind(&entry.url)
+        .bind(&entry.content_type)
+        .fetch_one(&mut **transaction)
+        .await?;
+        (content_id, false)
+    };
+    sqlx::query(
             r#"
             INSERT INTO content_status (user_id, content_id, status, created_at, updated_at)
             VALUES ($1::bigint::integer, $2::bigint::integer, 'inbox', timezone('UTC', now()), timezone('UTC', now()))
@@ -584,15 +620,7 @@ pub async fn persist_feed_backfill(
         .bind(content_id)
         .execute(&mut **transaction)
         .await?;
-        if was_created {
-            content_ids.push(content_id);
-        }
-    }
-    Ok(FeedBackfillPersistence {
-        saved: content_ids.len(),
-        duplicates,
-        content_ids,
-    })
+    Ok((content_id, was_created))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -953,3 +981,13 @@ pub enum ContentMiscRepositoryError {
 
 #[cfg(test)]
 mod tests;
+
+/// Include every existing membership, including archived content, when catching up a feed.
+pub async fn known_feed_urls(
+    pool: &PgPool,
+    user_id: i64,
+    content_type: &str,
+) -> Result<std::collections::BTreeSet<String>, sqlx::Error> {
+    Ok(sqlx::query_scalar::<_, String>("SELECT content.url FROM contents AS content JOIN content_status AS membership ON membership.content_id = content.id WHERE membership.user_id::bigint = $1 AND content.content_type = $2")
+        .bind(user_id).bind(content_type).fetch_all(pool).await?.into_iter().collect())
+}

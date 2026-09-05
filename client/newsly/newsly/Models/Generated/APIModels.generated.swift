@@ -6964,6 +6964,8 @@ struct APIBriefingBlock: Codable {
 }
 
 struct APIScraperConfigStatsResponse: Codable {
+    let lastFetchAt: Date?
+    let ingestionError: String?
     let totalCount: Int
     let completedCount: Int
     let unreadCount: Int
@@ -6975,6 +6977,8 @@ struct APIScraperConfigStatsResponse: Codable {
     let intervalSampleSize: Int
 
     init(
+        lastFetchAt: Date?,
+        ingestionError: String?,
         totalCount: Int,
         completedCount: Int,
         unreadCount: Int,
@@ -6985,6 +6989,8 @@ struct APIScraperConfigStatsResponse: Codable {
         averageIntervalHours: Double?,
         intervalSampleSize: Int = 0
     ) {
+        self.lastFetchAt = lastFetchAt
+        self.ingestionError = ingestionError
         self.totalCount = totalCount
         self.completedCount = completedCount
         self.unreadCount = unreadCount
@@ -6997,6 +7003,8 @@ struct APIScraperConfigStatsResponse: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case lastFetchAt = "last_fetch_at"
+        case ingestionError = "ingestion_error"
         case totalCount = "total_count"
         case completedCount = "completed_count"
         case unreadCount = "unread_count"
@@ -7010,6 +7018,15 @@ struct APIScraperConfigStatsResponse: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let lastFetchAtRaw = try container.decode(String?.self, forKey: .lastFetchAt) {
+            guard let lastFetchAtParsed = ServerDate.parse(lastFetchAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .lastFetchAt, in: container, debugDescription: "Unparseable date for lastFetchAt")
+            }
+            lastFetchAt = lastFetchAtParsed
+        } else {
+            lastFetchAt = nil
+        }
+        ingestionError = try container.decode(String?.self, forKey: .ingestionError)
         totalCount = try container.decode(Int.self, forKey: .totalCount)
         completedCount = try container.decode(Int.self, forKey: .completedCount)
         unreadCount = try container.decode(Int.self, forKey: .unreadCount)
@@ -7044,6 +7061,8 @@ struct APIScraperConfigStatsResponse: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(lastFetchAt.map(ServerDate.format), forKey: .lastFetchAt)
+        try container.encode(ingestionError, forKey: .ingestionError)
         try container.encode(totalCount, forKey: .totalCount)
         try container.encode(completedCount, forKey: .completedCount)
         try container.encode(unreadCount, forKey: .unreadCount)

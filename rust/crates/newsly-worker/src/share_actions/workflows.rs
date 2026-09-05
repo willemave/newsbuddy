@@ -257,6 +257,49 @@ pub fn build_host_action(
     )))
 }
 
+pub(super) fn build_verified_source_action(
+    task: &ShareActionAgentSnapshot,
+    target: &newsly_providers::ValidatedSharedTarget,
+) -> Option<PreparedHostAction> {
+    use newsly_providers::ValidatedSharedTarget;
+    let typed = match target {
+        ValidatedSharedTarget::Feed(feed) => {
+            let input = FeedActionInput {
+                url: feed.effective_url.clone(),
+                title: None,
+                platform: None,
+                instruction: input_optional_text(task, "instruction"),
+                feed_type: Some(validated_scraper_type(feed)),
+                feed_format: Some(feed.format.as_str().to_owned()),
+            };
+            match task.mode.as_str() {
+                "add_feed" => ShareActionHostInput::Feed(input),
+                "add_to_briefing" => {
+                    ShareActionHostInput::Briefing(BriefingActionInput::Feed(input))
+                }
+                _ => return None,
+            }
+        }
+        ValidatedSharedTarget::Item(item) if task.mode == "add_to_briefing" => {
+            ShareActionHostInput::Briefing(BriefingActionInput::Content(ContentActionInput {
+                url: item.effective_url.clone(),
+                title: None,
+                platform: None,
+                content_type: Some(item.content_type.to_owned()),
+                instruction: input_optional_text(task, "instruction"),
+                chat_initial_message: None,
+            }))
+        }
+        ValidatedSharedTarget::Item(_) => return None,
+    };
+    let workflow = ShareActionWorkflow::parse(&task.mode).ok()?;
+    Some(prepare_host_action(
+        workflow.host_action_name(),
+        typed,
+        Some("Shared source verified by the host".to_owned()),
+    ))
+}
+
 pub fn build_deterministic_chat_action(
     task: &ShareActionAgentSnapshot,
 ) -> Result<PreparedHostAction, ShareActionWorkflowError> {

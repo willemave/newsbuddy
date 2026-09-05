@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{HandlerExecution, LeaseHealth};
 
 use super::agent::{LearningDeckAgentError, LearningDeckAgentRuntime};
-use super::artifacts::LearningDeckArtifactStore;
+use super::artifacts::{LearningDeckArtifactError, LearningDeckArtifactStore};
 use super::finalizer::{LearningDeckFailureFinalizer, LearningDeckSuccessFinalizer};
 use super::source::{LearningDeckSourceLoad, LearningDeckSourceLoader};
 
@@ -52,8 +52,9 @@ impl LearningDeckTaskExecutor {
 
     /// Builds the complete Learning Deck executor from fail-closed process configuration.
     pub fn from_env(pool: PgPool, max_retries: i32) -> Result<Self, LearningDeckTaskBuildError> {
-        let artifacts = LearningDeckArtifactStore::from_env()
+        let artifacts = LearningDeckArtifactStore::from_env(pool.clone())
             .map_err(|error| LearningDeckTaskBuildError::Artifact(error.to_string()))?;
+        artifacts.start_cleanup();
         let agent = Arc::new(
             LearningDeckAgentRuntime::from_env(pool.clone())
                 .map_err(|error| LearningDeckTaskBuildError::Agent(error.to_string()))?,
@@ -188,6 +189,11 @@ impl LearningDeckTaskExecutor {
                         }
                     }
                 };
+                if retryable_agent_error(&error) {
+                    return LearningDeckDispatchOutcome::Handled(HandlerExecution::from_result(
+                        TaskResult::fail(Some(error.to_string()), true),
+                    ));
+                }
                 return handled_agent_failure(
                     task_id,
                     user_id,
@@ -232,6 +238,16 @@ impl LearningDeckTaskExecutor {
         {
             Ok(artifact) => artifact,
             Err(error) => {
+                if matches!(
+                    &error,
+                    LearningDeckArtifactError::Database(_)
+                        | LearningDeckArtifactError::ObjectStore(_)
+                        | LearningDeckArtifactError::File { .. }
+                ) {
+                    return LearningDeckDispatchOutcome::Handled(HandlerExecution::from_result(
+                        TaskResult::fail(Some(error.to_string()), true),
+                    ));
+                }
                 return handled_agent_failure(
                     task_id,
                     user_id,
@@ -478,4 +494,35 @@ fn positive_payload_id(payload: &Map<String, Value>, field: &str) -> Option<i64>
 
 fn json_object(value: Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
+}
+
+fn retryable_agent_error(error: &LearningDeckAgentError) -> bool {
+    match error {
+        LearningDeckAgentError::SandboxExecution { source, .. } => retryable_agent_error(source),
+        LearningDeckAgentError::E2b(error)
+        | LearningDeckAgentError::Lifecycle(
+            crate::task_sandbox::TaskSandboxError::Provider(error)
+            | crate::task_sandbox::TaskSandboxError::ProviderOperation { source: error, .. },
+        ) => error.disposition() == newsly_e2b::ErrorDisposition::Retryable,
+        LearningDeckAgentError::Deadline
+        | LearningDeckAgentError::Lifecycle(crate::task_sandbox::TaskSandboxError::Deadline)
+        | LearningDeckAgentError::Agent(
+            newsly_agent_runtime::AgentRuntimeError::DeadlineExceeded
+            | newsly_agent_runtime::AgentRuntimeError::Provider(_),
+        ) => true,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::{LearningDeckAgentError, retryable_agent_error};
+    #[test]
+    fn deck_deadlines_retry_but_invalid_instructions_stop() {
+        assert!(retryable_agent_error(&LearningDeckAgentError::Deadline));
+        assert!(!retryable_agent_error(&LearningDeckAgentError::Prompt(
+            "timeout".to_owned()
+        )));
+        assert!(!retryable_agent_error(&LearningDeckAgentError::Cancelled));
+    }
 }

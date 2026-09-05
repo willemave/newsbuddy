@@ -976,14 +976,20 @@ fn present_content_source(
             .source_url
             .clone()
             .or_else(|| Some(source.url.clone())),
-        image_url: Some(versioned_image_url(
-            format!("/static/images/content/{}.png", source.id),
-            version.as_deref(),
-        )),
-        thumbnail_url: Some(versioned_image_url(
-            format!("/static/images/thumbnails/{}.png", source.id),
-            version.as_deref(),
-        )),
+        image_url: clean_string(metadata.get("image_url"))
+            .or_else(|| {
+                version
+                    .as_ref()
+                    .map(|_| format!("/static/images/content/{}.png", source.id))
+            })
+            .map(|url| versioned_image_url(url, version.as_deref())),
+        thumbnail_url: clean_string(metadata.get("thumbnail_url"))
+            .or_else(|| {
+                version
+                    .as_ref()
+                    .map(|_| format!("/static/images/thumbnails/{}.png", source.id))
+            })
+            .map(|url| versioned_image_url(url, version.as_deref())),
         published_at: source.publication_date.or(Some(source.created_at)),
         content_type: Some(content_type),
         read,

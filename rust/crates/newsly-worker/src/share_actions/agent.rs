@@ -383,7 +383,7 @@ impl ShareActionAgentRuntime {
         // action boundary. It is byte bounded, UTF-8 checked, strictly decoded, and mode checked
         // by the workflow layer before any finalizer is built.
         let raw = tools.read_text(OUTPUT_RESULT_JSON, 1_000_000).await?;
-        let result: ShareActionAgentResult = serde_json::from_str(&raw)
+        let mut result: ShareActionAgentResult = serde_json::from_str(&raw)
             .map_err(|error| ShareActionAgentError::InvalidArtifact(error.to_string()))?;
         result
             .validate_confidence()
@@ -414,11 +414,36 @@ impl ShareActionAgentRuntime {
                 () = cancellation.cancelled() => return Err(ShareActionAgentError::Cancelled),
                 result = validation => result?,
             };
-            Some(validated.ok_or_else(|| {
-                ShareActionAgentError::InvalidArtifact(
-                    "feed result did not pass host feed validation".to_owned(),
-                )
-            })?)
+            if validated.is_none() && task.mode == "add_to_briefing" {
+                let original = task
+                    .input
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        ShareActionAgentError::InvalidArtifact("Shared URL is missing".to_owned())
+                    })?;
+                let proof = tokio::select! {
+                    () = cancellation.cancelled() => return Err(ShareActionAgentError::Cancelled),
+                    proof = self.feed_validator.validate_shared_item(original) => proof?,
+                };
+                let item = proof.ok_or_else(|| {
+                    ShareActionAgentError::InvalidArtifact(
+                        "Neither a valid feed nor an original article could be verified".to_owned(),
+                    )
+                })?;
+                result.briefing_target = Some(ShareActionBriefingTarget::Content {
+                    url: item.effective_url, title: result.title.clone(), platform: result.platform.clone(),
+                    rationale: Some("The original shared page is a verified item; the feed candidate was invalid".to_owned()),
+                    content_type: Some(item.content_type.to_owned()),
+                });
+                None
+            } else {
+                Some(validated.ok_or_else(|| {
+                    ShareActionAgentError::InvalidArtifact(
+                        "feed result did not pass host feed validation".to_owned(),
+                    )
+                })?)
+            }
         } else {
             None
         };
@@ -814,6 +839,21 @@ pub enum ShareActionAgentError {
 }
 
 impl ShareActionAgentError {
+    pub fn retryable(&self) -> bool {
+        match self {
+            Self::SandboxExecution { source, .. } => source.retryable(),
+            Self::E2b(error)
+            | Self::Lifecycle(
+                TaskSandboxError::Provider(error)
+                | TaskSandboxError::ProviderOperation { source: error, .. },
+            ) => error.disposition() == newsly_e2b::ErrorDisposition::Retryable,
+            Self::FeedValidation(_)
+            | Self::Deadline
+            | Self::Lifecycle(TaskSandboxError::Deadline) => true,
+            _ => false,
+        }
+    }
+
     #[must_use]
     pub fn sandbox_identity(&self) -> Option<(&str, &str)> {
         match self {

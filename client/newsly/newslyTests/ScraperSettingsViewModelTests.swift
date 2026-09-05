@@ -97,6 +97,8 @@ final class ScraperSettingsViewModelTests: XCTestCase {
 
     private func makeStats(intervalHours: Double) -> ScraperConfigStats {
         ScraperConfigStats(
+            lastFetchAt: nil,
+            ingestionError: nil,
             totalCount: 0,
             completedCount: 0,
             unreadCount: 0,

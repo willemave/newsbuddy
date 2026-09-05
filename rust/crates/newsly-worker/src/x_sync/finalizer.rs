@@ -11,7 +11,7 @@ use newsly_db::{
     upsert_x_bookmark_ledger, x_bookmark_destination_needs_image,
 };
 use newsly_providers::XTweet;
-use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
+use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskResult, TaskType};
 use serde_json::{Map, Value, json};
 use sqlx::{Postgres, Transaction};
 use thiserror::Error;
@@ -36,12 +36,12 @@ impl XSyncFinalizer {
     async fn apply_inner(
         &self,
         transaction: &mut Transaction<'static, Postgres>,
-    ) -> Result<(), XSyncFinalizeError> {
+    ) -> Result<bool, XSyncFinalizeError> {
         if !lock_current_x_sync_connection(transaction, &self.plan.prepared).await? {
             // Disconnect, OAuth replacement, or account deletion won while provider I/O was in
             // flight. Completing the obsolete queue row without publishing its output is the
             // only safe result.
-            return Ok(());
+            return Ok(false);
         }
         match &self.plan.mutation {
             XSyncMutation::ReauthRequired {
@@ -78,17 +78,21 @@ impl XSyncFinalizer {
                     .prepared
                     .last_synced_item_id
                     .as_deref());
-                let channel_last_synced_at = if bookmarks.status == "skipped_recently" {
-                    self.plan
-                        .prepared
-                        .bookmark_last_synced_at
-                        .map(|value| value.to_rfc3339())
-                } else {
-                    Some(completed_at.to_rfc3339())
-                };
+                let channel_last_synced_at =
+                    if bookmarks.status == "skipped_recently" || !bookmarks.finished {
+                        self.plan
+                            .prepared
+                            .bookmark_last_synced_at
+                            .map(|value| value.to_rfc3339())
+                    } else {
+                        Some(completed_at.to_rfc3339())
+                    };
                 let sync_metadata = json!({
                     "bookmarks": {
                         "status": bookmarks.status,
+                        "in_progress": !bookmarks.finished,
+                        "continuation": bookmarks.continuation,
+                        "pending_newest_item_id": bookmarks.pending_newest_item_id,
                         "fetched": bookmarks.fetched,
                         "accepted": summary.created + summary.reused,
                         "filtered_out": 0,
@@ -102,7 +106,7 @@ impl XSyncFinalizer {
                 complete_x_sync(
                     transaction,
                     self.plan.prepared.connection_id,
-                    "success",
+                    bookmarks.status,
                     bookmarks.newest_item_id.as_deref(),
                     &sync_metadata,
                     *completed_at,
@@ -110,7 +114,7 @@ impl XSyncFinalizer {
                 .await?;
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -220,10 +224,22 @@ impl TaskFinalizer for XSyncFinalizer {
         transaction: &'a mut Transaction<'static, Postgres>,
     ) -> HandlerFinalizerFuture<'a> {
         Box::pin(async move {
-            self.apply_inner(transaction)
+            if !self
+                .apply_inner(transaction)
                 .await
-                .map_err(|error| Box::new(error) as Box<dyn Error + Send + Sync>)?;
-            Ok(TaskFinalizerResult::Keep)
+                .map_err(|error| Box::new(error) as Box<dyn Error + Send + Sync>)?
+            {
+                return Ok(TaskFinalizerResult::Override(TaskResult::ok()));
+            }
+            Ok(match &self.plan.mutation {
+                XSyncMutation::Complete { bookmarks, .. } if !bookmarks.finished => {
+                    TaskFinalizerResult::Override(match &bookmarks.failure {
+                        Some(error) => TaskResult::fail(Some(error.clone()), true),
+                        None => TaskResult::defer(1),
+                    })
+                }
+                _ => TaskFinalizerResult::Keep,
+            })
         })
     }
 }

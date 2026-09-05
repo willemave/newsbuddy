@@ -228,7 +228,16 @@ async fn execute_discussion(
                 SummaryCall::LeaseLost => {
                     return plain_failure("queue lease was lost during discussion summary", true);
                 }
-                SummaryCall::Failed(error) if requested_mode == DiscussionSummaryMode::Merge => {
+                SummaryCall::Failed(error)
+                    if requested_mode == DiscussionSummaryMode::Merge
+                        && matches!(
+                            error,
+                            ContentMiscGatewayError::InvalidDiscussionSummary(_)
+                                | ContentMiscGatewayError::DiscussionGeneration(
+                                    newsly_agent_runtime::AgentRuntimeError::Validation(_)
+                                )
+                        ) =>
+                {
                     tracing::warn!(
                         news_item_id,
                         error = %error,
@@ -257,7 +266,7 @@ async fn execute_discussion(
                                 plan,
                                 snapshot,
                                 error.to_string(),
-                                true,
+                                error.discussion_retryable(),
                                 Some(fetched_artifact),
                             );
                         }
@@ -268,7 +277,7 @@ async fn execute_discussion(
                         plan,
                         snapshot,
                         error.to_string(),
-                        true,
+                        error.discussion_retryable(),
                         Some(fetched_artifact),
                     );
                 }

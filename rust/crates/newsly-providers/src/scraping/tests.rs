@@ -48,6 +48,7 @@ fn configured_feed_fetch_can_disable_only_the_response_size_limit() {
 
 fn podcast_target() -> FeedScrapeTarget {
     FeedScrapeTarget {
+        known_urls: std::collections::BTreeSet::new(),
         config_id: 42,
         user_id: 7,
         scraper_type: "podcast_rss".to_owned(),
@@ -173,6 +174,7 @@ fn podcast_feed_uses_enclosure_when_entry_has_no_page_link() {
 #[test]
 fn substack_feed_filters_audio_posts_by_title() {
     let target = FeedScrapeTarget {
+        known_urls: std::collections::BTreeSet::new(),
         config_id: 42,
         user_id: 7,
         scraper_type: "substack".to_owned(),
@@ -198,6 +200,7 @@ fn substack_feed_filters_audio_posts_by_title() {
 #[test]
 fn feed_body_preserves_internal_whitespace() {
     let target = FeedScrapeTarget {
+        known_urls: std::collections::BTreeSet::new(),
         config_id: 42,
         user_id: 7,
         scraper_type: "atom".to_owned(),
@@ -226,6 +229,7 @@ fn feed_body_preserves_internal_whitespace() {
 #[test]
 fn feed_source_falls_back_to_feed_domain() {
     let target = FeedScrapeTarget {
+        known_urls: std::collections::BTreeSet::new(),
         config_id: 42,
         user_id: 7,
         scraper_type: "atom".to_owned(),
@@ -280,4 +284,53 @@ fn invalid_feed_has_a_stable_diagnostic_code() {
     assert_eq!(error.http_status(), None);
     assert!(error.retryable());
     assert!(matches!(error, ScrapeGatewayError::Feed(_)));
+}
+
+#[test]
+fn retained_feed_catchup_skips_known_and_malformed_entries_before_limiting() {
+    let mut target = podcast_target();
+    target.limit = 2;
+    target
+        .known_urls
+        .insert("https://example.com/one.mp3".to_owned());
+    let document = br#"<rss version="2.0"><channel><title>Show</title><link>https://example.com</link><description>Show</description>
+    <item><guid>broken</guid><title>Missing enclosure</title></item>
+    <item><guid>one</guid><enclosure url="https://example.com/one.mp3" type="audio/mpeg" length="10"/></item>
+    <item><guid>two</guid><enclosure url="https://example.com/two.mp3" type="audio/mpeg" length="10"/></item>
+    <item><guid>three</guid><enclosure url="https://example.com/three.mp3" type="audio/mpeg" length="10"/></item>
+    </channel></rss>"#;
+    let result = normalize_feed_document(&target, document).unwrap();
+    let urls = result
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            ScrapedItem::Content(item) => Some(item.url.as_str()),
+            ScrapedItem::News(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        urls,
+        vec![
+            "https://example.com/two.mp3",
+            "https://example.com/three.mp3"
+        ]
+    );
+    assert_eq!(result.item_errors.len(), 1);
+}
+
+#[test]
+fn an_oversized_url_does_not_starve_the_usable_feed_tail() {
+    let mut target = podcast_target();
+    target.limit = 1;
+    let document = format!(
+        r#"<rss version="2.0"><channel><title>Show</title><item><title>Poison</title><enclosure url="https://cdn.example/{}.mp3" type="audio/mpeg"/></item><item><title>Good</title><enclosure url="https://cdn.example/good.mp3" type="audio/mpeg"/></item></channel></rss>"#,
+        "x".repeat(2050)
+    );
+    let outcome = normalize_feed_document(&target, document.as_bytes()).unwrap();
+    assert_eq!(outcome.items.len(), 1);
+    assert_eq!(outcome.item_errors.len(), 1);
+    let ScrapedItem::Content(item) = &outcome.items[0] else {
+        panic!("content expected")
+    };
+    assert_eq!(item.title.as_deref(), Some("Good"));
 }

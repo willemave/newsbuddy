@@ -116,91 +116,10 @@ pub struct UsageFreshness {
     pub latest_record_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct HealthSnapshot {
-    pub generated_at: DateTime<Utc>,
-    pub content: CountByStatus,
-    pub tasks: CountByStatus,
-    pub events: EventHealth,
-    pub usage: UsageFreshness,
-}
+mod health;
+pub use health::{HealthSnapshot, load_health_snapshot};
 
-impl HealthSnapshot {
-    pub fn render_text(&self) -> String {
-        format!(
-            "Health snapshot:\n- content: {} total\n- tasks: {} total\n- events: {} total\n- latest usage record: {}",
-            self.content.total,
-            self.tasks.total,
-            self.events.total,
-            self.usage
-                .latest_record_at
-                .map_or_else(|| "none".to_owned(), |value| value.to_rfc3339())
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
-struct StatusCountRow {
-    label: String,
-    count: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
-struct UsageFreshnessRow {
-    latest_record_at: Option<DateTime<Utc>>,
-}
-
-/// Loads the stable coarse health envelope using fixed read-only queries.
-///
-/// # Errors
-///
-/// Returns [`OperatorQueryError::Sqlx`] when `PostgreSQL` rejects a query or a result cannot be
-/// decoded.
-pub async fn load_health_snapshot(pool: &PgPool) -> Result<HealthSnapshot, OperatorQueryError> {
-    let content_rows = sqlx::query_as::<_, StatusCountRow>(
-        r"
-        SELECT COALESCE(status, 'unknown') AS label, COUNT(*)::bigint AS count
-        FROM contents
-        GROUP BY COALESCE(status, 'unknown')
-        ORDER BY label
-        ",
-    )
-    .fetch_all(pool)
-    .await?;
-    let task_rows = sqlx::query_as::<_, StatusCountRow>(
-        r"
-        SELECT COALESCE(status, 'unknown') AS label, COUNT(*)::bigint AS count
-        FROM processing_tasks
-        GROUP BY COALESCE(status, 'unknown')
-        ORDER BY label
-        ",
-    )
-    .fetch_all(pool)
-    .await?;
-    let usage = sqlx::query_as::<_, UsageFreshnessRow>(
-        r"
-        SELECT MAX(created_at) AT TIME ZONE 'UTC' AS latest_record_at
-        FROM vendor_usage_records
-        ",
-    )
-    .fetch_one(pool)
-    .await?;
-    let event_count: i64 = sqlx::query_scalar("SELECT COUNT(*)::bigint FROM event_logs")
-        .fetch_one(pool)
-        .await?;
-
-    Ok(HealthSnapshot {
-        generated_at: Utc::now(),
-        content: count_by_status(content_rows),
-        tasks: count_by_status(task_rows),
-        events: EventHealth { total: event_count },
-        usage: UsageFreshness {
-            latest_record_at: usage.latest_record_at,
-        },
-    })
-}
-
-fn count_by_status(rows: Vec<StatusCountRow>) -> CountByStatus {
+fn count_by_status(rows: Vec<health::StatusCountRow>) -> CountByStatus {
     let by_status = rows
         .into_iter()
         .map(|row| (row.label, row.count))
@@ -701,12 +620,26 @@ pub struct UsageTotals {
     pub total_tokens: i64,
     pub request_count: i64,
     pub resource_count: i64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: f64,
+    pub unpriced_call_count: i64,
     pub providers: BTreeMap<String, i64>,
     pub models: BTreeMap<String, i64>,
 }
 
 impl UsageTotals {
+    fn render_cost(&self) -> String {
+        self.cost_usd.map_or_else(
+            || {
+                format!(
+                    "cost unknown (${:.4} known; {} unpriced calls)",
+                    self.known_cost_usd, self.unpriced_call_count
+                )
+            },
+            |cost| format!("${cost:.4}"),
+        )
+    }
+
     fn render_units(&self) -> String {
         let mut units = Vec::new();
         if self.total_tokens != 0 {
@@ -743,7 +676,9 @@ pub struct UsageGroup {
     pub total_tokens: i64,
     pub request_count: i64,
     pub resource_count: i64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: f64,
+    pub unpriced_call_count: i64,
 }
 
 impl UsageGroup {
@@ -758,6 +693,8 @@ impl UsageGroup {
             request_count: self.request_count,
             resource_count: self.resource_count,
             cost_usd: self.cost_usd,
+            known_cost_usd: self.known_cost_usd,
+            unpriced_call_count: self.unpriced_call_count,
             providers: BTreeMap::new(),
             models: BTreeMap::new(),
         }
@@ -774,7 +711,9 @@ struct UsageTotalsRow {
     total_tokens: i64,
     request_count: i64,
     resource_count: i64,
-    cost_usd: f64,
+    cost_usd: Option<f64>,
+    known_cost_usd: f64,
+    unpriced_call_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -797,11 +736,11 @@ pub struct UsageSummary {
 impl UsageSummary {
     pub fn render_text(&self) -> String {
         let mut text = format!(
-            "Usage summary grouped by {}:\nTotals: {} calls, {}, ${:.4}",
+            "Usage summary grouped by {}:\nTotals: {} calls, {}, {}",
             self.group_by,
             self.totals.call_count,
             self.totals.render_units(),
-            self.totals.cost_usd
+            self.totals.render_cost()
         );
         if !self.groups.is_empty() {
             text.push_str("\nGroups:");
@@ -809,11 +748,11 @@ impl UsageSummary {
                 let totals = row.totals();
                 let _ = write!(
                     text,
-                    "\n- {}: {} calls, {}, ${:.4}",
+                    "\n- {}: {} calls, {}, {}",
                     row.key,
                     row.call_count,
                     totals.render_units(),
-                    row.cost_usd
+                    totals.render_cost()
                 );
             }
         }
@@ -843,7 +782,11 @@ pub async fn load_usage_summary(
             COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
             COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
-            ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS cost_usd
+            CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
+                THEN ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision
+                ELSE NULL END AS cost_usd,
+            ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS known_cost_usd,
+            COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
         FROM vendor_usage_records
         WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
           AND created_at <= ($2::timestamptz AT TIME ZONE 'UTC')
@@ -854,45 +797,7 @@ pub async fn load_usage_summary(
     .fetch_one(pool)
     .await?;
     let dimension_counts = load_usage_dimension_counts(pool, window).await?;
-    let groups = sqlx::query_as::<_, UsageGroup>(
-        r"
-        WITH grouped AS (
-            SELECT
-                CASE $3::text
-                    WHEN 'user' THEN COALESCE(user_id::text, 'unknown')
-                    WHEN 'feature' THEN COALESCE(feature, 'unknown')
-                    WHEN 'operation' THEN COALESCE(operation, 'unknown')
-                    WHEN 'provider' THEN COALESCE(provider, 'unknown')
-                    WHEN 'vendor' THEN COALESCE(provider, 'unknown')
-                    WHEN 'model' THEN COALESCE(model, 'unknown')
-                    WHEN 'source' THEN COALESCE(source, 'unknown')
-                    ELSE 'unknown'
-                END AS key,
-                COUNT(*)::bigint AS call_count,
-                COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
-                COALESCE(SUM(cache_read_tokens), 0)::bigint AS cache_read_tokens,
-                COALESCE(SUM(cache_write_tokens), 0)::bigint AS cache_write_tokens,
-                COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
-                COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
-                COALESCE(SUM(request_count), 0)::bigint AS request_count,
-                COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
-                ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS cost_usd
-            FROM vendor_usage_records
-            WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
-              AND created_at <= ($2::timestamptz AT TIME ZONE 'UTC')
-            GROUP BY 1
-        )
-        SELECT key, call_count, input_tokens, cache_read_tokens, cache_write_tokens,
-               output_tokens, total_tokens, request_count, resource_count, cost_usd
-        FROM grouped
-        ORDER BY (key = 'unknown'), LOWER(key)
-        ",
-    )
-    .bind(window.since)
-    .bind(window.until)
-    .bind(group_by.as_str())
-    .fetch_all(pool)
-    .await?;
+    let groups = load_usage_groups(pool, window, group_by).await?;
 
     let providers = dimension_counts
         .iter()
@@ -914,6 +819,8 @@ pub async fn load_usage_summary(
         request_count: totals.request_count,
         resource_count: totals.resource_count,
         cost_usd: totals.cost_usd,
+        known_cost_usd: totals.known_cost_usd,
+        unpriced_call_count: totals.unpriced_call_count,
         providers,
         models,
     };
@@ -926,6 +833,57 @@ pub async fn load_usage_summary(
         totals,
         groups,
     })
+}
+
+async fn load_usage_groups(
+    pool: &PgPool,
+    window: QueryWindow,
+    group_by: UsageGroupBy,
+) -> Result<Vec<UsageGroup>, sqlx::Error> {
+    sqlx::query_as::<_, UsageGroup>(
+        r"
+        WITH grouped AS (
+            SELECT
+                CASE $3::text
+                    WHEN 'user' THEN COALESCE(user_id::text, 'unknown')
+                    WHEN 'feature' THEN COALESCE(feature, 'unknown')
+                    WHEN 'operation' THEN COALESCE(operation, 'unknown')
+                    WHEN 'provider' THEN COALESCE(provider, 'unknown')
+                    WHEN 'vendor' THEN COALESCE(provider, 'unknown')
+                    WHEN 'model' THEN COALESCE(model, 'unknown')
+                    WHEN 'source' THEN COALESCE(source, 'unknown')
+                    ELSE 'unknown'
+                END AS key,
+                COUNT(*)::bigint AS call_count,
+                COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+                COALESCE(SUM(cache_read_tokens), 0)::bigint AS cache_read_tokens,
+                COALESCE(SUM(cache_write_tokens), 0)::bigint AS cache_write_tokens,
+                COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+                COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
+                COALESCE(SUM(request_count), 0)::bigint AS request_count,
+                COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
+                CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
+                    THEN ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision
+                    ELSE NULL END AS cost_usd,
+                ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS known_cost_usd,
+                COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
+            FROM vendor_usage_records
+            WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
+              AND created_at <= ($2::timestamptz AT TIME ZONE 'UTC')
+            GROUP BY 1
+        )
+        SELECT key, call_count, input_tokens, cache_read_tokens, cache_write_tokens,
+               output_tokens, total_tokens, request_count, resource_count, cost_usd,
+               known_cost_usd, unpriced_call_count
+        FROM grouped
+        ORDER BY (key = 'unknown'), LOWER(key)
+        ",
+    )
+    .bind(window.since)
+    .bind(window.until)
+    .bind(group_by.as_str())
+    .fetch_all(pool)
+    .await
 }
 
 async fn load_usage_dimension_counts(
@@ -1012,6 +970,8 @@ mod tests {
     fn health_text_keeps_legacy_operator_summary() {
         let generated_at = Utc.with_ymd_and_hms(2026, 8, 31, 12, 0, 0).unwrap();
         let snapshot = HealthSnapshot {
+            pipeline: newsly_db::PipelineHealthCounts::default(),
+            sources: Vec::new(),
             generated_at,
             content: CountByStatus {
                 total: 12,
@@ -1031,49 +991,6 @@ mod tests {
         assert!(rendered.contains("Health snapshot:"));
         assert!(rendered.contains("- content: 12 total"));
         assert!(rendered.contains("- latest usage record: 2026-08-31T12:00:00+00:00"));
-    }
-
-    #[test]
-    fn usage_text_renders_tokens_vendor_units_and_cost() {
-        let generated_at = Utc.with_ymd_and_hms(2026, 8, 31, 12, 0, 0).unwrap();
-        let summary = UsageSummary {
-            generated_at,
-            since: generated_at - Duration::hours(24),
-            until: generated_at,
-            group_by: "vendor".to_owned(),
-            totals: UsageTotals {
-                call_count: 2,
-                input_tokens: 60,
-                cache_read_tokens: 40,
-                cache_write_tokens: 10,
-                output_tokens: 40,
-                total_tokens: 100,
-                request_count: 2,
-                resource_count: 9,
-                cost_usd: 0.42,
-                providers: BTreeMap::new(),
-                models: BTreeMap::new(),
-            },
-            groups: vec![UsageGroup {
-                key: "exa".to_owned(),
-                call_count: 1,
-                input_tokens: 0,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-                request_count: 1,
-                resource_count: 8,
-                cost_usd: 0.28,
-            }],
-        };
-
-        let rendered = summary.render_text();
-        assert!(rendered.contains(
-            "Totals: 2 calls, 100 tokens, 40 cache-read tokens, 10 cache-write tokens, \
-             2 requests, 9 resources, $0.4200"
-        ));
-        assert!(rendered.contains("- exa: 1 calls, 1 requests, 8 resources, $0.2800"));
     }
 
     #[test]
@@ -1103,3 +1020,7 @@ mod tests {
         assert!(!rendered.contains("payload"));
     }
 }
+
+#[cfg(test)]
+#[path = "operator/usage_tests.rs"]
+mod usage_tests;

@@ -33,6 +33,10 @@ pub(super) struct BookmarkFetchOutcome {
     pub tweets: Vec<XTweet>,
     pub included_tweets: BTreeMap<String, XTweet>,
     pub newest_item_id: Option<String>,
+    pub continuation: Option<String>,
+    pub pending_newest_item_id: Option<String>,
+    pub finished: bool,
+    pub failure: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

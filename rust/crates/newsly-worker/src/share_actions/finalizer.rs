@@ -51,7 +51,7 @@ impl ShareActionSuccessFinalizer {
         }
     }
 
-    pub fn deterministic_chat(
+    pub fn deterministic(
         queue: QueueKernel,
         sandbox_root: String,
         snapshot: ShareActionAgentSnapshot,

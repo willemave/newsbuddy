@@ -35,7 +35,7 @@ use super::artifacts::{
     OUTPUT_ASSET_DIRECTORY, OUTPUT_INDEX_HTML, OUTPUT_SOURCE_METADATA, OUTPUT_SOURCE_NOTES,
     guess_content_type, validate_learning_deck_artifact,
 };
-use super::browser::{BrowserValidationError, validate_in_browser};
+use super::browser::{BrowserValidationError, hosted_viewer_html, validate_in_browser};
 
 #[path = "agent/policy.rs"]
 mod policy;
@@ -482,6 +482,7 @@ impl LearningDeckAgentRuntime {
                 report: Map::from_iter([("missing".to_owned(), json!([OUTPUT_SOURCE_NOTES]))]),
                 repairable: true,
             })?;
+        let index_html = hosted_viewer_html(&index_html);
         validate_learning_deck_artifact(&index_html, &source_notes, &self.config.limits)
             .map_err(LearningDeckAgentError::from_artifact)?;
         let policy = self.agent_network_policy().await;

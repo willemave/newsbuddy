@@ -10,6 +10,8 @@ use crate::{ScraperConfigProjection, canonicalize_feed_url};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ScraperConfigStatsProjection {
+    pub last_fetch_at: Option<DateTime<Utc>>,
+    pub ingestion_error: Option<String>,
     pub total_count: i64,
     pub completed_count: i64,
     pub unread_count: i64,
@@ -117,6 +119,14 @@ pub async fn get_scraper_config_stats(
         load_active_task_content_ids(pool, &matched_ids)
     )?;
 
+    let observations = sqlx::query_as::<_, (i64, Option<DateTime<Utc>>, Option<String>)>("SELECT config.id::bigint, health.last_success_at, health.error_code FROM user_scraper_configs AS config LEFT JOIN source_ingestion_health AS health ON health.source_key = CASE WHEN config.scraper_type = 'aggregator' THEN 'aggregator:' || (config.config::jsonb ->> 'key') ELSE 'config:' || config.id::text END WHERE config.user_id::bigint = $1")
+        .bind(user_id).fetch_all(pool).await?;
+    for (id, success, error) in observations {
+        if let Some(stats) = working.get_mut(&id) {
+            stats.response.last_fetch_at = success;
+            stats.response.ingestion_error = error;
+        }
+    }
     Ok(working
         .into_iter()
         .map(|(config_id, mut stats)| {

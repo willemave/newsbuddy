@@ -167,13 +167,6 @@ impl TaskType {
         }
     }
 
-    pub const fn reclaim_consumes_retry(self) -> bool {
-        matches!(
-            self,
-            Self::ChatTurn | Self::DigDeeper | Self::GenerateAudioEpisode | Self::RunLlmTask
-        )
-    }
-
     /// Applies the same defaults, null elision, and closed/open-object rules as the checked-in
     /// task schemas. This is deliberately performed both at enqueue and before dispatch.
     ///
@@ -269,6 +262,7 @@ impl TaskType {
                 });
             }
             Self::Scrape => {
+                optional_integer(&mut payload, self, "config_id", true)?;
                 if payload.contains_key("sources") {
                     let sources = payload.get("sources").and_then(Value::as_array).ok_or(
                         PayloadError::WrongType {

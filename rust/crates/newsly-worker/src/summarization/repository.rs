@@ -198,10 +198,7 @@ fn apply_completed_summary(
     {
         content.title = Some(title.chars().take(500).collect());
     }
-    content.status = status_after_summary(&content.content_type, &metadata).to_owned();
-    content.content_metadata = Value::Object(metadata);
-    content.error_message = None;
-    content.processed_at = Some(plan.finalized_at.naive_utc());
+    complete_readable_summary(content, metadata, plan.finalized_at.naive_utc());
 }
 
 fn apply_unchanged_summary(content: &mut LockedContent, plan: &SummarizationFinalizationPlan) {
@@ -211,10 +208,25 @@ fn apply_unchanged_summary(content: &mut LockedContent, plan: &SummarizationFina
         "summarization_input_fingerprint",
         Value::String(plan.attempt.input_fingerprint.clone()),
     );
-    content.status = status_after_summary(&content.content_type, &metadata).to_owned();
+    complete_readable_summary(content, metadata, plan.finalized_at.naive_utc());
+}
+
+fn complete_readable_summary(
+    content: &mut LockedContent,
+    mut metadata: Map<String, Value>,
+    processed_at: NaiveDateTime,
+) {
+    "completed".clone_into(&mut content.status);
+    if matches!(content.content_type.as_str(), "article" | "podcast")
+        && runtime_metadata_view(&Value::Object(metadata.clone()))
+            .get("image_generated_at")
+            .is_none_or(Value::is_null)
+    {
+        set_domain_field(&mut metadata, "artwork_status", Value::from("pending"));
+    }
     content.content_metadata = Value::Object(metadata);
     content.error_message = None;
-    content.processed_at = Some(plan.finalized_at.naive_utc());
+    content.processed_at = Some(processed_at);
 }
 
 fn apply_failure(
@@ -409,20 +421,6 @@ fn extract_pending_chat_requests(metadata: &Value) -> Vec<PendingChatRequest> {
     requests
 }
 
-fn status_after_summary(content_type: &str, metadata: &Map<String, Value>) -> &'static str {
-    if !matches!(content_type, "article" | "podcast") {
-        return "completed";
-    }
-    if runtime_metadata_view(&Value::Object(metadata.clone()))
-        .get("image_generated_at")
-        .is_some_and(|value| !value.is_null())
-    {
-        "completed"
-    } else {
-        "awaiting_image"
-    }
-}
-
 fn metadata_map(value: &Value) -> Map<String, Value> {
     value.as_object().cloned().unwrap_or_default()
 }
@@ -485,4 +483,69 @@ fn saturating_i32(value: u64) -> i32 {
 pub(super) enum SummarizationRepositoryError {
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::*;
+    use crate::summarization::model::PreparedSummarizationAttempt;
+    use newsly_queue::QueueKernel;
+    use sqlx::PgPool;
+
+    #[sqlx::test]
+    async fn reusable_summary_is_readable_and_enqueues_briefing_before_artwork(pool: PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let user: i64 = sqlx::query_scalar("INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('summary-ready', 'summary@example.test', FALSE, TRUE) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+        for kind in ["article", "podcast"] {
+            let id: i64 = sqlx::query_scalar("INSERT INTO contents (content_type, url, is_aggregate, status, content_metadata) VALUES ($1, $2, FALSE, 'processing', $3) RETURNING id::bigint")
+                .bind(kind).bind(format!("https://example.com/{kind}"))
+                .bind(json!({"summary": {"title":"Useful summary"}, "content":"source text"})).fetch_one(&pool).await.unwrap();
+            sqlx::query("INSERT INTO content_status (user_id, content_id, status, created_at, updated_at) VALUES ($1::bigint::integer, $2::bigint::integer, 'inbox', now(), now())").bind(user).bind(id).execute(&pool).await.unwrap();
+            let mut tx = pool.begin().await.unwrap();
+            let snapshot = load_summarization_snapshot(&mut tx, id)
+                .await
+                .unwrap()
+                .unwrap();
+            let payload = build_summarization_payload(kind, &snapshot.content_metadata, None);
+            let plan = SummarizationFinalizationPlan {
+                attempt: PreparedSummarizationAttempt {
+                    task_id: 1,
+                    content: snapshot,
+                    input_fingerprint: input_fingerprint(kind, &payload),
+                },
+                mutation: SummarizationMutation::Unchanged,
+                finalized_at: chrono::Utc::now(),
+            };
+            let SummarizationApplyOutcome::Applied(applied) =
+                apply_summarization_state(&mut tx, &plan).await.unwrap()
+            else {
+                panic!("summary should apply")
+            };
+            assert_eq!(applied.status, "completed");
+            crate::summarization::fanout::enqueue_summary_followups(
+                &mut tx,
+                &QueueKernel::new(pool.clone()),
+                &applied,
+                0,
+                1,
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+        }
+        let kinds: Vec<String> =
+            sqlx::query_scalar("SELECT task_type FROM processing_tasks ORDER BY task_type")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            kinds,
+            ["briefing_refresh", "generate_image", "generate_image"]
+        );
+        let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(pending, 2);
+    }
 }

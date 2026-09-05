@@ -215,7 +215,7 @@ impl ShareActionTaskExecutor {
                 Ok(action) => {
                     ShareActionDispatchOutcome::Handled(HandlerExecution::with_finalizer(
                         TaskResult::ok(),
-                        ShareActionSuccessFinalizer::deterministic_chat(
+                        ShareActionSuccessFinalizer::deterministic(
                             self.queue.clone(),
                             self.sandbox_root.clone(),
                             snapshot,
@@ -235,6 +235,36 @@ impl ShareActionTaskExecutor {
         if lease.ownership_lost() {
             return handled_defer(5);
         }
+        if matches!(snapshot.mode.as_str(), "add_feed" | "add_to_briefing")
+            && let Some(url) = clean_input_text(&snapshot.input, "url")
+        {
+            let validator = newsly_providers::FeedValidator::new();
+            let validated = tokio::select! {
+                () = lease.wait_for_ownership_loss() => return handled_defer(5),
+                result = validator.validate_shared_target(&url) => result,
+            };
+            match validated {
+                Ok(Some(target)) => {
+                    if let Some(action) =
+                        super::workflows::build_verified_source_action(&snapshot, &target)
+                    {
+                        return ShareActionDispatchOutcome::Handled(
+                            HandlerExecution::with_finalizer(
+                                TaskResult::ok(),
+                                ShareActionSuccessFinalizer::deterministic(
+                                    self.queue.clone(),
+                                    self.sandbox_root.clone(),
+                                    snapshot,
+                                    action,
+                                ),
+                            ),
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => return handled_retry(error.to_string()),
+            }
+        }
         let agent = {
             let cancellation = CancellationToken::new();
             let run = self.agent.run(&snapshot, cancellation.clone());
@@ -251,6 +281,9 @@ impl ShareActionTaskExecutor {
                 Err(error) => {
                     if let Some(delay) = error.deferral_seconds() {
                         return handled_defer(delay);
+                    }
+                    if error.retryable() && plan.retry_count < self.max_retries {
+                        return handled_retry(error.to_string());
                     }
                     let sandbox = error
                         .sandbox_identity()

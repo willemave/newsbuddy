@@ -70,19 +70,14 @@ pub(super) async fn apply_generated_image(
     set_domain_field(
         &mut metadata,
         "image_url",
-        Value::String(format!(
-            "/static/images/content/{}.png",
-            plan.attempt.content.id
-        )),
+        Value::String(plan.staged.image_url()),
     );
     set_domain_field(
         &mut metadata,
         "thumbnail_url",
-        Value::String(format!(
-            "/static/images/thumbnails/{}.png",
-            plan.attempt.content.id
-        )),
+        Value::String(plan.staged.thumbnail_url()),
     );
+    set_domain_field(&mut metadata, "artwork_status", Value::from("ready"));
     content.content_metadata = Value::Object(metadata);
     "completed".clone_into(&mut content.status);
     content.error_message = None;

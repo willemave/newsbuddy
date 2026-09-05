@@ -97,7 +97,9 @@ pub struct DiscussionRefreshResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DiscussionSummaryTopic {
+    #[schemars(length(min = 2, max = 90))]
     pub title: String,
+    #[schemars(length(min = 10, max = 500))]
     pub summary: String,
     pub stance: Option<String>,
 }
@@ -123,7 +125,9 @@ pub struct DiscussionSummaryComment {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DiscussionSummaryArtifact {
+    #[schemars(length(min = 20, max = 900))]
     pub overview: String,
+    #[schemars(length(min = 1, max = 8))]
     pub topics: Vec<DiscussionSummaryTopic>,
     #[serde(default)]
     pub notable_links: Vec<DiscussionSummaryLink>,
@@ -146,15 +150,10 @@ impl DiscussionSummaryArtifact {
                 "overview must contain 20 to 900 characters".to_owned(),
             ));
         }
-        if self.topics.is_empty() {
-            self.topics.push(DiscussionSummaryTopic {
-                title: "General discussion".to_owned(),
-                summary: self.overview.clone(),
-                stance: None,
-            });
-        }
-        if self.topics.len() > 8 {
-            self.topics.truncate(8);
+        if !(1..=8).contains(&self.topics.len()) {
+            return Err(ContentMiscGatewayError::InvalidDiscussionSummary(
+                "summary must contain one to eight topics".to_owned(),
+            ));
         }
         for topic in &mut self.topics {
             topic.title = clean_text(&topic.title);
@@ -522,7 +521,9 @@ impl ContentMiscGateway {
                 AgentRequest {
                     feature: "news_discussions".to_owned(),
                     model_spec: self.discussion_model.clone(),
-                    system_prompt: system_prompt.to_owned(),
+                    system_prompt: format!(
+                        "{system_prompt} Write an overview of 20-900 characters and one to eight                          topics. Each topic title must contain 2-90 characters and its summary                          10-500 characters. Use concise plain text with single spaces. These are                          character limits, not word limits; rewrite to fit without losing meaning."
+                    ),
                     user_prompt: prompt.to_owned(),
                     transcript: NewslyTranscript::default(),
                     response_contract: ResponseContract::JsonSchema {
@@ -549,7 +550,7 @@ impl ContentMiscGateway {
                 Arc::new(NoEvents),
             )
             .await
-            .map_err(|error| ContentMiscGatewayError::DiscussionGeneration(error.to_string()))?;
+            .map_err(ContentMiscGatewayError::DiscussionGeneration)?;
         let value = match outcome.structured_output {
             Some(value) => value,
             None => serde_json::from_str(&outcome.output_text).map_err(|error| {
@@ -788,7 +789,7 @@ pub enum ContentMiscGatewayError {
     #[error("discussion is unavailable ({status}): {message}")]
     DiscussionUnavailable { status: String, message: String },
     #[error("discussion summary generation failed: {0}")]
-    DiscussionGeneration(String),
+    DiscussionGeneration(#[source] AgentRuntimeError),
     #[error("discussion summary output is invalid: {0}")]
     InvalidDiscussionSummary(String),
     #[error("narration TTS is not configured")]
@@ -810,13 +811,16 @@ impl ContentMiscGatewayError {
     pub fn discussion_retryable(&self) -> bool {
         match self {
             Self::DiscussionFetch { retryable, .. } => *retryable,
-            Self::DiscussionGeneration(_) | Self::InvalidDiscussionSummary(_) | Self::Json(_) => {
-                true
-            }
+            Self::DiscussionGeneration(error) => matches!(
+                error,
+                AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_)
+            ),
             Self::Http(error) => error.status().is_none_or(|status| {
                 status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
             }),
-            Self::UnsupportedDiscussionPlatform
+            Self::InvalidDiscussionSummary(_)
+            | Self::Json(_)
+            | Self::UnsupportedDiscussionPlatform
             | Self::DiscussionIdentityMissing
             | Self::DiscussionUnavailable { .. }
             | Self::Url(_)
@@ -826,5 +830,94 @@ impl ContentMiscGatewayError {
             | Self::NarrationUnavailable
             | Self::EmptyNarrationAudio => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    fn artifact() -> DiscussionSummaryArtifact {
+        DiscussionSummaryArtifact {
+            overview: "Readers compare the evidence and describe practical limitations.".to_owned(),
+            topics: vec![DiscussionSummaryTopic {
+                title: "Practical limitations".to_owned(),
+                summary: "Commenters disagree about how well the result generalizes.".to_owned(),
+                stance: None,
+            }],
+            notable_links: Vec::new(),
+            representative_comments: Vec::new(),
+            external_discussion_url: None,
+            generated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn discussion_schema_rejects_lengths_before_runtime_acceptance() {
+        let schema = Value::from(schema_for!(DiscussionSummaryArtifact));
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        let valid = serde_json::to_value(artifact()).unwrap();
+        assert!(validator.is_valid(&valid));
+        for (pointer, minimum, maximum) in [
+            ("/overview", 20, 900),
+            ("/topics/0/title", 2, 90),
+            ("/topics/0/summary", 10, 500),
+        ] {
+            for (length, accepted) in [
+                (minimum - 1, false),
+                (minimum, true),
+                (maximum, true),
+                (maximum + 1, false),
+            ] {
+                let mut value = valid.clone();
+                *value.pointer_mut(pointer).unwrap() = Value::String("界".repeat(length));
+                assert_eq!(validator.is_valid(&value), accepted, "{pointer}: {length}");
+                assert_eq!(
+                    serde_json::from_value::<DiscussionSummaryArtifact>(value)
+                        .unwrap()
+                        .normalize_and_validate(None)
+                        .is_ok(),
+                    accepted
+                );
+            }
+        }
+        for count in [0, 9] {
+            let mut value = valid.clone();
+            value["topics"] = Value::Array(vec![valid["topics"][0].clone(); count]);
+            assert!(!validator.is_valid(&value));
+        }
+    }
+
+    #[test]
+    fn missing_topics_do_not_copy_an_oversized_overview_into_a_topic() {
+        let mut summary = artifact();
+        summary.overview = "x".repeat(800);
+        summary.topics.clear();
+        assert!(summary.normalize_and_validate(None).is_err());
+    }
+
+    #[test]
+    fn exhausted_discussion_validation_is_terminal_but_transient_errors_retry() {
+        for error in [
+            AgentRuntimeError::Validation("too long".to_owned()),
+            AgentRuntimeError::RequestLimitExceeded,
+            AgentRuntimeError::InvalidRequest("invalid schema".to_owned()),
+        ] {
+            assert!(!ContentMiscGatewayError::DiscussionGeneration(error).discussion_retryable());
+        }
+        assert!(
+            !ContentMiscGatewayError::InvalidDiscussionSummary("invalid length".to_owned())
+                .discussion_retryable()
+        );
+        assert!(
+            ContentMiscGatewayError::DiscussionGeneration(AgentRuntimeError::DeadlineExceeded)
+                .discussion_retryable()
+        );
+        assert!(
+            ContentMiscGatewayError::DiscussionGeneration(AgentRuntimeError::Provider(
+                "temporarily unavailable".to_owned()
+            ))
+            .discussion_retryable()
+        );
     }
 }

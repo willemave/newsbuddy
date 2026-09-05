@@ -22,6 +22,8 @@ pub struct PreparedXSync {
     pub last_synced_item_id: Option<String>,
     pub bookmark_last_synced_at: Option<DateTime<Utc>>,
     pub skip_bookmarks: bool,
+    pub bookmark_cursor: Option<String>,
+    pub bookmark_pending_newest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,7 +171,26 @@ pub async fn prepare_x_sync(
     .fetch_one(&mut **transaction)
     .await?;
 
+    let sync_metadata = sync_state
+        .sync_metadata
+        .map_or_else(|| json!({}), |metadata| metadata.0);
+    let bookmark_state = sync_metadata
+        .get(BOOKMARKS_CHANNEL)
+        .and_then(Value::as_object);
+    let bookmark_in_progress = bookmark_state
+        .and_then(|state| state.get("in_progress"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let bookmark_cursor = bookmark_state
+        .and_then(|state| state.get("continuation"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let bookmark_pending_newest = bookmark_state
+        .and_then(|state| state.get("pending_newest_item_id"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
     if !force
+        && !bookmark_in_progress
         && sync_state.last_synced_at.is_some_and(|last_synced_at| {
             within_interval(last_synced_at.and_utc(), now, sync_min_interval_minutes)
         })
@@ -177,12 +198,6 @@ pub async fn prepare_x_sync(
         return Ok(PrepareXSyncOutcome::SkippedRecently);
     }
 
-    let sync_metadata = sync_state
-        .sync_metadata
-        .map_or_else(|| json!({}), |metadata| metadata.0);
-    let bookmark_state = sync_metadata
-        .get(BOOKMARKS_CHANNEL)
-        .and_then(Value::as_object);
     let bookmark_last_synced_at = bookmark_state
         .and_then(|state| state.get("last_synced_at"))
         .and_then(Value::as_str)
@@ -194,9 +209,10 @@ pub async fn prepare_x_sync(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .or_else(|| clean_optional(sync_state.last_synced_item_id));
-    let skip_bookmarks = bookmark_last_synced_at.is_some_and(|last_synced_at| {
-        within_interval(last_synced_at, now, bookmark_min_interval_minutes)
-    });
+    let skip_bookmarks = !bookmark_in_progress
+        && bookmark_last_synced_at.is_some_and(|last_synced_at| {
+            within_interval(last_synced_at, now, bookmark_min_interval_minutes)
+        });
     let refresh_token_encrypted = clean_optional(connection.refresh_token_encrypted);
     Ok(PrepareXSyncOutcome::Prepared(Box::new(PreparedXSync {
         user_id,
@@ -212,6 +228,8 @@ pub async fn prepare_x_sync(
         last_synced_item_id,
         bookmark_last_synced_at,
         skip_bookmarks,
+        bookmark_cursor,
+        bookmark_pending_newest,
     })))
 }
 

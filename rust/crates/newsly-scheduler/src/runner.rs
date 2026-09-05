@@ -7,10 +7,7 @@ use secrecy::ExposeSecret;
 use tokio::sync::watch;
 use tokio::time::{MissedTickBehavior, interval};
 
-use crate::{
-    SchedulerConfig, SchedulerJob, SchedulerRepository,
-    schedule::{due_jobs, minute_bucket},
-};
+use crate::{SchedulerConfig, SchedulerJob, SchedulerRepository, schedule::JOBS};
 
 #[derive(Debug)]
 pub struct Scheduler {
@@ -30,9 +27,9 @@ impl Scheduler {
 
     /// Run recurring UTC schedule evaluation until shutdown is requested.
     ///
-    /// Due jobs are intentionally re-evaluated during the whole scheduled minute. Their durable
-    /// completion marker makes successful runs no-ops, while a transient failure can retry on the
-    /// next poll without waiting for the next 15-minute/day/week boundary.
+    /// Each poll evaluates the latest scheduled occurrence, including after downtime. Durable
+    /// completion markers suppress repeats, and transient failures retry on the next poll.
+    /// Older missed occurrences are coalesced rather than replayed.
     pub async fn run(&self, mut shutdown: watch::Receiver<bool>) {
         let mut poll = interval(self.config.poll_interval);
         poll.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -54,8 +51,9 @@ impl Scheduler {
     }
 
     async fn run_due_jobs(&self) {
-        let scheduled_for = minute_bucket(Utc::now());
-        for job in due_jobs(scheduled_for) {
+        let now = Utc::now();
+        for job in JOBS {
+            let scheduled_for = job.latest_due(now);
             let result = if job == SchedulerJob::TerminalTaskCleanup {
                 self.repository
                     .run_terminal_cleanup(scheduled_for, &self.config)
@@ -92,7 +90,7 @@ impl Scheduler {
                         job = job.as_str(),
                         scheduled_for = %scheduled_for,
                         error = %error,
-                        "scheduler job failed; it may retry during the current scheduled minute"
+                        "scheduler job failed; latest occurrence will retry"
                     );
                 }
             }
@@ -107,16 +105,20 @@ impl Scheduler {
             tracing::warn!(
                 misrouted = report.misrouted,
                 orphaned_leases = report.orphaned_leases,
-                "queue watchdog repaired tasks but no Slack webhook is configured"
+                pipeline = ?report.pipeline,
+                "queue watchdog found actionable pipeline state but no Slack webhook is configured"
             );
             return;
         };
         let message = format!(
-            "Queue watchdog repaired tasks | total={} move_misrouted={} recover_orphaned_leases={} expired_leases_left_claimable={}",
+            "Queue watchdog | attention={} move_misrouted={} recover_orphaned_leases={} expired_leases_left_claimable={} failing_sources={} overdue_tasks={} terminal_product_mismatches={}",
             report.touched(),
             report.misrouted,
             report.orphaned_leases,
             report.expired_reclaimable,
+            report.pipeline.failing_sources,
+            report.pipeline.overdue_tasks,
+            report.pipeline.terminal_product_mismatches,
         );
         match self
             .http

@@ -78,9 +78,8 @@ pub(super) async fn validate_in_browser(
     deadline: Instant,
     cancellation: CancellationToken,
 ) -> Result<Map<String, Value>, BrowserValidationError> {
-    let viewer = with_viewer_shell(index_html);
     tools
-        .write_text(VALIDATION_VIEWER_PATH, viewer)
+        .write_text(VALIDATION_VIEWER_PATH, index_html.to_owned())
         .await
         .map_err(|error| BrowserValidationError::Io(error.to_string()))?;
     tools
@@ -207,7 +206,7 @@ fn prefixed_json(output: &str, prefix: &str) -> Option<Value> {
     })
 }
 
-fn with_viewer_shell(index_html: &str) -> String {
+pub(super) fn hosted_viewer_html(index_html: &str) -> String {
     const SHELL: &str = r#"
 <style data-newsly-learning-deck-controls="style">
 html,body{width:100%;height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
@@ -341,7 +340,25 @@ impl BrowserValidationError {
 
 #[cfg(test)]
 mod tests {
-    use super::VALIDATION_SCRIPT;
+    use super::{VALIDATION_SCRIPT, hosted_viewer_html};
+
+    #[test]
+    fn hosted_viewer_html_contains_the_runtime_responsive_contract() {
+        let viewer = hosted_viewer_html(
+            "<!doctype html><html><body><div class=\"reveal\"></div></body></html>",
+        );
+
+        let shell_marker = "data-newsly-learning-deck-controls=\"script\"";
+        assert_eq!(viewer.matches(shell_marker).count(), 1);
+        assert!(viewer.contains("portrait:{width:720,height:1280"));
+        assert!(viewer.contains("landscape:{width:1280,height:720"));
+        assert!(viewer.contains("newsly-learning-deck-portrait"));
+        assert!(viewer.contains("scrollActivationWidth:null"));
+        assert!(
+            viewer.find(shell_marker).expect("shell marker")
+                < viewer.rfind("</body>").expect("closing body")
+        );
+    }
 
     #[test]
     fn page_evaluate_helpers_are_defined_inside_the_serialized_callback() {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use newsly_providers::{SummarizationGateway, SummarizationGatewayError, SummarizationSource};
+use newsly_providers::{SummarizationGateway, SummarizationSource};
 use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -228,7 +228,7 @@ async fn execute_summarization(
             )
         }
         Err(error) => {
-            let retryable = provider_error_is_retryable(&error);
+            let retryable = error.retryable();
             failed_execution(
                 services,
                 plan,
@@ -290,30 +290,6 @@ fn with_finalizer(
             services.briefing_batch_minimum,
         ),
     )
-}
-
-fn provider_error_is_retryable(error: &SummarizationGatewayError) -> bool {
-    let message = error.to_string().to_ascii_lowercase();
-    [
-        "timeout",
-        "timed out",
-        "rate limit",
-        "too many requests",
-        "429",
-        "temporarily unavailable",
-        "service unavailable",
-        "bad gateway",
-        "gateway timeout",
-        "connection reset",
-        "connection refused",
-        "connection aborted",
-        "resource exhausted",
-        "precondition",
-        "overloaded",
-        "provider execution failed",
-    ]
-    .iter()
-    .any(|token| message.contains(token))
 }
 
 fn split_model_spec(value: &str) -> (&str, &str) {

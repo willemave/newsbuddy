@@ -9,6 +9,7 @@ use crate::{SchedulerConfig, SchedulerJob};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MaintenanceReport {
+    pub pipeline: newsly_db::PipelineHealthCounts,
     pub misrouted: usize,
     pub orphaned_leases: usize,
     /// Complete expired leases remain in-place because the queue kernel claims them directly.
@@ -16,8 +17,8 @@ pub struct MaintenanceReport {
 }
 
 impl MaintenanceReport {
-    pub const fn touched(self) -> usize {
-        self.misrouted + self.orphaned_leases
+    pub fn touched(self) -> usize {
+        self.misrouted + self.orphaned_leases + self.pipeline.total()
     }
 }
 
@@ -118,7 +119,9 @@ impl SchedulerRepository {
         )
         .fetch_one(&mut **transaction)
         .await?;
+        let pipeline = newsly_db::pipeline_health_counts(transaction).await?;
         Ok(MaintenanceReport {
+            pipeline,
             misrouted: usize::try_from(misrouted).unwrap_or(usize::MAX),
             orphaned_leases: usize::try_from(orphaned_leases).unwrap_or(usize::MAX),
             expired_reclaimable: usize::try_from(expired_reclaimable).unwrap_or(usize::MAX),

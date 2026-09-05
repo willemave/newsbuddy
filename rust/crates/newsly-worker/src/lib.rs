@@ -152,23 +152,46 @@ impl HandlerExecution {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct EnqueueTasksFinalizer {
+    pub(crate) queue: QueueKernel,
+    pub(crate) requests: Vec<newsly_queue::EnqueueRequest>,
+}
+impl TaskFinalizer for EnqueueTasksFinalizer {
+    fn apply<'a>(
+        &'a self,
+        tx: &'a mut Transaction<'static, Postgres>,
+    ) -> HandlerFinalizerFuture<'a> {
+        Box::pin(async move {
+            self.queue
+                .enqueue_many_in_transaction(tx, self.requests.clone())
+                .await?;
+            Ok(TaskFinalizerResult::Keep)
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LeaseHealth {
     ownership_lost_rx: watch::Receiver<bool>,
+    cancellation_rx: watch::Receiver<bool>,
+    claim: ClaimedTask,
 }
 
 impl LeaseHealth {
     pub fn ownership_lost(&self) -> bool {
-        *self.ownership_lost_rx.borrow()
+        *self.ownership_lost_rx.borrow() || *self.cancellation_rx.borrow()
     }
 
     /// Waits until the exact lease can no longer be renewed. Handlers may use this to stop costly
     /// external work early; finalization is independently fenced even if a handler ignores it.
     pub async fn wait_for_ownership_loss(&mut self) {
-        while !*self.ownership_lost_rx.borrow_and_update() {
-            if self.ownership_lost_rx.changed().await.is_err() {
-                return;
-            }
+        if self.ownership_lost() {
+            return;
+        }
+        tokio::select! {
+            _ = self.ownership_lost_rx.wait_for(|lost| *lost) => {},
+            _ = self.cancellation_rx.wait_for(|cancelled| *cancelled) => {},
         }
     }
 }
@@ -220,6 +243,7 @@ impl HandlerRegistry {
 pub struct WorkerConfig {
     pub claim: ClaimRequest,
     pub max_retries: i32,
+    pub attempt_timeout: Duration,
     pub startup_poll_count: u32,
     pub startup_poll_interval: Duration,
     pub normal_poll_interval: Duration,
@@ -233,6 +257,7 @@ impl WorkerConfig {
         Self {
             claim,
             max_retries: 3,
+            attempt_timeout: Duration::from_secs(2 * 60 * 60),
             startup_poll_count: 10,
             startup_poll_interval: Duration::from_millis(100),
             normal_poll_interval: Duration::from_secs(1),
@@ -253,7 +278,8 @@ impl WorkerConfig {
                 "max_retries must be nonnegative",
             ));
         }
-        if self.startup_poll_interval.is_zero()
+        if self.attempt_timeout.is_zero()
+            || self.startup_poll_interval.is_zero()
             || self.normal_poll_interval.is_zero()
             || self.empty_backoff_interval.is_zero()
             || self.database_error_interval.is_zero()
@@ -392,6 +418,17 @@ impl WorkerKernel {
             return Ok(WorkerAttempt::Empty);
         };
 
+        if claim.retry_count > self.config.max_retries {
+            return self
+                .finalize_attempt(
+                    &claim,
+                    HandlerExecution::from_result(TaskResult::fail(
+                        Some("Expired attempts exhausted the retry budget".to_owned()),
+                        false,
+                    )),
+                )
+                .await;
+        }
         let prepare = match self.queue.prepare_work(&claim).await {
             Ok(prepare) => prepare,
             Err(error) if is_nonretryable_prepare_error(&error) => {
@@ -493,21 +530,35 @@ impl WorkerKernel {
             heartbeat_stop_rx,
             ownership_lost_tx,
         );
-        let lease = LeaseHealth { ownership_lost_rx };
+        let (cancellation_tx, cancellation_rx) = watch::channel(false);
+        let lease = LeaseHealth {
+            ownership_lost_rx,
+            cancellation_rx,
+            claim: claim.clone(),
+        };
 
         let execution = match self.handlers.handler(claim.task_type) {
             Some(handler) => {
-                if let Ok(execution) = AssertUnwindSafe(handler.execute(plan, lease.clone()))
-                    .catch_unwind()
-                    .await
-                {
-                    execution.with_default_error(claim.task_type)
-                } else {
-                    error!(task_id = claim.id, task_type = %claim.task_type, "task handler panicked");
-                    HandlerExecution::from_result(TaskResult::fail(
-                        Some(format!("{} handler panicked", claim.task_type)),
-                        true,
-                    ))
+                let mut cancellation = lease.clone();
+                let work = AssertUnwindSafe(handler.execute(plan, lease.clone())).catch_unwind();
+                tokio::pin!(work);
+                tokio::select! {
+                    result = &mut work => match result {
+                        Ok(execution) => execution.with_default_error(claim.task_type),
+                        Err(_) => HandlerExecution::from_result(TaskResult::fail(
+                            Some(format!("{} handler panicked", claim.task_type)), true)),
+                    },
+                    () = cancellation.wait_for_ownership_loss() => {
+                        // Sandbox allocation must return its remote ID before cleanup can own it.
+                        // These handlers already bound their provider calls and cooperate with cancellation.
+                        if claim.task_type == TaskType::RunLlmTask { let _ = work.await; }
+                        HandlerExecution::from_result(TaskResult::fail(Some("Task lease was lost".to_owned()), true))
+                    },
+                    () = tokio::time::sleep(self.config.attempt_timeout) => {
+                        cancellation_tx.send_replace(true);
+                        if claim.task_type == TaskType::RunLlmTask { let _ = work.await; }
+                        HandlerExecution::from_result(TaskResult::fail(Some("Task execution deadline exceeded".to_owned()), true))
+                    },
                 }
             }
             None => HandlerExecution::from_result(TaskResult::fail(
@@ -521,7 +572,7 @@ impl WorkerKernel {
 
         heartbeat_stop_tx.send_replace(true);
         let _ = heartbeat.await;
-        if lease.ownership_lost() {
+        if *lease.ownership_lost_rx.borrow() {
             warn!(
                 task_id = claim.id,
                 task_type = %claim.task_type,
@@ -567,10 +618,15 @@ impl WorkerKernel {
                         Some(format!("{} product finalization failed", claim.task_type)),
                         disposition == FinalizerErrorDisposition::Retryable,
                     );
-                    let transition = self
+                    let transition = if let Some(failed) = self
                         .queue
-                        .finalize(claim, &failure, self.config.max_retries)
-                        .await?;
+                        .begin_fenced_finalization(claim, &failure, self.config.max_retries)
+                        .await?
+                    {
+                        finish_finalization(failed, claim).await?
+                    } else {
+                        None
+                    };
                     return Ok(transition.map_or(
                         WorkerAttempt::FinalizationRejected {
                             task_id: claim.id,
@@ -586,7 +642,7 @@ impl WorkerKernel {
                     .map_err(QueueError::from)?;
             }
         }
-        let transition = finalization.finish().await?;
+        let transition = finish_finalization(finalization, claim).await?;
         let Some(transition) = transition else {
             return Ok(WorkerAttempt::FinalizationRejected {
                 task_id: claim.id,
@@ -623,6 +679,25 @@ impl WorkerKernel {
 enum ExecutedTask {
     Finished(HandlerExecution),
     OwnershipLost(HandlerExecution),
+}
+
+async fn finish_finalization(
+    mut finalization: newsly_queue::FencedFinalization,
+    claim: &ClaimedTask,
+) -> Result<Option<TaskTransition>, QueueError> {
+    if let Some(message) = finalization.terminal_failure().map(str::to_owned) {
+        newsly_db::settle_failed_task(
+            finalization.transaction_mut(),
+            claim.id,
+            claim.task_type.as_str(),
+            claim.content_id,
+            claim.owner_user_id,
+            &message,
+        )
+        .await
+        .map_err(QueueError::from)?;
+    }
+    finalization.finish().await
 }
 
 fn classify_transition(transition: TaskTransition) -> WorkerAttempt {

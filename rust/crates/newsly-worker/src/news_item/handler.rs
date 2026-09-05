@@ -5,7 +5,7 @@ use newsly_domain::{
     EmbeddingVector, EmbeddingVectorStore, RelationThresholds, prepare_relation_embedding_texts,
     related_representatives,
 };
-use newsly_providers::{NewsItemGateway, NewsItemGatewayError};
+use newsly_providers::NewsItemGateway;
 use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -21,7 +21,9 @@ use super::model::{
     BodySource, EnrichmentFinalizationPlan, EnrichmentMutation, EnrichmentPreparation,
     ModelUsageWrite, ProcessFinalizationPlan, ProcessMutation,
 };
-use super::repository::{load_relation_candidates, prepare_enrichment, prepare_processing};
+use super::repository::{
+    checkpoint_summary, load_relation_candidates, prepare_enrichment, prepare_processing,
+};
 use super::storage::NewsArticleBodyStore;
 
 #[derive(Debug, Clone)]
@@ -393,7 +395,7 @@ async fn execute_processing(
                         plan,
                         preparation.snapshot,
                         &error.to_string(),
-                        provider_retryable(&error),
+                        error.retryable(),
                     );
                 }
             },
@@ -421,6 +423,30 @@ async fn execute_processing(
             false,
         )
     };
+    if !used_existing_summary {
+        match checkpoint_summary(
+            &services.queue,
+            &lease.claim,
+            &preparation.snapshot,
+            &summary,
+            &usage,
+        )
+        .await
+        {
+            Ok(true) => usage.clear(),
+            Ok(false) => return HandlerExecution::from_result(TaskResult::defer(1)),
+            Err(error) => {
+                return processing_failure_with_usage(
+                    services,
+                    plan,
+                    preparation.snapshot,
+                    &error.to_string(),
+                    true,
+                    usage,
+                );
+            }
+        }
+    }
     let item_document = preparation.snapshot.relation_document(&summary);
     let candidates = {
         let mut transaction = match services.pool.begin().await {
@@ -509,7 +535,7 @@ async fn execute_processing(
                         plan,
                         preparation.snapshot,
                         &error.to_string(),
-                        provider_retryable(&error),
+                        error.retryable(),
                         usage,
                     );
                 }
@@ -762,24 +788,6 @@ fn news_item_id(plan: &OwnedWorkPlan) -> Option<i64> {
         .get("news_item_id")
         .and_then(Value::as_i64)
         .filter(|value| *value > 0)
-}
-
-fn provider_retryable(error: &NewsItemGatewayError) -> bool {
-    !matches!(
-        error,
-        NewsItemGatewayError::EmptySummaryInput
-            | NewsItemGatewayError::InvalidSummary(_)
-            | NewsItemGatewayError::UnsupportedEmbeddingModel(_)
-            | NewsItemGatewayError::TooManyEmbeddingInputs(_)
-            | NewsItemGatewayError::InvalidEmbeddingInputLength(_)
-            | NewsItemGatewayError::EmbeddingInputTooLarge(_)
-            | NewsItemGatewayError::InvalidEmbedding(_)
-            | NewsItemGatewayError::TooManyLinkCandidates(_)
-            | NewsItemGatewayError::TooManySelectedLinks(_)
-            | NewsItemGatewayError::InventedRelevantLink(_)
-            | NewsItemGatewayError::InvalidRelevantLink(_)
-            | NewsItemGatewayError::InvalidUrl(_)
-    )
 }
 
 fn plain_failure(message: impl Into<String>, retryable: bool) -> HandlerExecution {

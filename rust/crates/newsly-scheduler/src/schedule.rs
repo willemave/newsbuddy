@@ -35,6 +35,15 @@ impl SchedulerJob {
         }
     }
 
+    /// Only the latest missed occurrence is eligible; durable tick records deduplicate it.
+    pub fn latest_due(self, now: DateTime<Utc>) -> DateTime<Utc> {
+        let mut candidate = minute_bucket(now);
+        while !self.is_due(candidate) {
+            candidate -= chrono::Duration::minutes(1);
+        }
+        candidate
+    }
+
     pub fn advisory_key(self, minute: DateTime<Utc>) -> String {
         format!(
             "newsly:scheduler:{}:{}",
@@ -44,7 +53,7 @@ impl SchedulerJob {
     }
 }
 
-const JOBS: [SchedulerJob; 6] = [
+pub(crate) const JOBS: [SchedulerJob; 6] = [
     SchedulerJob::Scrape,
     SchedulerJob::IntegrationSync,
     SchedulerJob::QueueWatchdog,
@@ -59,6 +68,7 @@ pub(crate) fn minute_bucket(now: DateTime<Utc>) -> DateTime<Utc> {
         .expect("zero seconds and nanoseconds are valid")
 }
 
+#[cfg(test)]
 pub(crate) fn due_jobs(minute: DateTime<Utc>) -> Vec<SchedulerJob> {
     JOBS.into_iter().filter(|job| job.is_due(minute)).collect()
 }
@@ -89,5 +99,27 @@ mod tests {
     fn off_schedule_minute_only_runs_no_jobs() {
         let minute = Utc.with_ymd_and_hms(2026, 8, 30, 7, 13, 0).unwrap();
         assert!(due_jobs(minute).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use chrono::TimeZone;
+    #[test]
+    fn restart_selects_one_latest_occurrence() {
+        let now = Utc.with_ymd_and_hms(2026, 9, 4, 7, 13, 0).unwrap();
+        assert_eq!(
+            SchedulerJob::FeedDiscovery.latest_due(now),
+            Utc.with_ymd_and_hms(2026, 8, 31, 3, 0, 0).unwrap()
+        );
+        assert_eq!(
+            SchedulerJob::TerminalTaskCleanup.latest_due(now),
+            Utc.with_ymd_and_hms(2026, 9, 4, 4, 45, 0).unwrap()
+        );
+        assert_eq!(
+            SchedulerJob::Scrape.latest_due(now),
+            Utc.with_ymd_and_hms(2026, 9, 4, 7, 0, 0).unwrap()
+        );
     }
 }

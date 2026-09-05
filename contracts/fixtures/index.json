@@ -108,7 +108,7 @@
     {
       "category": "tasks",
       "path": "tasks/catalog.json",
-      "sha256": "25e6b78ff82dc5ec0490e9a88bc28cf3c49ab8a0af963fa678c0d295c476b919"
+      "sha256": "e469214f9389de549e8b3f31d5e25c07d203e88560d87f45942818a7fbee9fea"
     },
     {
       "category": "tasks",
@@ -193,7 +193,7 @@
     {
       "category": "tasks",
       "path": "tasks/scrape.schema.json",
-      "sha256": "54726d992f004f0492f0431d2248ac76d76c9988d8b8ebfff1fa412229f39011"
+      "sha256": "70b703e282d0f3673cf23fd62ccb357283516bd9cf62a3d378b84bc206588893"
     },
     {
       "category": "tasks",

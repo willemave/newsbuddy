@@ -10,8 +10,8 @@ use newsly_db::{
     prepare_scrape_sources, record_first_edition_scrape_result,
 };
 use newsly_providers::{
-    AggregatorKey, FeedScrapeTarget, RedditScrapeTarget, ScrapeGateway, ScrapeProviderOutcome,
-    ScrapedItem,
+    AggregatorKey, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure, ScrapeGateway,
+    ScrapeProviderOutcome, ScrapedItem,
 };
 use newsly_queue::{EnqueueRequest, OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Map, Value};
@@ -23,7 +23,6 @@ use crate::{
 };
 
 const MAX_CONCURRENT_SOURCES: usize = 6;
-const MAX_CONCURRENT_FEEDS: usize = 4;
 const DISCUSSION_REFRESH_LIMIT: i64 = 100;
 
 #[derive(Debug, Clone)]
@@ -76,7 +75,35 @@ async fn execute_scrape(
             return HandlerExecution::from_result(TaskResult::fail(Some(error), false));
         }
     };
-    let prepared = match prepare_scrape_sources(&services.pool, request.first_edition_run_id).await
+    let config_id = task.payload.get("config_id").and_then(Value::as_i64);
+    if config_id.is_some() && task.owner_user_id.is_none() {
+        return HandlerExecution::from_result(TaskResult::fail(
+            Some("Configured scrape requires an owner".to_owned()),
+            false,
+        ));
+    }
+    let scraper_types = request
+        .sources
+        .iter()
+        .filter_map(|source| match source {
+            RequestedSource::Aggregator(_) => Some("aggregator"),
+            RequestedSource::Reddit => Some("reddit"),
+            RequestedSource::Substack => Some("substack"),
+            RequestedSource::Atom => Some("atom"),
+            RequestedSource::Podcast => Some("podcast_rss"),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut prepared = match prepare_scrape_sources(
+        &services.pool,
+        request.first_edition_run_id,
+        config_id,
+        task.owner_user_id,
+        &scraper_types,
+    )
+    .await
     {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -87,7 +114,19 @@ async fn execute_scrape(
             ));
         }
     };
-    let source_plans = match build_source_plans(&request, &prepared) {
+    prepared.configs.retain(|config| {
+        config.scraper_type != "aggregator"
+            || config
+                .config
+                .get("key")
+                .and_then(Value::as_str)
+                .and_then(AggregatorKey::parse)
+                .is_some_and(|key| request.sources.contains(&RequestedSource::Aggregator(key)))
+    });
+    if config_id.is_some() && prepared.configs.is_empty() {
+        return HandlerExecution::from_result(TaskResult::ok());
+    }
+    let mut source_plans = match build_source_plans(&request, &prepared) {
         Ok(plans) => plans,
         Err(error) => {
             return HandlerExecution::from_result(TaskResult::fail(Some(error), false));
@@ -97,6 +136,40 @@ async fn execute_scrape(
         return HandlerExecution::from_result(TaskResult::ok());
     }
 
+    let children = isolated_scrape_requests(&source_plans, request.first_edition_run_id);
+    if request.sources.len() > 1 || children.len() > 1 {
+        return HandlerExecution::with_finalizer(
+            TaskResult::ok(),
+            crate::EnqueueTasksFinalizer {
+                queue: services.queue.clone(),
+                requests: children,
+            },
+        );
+    }
+
+    for source in &mut source_plans {
+        if let SourcePlanKind::Feed(targets) = &mut source.kind {
+            for target in targets {
+                let content_type = if target.scraper_type == "podcast_rss" {
+                    "podcast"
+                } else {
+                    "article"
+                };
+                target.known_urls =
+                    match newsly_db::known_feed_urls(&services.pool, target.user_id, content_type)
+                        .await
+                    {
+                        Ok(urls) => urls,
+                        Err(error) => {
+                            return HandlerExecution::from_result(TaskResult::fail(
+                                Some(error.to_string()),
+                                true,
+                            ));
+                        }
+                    };
+            }
+        }
+    }
     let gateway = services.gateway.clone();
     let outcomes = stream::iter(source_plans)
         .map(move |plan| {
@@ -115,10 +188,10 @@ async fn execute_scrape(
     }
     let failed_sources = outcomes
         .iter()
-        .filter(|outcome| outcome.failed_without_progress())
+        .filter(|outcome| outcome.failed_without_progress() || outcome.retryable_failure())
         .map(|outcome| outcome.source.clone())
         .collect::<Vec<_>>();
-    let task_result = if failed_sources.is_empty() {
+    let mut task_result = if failed_sources.is_empty() {
         TaskResult::ok()
     } else {
         TaskResult::fail(
@@ -126,9 +199,19 @@ async fn execute_scrape(
                 "Scraper sources failed: {}",
                 failed_sources.join(", ")
             )),
-            true,
+            outcomes.iter().any(SourceOutcome::retryable_failure),
         )
     };
+    task_result.retry_delay_seconds = outcomes
+        .iter()
+        .filter_map(|outcome| {
+            outcome
+                .result
+                .as_ref()
+                .err()
+                .and_then(|error| error.retry_after)
+        })
+        .max();
     HandlerExecution::with_finalizer(
         task_result,
         ScrapeFinalizer {
@@ -139,6 +222,9 @@ async fn execute_scrape(
         },
     )
 }
+
+mod dispatch;
+use dispatch::isolated_scrape_requests;
 
 #[derive(Debug, Clone)]
 struct ScrapeRequest {
@@ -341,6 +427,7 @@ fn feed_target(config: &ScrapeConfigSnapshot) -> Option<FeedScrapeTarget> {
         .or_else(|| clean_string(config.config.get("feed_url")))
         .or_else(|| clean_string(config.config.get("url")))?;
     Some(FeedScrapeTarget {
+        known_urls: std::collections::BTreeSet::new(),
         config_id: config.id,
         user_id: config.user_id,
         scraper_type: config.scraper_type.clone(),
@@ -387,11 +474,18 @@ fn reddit_target(config: &ScrapeConfigSnapshot) -> Option<RedditScrapeTarget> {
 struct SourceOutcome {
     source: String,
     required_config_ids: Vec<i64>,
-    result: Result<ScrapeProviderOutcome, String>,
+    result: Result<ScrapeProviderOutcome, ScrapeFailure>,
     discussion_catchup: bool,
 }
 
 impl SourceOutcome {
+    fn retryable_failure(&self) -> bool {
+        match &self.result {
+            Err(error) => error.retryable,
+            Ok(outcome) => outcome.retryable_failure,
+        }
+    }
+
     fn failed_without_progress(&self) -> bool {
         match &self.result {
             Err(_) => true,
@@ -411,69 +505,34 @@ async fn execute_source(gateway: &ScrapeGateway, plan: SourcePlan) -> SourceOutc
             result: gateway
                 .fetch_aggregator(key)
                 .await
-                .map_err(|error| error.to_string()),
+                .map_err(ScrapeFailure::from),
             discussion_catchup: false,
         },
         SourcePlanKind::Feed(targets) => {
-            let gateway = gateway.clone();
-            let source = plan.source.clone();
-            let results = stream::iter(targets)
-                .map(move |target| {
-                    let gateway = gateway.clone();
-                    let source = source.clone();
-                    async move {
-                        let result = match gateway.fetch_feed(&target).await {
-                            Ok(outcome) => {
-                                if outcome.items.is_empty() || !outcome.item_errors.is_empty() {
-                                    tracing::warn!(
-                                        source,
-                                        config_id = target.config_id,
-                                        item_count = outcome.items.len(),
-                                        item_error_count = outcome.item_errors.len(),
-                                        "scraper feed produced incomplete results"
-                                    );
-                                }
-                                Ok(outcome)
-                            }
-                            Err(error) => {
-                                tracing::warn!(
-                                    source,
-                                    config_id = target.config_id,
-                                    error_code = error.diagnostic_code(),
-                                    http_status = error.http_status(),
-                                    retryable = error.retryable(),
-                                    "scraper feed fetch failed"
-                                );
-                                Err(error.to_string())
-                            }
-                        };
-                        (target.config_id, result)
-                    }
-                })
-                .buffer_unordered(MAX_CONCURRENT_FEEDS)
-                .collect::<Vec<_>>()
-                .await;
-            combine_config_outcomes(plan.source, results)
+            let result = if let Some(target) = targets.into_iter().next() {
+                let result = gateway
+                    .fetch_feed(&target)
+                    .await
+                    .map_err(ScrapeFailure::from);
+                Some((target.config_id, result))
+            } else {
+                None
+            };
+            configured_source_outcome(plan.source, result)
         }
         SourcePlanKind::Reddit(targets) => {
-            let target_ids = targets
-                .iter()
-                .map(|target| target.config_id)
-                .collect::<BTreeSet<_>>();
-            match gateway.fetch_reddit_targets(&targets).await {
-                Ok(results) => combine_config_outcomes(plan.source, results),
-                Err(error) => SourceOutcome {
-                    source: plan.source,
-                    required_config_ids: target_ids.iter().copied().collect(),
-                    result: Err(error.to_string()),
-                    discussion_catchup: false,
-                },
-            }
+            let config_id = targets.first().map(|target| target.config_id);
+            let result = match gateway.fetch_reddit_targets(&targets).await {
+                Ok(results) => results.into_iter().next(),
+                Err(error) => config_id.map(|id| (id, Err(ScrapeFailure::from(error)))),
+            };
+            configured_source_outcome(plan.source, result)
         }
         SourcePlanKind::DiscussionComments => SourceOutcome {
             source: plan.source,
             required_config_ids: Vec::new(),
             result: Ok(ScrapeProviderOutcome {
+                retryable_failure: false,
                 items: Vec::new(),
                 item_errors: Vec::new(),
             }),
@@ -482,47 +541,27 @@ async fn execute_source(gateway: &ScrapeGateway, plan: SourcePlan) -> SourceOutc
     }
 }
 
-fn combine_config_outcomes(
+fn configured_source_outcome(
     source: String,
-    results: Vec<(i64, Result<ScrapeProviderOutcome, String>)>,
+    outcome: Option<(i64, Result<ScrapeProviderOutcome, ScrapeFailure>)>,
 ) -> SourceOutcome {
-    let config_count = results.len();
-    let required_config_ids = results.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-    let mut items = Vec::new();
-    let mut item_errors = Vec::new();
-    let mut successful_configs = 0_usize;
-    let mut failed_configs = 0_usize;
-    for (config_id, result) in results {
-        match result {
-            Ok(mut outcome) => {
-                successful_configs += 1;
-                items.append(&mut outcome.items);
-                item_errors.extend(
-                    outcome
-                        .item_errors
-                        .drain(..)
-                        .map(|error| format!("config {config_id}: {error}")),
-                );
-            }
-            Err(error) => {
-                failed_configs += 1;
-                item_errors.push(format!("config {config_id}: {error}"));
-            }
-        }
-    }
-    tracing::info!(
-        source,
-        config_count,
-        successful_configs,
-        failed_configs,
-        item_count = items.len(),
-        item_error_count = item_errors.len(),
-        "scraper configured-feed source completed"
+    let (required_config_ids, result) = outcome.map_or_else(
+        || {
+            (
+                Vec::new(),
+                Ok(ScrapeProviderOutcome {
+                    items: Vec::new(),
+                    item_errors: Vec::new(),
+                    retryable_failure: false,
+                }),
+            )
+        },
+        |(config_id, result)| (vec![config_id], result),
     );
     SourceOutcome {
         source,
         required_config_ids,
-        result: Ok(ScrapeProviderOutcome { items, item_errors }),
+        result,
         discussion_catchup: false,
     }
 }
@@ -565,8 +604,7 @@ enum ScrapeProgressState {
 impl ScrapeFinalizationFailures {
     fn new(outcomes: &[SourceOutcome], config_mismatch: bool) -> Self {
         Self {
-            retryable: config_mismatch
-                || outcomes.iter().any(SourceOutcome::failed_without_progress),
+            retryable: config_mismatch || outcomes.iter().any(SourceOutcome::retryable_failure),
             configuration: if config_mismatch {
                 ScrapeConfigurationState::Changed
             } else {
@@ -686,7 +724,13 @@ impl ScrapeFinalizer {
 
         for outcome in &self.outcomes {
             let mut processed = 0_i64;
-            let mut processed_by_config = BTreeMap::<i64, i64>::new();
+            let mut created = 0_i64;
+            let mut rejected = false;
+            let mut processed_by_config = outcome
+                .required_config_ids
+                .iter()
+                .map(|id| (*id, 0_i64))
+                .collect::<BTreeMap<_, _>>();
             if let Ok(provider_outcome) = &outcome.result {
                 for item in &provider_outcome.items {
                     let config_id = item_config_id(item);
@@ -698,11 +742,13 @@ impl ScrapeFinalizer {
                         Ok(PersistedScrapeItem::Content(persisted)) => {
                             savepoint.commit().await?;
                             if persisted.created {
+                                created += 1;
                                 process_content_ids.insert(persisted.content_id);
                             }
                         }
                         Ok(PersistedScrapeItem::News(persisted)) => {
                             savepoint.commit().await?;
+                            created += i64::from(persisted.created);
                             if persisted.created
                                 && !matches!(item, ScrapedItem::News(item) if item.status == "ready")
                             {
@@ -714,6 +760,7 @@ impl ScrapeFinalizer {
                         }
                         Err(error) => {
                             savepoint.rollback().await?;
+                            rejected = true;
                             failures.record_persistence(&error);
                             tracing::error!(
                                 source = outcome.source,
@@ -730,6 +777,40 @@ impl ScrapeFinalizer {
                     }
                 }
             }
+            if !outcome.discussion_catchup && !config_mismatch {
+                let error = match &outcome.result {
+                    Err(error) => Some(error.message.as_str()),
+                    Ok(value) if rejected || !value.item_errors.is_empty() => {
+                        Some("source_items_rejected")
+                    }
+                    Ok(_) => None,
+                };
+                let config_ids = if AggregatorKey::parse(&outcome.source).is_some() {
+                    vec![None]
+                } else {
+                    outcome
+                        .required_config_ids
+                        .iter()
+                        .copied()
+                        .map(Some)
+                        .collect()
+                };
+                for config_id in config_ids {
+                    let key = config_id.map_or_else(
+                        || format!("aggregator:{}", outcome.source),
+                        |id| format!("config:{id}"),
+                    );
+                    newsly_db::record_source_health(
+                        transaction,
+                        &key,
+                        config_id,
+                        processed,
+                        created,
+                        error,
+                    )
+                    .await?;
+                }
+            }
             if outcome.discussion_catchup {
                 discussion_ids.extend(
                     due_discussion_refresh_ids(transaction, DISCUSSION_REFRESH_LIMIT).await?,
@@ -738,6 +819,7 @@ impl ScrapeFinalizer {
             if let Some(run_id) = self.request.first_edition_run_id
                 && (outcome.source == "reddit" || AggregatorKey::parse(&outcome.source).is_some())
                 && failures.configuration_is_current()
+                && !outcome.retryable_failure()
             {
                 let recorded = record_first_edition_scrape_result(
                     transaction,

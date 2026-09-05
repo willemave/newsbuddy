@@ -17,6 +17,7 @@ use reqwest::Url;
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
 use thiserror::Error;
+use uuid::Uuid;
 
 pub(super) const OUTPUT_INDEX_HTML: &str = "output/index.html";
 pub(super) const OUTPUT_SOURCE_NOTES: &str = "output/source-notes.md";
@@ -32,39 +33,8 @@ const JSONL_CONTENT_TYPE: &str = "application/x-ndjson; charset=utf-8";
 const ALLOWED_SCRIPT_PACKAGES: [&str; 5] = ["reveal.js", "react", "react-dom", "d3", "mermaid"];
 const ALLOWED_SCRIPT_HOSTS: [&str; 2] = ["cdn.jsdelivr.net", "unpkg.com"];
 
-#[derive(Debug, Clone)]
-pub(super) struct LearningDeckArtifactLimits {
-    pub index_html_bytes: usize,
-    pub source_notes_bytes: usize,
-    pub asset_count: usize,
-    pub asset_bytes: usize,
-}
-
-impl LearningDeckArtifactLimits {
-    pub(super) fn from_env() -> Result<Self, LearningDeckArtifactError> {
-        Ok(Self {
-            index_html_bytes: bounded_usize(
-                "LEARNING_DECK_MAX_INDEX_HTML_BYTES",
-                2_000_000,
-                10_000,
-                10_000_000,
-            )?,
-            source_notes_bytes: bounded_usize(
-                "LEARNING_DECK_MAX_SOURCE_NOTES_BYTES",
-                1_000_000,
-                1_000,
-                5_000_000,
-            )?,
-            asset_count: bounded_usize("LEARNING_DECK_MAX_ASSET_COUNT", 40, 0, 200)?,
-            asset_bytes: bounded_usize(
-                "LEARNING_DECK_MAX_ASSET_BYTES",
-                5_000_000,
-                1_000,
-                20_000_000,
-            )?,
-        })
-    }
-}
+mod limits;
+pub(super) use limits::LearningDeckArtifactLimits;
 
 #[derive(Debug, Clone)]
 pub(super) struct LearningDeckAsset {
@@ -75,6 +45,7 @@ pub(super) struct LearningDeckAsset {
 
 #[derive(Clone)]
 pub(super) struct LearningDeckArtifactStore {
+    pool: sqlx::PgPool,
     backend: ArtifactBackend,
     prefix: String,
     limits: LearningDeckArtifactLimits,
@@ -87,7 +58,7 @@ impl std::fmt::Debug for LearningDeckArtifactStore {
             .field("backend", &self.backend)
             .field("prefix", &self.prefix)
             .field("limits", &self.limits)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -110,7 +81,7 @@ impl std::fmt::Debug for ArtifactBackend {
 }
 
 impl LearningDeckArtifactStore {
-    pub(super) fn from_env() -> Result<Self, LearningDeckArtifactError> {
+    pub(super) fn from_env(pool: sqlx::PgPool) -> Result<Self, LearningDeckArtifactError> {
         let provider = env::var("CONTENT_BODY_STORAGE_PROVIDER")
             .unwrap_or_else(|_| "local".to_owned())
             .trim()
@@ -172,6 +143,7 @@ impl LearningDeckArtifactStore {
             &env::var("CONTENT_BODY_STORAGE_PREFIX").unwrap_or_else(|_| "content".to_owned()),
         )?;
         Ok(Self {
+            pool,
             backend,
             prefix,
             limits: LearningDeckArtifactLimits::from_env()?,
@@ -203,7 +175,8 @@ impl LearningDeckArtifactStore {
         let key = join_key(
             &self.prefix,
             &format!(
-                "learning_deck_internal_logs/{user_id}/{deck_id}/runs/{run_id}/agent-log.jsonl"
+                "learning_deck_internal_logs/{user_id}/{deck_id}/runs/{run_id}/{}/agent-log.jsonl",
+                Uuid::new_v4()
             ),
         )?;
         let mut payload = String::new();
@@ -211,6 +184,7 @@ impl LearningDeckArtifactStore {
             payload.push_str(&serde_json::to_string(event)?);
             payload.push('\n');
         }
+        newsly_db::track_artifact(&self.pool, &key, run_id).await?;
         self.put_bytes(&key, payload.into_bytes(), JSONL_CONTENT_TYPE)
             .await?;
         Ok(Some(key))
@@ -234,7 +208,10 @@ impl LearningDeckArtifactStore {
         }
         let storage_prefix = join_key(
             &self.prefix,
-            &format!("learning_decks/{user_id}/{deck_id}/runs/{run_id}"),
+            &format!(
+                "learning_decks/{user_id}/{deck_id}/runs/{run_id}/{}",
+                Uuid::new_v4()
+            ),
         )?;
         let deck_object_key = join_key(&storage_prefix, "index.html")?;
         let source_notes_object_key = join_key(&storage_prefix, "source-notes.md")?;
@@ -262,6 +239,7 @@ impl LearningDeckArtifactStore {
             ),
         ];
         for (key, bytes, content_type) in writes {
+            newsly_db::track_artifact(&self.pool, &key, run_id).await?;
             if let Err(error) = self.put_bytes(&key, bytes, content_type).await {
                 self.best_effort_delete(&written).await;
                 return Err(error);
@@ -279,6 +257,7 @@ impl LearningDeckArtifactStore {
             }
             let relative = normalize_asset_path(&asset.relative_path)?;
             let key = join_key(&storage_prefix, &relative)?;
+            newsly_db::track_artifact(&self.pool, &key, run_id).await?;
             if let Err(error) = self
                 .put_bytes(&key, asset.bytes.clone(), &asset.content_type)
                 .await
@@ -999,6 +978,8 @@ pub(super) fn guess_content_type(path: &str) -> String {
 
 #[derive(Debug, Error)]
 pub(super) enum LearningDeckArtifactError {
+    #[error("artifact cleanup ledger failed")]
+    Database(#[from] sqlx::Error),
     #[error("missing required object-storage setting {0}")]
     Missing(&'static str),
     #[error("unsupported CONTENT_BODY_STORAGE_PROVIDER {0:?}")]
@@ -1048,3 +1029,8 @@ impl LearningDeckArtifactError {
         matches!(self, Self::RepairableContract(_))
     }
 }
+
+#[cfg(test)]
+mod isolation_tests;
+
+mod cleanup;

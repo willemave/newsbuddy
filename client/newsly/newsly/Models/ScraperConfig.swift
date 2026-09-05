@@ -36,6 +36,10 @@ extension APIScraperConfigStatsResponse {
     }
 
     var relativeProcessedSummary: String? {
+        if ingestionError != nil { return "Could not fully refresh this source" }
+        if let checkedAt = lastFetchAt {
+            return "Last checked \(Self.relativeFormatter.localizedString(for: checkedAt, relativeTo: Date()))"
+        }
         guard let latestProcessedDate else { return nil }
         return "Last processed \(Self.relativeFormatter.localizedString(for: latestProcessedDate, relativeTo: Date()))"
     }
@@ -71,7 +75,7 @@ extension APIScraperConfigStatsResponse {
     }
 
     var hasVisibleStats: Bool {
-        totalCount > 0 || processingCount > 0 || latestProcessedAt != nil || nextExpectedAt != nil
+        ingestionError != nil || lastFetchAt != nil || totalCount > 0 || processingCount > 0 || latestProcessedAt != nil || nextExpectedAt != nil
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {

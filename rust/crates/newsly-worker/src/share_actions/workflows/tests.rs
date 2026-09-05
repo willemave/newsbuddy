@@ -140,3 +140,34 @@ fn snapshot(mode: &str) -> ShareActionAgentSnapshot {
         workspace_path: "/data/workspace/tasks/7".to_owned(),
     }
 }
+
+#[test]
+fn verified_sources_route_without_model_output_and_preserve_mode() {
+    use newsly_providers::{ValidatedSharedItem, ValidatedSharedTarget};
+    let feed = ValidatedSharedTarget::Feed(ValidatedFeed {
+        effective_url: "https://example.test/feed".to_owned(),
+        format: ValidatedFeedFormat::Rss,
+        has_audio_entries: true,
+    });
+    let action = super::build_verified_source_action(&snapshot("add_to_briefing"), &feed).unwrap();
+    assert_eq!(action.action_name, "add_to_briefing");
+    let ShareActionHostInput::Briefing(super::BriefingActionInput::Feed(input)) =
+        action.typed_input
+    else {
+        panic!("expected feed")
+    };
+    assert_eq!(input.feed_type.as_deref(), Some("podcast_rss"));
+    let item = ValidatedSharedTarget::Item(ValidatedSharedItem {
+        effective_url: "https://example.test/episode".to_owned(),
+        content_type: "podcast",
+    });
+    let action = super::build_verified_source_action(&snapshot("add_to_briefing"), &item).unwrap();
+    let ShareActionHostInput::Briefing(super::BriefingActionInput::Content(input)) =
+        action.typed_input
+    else {
+        panic!("expected episode")
+    };
+    assert_eq!(input.content_type.as_deref(), Some("podcast"));
+    assert!(super::build_verified_source_action(&snapshot("add_feed"), &item).is_none());
+    assert!(super::build_verified_source_action(&snapshot("presentation"), &feed).is_none());
+}

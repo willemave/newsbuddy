@@ -157,7 +157,7 @@
       "dedupe_by_content": false,
       "handler": "newsly_worker::scrape::ScrapeHandler",
       "payload_schema": "tasks/scrape.schema.json",
-      "payload_schema_sha256": "54726d992f004f0492f0431d2248ac76d76c9988d8b8ebfff1fa412229f39011",
+      "payload_schema_sha256": "70b703e282d0f3673cf23fd62ccb357283516bd9cf62a3d378b84bc206588893",
       "queue": "content",
       "requires_owner": false,
       "task_type": "scrape"

@@ -281,6 +281,7 @@ mod tests {
         ("RecordContentInteractionRequest", "occurred_at"),
         ("ScraperConfigResponse", "created_at"),
         ("ScraperConfigStatsResponse", "latest_processed_at"),
+        ("ScraperConfigStatsResponse", "last_fetch_at"),
         ("ScraperConfigStatsResponse", "latest_publication_at"),
         ("ScraperConfigStatsResponse", "next_expected_at"),
         ("ShareActionResponse", "created_at"),

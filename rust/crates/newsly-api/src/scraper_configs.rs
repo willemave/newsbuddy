@@ -1073,6 +1073,8 @@ fn config_response(
 
 fn stats_response(stats: &ScraperConfigStatsProjection) -> ScraperConfigStatsResponse {
     ScraperConfigStatsResponse {
+        last_fetch_at: stats.last_fetch_at,
+        ingestion_error: stats.ingestion_error.clone(),
         total_count: stats.total_count,
         completed_count: stats.completed_count,
         unread_count: stats.unread_count,

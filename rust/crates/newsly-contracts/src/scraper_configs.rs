@@ -62,6 +62,12 @@ pub enum FeedSubscriptionOutcome {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct ScraperConfigStatsResponse {
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub last_fetch_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub ingestion_error: Option<String>,
     pub total_count: i64,
     pub completed_count: i64,
     pub unread_count: i64,

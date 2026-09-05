@@ -791,6 +791,16 @@ pub enum SummarizationGatewayError {
     Json(#[from] serde_json::Error),
 }
 
+impl SummarizationGatewayError {
+    #[must_use]
+    pub fn retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Agent(AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_))
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

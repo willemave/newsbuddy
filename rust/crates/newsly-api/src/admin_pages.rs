@@ -279,12 +279,12 @@ fn render_dashboard(snapshot: &AdminDashboardSnapshot, range: &str) -> String {
     for row in &snapshot.provider_costs {
         let _ = write!(
             html,
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>${:.6}</td></tr>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             escape_html(&row.provider),
             row.row_count,
             row.request_count,
             row.resource_count,
-            row.cost_usd
+            render_usage_cost(row.cost_usd, row.known_cost_usd, row.unpriced_call_count)
         );
     }
     html.push_str("</tbody></table><h2>Recent task failures</h2>");
@@ -346,7 +346,7 @@ fn render_vendor_usage(snapshot: &AdminVendorUsageSnapshot, query: &VendorUsageQ
     let mut html = document_start("Vendor Usage");
     let _ = write!(
         html,
-        "<main><p><a href=\"/admin/\">Dashboard</a></p><h1>Vendor usage</h1><form method=\"get\"><input name=\"provider\" placeholder=\"provider\" value=\"{}\"><input name=\"model\" placeholder=\"model\" value=\"{}\"><input name=\"feature\" placeholder=\"feature\" value=\"{}\"><input name=\"user_id\" placeholder=\"user id\" value=\"{}\"><input name=\"start_date\" type=\"date\" value=\"{}\"><input name=\"end_date\" type=\"date\" value=\"{}\"><button>Filter</button></form><section class=\"cards\"><div><strong>{}</strong><span>Rows</span></div><div><strong>{}</strong><span>Tokens</span></div><div><strong>{}</strong><span>Requests</span></div><div><strong>${:.6}</strong><span>Cost</span></div></section>",
+        "<main><p><a href=\"/admin/\">Dashboard</a></p><h1>Vendor usage</h1><form method=\"get\"><input name=\"provider\" placeholder=\"provider\" value=\"{}\"><input name=\"model\" placeholder=\"model\" value=\"{}\"><input name=\"feature\" placeholder=\"feature\" value=\"{}\"><input name=\"user_id\" placeholder=\"user id\" value=\"{}\"><input name=\"start_date\" type=\"date\" value=\"{}\"><input name=\"end_date\" type=\"date\" value=\"{}\"><button>Filter</button></form><section class=\"cards\"><div><strong>{}</strong><span>Rows</span></div><div><strong>{}</strong><span>Tokens</span></div><div><strong>{}</strong><span>Requests</span></div><div><strong>{}</strong><span>Cost</span></div></section>",
         escape_html(query.provider.as_deref().unwrap_or("")),
         escape_html(query.model.as_deref().unwrap_or("")),
         escape_html(query.feature.as_deref().unwrap_or("")),
@@ -356,19 +356,23 @@ fn render_vendor_usage(snapshot: &AdminVendorUsageSnapshot, query: &VendorUsageQ
         snapshot.totals.row_count,
         snapshot.totals.total_tokens,
         snapshot.totals.request_count,
-        snapshot.totals.cost_usd
+        render_usage_cost(
+            snapshot.totals.cost_usd,
+            snapshot.totals.known_cost_usd,
+            snapshot.totals.unpriced_call_count
+        )
     );
     html.push_str("<h2>Daily</h2><table><thead><tr><th>Date</th><th>Rows</th><th>Tokens</th><th>Requests</th><th>Resources</th><th>Cost</th></tr></thead><tbody>");
     for row in &snapshot.daily {
         let _ = write!(
             html,
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>${:.6}</td></tr>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             row.usage_day,
             row.row_count,
             row.total_tokens,
             row.request_count,
             row.resource_count,
-            row.cost_usd
+            render_usage_cost(row.cost_usd, row.known_cost_usd, row.unpriced_call_count)
         );
     }
     html.push_str("</tbody></table><h2>Recent calls</h2><table><thead><tr><th>Time</th><th>Provider</th><th>Model</th><th>Feature</th><th>User</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>");
@@ -386,18 +390,26 @@ fn render_vendor_usage(snapshot: &AdminVendorUsageSnapshot, query: &VendorUsageQ
             );
         let _ = write!(
             html,
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>${:.6}</td></tr>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             row.created_at.to_rfc3339(),
             escape_html(&row.provider),
             escape_html(&row.model),
             escape_html(&row.feature),
             escape_html(&user),
             row.total_tokens.unwrap_or_default(),
-            row.cost_usd.unwrap_or_default()
+            row.cost_usd
+                .map_or_else(|| "Unknown".to_owned(), |cost| format!("${cost:.6}"))
         );
     }
     html.push_str("</tbody></table></main></body></html>");
     html
+}
+
+fn render_usage_cost(cost: Option<f64>, known_cost: f64, unpriced_calls: i64) -> String {
+    cost.map_or_else(
+        || format!("Unknown (${known_cost:.6} known; {unpriced_calls} unpriced calls)"),
+        |cost| format!("${cost:.6}"),
+    )
 }
 
 fn document_start(title: &str) -> String {
@@ -421,4 +433,34 @@ mod tests {
     }
 
     use chrono::Timelike as _;
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::*;
+
+    #[test]
+    fn usage_page_labels_missing_costs_without_hiding_known_subtotals() {
+        let snapshot = AdminVendorUsageSnapshot {
+            rows: Vec::new(),
+            daily: Vec::new(),
+            totals: newsly_db::AdminVendorUsageTotals {
+                row_count: 2,
+                attributed_row_count: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                request_count: 2,
+                resource_count: 0,
+                cost_usd: None,
+                known_cost_usd: 0.25,
+                unpriced_call_count: 1,
+            },
+        };
+        let query: VendorUsageQuery = serde_json::from_value(serde_json::json!({})).unwrap();
+        let html = render_vendor_usage(&snapshot, &query);
+        assert!(html.contains("Unknown ($0.250000 known; 1 unpriced calls)"));
+        assert!(!html.contains("<strong>$0.000000</strong>"));
+        assert_eq!(render_usage_cost(Some(0.0), 0.0, 0), "$0.000000");
+    }
 }

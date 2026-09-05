@@ -51,18 +51,18 @@ pub(super) fn normalize_feed_document(
     let mut errors = Vec::new();
     let mut seen = BTreeSet::new();
     let empty_podcast_metadata = PodcastEntryMetadata::default();
-    for (entry_index, entry) in feed
-        .entries
-        .iter()
-        .take(target.limit.clamp(1, 100))
-        .enumerate()
-    {
+    for (entry_index, entry) in feed.entries.iter().enumerate() {
         let podcast = podcast_metadata
             .get(entry_index)
             .unwrap_or(&empty_podcast_metadata);
         match normalize_feed_entry(target, entry, &feed_metadata, &repeated_entry_urls, podcast) {
-            Ok(Some(item)) if seen.insert(item.url.clone()) => {
+            Ok(Some(item))
+                if !target.known_urls.contains(&item.url) && seen.insert(item.url.clone()) =>
+            {
                 items.push(ScrapedItem::Content(Box::new(item)));
+                if items.len() >= target.limit.clamp(1, 100) {
+                    break;
+                }
             }
             Ok(_) => {}
             Err(error) => errors.push(error),
@@ -97,19 +97,12 @@ fn normalize_feed_entry(
     else {
         return Err(format!("{}: feed entry has no usable URL", entry.id));
     };
+    if url.chars().count() > 2048 {
+        return Err("feed_entry_url_too_long".to_owned());
+    }
+    let title = title.map(|value| value.chars().take(500).collect());
     let published_at = entry.published.or(entry.updated);
-    let author = entry
-        .authors
-        .first()
-        .and_then(|person| clean(Some(person.name.clone())))
-        .or_else(|| {
-            entry
-                .media
-                .iter()
-                .flat_map(|media| media.credits.iter())
-                .find_map(|credit| clean(Some(credit.entity.clone())))
-        })
-        .or_else(|| feed.author.clone());
+    let author = entry_author(entry, feed);
     let body = entry
         .content
         .as_ref()
@@ -130,7 +123,8 @@ fn normalize_feed_entry(
         .display_name
         .clone()
         .or_else(|| feed.title.clone())
-        .or_else(|| domain_of(&target.feed_url));
+        .or_else(|| domain_of(&target.feed_url))
+        .map(|value| value.chars().take(100).collect::<String>());
     let feed_name = if target.scraper_type == "podcast_rss" {
         source.clone()
     } else {
@@ -243,4 +237,19 @@ fn clean_body(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
+}
+
+fn entry_author(entry: &feed_rs::model::Entry, feed: &FeedMetadata) -> Option<String> {
+    entry
+        .authors
+        .first()
+        .and_then(|person| clean(Some(person.name.clone())))
+        .or_else(|| {
+            entry
+                .media
+                .iter()
+                .flat_map(|media| media.credits.iter())
+                .find_map(|credit| clean(Some(credit.entity.clone())))
+        })
+        .or_else(|| feed.author.clone())
 }

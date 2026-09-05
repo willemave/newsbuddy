@@ -312,6 +312,10 @@ async fn execute_x_sync(
             tweets: Vec::new(),
             included_tweets: BTreeMap::new(),
             newest_item_id: None,
+            continuation: None,
+            pending_newest_item_id: None,
+            finished: true,
+            failure: None,
         }
     } else {
         match fetch_bookmarks(
@@ -320,7 +324,7 @@ async fn execute_x_sync(
             &mut lease,
             &access_token,
             &provider_user_id,
-            prepared.last_synced_item_id.as_deref(),
+            &prepared,
             &mut usage,
         )
         .await
@@ -365,28 +369,67 @@ async fn fetch_bookmarks(
     lease: &mut LeaseHealth,
     access_token: &str,
     provider_user_id: &str,
-    checkpoint: Option<&str>,
+    prepared: &PreparedXSync,
     usage: &mut Vec<XRequestUsage>,
 ) -> Result<BookmarkFetchOutcome, FetchBookmarksError> {
-    let mut newest_item_id = None;
+    provider_call(
+        lease,
+        collect_bookmark_pages(
+            prepared,
+            usage,
+            services.posts_read_cost_usd,
+            |token| async move {
+                gateway
+                    .fetch_bookmarks(
+                        access_token,
+                        provider_user_id,
+                        token.as_deref(),
+                        BOOKMARK_SYNC_PAGE_SIZE,
+                    )
+                    .await
+            },
+        ),
+    )
+    .await
+    .map_err(|LeaseLost| FetchBookmarksError::LeaseLost)?
+}
+
+async fn collect_bookmark_pages<F, Fut>(
+    prepared: &PreparedXSync,
+    usage: &mut Vec<XRequestUsage>,
+    unit_cost_usd: Option<f64>,
+    mut fetch: F,
+) -> Result<BookmarkFetchOutcome, FetchBookmarksError>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: Future<Output = Result<newsly_providers::XBookmarksPage, XSyncGatewayError>>,
+{
+    let checkpoint = prepared.last_synced_item_id.as_deref();
+    let mut newest_item_id = prepared.bookmark_pending_newest.clone();
     let mut fetched = 0_usize;
     let mut tweets = Vec::new();
     let mut included_tweets = BTreeMap::new();
-    let mut pagination_token = None;
+    let mut pagination_token = prepared.bookmark_cursor.clone();
+    let mut finished = false;
+    let mut failure = None;
 
     for _ in 0..BOOKMARK_SYNC_MAX_PAGES {
-        let page = provider_call(
-            lease,
-            gateway.fetch_bookmarks(
-                access_token,
-                provider_user_id,
-                pagination_token.as_deref(),
-                BOOKMARK_SYNC_PAGE_SIZE,
-            ),
-        )
-        .await
-        .map_err(|LeaseLost| FetchBookmarksError::LeaseLost)?
-        .map_err(FetchBookmarksError::Provider)?;
+        let page = match fetch(pagination_token.clone()).await {
+            Ok(page) => page,
+            Err(XSyncGatewayError::Provider { status: 400, .. }) if pagination_token.is_some() => {
+                // An expired continuation restarts from the old committed checkpoint. The
+                // existing bookmark ledger prevents replay from creating duplicate items.
+                pagination_token = None;
+                newest_item_id = None;
+                failure = Some("Bookmark continuation expired; restarting catch-up".to_owned());
+                break;
+            }
+            Err(error) if !tweets.is_empty() => {
+                failure = Some(error.to_string());
+                break;
+            }
+            Err(error) => return Err(FetchBookmarksError::Provider(error)),
+        };
         usage.push(XRequestUsage {
             model: "posts.read",
             feature: "x_sync",
@@ -394,7 +437,7 @@ async fn fetch_bookmarks(
             request_id: Uuid::new_v4().to_string(),
             request_count: 1,
             resource_ids: page.tweets.iter().map(|tweet| tweet.id.clone()).collect(),
-            unit_cost_usd: services.posts_read_cost_usd,
+            unit_cost_usd,
             channel: Some("bookmarks"),
         });
         included_tweets.extend(page.included_tweets);
@@ -402,7 +445,9 @@ async fn fetch_bookmarks(
             newest_item_id = page.tweets.first().map(|tweet| tweet.id.clone());
         }
         fetched = fetched.saturating_add(page.tweets.len());
-        if page.tweets.is_empty() {
+        if page.tweets.is_empty() && page.next_token.is_none() {
+            finished = true;
+            pagination_token = None;
             break;
         }
 
@@ -415,17 +460,23 @@ async fn fetch_bookmarks(
             tweets.push(tweet);
         }
         if reached_checkpoint || page.next_token.is_none() {
+            finished = true;
+            pagination_token = None;
             break;
         }
         pagination_token = page.next_token;
     }
 
     Ok(BookmarkFetchOutcome {
-        status: "success",
+        status: if finished { "success" } else { "partial" },
         fetched,
         tweets,
         included_tweets,
-        newest_item_id,
+        newest_item_id: finished.then(|| newest_item_id.clone()).flatten(),
+        pending_newest_item_id: if finished { None } else { newest_item_id },
+        continuation: pagination_token,
+        finished,
+        failure,
     })
 }
 
@@ -514,4 +565,110 @@ struct LeaseLost;
 enum FetchBookmarksError {
     LeaseLost,
     Provider(XSyncGatewayError),
+}
+
+#[cfg(test)]
+mod pagination_tests {
+    use super::*;
+    use newsly_providers::{XBookmarksPage, XTweet};
+
+    fn prepared() -> PreparedXSync {
+        PreparedXSync {
+            user_id: 1,
+            connection_id: 1,
+            provider_user_id: None,
+            provider_username: None,
+            access_token_encrypted: None,
+            refresh_token_encrypted: None,
+            token_expires_at: None,
+            scopes: vec![],
+            expected_access_token_encrypted: None,
+            expected_refresh_token_encrypted: None,
+            last_synced_item_id: Some("0".into()),
+            bookmark_last_synced_at: None,
+            skip_bookmarks: false,
+            bookmark_cursor: None,
+            bookmark_pending_newest: None,
+        }
+    }
+
+    fn page(offset: usize) -> XBookmarksPage {
+        let tweets = (offset..(offset + 5).min(61))
+            .map(|i| {
+                serde_json::from_value::<XTweet>(serde_json::json!({
+                    "id": (60-i).to_string(), "text": "saved", "referenced_tweet_types": [],
+                    "external_urls": [], "linked_tweet_ids": [], "has_video": false
+                }))
+                .unwrap()
+            })
+            .collect();
+        XBookmarksPage {
+            tweets,
+            included_tweets: BTreeMap::new(),
+            next_token: (offset + 5 < 61).then(|| (offset + 5).to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn capped_scan_resumes_through_old_checkpoint_before_advancing() {
+        let mut plan = prepared();
+        let first = collect_bookmark_pages(&plan, &mut vec![], None, |token| async move {
+            Ok(page(token.map_or(0, |value| value.parse().unwrap())))
+        })
+        .await
+        .unwrap();
+        assert_eq!(first.tweets.len(), 50);
+        assert_eq!(first.newest_item_id, None);
+        assert_eq!(first.continuation.as_deref(), Some("50"));
+        plan.bookmark_cursor = first.continuation;
+        plan.bookmark_pending_newest = first.pending_newest_item_id;
+        let last = collect_bookmark_pages(&plan, &mut vec![], None, |token| async move {
+            Ok(page(token.unwrap().parse().unwrap()))
+        })
+        .await
+        .unwrap();
+        assert_eq!(last.tweets.len(), 10);
+        assert_eq!(last.newest_item_id.as_deref(), Some("60"));
+        assert!(last.finished);
+        assert!(last.continuation.is_none());
+    }
+
+    #[tokio::test]
+    async fn page_failure_preserves_accepted_page_and_retry_position() {
+        let result = collect_bookmark_pages(&prepared(), &mut vec![], None, |token| async move {
+            if token.is_some() {
+                Err(XSyncGatewayError::Provider {
+                    status: 503,
+                    detail: "down".into(),
+                })
+            } else {
+                Ok(page(0))
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.tweets.len(), 5);
+        assert_eq!(result.continuation.as_deref(), Some("5"));
+        assert!(result.failure.is_some());
+        assert!(result.newest_item_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn expired_cursor_restarts_without_promoting_checkpoint() {
+        let mut plan = prepared();
+        plan.bookmark_cursor = Some("expired".into());
+        plan.bookmark_pending_newest = Some("60".into());
+        let result = collect_bookmark_pages(&plan, &mut vec![], None, |_| async {
+            Err(XSyncGatewayError::Provider {
+                status: 400,
+                detail: "expired".into(),
+            })
+        })
+        .await
+        .unwrap();
+        assert!(!result.finished);
+        assert!(result.continuation.is_none());
+        assert!(result.pending_newest_item_id.is_none());
+        assert!(result.newest_item_id.is_none());
+    }
 }

@@ -214,14 +214,20 @@ pub(super) fn source_from_content(
         summary,
         key_points,
         url: clean_text(source_url).or_else(|| clean_text(Some(url))),
-        image_url: Some(versioned_url(
-            format!("/static/images/content/{id}.png"),
-            version.as_deref(),
-        )),
-        thumbnail_url: Some(versioned_url(
-            format!("/static/images/thumbnails/{id}.png"),
-            version.as_deref(),
-        )),
+        image_url: clean_value(map.get("image_url"))
+            .or_else(|| {
+                version
+                    .as_ref()
+                    .map(|_| format!("/static/images/content/{id}.png"))
+            })
+            .map(|url| versioned_url(url, version.as_deref())),
+        thumbnail_url: clean_value(map.get("thumbnail_url"))
+            .or_else(|| {
+                version
+                    .as_ref()
+                    .map(|_| format!("/static/images/thumbnails/{id}.png"))
+            })
+            .map(|url| versioned_url(url, version.as_deref())),
         published_at: publication_date
             .or(Some(created_at))
             .map(|value| value.and_utc()),

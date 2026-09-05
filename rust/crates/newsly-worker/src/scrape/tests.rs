@@ -8,7 +8,7 @@ use sqlx::PgPool;
 
 use super::{
     AggregatorKey, RequestedSource, ScrapeFinalizationFailures, ScrapeFinalizer, ScrapeRequest,
-    SourceOutcome, combine_config_outcomes,
+    SourceOutcome, configured_source_outcome,
 };
 use crate::TaskFinalizerResult;
 
@@ -57,6 +57,39 @@ fn display_names_normalize_to_canonical_aggregators() {
     );
 }
 
+#[test]
+fn configured_feed_dispatch_keeps_each_target_in_its_own_task() {
+    let targets = [41, 42]
+        .into_iter()
+        .map(|id| newsly_providers::FeedScrapeTarget {
+            config_id: id,
+            user_id: 7,
+            scraper_type: "podcast_rss".to_owned(),
+            display_name: None,
+            feed_url: format!("https://example.com/{id}/feed"),
+            limit: 10,
+            fingerprint: "fixture".to_owned(),
+            known_urls: std::collections::BTreeSet::default(),
+        })
+        .collect();
+    let requests = super::isolated_scrape_requests(
+        &[super::SourcePlan {
+            source: "podcast".to_owned(),
+            kind: super::SourcePlanKind::Feed(targets),
+        }],
+        Some(99),
+    );
+    assert_eq!(requests.len(), 2);
+    for (request, id) in requests.iter().zip([41, 42]) {
+        assert_eq!(request.owner_user_id, Some(7));
+        let payload = request.payload.as_ref().unwrap();
+        assert_eq!(payload.get("config_id"), Some(&json!(id)));
+        assert_eq!(payload.get("sources"), Some(&json!(["podcast"])));
+        assert_eq!(payload.get("first_edition_run_id"), Some(&json!(99)));
+    }
+    assert_ne!(requests[0].dedupe_key, requests[1].dedupe_key);
+}
+
 fn scraped_news(url: &str, visibility_scope: &str) -> ScrapedItem {
     ScrapedItem::News(Box::new(ScrapedNewsItem {
         url: url.to_owned(),
@@ -101,7 +134,11 @@ fn persistence_failure_keeps_an_existing_retryable_source_failure() {
     let outcomes = [SourceOutcome {
         source: "atom".to_owned(),
         required_config_ids: Vec::new(),
-        result: Err("feed timed out".to_owned()),
+        result: Err(newsly_providers::ScrapeFailure {
+            retry_after: None,
+            message: "feed timed out".to_owned(),
+            retryable: true,
+        }),
         discussion_catchup: false,
     }];
     let mut failures = ScrapeFinalizationFailures::new(&outcomes, false);
@@ -116,38 +153,25 @@ fn persistence_failure_keeps_an_existing_retryable_source_failure() {
 }
 
 #[test]
-fn configured_feed_partial_progress_keeps_config_diagnostics_without_failing_source() {
-    let outcome = combine_config_outcomes(
+fn configured_source_preserves_retry_policy_and_target_identity() {
+    let outcome = configured_source_outcome(
         "podcast".to_owned(),
-        vec![
-            (
-                41,
-                Ok(ScrapeProviderOutcome {
-                    items: vec![scraped_content(
-                        "https://example.com/episode",
-                        "podcast",
-                        7,
-                        41,
-                    )],
-                    item_errors: vec!["episode missing audio".to_owned()],
-                }),
-            ),
-            (42, Err("scraper HTTP request failed".to_owned())),
-        ],
+        Some((
+            42,
+            Err(newsly_providers::ScrapeFailure {
+                message: "http_status".to_owned(),
+                retryable: true,
+                retry_after: Some(120),
+            }),
+        )),
     );
-
-    assert!(!outcome.failed_without_progress());
-    let result = outcome
-        .result
-        .expect("combined source should preserve partial progress");
-    assert_eq!(result.items.len(), 1);
-    assert_eq!(
-        result.item_errors,
-        [
-            "config 41: episode missing audio",
-            "config 42: scraper HTTP request failed",
-        ]
-    );
+    assert_eq!(outcome.required_config_ids, [42]);
+    assert!(outcome.failed_without_progress());
+    assert!(outcome.retryable_failure());
+    assert_eq!(outcome.result.unwrap_err().retry_after, Some(120));
+    let empty = configured_source_outcome("podcast".to_owned(), None);
+    assert!(empty.required_config_ids.is_empty());
+    assert!(!empty.failed_without_progress());
 }
 
 #[sqlx::test]
@@ -180,9 +204,15 @@ async fn database_failure_preserves_independent_items(pool: PgPool) {
     .fetch_all(&pool)
     .await
     .expect("test scraper configs should insert");
-    let prepared = newsly_db::prepare_scrape_sources(&pool, None)
-        .await
-        .expect("scraper configs should prepare");
+    let prepared = newsly_db::prepare_scrape_sources(
+        &pool,
+        None,
+        None,
+        None,
+        &["atom", "podcast_rss", "aggregator"],
+    )
+    .await
+    .expect("scraper configs should prepare");
     let article_url = "https://example.com/article";
     let podcast_url = "https://example.com/podcast";
     let news_url = "https://example.com/news";
@@ -198,6 +228,7 @@ async fn database_failure_preserves_independent_items(pool: PgPool) {
             source: "sciurls".to_owned(),
             required_config_ids: Vec::new(),
             result: Ok(ScrapeProviderOutcome {
+                retryable_failure: false,
                 items: vec![
                     scraped_content(
                         rejected_url,

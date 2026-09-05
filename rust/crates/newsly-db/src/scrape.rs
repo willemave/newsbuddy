@@ -38,6 +38,9 @@ struct ScrapeConfigRow {
 pub async fn prepare_scrape_sources(
     pool: &PgPool,
     first_edition_run_id: Option<i64>,
+    config_id: Option<i64>,
+    owner_user_id: Option<i64>,
+    scraper_types: &[&str],
 ) -> Result<PreparedScrapeSources, ScrapeRepositoryError> {
     let mut transaction = pool.begin().await?;
     let first_edition_user_id = if let Some(run_id) = first_edition_run_id {
@@ -70,13 +73,18 @@ pub async fn prepare_scrape_sources(
         FROM user_scraper_configs AS config
         JOIN users AS owner ON owner.id = config.user_id AND owner.is_active IS TRUE
         WHERE config.is_active IS TRUE
-          AND config.scraper_type IN ('aggregator', 'reddit', 'substack', 'atom', 'podcast_rss')
+          AND config.scraper_type = ANY($4::text[])
+          AND ($2::bigint IS NULL OR config.id::bigint = $2)
+          AND ($3::bigint IS NULL OR config.user_id::bigint = $3)
           AND ($1::bigint IS NULL OR config.user_id::bigint = $1)
         ORDER BY config.id
         FOR SHARE OF config, owner
         "#,
     )
     .bind(first_edition_user_id)
+    .bind(config_id)
+    .bind(owner_user_id)
+    .bind(scraper_types)
     .fetch_all(&mut *transaction)
     .await?;
     transaction.commit().await?;
@@ -657,7 +665,10 @@ pub async fn record_first_edition_scrape_result(
             else {
                 continue;
             };
-            processed_by_config_id.get(&config_id).copied().unwrap_or(0)
+            let Some(count) = processed_by_config_id.get(&config_id) else {
+                continue;
+            };
+            *count
         } else if row.source_kind == "aggregator"
             && row
                 .source_key

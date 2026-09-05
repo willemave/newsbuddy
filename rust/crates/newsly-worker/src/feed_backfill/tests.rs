@@ -123,6 +123,7 @@ fn outcomes(prepared: &PreparedFeedConfigs, user_id: i64) -> Vec<FeedFetchOutcom
             FeedFetchOutcome {
                 plan,
                 result: Ok(ScrapeProviderOutcome {
+                    retryable_failure: false,
                     items: vec![item],
                     item_errors: Vec::new(),
                 }),
@@ -181,6 +182,7 @@ impl TaskHandler for PreparedBackfillHandler {
 #[test]
 fn item_errors_without_usable_entries_fail_the_feed() {
     assert!(!feed_outcome_succeeded(&ScrapeProviderOutcome {
+        retryable_failure: false,
         items: Vec::new(),
         item_errors: vec!["episode has no audio".to_owned()],
     }));
@@ -189,6 +191,7 @@ fn item_errors_without_usable_entries_fail_the_feed() {
 #[test]
 fn empty_feed_without_item_errors_is_still_valid() {
     assert!(feed_outcome_succeeded(&ScrapeProviderOutcome {
+        retryable_failure: false,
         items: Vec::new(),
         item_errors: Vec::new(),
     }));
@@ -207,7 +210,6 @@ async fn article_and_podcast_backfill_commit_with_membership_and_work(pool: PgPo
         queue: QueueKernel::new(pool.clone()),
         results: outcomes(&prepared, user_id),
         request,
-        prepared,
     };
 
     assert!(matches!(
@@ -290,7 +292,6 @@ async fn queue_fence_commits_parent_completion_with_backfill_outputs(pool: PgPoo
         queue: QueueKernel::new(pool.clone()),
         results: outcomes(&prepared, user_id),
         request,
-        prepared,
     };
     let queue = QueueKernel::new(pool.clone());
     let mut enqueue = EnqueueRequest::new(TaskType::BackfillFeeds);
@@ -367,7 +368,6 @@ async fn duplicate_backfill_preserves_user_state_and_shares_existing_work(pool: 
         queue: QueueKernel::new(pool.clone()),
         results: outcomes(&first_prepared, user_id),
         request: first_request,
-        prepared: first_prepared,
     };
     apply_and_commit(&pool, &first).await;
 
@@ -395,7 +395,6 @@ async fn duplicate_backfill_preserves_user_state_and_shares_existing_work(pool: 
         queue: QueueKernel::new(pool.clone()),
         results: outcomes(&repeat_prepared, user_id),
         request: repeat_request,
-        prepared: repeat_prepared,
     };
     assert!(matches!(
         apply_and_commit(&pool, &repeat).await,
@@ -422,7 +421,6 @@ async fn duplicate_backfill_preserves_user_state_and_shares_existing_work(pool: 
         queue: QueueKernel::new(pool.clone()),
         results: outcomes(&second_prepared, second_user_id),
         request: second_request,
-        prepared: second_prepared,
     };
     assert!(matches!(
         apply_and_commit(&pool, &second).await,
@@ -517,11 +515,13 @@ async fn partial_backfill_records_exact_first_edition_outcomes(pool: PgPool) {
         .map(|plan| {
             let result = if plan.id == config_ids[0] {
                 ScrapeProviderOutcome {
+                    retryable_failure: false,
                     items: vec![article(plan.id, user_id)],
                     item_errors: vec!["one malformed article".to_owned()],
                 }
             } else {
                 ScrapeProviderOutcome {
+                    retryable_failure: false,
                     items: Vec::new(),
                     item_errors: vec!["episode has no audio".to_owned()],
                 }
@@ -535,7 +535,6 @@ async fn partial_backfill_records_exact_first_edition_outcomes(pool: PgPool) {
     let finalizer = FeedBackfillFinalizer {
         queue: QueueKernel::new(pool.clone()),
         request,
-        prepared,
         results,
     };
 
@@ -587,13 +586,26 @@ async fn partial_backfill_records_exact_first_edition_outcomes(pool: PgPool) {
     .await
     .expect("tasks should be queryable");
     assert_eq!(task_count, 1);
+    let health: Vec<(i64, Option<String>, bool)> = sqlx::query_as("SELECT config_id::bigint, error_code, last_success_at IS NULL FROM source_ingestion_health ORDER BY config_id").fetch_all(&pool).await.unwrap();
+    assert_eq!(
+        health,
+        config_ids
+            .iter()
+            .map(|id| (*id, Some("source_items_rejected".to_owned()), true))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[sqlx::test]
 async fn changed_feed_config_fences_content_and_queue_publication(pool: PgPool) {
     let user_id = insert_user(&pool).await;
     let config_ids = insert_feed_configs(&pool, user_id).await;
-    let request = request(user_id, config_ids.clone());
+    let run_id: i64 = sqlx::query_scalar("INSERT INTO onboarding_first_edition_runs (user_id, status, revision, started_at) VALUES ($1::integer, 'active', 1, now()) RETURNING id::bigint").bind(user_id).fetch_one(&pool).await.unwrap();
+    for (position, config_id) in config_ids.iter().enumerate() {
+        sqlx::query(r#"INSERT INTO onboarding_first_edition_sources (run_id, source_key, display_name, source_kind, "position", status, processed_item_count) VALUES ($1::integer, $2, 'Feed', 'feed', $3, 'queued', 0)"#).bind(run_id).bind(format!("feed:{config_id}")).bind(i32::try_from(position).unwrap()).execute(&pool).await.unwrap();
+    }
+    let mut request = request(user_id, config_ids.clone());
+    request.first_edition_run_id = Some(run_id);
     let prepared = prepare_configs(&pool, &request)
         .await
         .expect("configs should prepare")
@@ -607,7 +619,6 @@ async fn changed_feed_config_fences_content_and_queue_publication(pool: PgPool) 
     let finalizer = FeedBackfillFinalizer {
         queue: QueueKernel::new(pool.clone()),
         request,
-        prepared,
         results,
     };
 
@@ -621,10 +632,48 @@ async fn changed_feed_config_fences_content_and_queue_publication(pool: PgPool) 
         .fetch_one(&pool)
         .await
         .expect("content count should be queryable");
-    assert_eq!(content_count, 0);
+    assert_eq!(content_count, 1);
     let task_count = sqlx::query_scalar::<_, i64>("SELECT count(*)::bigint FROM processing_tasks")
         .fetch_one(&pool)
         .await
         .expect("task count should be queryable");
-    assert_eq!(task_count, 0);
+    assert_eq!(task_count, 1);
+    let states: Vec<String> = sqlx::query_scalar("SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint = $1 ORDER BY source_key").bind(run_id).fetch_all(&pool).await.unwrap();
+    assert_eq!(states, ["queued", "processed"]);
+}
+
+#[sqlx::test]
+async fn database_rejection_does_not_rollback_valid_backfill_siblings(pool: PgPool) {
+    let user_id = insert_user(&pool).await;
+    let entry = |suffix: &str, title: String| newsly_db::FeedBackfillEntry {
+        url: format!("https://example.com/{suffix}"),
+        source_url: format!("https://example.com/{suffix}"),
+        title: Some(title),
+        source: None,
+        platform: "rss".to_owned(),
+        metadata: json!({}),
+        published_at: None,
+        content_type: "article".to_owned(),
+    };
+    let entries = [
+        entry("first", "First".to_owned()),
+        entry("rejected", "x".repeat(501)),
+        entry("last", "Last".to_owned()),
+    ];
+    let mut tx = pool.begin().await.unwrap();
+    let result = newsly_db::persist_feed_backfill(
+        &mut tx,
+        user_id,
+        newsly_db::FeedBackfillOrigin::Background,
+        &entries,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!((result.saved, result.rejected), (2, 1));
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM content_status")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
 }

@@ -30,7 +30,9 @@ pub struct AdminProviderCostRow {
     pub row_count: i64,
     pub request_count: i64,
     pub resource_count: i64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: f64,
+    pub unpriced_call_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -115,14 +117,18 @@ pub struct AdminVendorUsageTotals {
     pub total_tokens: i64,
     pub request_count: i64,
     pub resource_count: i64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: f64,
+    pub unpriced_call_count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
 pub struct AdminVendorUsageDailyRow {
     pub usage_day: NaiveDate,
     pub row_count: i64,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
+    pub known_cost_usd: f64,
+    pub unpriced_call_count: i64,
     pub request_count: i64,
     pub resource_count: i64,
     pub total_tokens: i64,
@@ -281,7 +287,11 @@ pub async fn load_admin_dashboard(
             COUNT(*)::bigint AS row_count,
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
             COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
-            COALESCE(SUM(cost_usd), 0.0)::double precision AS cost_usd
+            CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
+                THEN COALESCE(SUM(cost_usd), 0.0)::double precision
+                ELSE NULL END AS cost_usd,
+            COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
+            COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
         FROM vendor_usage_records
         WHERE created_at >= timezone('UTC', clock_timestamp()) - interval '30 days'
         GROUP BY provider
@@ -366,7 +376,7 @@ pub async fn load_admin_vendor_usage(
         r#"
         SELECT
             usage.id::bigint,
-            usage.created_at,
+            usage.created_at AT TIME ZONE 'UTC' AS created_at,
             usage.provider,
             usage.model,
             usage.feature,
@@ -418,7 +428,11 @@ pub async fn load_admin_vendor_usage(
             COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
             COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
-            COALESCE(SUM(cost_usd), 0.0)::double precision AS cost_usd
+            CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
+                THEN COALESCE(SUM(cost_usd), 0.0)::double precision
+                ELSE NULL END AS cost_usd,
+            COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
+            COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
         FROM vendor_usage_records
         WHERE ($1::text IS NULL OR provider = $1)
           AND ($2::text IS NULL OR model = $2)
@@ -441,7 +455,11 @@ pub async fn load_admin_vendor_usage(
         SELECT
             created_at::date AS usage_day,
             COUNT(*)::bigint AS row_count,
-            COALESCE(SUM(cost_usd), 0.0)::double precision AS cost_usd,
+            CASE WHEN COUNT(*) FILTER (WHERE cost_usd IS NULL) = 0
+                THEN COALESCE(SUM(cost_usd), 0.0)::double precision
+                ELSE NULL END AS cost_usd,
+            COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
+            COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count,
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
             COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
             COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens
@@ -476,4 +494,50 @@ pub async fn load_admin_vendor_usage(
 pub enum AdminRepositoryError {
     #[error("PostgreSQL admin query failed")]
     Sqlx(#[from] sqlx::Error),
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::*;
+
+    #[sqlx::test]
+    async fn admin_cost_aggregates_preserve_unknown_prices(pool: PgPool) {
+        sqlx::query(
+            "INSERT INTO vendor_usage_records
+                (provider, model, feature, operation, cost_usd, created_at)
+             VALUES ('test', 'priced', 'test', 'test', 0.25, timezone('UTC', now())),
+                    ('test', 'unpriced', 'test', 'test', NULL, timezone('UTC', now())),
+                    ('free', 'free', 'test', 'test', 0.0, timezone('UTC', now()))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let snapshot = load_admin_vendor_usage(&pool, &AdminVendorUsageFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(snapshot.totals.cost_usd, None);
+        assert!((snapshot.totals.known_cost_usd - 0.25).abs() < f64::EPSILON);
+        assert_eq!(snapshot.totals.unpriced_call_count, 1);
+        assert_eq!(snapshot.daily[0].cost_usd, None);
+        assert_eq!(snapshot.daily[0].unpriced_call_count, 1);
+        let dashboard = load_admin_dashboard(&pool, None).await.unwrap();
+        let unpriced = dashboard
+            .provider_costs
+            .iter()
+            .find(|row| row.provider == "test")
+            .unwrap();
+        assert_eq!(unpriced.cost_usd, None);
+        assert_eq!(unpriced.unpriced_call_count, 1);
+        let free = load_admin_vendor_usage(
+            &pool,
+            &AdminVendorUsageFilter {
+                provider: Some("free".to_owned()),
+                ..AdminVendorUsageFilter::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(free.totals.cost_usd, Some(0.0));
+        assert_eq!(free.totals.unpriced_call_count, 0);
+    }
 }

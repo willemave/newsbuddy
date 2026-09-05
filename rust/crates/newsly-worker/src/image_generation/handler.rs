@@ -24,11 +24,8 @@ pub struct ImageWorkerServices {
 }
 
 impl ImageWorkerServices {
-    pub const fn new(
-        pool: PgPool,
-        gateway: ImageGenerationGateway,
-        file_store: ImageFileStore,
-    ) -> Self {
+    pub fn new(pool: PgPool, gateway: ImageGenerationGateway, file_store: ImageFileStore) -> Self {
+        file_store.start_cleanup(pool.clone());
         Self {
             pool,
             gateway,
@@ -92,9 +89,7 @@ async fn execute_image_generation(
                 error = %error,
                 "image generation provider failed"
             );
-            // The durable queue retries every provider failure. The gateway's structured retryable
-            // flag applies only to callers that perform retries inline.
-            return plain_failure(error.to_string(), true);
+            return plain_failure(error.to_string(), error.retryable());
         }
     };
     if lease.ownership_lost() {
@@ -102,7 +97,7 @@ async fn execute_image_generation(
     }
     let staged = match services
         .file_store
-        .stage(content_id, task_id, &generated.bytes)
+        .stage(&services.pool, content_id, task_id, &generated.bytes)
         .await
     {
         Ok(staged) => staged,

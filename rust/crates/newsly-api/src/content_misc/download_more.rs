@@ -101,12 +101,23 @@ pub(crate) async fn download_more_from_series(
     let outcome = state
         .scrape
         .fetch_feed(&FeedScrapeTarget {
+            known_urls: newsly_db::known_feed_urls(
+                state.database.pool(),
+                current_user.id,
+                if plan.scraper_type == "podcast_rss" {
+                    "podcast"
+                } else {
+                    "article"
+                },
+            )
+            .await
+            .map_err(|error| internal_error(error, &request_id))?,
             config_id: plan.config_id,
             user_id: current_user.id,
             scraper_type: plan.scraper_type.clone(),
             display_name: plan.display_name.clone(),
             feed_url: plan.feed_url.clone(),
-            limit: plan.target_limit,
+            limit: payload.count,
             fingerprint: "download-more".to_owned(),
         })
         .await
@@ -186,7 +197,7 @@ pub(crate) async fn download_more_from_series(
         scraped,
         saved: persisted.saved,
         duplicates: persisted.duplicates,
-        errors: outcome.item_errors.len(),
+        errors: outcome.item_errors.len() + persisted.rejected,
     }))
 }
 

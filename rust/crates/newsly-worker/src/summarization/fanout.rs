@@ -110,7 +110,7 @@ async fn image_is_eligible(
     transaction: &mut Transaction<'static, Postgres>,
     applied: &AppliedSummarization,
 ) -> Result<bool, sqlx::Error> {
-    if applied.status != "awaiting_image"
+    if !matches!(applied.status.as_str(), "completed" | "awaiting_image")
         || !matches!(applied.content_type.as_str(), "article" | "podcast")
         || applied.classification.as_deref() == Some("skip")
     {

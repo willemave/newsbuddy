@@ -1,6 +1,19 @@
 {
   "additionalProperties": true,
   "properties": {
+    "config_id": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Config Id"
+    },
     "first_edition_run_id": {
       "anyOf": [
         {

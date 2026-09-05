@@ -53,8 +53,49 @@ impl ImageFileStore {
         })
     }
 
+    pub(super) fn start_cleanup(&self, pool: sqlx::PgPool) {
+        let store = self.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                if pool.is_closed() {
+                    break;
+                }
+                if let Err(error) = store.cleanup_unreferenced(&pool).await {
+                    tracing::warn!(error = %error, "image cleanup will retry");
+                }
+            }
+        });
+    }
+
+    async fn cleanup_unreferenced(&self, pool: &sqlx::PgPool) -> Result<(), ImageFileStoreError> {
+        for key in newsly_db::artifact_cleanup_candidates(pool, "image").await? {
+            let path = Path::new(&key);
+            if path.is_absolute()
+                || path
+                    .components()
+                    .any(|c| !matches!(c, Component::Normal(_)))
+            {
+                tracing::warn!("invalid image cleanup key retained for inspection");
+                continue;
+            }
+            match fs::remove_file(self.root.join(path)).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    tracing::warn!(error = %error, "image deletion retained for retry");
+                    continue;
+                }
+            }
+            newsly_db::forget_cleaned_artifact(pool, &key).await?;
+        }
+        Ok(())
+    }
+
     pub(super) async fn stage(
         &self,
+        pool: &sqlx::PgPool,
         content_id: i64,
         task_id: i64,
         bytes: &[u8],
@@ -86,6 +127,18 @@ impl ImageFileStore {
             staging_dir.join(format!("content-{content_id}-task-{task_id}-{nonce}.png"));
         let staged_thumbnail_path =
             staging_dir.join(format!("thumbnail-{content_id}-task-{task_id}-{nonce}.png"));
+        for path in [
+            &staged_image_path,
+            &staged_thumbnail_path,
+            &content_dir.join(format!("{content_id}-{nonce}.png")),
+            &thumbnail_dir.join(format!("{content_id}-{nonce}.png")),
+        ] {
+            let key = path
+                .strip_prefix(&self.root)
+                .expect("constructed beneath image root")
+                .to_string_lossy();
+            newsly_db::track_image_artifact(pool, &key, task_id).await?;
+        }
         fs::write(&staged_image_path, transformed.normalized).await?;
         if let Err(error) = fs::write(&staged_thumbnail_path, transformed.thumbnail).await {
             let _ = fs::remove_file(&staged_image_path).await;
@@ -94,8 +147,8 @@ impl ImageFileStore {
         Ok(StagedImage {
             image_temp: staged_image_path,
             thumbnail_temp: staged_thumbnail_path,
-            image_destination: content_dir.join(format!("{content_id}.png")),
-            thumbnail_destination: thumbnail_dir.join(format!("{content_id}.png")),
+            image_destination: content_dir.join(format!("{content_id}-{nonce}.png")),
+            thumbnail_destination: thumbnail_dir.join(format!("{content_id}-{nonce}.png")),
         })
     }
 }
@@ -148,6 +201,25 @@ pub(super) struct StagedImage {
 }
 
 impl StagedImage {
+    pub(super) fn image_url(&self) -> String {
+        format!(
+            "/static/images/content/{}",
+            self.image_destination
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+        )
+    }
+    pub(super) fn thumbnail_url(&self) -> String {
+        format!(
+            "/static/images/thumbnails/{}",
+            self.thumbnail_destination
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+        )
+    }
+
     /// Publishes only after the worker kernel has locked the exact live queue lease. The two local
     /// renames are bounded filesystem operations; no provider or unbounded file work occurs while
     /// `PostgreSQL` is held.
@@ -206,6 +278,8 @@ fn thumbnail_dimensions(width: u32, height: u32) -> (u32, u32) {
 
 #[derive(Debug, Error)]
 pub enum ImageFileStoreError {
+    #[error("image cleanup ledger failed")]
+    Database(#[from] sqlx::Error),
     #[error("invalid image storage configuration: {0}")]
     InvalidConfiguration(String),
     #[error("could not resolve the current directory for image storage")]
@@ -235,8 +309,9 @@ mod tests {
         assert!(validate_dimensions(1_600, 900).is_ok());
     }
 
-    #[tokio::test]
-    async fn stages_normalized_image_and_thumbnail_before_canonical_publish() {
+    #[sqlx::test]
+    async fn stages_normalized_image_and_thumbnail_before_canonical_publish(pool: sqlx::PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
         let temporary = tempfile::tempdir().expect("temporary image root should exist");
         let source = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
             640,
@@ -251,7 +326,7 @@ mod tests {
             .expect("store configuration should be valid");
 
         let staged = store
-            .stage(42, 99, bytes.get_ref())
+            .stage(&pool, 42, 99, bytes.get_ref())
             .await
             .expect("valid image should stage");
         assert!(staged.image_temp.is_file());
@@ -259,9 +334,34 @@ mod tests {
         assert!(!staged.image_destination.exists());
 
         staged.publish().await.expect("staged image should publish");
-        assert!(temporary.path().join("content/42.png").is_file());
-        let thumbnail = image::open(temporary.path().join("thumbnails/42.png"))
-            .expect("thumbnail should decode");
+        assert!(staged.image_destination.is_file());
+        let thumbnail =
+            image::open(&staged.thumbnail_destination).expect("thumbnail should decode");
         assert_eq!(thumbnail.dimensions(), (200, 113));
+        let replacement = store.stage(&pool, 42, 99, bytes.get_ref()).await.unwrap();
+        assert_ne!(staged.image_destination, replacement.image_destination);
+        fs::remove_file(&replacement.thumbnail_temp).await.unwrap();
+        assert!(replacement.publish().await.is_err());
+        assert!(staged.image_destination.is_file());
+        sqlx::query("INSERT INTO contents (content_type, url, is_aggregate, content_metadata) VALUES ('article', 'https://example.com/image', FALSE, $1)")
+            .bind(serde_json::json!({"image_url": staged.image_url(), "thumbnail_url": staged.thumbnail_url()})).execute(&pool).await.unwrap();
+        sqlx::query(
+            "UPDATE artifact_cleanup_candidates SET created_at = now() - interval '2 days'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // A corrupt/unremovable candidate must not block the healthy orphan behind it.
+        fs::create_dir(temporary.path().join("cannot-delete-as-file"))
+            .await
+            .unwrap();
+        newsly_db::track_image_artifact(&pool, "cannot-delete-as-file", 99)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE artifact_cleanup_candidates SET created_at = now() - interval '3 days' WHERE object_key = 'cannot-delete-as-file'").execute(&pool).await.unwrap();
+        store.cleanup_unreferenced(&pool).await.unwrap();
+        assert!(staged.image_destination.is_file());
+        assert!(staged.thumbnail_destination.is_file());
+        assert!(!replacement.image_destination.exists());
     }
 }

@@ -5,16 +5,15 @@
 
 use std::time::Duration;
 
+use crate::public_http::{PublicDocument, PublicHttpError, fetch_public};
 use feed_rs::model::FeedType;
 use futures_util::{StreamExt as _, stream};
-use newsly_extraction::{ExtractionClientError, PublicUrl};
-use reqwest::{StatusCode, header};
+use newsly_extraction::ExtractionClientError;
+use reqwest::StatusCode;
 use thiserror::Error;
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_RESPONSE_BYTES: usize = 2_000_000;
-const MAX_REDIRECTS: usize = 5;
 const MAX_PARALLEL_VALIDATIONS: usize = 8;
 const USER_AGENT: &str = "newsly-feed-validator/1.0 (+https://newsly.app)";
 const ACCEPT: &str =
@@ -42,6 +41,18 @@ pub struct ValidatedFeed {
     pub has_audio_entries: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedSharedItem {
+    pub effective_url: String,
+    pub content_type: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidatedSharedTarget {
+    Feed(ValidatedFeed),
+    Item(ValidatedSharedItem),
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FeedValidator;
 
@@ -49,6 +60,20 @@ impl FeedValidator {
     #[must_use]
     pub const fn new() -> Self {
         Self
+    }
+
+    /// Prove that a shared URL names an article or episode before recovering a rejected feed choice.
+    ///
+    /// # Errors
+    /// Returns transient transport errors, exactly as feed validation does.
+    pub async fn validate_shared_item(
+        &self,
+        url: &str,
+    ) -> Result<Option<ValidatedSharedItem>, FeedValidationError> {
+        let Some(document) = self.fetch(url).await? else {
+            return Ok(None);
+        };
+        Ok(validated_shared_item_document(&document))
     }
 
     /// Validate one feed candidate and return its redirect-resolved URL.
@@ -80,31 +105,23 @@ impl FeedValidator {
         let Some(document) = self.fetch(url).await? else {
             return Ok(None);
         };
-        if !has_feed_document_root(&document.body) {
-            return Ok(None);
-        }
-        let parsed = match feed_rs::parser::parse(document.body.as_slice()) {
-            Ok(parsed) => parsed,
-            Err(error) => {
-                tracing::debug!(
-                    error = %error,
-                    url = %document.effective_url,
-                    "feed parser rejected candidate"
-                );
-                return Ok(None);
-            }
-        };
-        let Some(format) = validated_feed_format(&parsed.feed_type) else {
+        Ok(validated_feed_document(&document))
+    }
+
+    /// Classify a directly shared feed or item before using model-backed discovery.
+    ///
+    /// # Errors
+    /// Returns an operational error when public DNS or HTTP transport is unavailable.
+    pub async fn validate_shared_target(
+        &self,
+        url: &str,
+    ) -> Result<Option<ValidatedSharedTarget>, FeedValidationError> {
+        let Some(document) = self.fetch(url).await? else {
             return Ok(None);
         };
-        if !has_feed_semantics(&parsed) {
-            return Ok(None);
-        }
-        Ok(Some(ValidatedFeed {
-            effective_url: document.effective_url.to_string(),
-            format,
-            has_audio_entries: has_audio_entries(&parsed),
-        }))
+        Ok(validated_feed_document(&document)
+            .map(ValidatedSharedTarget::Feed)
+            .or_else(|| validated_shared_item_document(&document).map(ValidatedSharedTarget::Item)))
     }
 
     /// Validate a candidate set concurrently while preserving input order and per-candidate
@@ -124,93 +141,32 @@ impl FeedValidator {
             .await
     }
 
-    async fn fetch(&self, raw_url: &str) -> Result<Option<FeedDocument>, FeedValidationError> {
-        let Ok(mut current) = PublicUrl::parse(raw_url) else {
-            return Ok(None);
-        };
-        for redirect_count in 0..=MAX_REDIRECTS {
-            let addresses = match current.resolve_public_addresses().await {
-                Ok(addresses) => addresses,
-                Err(ExtractionClientError::DnsResolution { .. }) => {
-                    return Err(FeedValidationError::PublicUrlResolution);
+    async fn fetch(&self, raw_url: &str) -> Result<Option<PublicDocument>, FeedValidationError> {
+        match fetch_public(
+            raw_url,
+            REQUEST_TIMEOUT,
+            Some(MAX_RESPONSE_BYTES),
+            USER_AGENT,
+            ACCEPT,
+        )
+        .await
+        {
+            Ok(document) => Ok(Some(document)),
+            Err(PublicHttpError::Url(ExtractionClientError::DnsResolution { .. })) => {
+                Err(FeedValidationError::PublicUrlResolution)
+            }
+            Err(PublicHttpError::Status { status, .. }) => {
+                if status.is_server_error() || matches!(status.as_u16(), 408 | 429) {
+                    Err(FeedValidationError::HttpStatus(status))
+                } else {
+                    Ok(None)
                 }
-                Err(_) => return Ok(None),
-            };
-            let host = current
-                .as_url()
-                .host_str()
-                .ok_or(FeedValidationError::InvalidUrl)?;
-            let mut builder = reqwest::Client::builder()
-                .connect_timeout(CONNECT_TIMEOUT)
-                .timeout(REQUEST_TIMEOUT)
-                .redirect(reqwest::redirect::Policy::none())
-                .no_proxy();
-            if host.parse::<std::net::IpAddr>().is_err() {
-                builder = builder.resolve_to_addrs(host, &addresses);
             }
-            let client = builder.build()?;
-            let response = client
-                .get(current.as_url().clone())
-                .header(header::USER_AGENT, USER_AGENT)
-                .header(header::ACCEPT, ACCEPT)
-                .send()
-                .await?;
-            if response.status().is_redirection() {
-                if redirect_count == MAX_REDIRECTS {
-                    return Ok(None);
-                }
-                let Some(location) = response
-                    .headers()
-                    .get(header::LOCATION)
-                    .and_then(|value| value.to_str().ok())
-                else {
-                    return Ok(None);
-                };
-                let Ok(next) = current.as_url().join(location) else {
-                    return Ok(None);
-                };
-                let Ok(next) = PublicUrl::parse(next.as_str()) else {
-                    return Ok(None);
-                };
-                current = next;
-                continue;
-            }
-            if response.status() == StatusCode::TOO_MANY_REQUESTS
-                || response.status().is_server_error()
-            {
-                return Err(FeedValidationError::HttpStatus(response.status()));
-            }
-            if !response.status().is_success() {
-                return Ok(None);
-            }
-            if response
-                .content_length()
-                .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-            {
-                return Ok(None);
-            }
-            let mut body = Vec::new();
-            let mut chunks = response.bytes_stream();
-            while let Some(chunk) = chunks.next().await {
-                let chunk = chunk?;
-                if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-                    return Ok(None);
-                }
-                body.extend_from_slice(&chunk);
-            }
-            return Ok(Some(FeedDocument {
-                effective_url: current,
-                body,
-            }));
+            Err(PublicHttpError::Deadline) => Err(FeedValidationError::Deadline),
+            Err(PublicHttpError::Http(error)) => Err(FeedValidationError::Http(error)),
+            Err(_) => Ok(None),
         }
-        Ok(None)
     }
-}
-
-#[derive(Debug)]
-struct FeedDocument {
-    effective_url: PublicUrl,
-    body: Vec<u8>,
 }
 
 fn has_feed_semantics(feed: &feed_rs::model::Feed) -> bool {
@@ -277,6 +233,48 @@ const fn validated_feed_format(feed_type: &FeedType) -> Option<ValidatedFeedForm
     }
 }
 
+fn validated_shared_item_document(document: &PublicDocument) -> Option<ValidatedSharedItem> {
+    if document
+        .effective_url
+        .as_url()
+        .path()
+        .trim_matches('/')
+        .is_empty()
+    {
+        return None;
+    }
+    shared_item_kind(&document.body).map(|content_type| ValidatedSharedItem {
+        effective_url: document.effective_url.to_string(),
+        content_type,
+    })
+}
+
+fn validated_feed_document(document: &PublicDocument) -> Option<ValidatedFeed> {
+    if !has_feed_document_root(&document.body) {
+        return None;
+    }
+    let parsed = match feed_rs::parser::parse(document.body.as_slice()) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            tracing::debug!(
+                error = %error,
+                url = %document.effective_url,
+                "feed parser rejected candidate"
+            );
+            return None;
+        }
+    };
+    let format = validated_feed_format(&parsed.feed_type)?;
+    if !has_feed_semantics(&parsed) {
+        return None;
+    }
+    Some(ValidatedFeed {
+        effective_url: document.effective_url.to_string(),
+        format,
+        has_audio_entries: has_audio_entries(&parsed),
+    })
+}
+
 fn has_feed_document_root(body: &[u8]) -> bool {
     let prefix = &body[..body.len().min(4_000)];
     let lower = prefix
@@ -306,14 +304,60 @@ fn feed_root_at(mut value: &[u8]) -> bool {
     matches!(local_name, b"rss" | b"feed" | b"rdf")
 }
 
+fn shared_item_kind(bytes: &[u8]) -> Option<&'static str> {
+    let html = scraper::Html::parse_document(&String::from_utf8_lossy(bytes));
+    let scripts =
+        scraper::Selector::parse("script[type='application/ld+json']").expect("static selector");
+    for script in html.select(&scripts) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&script.inner_html())
+            && let Some(kind) = schema_item_kind(&value)
+        {
+            return Some(kind);
+        }
+    }
+    let selector = scraper::Selector::parse("meta[property='og:type']").expect("static selector");
+    html.select(&selector)
+        .any(|node| {
+            node.value()
+                .attr("content")
+                .is_some_and(|value| value.eq_ignore_ascii_case("article"))
+        })
+        .then_some("article")
+}
+
+fn schema_item_kind(value: &serde_json::Value) -> Option<&'static str> {
+    if let Some(values) = value.as_array() {
+        return values.iter().find_map(schema_item_kind);
+    }
+    let kinds = value.get("@type");
+    let contains = |expected: &str| {
+        kinds.is_some_and(|kind| {
+            kind.as_str() == Some(expected)
+                || kind
+                    .as_array()
+                    .is_some_and(|values| values.iter().any(|v| v.as_str() == Some(expected)))
+        })
+    };
+    if contains("PodcastEpisode") {
+        return Some("podcast");
+    }
+    if ["Article", "NewsArticle", "BlogPosting"]
+        .into_iter()
+        .any(contains)
+    {
+        return Some("article");
+    }
+    value.get("@graph").and_then(schema_item_kind)
+}
+
 #[derive(Debug, Error)]
 pub enum FeedValidationError {
+    #[error("feed validation deadline exceeded")]
+    Deadline,
     #[error("feed validator HTTP client failed")]
     Http(#[from] reqwest::Error),
     #[error("feed host could not be resolved on the public network")]
     PublicUrlResolution,
-    #[error("feed URL is invalid")]
-    InvalidUrl,
     #[error("feed host returned retryable HTTP status {0}")]
     HttpStatus(StatusCode),
 }
@@ -380,5 +424,23 @@ mod tests {
                 "extension {extension} was rejected"
             );
         }
+    }
+    #[test]
+    fn shared_item_evidence_distinguishes_episodes_articles_and_homepages() {
+        assert_eq!(super::shared_item_kind(br#"<script type="application/ld+json">{"@graph":[{"@type":["CreativeWork","PodcastEpisode"]}]}</script>"#), Some("podcast"));
+        assert_eq!(
+            super::shared_item_kind(br#"<meta property="og:type" content="article">"#),
+            Some("article")
+        );
+        assert_eq!(
+            super::shared_item_kind(
+                br#"<script type="application/ld+json">{"@type":"WebSite"}</script>"#
+            ),
+            None
+        );
+        assert_eq!(
+            super::shared_item_kind(br#"<script type="application/ld+json">invalid</script>"#),
+            None
+        );
     }
 }

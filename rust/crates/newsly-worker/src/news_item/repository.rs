@@ -127,7 +127,14 @@ pub(super) async fn prepare_processing(
     };
     let body_source = resolve_body_source(transaction, &row).await?;
     let snapshot = snapshot_from_row(&row, body_source);
-    let local_summary = existing_summary(&snapshot);
+    let checkpoint = snapshot.raw_metadata.get("summary_checkpoint");
+    let local_summary = checkpoint
+        .filter(|value| {
+            value.get("fingerprint").and_then(Value::as_str) == Some(snapshot.fingerprint.as_str())
+        })
+        .and_then(|value| value.get("summary"))
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .or_else(|| existing_summary(&snapshot));
     let (reusable_summary, reusable_representative_id) = if local_summary.is_some() {
         (local_summary, None)
     } else {
@@ -149,6 +156,9 @@ pub(super) async fn prepare_processing(
         reusable_representative_id,
     }))
 }
+
+mod checkpoint;
+pub(super) use checkpoint::checkpoint_summary;
 
 pub(super) async fn load_relation_candidates(
     transaction: &mut Transaction<'_, Postgres>,
@@ -323,11 +333,23 @@ pub(super) async fn apply_processing(
 ) -> Result<NewsApplyOutcome, NewsRepositoryError> {
     if let Some(mutation) = &plan.mutation {
         for usage in &mutation.usage {
-            persist_model_usage(transaction, plan, usage).await?;
+            persist_model_usage(
+                transaction,
+                plan.task_id,
+                plan.snapshot.owner_user_id,
+                usage,
+            )
+            .await?;
         }
     }
     for usage in &plan.failure_usage {
-        persist_model_usage(transaction, plan, usage).await?;
+        persist_model_usage(
+            transaction,
+            plan.task_id,
+            plan.snapshot.owner_user_id,
+            usage,
+        )
+        .await?;
     }
     let Some(row) = load_news_row(transaction, plan.snapshot.id, true).await? else {
         return Ok(NewsApplyOutcome::NewsItemMissing);
@@ -606,6 +628,11 @@ fn snapshot_from_row(row: &NewsRow, body_source: BodySource) -> NewsSnapshot {
 }
 
 fn source_fingerprint(row: &NewsRow) -> String {
+    let mut raw_metadata = row.raw_metadata.clone();
+    if let Some(object) = raw_metadata.as_object_mut() {
+        object.remove("summary_checkpoint");
+        object.remove("processing_error");
+    }
     stable_sha256(&json!({
         "id": row.id,
         "owner_user_id": row.owner_user_id,
@@ -621,7 +648,7 @@ fn source_fingerprint(row: &NewsRow) -> String {
         "discussion_url": row.discussion_url,
         "summary_key_points": row.summary_key_points,
         "summary_text": row.summary_text,
-        "raw_metadata": row.raw_metadata,
+        "raw_metadata": raw_metadata,
         "representative_news_item_id": row.representative_news_item_id,
         "cluster_size": row.cluster_size,
         "ingested_at": row.ingested_at,
@@ -1008,6 +1035,7 @@ async fn persist_summary(
     );
     metadata.insert("summary_version".to_owned(), Value::from(1));
     metadata.remove("processing_error");
+    metadata.remove("summary_checkpoint");
     let summary_section = metadata
         .entry("summary".to_owned())
         .or_insert_with(|| Value::Object(Map::new()));
@@ -1506,7 +1534,8 @@ async fn visible_user_ids(
 
 async fn persist_model_usage(
     transaction: &mut Transaction<'static, Postgres>,
-    plan: &ProcessFinalizationPlan,
+    task_id: i64,
+    owner_user_id: Option<i64>,
     write: &ModelUsageWrite,
 ) -> Result<(), sqlx::Error> {
     let total = write
@@ -1533,8 +1562,8 @@ async fn persist_model_usage(
     .bind(write.feature)
     .bind(write.operation)
     .bind(&write.provider_response_id)
-    .bind(plan.task_id)
-    .bind(plan.snapshot.owner_user_id)
+    .bind(task_id)
+    .bind(owner_user_id)
     .bind(saturating_i32(write.usage.input_tokens))
     .bind(saturating_i32(write.usage.cached_input_tokens))
     .bind(saturating_i32(write.usage.cache_write_tokens))
@@ -1701,3 +1730,7 @@ pub(super) enum NewsRepositoryError {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
+
+#[cfg(test)]
+#[path = "checkpoint_tests.rs"]
+mod checkpoint_tests;

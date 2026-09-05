@@ -324,6 +324,34 @@ Content bodies are staged by hash and published only through the exact fenced
 transaction. Feed links returned by extraction are candidates; Rust validates
 and persists subscriptions/backfill work.
 
+Scheduled and backfill dispatchers enqueue one task per configured feed/Reddit
+source or global aggregator. Each leaf prepares only its selected configuration,
+runs provider work independently, and fences that configuration at persistence.
+Canonical feed normalization skips known/rejected entries before its intake limit;
+per-entry savepoints retain healthy siblings on input constraint failures.
+Source health records successful checks separately from newly persisted items.
+Typed source outcomes keep transient HN/topic failures retryable while committing
+healthy items. Source HTTP Retry-After hints reach the queue, which adds positive
+jitter to failure retries; prerequisite deferrals keep their original delay.
+
+Feed validation and ingestion share pinned public HTTP with redirect revalidation
+and a total request deadline. Candidate probes retain byte limits; accepted feed
+documents retain the product's no-byte-cap policy. X synchronization persists
+continuations without advancing the settled bookmark checkpoint prematurely.
+
+### Pipeline interruption recovery
+
+Expired claims consume the existing retry budget for every task type. A worker
+attempt has a two-hour outer deadline; sandbox-backed LLM tasks drain bounded
+allocation/cleanup work after cancellation so a dispatched sandbox ID is not lost.
+Terminal failure settles the active product projection and queue transition in the
+same exact-lease transaction. Discovery and chat generation guards preserve newer
+attempts. The scheduler evaluates each job's latest occurrence after downtime;
+existing durable tick markers suppress duplicate scheduling. The existing
+watchdog and operator health share read-only counts for repeatedly failing
+sources, overdue work, and terminal queue/product mismatches. Repairs remain
+owned by normal feature tasks.
+
 ### 8.2 Short-form News
 
 News enrichment may obtain article evidence through the same extractor and
@@ -335,7 +363,9 @@ bounds evidence, runs canonical relation policy in Rust, and performs production
 embeddings through the configured hosted adapter. Local SentenceTransformers
 and experimental rerankers belong only to offline evals.
 
-Summary, relation/cluster state, relevant links, provider usage, Briefing pending
+A new summary and its usage first checkpoint under the exact queue lease and source
+fingerprint. Relation retries reuse that checkpoint; source changes invalidate it.
+Summary, relation/cluster state, relevant links, remaining provider usage, Briefing pending
 sources, Agent Data synchronization, and the queue transition publish
 atomically. News never enters the long-form generated-artwork path.
 
@@ -357,7 +387,14 @@ and are removed only after fenced state commits.
 Generated long-form artwork uses an immutable summary fingerprint. Provider and
 image transforms write attempt-scoped files without a database connection. The
 final transaction revalidates the exact lease, fingerprint, and lifecycle before
-publishing source image, thumbnail, UTC cache version, and usage together.
+publishing pointers to a unique immutable image/thumbnail pair, UTC cache version,
+and usage together. Summary completion makes articles and podcasts readable and
+enqueues Briefing independently of optional artwork.
+
+Deck bundles, agent logs, and generated image attempts register object keys before
+writing. A bounded hourly reaper uses the same PostgreSQL registry with a one-day
+grace period, retaining active work and published references. Cleanup failure
+does not block publication.
 
 ### 8.4 Chat, Learning Decks, Share Actions, and research
 
@@ -366,6 +403,10 @@ identities. Tool progress is separate from confirmed transcript text. Queue
 lease plus chat stream generation fence every partial and final publication.
 Provider response IDs support resumable operations without replaying accepted
 work.
+
+Directly verified Share feeds and articles/episodes use the existing host action
+finalizer without starting an agent. Ambiguous discovery retains the agent path;
+rejected feed output can recover only a host-verified original item.
 
 Learning Deck and Share Action agents use the same Newsly-owned agent runtime,
 E2B session layer, workspace bounds, artifact validators, and signed artifact

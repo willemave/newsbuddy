@@ -58,11 +58,18 @@ struct NewsSummaryOutput {
     title: String,
     #[schemars(length(max = 2_048))]
     article_url: Option<String>,
-    #[schemars(length(min = 2, max = 4))]
+    #[schemars(length(min = 2, max = 4), transform = key_point_constraints)]
     key_points: Vec<String>,
     #[schemars(length(min = 1, max = 500))]
     summary: String,
     classification: NewsClassification,
+}
+
+fn key_point_constraints(schema: &mut schemars::Schema) {
+    schema.insert(
+        "items".to_owned(),
+        serde_json::json!({"type": "string", "minLength": 1, "maxLength": 220}),
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -765,6 +772,22 @@ pub enum NewsItemGatewayError {
     Json(#[from] serde_json::Error),
 }
 
+impl NewsItemGatewayError {
+    #[must_use]
+    pub fn retryable(&self) -> bool {
+        match self {
+            Self::Agent(AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_)) => {
+                true
+            }
+            Self::Http(error) => crate::public_http::retryable_http_error(error),
+            Self::EmbeddingProvider { status, .. } => {
+                status.is_server_error() || matches!(status.as_u16(), 408 | 429)
+            }
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -786,6 +809,29 @@ mod tests {
             Some("https://example.com/story")
         );
         assert_eq!(summary.key_points, ["First point.", "Second point."]);
+    }
+
+    #[test]
+    fn key_point_schema_enforces_character_limits_on_each_item() {
+        let schema = Value::from(schemars::schema_for!(NewsSummaryOutput));
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        for (length, accepted) in [(0, false), (1, true), (220, true), (221, false)] {
+            let value = serde_json::json!({
+                "title": "A factual headline",
+                "article_url": null,
+                "key_points": ["界".repeat(length), "Another point"],
+                "summary": "A factual overview.",
+                "classification": "to_read"
+            });
+            assert_eq!(validator.is_valid(&value), accepted, "length {length}");
+            assert_eq!(
+                serde_json::from_value::<NewsSummaryOutput>(value)
+                    .unwrap()
+                    .normalize()
+                    .is_ok(),
+                accepted
+            );
+        }
     }
 
     #[test]
@@ -825,5 +871,33 @@ mod tests {
     fn local_embedding_models_are_rejected_for_production() {
         let value = "Qwen/Qwen3-Embedding-8B".to_owned();
         assert!(value.strip_prefix("openrouter:").is_none());
+    }
+    #[test]
+    fn typed_retry_policy_stops_configuration_and_authentication_failures() {
+        assert!(!NewsItemGatewayError::OpenRouterUnavailable.retryable());
+        assert!(
+            !NewsItemGatewayError::EmbeddingProvider {
+                status: StatusCode::UNAUTHORIZED,
+                message: "temporary-looking text".to_owned()
+            }
+            .retryable()
+        );
+        assert!(
+            NewsItemGatewayError::EmbeddingProvider {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                message: String::new()
+            }
+            .retryable()
+        );
+        assert!(
+            !crate::SummarizationGatewayError::InvalidArtifact(
+                "timeout text in invalid output".to_owned()
+            )
+            .retryable()
+        );
+        assert!(
+            crate::SummarizationGatewayError::Agent(AgentRuntimeError::DeadlineExceeded)
+                .retryable()
+        );
     }
 }

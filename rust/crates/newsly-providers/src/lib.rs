@@ -21,6 +21,7 @@ mod onboarding_flow;
 mod openai_background;
 mod openai_transcription;
 mod openrouter;
+mod public_http;
 mod rig_engine;
 mod scraping;
 mod summarization;
@@ -53,7 +54,10 @@ pub use content_misc::{
     GeneratedDiscussionSummary, GeneratedTweetSuggestion, GeneratedTweetSuggestions,
     PodcastEpisodeHit,
 };
-pub use feed_validation::{FeedValidationError, FeedValidator, ValidatedFeed, ValidatedFeedFormat};
+pub use feed_validation::{
+    FeedValidationError, FeedValidator, ValidatedFeed, ValidatedFeedFormat, ValidatedSharedItem,
+    ValidatedSharedTarget,
+};
 pub use image_generation::{
     GeneratedImage, GoogleImageAuth, ImageGenerationError, ImageGenerationGateway,
     ImageGenerationGatewayConfig, ImageGenerationUsage, InfographicProvider,
@@ -84,8 +88,8 @@ pub use openai_transcription::{
 pub use openrouter::{OpenRouterPrivacyPolicy, OpenRouterRoutingError};
 pub use rig_engine::{RigAgentEngine, RigAgentEngineError};
 pub use scraping::{
-    AggregatorKey, FeedScrapeTarget, RedditScrapeTarget, ScrapeGateway, ScrapeGatewayError,
-    ScrapeProviderOutcome, ScrapedContentItem, ScrapedItem, ScrapedNewsItem,
+    AggregatorKey, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure, ScrapeGateway,
+    ScrapeGatewayError, ScrapeProviderOutcome, ScrapedContentItem, ScrapedItem, ScrapedNewsItem,
 };
 pub use summarization::{
     ArtifactAsk, ArtifactKeyPoint, ArtifactQuote, ArtifactType, FeedPreview,

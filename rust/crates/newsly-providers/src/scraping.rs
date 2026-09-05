@@ -8,9 +8,9 @@ use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::public_http::{PublicHttpError, fetch_public};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
-use newsly_extraction::PublicUrl;
 use reqwest::{StatusCode, Url};
 use scraper::{ElementRef, Html, Selector};
 use secrecy::{ExposeSecret, SecretString};
@@ -23,7 +23,6 @@ mod feed;
 use feed::normalize_feed_document;
 
 const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024;
-const MAX_REDIRECTS: usize = 5;
 const MAX_HN_CONCURRENCY: usize = 8;
 const DEFAULT_USER_AGENT: &str = "newsly-scraper/2.0 (+https://newsly.app)";
 
@@ -94,6 +93,7 @@ impl AggregatorKey {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeedScrapeTarget {
+    pub known_urls: BTreeSet<String>,
     pub config_id: i64,
     pub user_id: i64,
     pub scraper_type: String,
@@ -159,17 +159,23 @@ pub struct ScrapedContentItem {
 pub struct ScrapeProviderOutcome {
     pub items: Vec<ScrapedItem>,
     pub item_errors: Vec<String>,
+    pub retryable_failure: bool,
 }
 
 impl ScrapeProviderOutcome {
     fn new(items: Vec<ScrapedItem>, item_errors: Vec<String>) -> Self {
-        Self { items, item_errors }
+        Self {
+            items,
+            item_errors,
+            retryable_failure: false,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ScrapeGateway {
     client: reqwest::Client,
+    http_timeout: Duration,
     reddit_client_id: Option<SecretString>,
     reddit_client_secret: Option<SecretString>,
     reddit_user_agent: String,
@@ -192,6 +198,7 @@ impl ScrapeGateway {
             .build()?;
         Ok(Self {
             client,
+            http_timeout: timeout,
             reddit_client_id: secret_env("REDDIT_CLIENT_ID"),
             reddit_client_secret: secret_env("REDDIT_CLIENT_SECRET"),
             reddit_user_agent: clean_env("REDDIT_USER_AGENT")
@@ -256,7 +263,7 @@ impl ScrapeGateway {
     pub async fn fetch_reddit_targets(
         &self,
         targets: &[RedditScrapeTarget],
-    ) -> Result<Vec<(i64, Result<ScrapeProviderOutcome, String>)>, ScrapeGatewayError> {
+    ) -> Result<Vec<(i64, Result<ScrapeProviderOutcome, ScrapeFailure>)>, ScrapeGatewayError> {
         if targets.is_empty() {
             return Ok(Vec::new());
         }
@@ -266,7 +273,7 @@ impl ScrapeGateway {
             let result = self
                 .fetch_subreddit(target, &token)
                 .await
-                .map_err(|error| error.to_string());
+                .map_err(ScrapeFailure::from);
             outcomes.push((target.config_id, result));
         }
         Ok(outcomes)
@@ -306,14 +313,12 @@ impl ScrapeGateway {
             .await;
         let mut items = Vec::new();
         let mut errors = Vec::new();
+        let mut retryable_failure = false;
         for result in results {
             let (story_id, story) = match result {
                 Ok((story_id, Ok(story))) => (story_id, story),
-                Ok((story_id, Err(error))) => {
-                    errors.push(format!("HN story {story_id}: {error}"));
-                    continue;
-                }
-                Err(error) => {
+                Ok((_, Err(error))) | Err(error) => {
+                    retryable_failure |= crate::public_http::retryable_http_error(&error);
                     errors.push(format!("HN story request: {error}"));
                     continue;
                 }
@@ -364,7 +369,11 @@ impl ScrapeGateway {
                 raw_metadata: metadata,
             }))));
         }
-        Ok(ScrapeProviderOutcome::new(items, errors))
+        Ok(ScrapeProviderOutcome {
+            items,
+            item_errors: errors,
+            retryable_failure,
+        })
     }
 
     async fn fetch_rss_cluster(
@@ -557,6 +566,7 @@ impl ScrapeGateway {
         let topics = ["science", "business", "politics", "sports"];
         let mut items = Vec::new();
         let mut errors = Vec::new();
+        let mut retryable_failure = false;
         let mut seen = BTreeSet::new();
         for topic in topics {
             let topic_url = format!("https://brutalist.report/topic/{topic}?limit=25&hours=24");
@@ -566,6 +576,7 @@ impl ScrapeGateway {
             {
                 Ok(bytes) => bytes,
                 Err(error) => {
+                    retryable_failure |= error.retryable();
                     errors.push(format!("{topic}: {error}"));
                     continue;
                 }
@@ -635,10 +646,11 @@ impl ScrapeGateway {
                 }
             }
         }
-        if items.is_empty() && !errors.is_empty() {
-            return Err(ScrapeGatewayError::Html(errors.join("; ")));
-        }
-        Ok(ScrapeProviderOutcome::new(items, errors))
+        Ok(ScrapeProviderOutcome {
+            items,
+            item_errors: errors,
+            retryable_failure,
+        })
     }
 
     async fn reddit_access_token(&self) -> Result<String, ScrapeGatewayError> {
@@ -763,60 +775,17 @@ impl ScrapeGateway {
         source_url: &str,
         max_response_bytes: Option<usize>,
     ) -> Result<Vec<u8>, ScrapeGatewayError> {
-        let mut current = PublicUrl::parse(source_url)?;
-        for redirect_count in 0..=MAX_REDIRECTS {
-            current.validate_dns().await?;
-            let response = self
-                .client
-                .get(current.as_url().clone())
-                .header(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT)
-                .header(
-                    reqwest::header::ACCEPT,
-                    "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.1",
-                )
-                .send()
-                .await?;
-            if response.status().is_redirection() {
-                if redirect_count == MAX_REDIRECTS {
-                    return Err(ScrapeGatewayError::TooManyRedirects);
-                }
-                let location = response
-                    .headers()
-                    .get(reqwest::header::LOCATION)
-                    .and_then(|value| value.to_str().ok())
-                    .ok_or(ScrapeGatewayError::RedirectLocationMissing)?;
-                let resolved = current
-                    .as_url()
-                    .join(location)
-                    .map_err(|error| ScrapeGatewayError::Url(error.to_string()))?;
-                current = PublicUrl::parse(resolved.as_str())?;
-                continue;
-            }
-            let response = response.error_for_status()?;
-            if response
-                .content_length()
-                .is_some_and(|length| exceeds_response_limit(length, max_response_bytes))
-            {
-                return Err(ScrapeGatewayError::ResponseTooLarge);
-            }
-            let mut body = Vec::new();
-            let mut stream = response.bytes_stream();
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk?;
-                let next_size = body.len().saturating_add(chunk.len()) as u64;
-                if exceeds_response_limit(next_size, max_response_bytes) {
-                    return Err(ScrapeGatewayError::ResponseTooLarge);
-                }
-                body.extend_from_slice(&chunk);
-            }
-            return Ok(body);
-        }
-        Err(ScrapeGatewayError::TooManyRedirects)
+        fetch_public(source_url, self.http_timeout, max_response_bytes, DEFAULT_USER_AGENT,
+            "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.1")
+            .await.map(|document| document.body).map_err(|error| match error {
+                PublicHttpError::Status {status, retry_after} => ScrapeGatewayError::HttpStatus {status, retry_after},
+                PublicHttpError::Http(error) => ScrapeGatewayError::Http(error),
+                PublicHttpError::Url(error) => ScrapeGatewayError::PublicUrl(error),
+                PublicHttpError::Deadline => ScrapeGatewayError::Deadline,
+                PublicHttpError::TooLarge => ScrapeGatewayError::ResponseTooLarge,
+                PublicHttpError::Redirect => ScrapeGatewayError::TooManyRedirects,
+            })
     }
-}
-
-fn exceeds_response_limit(size: u64, max_response_bytes: Option<usize>) -> bool {
-    max_response_bytes.is_some_and(|limit| size > limit as u64)
 }
 
 fn cluster_anchors(fragment: &Html, selector: &Selector) -> Vec<(String, Option<String>)> {
@@ -1106,8 +1075,36 @@ struct RedditPost {
     created_utc: Option<f64>,
 }
 
+#[derive(Debug, Clone, Error)]
+#[error("{message}")]
+pub struct ScrapeFailure {
+    pub message: String,
+    pub retryable: bool,
+    pub retry_after: Option<i64>,
+}
+impl From<ScrapeGatewayError> for ScrapeFailure {
+    fn from(error: ScrapeGatewayError) -> Self {
+        Self {
+            message: format!(
+                "{} (http_status={:?})",
+                error.diagnostic_code(),
+                error.http_status()
+            ),
+            retryable: error.retryable(),
+            retry_after: error.retry_after(),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ScrapeGatewayError {
+    #[error("source returned HTTP {status}")]
+    HttpStatus {
+        status: StatusCode,
+        retry_after: Option<i64>,
+    },
+    #[error("source fetch deadline exceeded")]
+    Deadline,
     #[error("scraper HTTP request failed")]
     Http(#[from] reqwest::Error),
     #[error("source URL is invalid: {0}")]
@@ -1116,8 +1113,6 @@ pub enum ScrapeGatewayError {
     PublicUrl(#[from] newsly_extraction::ExtractionClientError),
     #[error("source response exceeded the bounded body limit")]
     ResponseTooLarge,
-    #[error("source redirect is missing Location")]
-    RedirectLocationMissing,
     #[error("source exceeded the redirect limit")]
     TooManyRedirects,
     #[error("feed document is invalid: {0}")]
@@ -1133,6 +1128,8 @@ pub enum ScrapeGatewayError {
 impl ScrapeGatewayError {
     pub fn diagnostic_code(&self) -> &'static str {
         match self {
+            Self::HttpStatus { .. } => "http_status",
+            Self::Deadline => "http_timeout",
             Self::Http(error) if error.is_timeout() => "http_timeout",
             Self::Http(error) if error.is_connect() => "http_connect",
             Self::Http(error) if error.status().is_some() => "http_status",
@@ -1140,7 +1137,6 @@ impl ScrapeGatewayError {
             Self::Url(_) => "invalid_url",
             Self::PublicUrl(_) => "public_url_validation",
             Self::ResponseTooLarge => "response_too_large",
-            Self::RedirectLocationMissing => "redirect_location_missing",
             Self::TooManyRedirects => "too_many_redirects",
             Self::Feed(_) => "invalid_feed",
             Self::Html(_) => "invalid_html",
@@ -1151,21 +1147,32 @@ impl ScrapeGatewayError {
 
     pub fn http_status(&self) -> Option<u16> {
         match self {
+            Self::HttpStatus { status, .. } => Some(status.as_u16()),
             Self::Http(error) => error.status().map(|status| status.as_u16()),
+            _ => None,
+        }
+    }
+
+    pub fn retry_after(&self) -> Option<i64> {
+        match self {
+            Self::HttpStatus { retry_after, .. } => *retry_after,
             _ => None,
         }
     }
 
     pub fn retryable(&self) -> bool {
         match self {
-            Self::Http(error) => error.status().is_none_or(|status| {
-                status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
-            }),
-            Self::Feed(_) | Self::Html(_) => true,
+            Self::HttpStatus { status, .. } => {
+                status.is_server_error() || matches!(status.as_u16(), 408 | 429)
+            }
+            Self::Http(error) => crate::public_http::retryable_http_error(error),
+            Self::PublicUrl(newsly_extraction::ExtractionClientError::DnsResolution { .. })
+            | Self::Deadline
+            | Self::Feed(_)
+            | Self::Html(_) => true,
             Self::Url(_)
             | Self::PublicUrl(_)
             | Self::ResponseTooLarge
-            | Self::RedirectLocationMissing
             | Self::TooManyRedirects
             | Self::RedditNotConfigured
             | Self::RedditTokenMissing => false,
@@ -1175,3 +1182,5 @@ impl ScrapeGatewayError {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+use crate::public_http::exceeds_response_limit;
