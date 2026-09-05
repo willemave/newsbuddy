@@ -27,6 +27,14 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-05 — `main` — Isolate release-gate Simulator state
+
+- **Status:** Implemented; full release gate pending.
+- **Scope:** Canonical local release gate before native iOS lifecycle tests.
+- **Changes:** Uninstall only the Newsly test app from the selected Simulator after boot so credentials and per-user tab preferences cannot leak across disposable-database runs that reuse user IDs.
+- **Evidence:** The first `bae8931d` gate attempt passed 639 native unit tests, then the warm-resume test found a fully authenticated Knowledge root instead of the expected default Briefing root. Its captured hierarchy showed `knowledge.screen` and a selected Knowledge tab, proving stale client navigation state rather than an authentication or rendering failure.
+- **Remaining:** Commit the fix and restart the complete release gate on the replacement SHA.
+
 ### 2026-09-04 — `main` — Clean up pipeline resilience implementation
 
 - **Status:** Complete; validated locally.

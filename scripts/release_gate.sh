@@ -230,6 +230,10 @@ fi
 [[ -n "$simulator_udid" ]] || die "no available iPhone Simulator found"
 xcrun simctl boot "$simulator_udid" >/dev/null 2>&1 || true
 xcrun simctl bootstatus "$simulator_udid" -b
+# The disposable database restarts user IDs at one, while Simulator app data can retain
+# per-user navigation and credentials from an earlier release run. Remove only the test app so
+# the native lifecycle assertions start from the same clean client state as the fresh database.
+xcrun simctl uninstall "$simulator_udid" org.willemaw.newsly >/dev/null 2>&1 || true
 
 echo "== Native iOS tests on $simulator_udid =="
 rm -rf "$xcresult_path"
