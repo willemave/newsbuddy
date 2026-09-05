@@ -27,6 +27,46 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-04 — `main` — Clean up pipeline resilience implementation
+
+- **Status:** Complete; validated locally.
+- **Scope:** Behavior-preserving cleanup of the uncommitted pipeline patch; three read-only reviews covered sources, lifecycle, and artifacts. Concurrent deck viewer work is excluded.
+- **Changes:** Removed obsolete post-fanout batching and duplicate membership reads, reused source error policy, collapsed repeated summary/terminal finalization, removed unused X state and unreachable HTTP error branches, and expanded dense failure/cleanup SQL for review. Added isolated-source dispatch coverage.
+- **Decisions:** Retained legacy image URL handling required by stored artifacts; preserved exact-lease ownership and feature-specific finalization behavior.
+- **Validation:** 265 affected Rust tests passed, one paid provider test ignored; warning-denied all-target Clippy, formatting, architecture, public/task contract checks, and diff checks passed.
+- **Remaining:** No live provider replay or deployment performed.
+- **Commits:** Uncommitted.
+
+### 2026-09-04 — `main` — Implement content pipeline resilience
+
+- **Status:** Implemented and validated locally; uncommitted and undeployed.
+- **Scope:** Source scheduling/ingestion, Share/discovery, News summaries, optional artwork, decks/artifacts, X synchronization, worker failure settlement, source status and watchdog reporting.
+- **Decisions:** Preserve concurrent responsive deck-viewer changes. Retain Rust/PostgreSQL task ownership, accepted-feed size policy, short preparation/finalization transactions and existing action authorization. Add only durable checkpoints, source health and artifact cleanup where existing failure boundaries need them.
+- **Changes:** Isolated configured-source/global-aggregator tasks; shared pinned HTTP and canonical catch-up parsing; per-entry persistence/config fences; typed retries, Retry-After and positive jitter; bounded worker interruption with sandbox-allocation draining; terminal workflow settlement; durable X continuations and News summary checkpoints; text publication independent of artwork; immutable deck/image objects and bounded cleanup; deterministic verified Share feed/item routing plus valid-item recovery; source health, watchdog mismatch/overdue counts and latest-occurrence scheduler catch-up. Added three SQLx migrations, regenerated typed Swift source-status fields, and updated laws/architecture/plan.
+- **Validation:** 334 affected Rust tests passed, one credentialed provider test ignored; four iOS source-settings tests passed with app/Share Extension build. Warning-denied all-target Clippy, formatting, architecture/module guards, task/public contract drift and diff checks passed. Focused worker tests also cover cleanup deletion failure isolation.
+- **Remaining:** Authorized release gate with paid smoke, exact-SHA deployment, production migrations and private-feed/source-cadence observation. Accepted feeds still buffer in memory; provider acceptance before a recorded response can still incur bounded repeat work. No production state was changed.
+- **Commits:** Uncommitted.
+
+
+### 2026-09-04 — `main` — Publish the validated responsive Learning Deck viewer
+
+- **Status:** Implemented locally; not committed, pushed, deployed, or distributed.
+- **Scope:** Learning Deck agent artifact validation/publication, responsive Reveal viewer assembly, and the canonical Knowledge and Learning law.
+- **Decisions:** Treat iPhone portrait as the primary generated-deck surface. Assemble the responsive hosted viewer before browser validation and return that exact HTML for artifact storage, so validation and the iOS client cannot observe different Reveal canvas configuration.
+- **Changes:** Moved responsive viewer assembly to the generation boundary, stopped the browser validator from privately wrapping a different document, and added a focused regression for the injected portrait/landscape canvas contract.
+- **Validation:** `cargo fmt --all -- --check`, the 2 focused browser-validator tests, all-target `newsly-worker` compilation, warning-denied `newsly-worker` Clippy, and `git diff --check` passed. No paid generation canary, iOS Simulator run, commit, push, or deployment was performed.
+- **Commits:** Uncommitted.
+
+### 2026-09-04 — `main` — Audit content pipeline resilience
+
+- **Status:** Analysis complete; implementation not started.
+- **Scope:** Scheduling, aggregators, configured feeds/backfill, Share and discovery, extraction/media, summaries, Briefing, decks/artifacts, X sync, and failure/status recovery at local `add3ffbe`.
+- **Decisions:** Retain the Rust/PostgreSQL architecture. Prioritize immutable attempt artifacts, pinned feed dispatch, correct X pagination checkpoints, bounded interruption recovery, per-source tasks, truthful terminal status, and summary publication independent of artwork. Preserve the existing accepted-feed size policy and user-state invariants.
+- **Changes:** Added `docs/initiatives/2026-09-04-content-pipeline-resilience-plan.md` with code evidence, concrete failure traces, sequenced slices, and regression/release criteria. No application code changed.
+- **Validation:** Existing provider, queue, and worker library suites passed 173 tests, including embedded PostgreSQL integration tests; one credentialed live-provider test remained ignored. Findings are code-derived; new fault scenarios were not dynamically reproduced. No production inspection, private-feed replay, paid canary, or iOS validation in this audit.
+- **Remaining:** Review and implement the proposed slices, then run their failure tests and the authorized release workflow. Current deployment state was not verified.
+- **Commits:** Uncommitted documentation only.
+
 ### 2026-09-04 — `main` — Restore substantive Briefing article composition
 
 - **Status:** Complete; release validation pending.
@@ -2101,3 +2141,56 @@ Use this append-only log to preserve implementation context across sessions and 
 - Added post-publish, pre-deploy smoke tests for the exact Rust migration binary and the exact extractor image under production-like read-only and health-check constraints.
 - Made the Nginx slot switch retry its local post-reload health probe so a graceful worker handoff cannot spuriously roll routing back to the stopped prior slot.
 - Production recovery kept the completed SQLx authority migration, used the verified pre-adoption backup as its recovery point, and restored service with the exact Rust image plus a metadata-only extractor recovery image while the durable image fix proceeds through the full release gate.
+
+### 2026-09-05 — `main` — Lower shared bottom fade
+
+- **Status:** Complete
+- **Scope:** SwiftUI Briefing and Knowledge list bottom chrome.
+- **Decisions:** Use one 28-point fade shifted down 24 points behind floating navigation; remove Briefing-specific sizing.
+- **Validation:** XcodeBuildMCP iOS Simulator build succeeded; `git diff --check` passed.
+- **Remaining:** Visual confirmation on populated screens; no simulator screenshot captured.
+- **Commits:** Uncommitted.
+
+### 2026-09-05 — `main` — iOS performance and usability audit
+
+- **Scope:** Fresh iPhone 17 Pro/iOS 26.3 build; populated Knowledge, Briefing, article/chat navigation, search, Settings, deck reader, delayed deletion, light/dark, and supported Extra Large app text.
+- **Findings:** Saved removal leaves a stale actionable row and a repeated removal re-saves it; delayed deck deletion returns to a normal-looking row until the response; the selected Knowledge tab label clips at Extra Large. Recorded additional code-level risks separately from reproduced defects.
+- **Validation:** Fresh build, 633 unit tests, and three authenticated lifecycle UI tests passed. Used isolated migrated PostgreSQL, freshly built local Rust API, deterministic fixtures, and a local two-second DELETE delay proxy. No production or paid generation calls.
+- **Evidence:** `docs/initiatives/2026-09-05-ios-performance-usability-audit.md` and ignored `test-results/ios-usability-audit-2026-09-05/` screenshots, video, logs, and XCTest bundles.
+- **Remaining:** App fixes are proposed, not implemented. Physical-device Release/Instruments profiling and the explicitly listed accessibility, scale, and interruption checks remain necessary for full performance sign-off. No commit, push, or deploy.
+
+### 2026-09-05 — `main` — Daily-checkup validation and cost-reporting repairs
+
+- **Status:** Complete locally; preserving existing checkout work. Uncommitted and undeployed.
+- **Scope:** Discussion and news generation schemas, discussion retry policy, CLI and admin usage reporting.
+- **Evidence:** Production recheck at 15:12 UTC still showed 576 topic-length failures, seven overview-length failures, and three key-point-length failures in 24 hours.
+- **Trace:** Before: model output passes an unconstrained schema, post-generation length validation rejects it, the discussion worker marks the failure retryable, and the queue repeats the same input. After: schema validation supplies length feedback within the existing three-request budget; exhausted validation is nonretryable, while transient errors retain retries. Full-summary fallback is limited to malformed merge output. Lease cancellation and exact-lease finalization remain the publication boundary.
+- **Cost decision:** Null prices make the aggregate total unknown; expose the known subtotal and number of unpriced calls. Historical provider charges cannot be reconstructed from token counts alone.
+- **Validation:** Provider tests passed (73, one live test ignored), CLI tests (22), worker tests (118), and focused admin database and page tests (2). PostgreSQL fixtures cover partial, missing, zero, and empty costs. Workspace warning-denied Clippy, formatting, architecture guard, public-contract drift, and diff checks passed. The admin usage integration test also exposed and verified a UTC timestamp decoding repair.
+- **Remaining:** No live provider canary, release gate, deployment, production retry, or historical cost backfill. Existing records without pricing remain explicitly unknown.
+
+### 2026-09-05 — `main` — Knowledge processing spinners
+
+- **Scope:** Leading artwork for saved items, chats, decks, and narrations.
+- **Decisions:** Replace the icon or thumbnail with a standard spinner inside the existing 40-point artwork slot while active work runs. Remove the corner activity dot. Share the artwork renderer with saved items so an existing thumbnail cannot hide preparation. Stalled and terminal states do not spin. Added law K17 and a DEBUG-only processing/ready visual fixture.
+- **Validation:** Fresh iPhone 17 Pro/iOS 26.3 build and 34 focused native tests passed. Inspected processing and ready screenshots; all four shared-row title frames match exactly across the state change. Evidence: `test-results/knowledge-processing-2026-09-05/`. `git diff --check` passed.
+- **Remaining:** No commit, push, or deploy. Audit deletion and tab-label findings remain separate proposed fixes.
+
+### 2026-09-05 — `main` — Interactive first-launch logo
+
+- **Scope:** Signed-out landing and onboarding welcome; approved matte 3D ensō and Buddy design.
+- **Decisions:** Procedural local RealityKit geometry, bounded drag translation, damped swipe rotation and centering spring. Continue remains available; the welcome transitions to the existing small guide. Static brand artwork for Reduce Motion; driver pauses when inactive.
+- **Validation:** Current-checkout `newsly` build and 16 focused motion/onboarding tests passed on iPhone 17 Pro / iOS 26.3. Visually checked light/dark, horizontal and vertical rotation, release momentum, Continue to choice with the small guide, XXXL text, and the actual system Reduce Motion setting (static artwork, spin hint removed). Screenshot/video evidence: `test-results/intro-logo-2026-09-05/`. `git diff --check` passed.
+- **Remaining:** Physical-device frame pacing and the full release gate were not run. No commit, push, deployment, or Apple distribution requested.
+
+### 2026-09-05 — `main` — Ensō brush detail refinement
+
+- **Scope:** Refined the approved interactive logo after feedback that the ring was too basic.
+- **Decisions:** Variable stroke pressure, irregular silhouettes, staggered bristle tips, fine edge trails, shallow longitudinal ridges and a locally generated dry-brush pigment texture. Geometry and texture are created once per scene; existing drag, momentum and onboarding behavior are unchanged.
+- **Validation:** Fresh `newsly` Simulator build; inspected the real landing at phone size. Reduced the initial uniform ridges after visual review. Existing motion tests were not rerun for this visual-only refinement.
+- **Remaining:** Physical-device performance remains unmeasured. No commit, push or distribution.
+
+### 2026-09-05 — `main` — Shorten landing subtitle
+
+- **Scope:** Removed the second landing subtitle sentence at Willem's request; retained “Your quiet news companion.”
+- **Validation:** Verified the source string and whitespace diff. Copy-only change; no build or tests run.

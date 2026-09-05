@@ -18431,6 +18431,8 @@
       "ScraperConfigStatsResponse": {
         "type": "object",
         "required": [
+          "last_fetch_at",
+          "ingestion_error",
           "total_count",
           "completed_count",
           "unread_count",
@@ -18442,6 +18444,19 @@
           "interval_sample_size"
         ],
         "properties": {
+          "last_fetch_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ingestion_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "total_count": {
             "type": "integer",
             "format": "int64"
