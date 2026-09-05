@@ -22,14 +22,18 @@ struct LandingView: View {
         ZStack {
             Color.surfacePrimary.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Spacer()
-
-                titleSection
-
-                Spacer()
-
-                bottomCard
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Spacer(minLength: 0)
+                        titleSection
+                        Spacer(minLength: 0)
+                        bottomCard
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: proxy.size.height)
+                }
+                .scrollIndicators(.hidden)
             }
         }
         #if DEBUG && targetEnvironment(simulator)
@@ -48,12 +52,9 @@ struct LandingView: View {
 
     private func titleContent() -> some View {
         VStack(spacing: 24) {
-            // BrandMark, not AppMark: this is the brand on the page, not the icon chip, so
-            // it carries no field of its own to sit as a pale box on the surface.
-            Image("BrandMark")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 220, height: 220)
+            InteractiveLogoView()
+                .frame(maxWidth: 360)
+                .frame(height: 320)
                 #if DEBUG && targetEnvironment(simulator)
                 .onTapGesture {
                     handleLogoTap()
@@ -67,7 +68,7 @@ struct LandingView: View {
                     .foregroundColor(.onSurface)
                     .accessibilityIdentifier("auth.landing.screen")
 
-                Text("Your quiet news companion.\nOne briefing, read across your sources.")
+                Text("Your quiet news companion.")
                     .font(.onboardingSubtitle)
                     .foregroundColor(.onSurfaceSecondary)
                     .multilineTextAlignment(.center)
