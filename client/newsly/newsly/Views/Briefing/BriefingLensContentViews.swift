@@ -375,7 +375,7 @@ struct BriefingLensPageView: View, Equatable {
                     .id(contentIdentity)
                     .contentMargins(.top, topContentInset)
                     .contentMargins(.bottom, 40)
-                    .bottomScreenEdgeFade(fadeHeight: 32)
+                    .bottomScreenEdgeFade()
                     .refreshable {
                         await onRefresh()
                     }
@@ -555,7 +555,7 @@ private struct BriefingLensEmptyView: View {
             }
             .contentMargins(.top, topContentInset)
             .contentMargins(.bottom, 40)
-            .bottomScreenEdgeFade(fadeHeight: 32)
+            .bottomScreenEdgeFade()
             .refreshable {
                 await onRefresh()
             }

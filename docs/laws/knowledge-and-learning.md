@@ -26,8 +26,10 @@ K12. Learning Deck generation may iterate for as many model and tool turns as it
 
 K13. Initial Knowledge loading publishes one merged timeline. Fast loads do not flash transient empty, partial-source, or loading states; sustained loads and independent source failures remain visible.
 
-K14. Learning Deck validation renders the same viewer shell clients receive. The viewer may configure generated decks but cannot rewrite their authored scripts; external Reveal assets use the supported pinned runtime; detailed validator failures stay internal while users receive a stable recovery message.
+K14. Learning Deck validation renders the same viewer shell clients receive, and the validated HTML is the HTML published to clients. The viewer may configure generated decks but cannot rewrite their authored scripts; external Reveal assets use the supported pinned runtime; detailed validator failures stay internal while users receive a stable recovery message.
 
 K15. A successful Learning Deck may publish a source-specific, deck-cover-style thumbnail with its artifact bundle. Thumbnail generation cannot block an otherwise valid deck, failed reruns preserve the last successful bundle, and Knowledge uses stable placeholder artwork when no thumbnail exists.
 
 K16. Knowledge keeps its published merged timeline during lifecycle revalidation and recoverable connectivity failure. Temporary inactivity is not a reload trigger; a true warm resume may revalidate once without exposing partial-source results. Backgrounding may cancel lifecycle-owned reads, but it cannot cancel an explicit user refresh that already joined the same work.
+
+K17. While a Knowledge item is actively preparing, generating, or answering, a loading spinner replaces its leading icon or thumbnail without changing row layout. Ready, failed, unavailable, and stalled items do not show an active-processing spinner.

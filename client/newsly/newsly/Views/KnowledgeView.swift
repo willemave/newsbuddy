@@ -205,8 +205,6 @@ struct KnowledgeSavedContentButton: View {
 struct KnowledgeSavedRow: View {
     let content: ContentSummary
 
-    private let imageSize = CGSize(width: 40, height: 40)
-
     private var hasStalled: Bool {
         content.hasStalledKnowledgePreparation
     }
@@ -279,38 +277,12 @@ struct KnowledgeSavedRow: View {
     }
 
     private var artwork: some View {
-        CachedAsyncImage(
-            url: artworkURL,
-            targetSize: imageSize
-        ) { image in
-            image
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: imageSize.width, height: imageSize.height)
-                .clipped()
-        } placeholder: {
-            ZStack {
-                Color.surfaceSecondary
-                if hasStalled {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.appSymbol(size: 16, weight: .medium))
-                        .foregroundStyle(Color.onSurfaceTertiary)
-                } else if content.savedLibraryItemState == .processing {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "photo")
-                        .font(.appSymbol(size: 16))
-                        .foregroundStyle(Color.onSurfaceTertiary)
-                }
-            }
-            .frame(width: imageSize.width, height: imageSize.height)
-        }
-        .transaction { $0.animation = nil }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.outlineVariant.opacity(0.45), lineWidth: 0.5)
-        }
+        KnowledgeTimelineArtwork(
+            icon: hasStalled ? "exclamationmark.circle" : "photo",
+            imageURL: artworkURL,
+            isBusy: content.savedLibraryItemState == .processing && !hasStalled,
+            busyAccessibilityIdentifier: "knowledge.saved.\(content.id).preparing"
+        )
     }
 }
 

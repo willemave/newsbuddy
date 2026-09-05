@@ -562,15 +562,17 @@ extension View {
         }
     }
 
-    /// Keeps text and artwork legible as they approach floating bottom chrome.
-    func bottomScreenEdgeFade(fadeHeight: CGFloat = 28) -> some View {
+    /// Keeps the fade low at the viewport edge, behind the floating bottom chrome.
+    /// Briefing and Knowledge share the same height and placement.
+    func bottomScreenEdgeFade() -> some View {
         overlay(alignment: .bottom) {
             LinearGradient(
                 colors: [Color.surfacePrimary.opacity(0), Color.surfacePrimary],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: fadeHeight)
+            .frame(height: 28)
+            .offset(y: 24)
             .allowsHitTesting(false)
         }
     }

@@ -105,6 +105,10 @@ struct KnowledgeNarrationRow: View {
     var body: some View {
         KnowledgeTimelineRow(
             icon: "waveform",
+            isBusy: episode.isGenerating,
+            busyAccessibilityIdentifier: episode.isGenerating
+                ? "knowledge.narration.\(episode.id).preparing"
+                : nil,
             title: episode.title,
             subtitle: subtitle,
             kicker: kicker
@@ -224,7 +228,13 @@ struct KnowledgeTimelineArtwork: View {
     var body: some View {
         ZStack {
             Color.surfaceSecondary
-            if let imageURL {
+            if isBusy {
+                ProgressView()
+                    .controlSize(.regular)
+                    .tint(Color.onSurfaceSecondary)
+                    .accessibilityLabel("Processing")
+                    .accessibilityIdentifier(ifPresent: busyAccessibilityIdentifier)
+            } else if let imageURL {
                 CachedAsyncImage(
                     url: imageURL,
                     cacheIdentifier: imageCacheIdentifier,
@@ -245,40 +255,12 @@ struct KnowledgeTimelineArtwork: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.outlineVariant.opacity(0.45), lineWidth: 0.5)
         }
-        .overlay(alignment: .topTrailing) {
-            if isBusy {
-                PreparingActivityDot()
-                    .padding(2.5)
-                    .background(Color.surfacePrimary, in: Circle())
-                    .offset(x: 3, y: -3)
-                    .accessibilityIdentifier(ifPresent: busyAccessibilityIdentifier)
-            }
-        }
     }
 
     private var fallbackArtwork: some View {
         Image(systemName: icon)
             .font(.appSymbol(size: 16))
             .foregroundStyle(Color.onSurfaceSecondary)
-            .accessibilityHidden(true)
-    }
-}
-
-/// Breathing dot standing in for a spinner on rows still being prepared.
-/// A `.mini` `ProgressView` renders as a low-resolution aperture at this size
-/// and read as a rendering artifact sitting next to the timestamp.
-struct PreparingActivityDot: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isDimmed = false
-
-    var body: some View {
-        Circle()
-            .fill(Color.brandPrimary)
-            .frame(width: 5, height: 5)
-            .opacity(isDimmed ? 0.3 : 1)
-            .animation(reduceMotion ? nil : AppMotion.chatStatusPulse, value: isDimmed)
-            .onAppear { isDimmed = !reduceMotion }
-            .onChange(of: reduceMotion) { _, newValue in isDimmed = !newValue }
             .accessibilityHidden(true)
     }
 }

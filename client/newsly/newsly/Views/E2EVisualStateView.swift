@@ -38,6 +38,8 @@ struct E2EVisualStateView: View {
             .background(Color.surfacePrimary)
         case "detail-action-bar":
             E2EDetailActionBarVisualState()
+        case "knowledge-processing":
+            E2EKnowledgeProcessingVisualState()
         case "briefing-start-here":
             BriefingStartHereView(
                 progress: Self.startHereProgress,
@@ -109,6 +111,41 @@ struct E2EVisualStateView: View {
             viewModel.audioDurationSeconds = 2
         }
         return viewModel
+    }
+}
+
+private struct E2EKnowledgeProcessingVisualState: View {
+    @State private var isProcessing = true
+
+    private let rows = [
+        ("Saved article", "photo"),
+        ("Learning deck", "rectangle.on.rectangle"),
+        ("Chat answer", "bubble.left.and.bubble.right"),
+        ("Audio narration", "waveform"),
+    ]
+
+    var body: some View {
+        VStack(spacing: 16) {
+            EditorialMastheadHeader(title: "Knowledge")
+            ForEach(rows, id: \.0) { title, icon in
+                KnowledgeTimelineRow(
+                    icon: icon,
+                    isBusy: isProcessing,
+                    busyAccessibilityIdentifier: "knowledge.processing.\(icon)",
+                    title: title,
+                    subtitle: isProcessing ? "Processing" : "Ready",
+                    kicker: "TODAY"
+                ) {
+                    EmptyView()
+                }
+            }
+            Button(isProcessing ? "Finish processing" : "Start processing") {
+                isProcessing.toggle()
+            }
+            .accessibilityIdentifier("knowledge.processing.toggle")
+            Spacer()
+        }
+        .background(Color.surfacePrimary)
     }
 }
 

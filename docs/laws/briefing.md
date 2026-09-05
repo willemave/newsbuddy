@@ -2,6 +2,8 @@
 
 B1. Briefing is a per-user, continuously updated reading edition.
 
+Briefing and the Knowledge list share the same bottom-edge fade, kept low behind floating navigation so readable content above it stays clear.
+
 B2. Eligible sources are completed, unread, non-skipped articles, podcasts, and news that the authenticated user can open directly.
 
 B3. A source key is the canonical unit of coverage, citation, and read state.
