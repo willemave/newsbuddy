@@ -92,8 +92,15 @@ impl AggregatorKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeedEntrySelection {
+    StopAtKnown,
+    SkipKnown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeedScrapeTarget {
     pub known_urls: BTreeSet<String>,
+    pub entry_selection: FeedEntrySelection,
     pub config_id: i64,
     pub user_id: i64,
     pub scraper_type: String,

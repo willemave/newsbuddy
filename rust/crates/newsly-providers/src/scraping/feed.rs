@@ -6,8 +6,8 @@ use serde_json::json;
 use crate::feed_validation::entry_audio_url;
 
 use super::{
-    FeedScrapeTarget, ScrapeGatewayError, ScrapeProviderOutcome, ScrapedContentItem, ScrapedItem,
-    clean, domain_of, entry_html_url, normalize_http_url,
+    FeedEntrySelection, FeedScrapeTarget, ScrapeGatewayError, ScrapeProviderOutcome,
+    ScrapedContentItem, ScrapedItem, clean, domain_of, entry_html_url, normalize_http_url,
 };
 
 mod podcast;
@@ -56,9 +56,12 @@ pub(super) fn normalize_feed_document(
             .get(entry_index)
             .unwrap_or(&empty_podcast_metadata);
         match normalize_feed_entry(target, entry, &feed_metadata, &repeated_entry_urls, podcast) {
-            Ok(Some(item))
-                if !target.known_urls.contains(&item.url) && seen.insert(item.url.clone()) =>
-            {
+            Ok(Some(item)) if target.known_urls.contains(&item.url) => {
+                if target.entry_selection == FeedEntrySelection::StopAtKnown {
+                    break;
+                }
+            }
+            Ok(Some(item)) if seen.insert(item.url.clone()) => {
                 items.push(ScrapedItem::Content(Box::new(item)));
                 if items.len() >= target.limit.clamp(1, 100) {
                     break;

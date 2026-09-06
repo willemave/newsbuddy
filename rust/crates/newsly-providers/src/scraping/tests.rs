@@ -1,6 +1,6 @@
 use super::{
-    AggregatorKey, FeedScrapeTarget, ScrapeGatewayError, ScrapedItem, exceeds_response_limit,
-    is_external_reddit_url, normalize_feed_document, normalize_http_url,
+    AggregatorKey, FeedEntrySelection, FeedScrapeTarget, ScrapeGatewayError, ScrapedItem,
+    exceeds_response_limit, is_external_reddit_url, normalize_feed_document, normalize_http_url,
 };
 
 #[test]
@@ -49,6 +49,7 @@ fn configured_feed_fetch_can_disable_only_the_response_size_limit() {
 fn podcast_target() -> FeedScrapeTarget {
     FeedScrapeTarget {
         known_urls: std::collections::BTreeSet::new(),
+        entry_selection: FeedEntrySelection::StopAtKnown,
         config_id: 42,
         user_id: 7,
         scraper_type: "podcast_rss".to_owned(),
@@ -175,6 +176,7 @@ fn podcast_feed_uses_enclosure_when_entry_has_no_page_link() {
 fn substack_feed_filters_audio_posts_by_title() {
     let target = FeedScrapeTarget {
         known_urls: std::collections::BTreeSet::new(),
+        entry_selection: FeedEntrySelection::StopAtKnown,
         config_id: 42,
         user_id: 7,
         scraper_type: "substack".to_owned(),
@@ -201,6 +203,7 @@ fn substack_feed_filters_audio_posts_by_title() {
 fn feed_body_preserves_internal_whitespace() {
     let target = FeedScrapeTarget {
         known_urls: std::collections::BTreeSet::new(),
+        entry_selection: FeedEntrySelection::StopAtKnown,
         config_id: 42,
         user_id: 7,
         scraper_type: "atom".to_owned(),
@@ -230,6 +233,7 @@ fn feed_body_preserves_internal_whitespace() {
 fn feed_source_falls_back_to_feed_domain() {
     let target = FeedScrapeTarget {
         known_urls: std::collections::BTreeSet::new(),
+        entry_selection: FeedEntrySelection::StopAtKnown,
         config_id: 42,
         user_id: 7,
         scraper_type: "atom".to_owned(),
@@ -289,6 +293,7 @@ fn invalid_feed_has_a_stable_diagnostic_code() {
 #[test]
 fn retained_feed_catchup_skips_known_and_malformed_entries_before_limiting() {
     let mut target = podcast_target();
+    target.entry_selection = FeedEntrySelection::SkipKnown;
     target.limit = 2;
     target
         .known_urls
@@ -315,6 +320,34 @@ fn retained_feed_catchup_skips_known_and_malformed_entries_before_limiting() {
             "https://example.com/three.mp3"
         ]
     );
+    assert_eq!(result.item_errors.len(), 1);
+}
+
+#[test]
+fn scheduled_feed_stops_at_known_frontier_without_hiding_newer_usable_entries() {
+    let mut target = podcast_target();
+    target.limit = 10;
+    target
+        .known_urls
+        .insert("https://example.com/known.mp3".to_owned());
+    let document = br#"<rss version="2.0"><channel><title>Show</title>
+    <item><guid>broken</guid><title>Missing enclosure</title></item>
+    <item><guid>new</guid><enclosure url="https://example.com/new.mp3" type="audio/mpeg" length="10"/></item>
+    <item><guid>known</guid><enclosure url="https://example.com/known.mp3" type="audio/mpeg" length="10"/></item>
+    <item><guid>archive</guid><enclosure url="https://example.com/archive.mp3" type="audio/mpeg" length="10"/></item>
+    </channel></rss>"#;
+
+    let result = normalize_feed_document(&target, document).unwrap();
+    let urls = result
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            ScrapedItem::Content(item) => Some(item.url.as_str()),
+            ScrapedItem::News(_) => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(urls, vec!["https://example.com/new.mp3"]);
     assert_eq!(result.item_errors.len(), 1);
 }
 

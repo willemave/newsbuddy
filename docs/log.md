@@ -27,6 +27,15 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-05 — `main` — Stop scheduled feeds from traversing archives
+
+- **Status:** Implemented for emergency production release.
+- **Scope:** Configured RSS/Atom scheduled polling, explicit feed backfill, and download-more selection semantics.
+- **Decisions:** Scheduled polling stops at the first known feed entry; explicit backfill remains the sole path that scans past known or rejected entries.
+- **Changes:** Added a typed feed-entry selection policy, assigned it explicitly at every scheduled and catch-up caller, and covered both behaviors with provider tests.
+- **Validation:** Provider feed normalization (15 tests), worker scheduled scrape (7 tests), and worker feed-backfill persistence/fencing (8 tests) passed; affected API target compiled. Warning-denied Clippy for the provider, worker, and API crates plus architecture, public-contract, formatting, and whitespace checks passed. Canonical release gate pending.
+- **Remaining:** Deploy the tested SHA, restore the production scheduler, and separately reconcile accidental historical content and media work.
+
 ### 2026-09-05 — `main` — Isolate release-gate Simulator state
 
 - **Status:** Implemented; full release gate pending.

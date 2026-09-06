@@ -10,8 +10,8 @@ use newsly_db::{
     prepare_scrape_sources, record_first_edition_scrape_result,
 };
 use newsly_providers::{
-    AggregatorKey, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure, ScrapeGateway,
-    ScrapeProviderOutcome, ScrapedItem,
+    AggregatorKey, FeedEntrySelection, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure,
+    ScrapeGateway, ScrapeProviderOutcome, ScrapedItem,
 };
 use newsly_queue::{EnqueueRequest, OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Map, Value};
@@ -428,6 +428,7 @@ fn feed_target(config: &ScrapeConfigSnapshot) -> Option<FeedScrapeTarget> {
         .or_else(|| clean_string(config.config.get("url")))?;
     Some(FeedScrapeTarget {
         known_urls: std::collections::BTreeSet::new(),
+        entry_selection: FeedEntrySelection::StopAtKnown,
         config_id: config.id,
         user_id: config.user_id,
         scraper_type: config.scraper_type.clone(),

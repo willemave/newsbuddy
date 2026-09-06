@@ -24,4 +24,4 @@ S11. X connections belong to one user, sync incrementally, preserve provenance, 
 
 S12. Disconnecting or invalidating an integration removes usable credentials and reports when reauthorization is required.
 
-S13. Source refresh status distinguishes a successful check with no new items from a fetch, parsing, or persistence failure. Catch-up scans past already known and rejected entries while preserving existing read and archive state.
+S13. Source refresh status distinguishes a successful check with no new items from a fetch, parsing, or persistence failure. Scheduled refresh accepts only unseen entries ahead of the first known item and never walks backward through feed history. Explicit catch-up scans past already known and rejected entries while preserving existing read and archive state.

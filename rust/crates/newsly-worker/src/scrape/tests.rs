@@ -64,6 +64,7 @@ fn configured_feed_dispatch_keeps_each_target_in_its_own_task() {
         .map(|id| newsly_providers::FeedScrapeTarget {
             config_id: id,
             user_id: 7,
+            entry_selection: newsly_providers::FeedEntrySelection::StopAtKnown,
             scraper_type: "podcast_rss".to_owned(),
             display_name: None,
             feed_url: format!("https://example.com/{id}/feed"),

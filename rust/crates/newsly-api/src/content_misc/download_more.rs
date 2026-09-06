@@ -7,7 +7,7 @@ use newsly_db::{
     FeedBackfillEntry, FeedBackfillOrigin, FeedBackfillPreparation, persist_feed_backfill,
     prepare_feed_backfill,
 };
-use newsly_providers::{FeedScrapeTarget, ScrapeGatewayError, ScrapedItem};
+use newsly_providers::{FeedEntrySelection, FeedScrapeTarget, ScrapeGatewayError, ScrapedItem};
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
 
 use crate::auth::AuthenticatedUser;
@@ -112,6 +112,7 @@ pub(crate) async fn download_more_from_series(
             )
             .await
             .map_err(|error| internal_error(error, &request_id))?,
+            entry_selection: FeedEntrySelection::SkipKnown,
             config_id: plan.config_id,
             user_id: current_user.id,
             scraper_type: plan.scraper_type.clone(),
