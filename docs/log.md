@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-08 — `main` — Prepare Briefing and ingestion release
+
+- **Status:** Release commit prepared; canonical local release gate pending.
+- **Scope:** Briefing composition and active-lens narration, feed ingestion regression prevention and monitoring, feed status/history UI, generated contracts, database migrations, operator tooling, and release safeguards.
+- **Decisions:** Preserve the deployed `e0e8d39a` emergency feed-boundary commit in ancestry and merge it with the broader follow-up rather than rewriting shared history. Split the feed-history route into its own API module to satisfy the repository size guardrail.
+- **Changes:** Committed the accumulated implementation as `f0ea4dab`, then merged current `origin/main` as `88279ba4`; retained the broader bounded-intake test and source law alongside the hotfix history.
+- **Validation:** Pre-commit formatting and module-size guardrails passed. The affected API package compiled, and both scheduled-feed frontier tests passed after conflict resolution.
+- **Remaining:** Run the canonical release gate with live provider smoke, push only its exact tested SHA, wait for the SHA-matched Docker Deploy run, and verify production image and health.
+- **Commits:** `f0ea4dab`, `88279ba4`.
+
 ### 2026-09-07 — `main` — Briefing audio player design pass
 
 - **Status:** Implemented; uncommitted.
