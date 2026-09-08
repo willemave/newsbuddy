@@ -327,8 +327,9 @@ and persists subscriptions/backfill work.
 Scheduled and backfill dispatchers enqueue one task per configured feed/Reddit
 source or global aggregator. Each leaf prepares only its selected configuration,
 runs provider work independently, and fences that configuration at persistence.
-Canonical feed normalization skips known/rejected entries before its intake limit;
-per-entry savepoints retain healthy siblings on input constraint failures.
+Scheduled feed normalization accepts unseen head entries and stops at the first
+known entry. Explicit catch-up skips known/rejected entries before its intake
+limit; per-entry savepoints retain healthy siblings on input constraint failures.
 Source health records successful checks separately from newly persisted items.
 Typed source outcomes keep transient HN/topic failures retryable while committing
 healthy items. Source HTTP Retry-After hints reach the queue, which adds positive
