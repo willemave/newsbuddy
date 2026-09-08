@@ -9,7 +9,7 @@ import Observation
 import os.log
 
 private let narrationPlaybackLogger = Logger(subsystem: "com.newsly", category: "NarrationPlayback")
-typealias NarrationPlaybackFinishedHandler = @MainActor (NarrationTarget) -> Void
+typealias NarrationPlaybackFinishedHandler = @MainActor (NarrationTarget, Task<Void, Never>) -> Void
 
 private func narrationElapsedMilliseconds(since start: Date) -> Int {
     Int(Date().timeIntervalSince(start) * 1000)
@@ -116,6 +116,8 @@ final class NarrationPlaybackService {
 
     @ObservationIgnored
     private var playbackFinishedHandler: NarrationPlaybackFinishedHandler?
+    @ObservationIgnored
+    private var pendingReadMarks: Task<Void, Never>?
 
     @ObservationIgnored
     private var interruptionObserver: NSObjectProtocol?
@@ -473,8 +475,13 @@ final class NarrationPlaybackService {
         )
         let finishedHandler = playbackFinishedHandler
         resetPlaybackState(clearSavedPositionFor: target)
-        finishedHandler?(target)
-        await recordPlaybackFinished(for: target)
+        let previousReadMarks = pendingReadMarks
+        let completion = Task { @MainActor [self] in
+            await previousReadMarks?.value
+            await recordPlaybackFinished(for: target)
+        }
+        pendingReadMarks = completion
+        finishedHandler?(target, completion)
     }
 
     private func handleStreamFailure(

@@ -1,4 +1,4 @@
-mod fanout;
+pub(crate) mod fanout;
 mod finalizer;
 mod handler;
 mod input;

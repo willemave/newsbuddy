@@ -269,6 +269,14 @@ database_writer = "rust"
 e2b_namespace = "none"
 
 [[routes]]
+method = "POST"
+path = "/api/briefing/narrations/{episode_group_id}/retry"
+operation_id = "retryBriefingNarration"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
 method = "GET"
 path = "/api/briefing/narrations/{episode_group_id}"
 operation_id = "narrationBriefingStatus"
@@ -1351,6 +1359,14 @@ task_type = "transcribe_tweet_video"
 queue = "media"
 payload_schema = "tasks/transcribe_tweet_video.schema.json"
 handler = "newsly_worker::media::TranscribeTweetVideoHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
+path = "/api/scrapers/{config_id}/history"
+operation_id = "getFeedHistory"
 current_owner = "rust"
 database_writer = "rust"
 e2b_namespace = "none"

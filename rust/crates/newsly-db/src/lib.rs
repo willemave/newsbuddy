@@ -117,7 +117,7 @@ pub use briefing::{
     load_briefing_index, load_briefing_index_validator, load_briefing_lens_page,
     load_briefing_narration, mark_briefing_lens_read, mark_briefing_sources_read,
     prepare_briefing_narration, public_audio_episode_error_message, recent_briefing_dig_count,
-    record_briefing_dig_usage,
+    record_briefing_dig_usage, retry_briefing_narration,
 };
 pub use briefing_refresh::{
     ApplyBriefingLensAssignmentOutcome, BriefingAppendBatch, BriefingCompactionBatch,
@@ -358,3 +358,9 @@ mod artifact_cleanup;
 pub use artifact_cleanup::{
     artifact_cleanup_candidates, forget_cleaned_artifact, track_artifact, track_image_artifact,
 };
+pub mod briefing_attempts;
+pub mod incident_batches;
+pub mod pipeline_monitoring;
+
+mod feed_history;
+pub use feed_history::{FeedHistoryProjection, load_feed_history};

@@ -3,6 +3,8 @@ use newsly_contracts::{
     BriefingNarrationScope,
 };
 use newsly_db::AudioEpisodeProjection;
+use newsly_domain::{BriefingNarrationMetadata, NarrationScope};
+use serde::Deserialize;
 use serde_json::Value;
 
 use super::{clean_text, json_i64_values};
@@ -126,19 +128,17 @@ pub(super) fn present_narration(
         .and_then(Value::as_str)
         .and_then(clean_text)
         .unwrap_or_else(|| "Briefing".to_owned());
-    let scope = snapshot
-        .get("scope")
-        .and_then(Value::as_str)
-        .map(|value| match value {
-            "article_tier" => Ok(BriefingNarrationScope::ArticleTier),
-            "podcast_tier" => Ok(BriefingNarrationScope::PodcastTier),
-            "news_program" => Ok(BriefingNarrationScope::NewsProgram),
-            other => Err(internal_error(
-                format!("unsupported Briefing narration scope {other:?}"),
-                request_id,
-            )),
-        })
-        .transpose()?;
+    let metadata = BriefingNarrationMetadata::deserialize(snapshot)
+        .map_err(|error| internal_error(error, request_id))?;
+    metadata
+        .style()
+        .map_err(|error| internal_error(error, request_id))?;
+    let scope = metadata.scope.map(|scope| match scope {
+        NarrationScope::Lens => BriefingNarrationScope::Lens,
+        NarrationScope::ArticleTier => BriefingNarrationScope::ArticleTier,
+        NarrationScope::PodcastTier => BriefingNarrationScope::PodcastTier,
+        NarrationScope::NewsProgram => BriefingNarrationScope::NewsProgram,
+    });
     let first_status = AudioEpisodeStatus::try_from(first.status.as_str())
         .map_err(|error| internal_error(error, request_id))?;
     let statuses = episodes
@@ -173,7 +173,11 @@ pub(super) fn present_narration(
         episode_group_id: group_id,
         lens_key,
         scope,
-        title: format!("{lens_title} briefing"),
+        title: if scope == Some(BriefingNarrationScope::Lens) {
+            lens_title
+        } else {
+            format!("{lens_title} briefing")
+        },
         status,
         playable,
         duration_seconds,

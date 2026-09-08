@@ -47,6 +47,8 @@ final class MockBriefingService: BriefingServicing {
     var narrationManifest: BriefingNarration?
     var narrationManifests: [BriefingNarration] = []
     var narrationManifestsByLens: [String: BriefingNarration] = [:]
+    var narrationRetryEpisodeGroupIDs: [String] = []
+    var narrationRetryResults: [Result<BriefingNarration, Error>] = []
     var narrationFetchResults: [Result<BriefingNarration, Error>] = []
     var narrationError: Error?
     var narrationRequestDelayNanoseconds: UInt64?
@@ -228,11 +230,11 @@ final class MockBriefingService: BriefingServicing {
         return APIBriefingDigSummarizeResponse(summary: summary, model: "test", elapsedMs: 0)
     }
 
-    func requestNarration(programKey: String) async throws -> BriefingNarration {
-        narrationLensKeys.append(programKey)
-        if narrationRequestWaitLensKeys.contains(programKey) {
+    func requestNarration(lensKey: String) async throws -> BriefingNarration {
+        narrationLensKeys.append(lensKey)
+        if narrationRequestWaitLensKeys.contains(lensKey) {
             await withCheckedContinuation { continuation in
-                narrationRequestContinuations[programKey] = continuation
+                narrationRequestContinuations[lensKey] = continuation
             }
         }
         if let narrationRequestDelayNanoseconds {
@@ -250,7 +252,7 @@ final class MockBriefingService: BriefingServicing {
             throw narrationError
         }
         let narration: BriefingNarration
-        if let lensNarration = narrationManifestsByLens[programKey] {
+        if let lensNarration = narrationManifestsByLens[lensKey] {
             narration = lensNarration
         } else if !narrationManifests.isEmpty {
             narration = narrationManifests.removeFirst()
@@ -265,6 +267,14 @@ final class MockBriefingService: BriefingServicing {
 
     func resumeNarrationRequest(lensKey: String) {
         narrationRequestContinuations.removeValue(forKey: lensKey)?.resume()
+    }
+
+    func retryNarration(episodeGroupID: String) async throws -> BriefingNarration {
+        narrationRetryEpisodeGroupIDs.append(episodeGroupID)
+        guard !narrationRetryResults.isEmpty else { throw NSError(domain: "MockBriefingRetry", code: 1) }
+        let result = try narrationRetryResults.removeFirst().get()
+        latestNarration = result
+        return result
     }
 
     func fetchNarration(episodeGroupID: String) async throws -> BriefingNarration {
@@ -337,13 +347,13 @@ final class MockBriefingNarrationPlaybackService: BriefingNarrationPlaybackContr
         finishedHandler = onFinished
     }
 
-    func finishCurrent() {
+    func finishCurrent(readMarks: Task<Void, Never> = Task {}) {
         guard let target = speakingTarget else { return }
         let handler = finishedHandler
         isSpeaking = false
         speakingTarget = nil
         finishedHandler = nil
-        handler?(target)
+        handler?(target, readMarks)
     }
 }
 

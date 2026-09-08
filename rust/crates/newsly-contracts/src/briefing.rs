@@ -292,6 +292,7 @@ pub struct BriefingDigSummarizeResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BriefingNarrationScope {
+    Lens,
     ArticleTier,
     PodcastTier,
     NewsProgram,
@@ -306,6 +307,7 @@ pub struct LegacyBriefingNarrationRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema, ToSchema)]
 pub struct BriefingNarrationRequest {
+    /// `lens` requires `lens_key`; tier scopes exclude it. A lens key alone is legacy narration.
     pub scope: Option<BriefingNarrationScope>,
     #[schemars(length(min = 1, max = 64))]
     #[schema(min_length = 1, max_length = 64)]

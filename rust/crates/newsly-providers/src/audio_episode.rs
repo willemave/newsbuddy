@@ -1,3 +1,4 @@
+use newsly_domain::{BriefingNarrationMetadata, BriefingNarrationStyle, NewsNarrationWindow};
 use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Formatter};
 use std::path::{Path, PathBuf};
@@ -450,17 +451,33 @@ fn script_user_prompt(kind: &str, snapshot: &Value) -> Result<String, AudioEpiso
             "Create one cohesive podcast-style narration from the selected articles, podcast transcripts, and Fast Reads. Synthesize them as one episode, explaining shared themes, contradictions, evidence, and implications while preserving material source-specific details. Stay grounded in the selected sources. Use 500-700 spoken words and as many turns as needed. Use host for setup and transitions, cohost for synthesis, and expert for sharper analysis. Start by framing why the sources belong together and end with the concise takeaway the listener should remember.\n\nSelected source JSON:\n{source}"
         ),
         "briefing_narration" => {
-            let news = snapshot.get("scope").and_then(Value::as_str) == Some("news_program");
-            if news {
-                format!(
-                    "Create one concise Newsly news chapter from this bounded multi-lens source window. Curate the highest-signal events instead of reading every source or naming each lens. Group sources about the same event, lead with the most consequential developments, retain concrete names, numbers, stakes, and what to watch, and omit details that do not improve understanding. It is acceptable not to mention every supplied source; finishing the chapter represents consuming the complete input window. Use only host turns, 500-700 spoken words, no markdown, and only facts present in the supplied summaries, key points, and metadata.\n\nBriefing chapter JSON:\n{source}"
-                )
-            } else {
-                format!(
-                    "Create one compact Newsly audio chapter about the single supplied article or podcast. Tell the story rather than reading the visible Briefing summary: use the exact title and available publication or show name, then explain the thesis, strongest details, stakes, and memorable takeaway using the longer summary, key points, and bounded context. Do not add external facts or claim quotations that are not supplied. Use only host turns, 180-320 spoken words, and no markdown.\n\nBriefing chapter JSON:\n{source}"
-                )
+            let metadata = BriefingNarrationMetadata::deserialize(snapshot)?;
+            let style = metadata
+                .style()
+                .map_err(|error| AudioEpisodeGatewayError::InvalidScript(error.to_string()))?;
+            match style {
+                BriefingNarrationStyle::Preauthored => {
+                    return Err(AudioEpisodeGatewayError::InvalidScript(
+                        "Preauthored narration does not require script generation".to_owned(),
+                    ));
+                }
+                BriefingNarrationStyle::News(window) => {
+                    let window = match window {
+                        NewsNarrationWindow::Lens => "single-lens",
+                        NewsNarrationWindow::AllLenses => "multi-lens",
+                    };
+                    format!(
+                        "Create one concise Newsly news chapter from this bounded {window} source window. Curate the highest-signal events instead of reading every source or naming each lens. Group sources about the same event, lead with the most consequential developments, retain concrete names, numbers, stakes, and what to watch, and omit details that do not improve understanding. It is acceptable not to mention every supplied source; finishing the chapter represents consuming the complete input window. Use only host turns, 500-700 spoken words, no markdown, and only facts present in the supplied summaries, key points, and metadata.\n\nBriefing chapter JSON:\n{source}"
+                    )
+                }
+                BriefingNarrationStyle::Document => {
+                    format!(
+                        "Create one compact Newsly audio chapter about the single supplied article or podcast. Tell the story rather than reading the visible Briefing summary: use the exact title and available publication or show name, then explain the thesis, strongest details, stakes, and memorable takeaway using the longer summary, key points, and bounded context. Do not add external facts or claim quotations that are not supplied. Use only host turns, 180-320 spoken words, and no markdown.\n\nBriefing chapter JSON:\n{source}"
+                    )
+                }
             }
         }
+
         unsupported => {
             return Err(AudioEpisodeGatewayError::UnsupportedKind(
                 unsupported.to_owned(),
@@ -679,6 +696,42 @@ mod tests {
         assert!(prompt.contains("Tell the story rather than reading the visible Briefing summary"));
         assert!(prompt.contains("longer summary, key points, and bounded context"));
         assert!(prompt.contains("Use only host turns"));
+    }
+
+    #[test]
+    fn adapted_lens_narration_prompt_uses_the_persisted_tier() {
+        let news = script_user_prompt(
+            "briefing_narration",
+            &json!({
+                "scope": "lens", "lens_key": "ai", "lens_tier": "news", "items": []
+            }),
+        )
+        .expect("news prompt");
+        assert!(news.contains("single-lens source window"));
+        assert!(!news.contains("multi-lens"));
+        assert!(news.contains("500-700 spoken words"));
+        for tier in ["longform", "audio"] {
+            let prompt = script_user_prompt(
+                "briefing_narration",
+                &json!({
+                    "scope": "lens", "lens_tier": tier, "items": []
+                }),
+            )
+            .expect("document prompt");
+            assert!(prompt.contains("single supplied article or podcast"));
+            assert!(prompt.contains("180-320 spoken words"));
+        }
+        for tier in [None, Some("unsupported")] {
+            assert!(
+                script_user_prompt(
+                    "briefing_narration",
+                    &json!({
+                        "scope": "lens", "lens_tier": tier
+                    })
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 use newsly_db::BriefingRefreshSource;
+use newsly_providers::briefing_links::briefing_links;
 use newsly_providers::{
     BriefingCompositionBlock, BriefingCompositionLayout, BriefingFigureAlignment,
     BriefingFigurePlacement, BriefingPassageWeight,
@@ -10,14 +11,6 @@ use regex::Regex;
 use serde_json::{Value, json};
 use thiserror::Error;
 
-static SOURCE_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\[([^\]]+)\]\(((?:newsly|news)://briefing/(content|news)/(\d+))\)")
-        .expect("Briefing source-link regex must compile")
-});
-static BOLD_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\*\*\s*(\[[^\]]+\]\([^)]+\))\s*\*\*")
-        .expect("Briefing bold-link regex must compile")
-});
 static BOLD_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\*\*([^*]+)\*\*").expect("Briefing bold regex must compile"));
 static INSIGHT_MARKER_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -337,9 +330,9 @@ fn paragraphs_from_markdown(
 }
 
 fn sentence_groups(paragraph: &str) -> Vec<String> {
-    let spans = SOURCE_LINK_RE
-        .find_iter(paragraph)
-        .map(|found| (found.start(), found.end()))
+    let spans = briefing_links(paragraph)
+        .into_iter()
+        .map(|found| (found.range.start, found.range.end))
         .collect::<Vec<_>>();
     let mut sentences = Vec::new();
     let mut start = 0_usize;
@@ -379,16 +372,13 @@ fn runs_from_markdown(
     source_keys: &BTreeSet<String>,
     covered: &mut BTreeSet<String>,
 ) -> Vec<Value> {
-    let unwrapped = BOLD_LINK_RE.replace_all(markdown, "$1");
+    let unwrapped = markdown;
     let mut runs = Vec::new();
     let mut cursor = 0_usize;
-    for captures in SOURCE_LINK_RE.captures_iter(&unwrapped) {
-        let whole = captures.get(0).expect("source-link capture");
-        append_text_runs(&mut runs, &unwrapped[cursor..whole.start()]);
-        let kind = captures.get(3).expect("source kind").as_str();
-        let id = captures.get(4).expect("source id").as_str();
-        let source_key = format!("{kind}:{id}");
-        let text = captures.get(1).expect("source title").as_str();
+    for link in briefing_links(unwrapped) {
+        append_text_runs(&mut runs, &unwrapped[cursor..link.range.start]);
+        let source_key = link.source_key;
+        let text = link.label.as_str();
         if source_keys.contains(source_key.as_str()) {
             covered.insert(source_key.clone());
             append_run(
@@ -401,7 +391,7 @@ fn runs_from_markdown(
         } else {
             append_text_runs(&mut runs, text);
         }
-        cursor = whole.end();
+        cursor = link.range.end;
     }
     append_text_runs(&mut runs, &unwrapped[cursor..]);
     runs
@@ -447,7 +437,14 @@ fn append_run(runs: &mut Vec<Value>, kind: &str, text: &str, source_key: Option<
 }
 
 fn markdown_to_narration(markdown: &str) -> String {
-    let without_links = SOURCE_LINK_RE.replace_all(markdown, "$1");
+    let mut without_links = String::new();
+    let mut cursor = 0;
+    for link in briefing_links(markdown) {
+        without_links.push_str(&markdown[cursor..link.range.start]);
+        without_links.push_str(&link.label);
+        cursor = link.range.end;
+    }
+    without_links.push_str(&markdown[cursor..]);
     let without_insights = INSIGHT_MARKER_RE.replace_all(&without_links, "");
     without_insights
         .replace("**", "")
@@ -457,15 +454,9 @@ fn markdown_to_narration(markdown: &str) -> String {
 }
 
 fn source_keys_in_markdown(markdown: &str) -> BTreeSet<String> {
-    SOURCE_LINK_RE
-        .captures_iter(markdown)
-        .map(|captures| {
-            format!(
-                "{}:{}",
-                captures.get(3).expect("source kind").as_str(),
-                captures.get(4).expect("source id").as_str()
-            )
-        })
+    briefing_links(markdown)
+        .into_iter()
+        .map(|link| link.source_key)
         .collect()
 }
 
@@ -511,6 +502,27 @@ mod tests {
             thumbnail_url: None,
             published_at: None,
             briefing_context: None,
+        }
+    }
+
+    #[test]
+    fn citation_corpus_survives_coverage_runs_and_narration() {
+        for label in [
+            "A study [Update]",
+            r"A study \[Update\]",
+            "**你好** (update)!",
+        ] {
+            let markdown = format!("[{label}](newsly://briefing/content/1) explains the result.");
+            let layout = BriefingCompositionLayout {
+                suggested_quotes: vec![],
+                blocks: vec![BriefingCompositionBlock::Passage {
+                    markdown,
+                    weight: BriefingPassageWeight::Feature,
+                }],
+            };
+            let normalized = normalize_layout(&layout, &[source(1, false)], "longform", 0).unwrap();
+            assert!(!normalized.narration_text.contains("newsly://"));
+            assert!(normalized.blocks.to_string().contains("source_link"));
         }
     }
 

@@ -262,104 +262,304 @@ struct BriefingListenButton: View {
     }
 }
 
-/// Chapter navigation sits above the shared playback row: previous/next are
-/// immediate, while the center label opens the full chapter list.
-struct BriefingNarrationChapterControls: View {
-    let narration: BriefingNarration
+/// The now-playing card beneath the pinned strips. It has two shapes: a
+/// full card while the reader is at the top of the lens, and a one-line bar
+/// once the masthead has collapsed so the page belongs to the text again.
+/// Both shapes stay laid out so the swap is a crossfade, not a relayout.
+struct BriefingNowPlayingPanel: View {
+    let lensTitle: String
+    let narration: BriefingNarration?
     let selectedIndex: Int
-    let playbackService: NarrationPlaybackService
-    let target: NarrationTarget?
-    let isPreparing: Bool
-    let onPrevious: () -> Void
-    let onShowChapters: () -> Void
-    let onNext: () -> Void
+    let snapshot: NarrationPlaybackSnapshot
+    let isMinimized: Bool
     let onTogglePlayback: () -> Void
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    let onShowChapters: () -> Void
+    let onSeek: (Double) -> Void
+    let onSetPlaybackRate: (Float) -> Void
+    let onExpand: () -> Void
+    let onDismiss: () -> Void
+    /// Natural heights of both shapes, owned by the host so it can subtract
+    /// the difference from the chrome measurement in the same render pass
+    /// the shape changes. The height swap is deliberately not animated: an
+    /// animated height with an instant compensation would make the page
+    /// inset dip, which the scroll probe reads as a scroll.
+    @Binding var fullHeight: CGFloat
+    @Binding var minimizedHeight: CGFloat
+
+    private var chapterCount: Int { narration?.chapters.count ?? 0 }
 
     private var boundedIndex: Int {
-        guard !narration.chapters.isEmpty else { return 0 }
-        return min(max(selectedIndex, 0), narration.chapters.count - 1)
+        guard chapterCount > 0 else { return 0 }
+        return min(max(selectedIndex, 0), chapterCount - 1)
     }
 
     private var selectedChapter: AudioEpisode? {
-        guard narration.chapters.indices.contains(boundedIndex) else { return nil }
+        guard let narration, narration.chapters.indices.contains(boundedIndex) else { return nil }
         return narration.chapters[boundedIndex]
     }
 
+    private var hasPrevious: Bool { boundedIndex > 0 }
+    private var hasNext: Bool { boundedIndex < chapterCount - 1 }
+
+    private var visibleHeight: CGFloat? {
+        let height = isMinimized ? minimizedHeight : fullHeight
+        return height > 0 ? height : nil
+    }
+
     var body: some View {
-        VStack(spacing: 3) {
-            HStack(spacing: 6) {
-                chapterNavigationButton(
-                    systemName: "chevron.left",
+        ZStack(alignment: .top) {
+            fullCard
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _, height in
+                    guard height > 0, abs(height - fullHeight) > 0.5 else { return }
+                    fullHeight = height
+                }
+                .opacity(isMinimized ? 0 : 1)
+                .animation(.easeInOut(duration: 0.18), value: isMinimized)
+                .allowsHitTesting(!isMinimized)
+                .accessibilityHidden(isMinimized)
+
+            minimizedBar
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _, height in
+                    guard height > 0, abs(height - minimizedHeight) > 0.5 else { return }
+                    minimizedHeight = height
+                }
+                .opacity(isMinimized ? 1 : 0)
+                .animation(.easeInOut(duration: 0.18), value: isMinimized)
+                .allowsHitTesting(isMinimized)
+                .accessibilityHidden(!isMinimized)
+        }
+        .frame(height: visibleHeight, alignment: .top)
+        .clipped()
+        .transaction { $0.animation = nil }
+    }
+
+    // MARK: Full card
+
+    private var fullCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                NarrationPlayButton(
+                    snapshot: snapshot,
+                    diameter: 44,
+                    subject: "briefing audio",
+                    action: onTogglePlayback
+                )
+                .accessibilityIdentifier("briefing.narration.play")
+
+                chapterHeading
+
+                HStack(spacing: 0) {
+                    NarrationSpeedMenu(playbackRate: snapshot.playbackRate, onSelect: onSetPlaybackRate)
+                        .accessibilityIdentifier("briefing.narration.speed")
+                    dismissButton
+                }
+            }
+            .padding(.trailing, -10)
+
+            HStack(alignment: .top, spacing: 2) {
+                chapterStepButton(
+                    systemName: "backward.end.fill",
                     accessibilityLabel: "Previous chapter",
-                    isDisabled: boundedIndex == 0,
+                    isEnabled: hasPrevious,
                     action: onPrevious
                 )
+                .accessibilityIdentifier("briefing.narration.previous")
 
-                Button(action: onShowChapters) {
-                    HStack(spacing: 5) {
-                        Text(chapterLabel)
-                            .font(.appCaption.weight(.semibold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        Image(systemName: "chevron.down")
-                            .font(.appSymbol(size: 9, weight: .bold))
-                    }
-                    .foregroundStyle(Color.onSurfaceSecondary)
-                    .frame(maxWidth: .infinity, minHeight: 36)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Choose chapter. \(chapterLabel)")
-                .accessibilityIdentifier("briefing.narration.chapters")
+                NarrationScrubber(snapshot: snapshot, onSeek: onSeek)
+                    .padding(.top, 4)
 
-                chapterNavigationButton(
-                    systemName: "chevron.right",
+                chapterStepButton(
+                    systemName: "forward.end.fill",
                     accessibilityLabel: "Next chapter",
-                    isDisabled: boundedIndex >= narration.chapters.count - 1,
+                    isEnabled: hasNext,
                     action: onNext
                 )
+                .accessibilityIdentifier("briefing.narration.next")
             }
-            .padding(.horizontal, 6)
-
-            NarrationPlaybackControlRow(
-                playbackService: playbackService,
-                target: target,
-                isPreparing: isPreparing,
-                onTogglePlayback: onTogglePlayback
-            )
+            .padding(.horizontal, -8)
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.outlineVariant.opacity(0.5), lineWidth: 1)
-        }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 8)
+        .background(
+            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+                .fill(Color.surfaceSecondary)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CornerRadius.control, style: .continuous)
+                .stroke(Color.outlineVariant.opacity(0.35), lineWidth: 0.5)
+        )
     }
 
-    private var chapterLabel: String {
-        let count = narration.chapters.count
-        guard count > 0 else { return "Chapters" }
-        let duration = selectedChapter?.durationSeconds ?? 0
-        let roundedMinutes = max(1, Int((Double(duration) / 60).rounded()))
-        let durationLabel = duration > 0 ? " · ~\(roundedMinutes) min" : ""
-        let titleLabel = selectedChapter.map { " · \($0.title)" } ?? ""
-        return "Chapter \(boundedIndex + 1) of \(count)\(titleLabel)\(durationLabel)"
+    /// Kicker plus chapter title; the whole block opens the chapter list.
+    private var chapterHeading: some View {
+        Button(action: onShowChapters) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Text(kickerText)
+                        .kicker()
+                        .lineLimit(1)
+                    if chapterCount > 0 {
+                        Image(systemName: "chevron.down")
+                            .font(.appSymbol(size: 8, weight: .bold))
+                            .foregroundStyle(Color.onSurfaceSecondary)
+                    }
+                }
+
+                Text(headingTitle)
+                    .font(.appHeadline)
+                    .foregroundStyle(Color.onSurface)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(chapterCount == 0)
+        .accessibilityLabel("Choose chapter. \(kickerText). \(headingTitle)")
+        .accessibilityIdentifier("briefing.narration.chapters")
     }
 
-    private func chapterNavigationButton(
+    private var kickerText: String {
+        guard chapterCount > 0 else { return lensTitle.uppercased() }
+        var parts = ["CHAPTER \(boundedIndex + 1) OF \(chapterCount)"]
+        if let duration = selectedChapter?.durationSeconds, duration > 0 {
+            parts.append("\(max(1, Int((Double(duration) / 60).rounded()))) MIN")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var headingTitle: String {
+        if let selectedChapter {
+            return selectedChapter.title
+        }
+        return snapshot.isPreparing ? "Preparing your audio…" : lensTitle
+    }
+
+    private func chapterStepButton(
         systemName: String,
         accessibilityLabel: String,
-        isDisabled: Bool,
+        isEnabled: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.appSymbol(size: 12, weight: .semibold))
-                .foregroundStyle(Color.brandPrimary)
-                .frame(width: 44, height: 36)
+                .font(.appSymbol(size: 15, weight: .semibold))
+                .foregroundStyle(Color.onSurface)
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isDisabled || isPreparing)
-        .opacity(isDisabled ? 0.35 : 1)
+        .disabled(!isEnabled || snapshot.isPreparing)
+        .opacity(isEnabled ? 1 : 0.3)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    /// Stops audio and clears the player. Quiet on purpose: the accent
+    /// belongs to Play, and this should read as "put it away", not "cancel".
+    private var dismissButton: some View {
+        Button(action: onDismiss) {
+            Image(systemName: "xmark")
+                .font(.appSymbol(size: 12, weight: .bold))
+                .foregroundStyle(Color.onSurfaceSecondary)
+                .frame(width: 36, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Stop audio and close player")
+        .accessibilityIdentifier("briefing.narration.dismiss")
+    }
+
+    // MARK: Minimized bar
+
+    private var minimizedBar: some View {
+        HStack(spacing: 10) {
+            NarrationPlayButton(
+                snapshot: snapshot,
+                diameter: 30,
+                subject: "briefing audio",
+                action: onTogglePlayback
+            )
+            .accessibilityIdentifier("briefing.narration.play")
+
+            Button(action: onExpand) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(headingTitle)
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(Color.onSurface)
+                        .lineLimit(1)
+                    Text(minimizedDetail)
+                        .font(.appCaption2.monospacedDigit())
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show audio controls. \(headingTitle). \(minimizedDetail)")
+            .accessibilityIdentifier("briefing.narration.expand")
+
+            chapterStepButton(
+                systemName: "forward.end.fill",
+                accessibilityLabel: "Next chapter",
+                isEnabled: hasNext,
+                action: onNext
+            )
+            .accessibilityIdentifier("briefing.narration.next")
+            .padding(.trailing, -10)
+
+            dismissButton
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 2)
+        .padding(.top, 4)
+        .padding(.bottom, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.surfaceSecondary)
+        )
+        .overlay(alignment: .bottom) {
+            // Hairline progress along the bottom edge stands in for the scrubber.
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.outlineVariant.opacity(0.6))
+                    Capsule()
+                        .fill(Color.brandPrimary)
+                        .frame(width: max(geometry.size.width * snapshot.progress, 0))
+                }
+            }
+            .frame(height: 2)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 3)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.outlineVariant.opacity(0.35), lineWidth: 0.5)
+        )
+    }
+
+    private var minimizedDetail: String {
+        var parts: [String] = []
+        if chapterCount > 0 {
+            parts.append("Chapter \(boundedIndex + 1) of \(chapterCount)")
+        } else {
+            parts.append(lensTitle)
+        }
+        if snapshot.canSeek {
+            parts.append("\(narrationTimeLabel(snapshot.remainingTime)) left")
+        } else if snapshot.isPreparing {
+            parts.append("Preparing")
+        }
+        return parts.joined(separator: " · ")
     }
 }

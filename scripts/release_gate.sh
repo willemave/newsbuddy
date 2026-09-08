@@ -147,6 +147,7 @@ echo "Evidence: $result_root"
 echo "== Rust, SQLx, architecture, and contracts =="
 NEWSLY_ENV_FILE="$env_file" scripts/run_sqlx_migrations.sh
 scripts/architecture_guard.sh
+bash scripts/test_ingestion_regressions.sh
 (
   cd rust
   cargo clippy --workspace --all-targets --locked -- -D warnings

@@ -33,7 +33,8 @@ protocol BriefingServicing: AnyObject {
         passageContext: String,
         results: [APIBriefingDigSearchResult]
     ) async throws -> APIBriefingDigSummarizeResponse
-    func requestNarration(programKey: String) async throws -> BriefingNarration
+    func requestNarration(lensKey: String) async throws -> BriefingNarration
+    func retryNarration(episodeGroupID: String) async throws -> BriefingNarration
     func fetchNarration(episodeGroupID: String) async throws -> BriefingNarration
 }
 
@@ -177,24 +178,38 @@ final class LiveBriefingService: BriefingServicing {
         )
     }
 
-    func requestNarration(programKey: String) async throws -> BriefingNarration {
-        let scope = BriefingNarrationProgram.scope(for: programKey)
+    func requestNarration(lensKey: String) async throws -> BriefingNarration {
         let body = try encoder.encode(
             APIBriefingNarrationRequest(
-                scope: scope,
-                lensKey: scope == nil ? programKey : nil
+                scope: .lens,
+                lensKey: lensKey
             )
         )
-        return try await apiClient.request(
-            APIEndpoints.briefingNarration,
-            method: .post,
-            body: body
-        )
+        do {
+            return try await apiClient.request(
+                APIEndpoints.briefingNarration,
+                method: .post,
+                body: body
+            )
+        } catch {
+            if case .server(_, let metadata) = ClientFailure.classify(error),
+               metadata.code == "briefing_narration_empty" {
+                throw AudioEpisodeServiceError.emptyLens
+            }
+            throw error
+        }
     }
 
     func fetchNarration(episodeGroupID: String) async throws -> BriefingNarration {
         try await apiClient.request(
             APIEndpoints.briefingNarration(episodeGroupID: episodeGroupID)
+        )
+    }
+
+    func retryNarration(episodeGroupID: String) async throws -> BriefingNarration {
+        try await apiClient.request(
+            APIEndpoints.briefingNarration(episodeGroupID: episodeGroupID) + "/retry",
+            method: .post
         )
     }
 }

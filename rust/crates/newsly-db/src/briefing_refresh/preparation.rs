@@ -222,6 +222,16 @@ pub(super) async fn seed_content_pending(
         WHERE content.status = 'completed'
           AND content.content_type IN ('article', 'podcast')
           AND (content.classification IS NULL OR content.classification <> 'skip')
+          AND NULLIF(COALESCE(
+              content.content_metadata::jsonb #> '{domain,image_generated_at}',
+              content.content_metadata::jsonb -> 'image_generated_at'
+          ), 'null'::jsonb) IS NOT NULL
+          AND NULLIF(COALESCE(
+              content.content_metadata::jsonb #> '{domain,image_url}',
+              content.content_metadata::jsonb -> 'image_url',
+              content.content_metadata::jsonb #> '{domain,thumbnail_url}',
+              content.content_metadata::jsonb -> 'thumbnail_url'
+          ), 'null'::jsonb) IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM content_read_status AS read_status
               WHERE read_status.user_id::bigint = $1

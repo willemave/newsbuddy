@@ -33,6 +33,8 @@ use crate::write_support::{
 };
 use crate::{AppState, request_id_from_headers};
 
+pub(super) mod history;
+
 const ALLOWED_SCRAPER_TYPES: [&str; 6] = [
     "aggregator",
     "atom",
@@ -68,6 +70,10 @@ pub(super) fn router() -> Router<AppState> {
             put(update_scraper_config).delete(delete_scraper_config_endpoint),
         )
         .route("/api/scrapers/subscribe", post(subscribe_to_feed))
+        .route(
+            "/api/scrapers/{config_id}/history",
+            get(history::feed_history),
+        )
         .route(
             "/api/content/scrapers",
             get(list_content_scraper_configs).post(create_content_scraper_config),
@@ -172,14 +178,9 @@ async fn list_configs(
     .await
     .map_err(|error| internal_error(error, &request_id))?;
     let stats_by_config = if query.include_stats {
-        get_scraper_config_stats(
-            state.database.pool(),
-            current_user.id,
-            &configs,
-            state.checkout_timeout,
-        )
-        .await
-        .map_err(|error| internal_error(error, &request_id))?
+        get_scraper_config_stats(state.database.pool(), current_user.id, &configs)
+            .await
+            .map_err(|error| internal_error(error, &request_id))?
     } else {
         HashMap::new()
     };
@@ -1036,16 +1037,11 @@ async fn stats_for_record(
     record: &ScraperConfigProjection,
     request_id: &str,
 ) -> Result<ScraperConfigStatsProjection, ApiError> {
-    get_scraper_config_stats(
-        state.database.pool(),
-        user_id,
-        std::slice::from_ref(record),
-        state.checkout_timeout,
-    )
-    .await
-    .map_err(|error| internal_error(error, request_id))?
-    .remove(&record.id)
-    .ok_or_else(|| internal_error("scraper stats omitted requested config", request_id))
+    get_scraper_config_stats(state.database.pool(), user_id, std::slice::from_ref(record))
+        .await
+        .map_err(|error| internal_error(error, request_id))?
+        .remove(&record.id)
+        .ok_or_else(|| internal_error("scraper stats omitted requested config", request_id))
 }
 
 fn config_response(
@@ -1079,6 +1075,8 @@ fn stats_response(stats: &ScraperConfigStatsProjection) -> ScraperConfigStatsRes
         completed_count: stats.completed_count,
         unread_count: stats.unread_count,
         processing_count: stats.processing_count,
+        running_count: stats.running_count,
+        queued_count: stats.queued_count,
         latest_processed_at: stats.latest_processed_at,
         latest_publication_at: stats.latest_publication_at,
         next_expected_at: stats.next_expected_at,

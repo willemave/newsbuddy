@@ -36,7 +36,13 @@ protocol BriefingNarrationPlaybackControlling: AnyObject {
 extension NarrationPlaybackService: BriefingNarrationPlaybackControlling {}
 
 struct BriefingNarrationSession {
+    enum Edition {
+        case current
+        case finished(readMarks: Task<Void, Never>)
+    }
+
     var manifest: BriefingNarration?
+    var edition: Edition = .current
     var selectedChapterIndex = 0
     var isPreparing = false
     var errorMessage: String?
@@ -69,6 +75,9 @@ final class BriefingNarrationController {
     private let pollMaxAttempts: Int
     @ObservationIgnored
     private var preparations: [String: Preparation] = [:]
+    /// The chapter preparation each lens is awaiting, so dismissing the
+    /// player can cancel it instead of letting it finish and then play.
+    private var chapterPreparations: [String: Task<AudioEpisode, Error>] = [:]
     @ObservationIgnored
     private var playbackIntentID = UUID()
 
@@ -150,11 +159,25 @@ final class BriefingNarrationController {
         }
         guard !session(for: lensKey).isPreparing else { return }
         let playbackIntentID = beginPlaybackIntent()
+        if case .finished(let readMarks) = session(for: lensKey).edition {
+            await readMarks.value
+            guard self.playbackIntentID == playbackIntentID else { return }
+            sessions[lensKey] = BriefingNarrationSession()
+        }
         await playChapter(
             at: narrationChapterIndex(for: lensKey),
             for: lensKey,
             playbackIntentID: playbackIntentID
         )
+    }
+
+    /// Dismisses the player: stops audio, cancels a chapter still preparing,
+    /// and clears any error, so the lens returns to its quiet resting chrome.
+    func stopPlayback(for lensKey: String) {
+        _ = beginPlaybackIntent()
+        chapterPreparations[lensKey]?.cancel()
+        playbackService.stop()
+        clearError(for: lensKey)
     }
 
     func playChapter(at chapterIndex: Int, for lensKey: String) async {
@@ -176,20 +199,32 @@ final class BriefingNarrationController {
         guard !session(for: lensKey).isPreparing else { return }
         clearError(for: lensKey)
 
+        let requestedTarget: NarrationTarget?
         if let narration = narration(for: lensKey),
            narration.chapters.indices.contains(chapterIndex) {
-            let requestedTarget = NarrationTarget.audioEpisode(narration.chapters[chapterIndex].id)
-            if let speakingTarget = playbackService.speakingTarget,
-               speakingTarget != requestedTarget {
-                playbackService.stop()
-            }
+            requestedTarget = .audioEpisode(narration.chapters[chapterIndex].id)
+        } else {
+            requestedTarget = nil
+        }
+        if let speakingTarget = playbackService.speakingTarget,
+           speakingTarget != requestedTarget {
+            playbackService.stop()
         }
 
-        updateSession(for: lensKey) { $0.isPreparing = true }
+        updateSession(for: lensKey) {
+            $0.edition = .current
+            $0.isPreparing = true
+        }
         defer { updateSession(for: lensKey) { $0.isPreparing = false } }
 
+        let preparation = Task { [self] in
+            try await self.prepareNarrationChapter(at: chapterIndex, for: lensKey)
+        }
+        chapterPreparations[lensKey] = preparation
+        defer { chapterPreparations[lensKey] = nil }
+
         do {
-            let episode = try await prepareNarrationChapter(at: chapterIndex, for: lensKey)
+            let episode = try await preparation.value
             guard self.playbackIntentID == playbackIntentID else { return }
             guard let narration = narration(for: lensKey),
                   narration.chapters.indices.contains(chapterIndex) else { return }
@@ -227,15 +262,14 @@ final class BriefingNarrationController {
                 metadata: metadata,
                 remotePrevious: remotePrevious,
                 remoteNext: remoteNext,
-                onFinished: { [weak self] finishedTarget in
-                    Task { @MainActor [weak self] in
-                        await self?.advanceNarration(
-                            after: finishedTarget,
-                            chapterIndex: chapterIndex,
-                            lensKey: lensKey,
-                            playbackIntentID: playbackIntentID
-                        )
-                    }
+                onFinished: { [weak self] finishedTarget, readMarks in
+                    self?.finishNarrationChapter(
+                        after: finishedTarget,
+                        chapterIndex: chapterIndex,
+                        lensKey: lensKey,
+                        playbackIntentID: playbackIntentID,
+                        readMarks: readMarks
+                    )
                 }
             ) { [audioEpisodeService] in
                 try await audioEpisodeService.streamResource(for: episode)
@@ -287,8 +321,7 @@ final class BriefingNarrationController {
         updateSession(for: lensKey) { $0.selectedChapterIndex = chapterIndex }
 
         if currentNarration.chapters[chapterIndex].isFailed {
-            currentNarration = try await briefingService.requestNarration(programKey: lensKey)
-            try Task.checkCancellation()
+            currentNarration = try await Self.retryNarration(currentNarration, service: briefingService)
             storeNarration(currentNarration, for: lensKey)
         }
 
@@ -333,7 +366,8 @@ final class BriefingNarrationController {
                 episodeGroupID: current.episodeGroupId
             )
             try Task.checkCancellation()
-            guard refreshed.episodeGroupId == current.episodeGroupId else {
+            guard narration(for: lensKey)?.episodeGroupId == current.episodeGroupId,
+                  refreshed.episodeGroupId == current.episodeGroupId else {
                 briefingNarrationLogger.error(
                     "Narration refresh returned the wrong group | lensKey=\(lensKey, privacy: .public) expectedGroup=\(current.episodeGroupId, privacy: .private) actualGroup=\(refreshed.episodeGroupId, privacy: .private)"
                 )
@@ -380,6 +414,19 @@ final class BriefingNarrationController {
         )
     }
 
+    private static func retryNarration(
+        _ narration: BriefingNarration,
+        service: any BriefingServicing
+    ) async throws -> BriefingNarration {
+        let retried = try await service.retryNarration(episodeGroupID: narration.episodeGroupId)
+        try Task.checkCancellation()
+        guard retried.episodeGroupId == narration.episodeGroupId,
+              retried.chapters.map(\.id) == narration.chapters.map(\.id) else {
+            throw AudioEpisodeServiceError.generationFailed
+        }
+        return retried
+    }
+
     private static func prepareNarration(
         for lensKey: String,
         cachedNarration: BriefingNarration?,
@@ -393,8 +440,10 @@ final class BriefingNarrationController {
                 return .ready(current)
             }
 
-            if current?.isGenerating != true {
-                current = try await briefingService.requestNarration(programKey: lensKey)
+            if let failed = current, failed.status == .failed {
+                current = try await retryNarration(failed, service: briefingService)
+            } else if current == nil {
+                current = try await briefingService.requestNarration(lensKey: lensKey)
                 try Task.checkCancellation()
             }
 
@@ -405,7 +454,7 @@ final class BriefingNarrationController {
                 return .ready(narration)
             }
             if narration.status == .failed {
-                return .failed(AudioEpisodeServiceError.generationFailed, cachedNarration: nil)
+                return .failed(AudioEpisodeServiceError.generationFailed, cachedNarration: narration)
             }
 
             for _ in 0..<maxAttempts {
@@ -419,7 +468,7 @@ final class BriefingNarrationController {
                     return .ready(narration)
                 }
                 if narration.status == .failed {
-                    return .failed(AudioEpisodeServiceError.generationFailed, cachedNarration: nil)
+                    return .failed(AudioEpisodeServiceError.generationFailed, cachedNarration: narration)
                 }
             }
 
@@ -480,26 +529,34 @@ final class BriefingNarrationController {
         preparations[lensKey] = preparation
     }
 
-    private func advanceNarration(
+    private func finishNarrationChapter(
         after finishedTarget: NarrationTarget,
         chapterIndex: Int,
         lensKey: String,
-        playbackIntentID: UUID
-    ) async {
+        playbackIntentID: UUID,
+        readMarks: Task<Void, Never>
+    ) {
         guard self.playbackIntentID == playbackIntentID,
               case .audioEpisode(let episodeID) = finishedTarget,
-              let nextIndex = nextNarrationChapterIndex(
+              let narration = narration(for: lensKey),
+              narration.chapters.indices.contains(chapterIndex),
+              narration.chapters[chapterIndex].id == episodeID,
+              narrationChapterIndex(for: lensKey) == chapterIndex else { return }
+        guard let nextIndex = nextNarrationChapterIndex(
                 afterFinishedEpisodeID: episodeID,
                 chapterIndex: chapterIndex,
                 for: lensKey
               ) else {
+            updateSession(for: lensKey) { $0.edition = .finished(readMarks: readMarks) }
             return
         }
-        await playChapter(
-            at: nextIndex,
-            for: lensKey,
-            playbackIntentID: playbackIntentID
-        )
+        Task { @MainActor [weak self] in
+            await self?.playChapter(
+                at: nextIndex,
+                for: lensKey,
+                playbackIntentID: playbackIntentID
+            )
+        }
     }
 
     private func beginPlaybackIntent() -> UUID {

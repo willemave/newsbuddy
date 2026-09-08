@@ -67,6 +67,9 @@ private struct BriefingExpandedChromeHeightModifier: ViewModifier {
     let mastheadHeight: CGFloat
     let categoryStripHeight: CGFloat
     let keepsCategoryStripOpen: Bool
+    /// Height given up by pinned chrome that is not scroll-driven (the
+    /// minimized player), added back so the reported height stays expanded.
+    let additionalShrink: CGFloat
     @Binding var expandedHeight: CGFloat
 
     func body(content: Content) -> some View {
@@ -75,7 +78,7 @@ private struct BriefingExpandedChromeHeightModifier: ViewModifier {
         let categoryShrink = keepsCategoryStripOpen
             ? 0
             : min(max(collapse - mastheadHeight, 0), categoryStripHeight)
-        let totalShrink = mastheadShrink + categoryShrink
+        let totalShrink = mastheadShrink + categoryShrink + max(additionalShrink, 0)
 
         content
             .onGeometryChange(for: CGFloat.self) { proxy in
@@ -94,6 +97,7 @@ extension View {
         mastheadHeight: CGFloat,
         categoryStripHeight: CGFloat,
         keepsCategoryStripOpen: Bool,
+        additionalShrink: CGFloat = 0,
         expandedHeight: Binding<CGFloat>
     ) -> some View {
         modifier(
@@ -103,6 +107,7 @@ extension View {
                 mastheadHeight: mastheadHeight,
                 categoryStripHeight: categoryStripHeight,
                 keepsCategoryStripOpen: keepsCategoryStripOpen,
+                additionalShrink: additionalShrink,
                 expandedHeight: expandedHeight
             )
         )

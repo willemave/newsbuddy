@@ -16,6 +16,7 @@ use newsly_domain::{
 };
 use secrecy::SecretString;
 use serde::Serialize;
+mod task_commands;
 
 #[derive(Debug, Parser)]
 #[command(name = "newsly-admin", about = "Newsly Rust runtime operator")]
@@ -130,6 +131,42 @@ struct TasksArgs {
 
 #[derive(Debug, Subcommand)]
 enum TasksCommand {
+    /// Dry-run by default. Cancel reviewed accidental feed work without deleting content or reads.
+    ReconcileArchive {
+        #[arg(long, value_delimiter = ',', required = true)]
+        task_ids: Vec<i64>,
+        #[arg(long)]
+        user_id: i64,
+        #[arg(long)]
+        config_id: i64,
+        #[arg(long)]
+        created_from: chrono::NaiveDateTime,
+        #[arg(long)]
+        created_before: chrono::NaiveDateTime,
+        #[arg(long)]
+        published_before: chrono::NaiveDateTime,
+        #[arg(long)]
+        batch_id: uuid::Uuid,
+        #[arg(long)]
+        actor: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Preview or apply at most 100 reviewed historical artwork jobs. Existing attempts are excluded.
+    ArtworkBackfill {
+        #[arg(long, value_delimiter = ',', required = true)]
+        content_ids: Vec<i64>,
+        #[arg(long)]
+        batch_id: uuid::Uuid,
+        #[arg(long)]
+        actor: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        apply: bool,
+    },
     /// List recent failed tasks with bounded diagnostics and no task payloads.
     Failures {
         #[arg(long, default_value_t = 24)]
@@ -412,7 +449,9 @@ async fn execute_command(
             execute_ownership_command(&repository, &ownership.command).await
         }
         Command::Health(health) => execute_health_command(database, health, output).await,
-        Command::Tasks(tasks) => execute_tasks_command(database, tasks, output).await,
+        Command::Tasks(tasks) => {
+            task_commands::execute_tasks_command(database, tasks, output).await
+        }
         Command::Usage(usage) => execute_usage_command(database, usage, output).await,
         Command::Evals(evals) => execute_evals_command(database, evals, output).await,
         Command::E2e(e2e_args) => execute_e2e_command(database, e2e_args, output).await,
@@ -552,24 +591,6 @@ async fn execute_health_command(
                 operator::load_queue_health(database.pool(), *window_hours, *top_errors_limit)
                     .await?;
             emit_success(output, "health.queue", &snapshot, &snapshot.render_text())?;
-        }
-    }
-    Ok(())
-}
-
-async fn execute_tasks_command(
-    database: &Database,
-    args: &TasksArgs,
-    output: OutputFormat,
-) -> AnyResult<()> {
-    match &args.command {
-        TasksCommand::Failures {
-            window_hours,
-            limit,
-        } => {
-            let failures =
-                operator::load_recent_task_failures(database.pool(), *window_hours, *limit).await?;
-            emit_success(output, "tasks.failures", &failures, &failures.render_text())?;
         }
     }
     Ok(())

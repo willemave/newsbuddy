@@ -379,6 +379,18 @@ Discussion collection and summary refresh have independent cadences and durable
 claim fences. The first usable summary is immediate; later changes coalesce by
 materiality and age.
 
+Scheduled feed selection stops at the persisted known-URL frontier; explicit
+backfill uses a separate skip-known policy. Briefing composition shares one
+CommonMark citation reader between provider validation and worker normalization.
+Its correction budget is not nested inside provider schema correction, and
+input/model/parser fingerprints retain a bounded failure cooldown across jobs.
+Observed attempt usage commits under the original claim independently of edition
+publication. The queue watchdog persists observations and versioned alert delivery
+state in PostgreSQL; the existing HTTP transport delivers at least once with
+deduplication, retry, reminders, and recovery. Operator incident and artwork
+batches use explicit reviewed IDs and durable audits; migrations never enqueue
+unbounded historical provider work. See the ingestion regression runbook.
+
 Podcast and tweet-media workers perform bounded downloads, yt-dlp/ffmpeg
 subprocess work, feed resolution, and transcription outside transactions.
 Attempt files stay inside the configured root, reject symlinks/oversize input,
@@ -388,8 +400,9 @@ Generated long-form artwork uses an immutable summary fingerprint. Provider and
 image transforms write attempt-scoped files without a database connection. The
 final transaction revalidates the exact lease, fingerprint, and lifecycle before
 publishing pointers to a unique immutable image/thumbnail pair, UTC cache version,
-and usage together. Summary completion makes articles and podcasts readable and
-enqueues Briefing independently of optional artwork.
+and usage together. Summary completion keeps articles and podcasts behind the image gate.
+Successful image publication marks the source completed and enqueues it for Briefing, so Briefing
+never publishes long-form content without artwork.
 
 Deck bundles, agent logs, and generated image attempts register object keys before
 writing. A bounded hourly reaper uses the same PostgreSQL registry with a one-day
@@ -720,6 +733,16 @@ Dedicated models own Content, News, Briefing, Knowledge, audio, chat, onboarding
 settings, submissions, sources, integrations, and Learning Deck flows.
 `BriefingViewModel` owns data/lens state;
 `BriefingNarrationController` owns narration preparation and playback.
+Briefing Play sends the captured lens key with narration scope `lens`. The server
+plans that lens's eligible unread sources and snapshots its tier for adapted script
+generation. Playback sessions and immutable episode groups retain their originating
+lens identity; browsing another lens does not switch the queue. Retry addresses the
+original group and atomically resets failed chapters with queue insertion. A finished
+session waits for pending read marks before selecting a fresh unread edition. Shared
+domain narration metadata owns script-policy interpretation; the DB resolves chapter
+layout and immutable snapshot identity once per request. Released tier-scoped
+and lens-key-only narration requests remain API compatibility paths until minimum
+supported app versions and route telemetry allow their removal.
 `KnowledgeTimelineViewModel` composes saved Content, chat, Deck, and narration
 sources into one reverse-chronological projection and owns pagination and
 source-specific recovery.

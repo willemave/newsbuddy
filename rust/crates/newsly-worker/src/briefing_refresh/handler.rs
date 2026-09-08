@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -27,7 +28,7 @@ use super::normalize::normalize_layout;
 use super::planning::{PlannedBriefingWindow, plan_windows};
 use super::semantic_lenses::plan_semantic_lenses;
 
-const PROMPT_VERSION: &str = "briefing-v6";
+const PROMPT_VERSION: &str = "briefing-v7-commonmark";
 
 #[derive(Debug, Clone)]
 pub struct BriefingRefreshWorkerServices {
@@ -163,6 +164,7 @@ async fn execute_refresh(
     if lease.ownership_lost() {
         return plain_failure("queue lease was lost after Briefing lens planning", true);
     }
+    let composition_fence = seed.claim_fence.clone();
     let prepared = {
         let mut transaction = match services.pool.begin().await {
             Ok(transaction) => transaction,
@@ -197,7 +199,7 @@ async fn execute_refresh(
         return plain_failure("queue lease was lost before Briefing composition", true);
     }
 
-    let external = build_publication(services, prepared);
+    let external = build_publication(services, prepared, &composition_fence);
     tokio::pin!(external);
     let publication = tokio::select! {
         result = &mut external => result,
@@ -207,7 +209,7 @@ async fn execute_refresh(
     };
     let publication = match publication {
         Ok(publication) => publication,
-        Err(error) => return plain_failure(error.to_string(), true),
+        Err(error) => return plain_failure(error.to_string(), error.retryable()),
     };
     if lease.ownership_lost() {
         return plain_failure("queue lease was lost after Briefing composition", true);
@@ -225,6 +227,7 @@ async fn execute_refresh(
 async fn build_publication(
     services: &BriefingRefreshWorkerServices,
     prepared: PreparedBriefingRefresh,
+    fence: &newsly_db::BriefingRefreshClaimFence,
 ) -> Result<BriefingRefreshPublication, BriefingRefreshExecutionError> {
     let mut units = Vec::new();
     let mut embedding_usage = Vec::new();
@@ -326,8 +329,14 @@ async fn build_publication(
     let gateway = &services.gateway;
     let max_attempts = services.config.max_compose_attempts;
     let max_figures_deep = services.config.max_figures_deep;
+    let context = CompositionContext {
+        pool: &services.pool,
+        task_id: prepared.task_id,
+        user_id: prepared.user_id,
+        fence,
+    };
     let mut composed = stream::iter(units.into_iter().map(|unit| async move {
-        compose_unit(gateway, unit, max_attempts, max_figures_deep).await
+        compose_unit(gateway, unit, max_attempts, max_figures_deep, context).await
     }))
     .buffer_unordered(parallelism)
     .collect::<Vec<_>>()
@@ -398,89 +407,167 @@ struct ComposedUnit {
     segment: ComposedBriefingSegment,
 }
 
+#[derive(Clone, Copy)]
+struct CompositionContext<'a> {
+    pool: &'a PgPool,
+    task_id: i64,
+    user_id: i64,
+    fence: &'a newsly_db::BriefingRefreshClaimFence,
+}
+
+trait BriefingComposer: Sync {
+    fn model_spec(&self) -> &str;
+    fn compose(
+        &self,
+        request: &BriefingCompositionRequest,
+        feedback: Option<&str>,
+    ) -> impl std::future::Future<
+        Output = Result<
+            newsly_providers::GeneratedBriefingLayout,
+            newsly_providers::BriefingCompositionGatewayError,
+        >,
+    > + Send;
+}
+
+impl BriefingComposer for BriefingCompositionGateway {
+    fn model_spec(&self) -> &str {
+        Self::model_spec(self)
+    }
+    async fn compose(
+        &self,
+        request: &BriefingCompositionRequest,
+        feedback: Option<&str>,
+    ) -> Result<
+        newsly_providers::GeneratedBriefingLayout,
+        newsly_providers::BriefingCompositionGatewayError,
+    > {
+        Self::compose(self, request, feedback).await
+    }
+}
+
 async fn compose_unit(
-    gateway: &BriefingCompositionGateway,
+    gateway: &impl BriefingComposer,
     unit: CompositionUnit,
     max_attempts: usize,
     max_figures_deep: usize,
+    context: CompositionContext<'_>,
 ) -> Result<ComposedUnit, BriefingRefreshExecutionError> {
+    use sha2::{Digest, Sha256};
     let started = Instant::now();
     let request = BriefingCompositionRequest {
         lens_title: unit.lens.title.clone(),
         tier: unit.lens.tier.clone(),
         sources: unit.window.sources.iter().map(composition_source).collect(),
     };
-    let mut warnings = Vec::new();
+    let digest = Sha256::digest(format!(
+        "{PROMPT_VERSION}|{}|{}|{request:?}",
+        gateway.model_spec(),
+        max_figures_deep
+    ));
+    let fingerprint = digest
+        .iter()
+        .fold(String::with_capacity(64), |mut text, byte| {
+            let _ = write!(text, "{byte:02x}");
+            text
+        });
+    if newsly_db::briefing_attempts::cooling_down(context.pool, context.user_id, &fingerprint)
+        .await?
+    {
+        return Err(BriefingRefreshExecutionError::Composition {
+            lens_key: unit.lens.key,
+            attempts: 0,
+            message: "unchanged input is cooling down for 24 hours".to_owned(),
+        });
+    }
+    let mut feedback = None;
     for attempt in 1..=max_attempts {
-        let generated = match gateway.compose(&request).await {
+        let attempt_id = uuid::Uuid::new_v4();
+        let generated = match gateway.compose(&request, feedback.as_deref()).await {
             Ok(generated) => generated,
-            Err(error) if attempt < max_attempts => {
-                warnings.push(format!("llm_error_retry:{attempt}"));
-                tracing::warn!(
-                    lens_key = %unit.lens.key,
-                    tier = %unit.lens.tier,
-                    source_count = unit.window.sources.len(),
-                    attempt,
-                    error = %error,
-                    "Briefing composition failed; retrying the complete window"
-                );
+            Err(error) => {
+                let retryable = error.retryable();
+                let (provider, model) = split_model_spec(gateway.model_spec());
+                let observed = error.observed_usage().map(|usage| BriefingSegmentUsage {
+                    provider: provider.to_owned(),
+                    model: model.to_owned(),
+                    provider_response_id: None,
+                    usage: usage.clone(),
+                    operation: "briefing.compose_window.observed".to_owned(),
+                });
+                newsly_db::briefing_attempts::record_attempt(
+                    context.pool,
+                    context.task_id,
+                    context.user_id,
+                    context.fence,
+                    attempt_id,
+                    &fingerprint,
+                    if retryable {
+                        "transport_usage_unknown"
+                    } else if observed.is_some() {
+                        "rejected"
+                    } else {
+                        "rejected_usage_unknown"
+                    },
+                    observed.as_ref(),
+                    !retryable && attempt == max_attempts,
+                )
+                .await?;
+                if retryable {
+                    return Err(BriefingRefreshExecutionError::Transport(error.to_string()));
+                }
+                feedback = Some(error.to_string());
                 continue;
             }
-            Err(error) => {
-                return Err(BriefingRefreshExecutionError::Composition {
-                    lens_key: unit.lens.key.clone(),
-                    attempts: attempt,
-                    message: error.to_string(),
-                });
-            }
         };
-        let figure_budget = if unit.lens.tier == "news" {
-            0
-        } else {
-            max_figures_deep
+        let (provider, fallback_model) = split_model_spec(gateway.model_spec());
+        let model = nonempty(&generated.model).unwrap_or_else(|| fallback_model.to_owned());
+        let usage = BriefingSegmentUsage {
+            provider: provider.to_owned(),
+            model,
+            provider_response_id: generated.provider_response_id,
+            usage: generated.usage,
+            operation: "briefing.compose_window.observed".to_owned(),
         };
-        let normalized = match normalize_layout(
-            &generated.layout,
-            &unit.window.sources,
-            &unit.lens.tier,
-            figure_budget,
-        ) {
+        let normalized = generated.layout.and_then(|layout| {
+            normalize_layout(
+                &layout,
+                &unit.window.sources,
+                &unit.lens.tier,
+                if unit.lens.tier == "news" {
+                    0
+                } else {
+                    max_figures_deep
+                },
+            )
+            .map_err(|error| error.to_string())
+        });
+        newsly_db::briefing_attempts::record_attempt(
+            context.pool,
+            context.task_id,
+            context.user_id,
+            context.fence,
+            attempt_id,
+            &fingerprint,
+            if normalized.is_ok() {
+                "accepted"
+            } else {
+                "rejected"
+            },
+            Some(&usage),
+            normalized.is_err() && attempt == max_attempts,
+        )
+        .await?;
+        let normalized = match normalized {
             Ok(normalized) => normalized,
-            Err(error) if attempt < max_attempts => {
-                warnings.push(format!("llm_layout_policy_retry:{attempt}"));
-                tracing::warn!(
-                    lens_key = %unit.lens.key,
-                    tier = %unit.lens.tier,
-                    attempt,
-                    error = %error,
-                    "Briefing normalized layout failed policy; regenerating the window"
-                );
+            Err(error) => {
+                feedback = Some(error);
                 continue;
             }
-            Err(error) => {
-                return Err(BriefingRefreshExecutionError::Composition {
-                    lens_key: unit.lens.key.clone(),
-                    attempts: attempt,
-                    message: error.to_string(),
-                });
-            }
         };
-        warnings.extend(normalized.warnings);
+        let mut warnings = normalized.warnings;
         if matches!(&unit.kind, CompositionUnitKind::Compaction { .. }) {
             warnings.push("compaction_segment".to_owned());
         }
-        let (provider, fallback_model) = split_model_spec(gateway.model_spec());
-        let model = nonempty(&generated.model).unwrap_or_else(|| fallback_model.to_owned());
-        let input_tokens = Some(u64_to_i32(generated.usage.input_tokens));
-        let output_tokens = Some(u64_to_i32(generated.usage.output_tokens));
-        let generation_ms = i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX);
-        let usage = BriefingSegmentUsage {
-            provider: provider.to_owned(),
-            model: model.clone(),
-            provider_response_id: generated.provider_response_id,
-            usage: generated.usage,
-            operation: "briefing.compose_window".to_owned(),
-        };
         return Ok(ComposedUnit {
             ordinal: unit.ordinal,
             kind: unit.kind,
@@ -498,9 +585,9 @@ async fn compose_unit(
                 event_groups: unit.window.event_groups,
                 model: gateway.model_spec().to_owned(),
                 prompt_version: PROMPT_VERSION.to_owned(),
-                input_tokens,
-                output_tokens,
-                generation_ms,
+                input_tokens: Some(u64_to_i32(usage.usage.input_tokens)),
+                output_tokens: Some(u64_to_i32(usage.usage.output_tokens)),
+                generation_ms: i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX),
                 warnings,
                 usage,
             },
@@ -509,7 +596,7 @@ async fn compose_unit(
     Err(BriefingRefreshExecutionError::Composition {
         lens_key: unit.lens.key,
         attempts: max_attempts,
-        message: "composition attempt budget was empty".to_owned(),
+        message: feedback.unwrap_or_else(|| "composition attempt budget was empty".to_owned()),
     })
 }
 
@@ -549,6 +636,10 @@ fn plain_failure(message: impl Into<String>, retryable: bool) -> HandlerExecutio
 
 #[derive(Debug, Error)]
 enum BriefingRefreshExecutionError {
+    #[error("Briefing attempt persistence failed: {0}")]
+    Accounting(#[from] sqlx::Error),
+    #[error("Briefing provider transport failed: {0}")]
+    Transport(String),
     #[error("Briefing append plan lost pending row for {0}")]
     MissingPendingSource(String),
     #[error(
@@ -560,6 +651,15 @@ enum BriefingRefreshExecutionError {
         message: String,
     },
 }
+
+impl BriefingRefreshExecutionError {
+    fn retryable(&self) -> bool {
+        matches!(self, Self::Accounting(_) | Self::Transport(_))
+    }
+}
+
+#[cfg(test)]
+mod retry_tests;
 
 #[cfg(test)]
 mod tests {

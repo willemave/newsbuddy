@@ -2440,6 +2440,92 @@
         ]
       }
     },
+    "/api/briefing/narrations/{episode_group_id}/retry": {
+      "post": {
+        "tags": [
+          "briefing"
+        ],
+        "operationId": "retryBriefingNarration",
+        "parameters": [
+          {
+            "name": "episode_group_id",
+            "in": "path",
+            "description": "Existing narration group ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original narration with failed chapters queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingNarrationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Briefing narration not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale runtime owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/briefing/read-marks": {
       "post": {
         "tags": [
@@ -10969,6 +11055,112 @@
         ]
       }
     },
+    "/api/scrapers/{config_id}/history": {
+      "get": {
+        "tags": [
+          "scrapers"
+        ],
+        "operationId": "getFeedHistory",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "path",
+            "description": "Owned feed configuration",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "History offset, pages contain 30 items",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "completed (default), active, failed, or all",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Feed processing history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedHistoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid history query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Feed not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/share-actions": {
       "post": {
         "tags": [
@@ -13662,7 +13854,8 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/BriefingNarrationScope"
+                "$ref": "#/components/schemas/BriefingNarrationScope",
+                "description": "`lens` requires `lens_key`; tier scopes exclude it. A lens key alone is legacy narration."
               }
             ]
           },
@@ -13736,6 +13929,7 @@
       "BriefingNarrationScope": {
         "type": "string",
         "enum": [
+          "lens",
           "article_tier",
           "podcast_tier",
           "news_program"
@@ -16184,6 +16378,91 @@
           "atom"
         ]
       },
+      "FeedHistoryItem": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "content_type",
+          "status",
+          "stage",
+          "processed_at",
+          "publication_at",
+          "duration_seconds",
+          "reading_minutes"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "processed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "publication_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "duration_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "reading_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "FeedHistoryResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "next_offset"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedHistoryItem"
+            }
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "FeedSubscriptionOutcome": {
         "type": "string",
         "enum": [
@@ -18437,6 +18716,8 @@
           "completed_count",
           "unread_count",
           "processing_count",
+          "running_count",
+          "queued_count",
           "latest_processed_at",
           "latest_publication_at",
           "next_expected_at",
@@ -18470,6 +18751,14 @@
             "format": "int64"
           },
           "processing_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "running_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "queued_count": {
             "type": "integer",
             "format": "int64"
           },

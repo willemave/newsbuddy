@@ -18,12 +18,15 @@ enum AudioEpisodeDelivery: String {
 }
 
 enum AudioEpisodeServiceError: LocalizedError, Equatable {
+    case emptyLens
     case generationFailed
     case preparationTimedOut
     case missingStreamResource
 
     var userFacingMessage: String {
         switch self {
+        case .emptyLens:
+            return "No unread stories to play in this lens."
         case .generationFailed:
             return "Couldn't prepare audio. Please try again."
         case .preparationTimedOut:

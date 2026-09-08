@@ -8,7 +8,7 @@ B2. Eligible sources are completed, unread, non-skipped articles, podcasts, and 
 
 B3. A source key is the canonical unit of coverage, citation, and read state.
 
-B4. Article and podcast segments cover one source each, while news segments may combine several sources into a compact roundup. A news segment is sized by the distinct events it covers, not by source count: sources covering one event always stay in the same segment, however many there are.
+B4. Article and podcast segments cover one source each, while news segments may combine several sources into a compact roundup. News prose follows a concise newspaper-brief style: linked titles or descriptive facts appear early, supporting prose adds information without repeating the link, and thematic connections appear only when informative. A news segment is sized by the distinct events it covers, not by source count: sources covering one event always stay in the same segment, however many there are.
 
 B5. Lens names and order remain stable within one representation, and counts describe active unread source coverage.
 
@@ -28,8 +28,8 @@ B12. Reading a segment marks its full source batch once, and the segment retires
 
 B13. Read-only styling preserves scroll position and cannot be reversed by an index response from before an accepted read mutation. Outside that reconciliation window, the latest server index remains authoritative even when its version is lower. Replacing the ordered document resets the lens to the top without interrupting the readable view during refresh.
 
-B14. Links, figures, discussions, and citations resolve to sources owned by their segment, while invalid references are repaired or rejected before publication. Article and podcast passages treat each source as a full work, use its available enriched context, and give its thesis, evidence or counterpoints, and significance substantive treatment. They identify each work by its title and its available publication or show name. Pullquotes are editorial callouts and never claim to be source quotations, while Dig Deeper uses the selected passage with user-visible support.
+B14. Links, figures, discussions, and citations resolve to sources owned by their segment, while invalid references are repaired or rejected before publication. Citation validation, coverage, rendering, and narration agree on actual Markdown links, including nested or escaped brackets and Unicode titles. Bare URI text, code, and images do not establish citation coverage. Article and podcast passages treat each source as a full work, use its available enriched context, and give its thesis, evidence or counterpoints, and significance substantive treatment. They identify each work by its title and its available publication or show name. Pullquotes are editorial callouts and never claim to be source quotations, while Dig Deeper uses the selected passage with user-visible support.
 
 B15. First-run progress is durable and incremental. One unavailable source cannot block later sources or remove categories already ready to read.
 
-B16. Briefing audio is a grounded listening adaptation, not a reading of visible prose. Article and podcast programs keep one titled source per chapter. News is one cross-lens program whose chapters may curate only the highest-signal details; naturally finishing a News chapter marks its complete planned source window read even when some sources were not spoken.
+B16. Briefing audio is a grounded listening adaptation of the lens selected when Play is requested. Its complete eligible unread source set defines the program boundary, and playback never automatically continues into another lens. Article and podcast programs keep one titled source per chapter. News chapters may curate only the highest-signal details within that lens; naturally finishing a News chapter marks its complete planned source window read even when some sources were not spoken.

@@ -142,8 +142,9 @@ pub use onboarding_flow::{
 };
 pub use openai::{AudioTranscriptionHealthResponse, AudioTranscriptionResponse};
 pub use scraper_configs::{
-    CreateUserScraperConfig, FeedSubscriptionOutcome, ScraperConfigResponse,
-    ScraperConfigStatsResponse, ScraperType, SubscribeToFeedRequest, UpdateUserScraperConfig,
+    CreateUserScraperConfig, FeedHistoryItem, FeedHistoryResponse, FeedSubscriptionOutcome,
+    ScraperConfigResponse, ScraperConfigStatsResponse, ScraperType, SubscribeToFeedRequest,
+    UpdateUserScraperConfig,
 };
 pub use share_actions::{
     LlmTaskMode, LlmTaskStatus, ShareActionAgentResult, ShareActionBriefingTarget,

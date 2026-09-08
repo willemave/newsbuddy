@@ -38,6 +38,8 @@ struct E2EVisualStateView: View {
             .background(Color.surfacePrimary)
         case "detail-action-bar":
             E2EDetailActionBarVisualState()
+        case "briefing-player":
+            E2EBriefingPlayerVisualState()
         case "knowledge-processing":
             E2EKnowledgeProcessingVisualState()
         case "briefing-start-here":
@@ -225,6 +227,117 @@ private struct E2EDetailActionBarVisualState: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.top, 120)
         .background(Color.surfacePrimary)
+    }
+}
+
+/// The briefing now-playing card in both shapes: the full card shown at the
+/// top of a lens and the one-line bar shown once the masthead has collapsed.
+private struct E2EBriefingPlayerVisualState: View {
+    private static func chapter(_ id: Int, _ title: String, minutes: Int) -> AudioEpisode {
+        AudioEpisode(
+            id: id,
+            kind: .briefing_narration,
+            status: .completed,
+            title: title,
+            sourceContentId: nil,
+            subtitle: nil,
+            artworkUrl: nil,
+            durationSeconds: minutes * 60,
+            audioUrl: nil,
+            streamUrl: nil,
+            scriptText: nil,
+            errorMessage: nil,
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: nil
+        )
+    }
+
+    private static let narration = BriefingNarration(
+        episodeGroupId: "e2e-visual-briefing-player",
+        lensKey: "ai_society",
+        scope: .lens,
+        title: "AI & Society",
+        status: .completed,
+        playable: true,
+        durationSeconds: 14 * 60,
+        chapters: [
+            chapter(1, "Regulators circle the frontier labs", minutes: 4),
+            chapter(2, "What the new copyright rulings mean for training data", minutes: 5),
+            chapter(3, "A quieter week for chip export rules", minutes: 5)
+        ]
+    )
+
+    @State private var podcastPlaybackService = NarrationPlaybackService()
+
+    private static let playing = NarrationPlaybackSnapshot(
+        isPlaying: true,
+        canSeek: true,
+        currentTime: 72,
+        duration: 5 * 60,
+        playbackRate: 1.25
+    )
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Text("PLAYER · EXPANDED")
+                .kicker()
+            E2EBriefingPlayerPanel(narration: Self.narration, snapshot: Self.playing, isMinimized: false)
+
+            Text("PLAYER · MINIMIZED")
+                .kicker()
+            E2EBriefingPlayerPanel(narration: Self.narration, snapshot: Self.playing, isMinimized: true)
+
+            Text("PLAYER · PREPARING")
+                .kicker()
+            E2EBriefingPlayerPanel(
+                narration: nil,
+                snapshot: NarrationPlaybackSnapshot(isPreparing: true),
+                isMinimized: false
+            )
+
+            Text("PODCAST ROW")
+                .kicker()
+            NarrationPlaybackControlRow(
+                playbackService: podcastPlaybackService,
+                target: nil,
+                isPreparing: false,
+                onTogglePlayback: {}
+            )
+        }
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 100)
+        .background(Color.surfacePrimary)
+    }
+}
+
+/// Inert panel that owns the shape heights the real host normally tracks.
+private struct E2EBriefingPlayerPanel: View {
+    let narration: BriefingNarration?
+    let snapshot: NarrationPlaybackSnapshot
+    let isMinimized: Bool
+
+    @State private var fullHeight: CGFloat = 0
+    @State private var minimizedHeight: CGFloat = 0
+
+    var body: some View {
+        BriefingNowPlayingPanel(
+            lensTitle: "AI & Society",
+            narration: narration,
+            selectedIndex: 1,
+            snapshot: snapshot,
+            isMinimized: isMinimized,
+            onTogglePlayback: {},
+            onPrevious: {},
+            onNext: {},
+            onShowChapters: {},
+            onSeek: { _ in },
+            onSetPlaybackRate: { _ in },
+            onExpand: {},
+            onDismiss: {},
+            fullHeight: $fullHeight,
+            minimizedHeight: $minimizedHeight
+        )
     }
 }
 

@@ -10,8 +10,8 @@ use newsly_db::{
     prepare_scrape_sources, record_first_edition_scrape_result,
 };
 use newsly_providers::{
-    AggregatorKey, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure, ScrapeGateway,
-    ScrapeProviderOutcome, ScrapedItem,
+    AggregatorKey, FeedEntrySelection, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure,
+    ScrapeGateway, ScrapeProviderOutcome, ScrapedItem,
 };
 use newsly_queue::{EnqueueRequest, OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Map, Value};
@@ -428,6 +428,7 @@ fn feed_target(config: &ScrapeConfigSnapshot) -> Option<FeedScrapeTarget> {
         .or_else(|| clean_string(config.config.get("url")))?;
     Some(FeedScrapeTarget {
         known_urls: std::collections::BTreeSet::new(),
+        entry_selection: FeedEntrySelection::StopAtKnown,
         config_id: config.id,
         user_id: config.user_id,
         scraper_type: config.scraper_type.clone(),
@@ -725,6 +726,7 @@ impl ScrapeFinalizer {
         for outcome in &self.outcomes {
             let mut processed = 0_i64;
             let mut created = 0_i64;
+            let mut historical = 0_i64;
             let mut rejected = false;
             let mut processed_by_config = outcome
                 .required_config_ids
@@ -743,6 +745,10 @@ impl ScrapeFinalizer {
                             savepoint.commit().await?;
                             if persisted.created {
                                 created += 1;
+                                if matches!(item, ScrapedItem::Content(item) if item.published_at.is_some_and(|date| date < chrono::Utc::now() - chrono::Duration::days(30)))
+                                {
+                                    historical += 1;
+                                }
                                 process_content_ids.insert(persisted.content_id);
                             }
                         }
@@ -800,13 +806,20 @@ impl ScrapeFinalizer {
                         || format!("aggregator:{}", outcome.source),
                         |id| format!("config:{id}"),
                     );
-                    newsly_db::record_source_health(
+                    let observation = newsly_db::record_source_health(
                         transaction,
                         &key,
                         config_id,
                         processed,
                         created,
                         error,
+                    )
+                    .await?;
+                    newsly_db::pipeline_monitoring::record_intake(
+                        transaction,
+                        observation,
+                        historical,
+                        self.request.first_edition_run_id.is_some(),
                     )
                     .await?;
                 }

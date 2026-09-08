@@ -839,6 +839,76 @@ final class APIClientAuthTests: XCTestCase {
         XCTAssertEqual(error.userFacingMessage, "Sign in is not available for this account.")
     }
 
+    func testBriefingNarrationSendsTheActualLensIncludingFormerProgramKeys() async throws {
+        let session = makeSession()
+        let store = MockTokenStore(accessToken: "token", refreshToken: "refresh")
+        let credentials = MockCredentialSession(tokenStore: store, result: .success("token"))
+        let service = LiveBriefingService(
+            apiClient: APIClient(session: session, credentialSession: credentials),
+            completeFirstRun: {}
+        )
+        for key in ["ai-society", "business", "news", "articles", "podcasts"] {
+            MockURLProtocol.requestHandler = { request in
+                XCTAssertEqual(request.url?.path, "/api/briefing/narrations")
+                XCTAssertEqual(request.httpMethod, "POST")
+                let body = try XCTUnwrap(Self.bodyData(from: request))
+                let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                XCTAssertEqual(json, ["scope": "lens", "lens_key": key])
+                let response: [String: Any] = [
+                    "episode_group_id": "group-\(key)", "lens_key": key, "scope": "lens",
+                    "title": "Selected lens", "status": "pending", "playable": false,
+                    "duration_seconds": 0, "chapters": []
+                ]
+                return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200,
+                    httpVersion: nil, headerFields: nil)!,
+                    try JSONSerialization.data(withJSONObject: response))
+            }
+            let manifest = try await service.requestNarration(lensKey: key)
+            XCTAssertEqual(manifest.lensKey, key)
+            XCTAssertEqual(manifest.scope, .lens)
+            XCTAssertEqual(manifest.collectionTitle, "Selected lens")
+        }
+    }
+
+    func testBriefingNarrationRetryPostsOriginalGroupWithoutLensSelection() async throws {
+        let store = MockTokenStore(accessToken: "token", refreshToken: "refresh")
+        let credentials = MockCredentialSession(tokenStore: store, result: .success("token"))
+        let service = LiveBriefingService(
+            apiClient: APIClient(session: makeSession(), credentialSession: credentials),
+            completeFirstRun: {}
+        )
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/briefing/narrations/original/retry")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertNil(Self.bodyData(from: request))
+            return (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 200,
+                httpVersion: nil, headerFields: nil)!,
+                Data(#"{"episode_group_id":"original","lens_key":"ai","scope":"lens","title":"AI","status":"pending","playable":false,"duration_seconds":0,"chapters":[]}"#.utf8))
+        }
+        let narration = try await service.retryNarration(episodeGroupID: "original")
+        XCTAssertEqual(narration.episodeGroupId, "original")
+    }
+
+    func testBriefingNarrationMapsEmptyLensResponse() async throws {
+        let store = MockTokenStore(accessToken: "token", refreshToken: "refresh")
+        let credentials = MockCredentialSession(tokenStore: store, result: .success("token"))
+        let service = LiveBriefingService(
+            apiClient: APIClient(session: makeSession(), credentialSession: credentials),
+            completeFirstRun: {}
+        )
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 400,
+                httpVersion: nil, headerFields: ["Content-Type": "application/json"])!,
+             Data(#"{"code":"briefing_narration_empty","message":"No sources","retryable":false,"request_id":"test","details":null}"#.utf8))
+        }
+        do {
+            _ = try await service.requestNarration(lensKey: "empty")
+            XCTFail("Expected an empty lens")
+        } catch {
+            XCTAssertEqual(error as? AudioEpisodeServiceError, .emptyLens)
+        }
+    }
+
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]

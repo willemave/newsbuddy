@@ -8,12 +8,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+newsly-domain = { path = "../newsly-domain" }
 async-openai.workspace = true
 base64.workspace = true
 chrono.workspace = true
 fernet.workspace = true
 feed-rs.workspace = true
 quick-xml.workspace = true
+pulldown-cmark = { version = "0.13.4", default-features = false }
 futures-util.workspace = true
 jsonschema.workspace = true
 newsly-agent-runtime = { path = "../newsly-agent-runtime" }

@@ -1,5 +1,10 @@
 # Briefing Audio Story Chapters Design
 
+> September 7 design correction: [Briefing audio for the active lens](2026-09-07-briefing-active-lens-audio-design.md)
+> supersedes this document's tier-wide and combined News program scope, request
+> identity, and source selection. Play is intended to use the selected lens only.
+> The correction is implemented and validated locally; see the linked design for evidence.
+
 ## Goal
 
 Make Briefing audio feel like a purpose-written listening experience instead of a spoken copy of

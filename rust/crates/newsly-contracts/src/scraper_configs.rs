@@ -72,6 +72,10 @@ pub struct ScraperConfigStatsResponse {
     pub completed_count: i64,
     pub unread_count: i64,
     pub processing_count: i64,
+    #[serde(default)]
+    pub running_count: i64,
+    #[serde(default)]
+    pub queued_count: i64,
     #[schemars(with = "Option<String>")]
     #[schema(value_type = Option<String>, format = DateTime)]
     pub latest_processed_at: Option<DateTime<Utc>>,
@@ -105,4 +109,27 @@ pub struct ScraperConfigResponse {
 
 const fn default_active() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct FeedHistoryItem {
+    pub id: i64,
+    pub title: String,
+    pub content_type: String,
+    pub status: String,
+    pub stage: Option<String>,
+    #[schemars(with = "Option<String>")]
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub processed_at: Option<DateTime<Utc>>,
+    #[schemars(with = "Option<String>")]
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub publication_at: Option<DateTime<Utc>>,
+    pub duration_seconds: Option<i64>,
+    pub reading_minutes: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct FeedHistoryResponse {
+    pub items: Vec<FeedHistoryItem>,
+    pub next_offset: Option<i64>,
 }

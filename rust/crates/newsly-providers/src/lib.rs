@@ -88,8 +88,9 @@ pub use openai_transcription::{
 pub use openrouter::{OpenRouterPrivacyPolicy, OpenRouterRoutingError};
 pub use rig_engine::{RigAgentEngine, RigAgentEngineError};
 pub use scraping::{
-    AggregatorKey, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure, ScrapeGateway,
-    ScrapeGatewayError, ScrapeProviderOutcome, ScrapedContentItem, ScrapedItem, ScrapedNewsItem,
+    AggregatorKey, FeedEntrySelection, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure,
+    ScrapeGateway, ScrapeGatewayError, ScrapeProviderOutcome, ScrapedContentItem, ScrapedItem,
+    ScrapedNewsItem, normalize_feed_document,
 };
 pub use summarization::{
     ArtifactAsk, ArtifactKeyPoint, ArtifactQuote, ArtifactType, FeedPreview,
@@ -103,3 +104,4 @@ pub use x_oauth::{
 pub use x_sync::{
     XBookmarksPage, XLookupGateway, XSyncGateway, XSyncGatewayError, XSyncToken, XSyncUser, XTweet,
 };
+pub mod briefing_links;

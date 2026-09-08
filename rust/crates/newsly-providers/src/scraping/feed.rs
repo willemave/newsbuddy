@@ -6,8 +6,8 @@ use serde_json::json;
 use crate::feed_validation::entry_audio_url;
 
 use super::{
-    FeedScrapeTarget, ScrapeGatewayError, ScrapeProviderOutcome, ScrapedContentItem, ScrapedItem,
-    clean, domain_of, entry_html_url, normalize_http_url,
+    FeedEntrySelection, FeedScrapeTarget, ScrapeGatewayError, ScrapeProviderOutcome,
+    ScrapedContentItem, ScrapedItem, clean, domain_of, entry_html_url, normalize_http_url,
 };
 
 mod podcast;
@@ -20,7 +20,15 @@ struct FeedMetadata {
     description: Option<String>,
 }
 
-pub(super) fn normalize_feed_document(
+/// Normalizes already-fetched feed bytes using the same selection rules as [`super::ScrapeGateway`].
+///
+/// Keeping this boundary transport-free lets queue integration tests exercise feed selection and
+/// database finalization together without weakening production network protections.
+///
+/// # Errors
+///
+/// Returns [`super::ScrapeGatewayError::Feed`] when the bytes are not a valid RSS or Atom feed.
+pub fn normalize_feed_document(
     target: &FeedScrapeTarget,
     bytes: &[u8],
 ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
@@ -56,9 +64,12 @@ pub(super) fn normalize_feed_document(
             .get(entry_index)
             .unwrap_or(&empty_podcast_metadata);
         match normalize_feed_entry(target, entry, &feed_metadata, &repeated_entry_urls, podcast) {
-            Ok(Some(item))
-                if !target.known_urls.contains(&item.url) && seen.insert(item.url.clone()) =>
-            {
+            Ok(Some(item)) if target.known_urls.contains(&item.url) => {
+                if target.entry_selection == FeedEntrySelection::StopAtKnown {
+                    break;
+                }
+            }
+            Ok(Some(item)) if seen.insert(item.url.clone()) => {
                 items.push(ScrapedItem::Content(Box::new(item)));
                 if items.len() >= target.limit.clamp(1, 100) {
                     break;

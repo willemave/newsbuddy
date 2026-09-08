@@ -299,6 +299,9 @@ pub(super) async fn persist_usage(
     prepared: &PreparedBriefingRefresh,
     usage: &BriefingSegmentUsage,
 ) -> Result<(), sqlx::Error> {
+    if usage.operation == "briefing.compose_window.observed" {
+        return Ok(());
+    }
     let total_tokens = usage
         .usage
         .input_tokens

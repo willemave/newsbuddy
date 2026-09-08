@@ -143,12 +143,14 @@ final class BriefingNarrationControllerTests: XCTestCase {
         XCTAssertNil(controller.narration(for: "today"))
     }
 
-    func testTerminalNarrationFailureClearsManifestAndRetriesPost() async throws {
+    func testTerminalNarrationFailureRetainsEditionAndRetriesOriginalGroup() async throws {
         let service = MockBriefingService()
-        service.narrationManifests = [
-            makeBriefingNarration(chapters: [makeAudioEpisode(id: 41, status: .failed)]),
-            makeBriefingNarration(chapters: [makeAudioEpisode(id: 42)]),
-        ]
+        service.narrationManifest = makeBriefingNarration(
+            episodeGroupID: "original", chapters: [makeAudioEpisode(id: 41, status: .failed)]
+        )
+        service.narrationRetryResults = [.success(makeBriefingNarration(
+            episodeGroupID: "original", chapters: [makeAudioEpisode(id: 41)]
+        ))]
         let controller = makeController(service: service)
 
         do {
@@ -157,12 +159,13 @@ final class BriefingNarrationControllerTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? AudioEpisodeServiceError, .generationFailed)
         }
-        XCTAssertNil(controller.narration(for: "today"))
+        XCTAssertEqual(controller.narration(for: "today")?.episodeGroupId, "original")
 
         let replacement = try await controller.prepareNarration(for: "today")
 
-        XCTAssertEqual(replacement.chapters.first?.id, 42)
-        XCTAssertEqual(service.narrationLensKeys, ["today", "today"])
+        XCTAssertEqual(replacement.chapters.first?.id, 41)
+        XCTAssertEqual(service.narrationLensKeys, ["today"])
+        XCTAssertEqual(service.narrationRetryEpisodeGroupIDs, ["original"])
     }
 
     func testNarrationTimeoutRetainsManifestAndResumesWithoutNewPost() async throws {
@@ -348,6 +351,195 @@ final class BriefingNarrationControllerTests: XCTestCase {
 
         XCTAssertEqual(playbackService.playedTargets, [.audioEpisode(42)])
         XCTAssertEqual(playbackService.speakingTarget, .audioEpisode(42))
+    }
+
+    func testPlayingUncachedLensStopsPreviousLensWhilePreparing() async throws {
+        let service = MockBriefingService()
+        service.narrationManifestsByLens = [
+            "ai": makeBriefingNarration(lensKey: "ai", episodeGroupID: "ai-group",
+                chapters: [makeAudioEpisode(id: 41), makeAudioEpisode(id: 42)]),
+            "business": makeBriefingNarration(lensKey: "business", episodeGroupID: "business-group",
+                chapters: [makeAudioEpisode(id: 51)]),
+        ]
+        service.narrationRequestWaitLensKeys = ["business"]
+        let playback = MockBriefingNarrationPlaybackService()
+        let controller = makeController(service: service, playbackService: playback)
+        await controller.togglePlayback(for: "ai")
+
+        // Looking at another lens's controls does not change the playing queue.
+        XCTAssertNil(controller.session(for: "business").manifest)
+        XCTAssertTrue(controller.isPlaying(lensKey: "ai"))
+        let next = Task { @MainActor in await controller.togglePlayback(for: "business") }
+        await waitFor { service.narrationLensKeys.contains("business") }
+        XCTAssertNil(playback.speakingTarget)
+        XCTAssertTrue(controller.session(for: "business").isPreparing)
+
+        service.resumeNarrationRequest(lensKey: "business")
+        await next.value
+        XCTAssertEqual(playback.playedTargets, [.audioEpisode(41), .audioEpisode(51)])
+        XCTAssertEqual(controller.narration(for: "ai")?.episodeGroupId, "ai-group")
+        XCTAssertEqual(controller.narration(for: "business")?.episodeGroupId, "business-group")
+        playback.finishCurrent()
+        await Task.yield()
+        XCTAssertNil(playback.speakingTarget)
+        XCTAssertEqual(playback.playedTargets, [.audioEpisode(41), .audioEpisode(51)])
+    }
+
+    func testStopPlaybackClearsPlayingSessionAndKeepsManifest() async {
+        let service = MockBriefingService()
+        service.narrationManifest = makeBriefingNarration(
+            chapters: [makeAudioEpisode(id: 41), makeAudioEpisode(id: 42)]
+        )
+        let playback = MockBriefingNarrationPlaybackService()
+        let controller = makeController(service: service, playbackService: playback)
+        await controller.togglePlayback(for: "today")
+        XCTAssertTrue(controller.isPlaying(lensKey: "today"))
+
+        controller.stopPlayback(for: "today")
+
+        XCTAssertNil(playback.speakingTarget)
+        XCTAssertFalse(controller.isPlaying(lensKey: "today"))
+        XCTAssertFalse(controller.session(for: "today").isPreparing)
+        XCTAssertNil(controller.session(for: "today").errorMessage)
+        // The cached manifest survives so a later Play does not re-request it.
+        XCTAssertEqual(controller.narration(for: "today")?.chapters.count, 2)
+    }
+
+    func testStopPlaybackWhilePreparingCancelsPreparationAndNeverPlays() async {
+        let service = MockBriefingService()
+        service.narrationWaitsForCancellation = true
+        let playback = MockBriefingNarrationPlaybackService()
+        let controller = makeController(service: service, playbackService: playback)
+        let play = Task { @MainActor in await controller.togglePlayback(for: "today") }
+        await waitFor { service.narrationLensKeys == ["today"] }
+        XCTAssertTrue(controller.session(for: "today").isPreparing)
+
+        controller.stopPlayback(for: "today")
+        await play.value
+
+        XCTAssertFalse(controller.session(for: "today").isPreparing)
+        XCTAssertNil(controller.session(for: "today").errorMessage)
+        XCTAssertEqual(service.narrationCancellationCount, 1)
+        XCTAssertEqual(playback.playedTargets, [])
+        XCTAssertNil(playback.speakingTarget)
+    }
+
+    func testEmptyLensShowsAnExplanationWithoutPlayingAudio() async {
+        let service = MockBriefingService()
+        service.narrationError = AudioEpisodeServiceError.emptyLens
+        let playback = MockBriefingNarrationPlaybackService()
+        let controller = makeController(service: service, playbackService: playback)
+        await controller.togglePlayback(for: "empty")
+        XCTAssertEqual(controller.session(for: "empty").errorMessage,
+            "No unread stories to play in this lens.")
+        XCTAssertFalse(controller.session(for: "empty").isPreparing)
+        XCTAssertNil(controller.narration(for: "empty"))
+        XCTAssertTrue(playback.playedTargets.isEmpty)
+    }
+
+    func testCompletedLensRequestsItsCurrentUnreadEdition() async {
+        let service = MockBriefingService()
+        service.narrationManifestsByLens["ai"] = makeBriefingNarration(
+            lensKey: "ai", episodeGroupID: "old-edition", chapters: [makeAudioEpisode(id: 41)]
+        )
+        let playback = MockBriefingNarrationPlaybackService()
+        let controller = makeController(service: service, playbackService: playback)
+        await controller.togglePlayback(for: "ai")
+        playback.finishCurrent()
+        await Task.yield()
+        service.narrationManifestsByLens["ai"] = makeBriefingNarration(
+            lensKey: "ai", episodeGroupID: "new-edition", chapters: [makeAudioEpisode(id: 42)]
+        )
+        await controller.togglePlayback(for: "ai")
+        XCTAssertEqual(service.narrationLensKeys, ["ai", "ai"])
+        XCTAssertEqual(playback.playedTargets, [.audioEpisode(41), .audioEpisode(42)])
+    }
+
+    func testFailedChapterRetryDoesNotReuseAnIndexFromTheOldEdition() async throws {
+        let service = MockBriefingService()
+        service.narrationManifestsByLens["ai"] = makeBriefingNarration(
+            lensKey: "ai", episodeGroupID: "old-edition", chapters: [
+                makeAudioEpisode(id: 41), makeAudioEpisode(id: 42, status: .failed),
+                makeAudioEpisode(id: 43)
+            ]
+        )
+        let playback = MockBriefingNarrationPlaybackService()
+        let controller = makeController(service: service, playbackService: playback)
+        _ = try await controller.prepareNarration(for: "ai")
+        // Chapter 41 was consumed, so the next create request returns only unread sources.
+        service.narrationManifestsByLens["ai"] = makeBriefingNarration(
+            lensKey: "ai", episodeGroupID: "new-edition", chapters: [
+                makeAudioEpisode(id: 42), makeAudioEpisode(id: 43)
+            ]
+        )
+        service.narrationRetryResults = [.success(makeBriefingNarration(
+            lensKey: "ai", episodeGroupID: "old-edition", chapters: [
+                makeAudioEpisode(id: 41), makeAudioEpisode(id: 42), makeAudioEpisode(id: 43)
+            ]
+        ))]
+        await controller.playChapter(at: 1, for: "ai")
+        XCTAssertEqual(service.narrationRetryEpisodeGroupIDs, ["old-edition"])
+        XCTAssertEqual(service.narrationLensKeys, ["ai"])
+        XCTAssertEqual(playback.playedTargets, [.audioEpisode(42)])
+    }
+
+    func testFreshEditionWaitsForReadMarksAndRespectsNewPlaybackIntent() async {
+        let service = MockBriefingService()
+        service.narrationManifest = makeBriefingNarration(chapters: [makeAudioEpisode(id: 41)])
+        let playback = MockBriefingNarrationPlaybackService()
+        let controller = makeController(service: service, playbackService: playback)
+        await controller.togglePlayback(for: "today")
+        var acknowledge: CheckedContinuation<Void, Never>?
+        let readMarks = Task { @MainActor in
+            await withCheckedContinuation { acknowledge = $0 }
+        }
+        await waitFor { acknowledge != nil }
+        playback.finishCurrent(readMarks: readMarks)
+        var nextStarted = false
+        let next = Task { @MainActor in
+            nextStarted = true
+            await controller.togglePlayback(for: "today")
+        }
+        await waitFor { nextStarted }
+        XCTAssertEqual(service.narrationLensKeys, ["today"])
+        // A newer explicit replay must win over the pending fresh-edition request.
+        await controller.playChapter(at: 0, for: "today")
+        acknowledge?.resume()
+        await next.value
+        XCTAssertEqual(service.narrationLensKeys, ["today"])
+        XCTAssertEqual(playback.playedTargets, [.audioEpisode(41), .audioEpisode(41)])
+    }
+
+    func testPauseResumeRetainsEditionUntilNaturalCompletion() async {
+        let service = MockBriefingService()
+        service.narrationManifest = makeBriefingNarration(chapters: [makeAudioEpisode(id: 41)])
+        let playback = MockBriefingNarrationPlaybackService()
+        let controller = makeController(service: service, playbackService: playback)
+        await controller.togglePlayback(for: "today")
+        await controller.togglePlayback(for: "today")
+        XCTAssertFalse(playback.isSpeaking)
+        await controller.togglePlayback(for: "today")
+        XCTAssertTrue(playback.isSpeaking)
+        XCTAssertEqual(service.narrationLensKeys, ["today"])
+        playback.finishCurrent()
+        service.narrationManifest = makeBriefingNarration(chapters: [makeAudioEpisode(id: 42)])
+        await controller.togglePlayback(for: "today")
+        XCTAssertEqual(service.narrationLensKeys, ["today", "today"])
+        XCTAssertEqual(playback.playedTargets.last, .audioEpisode(42))
+    }
+
+    func testRetryRejectsReplacedChapterIdentities() async {
+        let service = MockBriefingService()
+        service.narrationManifest = makeBriefingNarration(chapters: [makeAudioEpisode(id: 41, status: .failed)])
+        service.narrationRetryResults = [.success(makeBriefingNarration(chapters: [makeAudioEpisode(id: 42)]))]
+        let playback = MockBriefingNarrationPlaybackService()
+        let controller = makeController(service: service, playbackService: playback)
+        await controller.togglePlayback(for: "today")
+        await controller.togglePlayback(for: "today")
+        XCTAssertTrue(playback.playedTargets.isEmpty)
+        XCTAssertEqual(controller.narrationEpisode(for: "today")?.id, 41)
+        XCTAssertEqual(service.narrationLensKeys, ["today"])
+        XCTAssertEqual(service.narrationRetryEpisodeGroupIDs.count, 1)
     }
 
     private func makeController(

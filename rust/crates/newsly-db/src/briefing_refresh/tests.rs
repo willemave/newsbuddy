@@ -44,7 +44,7 @@ async fn insert_eligible_article(pool: &PgPool) -> i64 {
             )
             VALUES (
                 'article', 'https://example.com/article', 'A test article', 'Example',
-                'completed', '{"summary":{"overview":"Useful context"}}'::json, false
+                'completed', '{"summary":{"overview":"Useful context"},"image_generated_at":"2026-09-05T12:00:00Z","image_url":"/static/images/content/test.png","thumbnail_url":"/static/images/thumbnails/test.png"}'::json, false
             )
             RETURNING id::bigint
             "#,

@@ -14,6 +14,7 @@ clap.workspace = true
 futures-util.workspace = true
 newsly-db = { path = "../newsly-db" }
 newsly-domain = { path = "../newsly-domain" }
+newsly-queue = { path = "../newsly-queue" }
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true

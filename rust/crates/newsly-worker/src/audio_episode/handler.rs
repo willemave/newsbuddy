@@ -6,11 +6,13 @@ use newsly_db::{
     AudioEpisodeRecord, AudioEpisodeScriptUsage, AudioEpisodeTtsUsage,
     PrepareAudioEpisodeGenerationOutcome, prepare_audio_episode_generation,
 };
+use newsly_domain::{BriefingNarrationMetadata, BriefingNarrationStyle};
 use newsly_providers::{
     AudioEpisodeGateway, AudioEpisodeGatewayError, AudioEpisodeScript, AudioEpisodeSpeaker,
     AudioEpisodeTurn,
 };
 use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
+use serde::Deserialize;
 use serde_json::Value;
 use sqlx::PgPool;
 
@@ -231,7 +233,17 @@ async fn prepare_script(
     attempt: &PreparedAudioEpisodeAttempt,
     lease: &mut LeaseHealth,
 ) -> Result<PreparedScript, GenerationStageError> {
-    if attempt.kind == "briefing_narration" && attempt.source_snapshot.get("scope").is_none() {
+    let style = if attempt.kind == "briefing_narration" {
+        Some(
+            BriefingNarrationMetadata::deserialize(&attempt.source_snapshot)
+                .map_err(|error| GenerationStageError::Input(error.to_string()))?
+                .style()
+                .map_err(|error| GenerationStageError::Input(error.to_string()))?,
+        )
+    } else {
+        None
+    };
+    if style == Some(BriefingNarrationStyle::Preauthored) {
         let text = attempt
             .source_snapshot
             .get("script_text")

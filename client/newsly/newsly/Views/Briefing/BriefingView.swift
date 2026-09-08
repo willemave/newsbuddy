@@ -38,6 +38,11 @@ struct BriefingView: View {
     @State private var mastheadHeight: CGFloat = 0
     @State private var categoryStripHeight: CGFloat = 0
     @State private var expandedChromeHeight: CGFloat = 0
+    @State private var listenPanelFullHeight: CGFloat = 0
+    @State private var listenPanelMinimizedHeight: CGFloat = 0
+    /// A tap on the minimized player reopens the full card while scrolled;
+    /// the next scroll-down retires it, like the tap-opened category strip.
+    @State private var listenPanelPinnedOpen = false
     @State private var activeAlert: BriefingViewAlert?
     @State private var markingCategoryTitle: String?
     @State private var markAllReadFeedbackTrigger = 0
@@ -88,11 +93,24 @@ struct BriefingView: View {
         mastheadHeight + (showsCategoryStrip ? categoryStripHeight : 0)
     }
 
+    private var isListenPanelMinimized: Bool {
+        viewModel.isMastheadCompact && !listenPanelPinnedOpen
+    }
+
+    /// Height the minimized player gives back while the masthead is compact.
+    /// Derived, not measured, so it changes in the same pass as the shape.
+    private var listenPanelShrink: CGFloat {
+        guard isListenPanelMinimized, listenPanelFullHeight > 0, listenPanelMinimizedHeight > 0 else {
+            return 0
+        }
+        return max(listenPanelFullHeight - listenPanelMinimizedHeight, 0)
+    }
+
     /// Bottom edge of the chrome that remains pinned while reading. A segment
     /// must pass fully above this edge beneath the pills to become read.
     private var readBoundaryY: CGFloat? {
         briefingPinnedReadBoundaryY(
-            expandedChromeHeight: expandedChromeHeight,
+            expandedChromeHeight: expandedChromeHeight - listenPanelShrink,
             collapsibleChromeHeight: collapsibleChromeHeight
         )
     }
@@ -161,16 +179,16 @@ struct BriefingView: View {
         }
         .sensoryFeedback(.success, trigger: markAllReadFeedbackTrigger)
         .sheet(item: $activeNarrationChapters) { item in
-            if let narration = narrationController.narration(for: item.programKey) {
+            if let narration = narrationController.narration(for: item.lensKey) {
                 BriefingNarrationChapterSheet(
                     narration: narration,
-                    selectedIndex: narrationController.narrationChapterIndex(for: item.programKey),
-                    isPreparing: narrationController.session(for: item.programKey).isPreparing,
+                    selectedIndex: narrationController.narrationChapterIndex(for: item.lensKey),
+                    isPreparing: narrationController.session(for: item.lensKey).isPreparing,
                     onSelect: { chapterIndex in
                         Task {
                             await narrationController.playChapter(
                                 at: chapterIndex,
-                                for: item.programKey
+                                for: item.lensKey
                             )
                         }
                     }
@@ -229,7 +247,10 @@ struct BriefingView: View {
                             onFirstPassageVisible: {
                                 viewModel.noteFirstPassageVisible(for: lens.key)
                             },
-                            onScrolledDown: { viewModel.noteScrolledDown(forLens: lens.key) },
+                            onScrolledDown: {
+                                viewModel.noteScrolledDown(forLens: lens.key)
+                                listenPanelPinnedOpen = false
+                            },
                             onMarkSegmentSeen: viewModel.markSegmentSeen,
                             onSetHeaderPinned: { pinned in
                                 viewModel.setHeaderPinned(pinned, forLens: lens.key)
@@ -364,6 +385,7 @@ struct BriefingView: View {
             mastheadHeight: mastheadHeight,
             categoryStripHeight: showsCategoryStrip ? categoryStripHeight : 0,
             keepsCategoryStripOpen: stripPinnedOpen,
+            additionalShrink: listenPanelShrink,
             expandedHeight: $expandedChromeHeight
         )
         .background(Color.surfacePrimary)
@@ -374,6 +396,11 @@ struct BriefingView: View {
         }
         .shadow(color: .black.opacity(viewModel.isMastheadCompact ? 0.12 : 0), radius: 10, y: 5)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isMastheadCompact)
+        .onChange(of: viewModel.isMastheadCompact) { _, isCompact in
+            if !isCompact {
+                listenPanelPinnedOpen = false
+            }
+        }
         .animation(.smooth(duration: 0.28), value: viewModel.isCategoryStripExpanded)
         .animation(.smooth(duration: 0.28), value: viewModel.selectedLensKey)
         .zIndex(1)
@@ -386,28 +413,30 @@ struct BriefingView: View {
     }
 
     private func listenAccessory(lensKey: String) -> some View {
-        let programKey = viewModel.narrationProgramKey(for: lensKey)
         return BriefingListenButton(
-            isPreparing: narrationController.session(for: programKey).isPreparing,
-            isPlaying: narrationController.isPlaying(lensKey: programKey),
+            isPreparing: narrationController.session(for: lensKey).isPreparing,
+            isPlaying: narrationController.isPlaying(lensKey: lensKey),
             onToggle: {
-                Task { await narrationController.togglePlayback(for: programKey) }
+                Task { await narrationController.togglePlayback(for: lensKey) }
             }
         )
     }
 
     /// Expands beneath the pinned strips only while narration for the selected
-    /// lens is preparing or active, so the resting chrome stays quiet.
+    /// lens is preparing or active, so the resting chrome stays quiet. Once
+    /// the masthead collapses the card minimizes to a single line.
     @ViewBuilder
     private func listenPanel(lensKey: String) -> some View {
-        let programKey = viewModel.narrationProgramKey(for: lensKey)
-        let session = narrationController.session(for: programKey)
-        let isPreparing = session.isPreparing
-        let narration = session.manifest
-        let chapterIndex = session.selectedChapterIndex
-        let target = narrationController.narrationEpisode(for: programKey)
+        let session = narrationController.session(for: lensKey)
+        let target = narrationController.narrationEpisode(for: lensKey)
             .map { NarrationTarget.audioEpisode($0.id) }
-        let isActive = isPreparing || (target != nil && target == playbackService.speakingTarget)
+        let snapshot = NarrationPlaybackSnapshot(
+            playbackService: playbackService,
+            target: target,
+            isPreparing: session.isPreparing
+        )
+        let isActive = session.isPreparing
+            || (target != nil && target == playbackService.speakingTarget)
 
         if session.errorMessage != nil || isActive {
             VStack(alignment: .leading, spacing: 8) {
@@ -419,60 +448,61 @@ struct BriefingView: View {
                 }
 
                 if isActive {
-                    if let narration {
-                        BriefingNarrationChapterControls(
-                            narration: narration,
-                            selectedIndex: chapterIndex,
-                            playbackService: playbackService,
-                            target: target,
-                            isPreparing: isPreparing,
-                            onPrevious: {
-                                Task {
-                                    await narrationController.playChapter(
-                                        at: chapterIndex - 1,
-                                        for: programKey
-                                    )
-                                }
-                            },
-                            onShowChapters: {
-                                activeNarrationChapters = BriefingNarrationChapterSheetItem(
-                                    programKey: programKey,
-                                    episodeGroupID: narration.episodeGroupId
+                    BriefingNowPlayingPanel(
+                        lensTitle: viewModel.orderedLenses.first { $0.key == lensKey }?.title ?? "Briefing",
+                        narration: session.manifest,
+                        selectedIndex: session.selectedChapterIndex,
+                        snapshot: snapshot,
+                        isMinimized: isListenPanelMinimized,
+                        onTogglePlayback: {
+                            Task { await narrationController.togglePlayback(for: lensKey) }
+                        },
+                        onPrevious: {
+                            Task {
+                                await narrationController.playChapter(
+                                    at: session.selectedChapterIndex - 1,
+                                    for: lensKey
                                 )
-                                Task {
-                                    await narrationController.refresh(for: programKey)
-                                }
-                            },
-                            onNext: {
-                                Task {
-                                    await narrationController.playChapter(
-                                        at: chapterIndex + 1,
-                                        for: programKey
-                                    )
-                                }
-                            },
-                            onTogglePlayback: {
-                                Task { await narrationController.togglePlayback(for: programKey) }
                             }
-                        )
-                    } else {
-                        NarrationPlaybackControlRow(
-                            playbackService: playbackService,
-                            target: target,
-                            isPreparing: isPreparing,
-                            onTogglePlayback: {
-                                Task { await narrationController.togglePlayback(for: programKey) }
+                        },
+                        onNext: {
+                            Task {
+                                await narrationController.playChapter(
+                                    at: session.selectedChapterIndex + 1,
+                                    for: lensKey
+                                )
                             }
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color.outlineVariant.opacity(0.5), lineWidth: 1)
-                        }
-                    }
+                        },
+                        onShowChapters: {
+                            guard let narration = session.manifest else { return }
+                            activeNarrationChapters = BriefingNarrationChapterSheetItem(
+                                lensKey: lensKey,
+                                episodeGroupID: narration.episodeGroupId
+                            )
+                            Task {
+                                await narrationController.refresh(for: lensKey)
+                            }
+                        },
+                        onSeek: { progress in
+                            guard let target else { return }
+                            playbackService.seek(to: progress, for: target)
+                        },
+                        onSetPlaybackRate: { rate in
+                            playbackService.setPlaybackRate(rate)
+                        },
+                        onExpand: { listenPanelPinnedOpen = true },
+                        onDismiss: { narrationController.stopPlayback(for: lensKey) },
+                        fullHeight: $listenPanelFullHeight,
+                        minimizedHeight: $listenPanelMinimizedHeight
+                    )
                 }
             }
             .padding(.horizontal, Spacing.appHorizontalMargin)
             .padding(.bottom, 10)
+            .onDisappear {
+                listenPanelFullHeight = 0
+                listenPanelMinimizedHeight = 0
+            }
         }
     }
 

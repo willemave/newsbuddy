@@ -51,6 +51,122 @@ enum APISubmissionResult: Codable {
     }
 }
 
+struct APIFeedHistoryItem: Codable {
+    let id: Int
+    let title: String
+    let contentType: String
+    let status: String
+    let stage: String?
+    let processedAt: Date?
+    let publicationAt: Date?
+    let durationSeconds: Int?
+    let readingMinutes: Int?
+
+    init(
+        id: Int,
+        title: String,
+        contentType: String,
+        status: String,
+        stage: String?,
+        processedAt: Date?,
+        publicationAt: Date?,
+        durationSeconds: Int?,
+        readingMinutes: Int?
+    ) {
+        self.id = id
+        self.title = title
+        self.contentType = contentType
+        self.status = status
+        self.stage = stage
+        self.processedAt = processedAt
+        self.publicationAt = publicationAt
+        self.durationSeconds = durationSeconds
+        self.readingMinutes = readingMinutes
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case title = "title"
+        case contentType = "content_type"
+        case status = "status"
+        case stage = "stage"
+        case processedAt = "processed_at"
+        case publicationAt = "publication_at"
+        case durationSeconds = "duration_seconds"
+        case readingMinutes = "reading_minutes"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        contentType = try container.decode(String.self, forKey: .contentType)
+        status = try container.decode(String.self, forKey: .status)
+        stage = try container.decode(String?.self, forKey: .stage)
+        if let processedAtRaw = try container.decode(String?.self, forKey: .processedAt) {
+            guard let processedAtParsed = ServerDate.parse(processedAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .processedAt, in: container, debugDescription: "Unparseable date for processedAt")
+            }
+            processedAt = processedAtParsed
+        } else {
+            processedAt = nil
+        }
+        if let publicationAtRaw = try container.decode(String?.self, forKey: .publicationAt) {
+            guard let publicationAtParsed = ServerDate.parse(publicationAtRaw) else {
+                throw DecodingError.dataCorruptedError(forKey: .publicationAt, in: container, debugDescription: "Unparseable date for publicationAt")
+            }
+            publicationAt = publicationAtParsed
+        } else {
+            publicationAt = nil
+        }
+        durationSeconds = try container.decode(Int?.self, forKey: .durationSeconds)
+        readingMinutes = try container.decode(Int?.self, forKey: .readingMinutes)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(contentType, forKey: .contentType)
+        try container.encode(status, forKey: .status)
+        try container.encode(stage, forKey: .stage)
+        try container.encode(processedAt.map(ServerDate.format), forKey: .processedAt)
+        try container.encode(publicationAt.map(ServerDate.format), forKey: .publicationAt)
+        try container.encode(durationSeconds, forKey: .durationSeconds)
+        try container.encode(readingMinutes, forKey: .readingMinutes)
+    }
+}
+
+struct APIFeedHistoryResponse: Codable {
+    let items: [APIFeedHistoryItem]
+    let nextOffset: Int?
+
+    init(
+        items: [APIFeedHistoryItem],
+        nextOffset: Int?
+    ) {
+        self.items = items
+        self.nextOffset = nextOffset
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextOffset = "next_offset"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decode([APIFeedHistoryItem].self, forKey: .items)
+        nextOffset = try container.decode(Int?.self, forKey: .nextOffset)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextOffset, forKey: .nextOffset)
+    }
+}
+
 struct APIErrorResponse: Codable {
     let code: String
     let message: String
@@ -6970,6 +7086,8 @@ struct APIScraperConfigStatsResponse: Codable {
     let completedCount: Int
     let unreadCount: Int
     let processingCount: Int
+    let runningCount: Int
+    let queuedCount: Int
     let latestProcessedAt: Date?
     let latestPublicationAt: Date?
     let nextExpectedAt: Date?
@@ -6983,6 +7101,8 @@ struct APIScraperConfigStatsResponse: Codable {
         completedCount: Int,
         unreadCount: Int,
         processingCount: Int,
+        runningCount: Int = 0,
+        queuedCount: Int = 0,
         latestProcessedAt: Date?,
         latestPublicationAt: Date?,
         nextExpectedAt: Date?,
@@ -6995,6 +7115,8 @@ struct APIScraperConfigStatsResponse: Codable {
         self.completedCount = completedCount
         self.unreadCount = unreadCount
         self.processingCount = processingCount
+        self.runningCount = runningCount
+        self.queuedCount = queuedCount
         self.latestProcessedAt = latestProcessedAt
         self.latestPublicationAt = latestPublicationAt
         self.nextExpectedAt = nextExpectedAt
@@ -7009,6 +7131,8 @@ struct APIScraperConfigStatsResponse: Codable {
         case completedCount = "completed_count"
         case unreadCount = "unread_count"
         case processingCount = "processing_count"
+        case runningCount = "running_count"
+        case queuedCount = "queued_count"
         case latestProcessedAt = "latest_processed_at"
         case latestPublicationAt = "latest_publication_at"
         case nextExpectedAt = "next_expected_at"
@@ -7031,6 +7155,8 @@ struct APIScraperConfigStatsResponse: Codable {
         completedCount = try container.decode(Int.self, forKey: .completedCount)
         unreadCount = try container.decode(Int.self, forKey: .unreadCount)
         processingCount = try container.decode(Int.self, forKey: .processingCount)
+        runningCount = try container.decode(Int.self, forKey: .runningCount)
+        queuedCount = try container.decode(Int.self, forKey: .queuedCount)
         if let latestProcessedAtRaw = try container.decode(String?.self, forKey: .latestProcessedAt) {
             guard let latestProcessedAtParsed = ServerDate.parse(latestProcessedAtRaw) else {
                 throw DecodingError.dataCorruptedError(forKey: .latestProcessedAt, in: container, debugDescription: "Unparseable date for latestProcessedAt")
@@ -7067,6 +7193,8 @@ struct APIScraperConfigStatsResponse: Codable {
         try container.encode(completedCount, forKey: .completedCount)
         try container.encode(unreadCount, forKey: .unreadCount)
         try container.encode(processingCount, forKey: .processingCount)
+        try container.encode(runningCount, forKey: .runningCount)
+        try container.encode(queuedCount, forKey: .queuedCount)
         try container.encode(latestProcessedAt.map(ServerDate.format), forKey: .latestProcessedAt)
         try container.encode(latestPublicationAt.map(ServerDate.format), forKey: .latestPublicationAt)
         try container.encode(nextExpectedAt.map(ServerDate.format), forKey: .nextExpectedAt)

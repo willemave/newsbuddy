@@ -41,6 +41,16 @@ impl HealthSnapshot {
             self.pipeline.overdue_tasks,
             self.pipeline.terminal_product_mismatches
         );
+        let _ = write!(
+            output,
+            "\n- monitoring: {} missing source checks, {} blocked artwork, {} growing media backlog, {} other active alerts, {} undelivered alerts; {} intentional incident cancellations",
+            self.pipeline.missing_source_checks,
+            self.pipeline.blocked_artwork,
+            self.pipeline.growing_media_backlog,
+            self.pipeline.other_active_alerts,
+            self.pipeline.undelivered_alerts,
+            self.pipeline.intentional_cancellations
+        );
         for source in &self.sources {
             let _ = write!(
                 output,

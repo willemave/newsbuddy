@@ -7,7 +7,9 @@ pub async fn record_source_health(
     persisted: i64,
     new_items: i64,
     error_code: Option<&str>,
-) -> Result<(), sqlx::Error> {
+) -> Result<i64, sqlx::Error> {
+    let observation = sqlx::query_scalar("INSERT INTO source_ingestion_observations (source_key, new_count, error_code) VALUES ($1, $2, $3) RETURNING id")
+        .bind(source_key).bind(new_items).bind(error_code).fetch_one(&mut **tx).await?;
     sqlx::query(
         r"
         INSERT INTO source_ingestion_health (
@@ -37,7 +39,7 @@ pub async fn record_source_health(
     .bind(error_code)
     .execute(&mut **tx)
     .await?;
-    Ok(())
+    Ok(observation)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, sqlx::FromRow)]
@@ -45,13 +47,25 @@ pub struct PipelineHealthCounts {
     pub failing_sources: i64,
     pub overdue_tasks: i64,
     pub terminal_product_mismatches: i64,
+    pub missing_source_checks: i64,
+    pub blocked_artwork: i64,
+    pub growing_media_backlog: i64,
+    pub undelivered_alerts: i64,
+    pub other_active_alerts: i64,
+    pub intentional_cancellations: i64,
 }
 
 impl PipelineHealthCounts {
     #[must_use]
     pub fn total(self) -> usize {
         usize::try_from(
-            self.failing_sources + self.overdue_tasks + self.terminal_product_mismatches,
+            self.failing_sources
+                + self.overdue_tasks
+                + self.terminal_product_mismatches
+                + self.missing_source_checks
+                + self.blocked_artwork
+                + self.growing_media_backlog
+                + self.other_active_alerts,
         )
         .unwrap_or(usize::MAX)
     }
@@ -63,6 +77,19 @@ pub async fn pipeline_health_counts(
 ) -> Result<PipelineHealthCounts, sqlx::Error> {
     sqlx::query_as(r#"
         SELECT
+          (SELECT count(*) FROM pipeline_alerts WHERE active AND alert_key IN ('historical_intake','repeated_output_rejection','queue_no_progress','alert_destination_missing')) AS other_active_alerts,
+          (SELECT count(*) FROM processing_tasks WHERE status = 'failed' AND (error_message LIKE 'incident_cancelled:%' OR error_message = 'incident_2026_09_05_archival_feed_import_cancelled')) AS intentional_cancellations,
+          (SELECT count(*) FROM user_scraper_configs c JOIN users u ON u.id = c.user_id
+           WHERE c.is_active AND u.is_active AND c.scraper_type IN ('atom', 'rss', 'podcast_rss', 'substack', 'reddit', 'aggregator')
+             AND COALESCE(c.updated_at,c.created_at) < timezone('UTC', now()) - interval '45 minutes'
+             AND NOT EXISTS (SELECT 1 FROM source_ingestion_health h WHERE h.config_id = c.id
+                 AND h.last_attempt_at >= timezone('UTC', now()) - interval '45 minutes')) AS missing_source_checks,
+          (SELECT count(*) FROM contents c WHERE c.status = 'awaiting_image'
+             AND c.updated_at < timezone('UTC', now()) - interval '30 minutes'
+             AND NOT EXISTS (SELECT 1 FROM processing_tasks t WHERE t.content_id = c.id
+                 AND t.task_type = 'generate_image' AND t.status IN ('pending', 'processing'))) AS blocked_artwork,
+          (SELECT count(*) FROM pipeline_alerts WHERE alert_key = 'media_growth' AND active) AS growing_media_backlog,
+          (SELECT count(*) FROM pipeline_alerts WHERE delivered_revision < revision) AS undelivered_alerts,
           (SELECT count(*) FROM source_ingestion_health AS health
            LEFT JOIN user_scraper_configs AS config ON config.id = health.config_id
            WHERE consecutive_failures >= 3 AND (health.config_id IS NULL OR config.is_active IS TRUE)) AS failing_sources,

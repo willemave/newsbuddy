@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use newsly_providers::ImageGenerationGateway;
-use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
+use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::PgPool;
 
@@ -21,15 +21,28 @@ pub struct ImageWorkerServices {
     pool: PgPool,
     gateway: ImageGenerationGateway,
     file_store: ImageFileStore,
+    queue: QueueKernel,
+    briefing_debounce_seconds: i64,
+    briefing_batch_minimum: i64,
 }
 
 impl ImageWorkerServices {
-    pub fn new(pool: PgPool, gateway: ImageGenerationGateway, file_store: ImageFileStore) -> Self {
+    pub fn new(
+        pool: PgPool,
+        gateway: ImageGenerationGateway,
+        file_store: ImageFileStore,
+        queue: QueueKernel,
+        briefing_debounce_seconds: i64,
+        briefing_batch_minimum: i64,
+    ) -> Self {
         file_store.start_cleanup(pool.clone());
         Self {
             pool,
             gateway,
             file_store,
+            queue,
+            briefing_debounce_seconds,
+            briefing_batch_minimum,
         }
     }
 }
@@ -113,12 +126,17 @@ async fn execute_image_generation(
 
     HandlerExecution::with_finalizer(
         TaskResult::ok(),
-        ImageFinalizer::new(ImageFinalizationPlan {
-            attempt: prepared.attempt,
-            staged,
-            usage: generated.usage,
-            generated_at: Utc::now(),
-        }),
+        ImageFinalizer::new(
+            ImageFinalizationPlan {
+                attempt: prepared.attempt,
+                staged,
+                usage: generated.usage,
+                generated_at: Utc::now(),
+            },
+            services.queue.clone(),
+            services.briefing_debounce_seconds,
+            services.briefing_batch_minimum,
+        ),
     )
 }
 

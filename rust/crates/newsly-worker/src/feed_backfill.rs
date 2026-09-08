@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use newsly_db::{FeedBackfillEntry, FeedBackfillOrigin, persist_feed_backfill};
 use newsly_providers::{
-    FeedScrapeTarget, ScrapeFailure, ScrapeGateway, ScrapeProviderOutcome, ScrapedItem,
+    FeedEntrySelection, FeedScrapeTarget, ScrapeFailure, ScrapeGateway, ScrapeProviderOutcome,
+    ScrapedItem,
 };
 use newsly_queue::{EnqueueRequest, OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Value, json};
@@ -117,6 +118,7 @@ async fn execute_backfill(
             .provider
             .fetch_feed(&FeedScrapeTarget {
                 known_urls,
+                entry_selection: FeedEntrySelection::SkipKnown,
                 config_id: plan.id,
                 user_id: request.user_id,
                 scraper_type: plan.scraper_type.clone(),

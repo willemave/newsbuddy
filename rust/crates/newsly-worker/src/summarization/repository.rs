@@ -216,13 +216,15 @@ fn complete_readable_summary(
     mut metadata: Map<String, Value>,
     processed_at: NaiveDateTime,
 ) {
-    "completed".clone_into(&mut content.status);
-    if matches!(content.content_type.as_str(), "article" | "podcast")
+    let artwork_pending = matches!(content.content_type.as_str(), "article" | "podcast")
         && runtime_metadata_view(&Value::Object(metadata.clone()))
             .get("image_generated_at")
-            .is_none_or(Value::is_null)
-    {
+            .is_none_or(Value::is_null);
+    if artwork_pending {
+        "awaiting_image".clone_into(&mut content.status);
         set_domain_field(&mut metadata, "artwork_status", Value::from("pending"));
+    } else {
+        "completed".clone_into(&mut content.status);
     }
     content.content_metadata = Value::Object(metadata);
     content.error_message = None;
@@ -493,7 +495,7 @@ mod readiness_tests {
     use sqlx::PgPool;
 
     #[sqlx::test]
-    async fn reusable_summary_is_readable_and_enqueues_briefing_before_artwork(pool: PgPool) {
+    async fn reusable_summary_waits_for_artwork_before_enqueuing_briefing(pool: PgPool) {
         newsly_db::run_migrations(&pool).await.unwrap();
         let user: i64 = sqlx::query_scalar("INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('summary-ready', 'summary@example.test', FALSE, TRUE) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
         for kind in ["article", "podcast"] {
@@ -521,7 +523,7 @@ mod readiness_tests {
             else {
                 panic!("summary should apply")
             };
-            assert_eq!(applied.status, "completed");
+            assert_eq!(applied.status, "awaiting_image");
             crate::summarization::fanout::enqueue_summary_followups(
                 &mut tx,
                 &QueueKernel::new(pool.clone()),
@@ -538,14 +540,44 @@ mod readiness_tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(
-            kinds,
-            ["briefing_refresh", "generate_image", "generate_image"]
-        );
+        assert_eq!(kinds, ["generate_image", "generate_image"]);
         let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(pending, 2);
+        assert_eq!(pending, 0);
+    }
+
+    #[sqlx::test]
+    async fn completed_artwork_enqueues_the_waiting_briefing_source(pool: PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let user: i64 = sqlx::query_scalar("INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('artwork-ready', 'artwork-ready@example.test', FALSE, TRUE) RETURNING id::bigint").fetch_one(&pool).await.unwrap();
+        let content_id: i64 = sqlx::query_scalar("INSERT INTO contents (content_type, url, is_aggregate, status, content_metadata) VALUES ('podcast', 'https://example.com/ready-podcast', FALSE, 'completed', $1) RETURNING id::bigint")
+            .bind(json!({"summary": {"title":"Useful summary"}, "image_generated_at":"2026-09-05T12:00:00Z", "image_url":"/static/images/content/ready.png", "thumbnail_url":"/static/images/thumbnails/ready.png"})).fetch_one(&pool).await.unwrap();
+        sqlx::query("INSERT INTO content_status (user_id, content_id, status, created_at, updated_at) VALUES ($1::bigint::integer, $2::bigint::integer, 'inbox', now(), now())").bind(user).bind(content_id).execute(&pool).await.unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        crate::summarization::fanout::enqueue_briefing_followups(
+            &mut tx,
+            &QueueKernel::new(pool.clone()),
+            content_id,
+            0,
+            1,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        let pending: (String, i64) =
+            sqlx::query_as("SELECT lens_key, source_id::bigint FROM briefing_pending_sources")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pending, ("podcasts".to_owned(), content_id));
+        let task_type: String = sqlx::query_scalar("SELECT task_type FROM processing_tasks")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(task_type, "briefing_refresh");
     }
 }

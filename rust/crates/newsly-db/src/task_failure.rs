@@ -384,8 +384,7 @@ async fn settle_failed_artwork(
     sqlx::query(
         r"
         UPDATE contents
-        SET status = CASE WHEN status = 'awaiting_image' THEN 'completed' ELSE status END,
-            content_metadata = $2,
+        SET content_metadata = $2,
             updated_at = timezone('UTC', clock_timestamp())
         WHERE id::bigint = $1
         ",
@@ -395,4 +394,37 @@ async fn settle_failed_artwork(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[sqlx::test]
+    async fn terminal_artwork_failure_keeps_long_form_content_blocked(pool: sqlx::PgPool) {
+        crate::run_migrations(&pool).await.unwrap();
+        let content_id: i64 = sqlx::query_scalar(
+            "INSERT INTO contents (content_type, url, is_aggregate, status, content_metadata) VALUES ('podcast', 'https://example.com/blocked-podcast', FALSE, 'awaiting_image', '{\"summary\":{\"title\":\"Ready\"}}'::json) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut transaction = pool.begin().await.unwrap();
+        settle_failed_artwork(&mut transaction, 1, Some(content_id), "provider exhausted")
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+
+        let (status, metadata): (String, serde_json::Value) = sqlx::query_as(
+            "SELECT status, content_metadata::jsonb FROM contents WHERE id::bigint = $1",
+        )
+        .bind(content_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "awaiting_image");
+        assert_eq!(metadata["artwork_status"], "failed");
+        assert_eq!(metadata["artwork_error"], "provider exhausted");
+    }
 }

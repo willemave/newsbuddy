@@ -71,7 +71,7 @@ struct SettingsLibrarySection: View {
                         )
                     )
                 } label: {
-                    SettingsRow(icon: "clock.arrow.circlepath", title: "Processing") {
+                    SettingsRow(icon: "clock.arrow.circlepath", title: "Feed Status") {
                         HStack(spacing: 8) {
                             if badgeStatsStore.processingCount > 0 {
                                 CountBadge(

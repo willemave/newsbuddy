@@ -9,21 +9,6 @@ enum NarrationTarget: Hashable {
     case audioEpisode(Int)
 }
 
-enum BriefingNarrationProgram {
-    static let articles = "articles"
-    static let podcasts = "podcasts"
-    static let news = "news"
-
-    static func scope(for key: String) -> APIBriefingNarrationScope? {
-        switch key {
-        case articles: .article_tier
-        case podcasts: .podcast_tier
-        case news: .news_program
-        default: nil
-        }
-    }
-}
-
 struct NarrationPlaybackMetadata: Equatable {
     let title: String
     let collectionTitle: String
@@ -69,7 +54,7 @@ extension APIBriefingNarrationResponse {
         case .article_tier: "Articles"
         case .podcast_tier: "Podcasts"
         case .news_program: "News Briefing"
-        case nil: title
+        case .lens, nil: title
         }
     }
 }

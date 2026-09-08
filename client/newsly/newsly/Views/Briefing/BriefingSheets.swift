@@ -131,7 +131,7 @@ struct BriefingSafariItem: Identifiable {
 }
 
 struct BriefingNarrationChapterSheetItem: Identifiable {
-    let programKey: String
+    let lensKey: String
     let episodeGroupID: String
 
     var id: String { episodeGroupID }

@@ -87,6 +87,13 @@ class ScraperConfigService {
         return response
     }
 
+    func feedHistory(configId: Int, status: String, offset: Int) async throws -> APIFeedHistoryResponse {
+        try await client.request(
+            APIEndpoints.scraperConfig(id: configId) + "/history",
+            queryItems: [URLQueryItem(name: "status", value: status), URLQueryItem(name: "offset", value: String(offset))]
+        )
+    }
+
     func deleteConfig(configId: Int) async throws {
         try await client.requestVoid(APIEndpoints.scraperConfig(id: configId), method: .delete)
     }

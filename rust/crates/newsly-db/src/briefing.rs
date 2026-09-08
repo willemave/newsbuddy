@@ -1,18 +1,15 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
-use serde_json::{Value, json};
+use serde_json::Value;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
-use crate::briefing_refresh::load_eligible_sources_for_keys;
-
 mod narration;
+#[cfg(test)]
+mod tests;
 
-use narration::{
-    document_narration_plans, episode_group_id, legacy_narration_plan, narration_chapter_plans,
-    source_snapshot, stable_hash,
-};
+pub use narration::{prepare_briefing_narration, retry_briefing_narration};
 
 const DEFAULT_MASTHEAD_TITLE: &str = "The Unread Times";
 const DEFAULT_MASTHEAD_DECK: &str = "A fresh edition will appear as unread sources arrive.";
@@ -190,6 +187,7 @@ pub enum PrepareNarrationOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BriefingNarrationSelection {
     Lens(String),
+    AdaptedLens(String),
     ArticleTier,
     PodcastTier,
     NewsProgram,
@@ -659,259 +657,8 @@ pub async fn record_briefing_dig_usage(
     Ok(())
 }
 
-pub async fn prepare_briefing_narration(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: i64,
-    selection: &BriefingNarrationSelection,
-    chaptered: bool,
-) -> Result<PrepareNarrationOutcome, BriefingRepositoryError> {
-    let (lens_key, tier, program_key, program_title, scope) = match selection {
-        BriefingNarrationSelection::Lens(key) => {
-            (Some(key.as_str()), None, key.as_str(), "Briefing", None)
-        }
-        BriefingNarrationSelection::ArticleTier => (
-            None,
-            Some("longform"),
-            "articles",
-            "Articles",
-            Some("article_tier"),
-        ),
-        BriefingNarrationSelection::PodcastTier => (
-            None,
-            Some("audio"),
-            "podcasts",
-            "Podcasts",
-            Some("podcast_tier"),
-        ),
-        BriefingNarrationSelection::NewsProgram => (
-            None,
-            Some("news"),
-            "news",
-            "News Briefing",
-            Some("news_program"),
-        ),
-    };
-    let lenses = sqlx::query_as::<_, BriefingLensProjection>(
-        r#"
-        SELECT id::bigint AS id, key, tier, title, deck, position
-        FROM briefing_lenses
-        WHERE user_id::bigint = $1 AND status = 'active'
-          AND ($2::text IS NULL OR key = $2)
-          AND ($3::text IS NULL OR tier = $3)
-        ORDER BY position, id
-        "#,
-    )
-    .bind(user_id)
-    .bind(lens_key)
-    .bind(tier)
-    .fetch_all(&mut **transaction)
-    .await?;
-    if lenses.is_empty() && lens_key.is_some() {
-        return Ok(PrepareNarrationOutcome::LensNotFound);
-    }
-    if lenses.is_empty() {
-        return Ok(PrepareNarrationOutcome::Empty);
-    }
-    let lens_ids = lenses.iter().map(|lens| lens.id).collect::<Vec<_>>();
-    let segment_rows = sqlx::query_as::<_, SegmentWithLensRow>(
-        r#"
-        SELECT id::bigint AS id, lens_id::bigint AS lens_id, created_at, status,
-               narration_text, blocks::jsonb AS blocks, source_keys::jsonb AS source_keys
-        FROM briefing_segments
-        WHERE lens_id::bigint = ANY($1::bigint[]) AND status IN ('active', 'degraded')
-        ORDER BY lens_id, created_at DESC, id DESC
-        "#,
-    )
-    .bind(&lens_ids)
-    .fetch_all(&mut **transaction)
-    .await?;
-    let mut segments_by_lens = HashMap::<i64, Vec<BriefingSegmentProjection>>::new();
-    for row in segment_rows {
-        segments_by_lens
-            .entry(row.lens_id)
-            .or_default()
-            .push(segment_from_parts(
-                row.id,
-                row.created_at,
-                row.status,
-                row.narration_text,
-                row.blocks,
-                &row.source_keys,
-            ));
-    }
-    let ordered_segments = lenses
-        .iter()
-        .flat_map(|lens| segments_by_lens.remove(&lens.id).unwrap_or_default())
-        .collect::<Vec<_>>();
-    let source_keys = dedupe_source_keys(
-        ordered_segments
-            .iter()
-            .flat_map(|segment| &segment.source_keys),
-    );
-    let sources = load_eligible_sources_for_keys(transaction, user_id, &source_keys).await?;
-    let mut plans = if !chaptered {
-        legacy_narration_plan(&ordered_segments)
-    } else if scope == Some("article_tier") || scope == Some("podcast_tier") {
-        document_narration_plans(&ordered_segments)
-    } else {
-        narration_chapter_plans(&ordered_segments, 5 * 60)
-    };
-    for plan in &mut plans {
-        plan.source_keys.retain(|key| sources.contains_key(key));
-    }
-    plans.retain(|plan| !plan.source_keys.is_empty());
-    if plans.is_empty() {
-        return Ok(PrepareNarrationOutcome::Empty);
-    }
-    let prompt_version = if scope.is_some() {
-        4
-    } else if chaptered {
-        3
-    } else {
-        2
-    };
-    let first_lens = &lenses[0];
-    let display_title = if scope.is_some() {
-        program_title.to_owned()
-    } else {
-        first_lens.title.clone()
-    };
-    let episode_group_id = chaptered.then(|| {
-        episode_group_id(
-            program_key,
-            &display_title,
-            scope,
-            prompt_version,
-            &plans,
-            &sources,
-        )
-    });
-    let chapter_count = plans.len();
-    let mut episodes = Vec::with_capacity(chapter_count);
-    for plan in plans {
-        let snapshot = source_snapshot(
-            program_key,
-            &display_title,
-            scope,
-            episode_group_id.as_deref(),
-            chapter_count,
-            &plan,
-            &sources,
-            chaptered,
-        );
-        let input_hash = if let Some(group_id) = &episode_group_id {
-            stable_hash(&json!({
-                "prompt_version": prompt_version,
-                "episode_group_id": group_id,
-                "chapter_index": plan.index,
-                "source_snapshot": snapshot,
-            }))
-        } else {
-            stable_hash(&json!({
-                "prompt_version": prompt_version,
-                "source_snapshot": snapshot,
-            }))
-        };
-        let title = if scope == Some("article_tier") || scope == Some("podcast_tier") {
-            plan.source_keys
-                .first()
-                .and_then(|key| sources.get(key))
-                .map_or_else(
-                    || format!("Chapter {}", plan.index + 1),
-                    |source| source.title.clone(),
-                )
-        } else if chaptered {
-            format!("{} — Chapter {}", display_title, plan.index + 1)
-        } else {
-            format!("{} briefing", first_lens.title)
-        };
-        let estimated_duration = if chaptered {
-            plan.duration_seconds
-        } else {
-            i32::max(
-                30,
-                i32::try_from(plan.narration_text.len() / 14).unwrap_or(i32::MAX),
-            )
-        };
-        let script = scope.is_none().then(|| {
-            json!({
-                "title": title,
-                "estimated_duration_seconds": estimated_duration,
-                "turns": [{"speaker": "host", "text": plan.narration_text}],
-            })
-        });
-        let script_text = scope.is_none().then_some(plan.narration_text.as_str());
-        let model = scope.is_none().then_some("deterministic");
-        let row = sqlx::query_as::<_, AudioEpisodeRow>(
-            r#"
-            INSERT INTO audio_episodes (
-                user_id, kind, status, title, input_hash, episode_group_id,
-                chapter_index, source_item_ids, source_snapshot, script,
-                script_text, prompt_version, model, audio_content_type,
-                duration_seconds, share_enabled, created_at, updated_at
-            ) VALUES (
-                $1::bigint::integer, 'briefing_narration', 'pending', $2, $3,
-                $4, $5, '[]'::jsonb, $6::jsonb, $7::jsonb, $8, $9,
-                $10, 'audio/mpeg', $11, FALSE,
-                timezone('UTC', now()), timezone('UTC', now())
-            )
-            ON CONFLICT (user_id, kind, input_hash) DO UPDATE SET
-                title = EXCLUDED.title,
-                episode_group_id = EXCLUDED.episode_group_id,
-                chapter_index = EXCLUDED.chapter_index,
-                source_item_ids = EXCLUDED.source_item_ids,
-                source_snapshot = EXCLUDED.source_snapshot,
-                script = CASE WHEN audio_episodes.status = 'completed' THEN audio_episodes.script
-                              ELSE EXCLUDED.script END,
-                script_text = CASE WHEN audio_episodes.status = 'completed' THEN audio_episodes.script_text
-                                   ELSE EXCLUDED.script_text END,
-                prompt_version = EXCLUDED.prompt_version,
-                model = CASE WHEN audio_episodes.status = 'completed' THEN audio_episodes.model
-                             ELSE EXCLUDED.model END,
-                status = CASE WHEN audio_episodes.status = 'failed' THEN 'pending'
-                              ELSE audio_episodes.status END,
-                error_message = CASE WHEN audio_episodes.status = 'failed' THEN NULL
-                                     ELSE audio_episodes.error_message END,
-                audio_storage_path = CASE WHEN audio_episodes.status = 'failed' THEN NULL
-                                          ELSE audio_episodes.audio_storage_path END,
-                started_at = CASE WHEN audio_episodes.status = 'failed' THEN NULL
-                                  ELSE audio_episodes.started_at END,
-                completed_at = CASE WHEN audio_episodes.status = 'failed' THEN NULL
-                                    ELSE audio_episodes.completed_at END,
-                duration_seconds = CASE
-                    WHEN audio_episodes.status = 'completed' THEN audio_episodes.duration_seconds
-                    ELSE EXCLUDED.duration_seconds
-                END,
-                updated_at = timezone('UTC', now())
-            RETURNING
-                id::bigint AS id, kind, status, title,
-                source_content_id::bigint AS source_content_id,
-                source_item_ids::jsonb AS source_item_ids,
-                source_snapshot::jsonb AS source_snapshot, script_text,
-                audio_storage_path, duration_seconds, error_message,
-                episode_group_id, chapter_index, created_at, updated_at
-            "#,
-        )
-        .bind(user_id)
-        .bind(&title)
-        .bind(input_hash)
-        .bind(episode_group_id.as_deref())
-        .bind(chaptered.then_some(plan.index))
-        .bind(snapshot)
-        .bind(script)
-        .bind(script_text)
-        .bind(prompt_version)
-        .bind(model)
-        .bind(chaptered.then_some(plan.duration_seconds))
-        .fetch_one(&mut **transaction)
-        .await?;
-        episodes.push(row.into());
-    }
-    Ok(PrepareNarrationOutcome::Ready(episodes))
-}
-
-pub async fn load_briefing_narration(
-    pool: &PgPool,
+pub async fn load_briefing_narration<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
     user_id: i64,
     episode_group_id: &str,
 ) -> Result<Vec<AudioEpisodeProjection>, BriefingRepositoryError> {
@@ -931,7 +678,7 @@ pub async fn load_briefing_narration(
     )
     .bind(user_id)
     .bind(episode_group_id)
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await?
     .into_iter()
     .map(Into::into)
@@ -1499,6 +1246,8 @@ fn json_string_array(value: &Value) -> Vec<String> {
 
 #[derive(Debug, Error)]
 pub enum BriefingRepositoryError {
+    #[error("invalid Briefing narration metadata")]
+    InvalidNarration(#[from] newsly_domain::InvalidNarrationMetadata),
     #[error("briefing database operation failed")]
     Sqlx(#[from] sqlx::Error),
     #[error("Briefing cursor belongs to another Lens")]

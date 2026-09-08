@@ -9,6 +9,11 @@ use super::{
 };
 use crate::briefing_refresh::BriefingRefreshSource;
 
+mod program;
+use program::NarrationProgram;
+mod repository;
+pub use repository::{prepare_briefing_narration, retry_briefing_narration};
+
 #[derive(Debug, Clone)]
 pub(super) struct NarrationPlan {
     pub(super) index: i32,
@@ -104,16 +109,12 @@ fn plan_from_segments(index: i32, segments: &[&BriefingSegmentProjection]) -> Na
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn source_snapshot(
-    program_key: &str,
-    program_title: &str,
-    scope: Option<&str>,
+fn source_snapshot(
+    program: &NarrationProgram<'_>,
     episode_group_id: Option<&str>,
     chapter_count: usize,
     plan: &NarrationPlan,
     sources: &HashMap<String, BriefingRefreshSource>,
-    chaptered: bool,
 ) -> Value {
     let (content_ids, news_item_ids) = parse_source_ids(&plan.source_keys);
     let items = plan
@@ -127,10 +128,10 @@ pub(super) fn source_snapshot(
             "kind".to_owned(),
             Value::String(BRIEFING_NARRATION_KIND.to_owned()),
         ),
-        ("lens_key".to_owned(), Value::String(program_key.to_owned())),
+        ("lens_key".to_owned(), Value::String(program.key.to_owned())),
         (
             "lens_title".to_owned(),
-            Value::String(program_title.to_owned()),
+            Value::String(program.title.to_owned()),
         ),
         ("source_count".to_owned(), json!(plan.source_keys.len())),
         ("segment_ids".to_owned(), json!(plan.segment_ids)),
@@ -141,18 +142,21 @@ pub(super) fn source_snapshot(
             json!({"content_ids": content_ids, "news_item_ids": news_item_ids}),
         ),
     ]);
-    if let Some(scope) = scope {
-        snapshot.insert("scope".to_owned(), Value::String(scope.to_owned()));
+    if let Some(scope) = program.metadata.scope {
+        snapshot.insert("scope".to_owned(), json!(scope));
     } else {
         snapshot.insert(
             "script_text".to_owned(),
             Value::String(plan.narration_text.clone()),
         );
     }
-    if chaptered {
+    if let Some(tier) = program.metadata.lens_tier {
+        snapshot.insert("lens_tier".to_owned(), json!(tier));
+    }
+    if let Some(group_id) = episode_group_id {
         snapshot.insert(
             "episode_group_id".to_owned(),
-            Value::String(episode_group_id.unwrap_or_default().to_owned()),
+            Value::String(group_id.to_owned()),
         );
         snapshot.insert("chapter_index".to_owned(), json!(plan.index));
         snapshot.insert("chapter_count".to_owned(), json!(chapter_count));
@@ -176,27 +180,28 @@ fn narration_source_value(source: &BriefingRefreshSource) -> Value {
     })
 }
 
-pub(super) fn episode_group_id(
-    program_key: &str,
-    program_title: &str,
-    scope: Option<&str>,
-    prompt_version: i32,
+fn episode_group_id(
+    program: &NarrationProgram<'_>,
     plans: &[NarrationPlan],
     sources: &HashMap<String, BriefingRefreshSource>,
 ) -> String {
-    stable_hash(&json!({
-        "prompt_version": prompt_version,
+    let mut input = json!({
+        "prompt_version": program.prompt_version,
         "kind": BRIEFING_NARRATION_KIND,
-        "program_key": program_key,
-        "program_title": program_title,
-        "scope": scope,
+        "program_key": program.key,
+        "program_title": program.title,
+        "scope": program.metadata.scope,
         "chapters": plans.iter().map(|plan| json!({
             "chapter_index": plan.index,
             "segment_ids": plan.segment_ids,
             "source_keys": plan.source_keys,
             "sources": plan.source_keys.iter().filter_map(|key| sources.get(key)).map(narration_source_value).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
-    }))
+    });
+    if let Some(tier) = program.metadata.lens_tier {
+        input["lens_tier"] = json!(tier);
+    }
+    stable_hash(&input)
 }
 
 fn estimate_duration_seconds(text: &str) -> i32 {

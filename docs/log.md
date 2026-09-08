@@ -27,6 +27,73 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-07 — `main` — Briefing audio player design pass
+
+- **Status:** Implemented; uncommitted.
+- **Scope:** iOS only. `BriefingChromeViews` (new `BriefingNowPlayingPanel` replaces `BriefingNarrationChapterControls`), `BriefingView` listen panel wiring, `BriefingChromeCollapse` height measurement, `NarrationPlaybackControlRow` (shared play button, speed menu, scrubber; also used by podcast detail), and a `briefing-player` E2E visual state.
+- **Decisions:** The player has two shapes. At the top of a lens it is a card: filled play disc, chapter kicker plus title (opens the chapter list), one speed menu instead of four pills, and prev / scrubber / next. Once the masthead is compact it becomes a one-line bar (play, title, chapter and time left, next, hairline progress). Tapping the bar reopens the card while scrolled, and the next scroll-down retires it, mirroring the tap-opened category strip. The minimized shrink is derived synchronously from the two measured natural heights and fed into the expanded-chrome measurement so the page's top inset never changes mid-scroll; the height swap is deliberately not animated because an animated height with instant compensation made the scroll probe read the inset dip as a scroll and immediately retired the pin. Playback views render from a value snapshot rather than reaching into the service, which keeps previews and visual states backend-free.
+- **Changes:** New panel and shared control pieces; container accessibility identifier removed from the panel because it overrode every child identifier; podcast row restyled to the same vocabulary with an unchanged call site. Follow-up the same day: both shapes gained a close button (`briefing.narration.dismiss`) backed by `BriefingNarrationController.stopPlayback(for:)`, which invalidates the playback intent, cancels the lens's in-flight chapter preparation (now held as a task per lens), stops the service, and clears the error, so the chrome returns to rest even mid-preparation. The cached manifest is kept.
+- **Validation:** Debug Simulator build; `briefing-player` visual state screenshots for expanded, minimized, preparing, and podcast row; real app against the local Rust API showed the card in the header, the bar after scrolling, tap-to-expand while scrolled, and re-minimizing on the next scroll. Focused iOS unit tests (narration controller, playback service, briefing view model, read marking) all passed (`xcodebuild test` reported TEST SUCCEEDED). Dismiss: two new controller tests cover stopping while playing and cancelling while preparing; the real app cleared the panel and restored the masthead Play button when closed mid-preparation.
+- **Cleanup:** Same-day pass: remaining-time math lives once on `NarrationPlaybackSnapshot`, the scrubber thumb size is computed once, the controller's per-lens preparation task no longer needs an identity check (the preparing guard already serialises it), and the visual state's six height states collapsed into one small host view. Narration controller and speed-option tests re-ran green.
+- **Remaining:** Playing-state chapter navigation was only exercised in the visual state; local workers were not started, so no audio was generated. Consider a Maestro baseline for the `briefing-player` visual state.
+- **Commits:** Uncommitted.
+
+### 2026-09-07 — `main` — Clean up active-lens Briefing audio
+
+- **Status:** Cleanup and focused validation complete; uncommitted.
+- **Scope:** Active-lens audio diff, with read-only reviews of database planning and iOS playback; unrelated worktree changes excluded.
+- **Changes:** Removed the redundant snapshot chapter flag and empty group-ID fallback, skipped the duplicate eligibility pass for already-filtered adapted-lens plans, and renamed the chapter sheet's remaining `programKey` to `lensKey`.
+- **Decisions:** Preserve legacy request meanings and historical manifest scope labels for installed clients. Intended audio behavior is unchanged.
+- **Validation:** Seven database narration tests and 15 iOS Simulator narration controller tests passed. Warning-denied database Clippy (all targets), formatting, and whitespace checks passed. Evidence: `test-results/active-lens-audio/cleanup-*.log`. Prior full feature evidence remains in the implementation entry below.
+- **Remaining:** No further cleanup identified within this scope. The unrelated scraper configuration size violation from the feature validation remains outside this cleanup. No commit, push, or deployment performed.
+- **Commits:** Uncommitted.
+
+### 2026-09-07 — `main` — Implement active-lens Briefing audio
+
+- **Status:** Implementation and focused local validation complete; uncommitted and undeployed.
+- **Scope:** Adapted-lens narration contract, source planning and snapshots, provider prompt selection, iOS request/session identity, and regression tests.
+- **Decisions:** Scope `lens` requires the actual lens key; server-derived tier selects News or document adaptation. Legacy request meanings and completed audio remain intact. New groups use prompt version 5 and include lens identity and tier. Exclude ineligible sources before planning adapted-lens chapter windows.
+- **State trace:** A plays; browsing B only reads B's session. Play B advances the playback intent and stops A while B prepares. A's late preparation/completion cannot take over B. B's completion marks B's stored chapter keys and stops at B's queue boundary.
+- **Validation:** 83 iOS Simulator tests and 14 focused Rust tests passed, including three isolated PostgreSQL tests for complete lens coverage, eligibility, reuse, compatibility, completion read marks, empty/unauthorized lenses, and document chapters. API/worker compile, warning-denied Clippy for affected packages/all targets, formatting, public contract drift, iOS wire boundaries, and whitespace checks passed. Moved narration preparation into its repository module to keep Briefing within its size limit. Evidence: `test-results/active-lens-audio/`.
+- **Remaining:** The repository-wide architecture guard still fails on the unrelated pre-existing `rust/crates/newsly-api/src/scraper_configs.rs` size violation (1206 lines; limit 1122). No live provider audio, physical-device validation, commit, push, deployment, or Apple distribution performed.
+- **Commits:** Uncommitted.
+
+### 2026-09-07 — `main` — Restrict Briefing audio design to the active lens
+
+- **Status:** Design update complete; implementation pending.
+- **Scope:** Active-lens audio design, supersession notice on the September 1 design, Briefing B16, and audio laws AV4/AV6.
+- **Decisions:** Play captures only the selected lens's complete eligible unread source set. Preserve adapted scripts, chapter generation, chapter completion read marks, and background playback. Browsing another lens preserves playback; its Play action explicitly switches queues.
+- **Validation:** Reviewed the design against the current client program mapping, repository selection, provider prompts, and completion handler; checked documentation whitespace. No runtime tests run for this documentation-only change.
+- **Remaining:** Implement the adapted-lens contract, client session identity, scoped planning, and focused acceptance tests. The current implementation still selects tier-wide programs.
+- **Commits:** Uncommitted.
+
+### 2026-09-06 — `main` — Implement ingestion regression prevention
+
+- **Status:** Core safeguards implemented and verified locally; uncommitted and undeployed.
+- **Scope:** Integrate deployed feed policy and saved lifecycle test; canonical CommonMark citations; bounded Briefing correction and independent attempt accounting; durable monitoring; audited bounded incident/artwork operations.
+- **Decisions:** Preserve concurrent artwork and iOS work. Historical image work requires reviewed explicit IDs, not schema deployment. External alert delivery remains at-least-once; no actual destination configured or messages sent.
+- **Validation:** 303 affected-package tests passed (one existing ignored test); all 13 exact-name regression gate checks passed. Warning-denied Clippy across affected packages, formatting, architecture/module-size guards, public-contract drift checks, and whitespace checks passed. Restoring scheduled `SkipKnown` deliberately failed the persisted feed test with both archive URLs; `StopAtKnown` was restored and the test passed. Tests cover user-state preservation, later-job correction budgets and changed-input recovery, rejected-attempt accounting, durable alert retry/recovery and HTTP failures, incident replay, bounded migration inventory, and real artwork file/readiness/fanout finalization.
+- **Remaining:** Reconcile deployed hotfix ancestry before committing; obtain release authorization, run the complete exact-SHA/live-smoke release workflow, configure the real alert destination, and observe production afterward. Additional discussion lifecycle and concurrent/crash fault-injection scenarios from the broader review remain documented in `docs/runbooks/ingestion-regression-prevention.md`. No production mutation, commit, push, or deployment performed.
+
+### 2026-09-06 — `main` — Review the archive regression and plan prevention
+
+- **Status:** Review and proposed plan complete; implementation not started.
+- **Scope:** Scheduled archive traversal, incident cleanup, saved integration tests, discussion/Briefing validation, pending artwork gating, usage accounting, and monitoring.
+- **Findings:** Traced archive traversal to shared catch-up semantics in `d1c49bf5`, corrected by deployed `e0e8d39a`. Located the stronger uncommitted test in `/private/tmp/newsly-feed-hotfix.R2P0Wy`. Reproduced a separate Briefing parser disagreement for bracketed titles; all five incident source titles contain brackets. Rejected composition attempts can lose usage accounting. The pending artwork migration matches 1,367 content candidates before ownership checks.
+- **Changes:** Added `docs/initiatives/2026-09-06-ingestion-regression-prevention-design.md` with confidence-qualified causes, current test/law coverage, six implementation slices, monitoring thresholds, and release acceptance criteria.
+- **Validation:** Fresh production snapshot at 13:35 UTC: zero overdue tasks, failing sources, or terminal-product mismatches; worker/scheduler image still `e0e8d39a`; alert destination unset. Fifteen feed/provider tests, three discussion schema/retry tests, and the saved PostgreSQL feed integration test passed. A temporary bracketed-title probe passed provider validation and failed worker normalization with `MissingCoverage`. The integration run required an isolated Cargo target after the shared target failed to resolve its new provider export.
+- **Remaining:** Review the proposal, integrate the prepared tests, implement the scoped fixes, and run the authorized release workflow. No canonical laws, application code, or production state changed in this turn; no commit or push.
+
+### 2026-09-05 — `main` — Protect generated artwork composition in mobile detail heroes
+
+- **Status:** Implemented locally; not committed or deployed.
+- **Scope:** Long-form generated-image prompt and its content-presentation invariant.
+- **Decisions:** Keep the existing 16:9 provider output and detail hero; guide generation around the actual phone crop and lower title/scrim overlay instead of changing image rendering for all source artwork.
+- **Changes:** Direct the model to use the full canvas while keeping the focal subject and essential details in the central upper region, continuing only nonessential environment through the lower overlay zone, and treating side edges as expendable.
+- **Validation:** All three focused image-prompt tests passed with checked SQLx metadata; Rust formatting and repository diff checks passed.
+- **Remaining:** Existing generated images require an explicit regeneration to pick up the new prompt; no paid generation canary was run.
+- **Commits:** Uncommitted.
+
 ### 2026-09-05 — `main` — Isolate release-gate Simulator state
 
 - **Status:** Implemented; full release gate pending.
@@ -2202,6 +2269,87 @@ Use this append-only log to preserve implementation context across sessions and 
 
 - **Scope:** Removed the second landing subtitle sentence at Willem's request; retained “Your quiet news companion.”
 - **Validation:** Verified the source string and whitespace diff. Copy-only change; no build or tests run.
+### 2026-09-05 — `main` — Restore artwork gate for long-form Briefing
+
+- **Status:** Implemented locally; not committed or deployed.
+- **Scope:** Article/podcast summary readiness, image finalization fanout, terminal image failure, source eligibility, and repair migration for text-only Briefing segments.
+- **Decisions:** Keep summarized long-form content in `awaiting_image`; only successful exact-lease image publication marks it `completed` and enqueues its Briefing refresh. Terminal artwork failure remains blocked.
+- **Changes:** Restored blocking artwork readiness, added image-to-Briefing fanout, required image metadata at Briefing source boundaries, and added a migration that retires affected segments and requeues missing images.
+- **Validation:** Rust formatting; warning-denied Clippy for `newsly-db` and `newsly-worker`; all 66 database and 119 worker library tests plus two worker binary tests passed.
+- **Remaining:** Deployment and live regeneration are required before production Briefing changes.
+- **Commits:** Uncommitted.
+
+### 2026-09-05 — `main` — App Store launch listing and screenshots
+
+- **Status:** Listing updates saved; screenshot upload blocked on local browser access.
+- **Scope:** App Store Connect app 6748866809 and ignored capture artifacts under `test-results/app-store-2026-09-05/`.
+- **Changes:** Saved Newsbuddy: News & Learning, free pricing, and US-only availability. Built the current iOS app and captured four 1320 × 2868 native screenshots using a separate local demo database with NASA/EPA-linked content.
+- **Validation:** Apple confirmed the name save and one-country availability; native build succeeded; all four images visually inspected and dimensions verified.
+- **Remaining:** Chrome file upload requires extension file-URL access; native fallback was blocked by locked Mac. Screenshots are not uploaded. Age-rating decision, privacy disclosures, content rights, review access/contact, developer agreement, and eligible App Store build remain outstanding. See capture README for resume details.
+- **Commits:** No commit or push for this task; preserve concurrent unrelated work.
+
+### 2026-09-05 — `main` — Revise launch screenshot selection
+- Replaced the Briefing capture with a shorter introduction and three visible key points; selected Briefing and Knowledge only, excluding Chat and article detail per user feedback.
+- Verified native iPhone 17 Pro Max capture at 1320 × 2868 using the existing newsly build and isolated demo database. No app code changed; App Store upload remains pending.
+
+### 2026-09-05 — `main` — Richer reusable launch briefing fixtures
+- Added `scripts/fixtures/launch_briefing.sql` and usage notes: eight curated source-linked stories across Space (4), Earth (2), and Energy (2), with readable context and takeaways plus matching article summaries.
+- Guarded transactional overlay targets only disposable launch databases with the appstore-launch seed. Preserves normal minimal E2E fixtures; no providers or production changes.
+- Applied successfully, verified replacement on rerun, and checked topic counts plus native scrolling into subsequent stories in the existing newsly / iPhone 17 Pro Max Simulator build. Updated launch capture locally; upload remains pending.
+
+### 2026-09-05 — `main` — App Store screenshots uploaded
+- Uploaded revised full Briefing and Knowledge PNGs in Chrome after file access was enabled. Verified two screenshots saved and reordered Briefing first; 6.5-inch inherits 6.9-inch assets.
+- Rechecked release build selector: all listed 212–221 disabled. Requested review contact/sign-in information and age-rating decision. Privacy questionnaire inspected without saving incomplete declarations; remaining launch blockers persist. No submission or release.
+
+### 2026-09-05 — `main` — Save launch age rating and review sign-in note
+- Saved Apple's calculated 16+ rating without override as authorized; declared web access/shareable UGC and occasional general-news mature topics.
+- Saved and verified review note explaining Apple-only sign-in with no demo username/password. Review contact details still required. No review submission or release.
+
+### 2026-09-05 — App Store privacy and public archive setup (main)
+- Published account-linked App Privacy declarations and saved content rights in App Store Connect.
+- Updated Xcode Cloud Default newsly archive to App Store Connect distribution; build 222 succeeded and is attached to version 1.0. Manual release retained.
+- Apple submission validation still requires demo username/password despite Apple-only login. Explanatory placeholders were blocked by automatic approval review and removed unsaved. Agreement acceptance remains with the user; nothing submitted or released. No commit or push.
+
+### 2026-09-05 — App Store review draft validated (main)
+- With explicit user approval, saved Apple-only login guidance in required reviewer fields.
+- Add for Review passed; draft lists iOS 1.0 (222) as Item Ready to Submit. Final submission remains unclicked; manual release retained.
+
+### 2026-09-05 — App Review test guidance (main)
+- Added reviewer checklist to App Store Connect notes for Apple sign-in, onboarding, Briefing/source links, AI questions, Knowledge/Learning Decks, audio, and share-sheet import. Included processing/network expectations and free access. Draft remains unsubmitted.
+
+### 2026-09-06 — `main` — Restore newspaper-style News briefing prompt
+- Restored concise title-led News guidance and early descriptive links; removed the unified-account instruction that encouraged thematic padding. Model, prompt version, and deep-source guidance remain unchanged.
+- Updated B4 and the existing prompt regression test. Preserved concurrent edits in these files.
+- Validation: nine focused provider tests passed; cargo fmt, provider Clippy with warnings denied, public contract drift check, and git diff --check passed. Live model output has not been evaluated. No commit, deployment, or saved-segment regeneration.
+
+## 2026-09-06 — Feed status and processing history (main)
+
+- Approved compact feed list with statistics only; removed predictions and global unread summary from Processing Stats and renamed it Feed Status.
+- Added owned, paginated feed history with archived/read items, status filters, active pipeline stages, and reader navigation. Totals preserve inbox-only unread semantics; successful completion timestamps exclude failed/skipped outcomes.
+- Running work requires an unexpired lease; queued and running counts deduplicate items. Reading estimates use source-body size, not RSS excerpt word counts.
+- Added the gateway ownership migration for `getFeedHistory`; use UTC lease comparisons and a single activity snapshot so queued/running counts cannot race into negative values.
+- Validation passed: 1 PostgreSQL integration test, 8 public-contract tests, 8 Swift tests, 6 live local API checks, warning-denied affected-package Clippy, contract drift, formatting, and diff checks. Native `newsly` build and iPhone 17 Pro Simulator navigation verified article/podcast histories, reader opening, Issues filter, and accessibility Extra Large text. Fixed a truncated count line found in visual QA.
+- Evidence: `test-results/feed-status/` contains fixture screenshots, API results, and validation logs. Simulator checks used an isolated local database; no production data or queues were changed. The full release gate and deployment are outside this implementation. No commit or push.
+
+### 2026-09-06 — Feed status visual refinement (main)
+- Redesigned the stats-only feed list using the app's warm surfaces, serif source names, article/podcast glyphs, clear last-processed and total metrics, and a separate activity line. Removed repeated zero activity counts from idle rows.
+- Section headings show feed counts. Accessibility text sizes stack the metrics vertically and allow source names and activity text to wrap.
+- Validation passed: native `newsly` build, iPhone 17 Pro Simulator inspection in light/dark and accessibility Extra Large text, feed-to-history navigation, and diff checks. Screenshots: `test-results/feed-status/list-redesign-{light,dark,large-text}.jpg`. No API behavior changes or release requested.
+
+### 2026-09-06 — Compact feed status rows (main)
+- Reduced row padding, internal spacing, icon size, and title/metric typography while retaining both stats, activity, wrapping, and accessibility metric stacking.
+- Validation: native iOS Simulator build passed without warnings; diff whitespace check passed. This spacing refinement was not rechecked in Simulator visually.
+
+### 2026-09-07 — `main` — Fix active-lens audio review findings
+- Retry now addresses the original owned narration group, preserves chapter IDs/source snapshots/script checkpoints, and atomically requeues failed audio with the durable task. It never reruns unread-source selection.
+- Finished playback waits for pending chapter read marks before creating the lens's current unread edition; pause/resume and explicit chapter replay preserve the current edition.
+- Centralized persisted scope/tier interpretation in typed domain metadata and DB chapter planning; extracted narration HTTP handlers into their own module.
+- Validation passed: 89 focused iOS Simulator tests (24 playback/controller tests rerun after the final client change), 15 focused Rust tests including five isolated PostgreSQL tests, warning-denied Clippy for affected packages, formatting, public contract drift, iOS wire boundaries, and whitespace checks. Retry tests prove immutable identities, ownership, rollback, and durable-task deduplication. Evidence: `test-results/active-lens-audio/fix-*`. Live provider audio and physical-device playback were not exercised. No commit, push, or deployment.
+
+### 2026-09-07 — External TestFlight build prepared (main)
+- Added build 1.0 (223), the newest eligible build shown, to the Beta Testers external group through Chrome.
+- Entered beta description, approved review contact and Apple-only login guidance, and a What to Test checklist covering onboarding, Briefing, source links, AI questions, Knowledge/decks, audio, and sharing.
+- Submitted for Beta App Review; verified Waiting for Review and one build in the group. Group currently has zero testers. Automatic tester notification disabled; no invitations sent. Public App Store release untouched.
 
 ### 2026-09-07 — detached worktree — Artifact response cleanup plan
 

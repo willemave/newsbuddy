@@ -16,26 +16,22 @@ use base64::Engine as _;
 use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use chrono::NaiveDateTime;
 use newsly_contracts::{
-    AudioEpisodeResponse, BRIEFING_DIG_FRAGMENT_MAX_LENGTH, BriefingBlockDto,
-    BriefingDigSearchRequest, BriefingDigSearchResponse, BriefingDigSearchResult,
-    BriefingDigSummarizeRequest, BriefingDigSummarizeResponse, BriefingDiscussionDto,
-    BriefingFirstRunPhase, BriefingFirstRunProgress, BriefingFirstRunSourceOutcome,
-    BriefingFirstRunSourceProgress, BriefingIndexResponse, BriefingLensResponse,
-    BriefingLensSummary, BriefingNarrationRequest, BriefingNarrationResponse,
-    BriefingNarrationScope, BriefingReadMarkRequest, BriefingReadMarkResponse,
-    BriefingRefreshResponse, BriefingSegmentDto, BriefingSourceDto, BriefingTier, ContentType,
-    LegacyBriefingNarrationRequest,
+    BRIEFING_DIG_FRAGMENT_MAX_LENGTH, BriefingBlockDto, BriefingDigSearchRequest,
+    BriefingDigSearchResponse, BriefingDigSearchResult, BriefingDigSummarizeRequest,
+    BriefingDigSummarizeResponse, BriefingDiscussionDto, BriefingFirstRunPhase,
+    BriefingFirstRunProgress, BriefingFirstRunSourceOutcome, BriefingFirstRunSourceProgress,
+    BriefingIndexResponse, BriefingLensResponse, BriefingLensSummary, BriefingReadMarkRequest,
+    BriefingReadMarkResponse, BriefingRefreshResponse, BriefingSegmentDto, BriefingSourceDto,
+    BriefingTier, ContentType,
 };
 use newsly_db::{
-    AudioEpisodeProjection, BriefingDiscussionProjection, BriefingFirstRunProjection,
-    BriefingIndexProjection, BriefingLensCursorProjection, BriefingLensPageProjection,
-    BriefingLensProjection, BriefingNarrationSelection, BriefingReadMarkProjection,
-    BriefingRepositoryError, BriefingSourceProjection, ContentBriefingSourceProjection,
-    NewsBriefingSourceProjection, PrepareNarrationOutcome, ensure_briefing_state_version,
+    BriefingDiscussionProjection, BriefingFirstRunProjection, BriefingIndexProjection,
+    BriefingLensCursorProjection, BriefingLensPageProjection, BriefingLensProjection,
+    BriefingReadMarkProjection, BriefingRepositoryError, BriefingSourceProjection,
+    ContentBriefingSourceProjection, NewsBriefingSourceProjection, ensure_briefing_state_version,
     expedite_pending_briefing_refresh, load_briefing_index, load_briefing_index_validator,
-    load_briefing_lens_page, load_briefing_narration, mark_briefing_lens_read,
-    mark_briefing_sources_read, prepare_briefing_narration, recent_briefing_dig_count,
-    record_briefing_dig_usage,
+    load_briefing_lens_page, mark_briefing_lens_read, mark_briefing_sources_read,
+    recent_briefing_dig_count, record_briefing_dig_usage,
 };
 use newsly_providers::{
     BriefingDigGateway, BriefingDigGatewayError, BriefingDigSummary, BriefingWebSearchResult,
@@ -53,17 +49,15 @@ use crate::write_support::{
 };
 use crate::{AppState, request_id_from_headers};
 
+pub(crate) mod narration;
+use narration::{chaptered_narration, legacy_narration, narration_status, retry_narration};
 mod presentation;
-
-use presentation::{present_audio_episode, present_narration};
 
 const READ_OPERATION_ID: &str = "markBriefingRead";
 const LENS_READ_OPERATION_ID: &str = "markBriefingLensesLensRead";
 const REFRESH_OPERATION_ID: &str = "refreshBriefing";
 const DIG_SEARCH_OPERATION_ID: &str = "digBriefingSearch";
 const DIG_SUMMARIZE_OPERATION_ID: &str = "digBriefingSummarize";
-const LEGACY_NARRATION_OPERATION_ID: &str = "narrationBriefing";
-const NARRATION_OPERATION_ID: &str = "chapteredBriefingNarration";
 const BRIEFING_LENS_PAGE_MAX: usize = 12;
 const DIG_SYSTEM_PROMPT: &str = concat!(
     "You expand a selected fragment from a personal news briefing into a grounded mini-explainer. ",
@@ -93,6 +87,10 @@ pub(super) fn router() -> Router<AppState> {
         .route("/api/briefing/dig/summarize", post(dig_summarize))
         .route("/api/briefing/narration", post(legacy_narration))
         .route("/api/briefing/narrations", post(chaptered_narration))
+        .route(
+            "/api/briefing/narrations/{episode_group_id}/retry",
+            post(retry_narration),
+        )
         .route(
             "/api/briefing/narrations/{episode_group_id}",
             get(narration_status),
@@ -511,220 +509,6 @@ pub(super) struct NarrationDeliveryQuery {
 
 fn default_delivery() -> String {
     "background".to_owned()
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/briefing/narration",
-    operation_id = "narrationBriefing",
-    tag = "briefing",
-    request_body = LegacyBriefingNarrationRequest,
-    params(("delivery" = Option<String>, Query, description = "background or stream")),
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = AudioEpisodeResponse),
-        (status = 400, description = "No narration available", body = newsly_contracts::ErrorEnvelope),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 404, description = "Briefing Lens not found", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn legacy_narration(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    query: Result<Query<NarrationDeliveryQuery>, QueryRejection>,
-    payload: Result<Json<LegacyBriefingNarrationRequest>, JsonRejection>,
-) -> Result<Json<AudioEpisodeResponse>, ApiError> {
-    let payload = payload.map(|Json(payload)| {
-        Json(BriefingNarrationRequest {
-            scope: None,
-            lens_key: Some(payload.lens_key),
-        })
-    });
-    let episodes = create_narration(
-        &state,
-        &headers,
-        current_user.id,
-        &stamp,
-        LEGACY_NARRATION_OPERATION_ID,
-        false,
-        query,
-        payload,
-    )
-    .await?;
-    let episode = episodes.into_iter().next().ok_or_else(|| {
-        internal_error(
-            "legacy narration has no episode",
-            &request_id_from_headers(&headers),
-        )
-    })?;
-    present_audio_episode(episode, &request_id_from_headers(&headers)).map(Json)
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/briefing/narrations",
-    operation_id = "chapteredBriefingNarration",
-    tag = "briefing",
-    request_body = BriefingNarrationRequest,
-    params(("delivery" = Option<String>, Query, description = "background or stream")),
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = BriefingNarrationResponse),
-        (status = 400, description = "No narration available", body = newsly_contracts::ErrorEnvelope),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 404, description = "Briefing Lens not found", body = newsly_contracts::ErrorEnvelope),
-        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn chaptered_narration(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    current_user: AuthenticatedUser,
-    Extension(stamp): Extension<RouteOwnershipStamp>,
-    query: Result<Query<NarrationDeliveryQuery>, QueryRejection>,
-    payload: Result<Json<BriefingNarrationRequest>, JsonRejection>,
-) -> Result<Json<BriefingNarrationResponse>, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    let episodes = create_narration(
-        &state,
-        &headers,
-        current_user.id,
-        &stamp,
-        NARRATION_OPERATION_ID,
-        true,
-        query,
-        payload,
-    )
-    .await?;
-    present_narration(episodes, &request_id).map(Json)
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/briefing/narrations/{episode_group_id}",
-    operation_id = "narrationBriefingStatus",
-    tag = "briefing",
-    params(("episode_group_id" = String, Path, description = "Narration group ID")),
-    security(("HTTPBearer" = [])),
-    responses(
-        (status = 200, description = "Successful Response", body = BriefingNarrationResponse),
-        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
-        (status = 404, description = "Briefing narration not found", body = newsly_contracts::ErrorEnvelope),
-        (status = 422, description = "Validation Error", body = newsly_contracts::ErrorEnvelope),
-        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
-    )
-)]
-pub(super) async fn narration_status(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    path: Result<Path<String>, PathRejection>,
-    current_user: AuthenticatedUser,
-) -> Result<Json<BriefingNarrationResponse>, ApiError> {
-    let request_id = request_id_from_headers(&headers);
-    let Path(group_id) = path.map_err(|error| validation_error(error.body_text(), &request_id))?;
-    let episodes = load_briefing_narration(state.database.pool(), current_user.id, &group_id)
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    if episodes.is_empty() {
-        return Err(not_found("Briefing narration", &request_id));
-    }
-    present_narration(episodes, &request_id).map(Json)
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn create_narration(
-    state: &AppState,
-    headers: &HeaderMap,
-    user_id: i64,
-    stamp: &RouteOwnershipStamp,
-    operation_id: &str,
-    chaptered: bool,
-    query: Result<Query<NarrationDeliveryQuery>, QueryRejection>,
-    payload: Result<Json<BriefingNarrationRequest>, JsonRejection>,
-) -> Result<Vec<AudioEpisodeProjection>, ApiError> {
-    let request_id = request_id_from_headers(headers);
-    require_operation(stamp, operation_id, &request_id)?;
-    let Query(query) = query.map_err(|error| validation_error(error.body_text(), &request_id))?;
-    if !matches!(query.delivery.as_str(), "background" | "stream") {
-        return Err(validation_error(
-            "delivery must be background or stream",
-            &request_id,
-        ));
-    }
-    let Json(payload) = decode_json(payload, &request_id)?;
-    let selection = match (payload.scope, payload.lens_key) {
-        (Some(scope), None) if chaptered => match scope {
-            BriefingNarrationScope::ArticleTier => BriefingNarrationSelection::ArticleTier,
-            BriefingNarrationScope::PodcastTier => BriefingNarrationSelection::PodcastTier,
-            BriefingNarrationScope::NewsProgram => BriefingNarrationSelection::NewsProgram,
-        },
-        (None, Some(lens_key)) if !lens_key.is_empty() && lens_key.chars().count() <= 64 => {
-            BriefingNarrationSelection::Lens(lens_key)
-        }
-        _ => {
-            return Err(validation_error(
-                "provide exactly one supported narration scope or legacy lens_key",
-                &request_id,
-            ));
-        }
-    };
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    verify_stamp(&mut transaction, stamp, &request_id).await?;
-    let episodes =
-        match prepare_briefing_narration(&mut transaction, user_id, &selection, chaptered)
-            .await
-            .map_err(|error| internal_error(error, &request_id))?
-        {
-            PrepareNarrationOutcome::Ready(episodes) => episodes,
-            PrepareNarrationOutcome::LensNotFound => {
-                return Err(not_found("Briefing lens", &request_id));
-            }
-            PrepareNarrationOutcome::Empty => {
-                return Err(bad_request(
-                    "No briefing narration is available",
-                    &request_id,
-                ));
-            }
-        };
-    let requests = episodes
-        .iter()
-        .filter(|episode| episode.status != "completed")
-        .map(|episode| {
-            let mut request = EnqueueRequest::new(TaskType::GenerateAudioEpisode);
-            request.payload = Some(
-                json!({"audio_episode_id": episode.id, "user_id": user_id})
-                    .as_object()
-                    .expect("audio episode payload is an object")
-                    .clone(),
-            );
-            request.dedupe_key = Some(format!("audio_episode:{}", episode.id));
-            request.owner_user_id = Some(user_id);
-            request
-        })
-        .collect::<Vec<_>>();
-    if !requests.is_empty() {
-        QueueKernel::new(state.database.pool().clone())
-            .enqueue_many_in_transaction(&mut transaction, requests)
-            .await
-            .map_err(|error| queue_error(error, &request_id))?;
-    }
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
-    Ok(episodes)
 }
 
 fn present_index(
@@ -1388,6 +1172,7 @@ fn lens_repository_error(error: BriefingRepositoryError, request_id: &str) -> Ap
             "Briefing cursor anchor is no longer active",
             request_id.to_owned(),
         ),
+        BriefingRepositoryError::InvalidNarration(error) => internal_error(error, request_id),
         BriefingRepositoryError::Sqlx(error) => internal_error(error, request_id),
     }
 }

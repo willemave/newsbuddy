@@ -8,10 +8,13 @@ Hard constraints:
 - No poster layout, newspaper layout, document pages, magazine spreads, screenshots, dashboards, or UI chrome
 - 16:9 aspect ratio optimized for mobile display
 - One dominant visual metaphor or one coherent scene, never a collage
-- One focal subject with strong negative space and clear foreground/background separation
+- One focal subject placed in the upper-middle of the frame, with clear foreground/background separation
 - Bold, graphic, and immediately legible at thumbnail size
 - Premium magazine image with tactile, materially believable surfaces
-- Purposeful asymmetry, decisive frame fill, and clean negative space
+- Use the full canvas for an interesting scene, with purposeful asymmetry and decisive frame fill
+- Keep the story-bearing subject and essential details inside the central 60% of the width and upper 65% of the height so a taller mobile crop remains compelling
+- Treat the lower 35% as an overlay-safe area: continue the environment and texture through it, but never place the focal subject or essential details there
+- Keep side edges expendable and extend the background naturally to every edge; do not anchor the composition to the bottom or a corner
 - One surprising material or object derived directly from the story topic
 - Refined topic-derived palette with 2 to 4 dominant colors; avoid default purple/cyan tech color schemes
 - Avoid generic AI robots, glowing blue circuitry, corporate clip art, and familiar stock metaphors
@@ -308,6 +311,9 @@ mod tests {
         assert!(prompt.contains("Coordination Shared state becomes the bottleneck."));
         assert!(prompt.contains("without screens"));
         assert!(prompt.contains("No readable text"));
+        assert!(prompt.contains("central 60% of the width and upper 65% of the height"));
+        assert!(prompt.contains("lower 35% as an overlay-safe area"));
+        assert!(prompt.contains("do not anchor the composition to the bottom or a corner"));
     }
 
     #[test]

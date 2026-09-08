@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use newsly_agent_runtime::{
@@ -28,16 +28,21 @@ const MAX_PROVIDER_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const COMPOSITION_SYSTEM_PROMPT: &str = r"Compose one source-grounded personal-news Briefing window.
 
 Return JSON matching the supplied schema. Passage markdown must cite sources using only these URI
-forms: `[exact title](newsly://briefing/content/123)` and
-`[exact title](newsly://briefing/news/456)`. Never invent a source, URL, title, publication, show,
+forms: `[source title or descriptive phrase](newsly://briefing/content/123)` and
+`[source title or descriptive phrase](newsly://briefing/news/456)`. Never invent a source, URL, title, publication, show,
 fact, quotation, or attribution. Never use em dashes or generic summary-speak. Begin with the
 strongest fact or idea rather than naming the lens or counting sources.
 
-For `news`, return exactly one passage: one concise, information-dense paragraph of at most three
-sentences, with no figures or pullquotes, linking every source exactly once. Synthesize related
-sources into a unified account instead of giving each source its own sentence, and omit details
-that do not materially improve the reader's understanding. Use the fewest sentences needed for a
-clear account. For `audio` and `longform`, treat every source as a full work rather than a headline.
+For `news`, write like a newspaper brief, information dense. Be as concise as possible, many times
+including only the article title as the content. Return exactly one passage: one compact paragraph
+of at most three sentences, with no figures or pullquotes, linking every source exactly once.
+Place links toward the beginning of the sentence that covers each source. Make each source link
+span a substantial phrase: the title plus its surrounding descriptive words, roughly four to ten
+words, never a bare two-word name. Let the linked phrase carry the fact instead of repeating it in
+surrounding prose. Begin directly with the strongest fact or story and vary sentence openings.
+Use a compact, informational register and simple connective prose rather than lists. Connect
+stories only when the connection adds useful information; omit abstract thematic introductions
+and conclusions. For `audio` and `longform`, treat every source as a full work rather than a headline.
 Give each source its own substantive treatment of 3-5 sentences, roughly 100-200 words, covering
 its thesis, key points, concrete evidence or counterpoints, and why it matters to the reader. Use
 the supplied `briefing_context` when present, including specific facts and attributable quotations
@@ -269,7 +274,7 @@ impl BriefingLensName {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedBriefingLayout {
-    pub layout: BriefingCompositionLayout,
+    pub layout: Result<BriefingCompositionLayout, String>,
     pub model: String,
     pub usage: ProviderUsage,
     pub provider_response_id: Option<String>,
@@ -395,6 +400,7 @@ impl BriefingCompositionGateway {
     pub async fn compose(
         &self,
         request: &BriefingCompositionRequest,
+        feedback: Option<&str>,
     ) -> Result<GeneratedBriefingLayout, BriefingCompositionGatewayError> {
         if request.sources.is_empty() {
             return Err(BriefingCompositionGatewayError::EmptySources);
@@ -404,12 +410,18 @@ impl BriefingCompositionGateway {
                 request.tier.clone(),
             ));
         }
-        let user_prompt = format!(
+        let mut user_prompt = format!(
             "Lens: {}\nTier: {}\n\nSources:\n{}\n\nCompose one complete Briefing window.",
             request.lens_title,
             request.tier,
             serde_json::to_string_pretty(&request.sources)?,
         );
+        if let Some(feedback) = feedback {
+            user_prompt.push_str(
+                "\nCorrect this validation failure in the complete replacement layout:\n",
+            );
+            user_prompt.push_str(feedback);
+        }
         let outcome = self
             .run_structured(StructuredRunRequest {
                 feature: "briefing_compose",
@@ -418,15 +430,17 @@ impl BriefingCompositionGateway {
                 schema_name: "briefing_composer_layout_v1",
                 schema: schemars::schema_for!(BriefingCompositionLayout),
                 output_tokens: 3_200,
-                validation_retries: 2,
+                validation_retries: 0,
             })
             .await?;
-        let value = outcome
+        let layout = outcome
             .structured_output
-            .ok_or(BriefingCompositionGatewayError::MissingStructuredOutput)?;
-        let layout = serde_json::from_value::<BriefingCompositionLayout>(value)?
-            .validate(&request.tier, &request.sources)
-            .map_err(BriefingCompositionGatewayError::InvalidLayout)?;
+            .ok_or_else(|| "provider returned no structured output".to_owned())
+            .and_then(|value| {
+                serde_json::from_value::<BriefingCompositionLayout>(value)
+                    .map_err(|error| error.to_string())
+            })
+            .and_then(|layout| layout.validate(&request.tier, &request.sources));
         Ok(GeneratedBriefingLayout {
             layout,
             model: outcome.model_name,
@@ -580,8 +594,8 @@ impl BriefingCompositionGateway {
             output_tokens,
             validation_retries,
         } = request;
-        Ok(self
-            .engine
+        let events = Arc::new(ObservedUsage::default());
+        self.engine
             .run(
                 AgentRequest {
                     feature: feature.to_owned(),
@@ -610,9 +624,13 @@ impl BriefingCompositionGateway {
                     provider_parameters: Map::new(),
                 },
                 Arc::new(NoTools),
-                Arc::new(NoEvents),
+                events.clone(),
             )
-            .await?)
+            .await
+            .map_err(|source| BriefingCompositionGatewayError::ObservedAgent {
+                source,
+                usage: events.0.lock().ok().and_then(|usage| usage.clone()),
+            })
     }
 }
 
@@ -621,20 +639,10 @@ fn source_link(kind: &str, id: i64) -> String {
 }
 
 fn source_links_in_markdown(markdown: &str) -> Vec<String> {
-    let prefix = "newsly://briefing/";
-    let mut remaining = markdown;
-    let mut links = Vec::new();
-    while let Some(start) = remaining.find(prefix) {
-        let candidate = &remaining[start..];
-        let end = candidate
-            .find(|character: char| {
-                character.is_whitespace() || matches!(character, ')' | ']' | '}' | '>' | '"' | '\'')
-            })
-            .unwrap_or(candidate.len());
-        links.push(candidate[..end].to_owned());
-        remaining = &candidate[end..];
-    }
-    links
+    crate::briefing_links::briefing_links(markdown)
+        .into_iter()
+        .map(|link| link.uri)
+        .collect()
 }
 
 fn validate_embedding_input(texts: &[String]) -> Result<(), BriefingCompositionGatewayError> {
@@ -723,17 +731,31 @@ impl ToolExecutor for NoTools {
     }
 }
 
-#[derive(Debug)]
-struct NoEvents;
+#[derive(Debug, Default)]
+struct ObservedUsage(Mutex<Option<ProviderUsage>>);
 
-impl AgentEventSink for NoEvents {
-    fn publish(&self, _event: AgentEvent) -> Result<(), AgentRuntimeError> {
+impl AgentEventSink for ObservedUsage {
+    fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError> {
+        if let AgentEvent::Usage { usage } = event {
+            let mut observed = self
+                .0
+                .lock()
+                .map_err(|_| AgentRuntimeError::Tool("usage observation lock failed".to_owned()))?;
+            observed
+                .get_or_insert_with(ProviderUsage::default)
+                .add_assign(&usage);
+        }
         Ok(())
     }
 }
 
 #[derive(Debug, Error)]
 pub enum BriefingCompositionGatewayError {
+    #[error("{source}")]
+    ObservedAgent {
+        source: AgentRuntimeError,
+        usage: Option<ProviderUsage>,
+    },
     #[error("Briefing composition requires at least one source")]
     EmptySources,
     #[error("Briefing lens naming requires at least one source")]
@@ -778,6 +800,30 @@ pub enum BriefingCompositionGatewayError {
     Json(#[from] serde_json::Error),
 }
 
+impl BriefingCompositionGatewayError {
+    pub fn observed_usage(&self) -> Option<&ProviderUsage> {
+        match self {
+            Self::ObservedAgent { usage, .. } => usage.as_ref(),
+            _ => None,
+        }
+    }
+    pub fn retryable(&self) -> bool {
+        match self {
+            Self::ObservedAgent {
+                source: AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_),
+                ..
+            }
+            | Self::Agent(AgentRuntimeError::DeadlineExceeded | AgentRuntimeError::Provider(_)) => {
+                true
+            }
+            Self::Http(error) => error
+                .status()
+                .is_none_or(|status| status.as_u16() == 429 || status.is_server_error()),
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -796,6 +842,34 @@ mod tests {
             thumbnail_url: None,
             published_at: None,
             briefing_context: None,
+        }
+    }
+
+    #[test]
+    fn citation_corpus_validates_brackets_but_rejects_bare_and_code_uris() {
+        for label in ["A [study]", r"A \[study\]", "你好 (Update)!"] {
+            let layout = BriefingCompositionLayout {
+                suggested_quotes: vec![],
+                blocks: vec![BriefingCompositionBlock::Passage {
+                    markdown: format!("[{label}](newsly://briefing/news/1) explains the result."),
+                    weight: BriefingPassageWeight::Brief,
+                }],
+            };
+            assert!(layout.validate("news", &[source(1)]).is_ok());
+        }
+        for markdown in [
+            "newsly://briefing/news/1",
+            "`[Title](newsly://briefing/news/1)`",
+            "[Ten](newsly://briefing/news/10)",
+        ] {
+            let layout = BriefingCompositionLayout {
+                suggested_quotes: vec![],
+                blocks: vec![BriefingCompositionBlock::Passage {
+                    markdown: markdown.to_owned(),
+                    weight: BriefingPassageWeight::Brief,
+                }],
+            };
+            assert!(layout.validate("news", &[source(1)]).is_err());
         }
     }
 
@@ -828,12 +902,12 @@ mod tests {
     }
 
     #[test]
-    fn news_prompt_requests_concise_synthesis() {
-        assert!(COMPOSITION_SYSTEM_PROMPT.contains("one concise, information-dense paragraph"));
-        assert!(COMPOSITION_SYSTEM_PROMPT.contains("Use the fewest sentences needed"));
-        assert!(
-            COMPOSITION_SYSTEM_PROMPT.contains("instead of giving each source its own sentence")
-        );
+    fn news_prompt_requests_newspaper_briefs() {
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("write like a newspaper brief"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("including only the article title"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("Place links toward the beginning"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("instead of repeating it"));
+        assert!(!COMPOSITION_SYSTEM_PROMPT.contains("unified account"));
     }
 
     #[test]

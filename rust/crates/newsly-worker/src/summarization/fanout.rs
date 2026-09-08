@@ -27,22 +27,37 @@ pub(super) async fn enqueue_summary_followups(
         requests.push(request);
     }
 
-    let briefing_requests = prepare_briefing_requests(
+    if !requests.is_empty() {
+        queue
+            .enqueue_many_in_transaction(transaction, requests)
+            .await?;
+    }
+    enqueue_briefing_followups(
         transaction,
-        applied,
+        queue,
+        applied.content_id,
         briefing_debounce_seconds,
         briefing_batch_minimum,
     )
-    .await?;
+    .await
+}
+
+pub(crate) async fn enqueue_briefing_followups(
+    transaction: &mut Transaction<'static, Postgres>,
+    queue: &QueueKernel,
+    content_id: i64,
+    debounce_seconds: i64,
+    batch_minimum: i64,
+) -> Result<(), SummarizationFanoutError> {
+    let briefing_requests =
+        prepare_briefing_requests(transaction, content_id, debounce_seconds, batch_minimum).await?;
     let briefing_deadlines = briefing_requests
         .iter()
         .filter_map(|request| Some((request.dedupe_key.clone()?, request.available_at?)))
         .collect::<Vec<_>>();
-    requests.extend(briefing_requests);
-
-    if !requests.is_empty() {
+    if !briefing_requests.is_empty() {
         queue
-            .enqueue_many_in_transaction(transaction, requests)
+            .enqueue_many_in_transaction(transaction, briefing_requests)
             .await?;
     }
     // An active deduped refresh may predate this source. Pull it forward to the newly computed
@@ -144,16 +159,36 @@ async fn image_is_eligible(
 
 async fn prepare_briefing_requests(
     transaction: &mut Transaction<'static, Postgres>,
-    applied: &AppliedSummarization,
+    content_id: i64,
     debounce_seconds: i64,
     batch_minimum: i64,
 ) -> Result<Vec<EnqueueRequest>, sqlx::Error> {
-    if applied.status != "completed"
-        || !matches!(applied.content_type.as_str(), "article" | "podcast")
-        || applied.classification.as_deref() == Some("skip")
-    {
+    let content_type = sqlx::query_scalar::<_, String>(
+        r"
+        SELECT content_type
+        FROM contents
+        WHERE id::bigint = $1
+          AND status = 'completed'
+          AND content_type IN ('article', 'podcast')
+          AND (classification IS NULL OR classification <> 'skip')
+          AND NULLIF(COALESCE(
+              content_metadata::jsonb #> '{domain,image_generated_at}',
+              content_metadata::jsonb -> 'image_generated_at'
+          ), 'null'::jsonb) IS NOT NULL
+          AND NULLIF(COALESCE(
+              content_metadata::jsonb #> '{domain,image_url}',
+              content_metadata::jsonb -> 'image_url',
+              content_metadata::jsonb #> '{domain,thumbnail_url}',
+              content_metadata::jsonb -> 'thumbnail_url'
+          ), 'null'::jsonb) IS NOT NULL
+        ",
+    )
+    .bind(content_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some(content_type) = content_type else {
         return Ok(Vec::new());
-    }
+    };
     let user_ids = sqlx::query_scalar::<_, i64>(
         r"
         SELECT DISTINCT status.user_id::bigint
@@ -168,13 +203,13 @@ async fn prepare_briefing_requests(
         ORDER BY status.user_id::bigint
         ",
     )
-    .bind(applied.content_id)
+    .bind(content_id)
     .fetch_all(&mut **transaction)
     .await?;
     if user_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let lens_key = if applied.content_type == "podcast" {
+    let lens_key = if content_type == "podcast" {
         "podcasts"
     } else {
         "articles"
@@ -194,7 +229,7 @@ async fn prepare_briefing_requests(
         )
         .bind(user_id)
         .bind(lens_key)
-        .bind(applied.content_id)
+        .bind(content_id)
         .execute(&mut **transaction)
         .await?;
     }
@@ -253,7 +288,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 #[derive(Debug, Error)]
-pub(super) enum SummarizationFanoutError {
+pub(crate) enum SummarizationFanoutError {
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
     #[error(transparent)]

@@ -41,6 +41,9 @@ pub struct SchedulerRepository {
 }
 
 impl SchedulerRepository {
+    pub(crate) fn pool(&self) -> &PgPool {
+        &self.pool
+    }
     pub fn new(pool: PgPool) -> Self {
         Self {
             queue: QueueKernel::new(pool.clone()),
@@ -74,7 +77,11 @@ impl SchedulerRepository {
             }
             SchedulerJob::QueueWatchdog => {
                 let report = self
-                    .repair_queue(&mut transaction, config.orphan_lease_grace)
+                    .repair_queue(
+                        &mut transaction,
+                        config.orphan_lease_grace,
+                        config.watchdog_alert_threshold,
+                    )
                     .await?;
                 ScheduledJobReport {
                     job,

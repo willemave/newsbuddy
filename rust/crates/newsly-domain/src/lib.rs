@@ -3,6 +3,11 @@
 #![forbid(unsafe_code)]
 
 mod ids;
+mod narration;
+pub use narration::{
+    BriefingNarrationMetadata, BriefingNarrationStyle, InvalidNarrationMetadata, NarrationScope,
+    NarrationTier, NewsNarrationWindow,
+};
 mod news_relations;
 mod ownership;
 

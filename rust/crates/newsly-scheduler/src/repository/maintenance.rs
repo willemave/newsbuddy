@@ -27,6 +27,7 @@ impl SchedulerRepository {
         &self,
         transaction: &mut Transaction<'static, Postgres>,
         orphan_grace: Duration,
+        alert_threshold: i64,
     ) -> Result<MaintenanceReport, SchedulerRepositoryError> {
         let grace_seconds = i64::try_from(orphan_grace.as_secs())
             .map_err(|_| SchedulerRepositoryError::DurationOutOfRange)?;
@@ -119,7 +120,8 @@ impl SchedulerRepository {
         )
         .fetch_one(&mut **transaction)
         .await?;
-        let pipeline = newsly_db::pipeline_health_counts(transaction).await?;
+        let pipeline =
+            newsly_db::pipeline_monitoring::observe_health(transaction, alert_threshold).await?;
         Ok(MaintenanceReport {
             pipeline,
             misrouted: usize::try_from(misrouted).unwrap_or(usize::MAX),

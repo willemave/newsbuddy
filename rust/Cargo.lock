@@ -2353,6 +2353,7 @@ dependencies = [
  "futures-util",
  "newsly-db",
  "newsly-domain",
+ "newsly-queue",
  "secrecy",
  "serde",
  "serde_json",
@@ -2568,7 +2569,9 @@ dependencies = [
  "futures-util",
  "jsonschema",
  "newsly-agent-runtime",
+ "newsly-domain",
  "newsly-extraction",
+ "pulldown-cmark",
  "quick-xml",
  "reqwest",
  "rig-core",
@@ -3236,6 +3239,17 @@ name = "protoc-bin-vendored-win32"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95067976aca6421a523e491fce939a3e65249bac4b977adee0ee9771568e8aa3"
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
+dependencies = [
+ "bitflags",
+ "memchr",
+ "unicase",
+]
 
 [[package]]
 name = "pxfm"

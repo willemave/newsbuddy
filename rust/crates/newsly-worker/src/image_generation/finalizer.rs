@@ -1,9 +1,10 @@
 use std::error::Error;
 
-use newsly_queue::TaskResult;
+use newsly_queue::{QueueKernel, TaskResult};
 use sqlx::{Postgres, Transaction};
 use thiserror::Error;
 
+use crate::summarization::fanout::{SummarizationFanoutError, enqueue_briefing_followups};
 use crate::{HandlerAfterCommitFuture, HandlerFinalizerFuture, TaskFinalizer, TaskFinalizerResult};
 
 use super::model::{ImageFinalizationPlan, ImageTargetOutcome};
@@ -13,11 +14,24 @@ use super::storage::ImageFileStoreError;
 #[derive(Debug)]
 pub(super) struct ImageFinalizer {
     plan: ImageFinalizationPlan,
+    queue: QueueKernel,
+    briefing_debounce_seconds: i64,
+    briefing_batch_minimum: i64,
 }
 
 impl ImageFinalizer {
-    pub(super) const fn new(plan: ImageFinalizationPlan) -> Self {
-        Self { plan }
+    pub(super) const fn new(
+        plan: ImageFinalizationPlan,
+        queue: QueueKernel,
+        briefing_debounce_seconds: i64,
+        briefing_batch_minimum: i64,
+    ) -> Self {
+        Self {
+            plan,
+            queue,
+            briefing_debounce_seconds,
+            briefing_batch_minimum,
+        }
     }
 
     async fn apply_inner(
@@ -28,6 +42,14 @@ impl ImageFinalizer {
         match outcome {
             ImageTargetOutcome::Ready => {
                 self.plan.staged.publish().await?;
+                enqueue_briefing_followups(
+                    transaction,
+                    &self.queue,
+                    self.plan.attempt.content.id,
+                    self.briefing_debounce_seconds,
+                    self.briefing_batch_minimum,
+                )
+                .await?;
                 Ok(TaskFinalizerResult::Keep)
             }
             ImageTargetOutcome::ContentMissing
@@ -80,4 +102,9 @@ enum ImageFinalizeError {
     Repository(#[from] ImageRepositoryError),
     #[error("image-generation file publication failed")]
     Storage(#[from] ImageFileStoreError),
+    #[error("image-generation Briefing fanout failed")]
+    BriefingFanout(#[from] SummarizationFanoutError),
 }
+
+#[cfg(test)]
+mod tests;

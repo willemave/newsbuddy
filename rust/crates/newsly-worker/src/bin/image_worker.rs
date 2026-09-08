@@ -36,6 +36,9 @@ pub(crate) async fn main() -> Result<()> {
         database.pool().clone(),
         gateway,
         file_store,
+        queue.clone(),
+        config.briefing_debounce_seconds,
+        config.briefing_batch_minimum,
     ));
 
     let mut handlers = HandlerRegistry::new();

@@ -30,6 +30,8 @@ P14. Sandbox-backed work writes only inside its task workspace, rejects every ot
 
 P15. Operator repairs are scoped and auditable. A liveness check alone never proves that workers, queues, and providers are healthy. Source failures, overdue work, and terminal queue/product mismatches are separately observable without automatically replaying terminal work.
 
+Missing expected source checks, sustained queue growth, stalled ready work, historical intake, blocked artwork, and alert delivery state are observable. Alert delivery survives restarts, suppresses unchanged notifications, and reports recovery; external delivery is at-least-once. Intentional incident cancellations retain an explicit reason and preserve canonical content and real user history. Schema deployment does not authorize unbounded historical provider work.
+
 P16. Every sandbox-backed LLM task attempt receives fresh isolated compute. No product workflow resumes, snapshots, pools, or shares a user sandbox, and normal completion kills the sandbox.
 
 P17. Knowledge is read from canonical host storage through typed, user-authorized tools. The system maintains no per-user sandbox mirror, corpus revision, index, or sync queue.
@@ -52,4 +54,8 @@ P25. Generated long-form artwork is derived from one immutable summary fingerpri
 
 P26. Discussion summaries and news key points expose their persisted character limits to generation and bounded validation correction. Invalid output never publishes. Exhausted discussion validation does not restart the same durable task; transient provider failures remain retryable, and later scheduled refreshes remain possible.
 
+Briefing has one bounded correction budget with actionable validation feedback. Exhausted unchanged input cannot immediately restart through a new queue job; materially changed input or generator/parser version is eligible, and unchanged input has a bounded later recovery time. The previous usable edition remains readable.
+
 P27. Usage reports distinguish unknown cost from a known zero charge. Any aggregate containing unpriced calls has an unknown total and separately reports its known subtotal and unpriced call count. Missing historical prices are never invented.
+
+Observed Briefing usage is recorded independently of successful edition publication, including rejected output and accepted sibling units. Re-recording an observed attempt does not double-count it. Provider failures without observable usage remain explicitly unknown; absent token counts and historical responses are not reconstructed as facts.

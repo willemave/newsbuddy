@@ -1,5 +1,4 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeDelta, Utc};
 use serde_json::Value;
@@ -16,6 +15,8 @@ pub struct ScraperConfigStatsProjection {
     pub completed_count: i64,
     pub unread_count: i64,
     pub processing_count: i64,
+    pub running_count: i64,
+    pub queued_count: i64,
     pub latest_processed_at: Option<DateTime<Utc>>,
     pub latest_publication_at: Option<DateTime<Utc>>,
     pub next_expected_at: Option<DateTime<Utc>>,
@@ -28,8 +29,8 @@ struct WorkingStats {
     response: ScraperConfigStatsProjection,
     publication_dates: BTreeSet<DateTime<Utc>>,
     completed_ids: HashSet<i64>,
+    inbox_completed_ids: HashSet<i64>,
     processing_candidates: HashSet<i64>,
-    checked_out_processing_ids: HashSet<i64>,
 }
 
 /// Derive the established per-source counters without retaining a transaction or ORM identity.
@@ -41,7 +42,6 @@ pub async fn get_scraper_config_stats(
     pool: &PgPool,
     user_id: i64,
     configs: &[ScraperConfigProjection],
-    checkout_timeout: Duration,
 ) -> Result<HashMap<i64, ScraperConfigStatsProjection>, ScraperStatsRepositoryError> {
     if configs.is_empty() {
         return Ok(HashMap::new());
@@ -49,9 +49,6 @@ pub async fn get_scraper_config_stats(
     let content_rows = load_content_rows(pool, user_id).await?;
     let index = ConfigIndex::new(configs);
     let allowed_content = AllowedContent::new(configs);
-    let processing_cutoff = Utc::now()
-        - TimeDelta::try_seconds(i64::try_from(checkout_timeout.as_secs()).unwrap_or(i64::MAX))
-            .unwrap_or(TimeDelta::MAX);
     let mut working = configs
         .iter()
         .map(|config| (config.id, WorkingStats::default()))
@@ -80,7 +77,9 @@ pub async fn get_scraper_config_stats(
         {
             stats.response.latest_publication_at = Some(publication_at);
         }
-        if let Some(processed_at) = content.processed_at.map(|value| value.and_utc())
+        if content.status == "completed"
+            && content.classification.as_deref() != Some("skip")
+            && let Some(processed_at) = content.processed_at.map(|value| value.and_utc())
             && stats
                 .response
                 .latest_processed_at
@@ -92,20 +91,17 @@ pub async fn get_scraper_config_stats(
         if content.status == "completed" && content.classification.as_deref() != Some("skip") {
             stats.response.completed_count += 1;
             stats.completed_ids.insert(content.id);
-        }
-        if matches!(
-            content.status.as_str(),
-            "new" | "pending" | "processing" | "awaiting_image"
-        ) {
-            stats.processing_candidates.insert(content.id);
-            if content.checked_out_by.is_some()
-                && content
-                    .checked_out_at
-                    .map(|value| value.and_utc())
-                    .is_some_and(|checked_out_at| checked_out_at >= processing_cutoff)
-            {
-                stats.checked_out_processing_ids.insert(content.id);
+            if content.in_inbox {
+                stats.inbox_completed_ids.insert(content.id);
             }
+        }
+        if content.classification.as_deref() != Some("skip")
+            && matches!(
+                content.status.as_str(),
+                "new" | "pending" | "processing" | "awaiting_image"
+            )
+        {
+            stats.processing_candidates.insert(content.id);
         }
     }
 
@@ -114,11 +110,16 @@ pub async fn get_scraper_config_stats(
         .flat_map(|stats| stats.completed_ids.iter().copied())
         .collect::<Vec<_>>();
     let matched_ids = matched_content_ids.into_iter().collect::<Vec<_>>();
-    let (read_ids, active_task_ids) = tokio::try_join!(
+    let (read_ids, activity) = tokio::try_join!(
         load_read_content_ids(pool, user_id, &completed_ids),
         load_active_task_content_ids(pool, &matched_ids)
     )?;
 
+    let active_task_ids = activity.keys().copied().collect::<HashSet<_>>();
+    let running_ids = activity
+        .iter()
+        .filter_map(|(id, running)| running.then_some(*id))
+        .collect::<HashSet<_>>();
     let observations = sqlx::query_as::<_, (i64, Option<DateTime<Utc>>, Option<String>)>("SELECT config.id::bigint, health.last_success_at, health.error_code FROM user_scraper_configs AS config LEFT JOIN source_ingestion_health AS health ON health.source_key = CASE WHEN config.scraper_type = 'aggregator' THEN 'aggregator:' || (config.config::jsonb ->> 'key') ELSE 'config:' || config.id::text END WHERE config.user_id::bigint = $1")
         .bind(user_id).fetch_all(pool).await?;
     for (id, success, error) in observations {
@@ -131,18 +132,26 @@ pub async fn get_scraper_config_stats(
         .into_iter()
         .map(|(config_id, mut stats)| {
             stats.response.unread_count =
-                i64::try_from(stats.completed_ids.difference(&read_ids).count())
+                i64::try_from(stats.inbox_completed_ids.difference(&read_ids).count())
                     .unwrap_or(i64::MAX);
             stats.response.processing_count = i64::try_from(
                 stats
                     .processing_candidates
                     .intersection(&active_task_ids)
-                    .chain(stats.checked_out_processing_ids.iter())
                     .copied()
                     .collect::<HashSet<_>>()
                     .len(),
             )
             .unwrap_or(i64::MAX);
+            stats.response.running_count = i64::try_from(
+                stats
+                    .processing_candidates
+                    .intersection(&running_ids)
+                    .count(),
+            )
+            .unwrap_or(i64::MAX);
+            stats.response.queued_count =
+                stats.response.processing_count - stats.response.running_count;
             let (next_expected_at, average_interval_hours, sample_size) =
                 estimate_next_expected_at(stats.publication_dates);
             stats.response.next_expected_at = next_expected_at;
@@ -154,8 +163,8 @@ pub async fn get_scraper_config_stats(
 }
 
 #[derive(Debug, FromRow)]
-struct ContentStatsRow {
-    id: i64,
+pub(super) struct ContentStatsRow {
+    pub(super) id: i64,
     status: String,
     classification: Option<String>,
     processed_at: Option<NaiveDateTime>,
@@ -163,13 +172,12 @@ struct ContentStatsRow {
     created_at: Option<NaiveDateTime>,
     source: Option<String>,
     content_metadata: Value,
-    checked_out_by: Option<String>,
-    checked_out_at: Option<NaiveDateTime>,
     content_type: String,
+    in_inbox: bool,
     platform: Option<String>,
 }
 
-async fn load_content_rows(
+pub(super) async fn load_content_rows(
     pool: &PgPool,
     user_id: i64,
 ) -> Result<Vec<ContentStatsRow>, ScraperStatsRepositoryError> {
@@ -183,15 +191,18 @@ async fn load_content_rows(
             content.publication_date,
             content.created_at,
             content.source,
-            content.content_metadata,
-            content.checked_out_by,
-            content.checked_out_at,
+            jsonb_build_object(
+                'feed_config_id', content.content_metadata -> 'feed_config_id',
+                'feed_url', content.content_metadata -> 'feed_url',
+                'source', content.content_metadata -> 'source',
+                'publication_date', content.content_metadata -> 'publication_date'
+            ) AS content_metadata,
             content.content_type,
-            content.platform
+            content.platform,
+            membership.status = 'inbox' AS in_inbox
         FROM contents AS content
         JOIN content_status AS membership ON membership.content_id = content.id
         WHERE membership.user_id::bigint = $1
-          AND membership.status = 'inbox'
           AND (
               content.content_type IN ('article', 'podcast')
               OR (content.platform = 'youtube' AND content.content_type <> 'news')
@@ -229,23 +240,19 @@ async fn load_read_content_ids(
 async fn load_active_task_content_ids(
     pool: &PgPool,
     content_ids: &[i64],
-) -> Result<HashSet<i64>, ScraperStatsRepositoryError> {
+) -> Result<HashMap<i64, bool>, ScraperStatsRepositoryError> {
     if content_ids.is_empty() {
-        return Ok(HashSet::new());
+        return Ok(HashMap::new());
     }
-    Ok(sqlx::query_scalar::<_, i64>(
-        r"
-        SELECT DISTINCT content_id::bigint
+    Ok(sqlx::query_as::<_, (i64, bool)>(r"
+        SELECT content_id::bigint,
+               bool_or(status = 'processing' AND COALESCE(lease_expires_at > timezone('UTC', now()), false))
         FROM processing_tasks
         WHERE content_id::bigint = ANY($1::bigint[])
           AND status IN ('pending', 'processing')
-        ",
-    )
-    .bind(content_ids)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .collect())
+          AND task_type IN ('process_content', 'process_podcast_media', 'summarize', 'generate_image')
+        GROUP BY content_id
+    ").bind(content_ids).fetch_all(pool).await?.into_iter().collect())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -293,14 +300,14 @@ impl AllowedContent {
 }
 
 #[derive(Debug)]
-struct ConfigIndex {
+pub(super) struct ConfigIndex {
     ids: HashSet<i64>,
     feed_urls: HashMap<String, Vec<i64>>,
     sources: HashMap<String, Vec<i64>>,
 }
 
 impl ConfigIndex {
-    fn new(configs: &[ScraperConfigProjection]) -> Self {
+    pub(super) fn new(configs: &[ScraperConfigProjection]) -> Self {
         let mut by_feed_url: HashMap<String, Vec<i64>> = HashMap::new();
         let mut by_source: HashMap<String, Vec<i64>> = HashMap::new();
         for config in configs {
@@ -336,7 +343,7 @@ impl ConfigIndex {
         }
     }
 
-    fn match_content(&self, content: &ContentStatsRow) -> Option<i64> {
+    pub(super) fn match_content(&self, content: &ContentStatsRow) -> Option<i64> {
         let metadata = content.content_metadata.as_object();
         if let Some(config_id) = metadata
             .and_then(|value| value.get("feed_config_id"))

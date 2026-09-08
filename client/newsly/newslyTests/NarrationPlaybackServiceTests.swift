@@ -12,7 +12,7 @@ final class NarrationPlaybackServiceTests: XCTestCase {
         let firstItem = try service.playAudioStream(
             resource(id: 41),
             for: firstTarget,
-            onFinished: { finishedTargets.append($0) }
+            onFinished: { target, _ in finishedTargets.append(target) }
         )
 
         NotificationCenter.default.post(
@@ -68,13 +68,13 @@ final class NarrationPlaybackServiceTests: XCTestCase {
         let item = try service.playAudioStream(
             resource(id: 42),
             for: target,
-            onFinished: { firstFinishedTargets.append($0) }
+            onFinished: { target, _ in firstFinishedTargets.append(target) }
         )
         service.pause()
 
         try await service.playStreamingNarration(
             for: target,
-            onFinished: { resumedFinishedTargets.append($0) }
+            onFinished: { target, _ in resumedFinishedTargets.append(target) }
         ) {
             fetchCount += 1
             return self.resource(id: 42)
