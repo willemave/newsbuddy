@@ -29,12 +29,12 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ### 2026-09-08 — `main` — Prepare Briefing and ingestion release
 
-- **Status:** Release commit prepared; canonical local release gate pending.
+- **Status:** Release commit prepared; canonical local release gate restart pending after an iOS lifecycle-test repair.
 - **Scope:** Briefing composition and active-lens narration, feed ingestion regression prevention and monitoring, feed status/history UI, generated contracts, database migrations, operator tooling, and release safeguards.
 - **Decisions:** Preserve the deployed `e0e8d39a` emergency feed-boundary commit in ancestry and merge it with the broader follow-up rather than rewriting shared history. Split the feed-history route into its own API module to satisfy the repository size guardrail.
 - **Changes:** Committed the accumulated implementation as `f0ea4dab`, then merged current `origin/main` as `88279ba4`; retained the broader bounded-intake test and source law alongside the hotfix history.
-- **Validation:** Pre-commit formatting and module-size guardrails passed. The affected API package compiled, and both scheduled-feed frontier tests passed after conflict resolution.
-- **Remaining:** Run the canonical release gate with live provider smoke, push only its exact tested SHA, wait for the SHA-matched Docker Deploy run, and verify production image and health.
+- **Validation:** Pre-commit formatting and module-size guardrails passed. The affected API package compiled, and both scheduled-feed frontier tests passed after conflict resolution. The first `df7f6986` release-gate run passed Rust, SQLx, contracts, and both Python islands, then stopped in native UI testing because iOS 26.3.1 did not expose the Newsly process as either XCTest background state after Home even though the same process resumed successfully. The test now waits for SpringBoard to become foreground, which verifies the user-visible Home transition without depending on an app-process state that Simulator may omit.
+- **Remaining:** Commit the lifecycle-test repair, restart the entire canonical release gate with live provider smoke on the replacement SHA, push only that exact tested SHA, wait for its Docker Deploy run, and verify production image and health.
 - **Commits:** `f0ea4dab`, `88279ba4`.
 
 ### 2026-09-07 — `main` — Briefing audio player design pass

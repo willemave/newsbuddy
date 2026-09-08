@@ -28,9 +28,11 @@ final class newslyUITests: XCTestCase {
         assertAuthenticatedBriefingRoot(in: app, phase: "initial launch")
 
         XCUIDevice.shared.press(.home)
-        let enteredBackground = app.wait(for: .runningBackground, timeout: 1)
-            || app.wait(for: .runningBackgroundSuspended, timeout: 5)
-        XCTAssertTrue(enteredBackground)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        XCTAssertTrue(
+            springboard.wait(for: .runningForeground, timeout: 10),
+            "Expected the Home screen before testing warm resume."
+        )
 
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
