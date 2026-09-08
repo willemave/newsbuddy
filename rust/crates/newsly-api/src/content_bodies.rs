@@ -15,11 +15,8 @@ use crate::error::ApiError;
 use crate::write_support::internal_error;
 use crate::{AppState, request_id_from_headers};
 
-const MAX_CONTENT_BODY_RESPONSE_CHARS: usize = 32_000;
 const CHATGPT_BASE_URL: &str = "https://chat.openai.com/?q=";
 const MAX_CHATGPT_URL_LENGTH: usize = 8_000;
-const TRUNCATED_BODY_NOTICE: &str =
-    "\n\n[Content truncated for app rendering. Open the original source for the full text.]";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -334,7 +331,7 @@ async fn resolve_projection(
                 variant: projection.variant.as_str().to_owned(),
                 kind: projection.kind,
                 format: format.to_owned(),
-                text: truncate_body_text(&text),
+                text,
                 updated_at: pointer.updated_at,
             }));
         }
@@ -352,41 +349,13 @@ async fn resolve_projection(
         variant: projection.variant.as_str().to_owned(),
         kind: projection.kind,
         format: format.to_owned(),
-        text: truncate_body_text(&text),
+        text,
         updated_at: projection.fallback_updated_at,
     }))
 }
 
 fn valid_format(value: &str) -> Option<&str> {
     matches!(value, "text" | "markdown").then_some(value)
-}
-
-fn truncate_body_text(text: &str) -> String {
-    if text.chars().count() <= MAX_CONTENT_BODY_RESPONSE_CHARS {
-        return text.to_owned();
-    }
-    let notice_chars = TRUNCATED_BODY_NOTICE.chars().count();
-    let available = MAX_CONTENT_BODY_RESPONSE_CHARS.saturating_sub(notice_chars);
-    if available == 0 {
-        return TRUNCATED_BODY_NOTICE.trim().to_owned();
-    }
-    let mut trimmed = text.chars().take(available).collect::<String>();
-    trimmed = trimmed.trim_end().to_owned();
-    let split_at = [
-        trimmed.rfind("\n\n"),
-        trimmed.rfind('\n'),
-        trimmed.rfind(' '),
-    ]
-    .into_iter()
-    .flatten()
-    .max();
-    if let Some(split_at) = split_at
-        && trimmed[..split_at].chars().count() >= available / 2
-    {
-        trimmed.truncate(split_at);
-        trimmed = trimmed.trim_end().to_owned();
-    }
-    format!("{trimmed}{TRUNCATED_BODY_NOTICE}")
 }
 
 fn parse_variant(

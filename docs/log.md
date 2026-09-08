@@ -2202,3 +2202,61 @@ Use this append-only log to preserve implementation context across sessions and 
 
 - **Scope:** Removed the second landing subtitle sentence at Willem's request; retained “Your quiet news companion.”
 - **Validation:** Verified the source string and whitespace diff. Copy-only change; no build or tests run.
+
+### 2026-09-07 — detached worktree — Artifact response cleanup plan
+
+- **Status:** Plan complete locally; external review blocked before execution. No cleanup implementation.
+- **Scope:** Canonical longform_artifact detail payload; preserve legacy formats and list previews; migrate native sharing/model conveniences and eval readiness/reporting; explicit supported-client boundary and contract validation.
+- **Findings:** List projection depends on the detail DTO. ShareMarkdownBuilder consumes flattened overview/bullets/quotes and needs migration. Existing version/build telemetry can inform compatibility retirement but current checkout does not prove installed-client readiness.
+- **Review:** Requested Fable/high/plan/default-tools review with worktree/main-checkout access. Auto-review rejected external private repo/production-eval context disclosure before process creation; no Fable findings or substitute-model review.
+- **Evidence:** docs/initiatives/2026-09-07-content-artifact-response-cleanup.md; saved request under test-results/artifact-cleanup-plan-review.
+- **Remaining:** Explicit approval of data access for Claude Fable review, then verification/incorporation of its findings. No commit, push or deployment.
+
+### 2026-09-07 — detached worktree — Fable reviewed artifact cleanup plan
+
+- **Status:** Plan revised and independently reviewed; no API cleanup implementation.
+- **Review:** User explicitly authorized Claude access after the initial approval block. Claude Fable review completed successfully in plan mode/high effort with normal tools and full worktree/main-checkout access. Raw response and review saved under test-results/artifact-cleanup-plan-review.
+- **Decisions:** Keep all response keys; null optional duplicate carriers and empty arrays for artifact detail. Remove metadata summary/feed_preview/selection_trace copies. Keep one-line aliases, legacy shapes and list previews unchanged. No schema changes, codegen, client release, telemetry retirement mechanism or request flag planned.
+- **Verification:** Confirmed required-nullable strict Swift decoding, artifact-first medium/full sharing, list presenter coupling, canonical DB predicate, missing presenter baselines and raw-JSON CLI behavior. Corrected initial overstatement about sharing dependency.
+- **Evidence:** Updated docs/initiatives/2026-09-07-content-artifact-response-cleanup.md; exact-target saved-response simulation gives 68.4–69.5% lower compact JSON size with canonical artifact and top-level key set unchanged. This is projected, not a changed-server result.
+- **Remaining:** Implementation and its focused validations; commit/push/deploy not authorized by this planning request.
+
+### 2026-09-07 — detached worktree `27eeea8b` — Canonical artifact detail cleanup
+
+- Status: implemented and locally validated; no commit or release authorized.
+- Applied the Fable-reviewed plan: preserve required wire keys, return artifact detail once, derive list-only preview/classification/topic/takeaway from normalized stored metadata, and retain legacy/malformed behavior. Storage and processing templates are unchanged.
+- Pipeline summary evals now require and grade the canonical artifact once (projection v5/report v2), retaining the unabridged HTTP response. Added pre-change presenter baselines, native generated/handwritten decoding and full/medium sharing checks, and a typed artifact in the existing native fixture set.
+- Validation: 15 presenter baselines and four saved production response replays passed; artifacts and non-target fields stayed identical, compact UTF-8 JSON shrank 68.4–69.5%. Focused DB/native fixture tests, 41 native tests, 8 Python tests (2 opt-in skipped), Ruff/MyPy, touched-file rustfmt, warning-denied API Clippy and contract drift checks passed. Existing native reader displayed artifact sections against a fresh disposable API fixture.
+- Real-source evals: full AEO article and Stripe transcript both passed all five criteria with Luna processing/Sol CLI judging; raw responses and canonical reports are under `test-results/artifact-cleanup-evals-20260907/`. This representation-only change does not establish a quality improvement. Full eval suite and production deployment were not run.
+
+### 2026-09-08 — detached worktree `27eeea8b` — Artifact refactor cleanup pass
+
+- Scope: recent artifact presenter and native fixture changes; read-only independent review of eval/compatibility tests found no changes needed.
+- Borrow summary objects when extracting one-line text/title fallbacks instead of cloning the entire envelope. Removed the unreachable string branch because callers already require an object.
+- Construct typed native fixture metadata directly; removed the build-legacy-then-replace path and inlined its now-single-use legacy fixture wrapper. Public payloads and fixture content remain unchanged.
+- Validation: 7 focused Rust presenter/fixture tests passed (including 15 response baselines); touched-file formatting, diff checks and warning-denied API Clippy passed. No prompt, schema, generated-client or eval behavior changes; no commit or deployment.
+
+### 2026-09-08 — detached worktree `27eeea8b` — Artifact code-review fixes
+
+- Removed list-to-detail DTO coupling. Both wire presenters consume shared normalized source values in `presentation/content.rs`; list rendering no longer creates/discards a detail response or clones the full artifact. The parent presenter shrank from 1,718 to 1,484 lines.
+- Moved the four artifact response fixtures to `contracts/testing/content/artifact_responses.json`, completed the production schema fields, and shared them with a native decoding/sharing test. Legacy/malformed/mismatch baselines remain separate. Rust verifies the production envelope schema plus exact list/detail outputs; Swift verifies the same envelopes and previous/current share output.
+- Validation: 42 focused native tests and all 15 Rust response baselines passed, as did warning-denied API Clippy, touched-file formatting, diff checks and the public contract drift check. No prompt changes, model rerun, commit or deployment.
+
+### 2026-09-08 — detached worktree `27eeea8b` — AXe artifact dev-server verification
+
+- Rebuilt the API and used AXe on iPhone 17 Pro (iOS 26.3.1) with real-source article/podcast artifacts in a disposable dev database. Added real local body files/rows for full-content export checks.
+- Passed article/podcast reader sections, article key-points copy, Knowledge save/list preview/reopen, and full 682-word article export. Verified copied exports, not just sheet presentation.
+- Found an existing failure: full podcast export is truncated by `content_bodies.rs`'s 32,000-character response cap for a 49,301-character transcript. Cap is present at HEAD; no product changes made in this testing task. Full-content sharing remains an outstanding issue.
+- Evidence/report: `test-results/artifact-axe-fullbody-20260908/` and `test-results/artifact-axe-20260908/`. Artwork not seeded/tested. No model calls, production writes, commit or deployment.
+
+### 2026-09-08 — detached worktree `27eeea8b` — Complete source-body sharing fix
+
+- Removed the dedicated body endpoint's 32,000-character truncation so full article/transcript sharing uses complete text. Authorization, variants, storage/fallback selection and wire schema are unchanged.
+- Added opt-in black-box API regression coverage for long Unicode transcripts from file storage and metadata fallback, including the final source sentence.
+- Validation: 12 local pipeline/API tests and 41 API unit tests passed; warning-denied API Clippy, Ruff, formatting and public contract drift checks passed. AXe Full content → Copy preserved the complete 49,301-character / 9,125-word production transcript verbatim, with one transcript section and no truncation notice. Evidence: `test-results/artifact-axe-fixed-20260908/`. User authorized commit and local merge into main; no push/deploy.
+
+### 2026-09-08 — detached worktree `27eeea8b` — Local merge validation
+
+- Scoped artifact cleanup, shared local eval harness and complete-body fix for the requested main merge; unrelated chat, summarization prompt and artwork work excluded.
+- Exact staged tree validated in a clean temporary checkout: 40 API unit tests, 12 pipeline/API tests against disposable local databases, warning-denied API Clippy and public contract drift checks passed. Harness Ruff, configured MyPy and 30 focused Python tests passed; four opt-in tests subsequently passed in the 12-test API run. Earlier native verification passed 42 focused tests and AXe reader/sharing flows.
+- Main has unrelated local edits; preserve them while fast-forwarding the scoped commit. No push or deployment.

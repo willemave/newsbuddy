@@ -31,3 +31,7 @@ C14. Submission status has one canonical discriminated result whose kind scopes 
 C15. An agent-initiated feed subscription—Share Add Feed, a feed-valued Add to Briefing action, or Chat—is applied only after the host has fetched and parsed the exact RSS or Atom URL outside the finalization transaction. Its applied result identifies the active subscription config and the validated feed format; a created or reactivated subscription and its initial backfill become durable atomically, while an invalid feed fails without an applied action. The host derives podcast treatment from parsed audio entries and Substack treatment from the effective host rather than trusting a model label.
 
 C16. Content submission and feed subscription are separate commands. Content submission never mutates a scraper config; legacy requests that set `subscribe_to_feed` are rejected before persistence and callers must use the canonical scraper-subscription or Share Add Feed boundary.
+
+C19. Typed article and podcast detail exposes one complete canonical artifact, with its duplicate optional carriers null and duplicate arrays empty while retaining all public top-level keys. Compact list previews remain available, and legacy summary and news representations retain their existing behavior.
+
+C20. Dedicated source-body responses preserve the complete stored article or transcript, including its ending. Full-content sharing must not silently substitute a rendering excerpt for that source.

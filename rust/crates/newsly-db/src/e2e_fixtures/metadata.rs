@@ -7,32 +7,48 @@ pub(super) fn fixture_url(namespace: &str, item: &str) -> String {
 }
 
 pub(super) fn detail_metadata(namespace: &str) -> Value {
-    longform_metadata(
-        namespace,
-        DETAIL_TITLE,
-        "A small team can make model changes safer by treating contracts, evaluation, and release evidence as one loop.",
-        "The article connects typed boundaries, representative evaluation data, and short feedback cycles. It argues that the useful unit of progress is not a model call but a validated product outcome.",
-        "When evaluation becomes part of the product loop, each release leaves the next decision easier to make.",
-    )
+    let title = DETAIL_TITLE;
+    let one_line = "A small team can make model changes safer by treating contracts, evaluation, and release evidence as one loop.";
+    let overview = "The article connects typed boundaries, representative evaluation data, and short feedback cycles. It argues that the useful unit of progress is not a model call but a validated product outcome.";
+    let quote = "When evaluation becomes part of the product loop, each release leaves the next decision easier to make.";
+    json!({
+        "fixture_namespace": namespace,
+        "source": "web",
+        "content_type": "html",
+        "final_url": fixture_url(namespace, "source"),
+        "content": format!("# {title}\n\n{overview}\n\n## Evidence\n\n{one_line}"),
+        "summary_kind": "longform_artifact",
+        "summary_version": 1,
+        "summary": {
+            "title": title,
+            "one_line": one_line,
+            "ask": "understand",
+            "artifact": {
+                "type": "findings",
+                "payload": {
+                    "overview": overview,
+                    "takeaway": "Keep contracts, evaluation, and release evidence in one loop.",
+                    "key_points": [{"heading": "Typed boundaries", "content": "Use generated contracts as the only network boundary."}],
+                    "quotes": [{"text": quote, "attribution": "Reliability field note"}],
+                    "extras": {"evidence": ["Prepare immutable input and finalize through a fresh fenced transaction."]}
+                }
+            },
+            "feed_preview": {
+                "title": title,
+                "one_line": one_line,
+                "artifact_type": "findings",
+                "preview_bullets": ["Keep contracts and evaluation together."],
+                "reason_to_read": "Make model changes safer."
+            }
+        }
+    })
 }
 
 pub(super) fn knowledge_metadata(namespace: &str) -> Value {
-    longform_metadata(
-        namespace,
-        KNOWLEDGE_TITLE,
-        "Reliable processing starts with explicit ownership and keeps external work outside PostgreSQL transactions.",
-        "These field notes cover immutable preparation DTOs, generated wire contracts, SQLx transaction boundaries, database-free extraction, and offline evaluation.",
-        "Release database connections before waiting on the network.",
-    )
-}
-
-fn longform_metadata(
-    namespace: &str,
-    title: &str,
-    one_line: &str,
-    overview: &str,
-    quote: &str,
-) -> Value {
+    let title = KNOWLEDGE_TITLE;
+    let one_line = "Reliable processing starts with explicit ownership and keeps external work outside PostgreSQL transactions.";
+    let overview = "These field notes cover immutable preparation DTOs, generated wire contracts, SQLx transaction boundaries, database-free extraction, and offline evaluation.";
+    let quote = "Release database connections before waiting on the network.";
     json!({
         "fixture_namespace": namespace,
         "source": "web",

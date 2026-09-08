@@ -7,13 +7,17 @@ import json
 from pathlib import Path
 from typing import Any
 
+from newsly_evals.chat.cli import add_parser, execute
 from newsly_evals.encoders import SentenceTransformerEncoder
+from newsly_evals.pipeline import cli as pipeline_cli
 from newsly_evals.relations import run_relation_eval
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run offline Newsly model evaluations")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    add_parser(subparsers)
+    pipeline_cli.add_parser(subparsers)
     relations = subparsers.add_parser("relations", help="Evaluate news relation embeddings")
     relations.add_argument("--cases", type=Path, required=True)
     relations.add_argument("--model", required=True)
@@ -26,6 +30,18 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
+    if args.command == "pipeline":
+        try:
+            return pipeline_cli.execute(args)
+        except (ValueError, RuntimeError, OSError) as error:
+            print(f"Pipeline eval error: {error}")
+            return 2
+    if args.command == "chat":
+        try:
+            return execute(args)
+        except (ValueError, RuntimeError, OSError) as error:
+            print(f"Chat eval error: {error}")
+            return 2
     if args.command != "relations":
         raise ValueError(f"unsupported command {args.command}")
     raw_payload: Any = json.loads(args.cases.read_text(encoding="utf-8"))

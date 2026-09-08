@@ -1,9 +1,12 @@
 # Newsly evals
 
-This is an offline-only Python package for constructing model-evaluation
-datasets, running local or hosted embedding models, and reporting results. It
-does not import the Newsly backend, connect to PostgreSQL, claim queue work, or
-own production matching policy.
+This is a local Python package for constructing model-evaluation datasets,
+running model evaluations, and reporting results. It does not import the Newsly
+backend, claim queue work, or own production matching policy.
+
+The [chat eval harness](CHAT_EVALS.md) generates synthetic initial state from YAML
+as SQL, bootstraps a disposable local database, and exercises Rust through HTTP.
+This fixture-only PostgreSQL access is separate from production-data exports.
 
 Every durable dataset produced here is a versioned JSON or JSONL artifact. Any
 snapshot of Newsly rows must be exported read-only by Rust/operator tooling

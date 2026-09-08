@@ -1,0 +1,63 @@
+{
+  "origin": "newsly-admin bounded read-only SELECT; global ready Techmeme/Hacker News records",
+  "captured_at_utc": "2026-09-07",
+  "scope": "Stored production summaries/key points, not independently verified article text or golden answers. No user memberships, private records, tokens or generated Briefing outputs. Public URL queries/fragments removed. Lens grouping is a local eval choice, not exported production lens assignment.",
+  "sources": [
+    {
+      "case": "tech_concise_release",
+      "source_id": "news_89833",
+      "production_news_id": 89833,
+      "public_url": "https://github.com/FulltimeFeline/Sol",
+      "published_at": null
+    },
+    {
+      "case": "tech_concise_ai_policy",
+      "source_id": "news_90164",
+      "production_news_id": 90164,
+      "public_url": "https://asia.nikkei.com/business/technology/artificial-intelligence/us-and-china-eye-trump-xi-talks-on-ai-guardrails-despite-tech-rift",
+      "published_at": "2026-09-07 03:10:00"
+    },
+    {
+      "case": "tech_concise_ai_policy",
+      "source_id": "news_89962",
+      "production_news_id": 89962,
+      "public_url": "https://www.nytimes.com/2026/09/06/technology/ai-chips-china-blacklist.html",
+      "published_at": "2026-09-07 00:45:01"
+    },
+    {
+      "case": "tech_concise_developer_tools",
+      "source_id": "news_90107",
+      "production_news_id": 90107,
+      "public_url": "https://github.com/Staatsgeheim/MathKernel",
+      "published_at": null
+    },
+    {
+      "case": "tech_concise_developer_tools",
+      "source_id": "news_90049",
+      "production_news_id": 90049,
+      "public_url": "https://ponytail.dev/",
+      "published_at": null
+    },
+    {
+      "case": "tech_concise_developer_tools",
+      "source_id": "news_89511",
+      "production_news_id": 89511,
+      "public_url": "https://github.com/mmeyerlein/meclaw",
+      "published_at": null
+    },
+    {
+      "case": "tech_concise_ai_claims",
+      "source_id": "news_90134",
+      "production_news_id": 90134,
+      "public_url": "https://www.wsj.com/tech/ai/the-ai-shift-turning-everyday-investors-into-mini-quant-funds-ebe4d45f",
+      "published_at": "2026-09-07 02:35:01"
+    },
+    {
+      "case": "tech_concise_ai_claims",
+      "source_id": "news_89960",
+      "production_news_id": 89960,
+      "public_url": "https://mbmccoy.dev/posts/mathematical-conservatory",
+      "published_at": null
+    }
+  ]
+}

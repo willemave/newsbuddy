@@ -5,7 +5,11 @@ description = "Offline Newsly model and embedding evaluation pipelines"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "httpx>=0.28.1",
+    "markdown-it-py>=4.2.0",
     "numpy>=2.5.1",
+    "pydantic>=2",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]

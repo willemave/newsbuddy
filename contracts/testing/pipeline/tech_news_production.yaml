@@ -1,0 +1,176 @@
+version: 1
+cases:
+- id: tech_concise_release
+  stage: briefing
+  sources:
+  - id: news_89833
+    kind: news
+    lens: developer_tools
+    title: Sol macOS music player is now free and open source
+    text: Sol is a free, open-source macOS music player designed for local music libraries, with support
+      for extensive formats, tagging, playback controls and library organization. It also supports podcasts,
+      internet radio, lyrics, server streaming and automation integrations.
+    key_points:
+    - Sol is a native Mac music player released under GPLv3 or later, with no subscription, trial, account,
+      telemetry or analytics.
+    - It supports macOS 14+, Apple Silicon and Intel, 34 languages, and local libraries across internal,
+      external, network and iCloud drives.
+    - Features include broad audio-format support, metadata editing, smart playlists, podcasts, internet
+      radio, lyrics, karaoke and Navidrome/Subsonic streaming.
+    - The repository provides signed and notarized releases, a Homebrew cask, and build instructions requiring
+      Xcode 26 or later and XcodeGen.
+    source: github.com
+    url: https://github.com/FulltimeFeline/Sol
+  expects: Summarize this macOS music-player release in one or two concise sentences. Preserve what became
+    free/open source, the relevant platform and meaningful limitations present in the source. Select the
+    most useful changes rather than cataloguing features or installation trivia. Include a natural source
+    reference; no generic praise or closing recap.
+- id: tech_concise_ai_policy
+  stage: briefing
+  sources:
+  - id: news_90164
+    kind: news
+    lens: ai_policy
+    title: US and China may discuss AI guardrails at September 24 talks
+    text: The US is poised to raise AI safety concerns with China during the upcoming Trump-Xi summit,
+      sources say. Discussions may cover preventing AI-directed cyberattacks, while China is expected
+      to revisit US export controls amid ongoing technological tensions.
+    key_points:
+    - The US is expected to raise preventing AI-directed cyberattacks at the September 24 talks, according
+      to sources familiar with preparations.
+    - China will likely revisit US export controls, while the talks could open dialogue despite the countries’
+      technological rivalry.
+    - Silicon Valley insiders have floated cooperation ideas, but skepticism about US-China collaboration
+      persists.
+    source: asia.nikkei.com
+    url: https://asia.nikkei.com/business/technology/artificial-intelligence/us-and-china-eye-trump-xi-talks-on-ai-guardrails-despite-tech-rift
+  - id: news_89962
+    kind: news
+    lens: ai_policy
+    title: Blacklisted Inspur allegedly bypassed U.S. AI chip restrictions
+    text: The New York Times reports that blacklisted China-owned company Inspur bypassed U.S. export
+      restrictions on advanced AI chips through a network of new subsidiaries and partners. Washington
+      imposed sanctions on Inspur over its work with the Chinese military, but a subsidiary kept shipping
+      Nvidia’s best chips.
+    key_points:
+    - The U.S. sanctioned China-owned Inspur over its work with the Chinese military.
+    - The company allegedly used new subsidiaries and partners to bypass U.S. export restrictions on advanced
+      AI chips.
+    - An Inspur subsidiary reportedly continued shipping Nvidia’s best chips.
+    source: nytimes.com
+    url: https://www.nytimes.com/2026/09/06/technology/ai-chips-china-blacklist.html
+  expects: 'Synthesize this AI-policy source set in one compact paragraph of at most three sentences.
+    Keep potential September 24 talks distinct from reported export-control circumvention: talks and agenda
+    are expected, not completed agreements; Inspur allegations belong to the New York Times report. Preserve
+    the core cyberattack/export-control issues without reciting every geopolitical background detail.
+    Do not assert that the Inspur story caused the talks. Reference both sources; repeated titles are acceptable. Avoid bloated semicolon chains in the substantive prose.'
+- id: tech_concise_developer_tools
+  stage: briefing
+  sources:
+  - id: news_90107
+    kind: news
+    lens: developer_tools
+    title: MathKernel adds evidence-aware mathematics for Python and MCP
+    text: MathKernel is a typed orchestration layer for applications and LLMs that separates intent interpretation
+      from mathematical computation and evidence tracking. Its trust model preserves distinctions among
+      symbolic results, exact certificates, certified numerics, empirical findings, and Lean-checked formal
+      proofs, while supporting broad mathematics through Python and MCP interfaces.
+    key_points:
+    - MathKernel v1.3.0 is available as a Python library and MCP server, requiring Python 3.11 or newer.
+    - Results retain trust levels, engine tags, derivation trails, provenance, and claim-specific evidence
+      instead of treating exact computation as formal proof.
+    - The project connects SymPy, Z3, Lean, Numba, CUDA, mpmath, and other engines across symbolic, exact,
+      certified-numeric, formal, statistical, geometry, topology, and PDE tasks.
+    - The MCP server exposes 162 math_-prefixed tools, including capability discovery, reasoning, provenance
+      tracing, and asynchronous jobs.
+    source: github.com
+    url: https://github.com/Staatsgeheim/MathKernel
+  - id: news_90049
+    kind: news
+    lens: developer_tools
+    title: Ponytail promotes simpler implementations for coding agents
+    text: Ponytail is a skill for coding agents centered on reducing over-engineering while preserving
+      validation, error handling, security, and accessibility. It presents simpler alternatives such as
+      using built-in date inputs or caching, and provides configurable commands for reviews, audits, debt
+      tracking, and benchmark reporting.
+    key_points:
+    - Ponytail encourages standard-library and native solutions, shorter diffs, and challenging unnecessary
+      requirements.
+    - It offers lite, full, ultra, and off intensity modes plus commands to review diffs, audit repositories,
+      track debt, and view benchmarks.
+    - Installation is documented for 14+ agents, including Codex, Copilot, Gemini, OpenCode, Cursor, Windsurf,
+      Cline, Kiro, and Zed.
+    source: ponytail.dev
+    url: https://ponytail.dev/
+  - id: news_89511
+    kind: news
+    lens: developer_tools
+    title: 'meclaw: Rust-based Linux substrate for auditable agent systems'
+    text: meclaw is an open-source, ontology-grounded agentic build system that turns a directory tree
+      into a running colony of actors under one Rust Linux binary. Its design makes agent topology, routing
+      and mutations auditable through files and an HTTP API, but the project remains experimental, Linux-only
+      and not ready for unsupervised production.
+    key_points:
+    - meclaw runs a directory tree as a colony of actors using one static Rust binary; folders are cells
+      and filesystem edges define message routes.
+    - Agents, tools and control loops are represented as files and topology, with runtime mutations applied
+      over HTTP and activity recorded as messages.
+    - The project includes meclaw-os templates, two-model assistants, model-free memory retrieval and
+      Linux sandboxing with Landlock, namespaces, cgroup v2 and seccomp.
+    - It is experimental and not intended for unsupervised production; it supports Linux only, runs Python3
+      code cells, and reports 6,600+ passing tests.
+    source: github.com
+    url: https://github.com/mmeyerlein/meclaw
+  expects: Give a compact developer-tools lens in one paragraph of at most three readable sentences. Preserve
+    the distinct purpose of MathKernel, Ponytail and meclaw; do not imply they are one product or integrate
+    together. Select defining capabilities and relevant limitations rather than exhaustive engine/tool/agent
+    lists or numerical feature inventories. Preserve MathKernel's distinction between computed evidence
+    and formal proof. Avoid generic commentary about the future of development, marketing language in the substantive prose. Repeated source titles and citation labels are acceptable. Reference all sources naturally.
+- id: tech_concise_ai_claims
+  stage: briefing
+  sources:
+  - id: news_90134
+    kind: news
+    lens: ai_evidence
+    title: AI Agents Bring Automated Trading to Everyday Investors
+    text: 'Everyday U.S. investors are using AI agents built with Claude or Codex to automate stock and
+      options trading, turning personal portfolios into “mini hedge funds.” The technology offers round-the-clock
+      execution but remains untested: researchers and market experts warn of concentrated bets, correlated
+      trading and amplified losses.'
+    key_points:
+    - Brokerages including Robinhood and Webull let customers connect portfolios to Claude, Codex and
+      other agents that can buy and sell assets autonomously.
+    - Investors say agents remove emotion and automate complex strategies; Dean Ahrens said his account
+      grew from $3,000 to $8,000 in a few months, including one Micron options trade returning over 500%.
+    - Skeptics warn agents may concentrate portfolios, amplify herd behavior and create volatility; an
+      NBER working paper found no apparent performance advantage over passive benchmarks.
+    - Moomoo CEO Neil McDonald estimates agents could execute about 20% of the brokerage’s trading volume
+      by year-end.
+    source: wsj.com
+    url: https://www.wsj.com/tech/ai/the-ai-shift-turning-everyday-investors-into-mini-quant-funds-ebe4d45f
+  - id: news_89960
+    kind: news
+    lens: ai_evidence
+    title: AI assistance reported in proof of Spherical Hadwiger Theorem
+    text: The article examines a preprint claiming an AI-assisted proof of the long-open Spherical Hadwiger
+      Conjecture, while noting that the author has not fully verified it. It argues that AI may force
+      major changes to mathematics’s academic support and incentive systems, while defending research
+      mathematics as a cultural endeavor.
+    key_points:
+    - A preprint by Wang and Wu of Hunan University apparently proves the Spherical Hadwiger Conjecture,
+      open since about 1974, with assistance from OpenAI Codex.
+    - The authors say Codex helped develop proof details, identify gaps, organize and typeset the manuscript,
+      and edit the English; they reviewed the content and take responsibility.
+    - The author has not fully verified the proof, but says it passed an initial review with Claude Fable
+      and describes the paper as polished and readable.
+    - The essay questions how mathematics should support human researchers if AI increasingly produces
+      and checks difficult results.
+    source: mbmccoy.dev
+    url: https://mbmccoy.dev/posts/mathematical-conservatory
+  expects: 'In one concise paragraph of at most three sentences, distinguish the two stories: individuals
+    experimenting with AI trading, and a claimed AI-assisted mathematical proof. Preserve the caution
+    that trading anecdotes do not establish a benchmark advantage and the proof has not been fully verified
+    by the reporting author. Do not turn an individual return or preprint claim into proven general AI
+    superiority, or claim the two stories are causally linked. Omit unnecessary anecdotal return figures
+    and extended philosophical commentary; use short, readable sentences and natural references to both
+    sources.'

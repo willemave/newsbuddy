@@ -1,0 +1,1435 @@
+[
+  {
+    "name": "long_structured1",
+    "content_type": "article",
+    "metadata": {
+      "summary_kind": "long_structured",
+      "summary_version": 1,
+      "summary": {
+        "overview": "Overview.",
+        "bullet_points": [
+          {
+            "text": "Point.",
+            "category": "tech"
+          }
+        ],
+        "quotes": [
+          {
+            "text": "Quote.",
+            "context": "Context."
+          }
+        ],
+        "topics": [
+          "Technology"
+        ]
+      }
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "long_structured",
+        "summary_version": 1,
+        "summary": {
+          "overview": "Overview.",
+          "bullet_points": [
+            {
+              "text": "Point.",
+              "category": "tech"
+            }
+          ],
+          "quotes": [
+            {
+              "text": "Quote.",
+              "context": "Context."
+            }
+          ],
+          "topics": [
+            "Technology"
+          ]
+        },
+        "platform": "web",
+        "source": "Example"
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": "Overview.",
+      "short_summary": "Overview.",
+      "summary_kind": "long_structured",
+      "summary_version": 1,
+      "structured_summary": {
+        "overview": "Overview.",
+        "bullet_points": [
+          {
+            "text": "Point.",
+            "category": "tech"
+          }
+        ],
+        "quotes": [
+          {
+            "text": "Quote.",
+            "context": "Context."
+          }
+        ],
+        "topics": [
+          "Technology"
+        ]
+      },
+      "longform_artifact": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [
+        {
+          "text": "Point.",
+          "category": "tech"
+        }
+      ],
+      "quotes": [
+        {
+          "text": "Quote.",
+          "context": "Context.",
+          "attribution": null
+        }
+      ],
+      "topics": [
+        "Technology"
+      ],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Overview.",
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": "Overview.",
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Overview.",
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": "Technology",
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": "Point.",
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "long_bullets1",
+    "content_type": "article",
+    "metadata": {
+      "summary_kind": "long_bullets",
+      "summary_version": 1,
+      "summary": {
+        "points": [
+          {
+            "text": "Point."
+          }
+        ]
+      }
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "long_bullets",
+        "summary_version": 1,
+        "summary": {
+          "points": [
+            {
+              "text": "Point."
+            }
+          ]
+        },
+        "platform": "web",
+        "source": "Example"
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": "Point.",
+      "short_summary": "Point.",
+      "summary_kind": "long_bullets",
+      "summary_version": 1,
+      "structured_summary": {
+        "points": [
+          {
+            "text": "Point."
+          }
+        ]
+      },
+      "longform_artifact": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [
+        {
+          "text": "Point.",
+          "category": "key_point"
+        }
+      ],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Point.",
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": "Point.",
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Point.",
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": null,
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": "Point.",
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "long_editorial_narrative1",
+    "content_type": "article",
+    "metadata": {
+      "summary_kind": "long_editorial_narrative",
+      "summary_version": 1,
+      "summary": {
+        "editorial_narrative": "Narrative."
+      }
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "long_editorial_narrative",
+        "summary_version": 1,
+        "summary": {
+          "editorial_narrative": "Narrative."
+        },
+        "platform": "web",
+        "source": "Example"
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": "Narrative.",
+      "short_summary": "Narrative.",
+      "summary_kind": "long_editorial_narrative",
+      "summary_version": 1,
+      "structured_summary": {
+        "editorial_narrative": "Narrative."
+      },
+      "longform_artifact": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Narrative.",
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": "Narrative.",
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Narrative.",
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": null,
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": null,
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "long_interleaved1",
+    "content_type": "article",
+    "metadata": {
+      "summary_kind": "long_interleaved",
+      "summary_version": 1,
+      "summary": {
+        "summary_type": "interleaved",
+        "key_points": [
+          {
+            "text": "Point."
+          }
+        ],
+        "topics": [
+          "Tech"
+        ]
+      }
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "long_interleaved",
+        "summary_version": 1,
+        "summary": {
+          "summary_type": "interleaved",
+          "key_points": [
+            {
+              "text": "Point."
+            }
+          ],
+          "topics": [
+            "Tech"
+          ]
+        },
+        "platform": "web",
+        "source": "Example"
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": null,
+      "short_summary": null,
+      "summary_kind": "long_interleaved",
+      "summary_version": 1,
+      "structured_summary": {
+        "summary_type": "interleaved",
+        "key_points": [
+          {
+            "text": "Point."
+          }
+        ],
+        "topics": [
+          "Tech"
+        ]
+      },
+      "longform_artifact": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": null,
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": null,
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": null,
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": null,
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": "Point.",
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "long_interleaved2",
+    "content_type": "article",
+    "metadata": {
+      "summary_kind": "long_interleaved",
+      "summary_version": 2,
+      "summary": {
+        "summary_type": "interleaved",
+        "key_points": [
+          {
+            "text": "Point."
+          }
+        ],
+        "topics": [
+          "Tech"
+        ]
+      }
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "long_interleaved",
+        "summary_version": 2,
+        "summary": {
+          "summary_type": "interleaved",
+          "key_points": [
+            {
+              "text": "Point."
+            }
+          ],
+          "topics": [
+            "Tech"
+          ]
+        },
+        "platform": "web",
+        "source": "Example"
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": null,
+      "short_summary": null,
+      "summary_kind": "long_interleaved",
+      "summary_version": 2,
+      "structured_summary": {
+        "summary_type": "interleaved",
+        "key_points": [
+          {
+            "text": "Point."
+          }
+        ],
+        "topics": [
+          "Tech"
+        ]
+      },
+      "longform_artifact": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [
+        {
+          "text": "Point.",
+          "category": null
+        }
+      ],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": null,
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": null,
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": null,
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": null,
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": "Point.",
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "short_news1",
+    "content_type": "news",
+    "metadata": {
+      "summary_kind": "short_news",
+      "summary_version": 1,
+      "summary": {
+        "summary": "News summary.",
+        "key_points": [
+          "One point."
+        ]
+      }
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "news",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "short_news",
+        "summary_version": 1,
+        "summary": {
+          "summary": "News summary.",
+          "key_points": [
+            "One point."
+          ]
+        },
+        "platform": "web",
+        "source": "Example",
+        "article": {
+          "url": "https://example.com/source",
+          "title": "Fixture title",
+          "source_domain": "Example"
+        }
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": "News summary.",
+      "short_summary": "News summary.",
+      "summary_kind": "short_news",
+      "summary_version": 1,
+      "structured_summary": null,
+      "longform_artifact": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": "https://example.com/source",
+      "news_discussion_url": null,
+      "news_key_points": [
+        "One point."
+      ],
+      "news_summary": "News summary.",
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "news",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": "News summary.",
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": "https://example.com/source",
+      "news_discussion_url": null,
+      "news_key_points": [
+        "One point."
+      ],
+      "news_summary": "News summary.",
+      "user_status": null,
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": "web",
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": null,
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "missing",
+    "content_type": "article",
+    "metadata": {},
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "platform": "web",
+        "source": "Example"
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": null,
+      "short_summary": null,
+      "summary_kind": null,
+      "summary_version": null,
+      "structured_summary": null,
+      "longform_artifact": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": null,
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": null,
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": null,
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": null,
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": null,
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "malformed",
+    "content_type": "article",
+    "metadata": {
+      "summary_kind": "longform_artifact",
+      "summary": "broken"
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "longform_artifact",
+        "summary": "broken",
+        "platform": "web",
+        "source": "Example"
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": null,
+      "short_summary": null,
+      "summary_kind": "longform_artifact",
+      "summary_version": null,
+      "structured_summary": null,
+      "longform_artifact": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": null,
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": null,
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": null,
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": null,
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": null,
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "missing_artifact",
+    "content_type": "article",
+    "metadata": {
+      "summary_kind": "longform_artifact",
+      "summary": {
+        "one_line": "Preview only.",
+        "feed_preview": {
+          "artifact_type": "argument"
+        }
+      }
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "longform_artifact",
+        "summary": {
+          "one_line": "Preview only.",
+          "feed_preview": {
+            "artifact_type": "argument"
+          }
+        },
+        "platform": "web",
+        "source": "Example",
+        "summary_version": 1
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": "Preview only.",
+      "short_summary": "Preview only.",
+      "summary_kind": "longform_artifact",
+      "summary_version": 1,
+      "structured_summary": {
+        "one_line": "Preview only.",
+        "feed_preview": {
+          "artifact_type": "argument"
+        }
+      },
+      "longform_artifact": {
+        "one_line": "Preview only.",
+        "feed_preview": {
+          "artifact_type": "argument"
+        }
+      },
+      "feed_preview": {
+        "artifact_type": "argument"
+      },
+      "artifact_type": "argument",
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Preview only.",
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": "Preview only.",
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Preview only.",
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": null,
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": {
+        "artifact_type": "argument"
+      },
+      "artifact_type": "argument",
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": null,
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "missing_type",
+    "content_type": "article",
+    "metadata": {
+      "summary_kind": "longform_artifact",
+      "summary": {
+        "artifact": {},
+        "one_line": "Incomplete."
+      }
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "longform_artifact",
+        "summary": {
+          "artifact": {},
+          "one_line": "Incomplete."
+        },
+        "platform": "web",
+        "source": "Example",
+        "summary_version": 1
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": "Incomplete.",
+      "short_summary": "Incomplete.",
+      "summary_kind": "longform_artifact",
+      "summary_version": 1,
+      "structured_summary": {
+        "artifact": {},
+        "one_line": "Incomplete."
+      },
+      "longform_artifact": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "bullet_points": [],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Incomplete.",
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": "Incomplete.",
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "Incomplete.",
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": null,
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": null,
+      "artifact_type": null,
+      "preview_bullets": null,
+      "reason_to_read": null,
+      "key_takeaway": null,
+      "saved_source": "knowledge"
+    }
+  },
+  {
+    "name": "kind_mismatch",
+    "content_type": "article",
+    "metadata": {
+      "summary_kind": "long_structured",
+      "summary": {
+        "title": "Fixture title",
+        "one_line": "A useful preview.",
+        "classification": "to_read",
+        "artifact": {
+          "type": "findings",
+          "payload": {
+            "overview": "Source overview.",
+            "takeaway": "Keep the qualification.",
+            "key_points": [
+              {
+                "heading": "Evidence",
+                "content": "A bounded claim."
+              }
+            ],
+            "quotes": [
+              {
+                "text": "Source quotation.",
+                "attribution": "Author"
+              }
+            ],
+            "extras": {
+              "evidence": [
+                "Supporting observation."
+              ]
+            }
+          }
+        },
+        "feed_preview": {
+          "artifact_type": "findings",
+          "preview_bullets": [
+            "A bounded claim."
+          ],
+          "reason_to_read": "Understand the evidence."
+        },
+        "selection_trace": {
+          "reason": "Source fit"
+        }
+      }
+    },
+    "detail": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "display_title": "Fixture title",
+      "source": "Example",
+      "status": "completed",
+      "error_message": null,
+      "retry_count": 0,
+      "metadata": {
+        "summary_kind": "long_structured",
+        "summary": {
+          "title": "Fixture title",
+          "one_line": "A useful preview.",
+          "classification": "to_read",
+          "artifact": {
+            "type": "findings",
+            "payload": {
+              "overview": "Source overview.",
+              "takeaway": "Keep the qualification.",
+              "key_points": [
+                {
+                  "heading": "Evidence",
+                  "content": "A bounded claim."
+                }
+              ],
+              "quotes": [
+                {
+                  "text": "Source quotation.",
+                  "attribution": "Author"
+                }
+              ],
+              "extras": {
+                "evidence": [
+                  "Supporting observation."
+                ]
+              }
+            }
+          },
+          "feed_preview": {
+            "artifact_type": "findings",
+            "preview_bullets": [
+              "A bounded claim."
+            ],
+            "reason_to_read": "Understand the evidence."
+          },
+          "selection_trace": {
+            "reason": "Source fit"
+          }
+        },
+        "platform": "web",
+        "source": "Example",
+        "summary_version": 1
+      },
+      "created_at": "2026-09-07T12:00:00Z",
+      "updated_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "checked_out_by": null,
+      "checked_out_at": null,
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "summary": "A useful preview.",
+      "short_summary": "A useful preview.",
+      "summary_kind": "long_structured",
+      "summary_version": 1,
+      "structured_summary": {
+        "title": "Fixture title",
+        "one_line": "A useful preview.",
+        "classification": "to_read",
+        "artifact": {
+          "type": "findings",
+          "payload": {
+            "overview": "Source overview.",
+            "takeaway": "Keep the qualification.",
+            "key_points": [
+              {
+                "heading": "Evidence",
+                "content": "A bounded claim."
+              }
+            ],
+            "quotes": [
+              {
+                "text": "Source quotation.",
+                "attribution": "Author"
+              }
+            ],
+            "extras": {
+              "evidence": [
+                "Supporting observation."
+              ]
+            }
+          }
+        },
+        "feed_preview": {
+          "artifact_type": "findings",
+          "preview_bullets": [
+            "A bounded claim."
+          ],
+          "reason_to_read": "Understand the evidence."
+        },
+        "selection_trace": {
+          "reason": "Source fit"
+        }
+      },
+      "longform_artifact": {
+        "title": "Fixture title",
+        "one_line": "A useful preview.",
+        "classification": "to_read",
+        "artifact": {
+          "type": "findings",
+          "payload": {
+            "overview": "Source overview.",
+            "takeaway": "Keep the qualification.",
+            "key_points": [
+              {
+                "heading": "Evidence",
+                "content": "A bounded claim."
+              }
+            ],
+            "quotes": [
+              {
+                "text": "Source quotation.",
+                "attribution": "Author"
+              }
+            ],
+            "extras": {
+              "evidence": [
+                "Supporting observation."
+              ]
+            }
+          }
+        },
+        "feed_preview": {
+          "artifact_type": "findings",
+          "preview_bullets": [
+            "A bounded claim."
+          ],
+          "reason_to_read": "Understand the evidence."
+        },
+        "selection_trace": {
+          "reason": "Source fit"
+        }
+      },
+      "feed_preview": {
+        "artifact_type": "findings",
+        "preview_bullets": [
+          "A bounded claim."
+        ],
+        "reason_to_read": "Understand the evidence."
+      },
+      "artifact_type": "findings",
+      "preview_bullets": [
+        "A bounded claim."
+      ],
+      "reason_to_read": "Understand the evidence.",
+      "bullet_points": [],
+      "quotes": [],
+      "topics": [],
+      "full_markdown": null,
+      "body_available": true,
+      "body_kind": "article",
+      "body_format": "markdown",
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "A useful preview.",
+      "image_url": null,
+      "thumbnail_url": null,
+      "detected_feed": null,
+      "can_subscribe": false
+    },
+    "list": {
+      "id": 42,
+      "content_type": "article",
+      "url": "https://example.com/source",
+      "source_url": "https://example.com/source",
+      "discussion_url": null,
+      "title": "Fixture title",
+      "source": "Example",
+      "platform": "web",
+      "status": "completed",
+      "short_summary": "A useful preview.",
+      "created_at": "2026-09-07T12:00:00Z",
+      "processed_at": "2026-09-07T12:00:00Z",
+      "classification": "to_read",
+      "publication_date": "2026-09-07T12:00:00Z",
+      "is_read": true,
+      "is_saved_to_knowledge": true,
+      "knowledge_saved_at": null,
+      "news_article_url": null,
+      "news_discussion_url": null,
+      "news_key_points": null,
+      "news_summary": "A useful preview.",
+      "user_status": "inbox",
+      "image_url": null,
+      "thumbnail_url": null,
+      "primary_topic": null,
+      "top_comment": null,
+      "comment_count": null,
+      "feed_preview": {
+        "artifact_type": "findings",
+        "preview_bullets": [
+          "A bounded claim."
+        ],
+        "reason_to_read": "Understand the evidence."
+      },
+      "artifact_type": "findings",
+      "preview_bullets": [
+        "A bounded claim."
+      ],
+      "reason_to_read": "Understand the evidence.",
+      "key_takeaway": "Keep the qualification.",
+      "saved_source": "knowledge"
+    }
+  }
+]

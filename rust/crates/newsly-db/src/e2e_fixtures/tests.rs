@@ -48,16 +48,18 @@ fn fixture_chat_uses_the_canonical_newsly_transcript() {
 #[test]
 fn metadata_keeps_the_longform_contract_fields_used_by_ios() {
     let metadata = detail_metadata("local");
-    assert_eq!(metadata["summary_kind"], "long_structured");
+    assert_eq!(metadata["summary_kind"], "longform_artifact");
     assert_eq!(metadata["summary_version"], 1);
     assert_eq!(metadata["summary"]["title"], DETAIL_TITLE);
     assert_eq!(
-        metadata["summary"]["quotes"].as_array().map(Vec::len),
+        metadata["summary"]["artifact"]["payload"]["quotes"]
+            .as_array()
+            .map(Vec::len),
         Some(1)
     );
-    assert!(
-        metadata["summary"]["full_markdown"]
-            .as_str()
-            .is_some_and(|value| value.contains("Notable Quotes"))
+    assert_eq!(metadata["summary"]["artifact"]["type"], "findings");
+    assert_eq!(
+        super::metadata::knowledge_metadata("local")["summary_kind"],
+        "long_structured"
     );
 }

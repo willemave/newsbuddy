@@ -512,7 +512,37 @@ separate egress policy.
 `python/evals` owns datasets, candidate/local embedding models, provider and
 judge orchestration, checkpoints, maximum-cost controls, aggregation, reports,
 and visualization. `newsly-admin` can export bounded read-only JSONL input;
-Python never receives database credentials.
+Python never receives production database credentials.
+
+The local chat eval harness in `python/evals` is a narrow fixture exception:
+Python compiles shared YAML scenarios into SQL and applies it with `psql` to a
+disposable `newsly_eval_*` database. Rust migrations still own schema. The
+harness starts the normal API/chat worker, stubs external HTTP services, and
+evaluates completed responses solely through product APIs and an independent
+CLI judge. It does not query the database to grade behavior or invoke Rust
+internals. Scenario YAML and stubs are shared with opt-in local integration
+checks; no CI eval or release gate is added. See `python/evals/CHAT_EVALS.md`.
+
+Typed article/podcast detail presents the complete stored envelope once in
+`longform_artifact`. Duplicate detail carriers retain required nullable/array keys
+with null/empty values; duplicate envelope, preview and selection trace entries
+are removed from the public metadata map. Stored metadata is unchanged. List
+and detail presenters independently consume normalized source values from
+`ContentPresentation`; list rendering never constructs a detail DTO or executes
+its pruning. Artifact inspection borrows the stored envelope; only detail output
+clones it for serialization. Legacy summaries and news retain their existing
+projection. Installed clients already render and share the canonical artifact.
+Dedicated body endpoints return complete stored or fallback text; rendering
+excerpts must not truncate the body used by native full-content sharing.
+
+The pipeline harness uses the same fixture exception, local runtime and HTTP
+stubs for raw article/podcast summarization and prepared-source Briefing
+composition. Each case starts an isolated database and the relevant normal Rust
+worker. It grades published Content or Briefing API output, with source evidence
+and expectations supplied only to the judge. News lens membership and artwork
+readiness are initial-state fixtures; extraction, transcription, image generation
+and semantic lens assignment are outside this suite. See
+`python/evals/PIPELINE_EVALS.md` and `contracts/testing/pipeline/`.
 
 The eval package writes versioned embedding bundles and cases for
 `newsly-eval-driver`. Rust owns canonical matching text, retrieval, scoring,

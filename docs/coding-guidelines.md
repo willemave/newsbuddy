@@ -97,6 +97,12 @@ issue user auth tokens, or own product state. The extractor returns typed usage
 events; Rust decides retries and persists them. Evals exchange versioned
 JSON/NDJSON artifacts and must not grow a second production matcher.
 
+The local chat and pipeline harnesses are a fixture-only exception: Python may generate SQL
+from shared YAML and apply it to an isolated `newsly_eval_*` database. It invokes
+the Rust migration binary, obtains tokens through the debug-login API, and
+evaluates behavior through HTTP. It must not read production data or SQL-query
+the application to judge responses. See `python/evals/CHAT_EVALS.md` and `python/evals/PIPELINE_EVALS.md`.
+
 The application image may include the pinned third-party `yt-dlp` executable
 and its private Python runtime. Treat it as a Rust-controlled media tool, not a
 place for Newsly application code or workflow ownership.

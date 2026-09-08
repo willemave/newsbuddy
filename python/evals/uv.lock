@@ -701,7 +701,11 @@ name = "newsly-evals"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
+    { name = "markdown-it-py" },
     { name = "numpy" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -726,9 +730,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'judge'", specifier = ">=0.69.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "markdown-it-py", specifier = ">=4.2.0" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "openai", marker = "extra == 'hosted'", specifier = ">=1.75.0" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "python-dotenv", marker = "extra == 'judge'", specifier = ">=1.1.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "sentence-transformers", marker = "extra == 'local'", specifier = ">=5.3.0" },
 ]
 provides-extras = ["hosted", "local", "judge"]

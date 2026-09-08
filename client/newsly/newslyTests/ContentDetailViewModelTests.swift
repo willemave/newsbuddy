@@ -265,12 +265,13 @@ final class ContentDetailViewModelTests: XCTestCase {
     }
 
     func testMediumShareMarkdownIncludesLongformArtifactExtras() throws {
-        let detail = try Self.decodeDetail(
-            from: """
+        let json = """
             {
               "id": 42,
               "content_type": "article",
               "url": "https://example.com/longform-artifact",
+              "source_url": "https://example.com/longform-artifact",
+              "discussion_url": null,
               "title": "Artifact Article",
               "display_title": "Artifact Article",
               "source": "Example",
@@ -323,7 +324,7 @@ final class ContentDetailViewModelTests: XCTestCase {
                 }
               },
               "feed_preview": null,
-              "artifact_type": "argument",
+              "artifact_type": null,
               "preview_bullets": null,
               "reason_to_read": null,
               "bullet_points": [],
@@ -343,7 +344,30 @@ final class ContentDetailViewModelTests: XCTestCase {
               "can_subscribe": false
             }
             """
-        )
+        let data = Data(json.utf8)
+        let generated = try JSONDecoder().decode(APIContentDetailResponse.self, from: data)
+        XCTAssertNotNil(generated.longformArtifact)
+        XCTAssertNil(generated.structuredSummary)
+        XCTAssertNil(generated.artifactType)
+        let detail = try Self.decodeDetail(from: json)
+        let artifact = try XCTUnwrap(detail.longformArtifact)
+        XCTAssertEqual(artifact.detailSections.map(\.id), ["takeaway", "keyPoints", "sourceQuotes", "extra"])
+
+        // Installed clients must render and share the same content after mirrors become null/empty.
+        var duplicated = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        duplicated["structured_summary"] = duplicated["longform_artifact"]
+        duplicated["metadata"] = ["summary": duplicated["longform_artifact"]!]
+        duplicated["artifact_type"] = "argument"
+        duplicated["bullet_points"] = [["text": "Obsolete mirror", "category": "legacy"]]
+        duplicated["topics"] = ["argument"]
+        let before = try JSONDecoder().decode(ContentDetail.self, from: JSONSerialization.data(withJSONObject: duplicated))
+        XCTAssertEqual(before.longformArtifact?.detailSections.map(\.id), artifact.detailSections.map(\.id))
+        for option: ShareContentOption in [.medium, .full] {
+            XCTAssertEqual(
+                ShareMarkdownBuilder(content: before, contentBody: nil).markdown(for: option),
+                ShareMarkdownBuilder(content: detail, contentBody: nil).markdown(for: option)
+            )
+        }
         let markdown = try XCTUnwrap(
             ShareMarkdownBuilder(content: detail, contentBody: nil)
                 .markdown(for: .medium)

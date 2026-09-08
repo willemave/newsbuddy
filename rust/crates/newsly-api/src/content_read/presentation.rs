@@ -73,213 +73,27 @@ const DISPLAY_SUMMARY_KINDS: &[SummaryKind] = &[
     SummaryKind::LongformArtifact,
 ];
 
-pub(crate) fn present_content_detail(
-    row: ContentDetailProjection,
-) -> Result<ContentDetailResponse, PresentationError> {
-    let content_type = ContentType::from_str(&row.content_type)
-        .map_err(|_| PresentationError::UnknownContentType(row.content_type.clone()))?;
-    let status = ContentStatus::from_str(&row.status)
-        .map_err(|_| PresentationError::UnknownContentStatus(row.status.clone()))?;
-    let mut metadata = runtime_metadata(&row.content_metadata);
-    insert_string_if_missing(&mut metadata, "platform", row.platform.as_deref());
-    insert_string_if_missing(&mut metadata, "source", row.source.as_deref());
-    backfill_legacy_news_article(&mut metadata, &row, content_type);
-    normalize_summary_contract(&mut metadata, content_type);
+mod content;
+pub(crate) use content::{present_content_detail, present_content_summary};
 
-    let resolved_url = resolve_content_url(&row.url, &metadata, content_type)
-        .ok_or_else(|| PresentationError::InvalidContentUrl(row.url.clone()))?;
-    let summary_kind = parse_summary_kind(metadata.get("summary_kind"));
-    let summary_version = parse_summary_version(metadata.get("summary_version"));
-    let summary = object_field(&metadata, "summary");
-    let summary_text = extract_short_summary(summary.cloned().map(Value::Object));
-    let display_title = resolve_content_display_title(row.title.as_deref(), &metadata);
-    let artifact = longform_artifact_fields(&metadata);
-    let is_legacy_news = content_type == ContentType::News && artifact.longform_artifact.is_none();
-
-    let (structured_summary, bullet_points, quotes, topics) = if is_legacy_news {
-        (None, Vec::new(), Vec::new(), Vec::new())
-    } else {
-        (
-            structured_summary(&metadata, summary_kind),
-            project_bullet_points(&metadata, summary_kind, summary_version),
-            project_quotes(&metadata, summary_kind, summary_version),
-            project_topics(&metadata, summary_kind, summary_version),
-        )
-    };
-    let news_fields = is_legacy_news.then(|| legacy_content_news_fields(&metadata, &resolved_url));
-    let discussion_url = if let Some(fields) = &news_fields {
-        fields.discussion_url.clone()
-    } else {
-        string_field(&metadata, "discussion_url")
-    };
-    let (image_url, thumbnail_url) = resolve_content_image_urls(row.id, content_type, &metadata);
-    let detected_feed = detected_feed(&metadata);
-
-    Ok(ContentDetailResponse {
-        id: row.id,
-        content_type,
-        url: resolved_url,
-        source_url: row.source_url.or(Some(row.url)),
-        discussion_url,
-        title: row.title,
-        display_title,
-        source: row.source,
-        status,
-        error_message: row.error_message,
-        retry_count: row.retry_count,
-        metadata: sanitize_metadata_for_api(metadata),
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        processed_at: row.processed_at,
-        checked_out_by: row.checked_out_by,
-        checked_out_at: row.checked_out_at,
-        publication_date: row.publication_date,
-        is_read: row.is_read,
-        is_saved_to_knowledge: row.is_saved_to_knowledge,
-        summary: summary_text.clone(),
-        short_summary: summary_text.clone(),
-        summary_kind,
-        summary_version,
-        structured_summary,
-        longform_artifact: artifact.longform_artifact,
-        feed_preview: artifact.feed_preview,
-        artifact_type: artifact.artifact_type,
-        preview_bullets: artifact.preview_bullets,
-        reason_to_read: artifact.reason_to_read,
-        bullet_points,
-        quotes,
-        topics,
-        full_markdown: None,
-        body_available: row.body_available,
-        body_kind: row.body_available.then(|| {
-            if content_type == ContentType::Podcast {
-                "transcript".to_owned()
-            } else {
-                "article".to_owned()
-            }
-        }),
-        body_format: row.body_format,
-        news_article_url: news_fields
-            .as_ref()
-            .and_then(|fields| fields.article_url.clone()),
-        news_discussion_url: news_fields
-            .as_ref()
-            .and_then(|fields| fields.discussion_url.clone()),
-        news_key_points: news_fields
-            .as_ref()
-            .and_then(|fields| fields.key_points.clone()),
-        news_summary: summary_text,
-        image_url,
-        thumbnail_url,
-        detected_feed,
-        can_subscribe: false,
-    })
-}
-
-pub(crate) fn present_content_summary(
-    row: ContentDetailProjection,
-    knowledge_saved_at: Option<chrono::DateTime<chrono::Utc>>,
-    saved_source_override: Option<SavedSource>,
-) -> Result<ContentSummaryResponse, PresentationError> {
-    let platform = row.platform.clone();
-    let detail = present_content_detail(row)?;
-    let classification = detail
-        .structured_summary
-        .as_ref()
-        .and_then(|summary| summary.get("classification"))
-        .and_then(Value::as_str)
-        .and_then(|value| match value {
-            "to_read" => Some(ContentClassification::ToRead),
-            "skip" => Some(ContentClassification::Skip),
-            _ => None,
-        });
-    let primary_topic = detail
-        .topics
-        .first()
-        .and_then(|value| clean_optional_str(Some(value.as_str())))
-        .or_else(|| {
-            (detail.content_type == ContentType::News)
-                .then(|| platform.clone())
-                .flatten()
-                .and_then(|value| clean_optional_str(Some(&value)))
-        });
-    let top_comment = if should_suppress_top_comment(
-        platform.as_deref(),
-        detail.discussion_url.as_deref(),
-        &detail.metadata,
-    ) {
-        None
-    } else {
-        object_field(&detail.metadata, "top_comment").and_then(|comment| {
-            let text = comment.get("text").and_then(value_as_clean_string)?;
-            let author = comment
-                .get("author")
-                .and_then(value_as_clean_string)
-                .unwrap_or_else(|| "unknown".to_owned());
-            Some(BTreeMap::from([
-                ("author".to_owned(), author),
-                ("text".to_owned(), text),
-            ]))
-        })
-    };
-    let comment_count = detail.metadata.get("comment_count").and_then(Value::as_i64);
-    let saved_source = saved_source_override.or_else(|| {
-        if !detail.is_saved_to_knowledge {
-            return None;
-        }
-        let submitted_via = string_field(&detail.metadata, "submitted_via")
-            .unwrap_or_default()
-            .to_lowercase();
-        let snapshot_source = string_field(&detail.metadata, "tweet_snapshot_source")
-            .unwrap_or_default()
-            .to_lowercase();
-        if submitted_via == "x_bookmarks" || snapshot_source == "x_bookmarks_sync" {
-            Some(SavedSource::XBookmark)
-        } else {
-            Some(SavedSource::Knowledge)
-        }
-    });
-    let key_takeaway = extract_key_takeaway(&detail.metadata);
-    let user_status = matches!(
-        detail.content_type,
-        ContentType::Article | ContentType::Podcast
-    )
-    .then(|| "inbox".to_owned());
-    Ok(ContentSummaryResponse {
-        id: detail.id,
-        content_type: detail.content_type,
-        url: detail.url,
-        source_url: detail.source_url,
-        discussion_url: detail.discussion_url,
-        title: Some(detail.display_title),
-        source: detail.source,
-        platform,
-        status: detail.status,
-        short_summary: detail.short_summary.clone(),
-        created_at: detail.created_at,
-        processed_at: detail.processed_at,
-        classification,
-        publication_date: detail.publication_date,
-        is_read: detail.is_read,
-        is_saved_to_knowledge: detail.is_saved_to_knowledge,
-        knowledge_saved_at,
-        news_article_url: detail.news_article_url,
-        news_discussion_url: detail.news_discussion_url,
-        news_key_points: detail.news_key_points,
-        news_summary: detail.news_summary.or(detail.short_summary),
-        user_status,
-        image_url: detail.image_url,
-        thumbnail_url: detail.thumbnail_url,
-        primary_topic,
-        top_comment,
-        comment_count,
-        feed_preview: detail.feed_preview,
-        artifact_type: detail.artifact_type,
-        preview_bullets: detail.preview_bullets,
-        reason_to_read: detail.reason_to_read,
-        key_takeaway,
-        saved_source,
-    })
+fn content_top_comment(
+    platform: Option<&str>,
+    discussion_url: Option<&str>,
+    metadata: &Map<String, Value>,
+) -> Option<BTreeMap<String, String>> {
+    if should_suppress_top_comment(platform, discussion_url, metadata) {
+        return None;
+    }
+    let comment = object_field(metadata, "top_comment")?;
+    let text = comment.get("text").and_then(value_as_clean_string)?;
+    let author = comment
+        .get("author")
+        .and_then(value_as_clean_string)
+        .unwrap_or_else(|| "unknown".to_owned());
+    Some(BTreeMap::from([
+        ("author".to_owned(), author),
+        ("text".to_owned(), text),
+    ]))
 }
 
 fn should_suppress_top_comment(
@@ -921,15 +735,29 @@ fn project_topics(
     }
 }
 
-struct ArtifactFields {
-    longform_artifact: Option<Map<String, Value>>,
+struct ArtifactFields<'a> {
+    longform_artifact: Option<&'a Map<String, Value>>,
     feed_preview: Option<Map<String, Value>>,
     artifact_type: Option<String>,
     preview_bullets: Option<Vec<String>>,
     reason_to_read: Option<String>,
 }
 
-fn longform_artifact_fields(metadata: &Map<String, Value>) -> ArtifactFields {
+fn is_typed_artifact_detail(
+    content_type: ContentType,
+    kind: Option<SummaryKind>,
+    fields: &ArtifactFields<'_>,
+) -> bool {
+    matches!(content_type, ContentType::Article | ContentType::Podcast)
+        && kind == Some(SummaryKind::LongformArtifact)
+        && fields
+            .longform_artifact
+            .as_ref()
+            .and_then(|summary| object_field(summary, "artifact"))
+            .is_some()
+}
+
+fn longform_artifact_fields(metadata: &Map<String, Value>) -> ArtifactFields<'_> {
     let Some(summary) = object_field(metadata, "summary") else {
         return ArtifactFields::empty();
     };
@@ -952,7 +780,7 @@ fn longform_artifact_fields(metadata: &Map<String, Value>) -> ArtifactFields {
         .as_ref()
         .and_then(|value| string_field(value, "reason_to_read"));
     ArtifactFields {
-        longform_artifact: artifact_type.as_ref().map(|_| summary.clone()),
+        longform_artifact: artifact_type.as_ref().map(|_| summary),
         feed_preview,
         artifact_type,
         preview_bullets,
@@ -960,7 +788,7 @@ fn longform_artifact_fields(metadata: &Map<String, Value>) -> ArtifactFields {
     }
 }
 
-impl ArtifactFields {
+impl ArtifactFields<'_> {
     const fn empty() -> Self {
         Self {
             longform_artifact: None,
@@ -1030,8 +858,7 @@ fn resolve_content_display_title(title: Option<&str>, metadata: &Map<String, Val
         })
         .or_else(|| title.and_then(clean_title))
         .or_else(|| {
-            object_field(metadata, "summary")
-                .and_then(|summary| extract_short_summary(Some(Value::Object(summary.clone()))))
+            extract_short_summary(object_field(metadata, "summary"))
                 .and_then(|value| summarize_text_as_title(&value))
         })
         .unwrap_or_else(|| "Untitled".to_owned())
@@ -1340,12 +1167,8 @@ fn summarize_text_as_title(value: &str) -> Option<String> {
     Some(format!("{}…", excerpt.trim_end()))
 }
 
-fn extract_short_summary(summary: Option<Value>) -> Option<String> {
-    let value = summary?;
-    if let Some(text) = value.as_str() {
-        return (!text.is_empty()).then(|| text.to_owned());
-    }
-    let summary = value.as_object()?;
+fn extract_short_summary(summary: Option<&Map<String, Value>>) -> Option<String> {
+    let summary = summary?;
     for value in [
         summary.get("one_line"),
         object_field(summary, "artifact")
@@ -1656,3 +1479,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod regression_tests;
