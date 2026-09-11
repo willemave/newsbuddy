@@ -36,6 +36,9 @@ struct SourceDetailSheet: View {
                     infoCard
 
                     if let stats = config.stats, stats.hasVisibleStats {
+                        if let issue = stats.issueSummary {
+                            sourceIssueBanner(issue)
+                        }
                         statsCard(stats)
                     }
 
@@ -205,6 +208,9 @@ struct SourceDetailSheet: View {
             statLine("Ready", value: "\(stats.completedCount)")
             statLine("Unread", value: "\(stats.unreadCount)")
             statLine("Processing", value: "\(stats.processingCount)")
+            if stats.failedCount > 0 {
+                statLine("Needs Attention", value: "\(stats.failedCount)")
+            }
 
             if let latestProcessed = formattedTimestamp(stats.latestProcessedDate) {
                 statLine("Last Processed", value: latestProcessed)
@@ -224,6 +230,23 @@ struct SourceDetailSheet: View {
     }
 
     // MARK: - Error Banner
+
+    private func sourceIssueBanner(_ issue: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Source needs attention", systemImage: "exclamationmark.triangle.fill")
+                .font(.appSubheadline.weight(.semibold))
+                .foregroundStyle(Color.statusDestructive)
+            Text(issue)
+                .font(.appSubheadline)
+                .foregroundStyle(Color.onSurface)
+            Text("Update the source URL, pause the source, or remove it if these items aren't accessible.")
+                .font(.appCaption)
+                .foregroundStyle(Color.onSurfaceSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color.statusDestructive.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
 
     private func errorBanner(_ error: String) -> some View {
         HStack(spacing: 8) {

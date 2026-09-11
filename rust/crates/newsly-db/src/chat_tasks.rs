@@ -19,7 +19,7 @@ use crate::chat_council::{
 };
 use crate::chat_transcripts::{ChatTranscriptError, decode_transcript, processing_transcript};
 
-const DEFAULT_MODEL: &str = "openai:gpt-5.6-terra";
+use crate::chat::DEFAULT_CHAT_MODEL as DEFAULT_MODEL;
 const DEFAULT_PROVIDER: &str = "openai";
 const KNOWLEDGE_SESSION_TYPE: &str = "knowledge_chat";
 const CHAT_FAILURE_MESSAGE: &str = "This chat turn could not be completed. Please retry.";

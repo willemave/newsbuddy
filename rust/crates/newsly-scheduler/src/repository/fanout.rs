@@ -22,9 +22,9 @@ impl SchedulerRepository {
         )
         .fetch_one(&mut **transaction)
         .await?;
-        if pending_content >= config.queue_backpressure_max_pending_content
-            || pending_news >= config.queue_backpressure_max_pending_process_news_item
-        {
+        let backpressure = pending_content >= config.queue_backpressure_max_pending_content
+            || pending_news >= config.queue_backpressure_max_pending_process_news_item;
+        if backpressure {
             tracing::warn!(
                 pending_content,
                 pending_process_news_item = pending_news,
@@ -33,29 +33,55 @@ impl SchedulerRepository {
                     config.queue_backpressure_max_pending_process_news_item,
                 "scheduled scrape skipped due to queue backpressure"
             );
-            return Ok(ScheduledJobReport::skipped(
-                SchedulerJob::Scrape,
-                "queue_backpressure",
-            ));
         }
 
         let mut request = EnqueueRequest::new(TaskType::Scrape);
-        request.payload = Some(Map::from_iter([(
-            "sources".to_owned(),
-            Value::Array(vec![Value::from("all")]),
-        )]));
+        request.payload = Some(Map::from_iter([
+            ("sources".to_owned(), Value::Array(vec![Value::from("all")])),
+            ("due_only".to_owned(), Value::Bool(true)),
+        ]));
         request.dedupe = Some(true);
         request.dedupe_key = Some("scheduled-scrape".to_owned());
+        let ids = sqlx::query_scalar::<_, i64>(r"
+            SELECT n.id::bigint FROM news_items n
+            WHERE n.status = 'ready' AND n.visibility_scope = 'global'
+              AND n.representative_news_item_id IS NULL
+              AND COALESCE(n.published_at, n.ingested_at) > timezone('UTC', now()) - interval '7 days'
+              AND NOT EXISTS (SELECT 1 FROM news_lens_embeddings e WHERE e.news_item_id = n.id AND e.model=$1 AND e.encoder_version=$2 AND timezone('UTC',e.checked_at) >= COALESCE(n.updated_at,n.created_at))
+              AND NOT EXISTS (SELECT 1 FROM processing_tasks t WHERE t.task_type='prepare_news_lens' AND t.payload->>'news_item_id'=n.id::text AND t.status='failed' AND t.payload->>'embedding_model'=$1 AND t.completed_at>=COALESCE(n.updated_at,n.created_at) AND t.completed_at>=timezone('UTC',now())-interval '6 hours')
+            ORDER BY n.ingested_at DESC, n.id DESC LIMIT 128
+        ").bind(&config.lens_embedding_model).bind(newsly_db::news_lens_embeddings::ENCODER_VERSION).fetch_all(&mut **transaction).await?;
+        let mut requests = if backpressure {
+            Vec::new()
+        } else {
+            vec![request]
+        };
+        for id in ids {
+            let mut warm = EnqueueRequest::new(TaskType::PrepareNewsLens);
+            warm.priority = -10;
+            warm.payload = Some(Map::from_iter([(
+                "news_item_id".to_owned(),
+                Value::from(id),
+            )]));
+            warm.dedupe = Some(true);
+            warm.dedupe_key = Some(format!("news-lens:{id}"));
+            requests.push(warm);
+        }
+        let considered = requests.len();
         let result = self
             .queue
-            .enqueue_many_in_transaction(transaction, vec![request])
+            .enqueue_many_in_transaction(transaction, requests)
             .await?;
         Ok(ScheduledJobReport {
             job: SchedulerJob::Scrape,
-            considered: 1,
+            considered,
             enqueued: result.inserted_task_ids.len(),
-            skipped: usize::from(result.inserted_task_ids.is_empty()),
-            detail: "scrape_enqueued",
+            skipped: considered.saturating_sub(result.inserted_task_ids.len()),
+            detail: if backpressure {
+                "queue_backpressure"
+            } else {
+                "scrape_enqueued"
+            },
             maintenance: None,
         })
     }

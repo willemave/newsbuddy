@@ -8,6 +8,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const DEFAULT_MASTHEAD_DECK: &str = "A fresh edition will appear as unread sources arrive.";
+pub const BRIEFING_COMPOSITION_PROMPT_VERSION: &str = "briefing-v7-commonmark";
 const FIXED_LENSES: [(&str, &str, &str, &str, i32); 2] = [
     (
         "podcasts",
@@ -80,7 +81,7 @@ impl BriefingRefreshConfig {
             || !(1..=12).contains(&self.window_min)
             || !(2..=4).contains(&self.news_window_max)
             || !(2..=20).contains(&self.new_lens_min_items)
-            || !(60..=86_400).contains(&self.pending_max_age_seconds)
+            || !(0..=86_400).contains(&self.pending_max_age_seconds)
             || !(3..=30).contains(&self.max_news_lenses)
             || !(0.0..=1.0).contains(&self.category_similarity)
             || !(0.0..=1.0).contains(&self.category_cluster_similarity)
@@ -525,9 +526,9 @@ pub enum BriefingRefreshRepositoryError {
 }
 
 mod lens_assignment;
-mod preparation;
+pub(crate) mod preparation;
 mod publication;
-mod sources;
+pub(crate) mod sources;
 
 pub(crate) use sources::load_eligible_sources_for_keys;
 

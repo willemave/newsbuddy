@@ -82,8 +82,8 @@ pub async fn pipeline_health_counts(
           (SELECT count(*) FROM user_scraper_configs c JOIN users u ON u.id = c.user_id
            WHERE c.is_active AND u.is_active AND c.scraper_type IN ('atom', 'rss', 'podcast_rss', 'substack', 'reddit', 'aggregator')
              AND COALESCE(c.updated_at,c.created_at) < timezone('UTC', now()) - interval '45 minutes'
-             AND NOT EXISTS (SELECT 1 FROM source_ingestion_health h WHERE h.config_id = c.id
-                 AND h.last_attempt_at >= timezone('UTC', now()) - interval '45 minutes')) AS missing_source_checks,
+             AND NOT EXISTS (SELECT 1 FROM source_ingestion_health h WHERE (h.config_id = c.id OR (c.scraper_type='aggregator' AND h.source_key='aggregator:' || lower(btrim(c.config::jsonb->>'key'))))
+                 AND h.last_attempt_at >= timezone('UTC', now()) - CASE WHEN c.scraper_type='aggregator' THEN interval '90 minutes' ELSE interval '45 minutes' END)) AS missing_source_checks,
           (SELECT count(*) FROM contents c WHERE c.status = 'awaiting_image'
              AND c.updated_at < timezone('UTC', now()) - interval '30 minutes'
              AND NOT EXISTS (SELECT 1 FROM processing_tasks t WHERE t.content_id = c.id

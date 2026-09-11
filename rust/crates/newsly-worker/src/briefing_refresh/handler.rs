@@ -6,11 +6,12 @@ use std::time::Instant;
 use chrono::Utc;
 use futures_util::stream::{self, StreamExt};
 use newsly_db::{
-    ApplyBriefingLensAssignmentOutcome, BriefingEmbeddingUsage, BriefingPendingIdentity,
-    BriefingRefreshLens, BriefingRefreshMode, BriefingRefreshPublication, BriefingRefreshSource,
-    BriefingSegmentUsage, ComposedBriefingAppend, ComposedBriefingCompaction,
-    ComposedBriefingSegment, PrepareBriefingRefreshOutcome, PreparedBriefingRefresh,
-    apply_briefing_lens_assignment, prepare_briefing_refresh,
+    ApplyBriefingLensAssignmentOutcome, BRIEFING_COMPOSITION_PROMPT_VERSION,
+    BriefingEmbeddingUsage, BriefingPendingIdentity, BriefingRefreshLens, BriefingRefreshMode,
+    BriefingRefreshPublication, BriefingRefreshSource, BriefingSegmentUsage,
+    ComposedBriefingAppend, ComposedBriefingCompaction, ComposedBriefingSegment,
+    PrepareBriefingRefreshOutcome, PreparedBriefingRefresh, apply_briefing_lens_assignment,
+    prepare_briefing_refresh,
 };
 use newsly_providers::{
     BriefingCompositionGateway, BriefingCompositionRequest, BriefingCompositionSource,
@@ -28,13 +29,11 @@ use super::normalize::normalize_layout;
 use super::planning::{PlannedBriefingWindow, plan_windows};
 use super::semantic_lenses::plan_semantic_lenses;
 
-const PROMPT_VERSION: &str = "briefing-v7-commonmark";
-
 #[derive(Debug, Clone)]
 pub struct BriefingRefreshWorkerServices {
-    pool: PgPool,
-    queue: QueueKernel,
-    gateway: BriefingCompositionGateway,
+    pub(super) pool: PgPool,
+    pub(super) queue: QueueKernel,
+    pub(super) gateway: BriefingCompositionGateway,
     config: BriefingRefreshWorkerConfig,
 }
 
@@ -105,6 +104,13 @@ async fn execute_refresh(
         Err(error) => return plain_failure(error.to_string(), false),
     };
 
+    let mut repository_config = services.config.repository.clone();
+    let initial = match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' AND NOT news_seed_settled)").bind(user_id).fetch_one(&services.pool).await {
+        Ok(value) => value, Err(error) => return plain_failure(error.to_string(), true),
+    };
+    if initial {
+        repository_config.pending_max_age_seconds = 0;
+    }
     let preparation = {
         let mut transaction = match services.pool.begin().await {
             Ok(transaction) => transaction,
@@ -115,7 +121,7 @@ async fn execute_refresh(
             plan.task_id,
             user_id,
             mode,
-            &services.config.repository,
+            &repository_config,
         )
         .await
         {
@@ -142,12 +148,29 @@ async fn execute_refresh(
     if lease.ownership_lost() {
         return plain_failure("queue lease was lost before Briefing lens planning", true);
     }
-    let lens_plan = {
+    let readiness = match super::warm_news::ready_news(
+        &services.pool,
+        &seed.lens_assignment.pending_sources,
+        services.gateway.embedding_model(),
+    )
+    .await
+    {
+        Ok(readiness) => readiness,
+        Err(error) => return plain_failure(error.to_string(), true),
+    };
+    let mut semantic_seed = seed.clone();
+    semantic_seed.lens_assignment.pending_sources = readiness.sources;
+    let cached_vectors = readiness.vectors;
+    let failed_sources = readiness.failed;
+    let missing = readiness.requests;
+    let waiting_for_news = !missing.is_empty();
+    let mut lens_plan = {
         let lens_planning = plan_semantic_lenses(
             &services.gateway,
-            &seed,
-            &services.config.repository,
+            &semantic_seed,
+            &repository_config,
             services.config.embedding_batch_size,
+            cached_vectors,
         );
         tokio::pin!(lens_planning);
         let result = tokio::select! {
@@ -164,6 +187,12 @@ async fn execute_refresh(
     if lease.ownership_lost() {
         return plain_failure("queue lease was lost after Briefing lens planning", true);
     }
+    super::semantic_lenses::assign_failed_sources(
+        &mut lens_plan,
+        &seed,
+        &failed_sources,
+        &repository_config,
+    );
     let composition_fence = seed.claim_fence.clone();
     let prepared = {
         let mut transaction = match services.pool.begin().await {
@@ -174,7 +203,7 @@ async fn execute_refresh(
             &mut transaction,
             seed,
             &lens_plan,
-            &services.config.repository,
+            &repository_config,
         )
         .await
         {
@@ -190,6 +219,13 @@ async fn execute_refresh(
             }
             ApplyBriefingLensAssignmentOutcome::Ready(prepared) => prepared,
         };
+        if let Err(error) = services
+            .queue
+            .enqueue_many_in_transaction(&mut transaction, missing)
+            .await
+        {
+            return plain_failure(error.to_string(), true);
+        }
         if let Err(error) = transaction.commit().await {
             return plain_failure(error.to_string(), true);
         }
@@ -219,7 +255,12 @@ async fn execute_refresh(
         BriefingRefreshFinalizer::new(
             services.queue.clone(),
             publication,
-            services.config.repository.clone(),
+            repository_config,
+            plan.payload
+                .get("stale_recoveries")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            waiting_for_news,
         ),
     )
 }
@@ -460,7 +501,7 @@ async fn compose_unit(
         sources: unit.window.sources.iter().map(composition_source).collect(),
     };
     let digest = Sha256::digest(format!(
-        "{PROMPT_VERSION}|{}|{}|{request:?}",
+        "{BRIEFING_COMPOSITION_PROMPT_VERSION}|{}|{}|{request:?}",
         gateway.model_spec(),
         max_figures_deep
     ));
@@ -584,7 +625,7 @@ async fn compose_unit(
                     .collect(),
                 event_groups: unit.window.event_groups,
                 model: gateway.model_spec().to_owned(),
-                prompt_version: PROMPT_VERSION.to_owned(),
+                prompt_version: BRIEFING_COMPOSITION_PROMPT_VERSION.to_owned(),
                 input_tokens: Some(u64_to_i32(usage.usage.input_tokens)),
                 output_tokens: Some(u64_to_i32(usage.usage.output_tokens)),
                 generation_ms: i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX),

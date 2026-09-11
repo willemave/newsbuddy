@@ -46,7 +46,7 @@ python/evals/.venv/bin/newsly-evals pipeline run \
   contracts/testing/pipeline/summarization.yaml \
   --binary-dir /path/to/rust/binaries \
   --env-file /path/to/local.env \
-  --model openai:gpt-5.6-terra \
+  --model openai:gpt-5.6-luna \
   --judge-model gpt-5.6-sol \
   --output test-results/pipeline-evals/run-1
 ```

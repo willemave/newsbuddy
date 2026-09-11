@@ -25,13 +25,21 @@ pub(super) fn isolated_scrape_requests(
             if let Some(id) = config_id {
                 payload.insert("config_id".to_owned(), Value::from(id));
             }
-            if let Some(id) = run_id {
+            let global = matches!(plan.kind, SourcePlanKind::Aggregator { .. });
+            if let Some(id) = run_id.filter(|_| !global) {
                 payload.insert("first_edition_run_id".to_owned(), Value::from(id));
+            }
+            if global && run_id.is_some() {
+                payload.insert("due_only".to_owned(), Value::Bool(true));
             }
             child.payload = Some(payload);
             child.owner_user_id = user_id;
             child.dedupe = Some(true);
-            child.dedupe_key = Some(format!("scrape:{}:{config_id:?}:{run_id:?}", plan.source));
+            child.dedupe_key = Some(if global {
+                format!("scrape:aggregator:{}", plan.source)
+            } else {
+                format!("scrape:{}:{config_id:?}:{run_id:?}", plan.source)
+            });
             requests.push(child);
         }
     }

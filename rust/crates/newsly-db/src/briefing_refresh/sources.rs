@@ -246,7 +246,7 @@ pub(super) fn source_from_content(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn source_from_news(
+pub(crate) fn source_from_news(
     id: i64,
     summary_text: Option<&str>,
     summary_key_points: &Value,

@@ -106,6 +106,21 @@ pub struct BriefingFirstRunSourceProgress {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BriefingFirstRunTierProgress {
+    pub tier: String,
+    #[serde(default)]
+    pub source_names: Vec<String>,
+    pub discovered: i64,
+    pub ready: i64,
+    pub processing: i64,
+    pub failed: i64,
+    pub skipped: i64,
+    pub source_count: i64,
+    pub pending_sources: i64,
+    pub unavailable_sources: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct BriefingFirstRunProgress {
     pub run_id: i64,
     pub revision: i32,
@@ -119,6 +134,8 @@ pub struct BriefingFirstRunProgress {
     pub queued_sources: Vec<String>,
     #[serde(default)]
     pub ready_category_keys: Vec<String>,
+    #[serde(default)]
+    pub tiers: Vec<BriefingFirstRunTierProgress>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]

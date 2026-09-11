@@ -196,90 +196,116 @@ def run(
         },
     )
     results = []
-    for case in cases:
-        print(f"  {case.id}: running…", flush=True)
-        path = output / case.id
-        path.mkdir()
-        result: dict[str, Any] = {
-            "id": case.id,
-            "stage": case.stage,
-            "expects": case.expects,
-            "status": "error",
-        }
-        started = time.monotonic()
-        phase = "bootstrap"
-        try:
-            with StubServer({"api.openai.com"}) as stubs:
-                stubs.reset(
-                    case.stubs
-                    or [Stub(method="POST", path="/embeddings", embedding_vector=[1.0, 0.0])]
+    repeated_errors: dict[tuple[str, str], int] = {}
+    blocked_stages: dict[str, str] = {}
+    try:
+        for case in cases:
+            print(f"  {case.id}: running…", flush=True)
+            path = output / case.id
+            path.mkdir()
+            result: dict[str, Any] = {
+                "id": case.id,
+                "stage": case.stage,
+                "expects": case.expects,
+                "status": "error",
+            }
+            started = time.monotonic()
+            phase = "bootstrap"
+            if case.stage in blocked_stages:
+                result["error"] = (
+                    "blocked: repeated deterministic stage error: " + blocked_stages[case.stage]
                 )
-                with LocalRuntime(
-                    postgres_url=postgres_url,
-                    binary_dir=binary_dir,
-                    output=path / "runtime",
-                    environment=environment,
-                    stubs=stubs,
-                    workers=("summarization" if case.stage == "summary" else "briefing_refresh",),
-                ) as runtime:
-                    namespace = "p-" + hashlib.sha256(runtime.name.encode()).hexdigest()[:24]
-                    sql = generate_sql(case, namespace)
-                    (path / "seed.sql").write_text(sql)
-                    refs = runtime.seed(sql)
-                    save_json(path / "manifest.json", refs)
-                    client = ChatClient(runtime.api_url, refs["user:reader"])
-                    try:
-                        phase = "processing"
-                        result["output"] = collect(client, case, refs, runtime, timeout, path)
-                    finally:
-                        client.close()
-                    result["stub_requests"] = list(stubs.requests)
-                    prompt = (
-                        INSTRUCTION
-                        + (NEWS_WORD_BUDGET if any(s.kind == "news" for s in case.sources) else "")
-                        + "\nEVALUATION DATA:\n"
-                        + json.dumps(
-                            {
-                                "expects": case.expects,
-                                "stage": case.stage,
-                                "sources": [
-                                    {
-                                        **s.model_dump(),
-                                        "url": s.url or source_url(namespace, s.id),
-                                        "source_key": ("news:" if s.kind == "news" else "content:")
-                                        + str(refs["source:" + s.id]),
-                                    }
-                                    for s in case.sources
-                                ],
-                                "output": result["output"],
-                            },
-                            ensure_ascii=False,
-                        )
+                result["seconds"] = 0.0
+                save_json(path / "result.json", result)
+                results.append(result)
+                report(output, results)
+                continue
+            try:
+                with StubServer({"api.openai.com"}) as stubs:
+                    stubs.reset(
+                        case.stubs
+                        or [Stub(method="POST", path="/embeddings", embedding_vector=[1.0, 0.0])]
                     )
-                    (path / "judge-input.txt").write_text(prompt)
-                # Stop the entire pipeline before invoking the independent CLI judge.
-                phase = "judge"
-                judgment = run_judge(prompt, judge_model, timeout=timeout)
-                result["judgment"] = judgment.model_dump()
-                result["status"] = "pass" if judgment.passed else "fail"
-        except (
-            RuntimeError,
-            ValueError,
-            OSError,
-            TimeoutError,
-            subprocess.SubprocessError,
-            httpx.HTTPError,
-        ) as error:
-            result["error"] = f"{phase}: {error}"
-        result["seconds"] = round(time.monotonic() - started, 3)
-        save_json(path / "result.json", result)
-        results.append(result)
+                    with LocalRuntime(
+                        postgres_url=postgres_url,
+                        binary_dir=binary_dir,
+                        output=path / "runtime",
+                        environment=environment,
+                        stubs=stubs,
+                        workers=(
+                            "summarization" if case.stage == "summary" else "briefing_refresh",
+                        ),
+                    ) as runtime:
+                        namespace = "p-" + hashlib.sha256(runtime.name.encode()).hexdigest()[:24]
+                        sql = generate_sql(case, namespace)
+                        (path / "seed.sql").write_text(sql)
+                        refs = runtime.seed(sql)
+                        save_json(path / "manifest.json", refs)
+                        client = ChatClient(runtime.api_url, refs["user:reader"])
+                        try:
+                            phase = "processing"
+                            result["output"] = collect(client, case, refs, runtime, timeout, path)
+                        finally:
+                            client.close()
+                        result["stub_requests"] = list(stubs.requests)
+                        prompt = (
+                            INSTRUCTION
+                            + (
+                                NEWS_WORD_BUDGET
+                                if any(s.kind == "news" for s in case.sources)
+                                else ""
+                            )
+                            + "\nEVALUATION DATA:\n"
+                            + json.dumps(
+                                {
+                                    "expects": case.expects,
+                                    "stage": case.stage,
+                                    "sources": [
+                                        {
+                                            **s.model_dump(),
+                                            "url": s.url or source_url(namespace, s.id),
+                                            "source_key": (
+                                                "news:" if s.kind == "news" else "content:"
+                                            )
+                                            + str(refs["source:" + s.id]),
+                                        }
+                                        for s in case.sources
+                                    ],
+                                    "output": result["output"],
+                                },
+                                ensure_ascii=False,
+                            )
+                        )
+                        (path / "judge-input.txt").write_text(prompt)
+                    # Stop the entire pipeline before invoking the independent CLI judge.
+                    phase = "judge"
+                    judgment = run_judge(prompt, judge_model, timeout=timeout)
+                    result["judgment"] = judgment.model_dump()
+                    result["status"] = "pass" if judgment.passed else "fail"
+            except (
+                RuntimeError,
+                ValueError,
+                OSError,
+                TimeoutError,
+                subprocess.SubprocessError,
+                httpx.HTTPError,
+            ) as error:
+                result["error"] = f"{phase}: {error}"
+                key = (case.stage, result["error"])
+                repeated_errors[key] = repeated_errors.get(key, 0) + 1
+                if repeated_errors[key] >= 2:
+                    blocked_stages[case.stage] = result["error"]
+            result["seconds"] = round(time.monotonic() - started, 3)
+            save_json(path / "result.json", result)
+            results.append(result)
+            report(output, results)
+            print(
+                f"  {case.id}: {result['status']}"
+                + (" — " + result["error"] if "error" in result else ""),
+                flush=True,
+            )
+    finally:
         report(output, results)
-        print(
-            f"  {case.id}: {result['status']}"
-            + (" — " + result["error"] if "error" in result else ""),
-            flush=True,
-        )
     return (
         2
         if any(r["status"] == "error" for r in results)

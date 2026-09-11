@@ -226,6 +226,7 @@ struct BriefingView: View {
                             lensKey: lens.key,
                             lensTitle: lens.title,
                             renderModel: viewModel.renderModel(for: lens.key),
+                            firstRunProgress: viewModel.firstRun?.tiers.first { $0.tier == lens.tier.rawValue },
                             isReadTrackingEnabled: viewModel.isActive
                                 && viewModel.selectedLensKey == lens.key,
                             readBoundaryY: readBoundaryY,

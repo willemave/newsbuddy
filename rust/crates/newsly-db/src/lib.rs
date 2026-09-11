@@ -120,12 +120,12 @@ pub use briefing::{
     record_briefing_dig_usage, retry_briefing_narration,
 };
 pub use briefing_refresh::{
-    ApplyBriefingLensAssignmentOutcome, BriefingAppendBatch, BriefingCompactionBatch,
-    BriefingDonorIdentity, BriefingEmbeddingUsage, BriefingLensAssignmentPlan,
-    BriefingLensAssignmentSnapshot, BriefingLensAssignmentUsage, BriefingLensCentroidMutation,
-    BriefingPendingIdentity, BriefingPendingLensAssignment, BriefingPlannedLens,
-    BriefingRefreshApplyOutcome, BriefingRefreshClaimFence, BriefingRefreshConfig,
-    BriefingRefreshLens, BriefingRefreshMode, BriefingRefreshPublication,
+    ApplyBriefingLensAssignmentOutcome, BRIEFING_COMPOSITION_PROMPT_VERSION, BriefingAppendBatch,
+    BriefingCompactionBatch, BriefingDonorIdentity, BriefingEmbeddingUsage,
+    BriefingLensAssignmentPlan, BriefingLensAssignmentSnapshot, BriefingLensAssignmentUsage,
+    BriefingLensCentroidMutation, BriefingPendingIdentity, BriefingPendingLensAssignment,
+    BriefingPlannedLens, BriefingRefreshApplyOutcome, BriefingRefreshClaimFence,
+    BriefingRefreshConfig, BriefingRefreshLens, BriefingRefreshMode, BriefingRefreshPublication,
     BriefingRefreshRepositoryError, BriefingRefreshSource, BriefingSegmentUsage,
     BriefingSemanticLens, BriefingUnassignedSource, ComposedBriefingAppend,
     ComposedBriefingCompaction, ComposedBriefingSegment, PrepareBriefingRefreshOutcome,
@@ -136,10 +136,10 @@ pub use chat::{
     ChatListCursor, ChatMessageProjection, ChatMessageStatusProjection, ChatMutationOutcome,
     ChatRecordAccess, ChatRepositoryError, ChatSessionDetailProjection, ChatSessionProjection,
     ChatToolProgressProjection, CreateChatSessionInput, CreateChatSessionOutcome,
-    StageAssistantTurnInput, StageChatMessageInput, StageChatTurnOutcome, StagedChatTurn,
-    UpdateChatSessionInput, archive_chat_session, create_chat_session, get_chat_message_status,
-    get_chat_session_detail, get_chat_session_summary, list_chat_sessions, stage_assistant_turn,
-    stage_chat_message, update_chat_session,
+    DEFAULT_CHAT_MODEL, StageAssistantTurnInput, StageChatMessageInput, StageChatTurnOutcome,
+    StagedChatTurn, UpdateChatSessionInput, archive_chat_session, create_chat_session,
+    get_chat_message_status, get_chat_session_detail, get_chat_session_summary, list_chat_sessions,
+    stage_assistant_turn, stage_chat_message, update_chat_session,
 };
 pub use chat_council::{
     CouncilCandidateCompletion, CouncilPersonaSeed, CouncilRepositoryError, CouncilRunContext,
@@ -157,10 +157,10 @@ pub use chat_tasks::{
     prepare_chat_task, publish_chat_turn, write_chat_partial, write_chat_tool_progress,
 };
 pub use chat_tooling::{
-    ChatArticleConversionSource, ChatContentHit, ChatNewsHit, ChatToolRepositoryError,
-    ChatUnreadNewsPage, create_deep_research_handoff, list_unread_chat_news,
-    prepare_chat_article_conversion, search_agent_knowledge, search_chat_content, search_chat_news,
-    search_chat_subscription_content,
+    ChatArticleConversionSource, ChatContentFilters, ChatContentHit, ChatContentPage, ChatNewsHit,
+    ChatToolRepositoryError, ChatUnreadNewsPage, create_deep_research_handoff,
+    list_unread_chat_news, prepare_chat_article_conversion, search_accessible_content,
+    search_agent_knowledge, search_chat_news,
 };
 pub use cli_link::{
     ApprovedCliLink, CliLinkPollStatus, CliLinkRepositoryError, PolledCliLink, StartedCliLink,
@@ -364,3 +364,10 @@ pub mod pipeline_monitoring;
 
 mod feed_history;
 pub use feed_history::{FeedHistoryProjection, load_feed_history};
+
+pub mod aggregator_corpus;
+pub mod first_edition_progress;
+pub mod news_lens_embeddings;
+
+#[cfg(test)]
+mod warm_news_tests;

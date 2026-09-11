@@ -475,6 +475,15 @@ impl FeedBackfillFinalizer {
                 i64::try_from(persisted.saved.saturating_add(persisted.duplicates))
                     .unwrap_or(i64::MAX),
             );
+            if let Some(run_id) = self.request.first_edition_run_id {
+                newsly_db::first_edition_progress::attach_content(
+                    transaction,
+                    run_id,
+                    self.request.user_id,
+                    &persisted.admitted_content_ids,
+                )
+                .await?;
+            }
             process_requests.extend(persisted.content_ids.into_iter().map(|content_id| {
                 let mut request = EnqueueRequest::new(TaskType::ProcessContent);
                 request.content_id = Some(content_id);

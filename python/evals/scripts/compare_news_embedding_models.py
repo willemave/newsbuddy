@@ -62,7 +62,7 @@ def _cases(case_ids: set[str] | None) -> list[dict[str, Any]]:
 
 def _thresholds(specs: list[str] | None) -> list[dict[str, Any]]:
     if not specs:
-        return [{"label": "current", "primary": 0.85, "secondary": 0.75}]
+        return []
     parsed = []
     for spec in specs:
         parts = spec.split(":")

@@ -71,6 +71,7 @@ string_enum!(TaskType {
     GenerateAudioEpisode => "generate_audio_episode",
     RunLlmTask => "run_llm_task",
     BriefingRefresh => "briefing_refresh",
+    PrepareNewsLens => "prepare_news_lens",
     DeleteUserAccount => "delete_user_account",
 });
 
@@ -123,6 +124,7 @@ impl TaskType {
             Self::SyncIntegration => (TaskQueue::Twitter, true, true),
             Self::GenerateAudioEpisode => (TaskQueue::AudioEpisode, true, true),
             Self::RunLlmTask | Self::BriefingRefresh => (TaskQueue::Llm, false, true),
+            Self::PrepareNewsLens => (TaskQueue::Llm, false, false),
             Self::BackfillFeeds => (TaskQueue::Backfill, false, true),
             Self::DeleteUserAccount => (TaskQueue::Backfill, false, false),
         };
@@ -163,6 +165,7 @@ impl TaskType {
             }
             Self::RunLlmTask => "newsly_worker::run_llm_task::RunLlmTaskHandler",
             Self::BriefingRefresh => "newsly_worker::briefing_refresh::BriefingRefreshHandler",
+            Self::PrepareNewsLens => "newsly_worker::briefing_refresh::PrepareNewsLensHandler",
             Self::DeleteUserAccount => "newsly_account_deletion_worker::AccountDeletionHandler",
         }
     }
@@ -204,7 +207,7 @@ impl TaskType {
             Self::ProcessNewsItem | Self::FetchNewsItemDiscussion => {
                 required_integer(&payload, self, "news_item_id", false)?;
             }
-            Self::EnrichNewsItemArticle => {
+            Self::PrepareNewsLens | Self::EnrichNewsItemArticle => {
                 required_integer(&payload, self, "news_item_id", true)?;
             }
             Self::DiscoverFeeds | Self::DeleteUserAccount => {
@@ -262,6 +265,7 @@ impl TaskType {
                 });
             }
             Self::Scrape => {
+                default_bool(&mut payload, self, "due_only", false)?;
                 optional_integer(&mut payload, self, "config_id", true)?;
                 if payload.contains_key("sources") {
                     let sources = payload.get("sources").and_then(Value::as_array).ok_or(
@@ -296,6 +300,8 @@ impl TaskType {
 
 #[derive(Debug, Clone)]
 pub struct EnqueueRequest {
+    /// Higher values run first within the existing fair retry buckets.
+    pub priority: i32,
     pub task_type: TaskType,
     pub content_id: Option<i64>,
     pub payload: Option<Map<String, Value>>,
@@ -310,6 +316,7 @@ pub struct EnqueueRequest {
 impl EnqueueRequest {
     pub const fn new(task_type: TaskType) -> Self {
         Self {
+            priority: 0,
             task_type,
             content_id: None,
             payload: None,

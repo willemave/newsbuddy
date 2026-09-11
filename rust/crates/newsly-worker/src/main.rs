@@ -52,6 +52,7 @@ enum WorkerProcess {
     FeedDiscovery,
     OnboardingDiscovery,
     BriefingRefresh,
+    NewsLens,
     Chat,
     RunLlmTask,
 }
@@ -88,6 +89,7 @@ impl WorkerProcess {
             "newsly-onboarding-discovery-worker" | "onboarding_discovery" => {
                 Ok(Self::OnboardingDiscovery)
             }
+            "newsly-news-lens-worker" | "news_lens" => Ok(Self::NewsLens),
             "newsly-briefing-refresh-worker" | "briefing_refresh" => Ok(Self::BriefingRefresh),
             "newsly-chat-worker" | "chat" => Ok(Self::Chat),
             "newsly-run-llm-task-worker" | "run_llm_task" => Ok(Self::RunLlmTask),
@@ -111,7 +113,8 @@ impl WorkerProcess {
             Self::FeedBackfill => feed_backfill_worker::main(),
             Self::FeedDiscovery => feed_discovery_worker::main(),
             Self::OnboardingDiscovery => onboarding_discovery_worker::main(),
-            Self::BriefingRefresh => briefing_refresh_worker::main(),
+            Self::BriefingRefresh => briefing_refresh_worker::run(false),
+            Self::NewsLens => briefing_refresh_worker::run(true),
             Self::Chat => chat_worker::main(),
             Self::RunLlmTask => run_llm_task_worker::main(),
         }
@@ -145,6 +148,7 @@ mod tests {
                 "newsly-onboarding-discovery-worker",
                 WorkerProcess::OnboardingDiscovery,
             ),
+            ("newsly-news-lens-worker", WorkerProcess::NewsLens),
             (
                 "newsly-briefing-refresh-worker",
                 WorkerProcess::BriefingRefresh,

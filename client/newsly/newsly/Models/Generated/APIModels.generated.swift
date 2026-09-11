@@ -2570,6 +2570,84 @@ struct APIBriefingIndexResponse: Codable {
     }
 }
 
+struct APIBriefingFirstRunTierProgress: Codable {
+    let tier: String
+    let sourceNames: [String]
+    let discovered: Int
+    let ready: Int
+    let processing: Int
+    let failed: Int
+    let skipped: Int
+    let sourceCount: Int
+    let pendingSources: Int
+    let unavailableSources: Int
+
+    init(
+        tier: String,
+        sourceNames: [String] = [],
+        discovered: Int,
+        ready: Int,
+        processing: Int,
+        failed: Int,
+        skipped: Int,
+        sourceCount: Int,
+        pendingSources: Int,
+        unavailableSources: Int
+    ) {
+        self.tier = tier
+        self.sourceNames = sourceNames
+        self.discovered = discovered
+        self.ready = ready
+        self.processing = processing
+        self.failed = failed
+        self.skipped = skipped
+        self.sourceCount = sourceCount
+        self.pendingSources = pendingSources
+        self.unavailableSources = unavailableSources
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case tier = "tier"
+        case sourceNames = "source_names"
+        case discovered = "discovered"
+        case ready = "ready"
+        case processing = "processing"
+        case failed = "failed"
+        case skipped = "skipped"
+        case sourceCount = "source_count"
+        case pendingSources = "pending_sources"
+        case unavailableSources = "unavailable_sources"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tier = try container.decode(String.self, forKey: .tier)
+        sourceNames = try container.decodeIfPresent([String].self, forKey: .sourceNames) ?? []
+        discovered = try container.decode(Int.self, forKey: .discovered)
+        ready = try container.decode(Int.self, forKey: .ready)
+        processing = try container.decode(Int.self, forKey: .processing)
+        failed = try container.decode(Int.self, forKey: .failed)
+        skipped = try container.decode(Int.self, forKey: .skipped)
+        sourceCount = try container.decode(Int.self, forKey: .sourceCount)
+        pendingSources = try container.decode(Int.self, forKey: .pendingSources)
+        unavailableSources = try container.decode(Int.self, forKey: .unavailableSources)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(tier, forKey: .tier)
+        try container.encode(sourceNames, forKey: .sourceNames)
+        try container.encode(discovered, forKey: .discovered)
+        try container.encode(ready, forKey: .ready)
+        try container.encode(processing, forKey: .processing)
+        try container.encode(failed, forKey: .failed)
+        try container.encode(skipped, forKey: .skipped)
+        try container.encode(sourceCount, forKey: .sourceCount)
+        try container.encode(pendingSources, forKey: .pendingSources)
+        try container.encode(unavailableSources, forKey: .unavailableSources)
+    }
+}
+
 struct APIBriefingFirstRunProgress: Codable {
     let runId: Int
     let revision: Int
@@ -2579,6 +2657,7 @@ struct APIBriefingFirstRunProgress: Codable {
     let activeSources: [String]
     let queuedSources: [String]
     let readyCategoryKeys: [String]
+    let tiers: [APIBriefingFirstRunTierProgress]
 
     init(
         runId: Int,
@@ -2588,7 +2667,8 @@ struct APIBriefingFirstRunProgress: Codable {
         completedSources: [APIBriefingFirstRunSourceProgress] = [],
         activeSources: [String] = [],
         queuedSources: [String] = [],
-        readyCategoryKeys: [String] = []
+        readyCategoryKeys: [String] = [],
+        tiers: [APIBriefingFirstRunTierProgress] = []
     ) {
         self.runId = runId
         self.revision = revision
@@ -2598,6 +2678,7 @@ struct APIBriefingFirstRunProgress: Codable {
         self.activeSources = activeSources
         self.queuedSources = queuedSources
         self.readyCategoryKeys = readyCategoryKeys
+        self.tiers = tiers
     }
 
     enum CodingKeys: String, CodingKey {
@@ -2609,6 +2690,7 @@ struct APIBriefingFirstRunProgress: Codable {
         case activeSources = "active_sources"
         case queuedSources = "queued_sources"
         case readyCategoryKeys = "ready_category_keys"
+        case tiers = "tiers"
     }
 
     init(from decoder: Decoder) throws {
@@ -2621,6 +2703,7 @@ struct APIBriefingFirstRunProgress: Codable {
         activeSources = try container.decode([String].self, forKey: .activeSources)
         queuedSources = try container.decode([String].self, forKey: .queuedSources)
         readyCategoryKeys = try container.decode([String].self, forKey: .readyCategoryKeys)
+        tiers = try container.decodeIfPresent([APIBriefingFirstRunTierProgress].self, forKey: .tiers) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2633,6 +2716,7 @@ struct APIBriefingFirstRunProgress: Codable {
         try container.encode(activeSources, forKey: .activeSources)
         try container.encode(queuedSources, forKey: .queuedSources)
         try container.encode(readyCategoryKeys, forKey: .readyCategoryKeys)
+        try container.encode(tiers, forKey: .tiers)
     }
 }
 
@@ -7086,6 +7170,8 @@ struct APIScraperConfigStatsResponse: Codable {
     let completedCount: Int
     let unreadCount: Int
     let processingCount: Int
+    let failedCount: Int
+    let accessGateCount: Int
     let runningCount: Int
     let queuedCount: Int
     let latestProcessedAt: Date?
@@ -7101,6 +7187,8 @@ struct APIScraperConfigStatsResponse: Codable {
         completedCount: Int,
         unreadCount: Int,
         processingCount: Int,
+        failedCount: Int = 0,
+        accessGateCount: Int = 0,
         runningCount: Int = 0,
         queuedCount: Int = 0,
         latestProcessedAt: Date?,
@@ -7115,6 +7203,8 @@ struct APIScraperConfigStatsResponse: Codable {
         self.completedCount = completedCount
         self.unreadCount = unreadCount
         self.processingCount = processingCount
+        self.failedCount = failedCount
+        self.accessGateCount = accessGateCount
         self.runningCount = runningCount
         self.queuedCount = queuedCount
         self.latestProcessedAt = latestProcessedAt
@@ -7131,6 +7221,8 @@ struct APIScraperConfigStatsResponse: Codable {
         case completedCount = "completed_count"
         case unreadCount = "unread_count"
         case processingCount = "processing_count"
+        case failedCount = "failed_count"
+        case accessGateCount = "access_gate_count"
         case runningCount = "running_count"
         case queuedCount = "queued_count"
         case latestProcessedAt = "latest_processed_at"
@@ -7155,6 +7247,8 @@ struct APIScraperConfigStatsResponse: Codable {
         completedCount = try container.decode(Int.self, forKey: .completedCount)
         unreadCount = try container.decode(Int.self, forKey: .unreadCount)
         processingCount = try container.decode(Int.self, forKey: .processingCount)
+        failedCount = try container.decode(Int.self, forKey: .failedCount)
+        accessGateCount = try container.decode(Int.self, forKey: .accessGateCount)
         runningCount = try container.decode(Int.self, forKey: .runningCount)
         queuedCount = try container.decode(Int.self, forKey: .queuedCount)
         if let latestProcessedAtRaw = try container.decode(String?.self, forKey: .latestProcessedAt) {
@@ -7193,6 +7287,8 @@ struct APIScraperConfigStatsResponse: Codable {
         try container.encode(completedCount, forKey: .completedCount)
         try container.encode(unreadCount, forKey: .unreadCount)
         try container.encode(processingCount, forKey: .processingCount)
+        try container.encode(failedCount, forKey: .failedCount)
+        try container.encode(accessGateCount, forKey: .accessGateCount)
         try container.encode(runningCount, forKey: .runningCount)
         try container.encode(queuedCount, forKey: .queuedCount)
         try container.encode(latestProcessedAt.map(ServerDate.format), forKey: .latestProcessedAt)

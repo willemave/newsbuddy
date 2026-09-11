@@ -73,6 +73,10 @@ pub struct ScraperConfigStatsResponse {
     pub unread_count: i64,
     pub processing_count: i64,
     #[serde(default)]
+    pub failed_count: i64,
+    #[serde(default)]
+    pub access_gate_count: i64,
+    #[serde(default)]
     pub running_count: i64,
     #[serde(default)]
     pub queued_count: i64,

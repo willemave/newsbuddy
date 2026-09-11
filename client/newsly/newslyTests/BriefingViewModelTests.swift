@@ -3,6 +3,53 @@ import XCTest
 
 @MainActor
 final class BriefingViewModelTests: XCTestCase {
+    func testOlderFirstRunResponseWithoutTiersStillDecodes() throws {
+        let data = try JSONEncoder().encode(makeFirstRun())
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "tiers")
+        let oldData = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(APIBriefingFirstRunProgress.self, from: oldData)
+        XCTAssertEqual(decoded.tiers.count, 0)
+    }
+
+    func testOlderTierWithoutSourceNamesStillDecodes() throws {
+        let data = Data(#"{"tier":"audio","discovered":2,"ready":0,"processing":2,"failed":0,"skipped":0,"source_count":1,"pending_sources":0,"unavailable_sources":0}"#.utf8)
+        let decoded = try JSONDecoder().decode(APIBriefingFirstRunTierProgress.self, from: data)
+        XCTAssertEqual(decoded.sourceNames, [])
+        XCTAssertEqual(decoded.processing, 2)
+    }
+
+    func testEndingFirstRunWhileWelcomeSelectedSelectsReadableLens() async {
+        let service = MockBriefingService()
+        let podcasts = makeLensSummary(key: "podcasts", title: "Podcasts", tier: .audio)
+        service.indexResults = [
+            .value(makeIndex(lenses: [podcasts], firstRun: makeFirstRun()), etag: "active"),
+            .value(makeIndex(lenses: [podcasts]), etag: "ended")
+        ]
+        service.lensResponses["podcasts"] = makeLens(key: "podcasts")
+        let viewModel = BriefingViewModel(service: service)
+        await viewModel.loadIndexIfNeeded()
+        XCTAssertTrue(viewModel.isStartHereSelected)
+        await viewModel.refreshIndex()
+        XCTAssertFalse(viewModel.isStartHereSelected)
+        XCTAssertEqual(viewModel.selectedLensKey, "podcasts")
+    }
+
+    func testRestoringActiveFirstRunPreservesSelectedTier() async {
+        let service = MockBriefingService()
+        let store = MockBriefingSnapshotStore(userID: 1)
+        let podcasts = makeLensSummary(key: "podcasts", title: "Podcasts", tier: .audio)
+        store.snapshotToLoad = BriefingSnapshot(userID: 1,
+            index: makeIndex(lenses: [podcasts], firstRun: makeFirstRun()),
+            etag: "active", selectedLensKey: "podcasts",
+            lenses: ["podcasts": makeLens(key: "podcasts")], savedAt: Date())
+        service.indexResults = [.notModified]
+        let viewModel = BriefingViewModel(service: service, snapshotStore: store)
+        await viewModel.loadIndexIfNeeded()
+        XCTAssertEqual(viewModel.selectedLensKey, "podcasts")
+        XCTAssertNotNil(viewModel.firstRun)
+    }
+
     func testActiveStateTracksBriefingLifecycle() {
         let viewModel = BriefingViewModel(service: MockBriefingService())
 
@@ -108,6 +155,21 @@ final class BriefingViewModelTests: XCTestCase {
         XCTAssertTrue(service.fetchLensKeys.isEmpty)
     }
 
+    func testBrowsingProcessingTierKeepsProgressAndSelectionAcrossRefresh() async {
+        let service = MockBriefingService()
+        let podcasts = makeLensSummary(key: "podcasts", title: "Podcasts", tier: .audio, segmentCount: 0)
+        let response = makeIndex(lenses: [podcasts], firstRun: makeFirstRun())
+        service.indexResults = [.value(response, etag: "warm-1"), .value(response, etag: "warm-2")]
+        service.lensResponses["podcasts"] = makeLens(key: "podcasts")
+        let viewModel = BriefingViewModel(service: service)
+        await viewModel.loadIndexIfNeeded()
+        viewModel.selectLens(key: "podcasts")
+        await viewModel.refreshIndex()
+        XCTAssertEqual(viewModel.selectedLensKey, "podcasts")
+        XCTAssertNotNil(viewModel.firstRun)
+        XCTAssertEqual(service.firstRunCompletionCount, 0)
+    }
+
     func testOpeningReadyCategoryOptimisticallyCompletesFirstRun() async {
         let service = MockBriefingService()
         let technology = makeLensSummary(key: "technology", title: "Technology")
@@ -115,7 +177,7 @@ final class BriefingViewModelTests: XCTestCase {
             .value(
                 makeIndex(
                     lenses: [technology],
-                    firstRun: makeFirstRun(readyCategoryKeys: ["technology"])
+                    firstRun: makeFirstRun(phase: .ready, readyCategoryKeys: ["technology"])
                 ),
                 etag: "first-run-2"
             )
@@ -144,7 +206,7 @@ final class BriefingViewModelTests: XCTestCase {
             .value(
                 makeIndex(
                     lenses: [technology],
-                    firstRun: makeFirstRun(readyCategoryKeys: ["technology"])
+                    firstRun: makeFirstRun(phase: .ready, readyCategoryKeys: ["technology"])
                 ),
                 etag: "first-run-retry"
             )

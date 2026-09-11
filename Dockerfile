@@ -105,7 +105,7 @@ COPY --from=newsly-rust-builder /workspace/rust/target/release-service/newsly-ac
 
 RUN for worker in \
       content media audio image discussion news-item scrape summarization x-sync \
-      feed-backfill feed-discovery onboarding-discovery briefing-refresh chat run-llm-task; \
+      feed-backfill feed-discovery onboarding-discovery briefing-refresh news-lens chat run-llm-task; \
       do ln -s newsly-worker "/usr/local/bin/newsly-${worker}-worker"; done \
     && chmod +x /usr/local/bin/newsly-* /app/docker/*.sh
 

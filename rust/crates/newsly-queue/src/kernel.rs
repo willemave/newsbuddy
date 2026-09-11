@@ -638,6 +638,7 @@ impl ClaimCursorKey {
 
 #[derive(Debug)]
 struct PreparedEnqueueWithoutStamp {
+    priority: i32,
     task_type: TaskType,
     content_id: Option<i64>,
     payload: Map<String, Value>,
@@ -700,6 +701,7 @@ impl TryFrom<EnqueueRequest> for PreparedEnqueueWithoutStamp {
         }
 
         Ok(Self {
+            priority: request.priority,
             task_type: request.task_type,
             content_id: request.content_id,
             payload,
@@ -714,6 +716,7 @@ impl TryFrom<EnqueueRequest> for PreparedEnqueueWithoutStamp {
 
 #[derive(Debug)]
 struct PreparedEnqueue {
+    priority: i32,
     task_type: TaskType,
     content_id: Option<i64>,
     payload: Map<String, Value>,
@@ -730,6 +733,7 @@ struct PreparedEnqueue {
 impl PreparedEnqueueWithoutStamp {
     fn with_stamp(self, stamp: &ExecutorOwnershipRow) -> PreparedEnqueue {
         PreparedEnqueue {
+            priority: self.priority,
             task_type: self.task_type,
             content_id: self.content_id,
             payload: self.payload,
@@ -890,9 +894,8 @@ async fn insert_or_resolve_task(
         .owner_user_id
         .map(|value| postgres_integer(value, "owner_user_id"))
         .transpose()?;
-    let inserted = if request.dedupe_key.is_some() {
-        sqlx::query_as::<_, InsertedTaskRow>(
-            r"
+    let inserted = sqlx::query_as::<_, InsertedTaskRow>(
+        r"
             INSERT INTO processing_tasks (
                 task_type,
                 content_id,
@@ -904,61 +907,28 @@ async fn insert_or_resolve_task(
                 owner_user_id,
                 executor_runtime,
                 executor_version,
-                executor_namespace
+                executor_namespace, priority
             )
-            VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT (dedupe_key)
                 WHERE dedupe_key IS NOT NULL AND status IN ('pending', 'processing')
                 DO NOTHING
             RETURNING id::bigint AS id, owner_user_id::bigint AS owner_user_id
             ",
-        )
-        .bind(request.task_type.as_str())
-        .bind(content_id)
-        .bind(payload)
-        .bind(request.queue_name.as_str())
-        .bind(request.available_at.naive_utc())
-        .bind(&request.dedupe_key)
-        .bind(owner_user_id)
-        .bind(request.executor_runtime.as_str())
-        .bind(request.executor_version)
-        .bind(&request.executor_namespace)
-        .fetch_optional(&mut **transaction)
-        .await?
-    } else {
-        Some(
-            sqlx::query_as::<_, InsertedTaskRow>(
-                r"
-                INSERT INTO processing_tasks (
-                    task_type,
-                    content_id,
-                    payload,
-                    status,
-                    queue_name,
-                    available_at,
-                    dedupe_key,
-                    owner_user_id,
-                    executor_runtime,
-                    executor_version,
-                    executor_namespace
-                )
-                VALUES ($1, $2, $3, 'pending', $4, $5, NULL, $6, $7, $8, $9)
-                RETURNING id::bigint AS id, owner_user_id::bigint AS owner_user_id
-                ",
-            )
-            .bind(request.task_type.as_str())
-            .bind(content_id)
-            .bind(payload)
-            .bind(request.queue_name.as_str())
-            .bind(request.available_at.naive_utc())
-            .bind(owner_user_id)
-            .bind(request.executor_runtime.as_str())
-            .bind(request.executor_version)
-            .bind(&request.executor_namespace)
-            .fetch_one(&mut **transaction)
-            .await?,
-        )
-    };
+    )
+    .bind(request.task_type.as_str())
+    .bind(content_id)
+    .bind(payload)
+    .bind(request.queue_name.as_str())
+    .bind(request.available_at.naive_utc())
+    .bind(&request.dedupe_key)
+    .bind(owner_user_id)
+    .bind(request.executor_runtime.as_str())
+    .bind(request.executor_version)
+    .bind(&request.executor_namespace)
+    .bind(request.priority)
+    .fetch_optional(&mut **transaction)
+    .await?;
     if let Some(inserted) = inserted {
         return Ok((inserted.id, true, inserted.owner_user_id));
     }
@@ -977,6 +947,9 @@ async fn insert_or_resolve_task(
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or(QueueError::DedupeRace)?;
+    // A foreground consumer may promote shared work without changing its retry deadline.
+    sqlx::query("UPDATE processing_tasks SET priority=$2 WHERE id::bigint=$1 AND status='pending' AND priority<$2 AND task_type=$3")
+        .bind(existing.id).bind(request.priority).bind(request.task_type.as_str()).execute(&mut **transaction).await?;
     Ok((existing.id, false, existing.owner_user_id))
 }
 
@@ -1051,7 +1024,8 @@ async fn claim_retry_bucket(
     push_optional_claim_filters(&mut query, request);
     query.push(
         r"
-            ORDER BY available_at ASC, created_at ASC, id ASC
+            ORDER BY priority DESC,
+                     available_at ASC, created_at ASC, id ASC
             FOR UPDATE SKIP LOCKED
             LIMIT 1
         )

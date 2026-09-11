@@ -370,6 +370,39 @@ Summary, relation/cluster state, relevant links, remaining provider usage, Brief
 sources, Agent Data synchronization, and the queue transition publish
 atomically. News never enters the long-form generated-artwork path.
 
+Shared aggregator checks use `source_ingestion_health` for hourly subscribed and
+two-hour unsubscribed eligibility. Scheduler and onboarding coalesce global
+scrapes by aggregator key; workers recheck eligibility without suppressing retries.
+Ready representative news schedules `prepare_news_lens`, handled by a dedicated
+`newsly-news-lens-worker` process using the existing worker binary dispatcher. `news_lens_embeddings` stores the canonical planner input hash, encoder
+version, model and dimension-validated vector. Preparation releases its database
+connection before provider work and finalizes through the exact queue lease.
+Scheduler ticks backfill at most 128 eligible missing embeddings, including under
+content-queue backpressure; foreground misses promote the same task. A short
+exact-lease checkpoint stores the input hash/model/encoder before external work,
+so terminal failures of any kind have a six-hour fingerprint-specific cooldown.
+Briefing assigns cached news semantically, isolates failed sources, and leaves
+uncached news pending while publishing other ready tiers. Queue priority orders work within existing retry
+fairness buckets, and promotion preserves `available_at` backoff.
+
+First-run news admission freezes up to 40 eligible stories in
+`onboarding_first_edition_items`, balanced across platform/topic before recency.
+The cohort settles through coverage, read state, or loss of eligibility before
+normal admission resumes. Feed backfill records both reused and new content in
+the same membership table. Article/podcast progress derives lifecycle and readable
+coverage from canonical rows, while fixed lenses exist immediately. Active
+first-run index responses include dynamic progress in their validator and bypass
+conditional 304 responses. Aggregator checks persist a fixed cutoff and terminal
+result on each run source; later fetches cannot reopen them. Terminal artwork and
+ineligible items settle tier progress, and abandoned runs expire after 24 hours.
+Item status writes do not acquire onboarding run locks through triggers.
+Stale publication schedules at most three quick recoveries, then a one-minute
+interval while initial news remains outstanding or the normal interval afterward.
+A completing sweep releases its own dedupe key inside the exact-lease transaction
+before enqueuing its successor. Existing-table indexes use separate concurrent
+SQLx migrations. Nonproductive initial sweeps wait 30–60 seconds. Active-run
+projection reconciles sources once per response using a bounded ingestion window.
+
 ### 8.3 Briefing, discussions, media, and images
 
 Briefing uses durable source/pending/publication state and versioned client

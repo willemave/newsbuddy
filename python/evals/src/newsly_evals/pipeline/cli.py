@@ -21,7 +21,7 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--binary-dir", type=Path, default=Path("rust/target/debug"))
     parser.add_argument("--postgres-url", default="postgresql://localhost/postgres")
     parser.add_argument("--env-file", type=Path)
-    parser.add_argument("--model", default="openai:gpt-5.6-terra")
+    parser.add_argument("--model", default="openai:gpt-5.6-luna")
     parser.add_argument("--judge-model", default="gpt-5.6-sol")
     parser.add_argument("--timeout", type=float, default=180)
 

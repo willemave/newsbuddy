@@ -334,7 +334,7 @@ pub(super) async fn persist_usage(
     .bind(u64_to_i32(usage.usage.output_tokens))
     .bind(u64_to_i32(total_tokens))
     .bind(json!({
-        "prompt_version": "briefing-v6",
+        "prompt_version": super::BRIEFING_COMPOSITION_PROMPT_VERSION,
         "reasoning_tokens": usage.usage.reasoning_tokens,
         "input_audio_tokens": usage.usage.input_audio_tokens,
         "output_audio_tokens": usage.usage.output_audio_tokens,

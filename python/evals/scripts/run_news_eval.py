@@ -15,10 +15,7 @@ from newsly_evals.relations import (
 )
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_PRIMARY_THRESHOLD = 0.85
-DEFAULT_SECONDARY_THRESHOLD = 0.75
 DEFAULT_SLICES = (
-    "exact_duplicates",
     "mixed_source_windows",
     "user_scoped_x_windows",
 )
@@ -39,12 +36,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--primary-threshold",
         type=float,
-        default=DEFAULT_PRIMARY_THRESHOLD,
     )
     parser.add_argument(
         "--secondary-threshold",
         type=float,
-        default=DEFAULT_SECONDARY_THRESHOLD,
     )
     parser.add_argument("--trace", action="store_true")
     parser.add_argument("--output", type=Path)
@@ -52,58 +47,49 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _empty_result(*, model: str, threshold: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "version": 1,
-        "model": model,
-        "runs": [
-            {
-                "threshold": threshold,
-                "summary": {
-                    "case_count": 0,
-                    "passed_count": 0,
-                    "failed_count": 0,
-                    "macro_precision": 0.0,
-                    "macro_recall": 0.0,
-                    "macro_f1": 0.0,
-                },
-                "results": [],
-            }
-        ],
-    }
-
-
 def main() -> int:
     args = _parse_args()
     requested_slices = args.slices or list(DEFAULT_SLICES)
-    thresholds = [
-        {
-            "label": "current",
-            "primary": args.primary_threshold,
-            "secondary": args.secondary_threshold,
-        }
-    ]
+    if (args.primary_threshold is None) != (args.secondary_threshold is None):
+        raise ValueError("primary and secondary thresholds must be overridden together")
+    thresholds = (
+        [
+            {
+                "label": "override",
+                "primary": args.primary_threshold,
+                "secondary": args.secondary_threshold,
+            }
+        ]
+        if args.primary_threshold is not None
+        else []
+    )
+    records_by_slice = {
+        slice_name: read_jsonl_records(args.input_dir / f"{slice_name}.jsonl")
+        for slice_name in requested_slices
+    }
+    for slice_name, records in records_by_slice.items():
+        if not records:
+            raise ValueError(f"configured relation slice {slice_name!r} contains no records")
     encoder = SentenceTransformerEncoder(args.model)
     slice_results: dict[str, dict[str, Any]] = {}
     summaries: dict[str, dict[str, Any]] = {}
     failed_count = 0
 
     for slice_name in requested_slices:
-        records = read_jsonl_records(args.input_dir / f"{slice_name}.jsonl")
+        records = records_by_slice[slice_name]
         cases = build_feed_relation_cases(records, label_prefix=slice_name)
-        if cases:
-            result = run_document_relation_eval(
-                cases=cases,
-                encoder=encoder,
-                thresholds=thresholds,
-                include_traces=args.trace,
-                provider_metadata={
-                    "pipeline": "frozen_feed_sentence_transformers",
-                    "slice": slice_name,
-                },
-            )
-        else:
-            result = _empty_result(model=args.model, threshold=thresholds[0])
+        if not cases:
+            raise ValueError(f"configured relation slice {slice_name!r} produced no cases")
+        result = run_document_relation_eval(
+            cases=cases,
+            encoder=encoder,
+            thresholds=thresholds,
+            include_traces=args.trace,
+            provider_metadata={
+                "pipeline": "frozen_feed_sentence_transformers",
+                "slice": slice_name,
+            },
+        )
         slice_results[slice_name] = result
         summary = result["runs"][0]["summary"]
         summaries[slice_name] = summary
@@ -114,8 +100,7 @@ def main() -> int:
         "artifact_type": "newsly.feed_relation_eval.result",
         "config": {
             "model": args.model,
-            "primary_threshold": args.primary_threshold,
-            "secondary_threshold": args.secondary_threshold,
+            "threshold": next(iter(slice_results.values()))["runs"][0]["threshold"],
             "slices": requested_slices,
             "policy_owner": "newsly-eval-driver",
         },

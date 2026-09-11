@@ -18,7 +18,7 @@ use thiserror::Error;
 use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
 const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-5.6-luna";
-const DEFAULT_EMBEDDING_MODEL: &str = "openrouter:qwen/qwen3-embedding-8b";
+use newsly_domain::DEFAULT_LENS_EMBEDDING_MODEL as DEFAULT_EMBEDDING_MODEL;
 const DEFAULT_OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1/";
 const MAX_EMBEDDING_BATCH: usize = 128;
 const MAX_EMBEDDING_TEXT_CHARS: usize = 50_000;
@@ -33,9 +33,12 @@ forms: `[source title or descriptive phrase](newsly://briefing/content/123)` and
 fact, quotation, or attribution. Never use em dashes or generic summary-speak. Begin with the
 strongest fact or idea rather than naming the lens or counting sources.
 
-For `news`, write like a newspaper brief, information dense. Be as concise as possible, many times
-including only the article title as the content. Return exactly one passage: one compact paragraph
-of at most three sentences, with no figures or pullquotes, linking every source exactly once.
+For `news`, write like a newspaper brief: compressed, factual, and information dense. Target 25-45
+words for the entire passage and never exceed 60 words, including linked text.
+Prefer one short clause per distinct event, and many times use only a compact linked title or descriptive fact. Cut
+background, inventories, secondary details, and thematic transitions before adding length. Return
+exactly one passage: one compact paragraph of at most three sentences, with no figures or
+pullquotes, linking every source exactly once.
 Place links toward the beginning of the sentence that covers each source. Make each source link
 span a substantial phrase: the title plus its surrounding descriptive words, roughly four to ten
 words, never a bare two-word name. Let the linked phrase carry the fact instead of repeating it in
@@ -904,7 +907,10 @@ mod tests {
     #[test]
     fn news_prompt_requests_newspaper_briefs() {
         assert!(COMPOSITION_SYSTEM_PROMPT.contains("write like a newspaper brief"));
-        assert!(COMPOSITION_SYSTEM_PROMPT.contains("including only the article title"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("Target 25-45"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("never exceed 60 words"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("one short clause per distinct event"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("compact linked title or descriptive fact"));
         assert!(COMPOSITION_SYSTEM_PROMPT.contains("Place links toward the beginning"));
         assert!(COMPOSITION_SYSTEM_PROMPT.contains("instead of repeating it"));
         assert!(!COMPOSITION_SYSTEM_PROMPT.contains("unified account"));

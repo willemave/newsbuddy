@@ -138,6 +138,7 @@ worker_processes=(
   feed_discovery
   onboarding_discovery
   briefing_refresh
+  news_lens
   chat
   run_llm_task
 )

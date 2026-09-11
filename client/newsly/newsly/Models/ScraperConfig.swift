@@ -35,6 +35,21 @@ extension APIScraperConfigStatsResponse {
         return parts.isEmpty ? nil : parts.joined(separator: " • ")
     }
 
+    var issueSummary: String? {
+        guard failedCount > 0 else { return nil }
+
+        let accessBlocked = min(accessGateCount, failedCount)
+        let otherFailures = failedCount - accessBlocked
+        var parts: [String] = []
+        if accessBlocked > 0 {
+            parts.append("\(accessBlocked) \(accessBlocked == 1 ? "item" : "items") blocked by paywall or sign-in")
+        }
+        if otherFailures > 0 {
+            parts.append("\(otherFailures) \(otherFailures == 1 ? "item" : "items") couldn't be processed")
+        }
+        return parts.joined(separator: " • ")
+    }
+
     var relativeProcessedSummary: String? {
         if ingestionError != nil { return "Could not fully refresh this source" }
         if let checkedAt = lastFetchAt {
@@ -75,7 +90,7 @@ extension APIScraperConfigStatsResponse {
     }
 
     var hasVisibleStats: Bool {
-        ingestionError != nil || lastFetchAt != nil || totalCount > 0 || processingCount > 0 || latestProcessedAt != nil || nextExpectedAt != nil
+        ingestionError != nil || failedCount > 0 || lastFetchAt != nil || totalCount > 0 || processingCount > 0 || latestProcessedAt != nil || nextExpectedAt != nil
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {

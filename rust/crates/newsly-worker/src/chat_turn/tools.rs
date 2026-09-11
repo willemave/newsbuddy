@@ -9,10 +9,10 @@ use newsly_agent_runtime::{
 };
 use newsly_contracts::{AssistantFeedOption, FeedType};
 use newsly_db::{
-    ChatTaskSnapshot, create_deep_research_handoff, list_unread_chat_news, mark_content_read,
-    mark_content_unread, prepare_chat_article_conversion, remove_content_from_knowledge,
-    save_content_to_knowledge, search_agent_knowledge, search_chat_content, search_chat_news,
-    search_chat_subscription_content,
+    ChatContentFilters, ChatTaskSnapshot, create_deep_research_handoff, list_unread_chat_news,
+    mark_content_read, mark_content_unread, prepare_chat_article_conversion,
+    remove_content_from_knowledge, save_content_to_knowledge, search_accessible_content,
+    search_chat_news,
 };
 use newsly_e2b::{
     CommandEvent, CommandRequest, DirectE2bProvider, ExecutionTag, NetworkPolicy, OutputLimits,
@@ -135,11 +135,11 @@ impl ChatToolExecutor {
             ),
             definition::<WebSearchInput>(
                 "search_web",
-                "Search the public web through Exa for current factual context.",
+                "Search the public web for external facts. Returns source titles, URLs and snippets; does not search the user's Newsly library.",
             ),
-            definition::<SearchInput>(
+            definition::<ContentSearchInput>(
                 "search_knowledge",
-                "Search the user's saved Newsly knowledge library.",
+                "List or search the user's saved Knowledge items. Omit query to browse saved items and assess topics from their snippets. Query filters by literal words, so related topics without those words are omitted. Optional source matches the owning followed show/publication, not mentions. Supports unread_only, limit (1-25), offset. Returns typed references, titles, links, snippets, dates, read/saved state, total_count (query matches), scope_total_count (saved items before the text filter) and next_offset; ambiguous source names return candidates without items. Inbox-only items are excluded.",
             ),
             definition::<ReadKnowledgeInput>(
                 "read_knowledge_item",
@@ -149,22 +149,18 @@ impl ChatToolExecutor {
                 "write_knowledge_items",
                 "Copy selected Knowledge references into input/knowledge in this turn's task sandbox.",
             ),
-            definition::<SearchInput>(
+            definition::<ContentSearchInput>(
                 "search_content",
-                "Search content visible in the user's Newsly inbox.",
+                "List or search accessible inbox and saved articles/podcast episodes. Query is optional lexical text; omit it to browse. Source is a followed show/publication name matched to ownership, not title/body mentions. Optional unread_only and saved_only filters apply before paging. Limit 1-25, offset starts at zero. Returns individual titles, links, snippets, dates, read/saved state, total_count (query matches), scope_total_count (items before text filtering) and next_offset. Ambiguous source names return candidates without items; unknown sources and empty searches do not substitute unrelated results.",
             ),
             definition::<SearchInput>("search_news", "Search user-visible Newsly fast-news items."),
-            definition::<SearchInput>(
-                "search_subscription_feeds",
-                "Search content from sources the user already follows.",
-            ),
             definition::<UnreadInput>(
                 "list_unread_news_items",
                 "List unread user-visible fast-news items.",
             ),
             definition::<WebSearchInput>(
                 "find_feed_options",
-                "Find candidate blogs, newsletters, podcasts, or RSS feeds for review.",
+                "Discover new blogs, newsletters, podcast shows or RSS feeds to follow. Returns source/subscription recommendations and feed URLs, not individual articles or episodes. Recommendations are attached as reviewable subscription cards.",
             ),
             definition::<ContentUrlInput>(
                 "add_item_to_feed",
@@ -228,10 +224,6 @@ impl ChatToolExecutor {
             "read_knowledge_item" => self.read_knowledge_item(call).await,
             "search_content" => self.search_content_kind(call, SearchKind::Content).await,
             "search_news" => self.search_news(call).await,
-            "search_subscription_feeds" => {
-                self.search_content_kind(call, SearchKind::Subscription)
-                    .await
-            }
             "list_unread_news_items" => self.list_unread(call).await,
             "save_to_knowledge" => self.mutate_content(call, Mutation::Save).await,
             "remove_from_knowledge" => self.mutate_content(call, Mutation::Remove).await,
@@ -480,7 +472,11 @@ impl ChatToolExecutor {
             .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
         let suggestions = normalize_seeds(&self.dependencies.feed_validator, seeds, query, &topics)
             .await
-            .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
+            .map_err(|error| {
+                AgentRuntimeError::Tool(format!(
+                    "Candidates were discovered, but feed validation failed: {error}"
+                ))
+            })?;
         let mut options = suggestions
             .into_iter()
             .filter_map(assistant_feed_option)
@@ -511,30 +507,15 @@ impl ChatToolExecutor {
         call: ToolCall,
         kind: SearchKind,
     ) -> Result<ToolOutput, AgentRuntimeError> {
-        let input: SearchInput = arguments(&call)?;
-        let query = bounded_query(&input.query)?;
-        let limit = i64::try_from(input.limit.unwrap_or(5).clamp(1, 10)).unwrap_or(10);
-        let results = match kind {
-            SearchKind::Knowledge => {
-                search_agent_knowledge(&self.dependencies.pool, self.snapshot.user_id, query, limit)
-                    .await
-            }
-            SearchKind::Content => {
-                search_chat_content(&self.dependencies.pool, self.snapshot.user_id, query, limit)
-                    .await
-            }
-            SearchKind::Subscription => {
-                search_chat_subscription_content(
-                    &self.dependencies.pool,
-                    self.snapshot.user_id,
-                    query,
-                    limit,
-                )
+        let input: ContentSearchInput = arguments(&call)?;
+        let filters = input.into_filters(matches!(kind, SearchKind::Knowledge))?;
+        let page =
+            search_accessible_content(&self.dependencies.pool, self.snapshot.user_id, &filters)
                 .await
-            }
-        }
-        .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
-        Ok(success(json!({"query": query, "items": results})))
+                .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
+        Ok(success(serde_json::to_value(page).map_err(|error| {
+            AgentRuntimeError::Tool(error.to_string())
+        })?))
     }
 
     async fn search_news(&self, call: ToolCall) -> Result<ToolOutput, AgentRuntimeError> {
@@ -879,7 +860,6 @@ impl ToolExecutor for ChatToolExecutor {
 enum SearchKind {
     Knowledge,
     Content,
-    Subscription,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -961,6 +941,41 @@ struct WebSearchInput {
     limit: Option<usize>,
     num_results: Option<usize>,
     category: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ContentSearchInput {
+    query: Option<String>,
+    source: Option<String>,
+    unread_only: Option<bool>,
+    saved_only: Option<bool>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+impl ContentSearchInput {
+    fn into_filters(self, knowledge: bool) -> Result<ChatContentFilters, AgentRuntimeError> {
+        let filters = ChatContentFilters {
+            query: self.query.unwrap_or_default(),
+            source: self.source,
+            unread_only: self.unread_only.unwrap_or(false),
+            saved_only: knowledge || self.saved_only.unwrap_or(false),
+            limit: self.limit.unwrap_or(25),
+            offset: self.offset.unwrap_or(0),
+        };
+        if !(1..=25).contains(&filters.limit)
+            || !(0..=100_000).contains(&filters.offset)
+            || filters.query.chars().count() > 2_000
+            || filters
+                .source
+                .as_ref()
+                .is_some_and(|s| s.trim().is_empty() || s.chars().count() > 2_000)
+        {
+            return Err(AgentRuntimeError::Tool("Invalid content search: limit must be 1-25, offset 0-100000, query/source at most 2000 characters, and source nonempty when provided".into()));
+        }
+        Ok(filters)
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1054,5 +1069,33 @@ fn failure(message: String) -> ToolOutput {
     ToolOutput {
         content: json!({"ok": false, "error": message}),
         is_error: true,
+    }
+}
+
+#[cfg(test)]
+mod content_search_input_tests {
+    use super::*;
+
+    #[test]
+    fn knowledge_is_saved_only_even_when_caller_requests_otherwise() {
+        let input: ContentSearchInput =
+            serde_json::from_value(json!({"saved_only":false})).unwrap();
+        let filters = input.into_filters(true).unwrap();
+        assert!(filters.saved_only);
+        assert!(filters.query.is_empty());
+        assert_eq!(filters.limit, 25);
+    }
+
+    #[test]
+    fn content_search_rejects_invalid_bounds_instead_of_silently_clamping() {
+        for input in [
+            json!({"limit":0}),
+            json!({"limit":26}),
+            json!({"offset":-1}),
+            json!({"source":" "}),
+        ] {
+            let input: ContentSearchInput = serde_json::from_value(input).unwrap();
+            assert!(input.into_filters(false).is_err());
+        }
     }
 }

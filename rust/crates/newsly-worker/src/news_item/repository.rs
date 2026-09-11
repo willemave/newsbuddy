@@ -7,11 +7,10 @@ use newsly_domain::{
     NewsRelationDocument, RelationExactKey, aggregate_relation_representative,
     can_bridge_relation_clusters,
 };
-use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
+use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Postgres, Transaction};
-use thiserror::Error;
 
 use crate::content::UsageWrite;
 
@@ -394,6 +393,17 @@ pub(super) async fn apply_processing(
             .execute(&mut **transaction)
             .await?;
         }
+        let mut prepare = EnqueueRequest::new(TaskType::PrepareNewsLens);
+        prepare.priority = -10;
+        prepare.payload = Some(Map::from_iter([(
+            "news_item_id".to_owned(),
+            json!(representative_id),
+        )]));
+        prepare.dedupe = Some(true);
+        prepare.dedupe_key = Some(format!("news-lens:{representative_id}"));
+        queue
+            .enqueue_many_in_transaction(transaction, vec![prepare])
+            .await?;
         enqueue_ready_fanout(transaction, queue, plan).await?;
     }
     Ok(NewsApplyOutcome::Applied)
@@ -1391,7 +1401,8 @@ async fn enqueue_ready_fanout(
             INSERT INTO briefing_pending_sources (
                 user_id, lens_key, source_kind, source_id, enqueued_at
             )
-            VALUES ($1, NULL, 'news', $2, timezone('UTC', clock_timestamp()))
+            SELECT $1, NULL, 'news', $2, timezone('UTC', clock_timestamp())
+            WHERE NOT EXISTS (SELECT 1 FROM onboarding_first_edition_runs WHERE user_id=$1 AND status='active' AND NOT news_seed_settled)
             ON CONFLICT (user_id, source_kind, source_id) DO NOTHING
             "#,
         )
@@ -1713,23 +1724,8 @@ fn saturating_i32(value: u64) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
-#[derive(Debug, Error)]
-pub(super) enum NewsRepositoryError {
-    #[error("content-analysis usage was passed to a news-item extraction finalizer")]
-    UnexpectedContentAnalysisUsage,
-    #[error("accepted relation candidate {0} was not loaded")]
-    MissingAcceptedCandidate(i64),
-    #[error("news representative {0} disappeared")]
-    MissingRepresentative(i64),
-    #[error(transparent)]
-    Sqlx(#[from] sqlx::Error),
-    #[error(transparent)]
-    Queue(#[from] QueueError),
-    #[error(transparent)]
-    ContentSubmission(#[from] newsly_db::ContentSubmissionRepositoryError),
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
-}
+mod error;
+pub(super) use error::NewsRepositoryError;
 
 #[cfg(test)]
 #[path = "checkpoint_tests.rs"]

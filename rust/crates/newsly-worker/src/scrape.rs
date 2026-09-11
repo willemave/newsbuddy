@@ -1,3 +1,4 @@
+use chrono::Utc;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::sync::Arc;
@@ -136,7 +137,54 @@ async fn execute_scrape(
         return HandlerExecution::from_result(TaskResult::ok());
     }
 
-    let children = isolated_scrape_requests(&source_plans, request.first_edition_run_id);
+    let due_only = task
+        .payload
+        .get("due_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || request.first_edition_run_id.is_some();
+    if due_only && task.retry_count == 0 {
+        let mut connection = match services.pool.acquire().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                return HandlerExecution::from_result(TaskResult::fail(
+                    Some(error.to_string()),
+                    true,
+                ));
+            }
+        };
+        let mut due = Vec::new();
+        for source in source_plans {
+            if matches!(source.kind, SourcePlanKind::Aggregator { .. }) {
+                match newsly_db::aggregator_corpus::aggregator_due(
+                    &mut connection,
+                    &source.source,
+                    Utc::now(),
+                )
+                .await
+                {
+                    Ok(false) => continue,
+                    Ok(true) => {}
+                    Err(error) => {
+                        return HandlerExecution::from_result(TaskResult::fail(
+                            Some(error.to_string()),
+                            true,
+                        ));
+                    }
+                }
+            }
+            due.push(source);
+        }
+        source_plans = due;
+    }
+    let mut children = isolated_scrape_requests(&source_plans, request.first_edition_run_id);
+    if due_only {
+        for child in &mut children {
+            if let Some(payload) = &mut child.payload {
+                payload.insert("due_only".to_owned(), Value::Bool(true));
+            }
+        }
+    }
     if request.sources.len() > 1 || children.len() > 1 {
         return HandlerExecution::with_finalizer(
             TaskResult::ok(),

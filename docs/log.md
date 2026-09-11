@@ -27,6 +27,45 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-10 — `main` — News Briefing prompt length
+
+- **Status:** Complete locally; regeneration and release pending.
+- **Scope:** News Briefing composition prompt and behavioral law.
+- **Decisions:** Strengthen prompt guidance only; keep the model, event-window policy, and production validator unchanged. Require 25-45 words normally and no more than 60 words including links.
+- **Changes:** Added a whole-passage word budget, one-clause-per-event guidance, and explicit instructions to remove background, inventories, secondary details, and thematic transitions first. Segment and vendor-usage provenance now share `briefing-v7-commonmark` instead of leaving usage metadata hardcoded to v6.
+- **Validation:** All nine Briefing composition tests and the focused PostgreSQL publication/provenance test passed. Database, provider, and worker Clippy passed with warnings denied; Rust formatting and diff checks passed.
+- **Remaining:** Release the change, evaluate newly generated samples, then use the explicit full-refresh path to regenerate historical segments once quality is confirmed.
+- **Commits:** Uncommitted.
+
+### 2026-09-09 — `main` — Eval remediation after Fable review
+
+- **Status:** Implemented and focused validation complete; hosted reruns pending approval.
+- **Scope:** Briefing prompt-version persistence, Sol chat retrieval/defaults, summary grounding, relation policy/eval integrity, and eval-run durability.
+- **Decisions:** Keep Qwen as the production relation authority and MiniLM diagnostic only. Do not tune thresholds from the English-only baseline. Rust owns default thresholds. Treat low-information paywall titles and byte-identical repost labels deterministically. Preserve all concurrent warm-news/feed-status work.
+- **Changes:** Added the forward `prompt_version` text migration and terminal SQL data/integrity-error classification; persisted the shared v7 prompt constant through a real repository test. Ported the reviewed ownership-aware chat search with filters, counts, ambiguity, pagination, links, and Sol defaults. Added summary instructions for reader/ad/sponsor text and speaker attribution. Empty relation slices now fail closed, the empty exact-duplicate slice is no longer default, pipeline defaults to Luna, repeated stage errors stop further calls, partial reports survive interruption, and `python/evals/EVAL_MATRIX.md` records routes/call bounds/approval classes.
+- **Validation:** Read-only production evidence confirmed active SHA `b2320a09` and `briefing_segments.prompt_version VARCHAR(16)`; recent sweep completions did not substantiate a current retry storm. Focused PostgreSQL Briefing publication and chat retrieval tests passed. API/DB/domain/eval-driver/provider/worker offline checks passed; Rust focused unit tests passed. Python Ruff, MyPy, and 36 tests passed with five opt-in skips. Corrected MiniLM reruns: curated 20/101 with 0.356 positive recall and 2/2 negative safety; frozen feed 8/8.
+- **Remaining:** Run paid hosted Qwen comparison and fresh Sol/Luna candidate/judge suites only after their explicit approvals; full production-source bodies remain separately gated. No threshold change is justified yet. Full workspace/release gates and deployment were not requested.
+- **Commits:** Uncommitted.
+
+### 2026-09-09 — `main` — Warm onboarding review fixes
+
+- **Status:** Complete locally; not released.
+- **Scope:** Fix confirmed Fable findings in first-run completion, embedding isolation, staged client compatibility, stable source progress, and error/lifecycle UI.
+- **Decisions:** Give `prepare_news_lens` its own worker process. Publish ready content while uncached news remains pending; isolate terminal failed stories from semantic siblings. Checkpoint exact embedding input/model/version before external calls and allow unchanged failed preparation to recover after six hours. Freeze and persist one aggregator check per run; expire abandoned runs after 24 hours. Remove cross-item status triggers; live progress remains part of the response validator. Preserve source failure visibility work.
+- **Additional fixes:** Concurrent indexes on existing large tables, explicit UTC cache comparisons, bounded one-minute stale recovery during initial news, and atomic sweep successor scheduling without self-deduplication. New client tolerates absent tier fields, restores selection, exits Welcome after expiry, highlights the selected pill, and preserves Retry on lens-load errors.
+- **Validation:** 273 affected Rust library tests, two worker-dispatch tests, the task-contract corpus, and 44 native tests passed. Warning-denied Clippy, formatting, public contract drift, fresh isolated PostgreSQL migrations, SQLx metadata checks, and diff checks passed. Simulator fixtures verified progress, empty state, and error-to-Retry behavior; the final view build passed. Regression coverage includes terminal artwork, archival, cold-news/ready-article publication, mixed cached/missing/failed stories, exact-input cooldown, monotonic aggregator completion, client decoding, relaunch, expiry, and exact-lease sweep succession. Fable follow-up confirmed the original blockers resolved with no new blocking regression; its duplicate reconciliation, history-scan, and nonproductive polling findings were subsequently fixed and the Rust gates rerun.
+- **Release:** No commit, push, deployment, production migration, or production performance canary. Cold-pool throughput still needs measurement; preparation currently makes one embedding request per story.
+
+### 2026-09-09 — `main` — Warm news onboarding
+
+- **Status:** Complete locally; production rollout and performance measurement remain separate.
+- **Scope:** Shared aggregator cadence, durable lens embeddings, bounded first-news admission, and first-run article/podcast progress.
+- **Decisions:** Reuse source health and source-isolated scraping. Prepare lens embeddings through a global task. Keep first-run membership separate from canonical item lifecycle. Preserve progress while browsing fixed lenses.
+- **Validation:** 267 affected Rust library tests passed (API 43, DB 83, queue 11, scheduler 4, worker 126), including cadence boundaries, exact embedding reuse/invalidation and dimensions, frozen cohort admission, reused-content progress, source outcomes, priority coalescing, and bounded stale recovery. Warning-denied affected-target Clippy, formatting, public contract drift and SQLx workspace metadata checks passed against a disposable migrated database. All 40 native Briefing view-model tests passed; the rebuilt podcast progress fixture was inspected in iPhone 17 Simulator. Read-only production evidence showed all seven aggregators checked successfully at 2026-09-10 01:28 UTC.
+- **Remaining:** Production release, bounded corpus preparation, and equivalent-load measurements for first-news p95 and article/podcast queue wait. No paid performance canary or production mutation performed. Cold rollout uses durable cache-miss preparation until the pool is warm.
+- **Commits:** Uncommitted.
+
+
 ### 2026-09-08 — `main` — Prepare Briefing and ingestion release
 
 - **Status:** Release commit prepared; canonical local release gate restart pending after an iOS lifecycle-test repair.
@@ -2427,3 +2466,9 @@ Use this append-only log to preserve implementation context across sessions and 
 - Scoped artifact cleanup, shared local eval harness and complete-body fix for the requested main merge; unrelated chat, summarization prompt and artwork work excluded.
 - Exact staged tree validated in a clean temporary checkout: 40 API unit tests, 12 pipeline/API tests against disposable local databases, warning-denied API Clippy and public contract drift checks passed. Harness Ruff, configured MyPy and 30 focused Python tests passed; four opt-in tests subsequently passed in the 12-test API run. Earlier native verification passed 42 focused tests and AXe reader/sharing flows.
 - Main has unrelated local edits; preserve them while fast-forwarding the scoped commit. No push or deployment.
+
+### 2026-09-08 — `main` — User-visible feed source failures
+
+- Feed stats now count terminal item-processing failures per configured source and distinguish access gates such as paywalls or sign-in requirements from other failures, without returning raw internal diagnostics.
+- Feed Sources and Feed Status rows show prominent error labels. Source details explain the available URL, pause, and removal actions; Feed Status drill-down opens Issues first when failures exist.
+- Validation passed: focused PostgreSQL stats/history coverage, 8 public-contract tests, five focused native tests on iPhone 17 Pro Simulator, warning-denied Clippy for affected Rust packages, generated-contract drift, iOS wire boundaries, formatting, and diff checks. The app build was installed in Simulator, but no access-gated local source fixture was available for a final populated-row screenshot. No commit, push, or deployment requested.

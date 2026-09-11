@@ -62,9 +62,11 @@ pub struct FirstRunSourceProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BriefingFirstRunProjection {
+    pub pending_news: bool,
     pub run_id: i64,
     pub revision: i32,
     pub sources: Vec<FirstRunSourceProjection>,
+    pub tiers: Vec<crate::first_edition_progress::FirstRunTierProjection>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -734,7 +736,14 @@ async fn load_first_run(
     let Some(run) = run else {
         return Ok(None);
     };
-    let sources = sqlx::query_as::<_, FirstRunSourceRow>(
+    crate::first_edition_progress::reconcile_sources(&mut *pool.acquire().await?, user_id).await?;
+    let still_active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE id::bigint=$1 AND status='active')")
+        .bind(run.id).fetch_one(pool).await?;
+    if !still_active {
+        return Ok(None);
+    }
+
+    let source_rows = sqlx::query_as::<_, FirstRunSourceRow>(
         r#"
         SELECT display_name, position, status, processed_item_count, completed_at
         FROM onboarding_first_edition_sources
@@ -744,20 +753,26 @@ async fn load_first_run(
     )
     .bind(run.id)
     .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|source| FirstRunSourceProjection {
-        display_name: source.display_name,
-        position: source.position,
-        status: source.status,
-        processed_item_count: source.processed_item_count.max(0),
-        completed_at: source.completed_at.map(|value| value.and_utc()),
-    })
-    .collect();
+    .await?;
+    let mut sources = Vec::new();
+    for source in source_rows {
+        sources.push(FirstRunSourceProjection {
+            display_name: source.display_name,
+            position: source.position,
+            status: source.status,
+            processed_item_count: source.processed_item_count.max(0),
+            completed_at: source.completed_at.map(|v| v.and_utc()),
+        });
+    }
+    let tiers = crate::first_edition_progress::tiers(pool, run.id).await?;
+    let pending_news: bool = sqlx::query_scalar("SELECT NOT news_seed_settled AND (news_seeded OR EXISTS(SELECT 1 FROM onboarding_first_edition_sources s WHERE s.run_id=r.id AND s.source_kind='aggregator' AND s.processed_item_count>0)) FROM onboarding_first_edition_runs r WHERE r.id::bigint=$1")
+        .bind(run.id).fetch_one(pool).await?;
     Ok(Some(BriefingFirstRunProjection {
+        pending_news,
         run_id: run.id,
         revision: run.revision,
         sources,
+        tiers,
     }))
 }
 

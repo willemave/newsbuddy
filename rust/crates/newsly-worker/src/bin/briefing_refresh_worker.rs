@@ -9,6 +9,7 @@ use newsly_queue::{
 };
 use newsly_worker::briefing_refresh::{
     BriefingRefreshHandler, BriefingRefreshWorkerConfig, BriefingRefreshWorkerServices,
+    PrepareNewsLensHandler,
 };
 use newsly_worker::process::{
     initialize_observability, notification_database_url, spawn_shutdown_signal,
@@ -17,12 +18,24 @@ use newsly_worker::queue_process_config::QueueWorkerProcessConfig;
 use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
-pub(crate) async fn main() -> Result<()> {
-    let process = QueueWorkerProcessConfig::from_env(
-        "newsly-briefing-refresh-worker",
-        "rust-briefing-refresh",
-    )
-    .context("invalid Newsly Rust Briefing-refresh worker process configuration")?;
+pub(crate) async fn run(preparation_only: bool) -> Result<()> {
+    let task_type = if preparation_only {
+        TaskType::PrepareNewsLens
+    } else {
+        TaskType::BriefingRefresh
+    };
+    let process_name = if preparation_only {
+        "newsly-news-lens-worker"
+    } else {
+        "newsly-briefing-refresh-worker"
+    };
+    let worker_id = if preparation_only {
+        "rust-news-lens"
+    } else {
+        "rust-briefing-refresh"
+    };
+    let process = QueueWorkerProcessConfig::from_env(process_name, worker_id)
+        .context("invalid Newsly Rust Briefing-refresh worker process configuration")?;
     let briefing = BriefingRefreshWorkerConfig::from_env()
         .context("invalid Newsly Rust Briefing-refresh configuration")?;
     initialize_observability(&process.log_filter, process.log_format)
@@ -45,13 +58,15 @@ pub(crate) async fn main() -> Result<()> {
     ));
 
     let mut handlers = HandlerRegistry::new();
-    handlers.register(BriefingRefreshHandler::new(services))?;
-    let scope = ClaimRuntimeScope::namespaces(
-        RuntimeOwner::Rust,
-        [ResourceKey::new(TaskType::BriefingRefresh.as_str())?],
-    )?;
+    if preparation_only {
+        handlers.register(PrepareNewsLensHandler::new(services))?;
+    } else {
+        handlers.register(BriefingRefreshHandler::new(services))?;
+    }
+    let scope =
+        ClaimRuntimeScope::namespaces(RuntimeOwner::Rust, [ResourceKey::new(task_type.as_str())?])?;
     let mut claim = ClaimRequest::for_queue(process.worker_id.clone(), TaskQueue::Llm, scope);
-    claim.task_type = Some(TaskType::BriefingRefresh);
+
     claim.lease_duration = process.lease_duration;
     let mut worker_config = WorkerConfig::new(claim);
     worker_config.max_retries = process.max_retries;
@@ -65,7 +80,7 @@ pub(crate) async fn main() -> Result<()> {
     tracing::info!(
         worker_id = %process.worker_id,
         queue = %TaskQueue::Llm,
-        task_type = %TaskType::BriefingRefresh,
+        task_type = %task_type,
         "Newsly Rust Briefing refresh worker started; only rows stamped for the Rust runtime are claimable"
     );
     let run_result = worker.run(shutdown_rx).await;

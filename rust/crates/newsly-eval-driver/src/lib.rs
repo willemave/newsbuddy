@@ -34,6 +34,7 @@ pub struct PrepareRelationsRequest {
 #[serde(deny_unknown_fields)]
 pub struct PrepareRelationsResponse {
     pub version: u16,
+    pub default_thresholds: RelationThresholds,
     pub texts: Vec<RelationEmbeddingText>,
 }
 
@@ -101,6 +102,11 @@ pub struct RelationEvalSummary {
     pub macro_precision: f64,
     pub macro_recall: f64,
     pub macro_f1: f64,
+    pub positive_case_count: usize,
+    pub negative_case_count: usize,
+    pub predicting_case_count: usize,
+    pub macro_positive_recall: f64,
+    pub negative_case_pass_rate: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -114,6 +120,8 @@ pub struct RelationCaseResult {
     pub precision: f64,
     pub recall: f64,
     pub f1: f64,
+    pub gold_pair_count: usize,
+    pub predicted_pair_count: usize,
     pub passed: bool,
     pub groups: Vec<PredictedGroup>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -197,6 +205,7 @@ pub fn prepare_relations(
     }
     Ok(PrepareRelationsResponse {
         version: EVAL_PROTOCOL_VERSION,
+        default_thresholds: RelationThresholds::default(),
         texts,
     })
 }
@@ -316,7 +325,7 @@ fn evaluate_case(
     let predicted_pairs = pairwise_sets(&predicted_labels);
     let true_positive = gold_pairs.intersection(&predicted_pairs).count();
     let precision = if predicted_pairs.is_empty() {
-        1.0
+        if gold_pairs.is_empty() { 1.0 } else { 0.0 }
     } else {
         ratio(true_positive, predicted_pairs.len())
     };
@@ -357,6 +366,8 @@ fn evaluate_case(
         precision,
         recall,
         f1,
+        gold_pair_count: gold_pairs.len(),
+        predicted_pair_count: predicted_pairs.len(),
         passed: gold_pairs == predicted_pairs,
         groups,
         traces: include_traces.then_some(traces),
@@ -449,13 +460,46 @@ where
 fn summarize(results: &[RelationCaseResult]) -> RelationEvalSummary {
     let case_count = results.len();
     let passed_count = results.iter().filter(|result| result.passed).count();
+    let positive = results
+        .iter()
+        .filter(|result| result.gold_pair_count > 0)
+        .collect::<Vec<_>>();
+    let negative = results
+        .iter()
+        .filter(|result| result.gold_pair_count == 0)
+        .collect::<Vec<_>>();
+    let predicting = results
+        .iter()
+        .filter(|result| result.predicted_pair_count > 0)
+        .collect::<Vec<_>>();
     RelationEvalSummary {
         case_count,
         passed_count,
         failed_count: case_count - passed_count,
-        macro_precision: average(results, |result| result.precision),
+        macro_precision: average_refs(&predicting, |result| result.precision),
         macro_recall: average(results, |result| result.recall),
         macro_f1: average(results, |result| result.f1),
+        positive_case_count: positive.len(),
+        negative_case_count: negative.len(),
+        predicting_case_count: predicting.len(),
+        macro_positive_recall: average_refs(&positive, |result| result.recall),
+        negative_case_pass_rate: average_refs(
+            &negative,
+            |result| {
+                if result.passed { 1.0 } else { 0.0 }
+            },
+        ),
+    }
+}
+
+fn average_refs(
+    results: &[&RelationCaseResult],
+    value: impl Fn(&RelationCaseResult) -> f64,
+) -> f64 {
+    if results.is_empty() {
+        0.0
+    } else {
+        results.iter().map(|result| value(result)).sum::<f64>() / count_as_f64(results.len())
     }
 }
 

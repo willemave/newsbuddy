@@ -30,6 +30,8 @@ P14. Sandbox-backed work writes only inside its task workspace, rejects every ot
 
 P15. Operator repairs are scoped and auditable. A liveness check alone never proves that workers, queues, and providers are healthy. Source failures, overdue work, and terminal queue/product mismatches are separately observable without automatically replaying terminal work.
 
+Terminal item failures attributed to a configured source are visible in that source's user-facing status. Access gates such as paywalls and sign-in requirements are distinguished from other processing failures without exposing internal provider diagnostics.
+
 Missing expected source checks, sustained queue growth, stalled ready work, historical intake, blocked artwork, and alert delivery state are observable. Alert delivery survives restarts, suppresses unchanged notifications, and reports recovery; external delivery is at-least-once. Intentional incident cancellations retain an explicit reason and preserve canonical content and real user history. Schema deployment does not authorize unbounded historical provider work.
 
 P16. Every sandbox-backed LLM task attempt receives fresh isolated compute. No product workflow resumes, snapshots, pools, or shares a user sandbox, and normal completion kills the sandbox.
@@ -59,3 +61,8 @@ Briefing has one bounded correction budget with actionable validation feedback. 
 P27. Usage reports distinguish unknown cost from a known zero charge. Any aggregate containing unpriced calls has an unknown total and separately reports its known subtotal and unpriced call count. Missing historical prices are never invented.
 
 Observed Briefing usage is recorded independently of successful edition publication, including rejected output and accepted sibling units. Re-recording an observed attempt does not double-count it. Provider failures without observable usage remain explicitly unknown; absent token counts and historical responses are not reconstructed as facts.
+
+
+P28. Aggregator ingestion is shared across users. Scheduled checks are due hourly with active subscribers and every two hours without them. Scheduled and onboarding requests coalesce by source; queue retries retain their backoff. Freshness, item preparation, and readiness are distinct states, including successful empty checks and unavailable sources.
+
+Reusable news lens preparation is keyed by canonical story input, encoder version, model, and vector dimensions. Source changes and lease loss fence publication. Global background preparation is bounded, and foreground demand can promote existing work without duplicating it or erasing retry delays. Retry fairness remains effective across task priorities. Repeated unchanged terminal preparation failures do not immediately create fresh paid attempts. Exact input/model/version checkpoints also identify worker deadline failures. Unchanged failures have a six-hour recovery window; changed inputs or models can proceed immediately. Embedding preparation has independent worker capacity, and content-ingestion backpressure does not pause preparation of already-ready news.

@@ -209,6 +209,7 @@ struct BriefingLensPageView: View, Equatable {
     let lensKey: String
     let lensTitle: String
     let renderModel: BriefingLensRenderModel?
+    var firstRunProgress: APIBriefingFirstRunTierProgress? = nil
     let isReadTrackingEnabled: Bool
     let readBoundaryY: CGFloat?
     let documentGeneration: Int
@@ -252,6 +253,7 @@ struct BriefingLensPageView: View, Equatable {
         lhs.lensKey == rhs.lensKey
             && lhs.lensTitle == rhs.lensTitle
             && lhs.renderModel === rhs.renderModel
+            && lhs.firstRunProgress == rhs.firstRunProgress
             && lhs.isReadTrackingEnabled == rhs.isReadTrackingEnabled
             && lhs.readBoundaryY == rhs.readBoundaryY
             && lhs.documentGeneration == rhs.documentGeneration
@@ -300,7 +302,18 @@ struct BriefingLensPageView: View, Equatable {
 
     var body: some View {
         Group {
-            if let renderModel, renderModel.segments.isEmpty, !renderModel.hasMore {
+            if let error, renderModel?.segments.isEmpty != false {
+                ErrorView(message: error) { onRetry() }
+                    .padding(.top, topContentInset)
+                    .accessibilityIdentifier("briefing.lens_error.\(lensKey)")
+            } else if let firstRunProgress, renderModel?.segments.isEmpty != false {
+                ScrollView {
+                    BriefingTierProgressView(progress: firstRunProgress, title: lensTitle)
+                        .padding(.top, topContentInset + 24)
+                        .padding(.horizontal, Spacing.appHorizontalMargin)
+                }
+                .refreshable { await onRefresh() }
+            } else if let renderModel, renderModel.segments.isEmpty, !renderModel.hasMore {
                 BriefingLensEmptyView(
                     lensTitle: lensTitle,
                     topContentInset: topContentInset,
@@ -344,6 +357,10 @@ struct BriefingLensPageView: View, Equatable {
                                     }
                                 }
                                 .padding(.horizontal, Spacing.appHorizontalMargin)
+                            }
+
+                            if let firstRunProgress, firstRunProgress.processing > 0 || firstRunProgress.pendingSources > 0 || firstRunProgress.failed > 0 {
+                                BriefingTierProgressView(progress: firstRunProgress, title: lensTitle)
                             }
 
                             Color.clear
@@ -422,12 +439,6 @@ struct BriefingLensPageView: View, Equatable {
                     }
                 }
                 .accessibilityIdentifier("briefing.lens_page.\(lensKey)")
-            } else if let error {
-                ErrorView(message: error) {
-                    onRetry()
-                }
-                .padding(.top, topContentInset)
-                .accessibilityIdentifier("briefing.lens_error.\(lensKey)")
             } else {
                 LoadingView()
                     .padding(.top, topContentInset)
@@ -889,5 +900,56 @@ private struct BriefingPullquoteView: View {
                 .frame(width: 3)
         }
         .accessibilityElement(children: .contain)
+    }
+}
+
+
+struct BriefingTierProgressView: View {
+    let progress: APIBriefingFirstRunTierProgress
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.appTitle3).foregroundStyle(Color.onSurface)
+            if !progress.sourceNames.isEmpty {
+                Text(progress.sourceNames.joined(separator: " · "))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if progress.sourceCount == 0 {
+                Text("Add a source to start reading here.")
+                NavigationLink("Manage sources") { SettingsView() }
+            } else if progress.pendingSources > 0 && progress.discovered == 0 {
+                Text("Checking your sources for recent \(title.lowercased()).")
+            } else if progress.discovered == 0 && progress.pendingSources == 0 && progress.unavailableSources == 0 {
+                Text("Your sources have no recent items yet.")
+            } else {
+                Text("\(progress.ready) ready. Preparing \(progress.processing) more.")
+                if progress.pendingSources > 0 {
+                    Text("Still checking \(progress.pendingSources) \(progress.pendingSources == 1 ? "source" : "sources").")
+                }
+            }
+            if progress.failed > 0 || progress.unavailableSources > 0 {
+                Text("Some items could not be prepared. Pull to refresh for updates.")
+            }
+            if progress.skipped > 0 {
+                Text("\(progress.skipped) items were skipped.")
+            }
+        }
+        .font(.appBody)
+        .foregroundStyle(Color.onSurfaceSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("briefing.tier_progress.\(progress.tier)")
+    }
+}
+
+
+extension APIBriefingFirstRunTierProgress: Equatable {
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.tier == rhs.tier && lhs.sourceNames == rhs.sourceNames && lhs.discovered == rhs.discovered
+            && lhs.ready == rhs.ready && lhs.processing == rhs.processing
+            && lhs.failed == rhs.failed && lhs.skipped == rhs.skipped
+            && lhs.sourceCount == rhs.sourceCount && lhs.pendingSources == rhs.pendingSources
+            && lhs.unavailableSources == rhs.unavailableSources
     }
 }

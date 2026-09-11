@@ -66,12 +66,12 @@ struct BriefingFirstRunStrip: View {
                     BriefingStripPill(
                         title: lens.title,
                         unreadCount: lens.unreadSourceCount,
-                        isSelected: false,
+                        isSelected: lens.key == viewModel.selectedLensKey,
                         accessibilityId: "briefing.lens.\(lens.key)"
                     ) {
                         onSelectLens(lens.key)
                     }
-                    .disabled(lens.segmentCount == 0)
+                    .disabled(lens.tier == .news && lens.segmentCount == 0)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }

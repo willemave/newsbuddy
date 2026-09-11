@@ -12,7 +12,7 @@ use crate::chat_transcripts::{
 };
 
 const DEFAULT_PROVIDER: &str = "openai";
-const DEFAULT_MODEL: &str = "openai:gpt-5.6-terra";
+pub const DEFAULT_CHAT_MODEL: &str = "openai:gpt-5.6-sol";
 const KNOWLEDGE_SESSION_TYPE: &str = "knowledge_chat";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -749,7 +749,7 @@ pub async fn stage_assistant_turn(
         .bind(KNOWLEDGE_SESSION_TYPE)
         .bind(&selected_topic)
         .bind(&context_snapshot)
-        .bind(DEFAULT_MODEL)
+        .bind(DEFAULT_CHAT_MODEL)
         .bind(DEFAULT_PROVIDER)
         .fetch_one(&mut **transaction)
         .await?;
@@ -1063,7 +1063,7 @@ async fn present_session(
         session_type: row.session_type,
         topic: row.topic,
         llm_model: if row.llm_model.is_empty() {
-            DEFAULT_MODEL.to_owned()
+            DEFAULT_CHAT_MODEL.to_owned()
         } else {
             row.llm_model
         },

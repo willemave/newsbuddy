@@ -116,7 +116,7 @@ pub trait TaskFinalizer: Debug + Send + Sync + 'static {
     /// error type also contains deterministic failures must classify those explicitly.
     fn error_disposition(
         &self,
-        _source: &(dyn std::error::Error + Send + Sync),
+        _source: &(dyn std::error::Error + Send + Sync + 'static),
     ) -> FinalizerErrorDisposition {
         FinalizerErrorDisposition::Retryable
     }

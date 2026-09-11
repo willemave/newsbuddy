@@ -14,6 +14,11 @@
       "default": null,
       "title": "Config Id"
     },
+    "due_only": {
+      "default": false,
+      "title": "Due Only",
+      "type": "boolean"
+    },
     "first_edition_run_id": {
       "anyOf": [
         {

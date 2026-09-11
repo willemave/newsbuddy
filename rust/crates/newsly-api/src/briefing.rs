@@ -129,7 +129,9 @@ pub(super) async fn get_index(
             validator.first_run_id,
             validator.first_run_revision,
         );
-        if if_none_match == etag {
+        // Active onboarding includes live processing and time-based source freshness.
+        // Always project it rather than hiding progress behind a publication-only validator.
+        if validator.first_run_id == 0 && if_none_match == etag {
             let mut response = StatusCode::NOT_MODIFIED.into_response();
             apply_cache_headers(response.headers_mut(), &etag);
             return Ok(response);
@@ -139,7 +141,7 @@ pub(super) async fn get_index(
         .await
         .map_err(|error| internal_error(error, &request_id))?;
     let response_body = present_index(projection, &request_id)?;
-    let etag = briefing_etag(
+    let mut etag = briefing_etag(
         current_user.id,
         response_body.version,
         response_body.first_run.as_ref().map_or(0, |run| run.run_id),
@@ -148,6 +150,15 @@ pub(super) async fn get_index(
             .as_ref()
             .map_or(0, |run| run.revision),
     );
+    if response_body.first_run.is_some() {
+        let bytes = serde_json::to_vec(&response_body)
+            .map_err(|error| internal_error(error, &request_id))?;
+        let mut hex = String::new();
+        for byte in Sha256::digest(bytes) {
+            write!(&mut hex, "{byte:02x}").expect("String writing cannot fail");
+        }
+        etag = format!("W/\"warm-{}\"", &hex[..24]);
+    }
     let mut response = Json(response_body).into_response();
     apply_cache_headers(response.headers_mut(), &etag);
     Ok(response)
@@ -550,7 +561,9 @@ fn present_index(
         .map(|run| present_first_run(&run, ready_keys));
     if first_run.is_some() {
         summaries.retain(|summary| {
-            summary.segment_count > 0 || projection.pending_lens_keys.contains(&summary.key)
+            summary.tier != BriefingTier::News
+                || summary.segment_count > 0
+                || projection.pending_lens_keys.contains(&summary.key)
         });
     }
     Ok(BriefingIndexResponse {
@@ -593,8 +606,12 @@ fn present_first_run(
             });
         }
     }
-    let all_done = completed_sources.len() == connected_source_count;
-    let phase = if all_done && !ready_category_keys.is_empty() {
+    let all_done = completed_sources.len() == connected_source_count
+        && run
+            .tiers
+            .iter()
+            .all(|tier| tier.processing == 0 && tier.pending_sources == 0);
+    let phase = if all_done && !run.pending_news {
         BriefingFirstRunPhase::Ready
     } else if all_done {
         BriefingFirstRunPhase::WaitingForContent
@@ -618,6 +635,22 @@ fn present_first_run(
             .map(|source| source.display_name.clone())
             .collect(),
         ready_category_keys,
+        tiers: run
+            .tiers
+            .iter()
+            .map(|tier| newsly_contracts::BriefingFirstRunTierProgress {
+                tier: tier.tier.clone(),
+                source_names: tier.source_names.clone(),
+                discovered: tier.discovered,
+                ready: tier.ready,
+                processing: tier.processing,
+                failed: tier.failed,
+                skipped: tier.skipped,
+                source_count: tier.source_count,
+                pending_sources: tier.pending_sources,
+                unavailable_sources: tier.unavailable_sources,
+            })
+            .collect(),
     }
 }
 
@@ -1429,4 +1462,40 @@ fn truncate_overview(value: &str, max_chars: usize) -> String {
         .trim()
         .trim_end_matches(['.', ',', ';', ':']);
     format!("{truncated}...").chars().take(max_chars).collect()
+}
+
+#[cfg(test)]
+mod warm_progress_tests {
+    use super::*;
+
+    #[test]
+    fn all_terminal_tiers_can_finish_even_without_a_readable_lens() {
+        let mut run = newsly_db::BriefingFirstRunProjection {
+            pending_news: false,
+            run_id: 1,
+            revision: 1,
+            sources: Vec::new(),
+            tiers: vec![newsly_db::first_edition_progress::FirstRunTierProjection {
+                tier: "audio".into(),
+                source_names: vec![],
+                discovered: 2,
+                ready: 0,
+                processing: 0,
+                failed: 1,
+                skipped: 1,
+                source_count: 0,
+                pending_sources: 0,
+                unavailable_sources: 0,
+            }],
+        };
+        assert_eq!(
+            present_first_run(&run, vec![]).phase,
+            BriefingFirstRunPhase::Ready
+        );
+        run.pending_news = true;
+        assert_eq!(
+            present_first_run(&run, vec![]).phase,
+            BriefingFirstRunPhase::WaitingForContent
+        );
+    }
 }

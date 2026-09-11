@@ -50,7 +50,7 @@ impl TaskFinalizer for FailingFinalizer {
 
     fn error_disposition(
         &self,
-        _source: &(dyn std::error::Error + Send + Sync),
+        _source: &(dyn std::error::Error + Send + Sync + 'static),
     ) -> FinalizerErrorDisposition {
         self.disposition
     }

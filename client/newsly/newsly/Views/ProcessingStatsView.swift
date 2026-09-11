@@ -133,10 +133,15 @@ private struct FeedStatusRow: View {
                     } ?? "Not yet")
                     metric("Total processed", value: stats.completedCount.formatted())
                 }
+                if let issue = stats.issueSummary {
+                    Label(issue, systemImage: "exclamationmark.triangle.fill")
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(Color.statusDestructive)
+                }
                 if stats.ingestionError != nil {
-                    Label("Could not refresh feed", systemImage: "exclamationmark.circle")
-                        .font(.appCaption)
-                        .foregroundStyle(Color.onSurfaceSecondary)
+                    Label("Could not refresh feed", systemImage: "exclamationmark.triangle.fill")
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(Color.statusDestructive)
                 }
             }
         }
@@ -172,8 +177,13 @@ struct FeedStatusSummary: View {
                     Text("Nothing processed yet")
                 }
                 Text("\(stats.completedCount) processed · \(stats.runningCount) running · \(stats.queuedCount) queued")
+                if let issue = stats.issueSummary {
+                    Label(issue, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.statusDestructive)
+                }
                 if stats.ingestionError != nil {
-                    Label("Could not refresh feed", systemImage: "exclamationmark.circle")
+                    Label("Could not refresh feed", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.statusDestructive)
                 }
             }
             .font(.appCaption)

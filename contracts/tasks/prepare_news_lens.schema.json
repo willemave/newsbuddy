@@ -1,0 +1,25 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "news_item_id": {
+      "minimum": 1,
+      "title": "News Item Id",
+      "type": "integer"
+    },
+    "embedding_model": {
+      "type": "string"
+    },
+    "input_hash": {
+      "type": "string"
+    },
+    "encoder_version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "required": [
+    "news_item_id"
+  ],
+  "title": "PrepareNewsLensPayload",
+  "type": "object"
+}

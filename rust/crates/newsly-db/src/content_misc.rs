@@ -494,6 +494,7 @@ pub struct FeedBackfillPersistence {
     pub duplicates: usize,
     pub rejected: usize,
     pub content_ids: Vec<i64>,
+    pub admitted_content_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -518,6 +519,7 @@ pub async fn persist_feed_backfill(
     entries: &[FeedBackfillEntry],
 ) -> Result<FeedBackfillPersistence, ContentMiscRepositoryError> {
     let mut content_ids = Vec::new();
+    let mut admitted_content_ids = Vec::new();
     let mut duplicates = 0;
     let mut rejected = 0;
     for entry in entries {
@@ -525,6 +527,7 @@ pub async fn persist_feed_backfill(
         match persist_backfill_entry(&mut item_tx, user_id, origin, entry).await {
             Ok((id, created)) => {
                 item_tx.commit().await?;
+                admitted_content_ids.push(id);
                 if created {
                     content_ids.push(id);
                 } else {
@@ -545,6 +548,7 @@ pub async fn persist_feed_backfill(
         }
     }
     Ok(FeedBackfillPersistence {
+        admitted_content_ids,
         saved: content_ids.len(),
         duplicates,
         rejected,

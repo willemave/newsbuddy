@@ -34,6 +34,13 @@ struct SourceRow: View {
                         .lineLimit(1)
                 }
 
+                if let issue = stats?.issueSummary {
+                    Label(issue, systemImage: "exclamationmark.triangle.fill")
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(Color.statusDestructive)
+                        .lineLimit(2)
+                }
+
                 if let summary = statsLine {
                     Text(summary)
                         .font(.appCaption)
@@ -93,6 +100,9 @@ struct SourceRow: View {
         parts.append(isActive ? "Active" : "Inactive")
         if let statsLine {
             parts.append(statsLine)
+        }
+        if let issue = stats?.issueSummary {
+            parts.append("Error: \(issue)")
         }
         return parts.joined(separator: ", ")
     }

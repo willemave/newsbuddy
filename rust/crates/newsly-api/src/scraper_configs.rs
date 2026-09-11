@@ -1075,6 +1075,8 @@ fn stats_response(stats: &ScraperConfigStatsProjection) -> ScraperConfigStatsRes
         completed_count: stats.completed_count,
         unread_count: stats.unread_count,
         processing_count: stats.processing_count,
+        failed_count: stats.failed_count,
+        access_gate_count: stats.access_gate_count,
         running_count: stats.running_count,
         queued_count: stats.queued_count,
         latest_processed_at: stats.latest_processed_at,

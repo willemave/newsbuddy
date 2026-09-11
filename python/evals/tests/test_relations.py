@@ -2,10 +2,21 @@ from __future__ import annotations
 
 import unittest
 
-from newsly_evals.relations import build_feed_relation_cases
+from newsly_evals.relations import build_feed_relation_cases, build_title_relation_cases
 
 
 class FeedRelationCaseTests(unittest.TestCase):
+    def test_title_cases_do_not_fabricate_content_or_provenance(self) -> None:
+        cases = build_title_relation_cases(
+            [{"case_id": "titles", "label": "Titles", "titles": ["One", "Two"]}]
+        )
+
+        document = cases[0]["groups"][0][0]
+        self.assertIsNone(document["summary_text"])
+        self.assertIsNone(document["article_domain"])
+        self.assertIsNone(document["source_label"])
+        self.assertIsNone(document["platform"])
+
     def test_frozen_rows_map_to_language_neutral_documents(self) -> None:
         cases = build_feed_relation_cases(
             [
@@ -56,6 +67,27 @@ class FeedRelationCaseTests(unittest.TestCase):
         )
 
         self.assertEqual([[7]], [[item["id"] for item in group] for group in cases[0]["groups"]])
+
+    def test_byte_identical_reposts_share_gold_even_when_synthetic_urls_differ(self) -> None:
+        cases = build_feed_relation_cases(
+            [
+                {
+                    "case_id": "window",
+                    "news_item_id": 1,
+                    "summary_title": "Same complete post",
+                    "gold_cluster_id": "https://example.test/one",
+                },
+                {
+                    "case_id": "window",
+                    "news_item_id": 2,
+                    "summary_title": "Same complete post",
+                    "gold_cluster_id": "https://example.test/two",
+                },
+            ],
+            label_prefix="slice",
+        )
+
+        self.assertEqual([[1, 2]], [[item["id"] for item in group] for group in cases[0]["groups"]])
 
 
 if __name__ == "__main__":

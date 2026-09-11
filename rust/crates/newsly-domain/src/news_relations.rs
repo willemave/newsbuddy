@@ -21,6 +21,23 @@ const CONTENT_WEIGHT: f64 = 0.35;
 const PROVENANCE_WEIGHT: f64 = 0.10;
 const SEMANTIC_PREFILTER_MAX_CANDIDATES: usize = 12;
 const CLUSTER_RELATED_TITLE_LIMIT: usize = 6;
+const DEFAULT_RELATION_PRIMARY_THRESHOLD: f64 = 0.85;
+const DEFAULT_RELATION_SECONDARY_THRESHOLD: f64 = 0.75;
+
+const LOW_INFORMATION_TITLES: [&str; 12] = [
+    "access denied",
+    "enable javascript",
+    "log in to continue",
+    "na",
+    "n/a",
+    "none",
+    "subscribe to read",
+    "sign in to continue",
+    "unknown",
+    "untitled",
+    "void",
+    "wsj.com",
+];
 
 static MATCH_TOKEN_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-z0-9]{3,}").expect("match-token regex is valid"));
@@ -80,6 +97,15 @@ pub struct RelationExactKey {
 pub struct RelationThresholds {
     pub primary: f64,
     pub secondary: f64,
+}
+
+impl Default for RelationThresholds {
+    fn default() -> Self {
+        Self {
+            primary: DEFAULT_RELATION_PRIMARY_THRESHOLD,
+            secondary: DEFAULT_RELATION_SECONDARY_THRESHOLD,
+        }
+    }
 }
 
 impl RelationThresholds {
@@ -437,6 +463,14 @@ pub fn related_representatives(
         return Ok(empty_result(item, 0, RelationMatchPath::NoCandidates));
     }
 
+    if is_low_information_title(item.primary_title.as_deref()) {
+        return Ok(empty_result(
+            item,
+            candidates.len(),
+            RelationMatchPath::PrefilterEmpty,
+        ));
+    }
+
     let item_tokens = match_tokens(item.primary_title.as_deref().unwrap_or_default());
     let mut prefiltered = semantic_prefilter(item, candidates, &item_tokens);
     if prefiltered.is_empty() {
@@ -600,6 +634,9 @@ fn semantic_prefilter<'a>(
         .iter()
         .enumerate()
         .filter_map(|(original_index, document)| {
+            if is_low_information_title(document.primary_title.as_deref()) {
+                return None;
+            }
             let tokens = candidate_title_variants(document)
                 .iter()
                 .flat_map(|title| match_tokens(title))
@@ -866,6 +903,16 @@ fn normalized_optional(value: Option<&str>) -> Option<String> {
     clean_optional(value).map(|value| value.to_lowercase())
 }
 
+fn is_low_information_title(value: Option<&str>) -> bool {
+    let Some(title) = normalized_optional(value) else {
+        return true;
+    };
+    LOW_INFORMATION_TITLES.contains(&title.as_str())
+        || title
+            .strip_prefix("subscribe to read ")
+            .is_some_and(str::is_empty)
+}
+
 fn compare_optional_time(left: Option<DateTime<Utc>>, right: Option<DateTime<Utc>>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
@@ -880,4 +927,62 @@ fn is_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn production_relation_thresholds_have_one_default_owner() {
+        let thresholds = RelationThresholds::default();
+        assert!((thresholds.primary - 0.85).abs() < f64::EPSILON);
+        assert!((thresholds.secondary - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn repeated_paywall_titles_are_low_information() {
+        assert!(is_low_information_title(Some(" wsj.com ")));
+        assert!(is_low_information_title(Some("Subscribe   to read")));
+        assert!(!is_low_information_title(Some("WSJ reports a rate cut")));
+    }
+
+    #[test]
+    fn exact_identity_bypasses_embeddings_and_title_guards() {
+        let exact = RelationExactKey {
+            kind: "story".to_owned(),
+            value: "https://example.test/story".to_owned(),
+        };
+        let document = |id| NewsRelationDocument {
+            id,
+            primary_title: Some("wsj.com".to_owned()),
+            related_titles: Vec::new(),
+            summary_key_points: Vec::new(),
+            summary_text: None,
+            article_domain: None,
+            source_label: None,
+            platform: None,
+            exact_relation_key: Some(exact.clone()),
+            ingested_at: None,
+        };
+        let store = EmbeddingVectorStore::new(
+            1,
+            [EmbeddingVector {
+                id: "unused".to_owned(),
+                text_sha256: "0".repeat(64),
+                vector: vec![1.0],
+            }],
+        )
+        .unwrap();
+
+        let result = related_representatives(
+            &document(2),
+            &[document(1)],
+            RelationThresholds::default(),
+            &store,
+        )
+        .unwrap();
+        assert!(matches!(result.path, RelationMatchPath::Exact));
+        assert_eq!(result.accepted_ids, vec![1]);
+    }
 }

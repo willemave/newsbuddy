@@ -18,21 +18,16 @@ pub(super) async fn plan_semantic_lenses(
     seed: &PreparedBriefingRefreshSeed,
     config: &BriefingRefreshConfig,
     embedding_batch_size: usize,
+    source_vectors: Vec<Vec<f64>>,
 ) -> Result<BriefingLensAssignmentPlan, SemanticLensPlanningError> {
     let snapshot = &seed.lens_assignment;
     if snapshot.pending_sources.is_empty() {
         return Ok(empty_plan(seed));
     }
     let texts = snapshot
-        .pending_sources
+        .active_lenses
         .iter()
-        .map(|pending| pending.source.embedding_text())
-        .chain(
-            snapshot
-                .active_lenses
-                .iter()
-                .map(BriefingSemanticLens::profile_text),
-        )
+        .map(BriefingSemanticLens::profile_text)
         .collect::<Vec<_>>();
     let mut vectors = Vec::with_capacity(texts.len());
     let mut usage = Vec::new();
@@ -62,15 +57,19 @@ pub(super) async fn plan_semantic_lenses(
             }
         }
     }
-    if vectors.len() != texts.len() || vectors.is_empty() {
+    if vectors.len() != texts.len() {
         return Err(SemanticLensPlanningError::EmbeddingShape {
             expected: texts.len(),
             actual: vectors.len(),
         });
     }
-    let source_count = snapshot.pending_sources.len();
-    let source_vectors = vectors[..source_count].to_vec();
-    let profile_vectors = &vectors[source_count..];
+    if source_vectors.len() != snapshot.pending_sources.len() {
+        return Err(SemanticLensPlanningError::EmbeddingShape {
+            expected: snapshot.pending_sources.len(),
+            actual: source_vectors.len(),
+        });
+    }
+    let profile_vectors = &vectors;
     let vector_size = source_vectors.first().map_or(0, Vec::len);
     if vector_size == 0
         || source_vectors
@@ -287,7 +286,7 @@ pub(super) async fn plan_semantic_lenses(
     })
 }
 
-async fn plan_nonsemantic_lenses(
+pub(super) async fn plan_nonsemantic_lenses(
     gateway: &BriefingCompositionGateway,
     seed: &PreparedBriefingRefreshSeed,
     config: &BriefingRefreshConfig,
@@ -433,6 +432,43 @@ fn composition_source(pending: &BriefingUnassignedSource) -> BriefingComposition
         published_at: source.published_at.map(|value| value.to_rfc3339()),
         briefing_context: source.briefing_context.clone(),
     }
+}
+
+/// Isolate failed stories without changing semantic assignments for healthy siblings.
+pub(super) fn assign_failed_sources(
+    plan: &mut BriefingLensAssignmentPlan,
+    seed: &PreparedBriefingRefreshSeed,
+    failed: &[BriefingUnassignedSource],
+    config: &BriefingRefreshConfig,
+) {
+    if failed.is_empty() {
+        return;
+    }
+    let active = &seed.lens_assignment.active_news_lens_keys;
+    let target = if active.iter().any(|key| key == "misc")
+        || plan.new_lenses.iter().any(|lens| lens.key == "misc")
+    {
+        "misc".to_owned()
+    } else if active.len() + plan.new_lenses.len() < config.max_news_lenses {
+        plan.new_lenses.push(misc_lens(
+            seed.lens_assignment.next_news_position
+                + i32::try_from(plan.new_lenses.len()).unwrap_or(0),
+        ));
+        "misc".to_owned()
+    } else if let Some(key) = active
+        .first()
+        .cloned()
+        .or_else(|| plan.new_lenses.first().map(|lens| lens.key.clone()))
+    {
+        key
+    } else {
+        return;
+    };
+    plan.assignments.extend(
+        failed
+            .iter()
+            .map(|source| assignment(source, target.clone())),
+    );
 }
 
 fn empty_plan(seed: &PreparedBriefingRefreshSeed) -> BriefingLensAssignmentPlan {
@@ -894,104 +930,4 @@ pub(super) enum SemanticLensPlanningError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unique_keys_are_normalized_and_suffixed() {
-        let mut used = HashSet::from(["news-public-infrastructure".to_owned()]);
-        assert_eq!(
-            unique_lens_key("News-Public Infrastructure", &mut used),
-            "news-public-infrastructure-2"
-        );
-    }
-
-    #[test]
-    fn centroid_model_change_resets_instead_of_blending() {
-        let lens = BriefingSemanticLens {
-            id: 1,
-            key: "news-ai".to_owned(),
-            title: "AI".to_owned(),
-            deck: "Artificial intelligence systems.".to_owned(),
-            position: 2,
-            centroid: Some(vec![1.0, 0.0]),
-            centroid_weight: 20,
-            centroid_model: Some("openrouter:old".to_owned()),
-            routing_rule: None,
-            updated_at: Utc::now(),
-        };
-        let mut working = WorkingLens::existing(&lens, &[0.5, 0.5], "openrouter:new", 2);
-        working.update_centroid(&[0.0, 1.0], 32, "openrouter:new");
-        assert_eq!(working.centroid, Some(vec![0.0, 1.0]));
-        assert_eq!(working.centroid_weight, 1);
-        assert_eq!(working.similarity_vector, vec![0.5, 0.5]);
-    }
-
-    #[test]
-    fn routing_keeps_the_first_lens_on_equal_similarity() {
-        let lenses = vec![
-            WorkingLens::new(
-                "news-first".to_owned(),
-                "First".to_owned(),
-                "First semantic category.".to_owned(),
-                2,
-                vec![1.0, 0.0],
-                1,
-                "openrouter:model",
-            ),
-            WorkingLens::new(
-                "news-second".to_owned(),
-                "Second".to_owned(),
-                "Second semantic category.".to_owned(),
-                3,
-                vec![1.0, 0.0],
-                1,
-                "openrouter:model",
-            ),
-        ];
-        assert_eq!(best_lens(&[1.0, 0.0], &lenses), Some((0, 1.0)));
-    }
-
-    #[test]
-    fn greedy_clustering_matches_similarity_boundary() {
-        let pending = |id| BriefingUnassignedSource {
-            pending_id: id,
-            source_kind: "news".to_owned(),
-            source_id: id,
-            enqueued_at: Utc::now(),
-            source: newsly_db::BriefingRefreshSource {
-                source_key: format!("news:{id}"),
-                kind: "news".to_owned(),
-                id,
-                title: format!("Source {id}"),
-                source_name: None,
-                summary: None,
-                key_points: Vec::new(),
-                url: None,
-                image_url: None,
-                thumbnail_url: None,
-                published_at: None,
-                briefing_context: None,
-            },
-        };
-        let clusters = cluster_candidates(
-            vec![
-                Candidate {
-                    pending: pending(1),
-                    vector: vec![1.0, 0.0],
-                },
-                Candidate {
-                    pending: pending(2),
-                    vector: vec![0.99, 0.01],
-                },
-                Candidate {
-                    pending: pending(3),
-                    vector: vec![0.0, 1.0],
-                },
-            ],
-            0.9,
-        );
-        assert_eq!(clusters.len(), 2);
-        assert_eq!(clusters[0].candidates.len(), 2);
-    }
-}
+mod tests;

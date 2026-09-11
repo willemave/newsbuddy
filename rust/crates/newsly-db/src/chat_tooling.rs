@@ -3,10 +3,8 @@
 //! Each function owns one short pool checkout or caller transaction. Tool executors never retain
 //! an ORM-shaped row or SQLx connection while Rig performs another model request.
 
-use std::collections::BTreeSet;
-
 use chrono::NaiveDateTime;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{AssertSqlSafe, FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
@@ -20,6 +18,7 @@ pub struct ChatContentHit {
     pub source: Option<String>,
     pub url: String,
     pub snippet: Option<String>,
+    pub published_at: Option<NaiveDateTime>,
     pub is_read: bool,
     pub is_saved_to_knowledge: bool,
 }
@@ -56,7 +55,7 @@ pub struct ChatUnreadNewsPage {
     pub total_count: i64,
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, Deserialize, FromRow)]
 struct ContentHitRow {
     content_id: i64,
     content_type: String,
@@ -64,6 +63,7 @@ struct ContentHitRow {
     source: Option<String>,
     url: String,
     snippet: Option<String>,
+    published_at: Option<NaiveDateTime>,
     is_read: bool,
     is_saved_to_knowledge: bool,
 }
@@ -81,6 +81,7 @@ impl From<ContentHitRow> for ChatContentHit {
             source: row.source,
             url: row.url,
             snippet: row.snippet,
+            published_at: row.published_at,
             is_read: row.is_read,
             is_saved_to_knowledge: row.is_saved_to_knowledge,
         }
@@ -99,12 +100,6 @@ struct NewsHitRow {
     key_points: Value,
     published_at: Option<NaiveDateTime>,
     is_read: bool,
-}
-
-#[derive(Debug, FromRow)]
-struct SubscriptionConfigRow {
-    display_name: Option<String>,
-    configured_name: Option<String>,
 }
 
 impl From<NewsHitRow> for ChatNewsHit {
@@ -144,118 +139,6 @@ pub async fn search_agent_knowledge(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-pub async fn search_chat_content(
-    pool: &PgPool,
-    user_id: i64,
-    query: &str,
-    limit: i64,
-) -> Result<Vec<ChatContentHit>, ChatToolRepositoryError> {
-    validate_search(user_id, query, limit)?;
-    let statement = format!(
-        "{}\nJOIN content_status AS inbox ON inbox.content_id = content.id AND inbox.user_id::bigint = $1 AND inbox.status = 'inbox'\n{}",
-        content_select(),
-        content_search_tail("content.created_at", "", true)
-    );
-    let normalized = query.trim();
-    let mut rows = sqlx::query_as::<_, ContentHitRow>(AssertSqlSafe(statement.clone()))
-        .bind(user_id)
-        .bind(normalized)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?;
-    if rows.is_empty() && !normalized.is_empty() {
-        rows = sqlx::query_as::<_, ContentHitRow>(AssertSqlSafe(statement))
-            .bind(user_id)
-            .bind("")
-            .bind(limit)
-            .fetch_all(pool)
-            .await?;
-    }
-    Ok(rows.into_iter().map(Into::into).collect())
-}
-
-pub async fn search_chat_subscription_content(
-    pool: &PgPool,
-    user_id: i64,
-    query: &str,
-    limit: i64,
-) -> Result<Vec<ChatContentHit>, ChatToolRepositoryError> {
-    validate_search(user_id, query, limit)?;
-    let raw_tokens = subscription_tokens(query);
-    let significant_query_tokens = significant_subscription_tokens(query);
-    if significant_query_tokens.is_empty() {
-        return Ok(Vec::new());
-    }
-    let query_has_subscription_hint = raw_tokens
-        .iter()
-        .any(|token| SUBSCRIPTION_QUERY_HINTS.contains(&token.as_str()));
-    let normalized_query = query.trim().to_ascii_lowercase();
-    let configs = sqlx::query_as::<_, SubscriptionConfigRow>(
-        r#"
-        SELECT
-            NULLIF(BTRIM(subscription.display_name), '') AS display_name,
-            NULLIF(BTRIM(subscription.config->>'name'), '') AS configured_name
-        FROM user_scraper_configs AS subscription
-        JOIN users AS account ON account.id = subscription.user_id AND account.is_active = TRUE
-        WHERE subscription.user_id::bigint = $1 AND subscription.is_active = TRUE
-        "#,
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
-    let mut matchers = Vec::new();
-    for config in configs {
-        let names = [config.display_name, config.configured_name]
-            .into_iter()
-            .flatten()
-            .map(|name| name.trim().to_owned())
-            .filter(|name| !name.is_empty())
-            .collect::<BTreeSet<_>>();
-        if names.is_empty() {
-            continue;
-        }
-        let candidate_tokens = names
-            .iter()
-            .flat_map(|name| significant_subscription_tokens(name))
-            .collect::<BTreeSet<_>>();
-        if candidate_tokens.is_empty() {
-            continue;
-        }
-        let name_overlap = significant_query_tokens
-            .iter()
-            .any(|token| candidate_tokens.contains(token));
-        let substring_match = names.iter().any(|name| {
-            let name = name.to_ascii_lowercase();
-            !normalized_query.is_empty()
-                && (normalized_query.contains(&name) || name.contains(&normalized_query))
-        });
-        if !name_overlap && !substring_match {
-            continue;
-        }
-        if !query_has_subscription_hint && !name_overlap {
-            continue;
-        }
-        matchers.push(serde_json::json!({
-            "names": names,
-            "tokens": candidate_tokens,
-        }));
-    }
-    if matchers.is_empty() {
-        return Ok(Vec::new());
-    }
-    let rows = sqlx::query_as::<_, ContentHitRow>(AssertSqlSafe(format!(
-        "{}\nJOIN content_status AS inbox ON inbox.content_id = content.id AND inbox.user_id::bigint = $1 AND inbox.status = 'inbox'\n{}",
-        content_select(),
-        subscription_search_tail()
-    )))
-    .bind(user_id)
-    .bind(Value::Array(matchers))
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows.into_iter().map(Into::into).collect())
-}
-
 pub async fn search_chat_news(
     pool: &PgPool,
     user_id: i64,
@@ -265,22 +148,13 @@ pub async fn search_chat_news(
     validate_search(user_id, query, limit)?;
     let normalized = query.trim();
     let statement = news_search_statement();
-    let mut rows = sqlx::query_as::<_, NewsHitRow>(statement)
+    let rows = sqlx::query_as::<_, NewsHitRow>(statement)
         .bind(user_id)
         .bind(normalized)
         .bind(limit)
         .bind(false)
         .fetch_all(pool)
         .await?;
-    if rows.is_empty() && !normalized.is_empty() {
-        rows = sqlx::query_as::<_, NewsHitRow>(statement)
-            .bind(user_id)
-            .bind("")
-            .bind(limit)
-            .bind(false)
-            .fetch_all(pool)
-            .await?;
-    }
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
@@ -465,6 +339,7 @@ fn content_select() -> &'static str {
     r#"
         SELECT
             content.id::bigint AS content_id,
+            COALESCE(content.publication_date, content.created_at) AS published_at,
             content.content_type,
             COALESCE(
                 NULLIF(BTRIM(content.content_metadata->'summary'->>'title'), ''),
@@ -538,95 +413,6 @@ fn content_search_tail(
     )
 }
 
-fn subscription_search_tail() -> &'static str {
-    r#"
-        WHERE content.status = 'completed'
-          AND (content.classification IS NULL OR content.classification <> 'skip')
-          AND EXISTS (
-              SELECT 1
-              FROM jsonb_array_elements($2::jsonb) AS matcher
-              WHERE (
-                  EXISTS (
-                      SELECT 1
-                      FROM jsonb_array_elements_text(matcher->'names') AS candidate(name)
-                      WHERE LOWER(COALESCE(content.source, '')) LIKE '%' || LOWER(candidate.name) || '%'
-                         OR LOWER(COALESCE(content.title, '')) LIKE '%' || LOWER(candidate.name) || '%'
-                         OR LOWER(COALESCE(content.search_text, '')) LIKE '%' || LOWER(candidate.name) || '%'
-                  )
-                  OR NOT EXISTS (
-                      SELECT 1
-                      FROM jsonb_array_elements_text(matcher->'tokens') AS candidate(token)
-                      WHERE NOT (
-                          LOWER(COALESCE(content.title, '')) LIKE '%' || LOWER(candidate.token) || '%'
-                          OR LOWER(COALESCE(content.search_text, '')) LIKE '%' || LOWER(candidate.token) || '%'
-                          OR LOWER(COALESCE(content.source, '')) LIKE '%' || LOWER(candidate.token) || '%'
-                      )
-                  )
-                )
-          )
-        ORDER BY content.created_at DESC, content.id DESC
-        LIMIT $3
-    "#
-}
-
-const SUBSCRIPTION_QUERY_HINTS: [&str; 10] = [
-    "episode", "episodes", "feed", "feeds", "pod", "pods", "podcast", "podcasts", "series", "show",
-];
-
-fn subscription_tokens(value: &str) -> Vec<String> {
-    value
-        .to_ascii_lowercase()
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .map(|token| {
-            if token.len() > 4 && token.ends_with("ies") {
-                format!("{}y", &token[..token.len() - 3])
-            } else if token.len() > 3 && token.ends_with('s') {
-                token[..token.len() - 1].to_owned()
-            } else {
-                token.to_owned()
-            }
-        })
-        .collect()
-}
-
-fn significant_subscription_tokens(value: &str) -> BTreeSet<String> {
-    subscription_tokens(value)
-        .into_iter()
-        .filter(|token| !is_subscription_stopword(token))
-        .collect()
-}
-
-fn is_subscription_stopword(value: &str) -> bool {
-    matches!(
-        value,
-        "a" | "an"
-            | "and"
-            | "article"
-            | "articles"
-            | "episode"
-            | "episodes"
-            | "feed"
-            | "feeds"
-            | "have"
-            | "in"
-            | "inbox"
-            | "my"
-            | "newsletter"
-            | "newsletters"
-            | "of"
-            | "pod"
-            | "pods"
-            | "podcast"
-            | "podcasts"
-            | "read"
-            | "series"
-            | "show"
-            | "shows"
-            | "the"
-    )
-}
-
 fn validate_search(user_id: i64, query: &str, limit: i64) -> Result<(), ChatToolRepositoryError> {
     if user_id <= 0 || query.chars().count() > 2_000 || !(1..=100).contains(&limit) {
         Err(ChatToolRepositoryError::InvalidInput)
@@ -642,3 +428,7 @@ pub enum ChatToolRepositoryError {
     #[error("chat tool database operation failed")]
     Sqlx(#[from] sqlx::Error),
 }
+
+#[path = "chat_tooling/search.rs"]
+mod search;
+pub use search::{ChatContentFilters, ChatContentPage, search_accessible_content};

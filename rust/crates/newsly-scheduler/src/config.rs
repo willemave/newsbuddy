@@ -16,6 +16,7 @@ pub struct SchedulerConfig {
     pub database: DatabaseConfig,
     pub instance_id: String,
     pub poll_interval: Duration,
+    pub lens_embedding_model: String,
     pub x_sync_enabled: bool,
     pub feed_discovery_min_reads: i64,
     pub queue_backpressure_max_pending_content: i64,
@@ -34,6 +35,7 @@ impl Debug for SchedulerConfig {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SchedulerConfig")
+            .field("lens_embedding_model", &self.lens_embedding_model)
             .field("database", &self.database)
             .field("instance_id", &self.instance_id)
             .field("poll_interval", &self.poll_interval)
@@ -114,7 +116,17 @@ impl SchedulerConfig {
             return Err(SchedulerConfigError::Range("terminal task cleanup bounds"));
         }
 
+        let embedding_spec = env::var("BRIEFING_CATEGORY_EMBEDDING_MODEL")
+            .unwrap_or_else(|_| newsly_domain::DEFAULT_LENS_EMBEDDING_MODEL.to_owned());
+        let lens_embedding_model = embedding_spec
+            .strip_prefix("openrouter:")
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(SchedulerConfigError::Range(
+                "BRIEFING_CATEGORY_EMBEDDING_MODEL",
+            ))?
+            .to_owned();
         let config = Self {
+            lens_embedding_model,
             database,
             instance_id,
             poll_interval,

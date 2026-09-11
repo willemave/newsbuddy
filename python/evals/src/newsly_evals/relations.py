@@ -118,10 +118,10 @@ def build_title_relation_cases(raw_cases: Sequence[Mapping[str, Any]]) -> list[d
                         "primary_title": title,
                         "related_titles": [],
                         "summary_key_points": [],
-                        "summary_text": title,
-                        "article_domain": f"source{next_id}.example.com",
-                        "source_label": f"Source {next_id}",
-                        "platform": "eval",
+                        "summary_text": None,
+                        "article_domain": None,
+                        "source_label": None,
+                        "platform": None,
                         "exact_relation_key": None,
                         "ingested_at": (base_time + timedelta(seconds=next_id))
                         .isoformat()
@@ -183,7 +183,7 @@ def run_relation_eval(
     *,
     raw_cases: Sequence[Mapping[str, Any]],
     encoder: EmbeddingEncoder,
-    thresholds: Sequence[Mapping[str, Any]],
+    thresholds: Sequence[Mapping[str, Any]] | None = None,
     driver: RustEvalDriver | None = None,
     include_traces: bool = False,
     provider_metadata: Mapping[str, Any] | None = None,
@@ -204,7 +204,7 @@ def run_document_relation_eval(
     *,
     cases: Sequence[Mapping[str, Any]],
     encoder: EmbeddingEncoder,
-    thresholds: Sequence[Mapping[str, Any]],
+    thresholds: Sequence[Mapping[str, Any]] | None = None,
     driver: RustEvalDriver | None = None,
     include_traces: bool = False,
     provider_metadata: Mapping[str, Any] | None = None,
@@ -212,6 +212,18 @@ def run_document_relation_eval(
     """Embed language-neutral documents and delegate every relation decision to Rust."""
     rust = driver or RustEvalDriver()
     prepared = rust.prepare_relations(cases)
+    resolved_thresholds = list(thresholds or [])
+    if not resolved_thresholds:
+        defaults = prepared.get("default_thresholds")
+        if not isinstance(defaults, Mapping):
+            raise ValueError("prepare response is missing default_thresholds")
+        resolved_thresholds = [
+            {
+                "label": "current",
+                "primary": float(defaults["primary"]),
+                "secondary": float(defaults["secondary"]),
+            }
+        ]
     bundle = build_embedding_bundle(
         prepared=prepared,
         encoder=encoder,
@@ -220,7 +232,7 @@ def run_document_relation_eval(
     result = rust.score_relations(
         cases=cases,
         embedding_bundle=bundle,
-        thresholds=thresholds,
+        thresholds=resolved_thresholds,
         include_traces=include_traces,
     )
     result["embedding_bundle_metadata"] = {
@@ -248,11 +260,21 @@ def build_feed_relation_cases(
     cases: list[dict[str, Any]] = []
     for case_id, case_records in records_by_case.items():
         ordered_records = sorted(case_records, key=_feed_record_order)
+        title_counts: dict[str, int] = defaultdict(int)
+        for record in ordered_records:
+            title = _feed_title(record)
+            if title:
+                title_counts[title.casefold()] += 1
         groups_by_label: dict[str, list[dict[str, Any]]] = defaultdict(list)
         group_order: list[str] = []
         for record in ordered_records:
             document = _feed_relation_document(record)
-            gold_label = _optional_string(record.get("gold_cluster_id"))
+            title = _feed_title(record)
+            gold_label = (
+                f"identical-title:{title.casefold()}"
+                if title and title_counts[title.casefold()] > 1
+                else _optional_string(record.get("gold_cluster_id"))
+            )
             if not gold_label:
                 gold_label = f"singleton:{document['id']}"
             if gold_label not in groups_by_label:
@@ -266,6 +288,12 @@ def build_feed_relation_cases(
             }
         )
     return cases
+
+
+def _feed_title(record: Mapping[str, Any]) -> str | None:
+    return _optional_string(record.get("article_title")) or _optional_string(
+        record.get("summary_title")
+    )
 
 
 def _feed_relation_document(record: Mapping[str, Any]) -> dict[str, Any]:

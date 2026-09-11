@@ -118,6 +118,15 @@
       "task_type": "onboarding_discover"
     },
     {
+      "dedupe_by_content": false,
+      "handler": "newsly_worker::briefing_refresh::PrepareNewsLensHandler",
+      "payload_schema": "tasks/prepare_news_lens.schema.json",
+      "payload_schema_sha256": "a8309ef50c89a7f01fba7d24f873d0128372ff78c692e10f55f08f814f9e3489",
+      "queue": "llm",
+      "requires_owner": false,
+      "task_type": "prepare_news_lens"
+    },
+    {
       "dedupe_by_content": true,
       "handler": "newsly_worker::content::ProcessContentHandler",
       "payload_schema": "tasks/process_content.schema.json",
@@ -157,7 +166,7 @@
       "dedupe_by_content": false,
       "handler": "newsly_worker::scrape::ScrapeHandler",
       "payload_schema": "tasks/scrape.schema.json",
-      "payload_schema_sha256": "70b703e282d0f3673cf23fd62ccb357283516bd9cf62a3d378b84bc206588893",
+      "payload_schema_sha256": "22a8e7fb64cd115a2cde883ba31cfa710c7342a2a0c714929ac612a56fc9dd58",
       "queue": "content",
       "requires_owner": false,
       "task_type": "scrape"

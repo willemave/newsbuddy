@@ -35,3 +35,9 @@ CH16. Model history contains newest complete user turns within the remaining req
 CH17. Knowledge lookup in chat is served by a host-side search tool over the user's saved library. Searching knowledge alone never acquires a sandbox.
 
 CH18. Reading a Knowledge reference alone never acquires a sandbox. A chat sandbox is created lazily on the first execution or file-writing tool and is killed when the turn ends.
+
+CH19. A content list requested for a specific show or publication preserves that source identity. Shared guests, topics, or mentions of the requested source do not make an item belong to it. Individual articles and episodes have their own links, and bounded lists disclose their scope.
+
+CH20. New OpenAI chat sessions and missing-model chat fallbacks use Sol. Existing explicit model selections remain attached to their sessions; this default does not change summarization or other cheap-model work.
+
+CH21. Content retrieval applies source ownership and read/saved filters before paging. Ambiguous followed-source names are surfaced explicitly. Saved content can be browsed without an exact keyword, empty search results remain empty, and returned counts describe the same accessible set as the page.

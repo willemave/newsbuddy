@@ -1,8 +1,9 @@
 use sqlx::PgPool;
 
 use super::{
-    ApplyBriefingLensAssignmentOutcome, BriefingLensAssignmentPlan, BriefingRefreshConfig,
-    BriefingRefreshMode, BriefingRefreshPublication, BriefingRefreshSource, BriefingSegmentUsage,
+    ApplyBriefingLensAssignmentOutcome, BRIEFING_COMPOSITION_PROMPT_VERSION,
+    BriefingLensAssignmentPlan, BriefingRefreshConfig, BriefingRefreshMode,
+    BriefingRefreshPublication, BriefingRefreshSource, BriefingSegmentUsage,
     ComposedBriefingAppend, ComposedBriefingSegment, PrepareBriefingRefreshOutcome,
     PreparedBriefingRefresh, PreparedBriefingRefreshSeed, ProviderUsage, Utc,
     apply_briefing_lens_assignment, apply_briefing_refresh, json, prepare_briefing_refresh,
@@ -148,7 +149,7 @@ fn article_publication(prepared: PreparedBriefingRefresh) -> BriefingRefreshPubl
                 source_keys: source_keys.clone(),
                 event_groups: source_keys.iter().cloned().map(|key| vec![key]).collect(),
                 model: "openai:gpt-5.6-luna".to_owned(),
-                prompt_version: "briefing-v6".to_owned(),
+                prompt_version: BRIEFING_COMPOSITION_PROMPT_VERSION.to_owned(),
                 input_tokens: Some(10),
                 output_tokens: Some(5),
                 generation_ms: 25,
@@ -329,6 +330,13 @@ async fn publication_atomically_replaces_pending_ownership_with_a_segment(pool: 
     .fetch_one(&pool)
     .await
     .expect("segment count");
+    let prompt_version: String = sqlx::query_scalar(
+        "SELECT prompt_version FROM briefing_segments WHERE user_id::bigint = $1 AND status = 'active'",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("persisted prompt version");
     let usage: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM vendor_usage_records WHERE user_id::bigint = $1 AND feature = 'briefing_compose'",
         )
@@ -336,7 +344,16 @@ async fn publication_atomically_replaces_pending_ownership_with_a_segment(pool: 
         .fetch_one(&pool)
         .await
         .expect("usage count");
+    let usage_prompt_version: String = sqlx::query_scalar(
+        "SELECT metadata::jsonb ->> 'prompt_version' FROM vendor_usage_records WHERE user_id::bigint = $1 AND feature = 'briefing_compose'",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("usage prompt version");
     assert_eq!((pending, segments, usage), (0, 1, 1));
+    assert_eq!(prompt_version, BRIEFING_COMPOSITION_PROMPT_VERSION);
+    assert_eq!(usage_prompt_version, BRIEFING_COMPOSITION_PROMPT_VERSION);
 }
 
 #[sqlx::test]
@@ -371,4 +388,28 @@ async fn stale_version_preserves_pending_sources_and_the_last_usable_edition(poo
             .await
             .expect("segment count");
     assert_eq!((pending, segments), (1, 0));
+}
+
+#[sqlx::test(migrations = false)]
+async fn ready_article_can_publish_while_news_has_no_embedding(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let user_id = insert_eligible_article(&pool).await;
+    sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active) VALUES($1::bigint::integer,'aggregator','aggregator://hackernews','{\"key\":\"hackernews\"}',true)").bind(user_id).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO news_items(ingest_key,visibility_scope,platform,status,summary_text,raw_metadata,ingested_at,created_at) VALUES('cold-news','global','hackernews','ready','Prepared text','{}',timezone('UTC',now()),timezone('UTC',now()))").execute(&pool).await.unwrap();
+    let prepared = prepare_article(&pool, user_id).await;
+    assert_eq!(prepared.append_batches[0].sources[0].kind, "content");
+    let publication = article_publication(prepared);
+    let mut tx = pool.begin().await.unwrap();
+    let result = apply_briefing_refresh(&mut tx, &publication, &test_config())
+        .await
+        .unwrap();
+    assert!(!result.stale);
+    tx.commit().await.unwrap();
+    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM briefing_pending_sources WHERE user_id::bigint=$1 AND source_kind='news' AND lens_key IS NULL").bind(user_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(pending, 1);
+    let embeddings: i64 = sqlx::query_scalar("SELECT count(*) FROM news_lens_embeddings")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(embeddings, 0);
 }

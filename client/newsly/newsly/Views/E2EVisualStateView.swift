@@ -42,6 +42,23 @@ struct E2EVisualStateView: View {
             E2EBriefingPlayerVisualState()
         case "knowledge-processing":
             E2EKnowledgeProcessingVisualState()
+        case "briefing-tier-error":
+            E2EBriefingTierErrorVisualState()
+        case "briefing-tier-empty":
+            NavigationStack {
+                BriefingTierProgressView(progress: APIBriefingFirstRunTierProgress(tier: "audio", discovered: 0, ready: 0, processing: 0, failed: 0, skipped: 0, sourceCount: 0, pendingSources: 0, unavailableSources: 0), title: "Podcasts")
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
+            }
+        case "briefing-tier-progress":
+            ScrollView {
+                BriefingTierProgressView(
+                    progress: APIBriefingFirstRunTierProgress(tier: "audio", sourceNames: ["Acquired", "The Knowledge Project"], discovered: 8, ready: 2, processing: 5, failed: 1, skipped: 0, sourceCount: 4, pendingSources: 1, unavailableSources: 0),
+                    title: "Podcasts"
+                )
+                .padding(.horizontal, Spacing.appHorizontalMargin)
+                .padding(.top, 80)
+            }
+            .background(Color.surfacePrimary)
         case "briefing-start-here":
             BriefingStartHereView(
                 progress: Self.startHereProgress,
@@ -386,4 +403,25 @@ private final class E2EVisualOnboardingService: OnboardingServicing {
         )
     }
 }
+private struct E2EBriefingTierErrorVisualState: View {
+    @State private var failed = true
+    @State private var chromeCollapse = BriefingChromeCollapseModel()
+
+    var body: some View {
+        BriefingLensPageView(
+            lensKey: "podcasts", lensTitle: "Podcasts", renderModel: nil,
+            firstRunProgress: APIBriefingFirstRunTierProgress(tier: "audio", sourceNames: ["Acquired"], discovered: 1, ready: 0, processing: 1, failed: 0, skipped: 0, sourceCount: 1, pendingSources: 0, unavailableSources: 0),
+            isReadTrackingEnabled: false, readBoundaryY: nil, documentGeneration: 0,
+            scrollToTopRequest: 0, shouldScrollToTop: false,
+            error: failed ? "Could not load Podcasts. Please try again." : nil,
+            continuationError: nil, isLoadingContinuation: false,
+            chromeCollapse: chromeCollapse, collapsibleChromeHeight: 0, topContentInset: 40,
+            onOpenSource: { _ in }, onOpenDiscussion: { _ in }, onDig: { _, _ in },
+            onRefresh: { failed = false }, onLoad: {}, onRetry: { failed = false },
+            onFirstPassageVisible: {}, onScrolledDown: {}, onMarkSegmentSeen: { _ in }, onSetHeaderPinned: { _ in }
+        )
+        .background(Color.surfacePrimary)
+    }
+}
+
 #endif

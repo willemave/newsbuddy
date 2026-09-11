@@ -881,7 +881,7 @@ pub async fn get_or_create_share_chat_session(
             initial_message: None,
             session_type: "knowledge_chat",
             llm_provider: "openai",
-            llm_model: "openai:gpt-5.6-terra",
+            llm_model: crate::chat::DEFAULT_CHAT_MODEL,
         },
     )
     .await?;

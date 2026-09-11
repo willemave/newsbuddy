@@ -55,6 +55,7 @@ impl SchedulerRepository {
                     ('generate_audio_episode', 'audio_episode'),
                     ('run_llm_task', 'llm'),
                     ('briefing_refresh', 'llm'),
+                    ('prepare_news_lens', 'llm'),
                     ('delete_user_account', 'backfill')
             ),
             repaired AS (

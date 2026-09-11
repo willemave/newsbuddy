@@ -4,13 +4,12 @@ use newsly_db::AssistantScreenContext;
 
 use super::prompts::{ChatPromptError, assistant_instruction};
 
-const DEFAULT_TOOLS: [&str; 17] = [
+const DEFAULT_TOOLS: [&str; 16] = [
     "search_web",
     "find_feed_options",
     "search_knowledge",
     "read_knowledge_item",
     "write_knowledge_items",
-    "search_subscription_feeds",
     "search_content",
     "search_news",
     "list_unread_news_items",

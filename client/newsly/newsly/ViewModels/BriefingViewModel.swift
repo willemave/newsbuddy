@@ -252,7 +252,7 @@ final class BriefingViewModel {
 
     func selectLens(key: String) {
         guard destination != .lens(key) else { return }
-        if firstRun != nil {
+        if firstRun?.phase == .ready {
             dismissFirstRun()
         }
         if let selectedLensKey {
@@ -457,10 +457,10 @@ final class BriefingViewModel {
             ? Self.sortedLenses(response.lenses)
             : response.lenses
         state = response.lenses.isEmpty && firstRun == nil ? .empty : .loaded
-        if firstRun != nil {
+        if firstRun != nil && destination == nil {
             destination = .startHere
-        } else if selectedLensKey == nil
-                    || !response.lenses.contains(where: { $0.key == selectedLensKey }) {
+        } else if (firstRun == nil && isStartHereSelected) || (!isStartHereSelected && (selectedLensKey == nil
+                    || !response.lenses.contains(where: { $0.key == selectedLensKey }))) {
             destination = orderedLenses.first.map { .lens($0.key) }
         }
         noteSelectionChanged()
@@ -551,11 +551,11 @@ final class BriefingViewModel {
         indexSynchronizer.restore(etag: snapshot.etag)
         lastValidatedAt = snapshot.lastValidatedAt
         state = .loaded
-        if firstRun != nil {
-            destination = .startHere
-        } else if let savedKey = snapshot.selectedLensKey,
+        if let savedKey = snapshot.selectedLensKey,
            snapshot.index.lenses.contains(where: { $0.key == savedKey }) {
             destination = .lens(savedKey)
+        } else if firstRun != nil {
+            destination = .startHere
         } else if selectedLensKey == nil
                     || !snapshot.index.lenses.contains(where: { $0.key == selectedLensKey }) {
             destination = orderedLenses.first.map { .lens($0.key) }

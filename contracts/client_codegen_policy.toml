@@ -409,6 +409,9 @@ targets = ["app_swift"]
 schema = "BriefingIndexResponse"
 targets = ["app_swift"]
 [[models]]
+schema = "BriefingFirstRunTierProgress"
+targets = ["app_swift"]
+[[models]]
 schema = "BriefingFirstRunProgress"
 targets = ["app_swift"]
 [[models]]
@@ -627,6 +630,8 @@ untyped_fields = [
 # These older response fields deliberately tolerate an absent key. All other
 # non-null fields keep strict Swift decoding even if construction has a default.
 lenient_fields = [
+  "BriefingFirstRunProgress.tiers",
+  "BriefingFirstRunTierProgress.source_names",
   "ContentDetailResponse.bullet_points",
   "ContentDetailResponse.quotes",
   "ContentDetailResponse.topics",
@@ -686,6 +691,8 @@ lenient_fields = [
 "BriefingFirstRunProgress.active_sources" = "[]"
 "BriefingFirstRunProgress.queued_sources" = "[]"
 "BriefingFirstRunProgress.ready_category_keys" = "[]"
+"BriefingFirstRunProgress.tiers" = "[]"
+"BriefingFirstRunTierProgress.source_names" = "[]"
 "BriefingLensResponse.segments" = "[]"
 "BriefingLensResponse.sources" = "[]"
 "BriefingLensResponse.has_more" = "false"
@@ -724,6 +731,8 @@ lenient_fields = [
 "ScraperConfigStatsResponse.interval_sample_size" = "0"
 "ScraperConfigStatsResponse.running_count" = "0"
 "ScraperConfigStatsResponse.queued_count" = "0"
+"ScraperConfigStatsResponse.failed_count" = "0"
+"ScraperConfigStatsResponse.access_gate_count" = "0"
 "OnboardingDiscoveryLaneStatus.completed_queries" = "0"
 "OnboardingDiscoveryLaneStatus.query_count" = "0"
 "OnboardingFastDiscoverResponse.recommended_pods" = "[]"

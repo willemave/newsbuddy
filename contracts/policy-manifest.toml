@@ -1370,3 +1370,12 @@ operation_id = "getFeedHistory"
 current_owner = "rust"
 database_writer = "rust"
 e2b_namespace = "none"
+
+[[tasks]]
+task_type = "prepare_news_lens"
+queue = "llm"
+payload_schema = "tasks/prepare_news_lens.schema.json"
+handler = "newsly_worker::briefing_refresh::PrepareNewsLensHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"

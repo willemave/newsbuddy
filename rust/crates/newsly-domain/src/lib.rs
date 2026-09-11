@@ -27,3 +27,6 @@ pub use ownership::{
     ReadinessState, ReplicaId, ResourceKey, ResourceKind, RuntimeOwner, TransitionIntent,
     TransitionState,
 };
+
+/// Provider-qualified model used to prepare shared news lens inputs.
+pub const DEFAULT_LENS_EMBEDDING_MODEL: &str = "openrouter:qwen/qwen3-embedding-8b";

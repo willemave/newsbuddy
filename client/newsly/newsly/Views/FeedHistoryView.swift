@@ -6,12 +6,13 @@ struct FeedHistoryView: View {
     let config: ScraperConfig
     let sourcesViewModel: ScraperSettingsViewModel
     @State private var viewModel: FeedHistoryViewModel
-    @State private var status = "completed"
+    @State private var status: String
 
     init(config: ScraperConfig, sourcesViewModel: ScraperSettingsViewModel) {
         self.config = config
         self.sourcesViewModel = sourcesViewModel
         _viewModel = State(initialValue: FeedHistoryViewModel(configId: config.id))
+        _status = State(initialValue: (config.stats?.failedCount ?? 0) > 0 ? "failed" : "completed")
     }
 
     private var currentConfig: ScraperConfig {

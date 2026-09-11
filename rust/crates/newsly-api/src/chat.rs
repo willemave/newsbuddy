@@ -787,7 +787,7 @@ fn resolve_model(
         "anthropic" => "anthropic:claude-opus-4-6",
         "openrouter" => "openrouter:deepseek/deepseek-v4-flash",
         "deep_research" => "deep_research:o4-mini-deep-research-2025-06-26",
-        _ => "openai:gpt-5.6-terra",
+        _ => newsly_db::DEFAULT_CHAT_MODEL,
     };
     (provider, model.to_owned())
 }
@@ -933,5 +933,26 @@ fn queue_error(error: QueueError, request_id: &str) -> ApiError {
     match error {
         QueueError::UserMissingOrInactive => inactive_user(request_id),
         other => internal_error(other, request_id),
+    }
+}
+
+#[cfg(test)]
+mod model_selection_tests {
+    use super::*;
+
+    #[test]
+    fn openai_chat_defaults_to_sol_and_preserves_explicit_selection() {
+        assert_eq!(
+            resolve_model(None, None),
+            ("openai", "openai:gpt-5.6-sol".to_owned())
+        );
+        assert_eq!(
+            resolve_model(Some(LlmProvider::Openai), Some("openai:gpt-5.6-terra")),
+            ("openai", "openai:gpt-5.6-terra".to_owned())
+        );
+        assert_eq!(
+            resolve_model(Some(LlmProvider::Anthropic), None),
+            ("anthropic", "anthropic:claude-opus-4-6".to_owned())
+        );
     }
 }

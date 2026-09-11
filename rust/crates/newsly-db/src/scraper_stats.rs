@@ -15,6 +15,8 @@ pub struct ScraperConfigStatsProjection {
     pub completed_count: i64,
     pub unread_count: i64,
     pub processing_count: i64,
+    pub failed_count: i64,
+    pub access_gate_count: i64,
     pub running_count: i64,
     pub queued_count: i64,
     pub latest_processed_at: Option<DateTime<Utc>>,
@@ -31,6 +33,7 @@ struct WorkingStats {
     completed_ids: HashSet<i64>,
     inbox_completed_ids: HashSet<i64>,
     processing_candidates: HashSet<i64>,
+    failed_ids: HashSet<i64>,
 }
 
 /// Derive the established per-source counters without retaining a transaction or ORM identity.
@@ -103,6 +106,23 @@ pub async fn get_scraper_config_stats(
         {
             stats.processing_candidates.insert(content.id);
         }
+        if content.status == "failed"
+            || (matches!(
+                content.status.as_str(),
+                "new" | "pending" | "processing" | "awaiting_image"
+            ) && content.has_failed_task)
+        {
+            stats.failed_ids.insert(content.id);
+        }
+        if content.status == "failed"
+            && content
+                .content_metadata
+                .get("extraction_error_code")
+                .and_then(Value::as_str)
+                == Some("access_gate")
+        {
+            stats.response.access_gate_count += 1;
+        }
     }
 
     let completed_ids = working
@@ -152,6 +172,7 @@ pub async fn get_scraper_config_stats(
             .unwrap_or(i64::MAX);
             stats.response.queued_count =
                 stats.response.processing_count - stats.response.running_count;
+            stats.response.failed_count = i64::try_from(stats.failed_ids.len()).unwrap_or(i64::MAX);
             let (next_expected_at, average_interval_hours, sample_size) =
                 estimate_next_expected_at(stats.publication_dates);
             stats.response.next_expected_at = next_expected_at;
@@ -175,6 +196,7 @@ pub(super) struct ContentStatsRow {
     content_type: String,
     in_inbox: bool,
     platform: Option<String>,
+    has_failed_task: bool,
 }
 
 pub(super) async fn load_content_rows(
@@ -195,10 +217,28 @@ pub(super) async fn load_content_rows(
                 'feed_config_id', content.content_metadata -> 'feed_config_id',
                 'feed_url', content.content_metadata -> 'feed_url',
                 'source', content.content_metadata -> 'source',
+                'extraction_error_code', COALESCE(
+                    content.content_metadata -> 'extraction_error_code',
+                    content.content_metadata #> '{processing,extraction_error_code}'
+                ),
                 'publication_date', content.content_metadata -> 'publication_date'
             ) AS content_metadata,
             content.content_type,
             content.platform,
+            COALESCE((
+                SELECT failed_task.status = 'failed'
+                FROM processing_tasks AS failed_task
+                WHERE failed_task.content_id = content.id
+                  AND failed_task.task_type IN ('process_content', 'process_podcast_media', 'summarize', 'generate_image')
+                ORDER BY CASE
+                           WHEN failed_task.status = 'processing'
+                                AND failed_task.lease_expires_at > timezone('UTC', now()) THEN 0
+                           WHEN failed_task.status IN ('pending', 'processing') THEN 1
+                           ELSE 2
+                         END,
+                         failed_task.id DESC
+                LIMIT 1
+            ), false) AS has_failed_task,
             membership.status = 'inbox' AS in_inbox
         FROM contents AS content
         JOIN content_status AS membership ON membership.content_id = content.id

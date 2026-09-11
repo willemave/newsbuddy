@@ -14,6 +14,18 @@ final class ScraperSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(makeStats(intervalHours: 48).cadenceSummary, "Usually every 2 days")
     }
 
+    func testIssueSummaryDistinguishesAccessGatesFromOtherFailures() {
+        XCTAssertEqual(
+            makeStats(failedCount: 2, accessGateCount: 2).issueSummary,
+            "2 items blocked by paywall or sign-in"
+        )
+        XCTAssertEqual(
+            makeStats(failedCount: 3, accessGateCount: 1).issueSummary,
+            "1 item blocked by paywall or sign-in • 2 items couldn't be processed"
+        )
+        XCTAssertNil(makeStats().issueSummary)
+    }
+
     func testAddConfigReturnsTrueAndPrependsCreatedConfig() async {
         let created = makeConfig(id: 2, displayName: "Created")
         let service = StubScraperSettingsService(createResult: .success(created))
@@ -95,7 +107,11 @@ final class ScraperSettingsViewModelTests: XCTestCase {
         )
     }
 
-    private func makeStats(intervalHours: Double) -> ScraperConfigStats {
+    private func makeStats(
+        intervalHours: Double? = nil,
+        failedCount: Int = 0,
+        accessGateCount: Int = 0
+    ) -> ScraperConfigStats {
         ScraperConfigStats(
             lastFetchAt: nil,
             ingestionError: nil,
@@ -103,6 +119,8 @@ final class ScraperSettingsViewModelTests: XCTestCase {
             completedCount: 0,
             unreadCount: 0,
             processingCount: 0,
+            failedCount: failedCount,
+            accessGateCount: accessGateCount,
             latestProcessedAt: nil,
             latestPublicationAt: nil,
             nextExpectedAt: nil,

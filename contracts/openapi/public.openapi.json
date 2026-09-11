@@ -13648,7 +13648,8 @@
           "completed_sources",
           "active_sources",
           "queued_sources",
-          "ready_category_keys"
+          "ready_category_keys",
+          "tiers"
         ],
         "properties": {
           "run_id": {
@@ -13689,6 +13690,12 @@
             "items": {
               "type": "string"
             }
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BriefingFirstRunTierProgress"
+            }
           }
         }
       },
@@ -13717,6 +13724,64 @@
           },
           "outcome": {
             "$ref": "#/components/schemas/BriefingFirstRunSourceOutcome"
+          }
+        }
+      },
+      "BriefingFirstRunTierProgress": {
+        "type": "object",
+        "required": [
+          "tier",
+          "source_names",
+          "discovered",
+          "ready",
+          "processing",
+          "failed",
+          "skipped",
+          "source_count",
+          "pending_sources",
+          "unavailable_sources"
+        ],
+        "properties": {
+          "tier": {
+            "type": "string"
+          },
+          "source_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "discovered": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ready": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "processing": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "skipped": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "source_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pending_sources": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unavailable_sources": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -18716,6 +18781,8 @@
           "completed_count",
           "unread_count",
           "processing_count",
+          "failed_count",
+          "access_gate_count",
           "running_count",
           "queued_count",
           "latest_processed_at",
@@ -18751,6 +18818,14 @@
             "format": "int64"
           },
           "processing_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "failed_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "access_gate_count": {
             "type": "integer",
             "format": "int64"
           },

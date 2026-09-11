@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+newsly-domain = { path = "../newsly-domain" }
 newsly-db = { path = "../newsly-db" }
 newsly-queue = { path = "../newsly-queue" }
 reqwest.workspace = true

@@ -24,6 +24,7 @@ pub async fn prepare_briefing_refresh(
     config: &BriefingRefreshConfig,
 ) -> Result<PrepareBriefingRefreshOutcome, BriefingRefreshRepositoryError> {
     config.validate()?;
+    crate::first_edition_progress::expire_runs(transaction, user_id).await?;
     let claim_fence = load_briefing_refresh_claim_fence(transaction, task_id, user_id)
         .await?
         .ok_or(BriefingRefreshRepositoryError::ClaimOwnershipLost)?;
@@ -155,7 +156,7 @@ pub(super) async fn active_user_exists(
     .await
 }
 
-pub(super) async fn ensure_fixed_lenses(
+pub(crate) async fn ensure_fixed_lenses(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
 ) -> Result<(), sqlx::Error> {
@@ -257,11 +258,43 @@ pub(super) async fn seed_content_pending(
     .rows_affected() as usize)
 }
 
-pub(super) async fn seed_news_pending(
+pub(crate) async fn seed_news_pending(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: i64,
     full: bool,
 ) -> Result<usize, sqlx::Error> {
+    let active_run = sqlx::query_as::<_, (i64, bool, bool)>("SELECT id::bigint, news_seeded, news_seed_settled FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' ORDER BY id DESC LIMIT 1 FOR UPDATE")
+        .bind(user_id).fetch_optional(&mut **transaction).await?;
+    if let Some((run_id, seeded, settled)) = active_run {
+        if !seeded {
+            sqlx::query(AssertSqlSafe(format!(r#"
+                WITH visible_news AS ({visible_news}), ranked AS (
+                    SELECT n.id, COALESCE(n.published_at,n.ingested_at) AS arrival,
+                           row_number() OVER (PARTITION BY n.platform, n.raw_metadata::jsonb #>> '{{aggregator,topic}}' ORDER BY COALESCE(n.published_at,n.ingested_at) DESC, n.id DESC) AS source_rank
+                    FROM visible_news n WHERE NOT EXISTS (
+                        SELECT 1 FROM news_item_read_status r JOIN news_items m ON m.id=r.news_item_id
+                        WHERE r.user_id::bigint=$1 AND COALESCE(m.representative_news_item_id,m.id)=n.id
+                    )
+                )
+                INSERT INTO onboarding_first_edition_items(run_id,source_kind,source_id)
+                SELECT $2::bigint::integer,'news',id FROM ranked ORDER BY source_rank,arrival DESC,id DESC LIMIT 40
+                ON CONFLICT DO NOTHING
+            "#, visible_news=visible_news_sql())))
+                .bind(user_id).bind(run_id).execute(&mut **transaction).await?;
+            // Leave an empty corpus open until ready news actually arrives.
+            sqlx::query("UPDATE onboarding_first_edition_runs SET news_seeded=EXISTS(SELECT 1 FROM onboarding_first_edition_items WHERE run_id::bigint=$1 AND source_kind='news') WHERE id::bigint=$1")
+                .bind(run_id).execute(&mut **transaction).await?;
+        } else if !settled {
+            sqlx::query(AssertSqlSafe(format!(r"WITH visible_news AS ({visible_news})
+                UPDATE onboarding_first_edition_runs r SET news_seed_settled=TRUE WHERE r.id::bigint=$2 AND NOT EXISTS (
+                    SELECT 1 FROM onboarding_first_edition_items i JOIN visible_news n ON n.id=i.source_id
+                    WHERE i.run_id=r.id AND i.source_kind='news'
+                      AND NOT EXISTS(SELECT 1 FROM briefing_segments s WHERE s.user_id=r.user_id AND s.status IN ('active','degraded') AND s.source_keys::jsonb ? ('news:' || n.id::text))
+                      AND NOT EXISTS(SELECT 1 FROM news_item_read_status rs JOIN news_items m ON m.id=rs.news_item_id WHERE rs.user_id=r.user_id AND COALESCE(m.representative_news_item_id,m.id)=n.id)
+                )", visible_news=visible_news_sql())))
+                .bind(user_id).bind(run_id).execute(&mut **transaction).await?;
+        }
+    }
     Ok(sqlx::query(AssertSqlSafe(format!(
         r#"
         WITH visible_news AS ({visible_news})
@@ -271,7 +304,9 @@ pub(super) async fn seed_news_pending(
         SELECT $1::bigint::integer, NULL, 'news', news.id,
                timezone('UTC', clock_timestamp())
         FROM visible_news AS news
-        WHERE NOT EXISTS (
+        WHERE (NOT EXISTS (SELECT 1 FROM onboarding_first_edition_runs r WHERE r.user_id::bigint=$1 AND r.status='active' AND NOT r.news_seed_settled)
+            OR EXISTS (SELECT 1 FROM onboarding_first_edition_items i JOIN onboarding_first_edition_runs r ON r.id=i.run_id WHERE r.user_id::bigint=$1 AND r.status='active' AND i.source_kind='news' AND i.source_id=news.id))
+          AND NOT EXISTS (
             SELECT 1
             FROM news_items AS member
             JOIN news_item_read_status AS read_status ON read_status.news_item_id = member.id

@@ -122,11 +122,16 @@ mod tests {
             (3, "processing", "inbox", Some("processing")),
             (4, "failed", "inbox", Some("failed")),
             (5, "pending", "archived", Some("cancelled")),
+            (6, "processing", "inbox", Some("failed")),
         ] {
             let id = sqlx::query_scalar::<_, i64>("INSERT INTO contents (content_type, url, title, status, is_aggregate, content_metadata, processed_at) VALUES ('podcast', $1, $2, $3, false, $4, '2026-09-01 12:00:00') RETURNING id::bigint")
                 .bind(format!("https://example.com/{index}"))
                 .bind(format!("Episode {index}"))
-                .bind(status).bind(json!({"feed_config_id": config.id, "duration_seconds": 1200}))
+                .bind(status).bind(if index == 4 {
+                    json!({"feed_config_id": config.id, "duration_seconds": 1200, "processing": {"extraction_error_code": "access_gate"}})
+                } else {
+                    json!({"feed_config_id": config.id, "duration_seconds": 1200})
+                })
                 .fetch_one(&pool).await.unwrap();
             sqlx::query(
                 "INSERT INTO content_status (user_id, content_id, status) VALUES ($1, $2, $3)",
@@ -151,11 +156,19 @@ mod tests {
             (
                 stats.completed_count,
                 stats.unread_count,
+                stats.failed_count,
+                stats.access_gate_count,
                 stats.running_count,
                 stats.queued_count
             ),
-            (2, 1, 1, 1)
+            (2, 1, 2, 1, 1, 1)
         );
+        sqlx::query("INSERT INTO processing_tasks (content_id, task_type, status, executor_runtime, executor_version, executor_namespace) VALUES ($1, 'process_content', 'failed', 'rust', 1, 'process_content')")
+            .bind(ids[1]).execute(&pool).await.unwrap();
+        let stats = get_scraper_config_stats(&pool, user, &configs)
+            .await
+            .unwrap();
+        assert_eq!(stats[&config.id].failed_count, 2);
         let first = load_feed_history(&pool, user, &configs, config.id, "completed", 0, 1)
             .await
             .unwrap();
@@ -185,7 +198,7 @@ mod tests {
         let issues = load_feed_history(&pool, user, &configs, config.id, "failed", 0, 30)
             .await
             .unwrap();
-        assert_eq!(issues.len(), 2);
+        assert_eq!(issues.len(), 3);
         // A second unrelated task must not double-count an item or become its visible stage.
         sqlx::query("INSERT INTO processing_tasks (content_id, task_type, status, executor_runtime, executor_version, executor_namespace) VALUES ($1, 'dig_deeper', 'pending', 'rust', 1, 'dig_deeper')")
             .bind(ids[3]).execute(&pool).await.unwrap();
