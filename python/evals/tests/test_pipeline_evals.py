@@ -37,6 +37,26 @@ def test_suite_and_sql_guards() -> None:
         Suite.model_validate(raw)
 
 
+def test_news_word_target_requires_ordered_news_briefing_range() -> None:
+    production_case = Suite.model_validate(read_yaml(PRODUCTION_SUITE)).cases[0].model_dump()
+    production_case["news_word_target"] = {
+        "target_min": 65,
+        "target_max": 45,
+        "hard_max": 75,
+    }
+    with pytest.raises(ValidationError, match="target_min <= target_max <= hard_max"):
+        Suite.model_validate({"version": 1, "cases": [production_case]})
+
+    summary_case = Suite.model_validate(read_yaml(SUITE)).cases[0].model_dump()
+    summary_case["news_word_target"] = {
+        "target_min": 25,
+        "target_max": 40,
+        "hard_max": 40,
+    }
+    with pytest.raises(ValidationError, match="requires a briefing case with news sources"):
+        Suite.model_validate({"version": 1, "cases": [summary_case]})
+
+
 def test_embedding_stub_matches_request_batch() -> None:
     with StubServer() as stubs:
         stubs.reset([Stub(method="POST", path="/embeddings", embedding_vector=[1, 0])])
@@ -174,6 +194,67 @@ def test_report_contains_canonical_output_once(tmp_path: Path) -> None:
     )
     assert (tmp_path / "report.md").read_text().count("Unique takeaway.") == 1
     assert json.loads((tmp_path / "results.json").read_text())["version"] == 2
+
+
+def test_news_density_metrics_count_rendered_run_text(tmp_path: Path) -> None:
+    from newsly_evals.pipeline.runner import measure_news_passages, report
+    from newsly_evals.pipeline.schema import NewsWordTarget
+
+    output = {
+        "lenses": [
+            {
+                "lens": {"tier": "news"},
+                "segments": [
+                    {
+                        "id": 42,
+                        "source_keys": ["news:1", "news:2"],
+                        "blocks": [
+                            {
+                                "type": "passage",
+                                "paragraphs": [
+                                    {
+                                        "runs": [
+                                            {"kind": "source_link", "text": "Linked title"},
+                                            {"kind": "text", "text": " adds useful context."},
+                                        ]
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            {"lens": {"tier": "longform"}, "segments": [{"id": 99, "blocks": []}]},
+        ]
+    }
+
+    metrics = measure_news_passages(
+        output, NewsWordTarget(target_min=25, target_max=45, hard_max=75)
+    )
+    assert metrics == [
+        {
+            "segment_id": 42,
+            "source_count": 2,
+            "rendered_word_count": 5,
+            "density_band": "under_target",
+            "word_target": {"target_min": 25, "target_max": 45, "hard_max": 75},
+        }
+    ]
+    report(
+        tmp_path,
+        [
+            {
+                "id": "news",
+                "status": "pass",
+                "expects": "Useful density",
+                "output": output,
+                "metrics": {"news_passages": metrics},
+            }
+        ],
+    )
+    assert (
+        "5 rendered words across 2 sources (under_target)" in (tmp_path / "report.md").read_text()
+    )
 
 
 @pytest.mark.skipif(

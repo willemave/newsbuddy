@@ -17,7 +17,7 @@ checks use this same YAML, SQL generator, runtime and HTTP stub server.
   contain the canonical `longform_artifact` envelope. The judge and report receive
   the title plus that envelope once; `last-response.json` retains the unabridged
   HTTP payload. A completed response missing the artifact is an execution/contract
-  error, not an alias fallback. Projection version is `pipeline-v5-canonical-artifact`
+  error, not an alias fallback. Harness and judge version is `pipeline-v6-news-density`
   and results/report version is 2. This does not test URL
   extraction, audio downloading or transcription.
 - `briefing`: prepared news summaries or article/podcast summaries, assigned
@@ -54,7 +54,11 @@ python/evals/.venv/bin/newsly-evals pipeline run \
 Repeat `--case article_numbers --case news_conflicting_reports` to select cases.
 Each case gets its own database and processes, and errors do not stop later cases.
 Databases and processes are cleaned up on success, failure or interruption. Reports
-and logs remain. Output directories must not already exist.
+and logs remain. For News cases with `news_word_target`, `results.json` and `report.md`
+record the rendered word count including linked text, source count, and whether the passage
+falls below, within, or above that fixture's expected range and 75-word hard maximum. Explicit
+fixture ranges distinguish one event reported by several sources from a true multi-event
+roundup. Output directories must not already exist.
 
 Candidate processing uses the normal Rust model settings. Current summarization
 limits are three model requests with 6,000 output tokens per request. Briefing
@@ -137,7 +141,7 @@ Run it with the same command above, substituting
 synthetic cases remain useful controlled regressions and are not replaced. Both suites
 are reused by the opt-in API integration checks.
 
-Pipeline-v4 adds a news-only 25–45-word target and 60-word maximum per passage, excluding linked titles and permitted title recaps. Under-target prose is acceptable if complete; 46–60 words must serve material facts or qualifications. Over 60 fails relevance. Article/podcast grading is unchanged. Comparisons with pipeline-v3 combine candidate-prompt and news-rubric changes.
+Pipeline-v6 caps a single event at 40 rendered words and uses a 45–65-word target for a multi-event roundup, with a 75-word roundup maximum. Explicit fixture targets and deterministic report metrics count the complete rendered passage, including linked text; absent such a target, linked titles and permitted title recaps remain excluded from qualitative prose-length judgments. Added length must serve material facts or qualifications rather than fill the range. Article/podcast grading is unchanged. Comparisons with pipeline-v5 combine candidate-prompt and news-rubric changes.
 
 ## Full production-source snapshots
 

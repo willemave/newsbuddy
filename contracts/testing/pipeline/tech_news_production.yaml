@@ -2,6 +2,10 @@ version: 1
 cases:
 - id: tech_concise_release
   stage: briefing
+  news_word_target:
+    target_min: 25
+    target_max: 40
+    hard_max: 40
   sources:
   - id: news_89833
     kind: news
@@ -27,6 +31,10 @@ cases:
     reference; no generic praise or closing recap.
 - id: tech_concise_ai_policy
   stage: briefing
+  news_word_target:
+    target_min: 45
+    target_max: 65
+    hard_max: 75
   sources:
   - id: news_90164
     kind: news
@@ -66,6 +74,10 @@ cases:
     Do not assert that the Inspur story caused the talks. Reference both sources; repeated titles are acceptable. Avoid bloated semicolon chains in the substantive prose.'
 - id: tech_concise_developer_tools
   stage: briefing
+  news_word_target:
+    target_min: 45
+    target_max: 65
+    hard_max: 75
   sources:
   - id: news_90107
     kind: news
@@ -128,6 +140,10 @@ cases:
     and formal proof. Avoid generic commentary about the future of development, marketing language in the substantive prose. Repeated source titles and citation labels are acceptable. Reference all sources naturally.
 - id: tech_concise_ai_claims
   stage: briefing
+  news_word_target:
+    target_min: 45
+    target_max: 65
+    hard_max: 75
   sources:
   - id: news_90134
     kind: news

@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-11 — `main` — Relax News Briefing density
+
+- **Status:** Complete locally; regeneration and release pending.
+- **Scope:** News Briefing composition prompt, prompt provenance, behavioral law, and aligned pipeline-eval rubric.
+- **Decisions:** Keep single-event briefs at a firm 40-word ceiling while relaxing true multi-event roundups to 45-65 words, with a 75-word ceiling. Preserve useful context or material qualifications when they improve understanding without mechanically expanding every source.
+- **Changes:** Relaxed the multi-event News prompt and sentence allowance, bounded single-event supporting detail, required grammatical noun-phrase links, advanced composition provenance to `briefing-v8-density`, and aligned the product law and `pipeline-v6-news-density` evaluation guidance. Eval fixtures can declare event-aware word targets, reports include deterministic rendered word counts, source counts, and density bands, and the judge treats the declared hard maximum as a permitted fact-serving extension rather than failing every target miss.
+- **Validation:** Focused News Briefing prompt test passed. Rust formatting and warning-denied Clippy for `newsly-providers` and `newsly-db` passed. Python eval Ruff, MyPy, and all 38 tests passed with five opt-in skips; diff checks passed. Seven local Luna candidate/Sol judge executions across three frozen public cases drove the tuning: the final single-event branch passed at 37 rendered words; a three-event roundup passed at 69; the two-event case preserved all requested facts at 56-69 words but exposed verb-bearing link and overly strict extension-scoring issues, both subsequently tightened in the prompt/rubric without another paid rerun.
+- **Remaining:** Run one fresh multi-event sample to validate the final noun-phrase link rule, then release and regenerate representative News segments to assess density in the app. No production regeneration or release was performed.
+- **Commits:** This commit.
+
 ### 2026-09-10 — `main` — News Briefing prompt length
 
 - **Status:** Complete locally; regeneration and release pending.

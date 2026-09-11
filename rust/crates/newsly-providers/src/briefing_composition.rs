@@ -33,16 +33,22 @@ forms: `[source title or descriptive phrase](newsly://briefing/content/123)` and
 fact, quotation, or attribution. Never use em dashes or generic summary-speak. Begin with the
 strongest fact or idea rather than naming the lens or counting sources.
 
-For `news`, write like a newspaper brief: compressed, factual, and information dense. Target 25-45
-words for the entire passage and never exceed 60 words, including linked text.
-Prefer one short clause per distinct event, and many times use only a compact linked title or descriptive fact. Cut
-background, inventories, secondary details, and thematic transitions before adding length. Return
-exactly one passage: one compact paragraph of at most three sentences, with no figures or
+For `news`, write like a newspaper brief: concise, factual, and information dense. For one distinct
+event, never exceed 40 words for the entire passage, including linked text. Select at most two useful
+supporting facts or qualifications beyond the linked headline; never substitute a feature or
+capability list. For a roundup of multiple distinct events, target 45-65 words and never exceed 75.
+Never add detail merely to reach a target.
+Give each distinct event a complete, informative clause; preserve concrete context or a material
+qualification only when it improves understanding. Cut generic background, feature inventories,
+and thematic transitions before material facts. Return exactly one passage: one compact paragraph
+of at most four sentences, with no figures or
 pullquotes, linking every source exactly once.
 Place links toward the beginning of the sentence that covers each source. Make each source link
 span a substantial phrase: the title plus its surrounding descriptive words, roughly four to ten
 words, never a bare two-word name. Let the linked phrase carry the fact instead of repeating it in
-surrounding prose. Begin directly with the strongest fact or story and vary sentence openings.
+surrounding prose. Use a descriptive noun phrase for each link; do not put a finite verb inside the
+link or follow it with a duplicated verb or restatement. Begin directly with the strongest fact or
+story and vary sentence openings.
 Use a compact, informational register and simple connective prose rather than lists. Connect
 stories only when the connection adds useful information; omit abstract thematic introductions
 and conclusions. For `audio` and `longform`, treat every source as a full work rather than a headline.
@@ -907,10 +913,15 @@ mod tests {
     #[test]
     fn news_prompt_requests_newspaper_briefs() {
         assert!(COMPOSITION_SYSTEM_PROMPT.contains("write like a newspaper brief"));
-        assert!(COMPOSITION_SYSTEM_PROMPT.contains("Target 25-45"));
-        assert!(COMPOSITION_SYSTEM_PROMPT.contains("never exceed 60 words"));
-        assert!(COMPOSITION_SYSTEM_PROMPT.contains("one short clause per distinct event"));
-        assert!(COMPOSITION_SYSTEM_PROMPT.contains("compact linked title or descriptive fact"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("never exceed 40 words"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("target 45-65 words"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("never exceed 75"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("Select at most two useful"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("never substitute a feature or"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("complete, informative clause"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("Never add detail merely"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("do not put a finite verb inside"));
+        assert!(COMPOSITION_SYSTEM_PROMPT.contains("duplicated verb or restatement"));
         assert!(COMPOSITION_SYSTEM_PROMPT.contains("Place links toward the beginning"));
         assert!(COMPOSITION_SYSTEM_PROMPT.contains("instead of repeating it"));
         assert!(!COMPOSITION_SYSTEM_PROMPT.contains("unified account"));

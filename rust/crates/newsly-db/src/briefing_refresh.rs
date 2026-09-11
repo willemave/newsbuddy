@@ -8,7 +8,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const DEFAULT_MASTHEAD_DECK: &str = "A fresh edition will appear as unread sources arrive.";
-pub const BRIEFING_COMPOSITION_PROMPT_VERSION: &str = "briefing-v7-commonmark";
+pub const BRIEFING_COMPOSITION_PROMPT_VERSION: &str = "briefing-v8-density";
 const FIXED_LENSES: [(&str, &str, &str, &str, i32); 2] = [
     (
         "podcasts",
