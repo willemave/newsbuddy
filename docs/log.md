@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-12 — `main` — Release smoke active-deck conflict isolation
+
+- **Status:** Release correction complete locally; full release gate restart pending.
+- **Scope:** Production-shaped Share Extension to Learning Deck smoke conflict assertion.
+- **Decisions:** Assert the global one-active-deck boundary with a distinct, locally resolved GitHub source. Keep Share Action content readiness independent because public content detail intentionally remains hidden until its full lifecycle completes.
+- **Changes:** Replaced the content-readiness poll with a deterministic alternate-source conflict request; retained the original content identity for grounded-chat coverage.
+- **Validation:** The second exact-SHA release gate passed Rust/SQLx/contracts, both Python islands, 665 native unit tests, three lifecycle UI tests, and AXe; live smoke showed content detail can remain 404 after processing and summarization while the deck source is valid internally. All four `newsly-smoke` tests, warning-denied Clippy, Rust formatting, and diff checks pass after the correction.
+- **Remaining:** Restart the entire release gate on the replacement SHA before push.
+- **Commits:** This commit.
+
 ### 2026-09-12 — `main` — Release smoke Learning Deck readiness race
 
 - **Status:** Release correction complete locally; full release gate restart pending.
