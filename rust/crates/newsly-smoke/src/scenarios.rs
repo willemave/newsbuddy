@@ -4,10 +4,11 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail, ensure};
 use chrono::Utc;
 use newsly_contracts::{
-    AssistantTurnResponse, ChatMessageRole, ChatSessionDetailDto, CreateChatSessionResponse,
-    ErrorEnvelope, LearningDeckResponse, LearningDeckShareResponse, LearningDeckUrlResponse,
-    LlmTaskMode, LlmTaskStatus, MessageProcessingStatus, MessageStatusResponse,
-    SendMessageResponse, ShareActionResponse, TokenResponse,
+    AssistantTurnResponse, ChatMessageRole, ChatSessionDetailDto, ContentDetailResponse,
+    ContentStatus, CreateChatSessionResponse, ErrorEnvelope, LearningDeckResponse,
+    LearningDeckShareResponse, LearningDeckUrlResponse, LlmTaskMode, LlmTaskStatus,
+    MessageProcessingStatus, MessageStatusResponse, SendMessageResponse, ShareActionResponse,
+    TokenResponse,
 };
 use reqwest::StatusCode;
 use serde_json::{Map, Value, json};
@@ -332,6 +333,7 @@ async fn share_extension_to_learning_deck(
     let deck_id = positive_result_id(&action.action_result, "learning_deck_id")?;
     let content_id = positive_result_id(&action.action_result, "content_id")?;
 
+    wait_for_deck_source(config, &auth.primary, content_id).await?;
     let active_conflict = auth
         .primary
         .post_expect_status(
@@ -611,6 +613,35 @@ async fn wait_for_deck(
     .await
 }
 
+async fn wait_for_deck_source(
+    config: &SmokeConfig,
+    api: &SmokeApi,
+    content_id: i64,
+) -> Result<ContentDetailResponse> {
+    poll(config, "Learning Deck source", || async {
+        let content: ContentDetailResponse = api.get(&format!("/api/content/{content_id}")).await?;
+        if deck_source_readiness(content.status, content.body_available)? {
+            Ok(Some(content))
+        } else {
+            Ok(None)
+        }
+    })
+    .await
+}
+
+fn deck_source_readiness(status: ContentStatus, body_available: bool) -> Result<bool> {
+    match status {
+        ContentStatus::Completed | ContentStatus::AwaitingImage => {
+            ensure!(body_available, "completed Learning Deck source has no body");
+            Ok(true)
+        }
+        ContentStatus::Failed | ContentStatus::Skipped => {
+            bail!("Learning Deck source ended as {status}")
+        }
+        ContentStatus::New | ContentStatus::Pending | ContentStatus::Processing => Ok(false),
+    }
+}
+
 async fn send_and_wait(
     config: &SmokeConfig,
     api: &SmokeApi,
@@ -759,9 +790,10 @@ fn evidence<const N: usize>(values: [(&str, Value); N]) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
+    use newsly_contracts::ContentStatus;
     use serde_json::{Map, json};
 
-    use super::positive_result_id;
+    use super::{deck_source_readiness, positive_result_id};
 
     #[test]
     fn action_identity_extraction_requires_positive_integer() {
@@ -771,5 +803,15 @@ mod tests {
             let bad = Map::from_iter([("deck_id".to_owned(), value)]);
             assert!(positive_result_id(&bad, "deck_id").is_err());
         }
+    }
+
+    #[test]
+    fn deck_source_readiness_waits_and_fails_closed() {
+        assert!(!deck_source_readiness(ContentStatus::Processing, false).unwrap());
+        assert!(deck_source_readiness(ContentStatus::Completed, true).unwrap());
+        assert!(deck_source_readiness(ContentStatus::AwaitingImage, true).unwrap());
+        assert!(deck_source_readiness(ContentStatus::Completed, false).is_err());
+        assert!(deck_source_readiness(ContentStatus::Failed, false).is_err());
+        assert!(deck_source_readiness(ContentStatus::Skipped, false).is_err());
     }
 }

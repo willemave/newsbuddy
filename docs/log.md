@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-12 — `main` — Release smoke Learning Deck readiness race
+
+- **Status:** Release correction complete locally; full release gate restart pending.
+- **Scope:** Production-shaped Share Extension to Learning Deck smoke ordering.
+- **Decisions:** Preserve the public 404 contract for content that is not ready. Wait through public content state before asserting the separate active-deck 409 conflict, and fail closed on terminal or bodyless source states.
+- **Changes:** Added a bounded content-readiness wait between Share Action completion and the direct content-backed Learning Deck conflict assertion.
+- **Validation:** The first exact-SHA release gate passed Rust/SQLx/contracts, both Python islands, 665 native unit tests, three lifecycle UI tests, and AXe; live smoke exposed the race when `process_content` committed just after the assertion. All four `newsly-smoke` tests, warning-denied Clippy, Rust formatting, and diff checks pass after the correction.
+- **Remaining:** Restart the entire release gate on the replacement SHA before push.
+- **Commits:** This commit.
+
 ### 2026-09-12 — `detached e6bd96b0` — Briefing audio startup timing
 
 - **Status:** Complete locally; live latency measurements pending.
