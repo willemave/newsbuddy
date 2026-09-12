@@ -145,6 +145,11 @@ targets = ["app_swift"]
 open = false
 
 [[enums]]
+schema = "BriefingRefreshStatus"
+targets = ["app_swift"]
+open = false
+
+[[enums]]
 schema = "ReadingExperience"
 targets = ["app_swift"]
 open = false
@@ -461,6 +466,9 @@ schema = "BriefingNarrationResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "BriefingRefreshResponse"
+targets = ["app_swift"]
+[[models]]
+schema = "BriefingRefreshStatusResponse"
 targets = ["app_swift"]
 [[models]]
 schema = "CreateUserScraperConfig"

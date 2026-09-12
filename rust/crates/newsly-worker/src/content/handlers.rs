@@ -27,7 +27,7 @@ use support::{
     resolve_article_url, should_run_structured_analysis,
 };
 #[cfg(test)]
-use tweet::{extract_tweet_id, resolve_from_known_tweets};
+use tweet::{extract_tweet_id, resolve_from_known_tweets, single_short_url};
 
 #[derive(Debug, Clone)]
 pub struct ContentWorkerServices {
@@ -123,7 +123,7 @@ mod tests {
     use super::{
         classify_known_url, extract_tweet_id, extraction_failure_is_terminal,
         feed_candidates_from_metadata, instruction_link_plan, resolve_article_url,
-        resolve_from_known_tweets, should_run_structured_analysis,
+        resolve_from_known_tweets, should_run_structured_analysis, single_short_url,
     };
     use crate::content::model::ContentSnapshot;
 
@@ -268,6 +268,16 @@ mod tests {
         );
         assert_eq!(resolution.resolution_source, "linked_tweet");
         assert_eq!(resolution.resolution_tweet_id, "11");
+    }
+
+    #[test]
+    fn recognizes_only_one_trusted_short_link_in_note_text() {
+        assert_eq!(
+            single_short_url("Recommended: https://t.co/story.").as_deref(),
+            Some("https://t.co/story")
+        );
+        assert!(single_short_url("https://t.co/one https://t.co/two").is_none());
+        assert!(single_short_url("https://example.com/story").is_none());
     }
 
     fn tweet(id: &str, external_urls: Vec<String>, linked_tweet_ids: Vec<String>) -> XTweet {

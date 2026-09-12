@@ -54,6 +54,21 @@ extension BriefingViewModel {
         }
     }
 
+    /// An explicit list refresh ends the short reading-retention grace period for segments the
+    /// server has already retired. Rehydrate the selected lens immediately from the durable list;
+    /// ordinary background reconciliation still preserves the current reading position.
+    func reconcileReadRetirementsForManualRefresh() {
+        let retiredLensKeys = lensStates.compactMap { key, state in
+            state.retainsReadRetirement ? key : nil
+        }
+        for key in retiredLensKeys {
+            discardStaleLensDocument(key)
+        }
+        if let selectedLensKey, retiredLensKeys.contains(selectedLensKey) {
+            loadLensIfNeeded(key: selectedLensKey)
+        }
+    }
+
     @discardableResult
     private func discardStaleLensDocument(_ key: String) -> Bool {
         guard var state = lensStates[key], state.isStale, let document = state.document else {

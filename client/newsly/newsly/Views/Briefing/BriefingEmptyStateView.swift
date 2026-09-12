@@ -80,7 +80,7 @@ struct BriefingEmptyStateView: View {
     @ViewBuilder
     private var statusIndicator: some View {
         switch refreshPhase {
-        case .requesting, .waitingForVersion:
+        case .requesting, .waitingForCompletion:
             ProgressView()
                 .controlSize(.small)
         case .failed:
@@ -96,7 +96,7 @@ struct BriefingEmptyStateView: View {
 
     private var statusText: String {
         switch refreshPhase {
-        case .requesting, .waitingForVersion:
+        case .requesting, .waitingForCompletion:
             "Checking your sources…"
         case .failed(let message):
             message

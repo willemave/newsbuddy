@@ -39,6 +39,10 @@ final class MockBriefingService: BriefingServicing {
     var refreshError: Error?
     var refreshDelayNanoseconds: UInt64?
     var refreshWaitsForResume = false
+    var refreshResponse = APIBriefingRefreshResponse(enqueued: true, taskId: 1, version: 1)
+    var refreshStatusResults: [APIBriefingRefreshStatusResponse] = []
+    var refreshStatusError: Error?
+    private(set) var refreshStatusTaskIDs: [Int] = []
     var digSearchFragments: [String] = []
     var digSearchErrors: [Error?] = []
     var digSummarizePassageContexts: [String] = []
@@ -182,7 +186,23 @@ final class MockBriefingService: BriefingServicing {
         if let refreshError {
             throw refreshError
         }
-        return APIBriefingRefreshResponse(enqueued: true, version: 1)
+        return refreshResponse
+    }
+
+    func fetchRefreshStatus(taskID: Int) async throws -> APIBriefingRefreshStatusResponse {
+        refreshStatusTaskIDs.append(taskID)
+        events.append("fetchRefreshStatus:\(taskID)")
+        if let refreshStatusError {
+            throw refreshStatusError
+        }
+        if !refreshStatusResults.isEmpty {
+            return refreshStatusResults.removeFirst()
+        }
+        return APIBriefingRefreshStatusResponse(
+            taskId: taskID,
+            status: .completed,
+            version: refreshResponse.version
+        )
     }
 
     func completeFirstRun() async throws {

@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use reqwest::{Client, Url};
+use reqwest::{Client, Url, header, redirect};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
+
+mod urls;
+use urls::{html_redirect_url, normalize_external_url, trusted_short_url};
 
 const X_TWEET_FIELDS: &str = "created_at,author_id,public_metrics,entities,conversation_id,in_reply_to_user_id,referenced_tweets,text,article,note_tweet,attachments";
 const X_USER_FIELDS: &str = "name,username";
@@ -73,6 +76,7 @@ pub struct XSyncGateway {
 #[derive(Debug, Clone)]
 pub struct XLookupGateway {
     client: Client,
+    redirect_client: Client,
     api_base_url: Url,
 }
 
@@ -88,6 +92,10 @@ impl XLookupGateway {
         }
         Ok(Self {
             client: Client::builder().timeout(Duration::from_secs(20)).build()?,
+            redirect_client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .redirect(redirect::Policy::none())
+                .build()?,
             api_base_url,
         })
     }
@@ -214,6 +222,35 @@ impl XLookupGateway {
         }
         let payload = self.send_lookup(url, access_token).await?;
         Ok(map_tweets_page(&payload))
+    }
+
+    /// Resolves one trusted X short link into a non-X HTTP(S) destination.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the request fails. Invalid, non-`t.co`, or still-X destinations
+    /// return `Ok(None)` without making a request or exposing them as article targets.
+    pub async fn resolve_short_url(
+        &self,
+        value: &str,
+    ) -> Result<Option<String>, XSyncGatewayError> {
+        let Some(url) = trusted_short_url(value) else {
+            return Ok(None);
+        };
+        // Inspect the trusted shortener response without fetching the destination. Besides being
+        // cheaper, this prevents an externally supplied redirect from becoming an SSRF hop.
+        let response = self.redirect_client.get(url.clone()).send().await?;
+        if response.status().is_redirection() {
+            return Ok(response
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| url.join(value).ok())
+                .and_then(|target| normalize_external_url(target.as_str())));
+        }
+        let response = response.error_for_status()?;
+        let body = response.text().await?;
+        Ok(html_redirect_url(&body).and_then(|target| normalize_external_url(&target)))
     }
 
     async fn send_lookup(
@@ -570,7 +607,7 @@ fn map_tweet(
         .filter_map(Value::as_object)
         .filter_map(|reference| optional_string(reference.get("type")))
         .collect();
-    let external_urls = external_urls(entities);
+    let external_urls = tweet_external_urls(tweet, entities);
     let linked_tweet_ids = linked_tweet_ids(tweet, entities);
     let (has_video, video_duration_ms) = video_metadata(tweet, media);
     Some(XTweet {
@@ -667,13 +704,7 @@ fn article_parts(value: Option<&Value>) -> (Option<String>, Option<String>) {
 
 fn note_tweet_text(value: Option<&Value>) -> Option<String> {
     let note_data = value.and_then(Value::as_object)?;
-    let note_result = note_data
-        .get("note_tweet_results")
-        .and_then(Value::as_object)
-        .and_then(|results| results.get("result"))
-        .and_then(Value::as_object)
-        .or_else(|| note_data.get("result").and_then(Value::as_object))
-        .unwrap_or(note_data);
+    let note_result = note_tweet_result(value)?;
     first_text([
         note_result.get("text"),
         nested_value(note_result, &["richtext", "text"]),
@@ -688,6 +719,37 @@ fn note_tweet_text(value: Option<&Value>) -> Option<String> {
         nested_value(note_data, &["content", "richtext", "text"]),
         nested_value(note_data, &["content", "rich_text", "text"]),
     ])
+}
+
+fn note_tweet_result(value: Option<&Value>) -> Option<&Map<String, Value>> {
+    let note_data = value.and_then(Value::as_object)?;
+    let note_result = note_data
+        .get("note_tweet_results")
+        .and_then(Value::as_object)
+        .and_then(|results| results.get("result"))
+        .and_then(Value::as_object)
+        .or_else(|| note_data.get("result").and_then(Value::as_object));
+    Some(note_result.unwrap_or(note_data))
+}
+
+fn tweet_external_urls(
+    tweet: &Map<String, Value>,
+    entities: Option<&Map<String, Value>>,
+) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let note = note_tweet_result(tweet.get("note_tweet"));
+    [
+        entities,
+        note.and_then(|value| value.get("entities"))
+            .and_then(Value::as_object),
+        note.and_then(|value| value.get("entity_set"))
+            .and_then(Value::as_object),
+    ]
+    .into_iter()
+    .flatten()
+    .flat_map(|entities| external_urls(Some(entities)))
+    .filter(|url| seen.insert(url.clone()))
+    .collect()
 }
 
 fn metric(metrics: Option<&Map<String, Value>>, key: &str) -> Option<i64> {
@@ -720,28 +782,6 @@ fn external_urls(entities: Option<&Map<String, Value>>) -> Vec<String> {
         .filter_map(|url| normalize_external_url(&url))
         .filter(|url| seen.insert(url.clone()))
         .collect()
-}
-
-fn normalize_external_url(value: &str) -> Option<String> {
-    let mut url = Url::parse(value.trim()).ok()?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return None;
-    }
-    let host = url
-        .host_str()?
-        .trim_end_matches('.')
-        .trim_start_matches("www.")
-        .to_ascii_lowercase();
-    if ["x.com", "twitter.com", "t.co"]
-        .iter()
-        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
-    {
-        return None;
-    }
-    if url.scheme() != "https" && url.set_scheme("https").is_err() {
-        return None;
-    }
-    Some(url.to_string())
 }
 
 fn strip_bearer_prefix(value: &str) -> &str {
@@ -925,40 +965,4 @@ pub enum XSyncGatewayError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{normalize_external_url, strip_bearer_prefix, tweet_id_from_url};
-
-    #[test]
-    fn accepts_case_insensitive_bearer_prefix_without_forwarding_it_twice() {
-        assert_eq!(strip_bearer_prefix("Bearer token"), "token");
-        assert_eq!(strip_bearer_prefix("bearer token"), "token");
-        assert_eq!(strip_bearer_prefix("Bearer "), "");
-        assert_eq!(strip_bearer_prefix("token"), "token");
-    }
-
-    #[test]
-    fn tweet_id_parser_accepts_only_x_status_urls() {
-        assert_eq!(
-            tweet_id_from_url("https://x.com/newsly/status/1234567890?ref=share").as_deref(),
-            Some("1234567890")
-        );
-        assert_eq!(
-            tweet_id_from_url("https://example.com/newsly/status/1234567890"),
-            None
-        );
-        assert_eq!(
-            tweet_id_from_url("https://x.com/newsly/status/not-a-number"),
-            None
-        );
-    }
-
-    #[test]
-    fn external_url_normalization_rejects_non_http_and_x_hosts() {
-        assert_eq!(normalize_external_url("ftp://example.com/file"), None);
-        assert_eq!(normalize_external_url("https://x.com/i/status/123"), None);
-        assert_eq!(
-            normalize_external_url("http://example.com/story#discussion").as_deref(),
-            Some("https://example.com/story#discussion")
-        );
-    }
-}
+mod tests;

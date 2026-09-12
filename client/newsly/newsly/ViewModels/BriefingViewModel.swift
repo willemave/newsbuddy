@@ -140,7 +140,7 @@ final class BriefingViewModel {
     }
 
     var isRefreshing: Bool {
-        refreshPhase == .requesting || refreshPhase == .waitingForVersion
+        refreshPhase == .requesting || refreshPhase == .waitingForCompletion
     }
 
     var selectedLensKey: String? {
@@ -243,6 +243,7 @@ final class BriefingViewModel {
             prepare: { [weak self] in
                 self?.cancelBackgroundLensLoads()
                 await self?.flushPendingReadMarks()
+                self?.reconcileReadRetirementsForManualRefresh()
             },
             onIndexResult: { [weak self] result in
                 self?.applyValidatedIndexResult(result)

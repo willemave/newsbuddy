@@ -119,6 +119,27 @@ pub(super) async fn execute_tweet_analysis(
             }
         }
     };
+    let short_text_resolution = resolve_short_text_target(services, &tweet, &included).await;
+    if lease.ownership_lost() {
+        return HandlerExecution::from_result(TaskResult::fail(
+            Some("lease ownership was lost during X short link resolution".to_owned()),
+            true,
+        ));
+    }
+    if let Some(resolution) = short_text_resolution {
+        return finalize_tweet_resolution(
+            services,
+            plan,
+            snapshot,
+            content_id,
+            tweet,
+            lookup_source,
+            canonical_url,
+            resolution,
+            usage,
+        )
+        .await;
+    }
     let Some(token) = services.x_app_bearer_token.as_ref() else {
         let resolution = resolve_tweet_without_lookups(&tweet, included);
         return finalize_tweet_resolution(
@@ -161,6 +182,64 @@ pub(super) async fn execute_tweet_analysis(
         usage,
     )
     .await
+}
+
+async fn resolve_short_text_target(
+    services: &ContentWorkerServices,
+    root: &XTweet,
+    included: &BTreeMap<String, XTweet>,
+) -> Option<TweetTargetResolution> {
+    if !root.external_urls.is_empty() {
+        return None;
+    }
+    let short_url = single_short_url(&tweet_processing_text(root))?;
+    match services.x_lookup.resolve_short_url(&short_url).await {
+        Ok(Some(url)) => Some(known_tweet_resolution(
+            root,
+            included.clone(),
+            url,
+            "root_text_url",
+            &root.id,
+        )),
+        Ok(None) => None,
+        Err(error) => {
+            tracing::warn!(tweet_id = %root.id, error = %error, "X short link resolution failed");
+            None
+        }
+    }
+}
+
+pub(super) fn single_short_url(text: &str) -> Option<String> {
+    let urls = text
+        .split_whitespace()
+        .filter_map(|part| {
+            let candidate = part.trim_matches(|character: char| {
+                matches!(
+                    character,
+                    '(' | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '<'
+                        | '>'
+                        | '"'
+                        | '\''
+                        | ','
+                        | '.'
+                        | ';'
+                        | ':'
+                        | '!'
+                        | '?'
+                )
+            });
+            let url = Url::parse(candidate).ok()?;
+            (url.host_str()
+                .is_some_and(|host| host.eq_ignore_ascii_case("t.co")))
+            .then(|| url.to_string())
+        })
+        .collect::<Vec<_>>();
+    (urls.len() == 1).then(|| urls[0].clone())
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]

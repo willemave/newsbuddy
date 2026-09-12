@@ -37,3 +37,5 @@ C17. Generated long-form artwork keeps its focal subject and story-bearing detai
 C19. Typed article and podcast detail exposes one complete canonical artifact, with its duplicate optional carriers null and duplicate arrays empty while retaining all public top-level keys. Compact list previews remain available, and legacy summary and news representations retain their existing behavior.
 
 C20. Dedicated source-body responses preserve the complete stored article or transcript, including its ending. Full-content sharing must not silently substitute a rendering excerpt for that source.
+
+C21. X Note Tweet links use the provider's expanded entity destination when available. A lone trusted `t.co` link in Note Tweet text may be resolved to its final non-X HTTP(S) destination; ambiguous or still-X links remain part of the post instead of being promoted as an article target.

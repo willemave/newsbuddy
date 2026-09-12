@@ -302,6 +302,14 @@ e2b_namespace = "none"
 
 [[routes]]
 method = "GET"
+path = "/api/briefing/refresh/{task_id}"
+operation_id = "getBriefingRefreshStatus"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "GET"
 path = "/api/content/"
 operation_id = "listContents"
 current_owner = "rust"

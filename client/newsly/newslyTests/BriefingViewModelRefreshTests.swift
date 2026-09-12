@@ -3,6 +3,50 @@ import XCTest
 
 @MainActor
 final class BriefingViewModelRefreshTests: XCTestCase {
+    func testPullToRefreshDropsRetiredReadSegmentsWithoutRebuildingTheEdition() async {
+        let service = MockBriefingService()
+        let readSegment = makeSegment(id: 10, sourceKeys: ["content:1"])
+        let summary = makeLensSummary(key: "today", segmentCount: 1)
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [summary]), etag: "etag-1"),
+            .value(makeIndex(version: 2, lenses: [summary]), etag: "etag-2"),
+            .notModified
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(key: "today", version: 1, segments: [readSegment]),
+            makeLens(key: "today", version: 2, segments: [])
+        ]
+        service.readMarkResponse = APIBriefingReadMarkResponse(
+            marked: 1,
+            retired: 1,
+            version: 2
+        )
+        service.refreshResponse = APIBriefingRefreshResponse(
+            enqueued: true,
+            taskId: 42,
+            version: 2
+        )
+        let viewModel = BriefingViewModel(service: service, refreshPollDelays: [1_000_000])
+
+        viewModel.setActive(true)
+        await waitForBriefingCondition { viewModel.selectedLens?.segments.map(\.id) == [10] }
+        viewModel.markSegmentSeen(readSegment)
+        await waitForBriefingCondition(timeoutNanoseconds: 1_500_000_000) {
+            viewModel.index?.version == 2 && viewModel.selectedLens?.segments.map(\.id) == [10]
+        }
+
+        await viewModel.pullToRefresh()
+        await waitForBriefingCondition {
+            viewModel.selectedLens?.version == 2
+                && viewModel.selectedLens?.segments.isEmpty == true
+                && viewModel.refreshPhase == .idle
+        }
+
+        XCTAssertEqual(service.refreshRequestCount, 1)
+        XCTAssertEqual(service.refreshStatusTaskIDs, [42])
+        XCTAssertEqual(service.fetchLensKeys.filter { $0 == "today" }.count, 2)
+    }
+
     func testPullToRefreshFlushesPendingReadMarksBeforeForceLoad() async {
         let service = MockBriefingService()
         let segment = makeSegment(id: 10, sourceKeys: ["content:1"])
@@ -143,28 +187,89 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         XCTAssertEqual(service.refreshRequestCount, 1)
     }
 
-    func testManualRefreshPollsPastOldDelayAndAppliesLaterVersion() async {
+    func testManualRefreshPollsUntilTaskCompletesAndAppliesLatestIndex() async {
         let service = MockBriefingService()
         service.indexResults = [
             .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
             .value(makeIndex(version: 2, lenses: [makeLensSummary(key: "today")]), etag: "etag-2")
         ]
         service.lensResponses["today"] = makeLens(key: "today", version: 1)
+        service.refreshResponse = APIBriefingRefreshResponse(
+            enqueued: true,
+            taskId: 42,
+            version: 1
+        )
+        service.refreshStatusResults = [
+            APIBriefingRefreshStatusResponse(taskId: 42, status: .pending, version: 1),
+            APIBriefingRefreshStatusResponse(taskId: 42, status: .processing, version: 1),
+            APIBriefingRefreshStatusResponse(taskId: 42, status: .completed, version: 2)
+        ]
         let viewModel = BriefingViewModel(
             service: service,
-            refreshPollDelays: [400_000_000]
+            refreshPollDelays: [1_000_000, 1_000_000, 1_000_000]
         )
         viewModel.setActive(true)
         await waitForBriefingCondition { viewModel.selectedLens?.version == 1 }
         service.lensResponses["today"] = makeLens(key: "today", version: 2)
 
         await viewModel.pullToRefresh()
-        XCTAssertEqual(viewModel.refreshPhase, .waitingForVersion)
+        XCTAssertEqual(viewModel.refreshPhase, .waitingForCompletion)
         await waitForBriefingCondition(timeoutNanoseconds: 1_000_000_000) {
             viewModel.selectedLens?.version == 2
         }
 
         XCTAssertEqual(viewModel.refreshPhase, .idle)
+        XCTAssertEqual(service.refreshStatusTaskIDs, [42, 42, 42])
+    }
+
+    func testSameVersionTaskCompletionEndsRefreshWithoutWaitingForVersionChange() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
+            .notModified
+        ]
+        service.lensResponses["today"] = makeLens(key: "today", version: 1)
+        service.refreshResponse = APIBriefingRefreshResponse(
+            enqueued: true,
+            taskId: 42,
+            version: 1
+        )
+        service.refreshStatusResults = [
+            APIBriefingRefreshStatusResponse(taskId: 42, status: .completed, version: 1)
+        ]
+        let viewModel = BriefingViewModel(service: service, refreshPollDelays: [1_000_000])
+        viewModel.setActive(true)
+        await waitForBriefingCondition { viewModel.selectedLens?.version == 1 }
+
+        await viewModel.pullToRefresh()
+        await waitForBriefingCondition { viewModel.refreshPhase == .idle }
+
+        XCTAssertEqual(service.refreshStatusTaskIDs, [42])
+        XCTAssertEqual(service.indexEtags, [nil, "etag-1"])
+        XCTAssertEqual(viewModel.selectedLens?.version, 1)
+    }
+
+    func testFailedRefreshTaskProducesActionLevelFailure() async {
+        let service = MockBriefingService()
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1")
+        ]
+        service.lensResponses["today"] = makeLens(key: "today", version: 1)
+        service.refreshStatusResults = [
+            APIBriefingRefreshStatusResponse(taskId: 1, status: .failed, version: 1)
+        ]
+        let viewModel = BriefingViewModel(service: service, refreshPollDelays: [1_000_000])
+        viewModel.setActive(true)
+        await waitForBriefingCondition { viewModel.selectedLens != nil }
+
+        await viewModel.pullToRefresh()
+        await waitForBriefingCondition {
+            if case .failed = viewModel.refreshPhase { return true }
+            return false
+        }
+
+        XCTAssertEqual(service.indexEtags, [nil])
+        XCTAssertNotNil(viewModel.selectedLens)
     }
 
     func testDeactivationDuringRefreshRequestDoesNotStartPolling() async {

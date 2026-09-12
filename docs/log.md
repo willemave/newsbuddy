@@ -35,7 +35,18 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Added request/snapshot/enqueue, queue wait, script mode/model/usage, speech response/stitch/storage, committed finalization, readiness polling, and playback-progress timing without logging source content or credentials. The startup plan documents correlation, nested durations, measurement limits, and a future OpenAI/ElevenLabs comparison.
 - **Validation:** Rust formatting and warning-denied Clippy passed for `newsly-providers`, `newsly-worker`, and `newsly-api`, including all targets. Focused provider audio tests, three narration API tests (including atomic deduplicated retry), and two worker finalizer retry/failure tests passed; database tests used a disposable local PostgreSQL cluster, stopped on exit. Final XcodeBuildMCP run passed all 26 BriefingNarrationController/NarrationPlaybackService tests. Diff checks passed. No paid provider calls or production mutations.
 - **Remaining:** Capture first play, resume, and chapter transition on an instrumented runtime before choosing an optimization or provider. First playback progress has 0.5-second sampling precision and does not prove physical audibility. No streaming/provider behavior changed; no deployment performed.
-- **Commits:** This commit; local merge to main requested. No push or deployment requested.
+- **Commits:** `480c3509`; merged with current local main, preserving both engineering-log entries. No push or deployment requested.
+- **Merge validation:** The latest main's X provider exceeded the existing 1,000-line guardrail. Moved its unchanged URL helpers and tests into adjacent modules to satisfy the hook; no provider policy or parsing behavior changed. All five X provider tests passed.
+
+### 2026-09-12 — `willem/recover-refresh-x-note` — Recover Briefing refresh and X Note Tweet work
+
+- **Status:** Complete locally; ready for review.
+- **Scope:** Durable Briefing refresh completion across Rust contracts/API/DB and SwiftUI, plus X Note Tweet external-link extraction in the provider and content worker.
+- **Decisions:** Treat the accepted durable task as the refresh completion authority instead of restoring the stale synchronous no-work preflight. Every accepted refresh returns a required task id; task completion is terminal even when the Briefing version is unchanged. Keep manual generation in append mode; an explicit list refresh only releases the client retention of server-retired read segments and reloads the selected lens. Prefer structured nested Note Tweet entities, with a bounded exact-`t.co` redirect fallback only when the note contains one short link and no expanded external URL.
+- **Changes:** Added an owner-scoped refresh-status endpoint and generated client contracts, task-aware iOS polling with same-version and failure handling, and the reduced-motion-aware animated AppMark waiting state. Pull-to-refresh now removes already-retired read segments from the visible list and rehydrates that lens without recomposing the edition. X mapping reads nested note entity sets and the content worker can resolve a lone trusted short link before falling back to native tweet text. Also retained the recovered Briefing source-link styling commit on this branch.
+- **Validation:** Rust formatting and warning-denied Clippy passed for API, contracts, DB, providers, and worker. Focused provider tests passed (5), worker content-handler tests passed (9), and the owner-scoped PostgreSQL refresh observation test passed against local PostgreSQL. Public contracts regenerated and drift check passed. All 12 native Briefing refresh tests and all 6 adjacent retention tests passed on an Xcode-built iPhone 17 Simulator, including same-version completion, failed-task handling, explicit list removal, and preservation of ordinary reading position. Diff checks passed.
+- **Remaining:** Human review of the combined branch; no push, deployment, or production mutation was requested.
+- **Commits:** `374cae97`, `eacdf425`, `87ea4ce1`, `ac0ff66e`, `ae02b1d5`.
 
 ### 2026-09-12 — `main` — Agent skill boundaries and model roles
 
@@ -46,6 +57,16 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** All nine modified skills passed the skill validator; diffs and whitespace checks passed in both repositories. Writing Assistant SHA-256 is unchanged. Instruction-only changes; no application tests or live model calls were run.
 - **Remaining:** Observe routing in subsequent tasks; release-skill deduplication, retired remote-debug commands, and config cleanup remain outside this edit.
 - **Commits:** Included in the local main commit for agent guidance; no push or deployment requested.
+
+### 2026-09-12 — `codex/briefing-links-no-underline` — Briefing links without underlines
+
+- **Status:** Implemented locally; sample-text visual comparison captured.
+- **Scope:** iOS Briefing passage link styling.
+- **Decisions:** Remove underlines from structured and Markdown source links while preserving accent color and link destinations for a visual trial.
+- **Validation:** `newsly` built and launched on iPhone 17 Pro Max (iOS 26.3); all 11 existing BriefingAttributedTextBuilderTests passed, including source-link destination coverage. UI snapshot and screenshot showed the startup spinner, so the Briefing appearance and live tapping were not visually verified.
+- **Remaining:** Live authenticated Briefing preview remains blocked at app startup.
+- **Visual follow-up:** Captured before/after screenshots on iPhone 17 Pro Max using the actual Briefing passage renderer and identical sample text through a temporary DEBUG preview; removed the temporary preview afterward. The screenshots remained in the source worktree and are not included in this branch.
+- **Commits:** Included in the Briefing link styling commit.
 
 ### 2026-09-11 — `main` — Relax News Briefing density
 

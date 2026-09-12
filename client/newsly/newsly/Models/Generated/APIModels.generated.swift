@@ -3418,30 +3418,72 @@ struct APIBriefingNarrationResponse: Codable {
 
 struct APIBriefingRefreshResponse: Codable {
     let enqueued: Bool
+    let taskId: Int
     let version: Int
 
     init(
         enqueued: Bool,
+        taskId: Int,
         version: Int
     ) {
         self.enqueued = enqueued
+        self.taskId = taskId
         self.version = version
     }
 
     enum CodingKeys: String, CodingKey {
         case enqueued = "enqueued"
+        case taskId = "task_id"
         case version = "version"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         enqueued = try container.decode(Bool.self, forKey: .enqueued)
+        taskId = try container.decode(Int.self, forKey: .taskId)
         version = try container.decode(Int.self, forKey: .version)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(enqueued, forKey: .enqueued)
+        try container.encode(taskId, forKey: .taskId)
+        try container.encode(version, forKey: .version)
+    }
+}
+
+struct APIBriefingRefreshStatusResponse: Codable {
+    let taskId: Int
+    let status: APIBriefingRefreshStatus
+    let version: Int
+
+    init(
+        taskId: Int,
+        status: APIBriefingRefreshStatus,
+        version: Int
+    ) {
+        self.taskId = taskId
+        self.status = status
+        self.version = version
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case taskId = "task_id"
+        case status = "status"
+        case version = "version"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        taskId = try container.decode(Int.self, forKey: .taskId)
+        status = try container.decode(APIBriefingRefreshStatus.self, forKey: .status)
+        version = try container.decode(Int.self, forKey: .version)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(taskId, forKey: .taskId)
+        try container.encode(status, forKey: .status)
         try container.encode(version, forKey: .version)
     }
 }

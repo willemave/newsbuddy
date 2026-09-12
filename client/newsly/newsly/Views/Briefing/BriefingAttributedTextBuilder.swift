@@ -43,7 +43,6 @@ struct BriefingAttributedTextBuilder {
                 if run.kind == .source_link, let sourceKey = run.sourceKey {
                     attributes[.link] = url(for: sourceKey)
                     attributes[.foregroundColor] = UIColor.appAccent
-                    attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
                 }
                 if run.kind == .text && run.bold {
                     attributes[.font] = baseFont.withWeight(.semibold)
@@ -167,7 +166,6 @@ struct BriefingAttributedTextBuilder {
                 var linkAttributes = attributes
                 linkAttributes[.link] = url
                 linkAttributes[.foregroundColor] = UIColor.appAccent
-                linkAttributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
                 output.append(NSAttributedString(
                     string: nsText.substring(with: match.range(at: 1)),
                     attributes: linkAttributes

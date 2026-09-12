@@ -6,7 +6,7 @@ Briefing and the Knowledge list share the same bottom-edge fade, kept low behind
 
 B2. Eligible sources are completed, unread, non-skipped articles, podcasts, and news that the authenticated user can open directly.
 
-B3. A source key is the canonical unit of coverage, citation, and read state.
+B3. A source key is the canonical unit of coverage, citation, and read state. Briefing passage links retain their accent color and tap destination without an underline.
 
 B4. Article and podcast segments cover one source each, while news segments may combine several sources into a compact roundup. News prose follows a concise newspaper-brief style: a single-event passage never exceeds 40 words, while a multi-event roundup targets 45-65 words and never exceeds 75. Linked descriptive noun phrases appear early and fit grammatically into their sentence without duplicating a predicate. Supporting prose selects useful context or material qualifications without repeating the link, substituting a feature inventory, or expanding merely to reach a target; thematic connections appear only when informative. A news segment is sized by the distinct events it covers, not by source count: sources covering one event always stay in the same segment, however many there are.
 
@@ -18,13 +18,13 @@ B7. One user-scoped version identifies the complete visible Briefing. Every visi
 
 B8. Paging at one fixed version returns the same ordered segments, sources, read flags, and summary as the complete lens.
 
-B9. Refreshes may coalesce, but publication requires successful composition and unchanged version, source ownership, and eligibility. Failed or stale work leaves the last usable edition intact.
+B9. Refreshes may coalesce, but publication requires successful composition and unchanged version, source ownership, and eligibility. A manual refresh observes its exact durable task, so successful same-version completion terminates without waiting for a version-change deadline. Failed or stale work leaves the last usable edition intact.
 
 B10. Server state remains authoritative. Local snapshots support cold starts, and recoverable failures, retries, or reopening preserve readable content while unfinished work resumes safely.
 
 B11. A segment becomes read only after it was visible and its full rendered body passes above the readable viewport boundary. Initial offscreen geometry never marks it read.
 
-B12. Reading a segment marks its full source batch once, and the segment retires when every source is read. Marking a lens read covers every active source and canonical duplicate representative. A successful read-mutation response is durable and visible to the next Briefing index read.
+B12. Reading a segment marks its full source batch once, and the segment retires when every source is read. The current reading view may retain that segment briefly for positional stability, but an explicit list refresh removes server-retired segments without recomposing the edition. Marking a lens read covers every active source and canonical duplicate representative. A successful read-mutation response is durable and visible to the next Briefing index read.
 
 B13. Read-only styling preserves scroll position and cannot be reversed by an index response from before an accepted read mutation. Outside that reconciliation window, the latest server index remains authoritative even when its version is lower. Replacing the ordered document resets the lens to the top without interrupting the readable view during refresh.
 
