@@ -24,7 +24,7 @@ B10. Server state remains authoritative. Local snapshots support cold starts, an
 
 B11. A segment becomes read only after it was visible and its full rendered body passes above the readable viewport boundary. Initial offscreen geometry never marks it read.
 
-B12. Reading a segment marks its full source batch once, and the segment retires when every source is read. Marking a lens read covers every active source and canonical duplicate representative. A successful read-mutation response is durable and visible to the next Briefing index read.
+B12. Reading a segment marks its full source batch once, and the segment retires when every source is read. The current reading view may retain that segment briefly for positional stability, but an explicit list refresh removes server-retired segments without recomposing the edition. Marking a lens read covers every active source and canonical duplicate representative. A successful read-mutation response is durable and visible to the next Briefing index read.
 
 B13. Read-only styling preserves scroll position and cannot be reversed by an index response from before an accepted read mutation. Outside that reconciliation window, the latest server index remains authoritative even when its version is lower. Replacing the ordered document resets the lens to the top without interrupting the readable view during refresh.
 

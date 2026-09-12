@@ -3,6 +3,50 @@ import XCTest
 
 @MainActor
 final class BriefingViewModelRefreshTests: XCTestCase {
+    func testPullToRefreshDropsRetiredReadSegmentsWithoutRebuildingTheEdition() async {
+        let service = MockBriefingService()
+        let readSegment = makeSegment(id: 10, sourceKeys: ["content:1"])
+        let summary = makeLensSummary(key: "today", segmentCount: 1)
+        service.indexResults = [
+            .value(makeIndex(version: 1, lenses: [summary]), etag: "etag-1"),
+            .value(makeIndex(version: 2, lenses: [summary]), etag: "etag-2"),
+            .notModified
+        ]
+        service.lensPageResponses["today"] = [
+            makeLens(key: "today", version: 1, segments: [readSegment]),
+            makeLens(key: "today", version: 2, segments: [])
+        ]
+        service.readMarkResponse = APIBriefingReadMarkResponse(
+            marked: 1,
+            retired: 1,
+            version: 2
+        )
+        service.refreshResponse = APIBriefingRefreshResponse(
+            enqueued: true,
+            taskId: 42,
+            version: 2
+        )
+        let viewModel = BriefingViewModel(service: service, refreshPollDelays: [1_000_000])
+
+        viewModel.setActive(true)
+        await waitForBriefingCondition { viewModel.selectedLens?.segments.map(\.id) == [10] }
+        viewModel.markSegmentSeen(readSegment)
+        await waitForBriefingCondition(timeoutNanoseconds: 1_500_000_000) {
+            viewModel.index?.version == 2 && viewModel.selectedLens?.segments.map(\.id) == [10]
+        }
+
+        await viewModel.pullToRefresh()
+        await waitForBriefingCondition {
+            viewModel.selectedLens?.version == 2
+                && viewModel.selectedLens?.segments.isEmpty == true
+                && viewModel.refreshPhase == .idle
+        }
+
+        XCTAssertEqual(service.refreshRequestCount, 1)
+        XCTAssertEqual(service.refreshStatusTaskIDs, [42])
+        XCTAssertEqual(service.fetchLensKeys.filter { $0 == "today" }.count, 2)
+    }
+
     func testPullToRefreshFlushesPendingReadMarksBeforeForceLoad() async {
         let service = MockBriefingService()
         let segment = makeSegment(id: 10, sourceKeys: ["content:1"])

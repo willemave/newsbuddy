@@ -243,6 +243,7 @@ final class BriefingViewModel {
             prepare: { [weak self] in
                 self?.cancelBackgroundLensLoads()
                 await self?.flushPendingReadMarks()
+                self?.reconcileReadRetirementsForManualRefresh()
             },
             onIndexResult: { [weak self] result in
                 self?.applyValidatedIndexResult(result)
