@@ -7,6 +7,28 @@ private let briefingNarrationLogger = Logger(
     category: "BriefingNarration"
 )
 
+/// Local monotonic milestones; group and episode IDs join these with server/player logs.
+private struct BriefingNarrationTiming {
+    let id = UUID()
+    let startedAt = ContinuousClock.now
+
+    func log(
+        _ stage: String,
+        narration: BriefingNarration? = nil,
+        episodeID: Int? = nil,
+        attempt: Int = 0,
+        operationStartedAt: ContinuousClock.Instant? = nil
+    ) {
+        let elapsed = startedAt.duration(to: .now).components
+        let operation = (operationStartedAt ?? startedAt).duration(to: .now).components
+        let elapsedMs = elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000
+        let operationMs = operation.seconds * 1000 + operation.attoseconds / 1_000_000_000_000_000
+        briefingNarrationLogger.info(
+            "Briefing audio timing | trace=\(id.uuidString, privacy: .public) stage=\(stage, privacy: .public) group=\(narration?.episodeGroupId ?? "none", privacy: .public) episodeId=\(episodeID ?? -1) attempt=\(attempt) elapsedMs=\(elapsedMs) operationMs=\(operationMs)"
+        )
+    }
+}
+
 @MainActor
 protocol BriefingAudioEpisodeServicing: AnyObject {
     func streamResource(for episode: AudioEpisode) async throws -> AuthorizedMediaResource
@@ -159,15 +181,22 @@ final class BriefingNarrationController {
         }
         guard !session(for: lensKey).isPreparing else { return }
         let playbackIntentID = beginPlaybackIntent()
+        let timing = BriefingNarrationTiming()
+        timing.log("play_intent")
         if case .finished(let readMarks) = session(for: lensKey).edition {
             await readMarks.value
-            guard self.playbackIntentID == playbackIntentID else { return }
+            timing.log("read_marks_finished")
+            guard self.playbackIntentID == playbackIntentID else {
+                timing.log("superseded")
+                return
+            }
             sessions[lensKey] = BriefingNarrationSession()
         }
         await playChapter(
             at: narrationChapterIndex(for: lensKey),
             for: lensKey,
-            playbackIntentID: playbackIntentID
+            playbackIntentID: playbackIntentID,
+            timing: timing
         )
     }
 
@@ -193,11 +222,15 @@ final class BriefingNarrationController {
     private func playChapter(
         at chapterIndex: Int,
         for lensKey: String,
-        playbackIntentID: UUID
+        playbackIntentID: UUID,
+        timing: BriefingNarrationTiming = BriefingNarrationTiming()
     ) async {
         guard self.playbackIntentID == playbackIntentID else { return }
         guard !session(for: lensKey).isPreparing else { return }
         clearError(for: lensKey)
+        timing.log("chapter_preparation_started", narration: narration(for: lensKey))
+        var startupOutcome = "superseded"
+        defer { timing.log(startupOutcome, narration: narration(for: lensKey)) }
 
         let requestedTarget: NarrationTarget?
         if let narration = narration(for: lensKey),
@@ -228,6 +261,7 @@ final class BriefingNarrationController {
             guard self.playbackIntentID == playbackIntentID else { return }
             guard let narration = narration(for: lensKey),
                   narration.chapters.indices.contains(chapterIndex) else { return }
+            timing.log("chapter_ready", narration: narration, episodeID: episode.id)
             let metadata = NarrationPlaybackMetadata(
                 title: episode.title,
                 collectionTitle: narration.collectionTitle,
@@ -256,6 +290,7 @@ final class BriefingNarrationController {
             } else {
                 remoteNext = nil
             }
+            timing.log("player_requested", narration: narration, episodeID: episode.id)
             try await playbackService.playStreamingNarration(
                 for: .audioEpisode(episode.id),
                 rate: playbackService.playbackRate,
@@ -272,12 +307,24 @@ final class BriefingNarrationController {
                     )
                 }
             ) { [audioEpisodeService] in
-                try await audioEpisodeService.streamResource(for: episode)
+                let authorizationStartedAt = ContinuousClock.now
+                timing.log("authorization_started", narration: narration, episodeID: episode.id)
+                let resource = try await audioEpisodeService.streamResource(for: episode)
+                timing.log(
+                    "authorization_finished",
+                    narration: narration,
+                    episodeID: episode.id,
+                    operationStartedAt: authorizationStartedAt
+                )
+                return resource
             }
+            startupOutcome = "player_handoff_finished"
         } catch where ClientFailure.classify(error) == .cancelled {
+            startupOutcome = "cancelled"
             return
         } catch {
             guard self.playbackIntentID == playbackIntentID else { return }
+            startupOutcome = "failed"
             briefingNarrationLogger.error(
                 "Narration playback failed | lensKey=\(lensKey, privacy: .public) error=\(error.localizedDescription, privacy: .private)"
             )
@@ -308,6 +355,12 @@ final class BriefingNarrationController {
         at chapterIndex: Int,
         for lensKey: String
     ) async throws -> AudioEpisode {
+        let timing = BriefingNarrationTiming()
+        var outcome = "failed"
+        var attempts = 0
+        defer {
+            timing.log(Task.isCancelled ? "cancelled" : outcome, narration: narration(for: lensKey), attempt: attempts)
+        }
         var currentNarration: BriefingNarration
         if let cachedNarration = narration(for: lensKey) {
             currentNarration = cachedNarration
@@ -331,21 +384,26 @@ final class BriefingNarrationController {
             }
             let chapter = currentNarration.chapters[chapterIndex]
             if chapter.isCompleted {
+                outcome = "requested_chapter_ready"
                 return chapter
             }
             if chapter.isFailed {
                 throw AudioEpisodeServiceError.generationFailed
             }
 
+            let pollStartedAt = ContinuousClock.now
+            attempts = attempt + 1
             currentNarration = try await briefingService.fetchNarration(
                 episodeGroupID: currentNarration.episodeGroupId
             )
             try Task.checkCancellation()
             storeNarration(currentNarration, for: lensKey)
+            timing.log("chapter_poll_finished", narration: currentNarration, attempt: attempts, operationStartedAt: pollStartedAt)
             guard currentNarration.chapters.indices.contains(chapterIndex) else {
                 throw AudioEpisodeServiceError.generationFailed
             }
             if currentNarration.chapters[chapterIndex].isCompleted {
+                outcome = "requested_chapter_ready"
                 return currentNarration.chapters[chapterIndex]
             }
             if currentNarration.chapters[chapterIndex].isFailed {
@@ -356,6 +414,7 @@ final class BriefingNarrationController {
             }
         }
 
+        outcome = "timed_out"
         throw AudioEpisodeServiceError.preparationTimedOut
     }
 
@@ -434,16 +493,28 @@ final class BriefingNarrationController {
         pollIntervalNanoseconds: UInt64,
         maxAttempts: Int
     ) async -> PreparationOutcome {
+        let timing = BriefingNarrationTiming()
+        var outcome = "failed"
+        var attempts = 0
         var current = cachedNarration
+        defer {
+            timing.log(Task.isCancelled ? "cancelled" : outcome, narration: current, attempt: attempts)
+        }
+        timing.log("manifest_preparation_started", narration: current)
         do {
             if let current, current.playable, current.firstPlayableChapter != nil {
+                outcome = "cached_manifest_ready"
                 return .ready(current)
             }
 
             if let failed = current, failed.status == .failed {
+                let requestStartedAt = ContinuousClock.now
                 current = try await retryNarration(failed, service: briefingService)
+                timing.log("retry_command_finished", narration: current, operationStartedAt: requestStartedAt)
             } else if current == nil {
+                let requestStartedAt = ContinuousClock.now
                 current = try await briefingService.requestNarration(lensKey: lensKey)
+                timing.log("request_command_finished", narration: current, operationStartedAt: requestStartedAt)
                 try Task.checkCancellation()
             }
 
@@ -451,20 +522,25 @@ final class BriefingNarrationController {
                 return .failed(AudioEpisodeServiceError.generationFailed, cachedNarration: nil)
             }
             if narration.playable, narration.firstPlayableChapter != nil {
+                outcome = "manifest_ready"
                 return .ready(narration)
             }
             if narration.status == .failed {
                 return .failed(AudioEpisodeServiceError.generationFailed, cachedNarration: narration)
             }
 
-            for _ in 0..<maxAttempts {
+            for attempt in 0..<maxAttempts {
                 try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+                let pollStartedAt = ContinuousClock.now
+                attempts = attempt + 1
                 narration = try await briefingService.fetchNarration(
                     episodeGroupID: narration.episodeGroupId
                 )
                 current = narration
+                timing.log("manifest_poll_finished", narration: current, attempt: attempts, operationStartedAt: pollStartedAt)
                 try Task.checkCancellation()
                 if narration.playable, narration.firstPlayableChapter != nil {
+                    outcome = "manifest_ready"
                     return .ready(narration)
                 }
                 if narration.status == .failed {
@@ -472,8 +548,10 @@ final class BriefingNarrationController {
                 }
             }
 
+            outcome = "timed_out"
             return .failed(AudioEpisodeServiceError.preparationTimedOut, cachedNarration: current)
         } catch let error where ClientFailure.classify(error) == .cancelled {
+            outcome = "cancelled"
             return .failed(error, cachedNarration: cachedNarration)
         } catch {
             return .failed(error, cachedNarration: current)

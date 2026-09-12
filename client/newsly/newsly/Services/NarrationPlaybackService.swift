@@ -11,8 +11,9 @@ import os.log
 private let narrationPlaybackLogger = Logger(subsystem: "com.newsly", category: "NarrationPlayback")
 typealias NarrationPlaybackFinishedHandler = @MainActor (NarrationTarget, Task<Void, Never>) -> Void
 
-private func narrationElapsedMilliseconds(since start: Date) -> Int {
-    Int(Date().timeIntervalSince(start) * 1000)
+private func narrationElapsedMilliseconds(since start: ContinuousClock.Instant) -> Int {
+    let duration = start.duration(to: .now).components
+    return Int(duration.seconds * 1000 + duration.attoseconds / 1_000_000_000_000_000)
 }
 
 @MainActor
@@ -94,7 +95,7 @@ final class NarrationPlaybackService {
     private var savedPlaybackPositions: [NarrationTarget: TimeInterval] = [:]
 
     @ObservationIgnored
-    private var playbackStartedAt: Date?
+    private var playbackStartedAt: ContinuousClock.Instant?
 
     @ObservationIgnored
     private var playbackItemReadyLogged = false
@@ -107,6 +108,9 @@ final class NarrationPlaybackService {
 
     @ObservationIgnored
     private var playbackFirstProgressLogged = false
+
+    @ObservationIgnored
+    private var playbackProgressBaseline: TimeInterval = 0
 
     @ObservationIgnored
     private var playbackRequestGeneration = 0
@@ -199,7 +203,7 @@ final class NarrationPlaybackService {
         onFinished: NarrationPlaybackFinishedHandler? = nil,
         fetchStreamResource: () async throws -> AuthorizedMediaResource
     ) async throws {
-        let startedAt = Date()
+        let startedAt = ContinuousClock.now
         narrationPlaybackLogger.info(
             "Streaming narration requested | target=\(String(describing: target), privacy: .public) rate=\(rate)"
         )
@@ -207,7 +211,7 @@ final class NarrationPlaybackService {
 
         if speakingTarget == target {
             playbackFinishedHandler = onFinished
-            if try resumeStreamIfNeeded(for: target) {
+            if try resumeStreamIfNeeded(for: target, startedAt: startedAt) {
                 activateNowPlaying(
                     metadata: metadata,
                     target: target,
@@ -250,13 +254,17 @@ final class NarrationPlaybackService {
                 metadata: metadata,
                 remotePrevious: remotePrevious,
                 remoteNext: remoteNext,
-                onFinished: onFinished
+                onFinished: onFinished,
+                startupStartedAt: startedAt
             )
         } catch where ClientFailure.classify(error) == .cancelled {
+            narrationPlaybackLogger.info(
+                "Streaming narration cancelled before playback | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt))"
+            )
             throw CancellationError()
         } catch {
             narrationPlaybackLogger.error(
-                "Streaming narration failed before playback | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+                "Streaming narration failed before playback | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .private)"
             )
             throw error
         }
@@ -269,9 +277,10 @@ final class NarrationPlaybackService {
         metadata: NarrationPlaybackMetadata? = nil,
         remotePrevious: (@MainActor () -> Void)? = nil,
         remoteNext: (@MainActor () -> Void)? = nil,
-        onFinished: NarrationPlaybackFinishedHandler? = nil
+        onFinished: NarrationPlaybackFinishedHandler? = nil,
+        startupStartedAt: ContinuousClock.Instant? = nil
     ) throws -> AVPlayerItem {
-        let startedAt = Date()
+        let startedAt = ContinuousClock.now
         let resumeTime = savedPlaybackPositions[target] ?? 0
         stop()
         do {
@@ -293,7 +302,8 @@ final class NarrationPlaybackService {
             isSpeaking = true
             isPaused = false
             progress.reset()
-            playbackStartedAt = startedAt
+            playbackStartedAt = startupStartedAt ?? startedAt
+            playbackProgressBaseline = resumeTime
             playbackItemReadyLogged = false
             playbackTimeControlPlayingLogged = false
             playbackTimeControlWaitingLogged = false
@@ -326,7 +336,7 @@ final class NarrationPlaybackService {
             return item
         } catch {
             narrationPlaybackLogger.error(
-                "AVPlayer stream setup failed | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .public)"
+                "AVPlayer stream setup failed | target=\(String(describing: target), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: startedAt)) error=\(error.localizedDescription, privacy: .private)"
             )
             resetPlaybackState()
             throw error
@@ -336,6 +346,7 @@ final class NarrationPlaybackService {
     func pause() {
         guard let target = speakingTarget else { return }
         if let streamPlayer {
+            logStartupOutcome("paused", for: target)
             let currentSeconds = finiteSeconds(streamPlayer.currentTime().seconds) ?? 0
             savedPlaybackPositions[target] = currentSeconds
             progress.update(
@@ -361,6 +372,7 @@ final class NarrationPlaybackService {
         playbackRequestGeneration += 1
         let target = speakingTarget
         if let target {
+            logStartupOutcome("stopped", for: target)
             narrationPlaybackLogger.info(
                 "Streaming narration stopped | target=\(String(describing: target), privacy: .public) currentSeconds=\(self.currentTime, privacy: .public)"
             )
@@ -397,14 +409,18 @@ final class NarrationPlaybackService {
         try audioSession.setActive(true)
     }
 
-    private func resumeStreamIfNeeded(for target: NarrationTarget) throws -> Bool {
+    private func resumeStreamIfNeeded(
+        for target: NarrationTarget,
+        startedAt: ContinuousClock.Instant = .now
+    ) throws -> Bool {
         guard isPaused, let streamPlayer else { return false }
         try configurePlaybackSession()
         streamPlayer.playImmediately(atRate: playbackRate)
         speakingTarget = target
         isSpeaking = true
         isPaused = false
-        playbackStartedAt = Date()
+        playbackStartedAt = startedAt
+        playbackProgressBaseline = finiteSeconds(streamPlayer.currentTime().seconds) ?? 0
         playbackFirstProgressLogged = false
         syncProgressFromPlayer()
         startProgressTimer()
@@ -450,6 +466,7 @@ final class NarrationPlaybackService {
             let statusDescription = streamItemStatusDescription(item.status)
             let errorDescription = item.error?.localizedDescription
             Task { @MainActor [weak self] in
+                guard self?.playbackSessionID == playbackSessionID else { return }
                 self?.logStreamItemStatus(
                     isReady: isReady,
                     isFailed: isFailed,
@@ -494,6 +511,7 @@ final class NarrationPlaybackService {
               speakingTarget == target else {
             return
         }
+        logStartupOutcome("failed", for: target)
         narrationPlaybackLogger.error(
             "Streaming narration player failed | target=\(String(describing: target), privacy: .public)"
         )
@@ -508,6 +526,7 @@ final class NarrationPlaybackService {
             let statusDescription = streamTimeControlStatusDescription(player.timeControlStatus)
             let waitingReason = player.reasonForWaitingToPlay?.rawValue
             Task { @MainActor [weak self] in
+                guard self?.streamPlayer === player else { return }
                 self?.logStreamTimeControlStatus(
                     isPlaying: isPlaying,
                     isWaiting: isWaiting,
@@ -532,7 +551,7 @@ final class NarrationPlaybackService {
             )
         } else if isFailed {
             narrationPlaybackLogger.error(
-                "AVPlayer item status failed | target=\(String(describing: self.speakingTarget), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: playbackStartedAt)) error=\(errorDescription ?? "unknown", privacy: .public)"
+                "AVPlayer item status failed | target=\(String(describing: self.speakingTarget), privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: playbackStartedAt)) error=\(errorDescription ?? "unknown", privacy: .private)"
             )
         }
     }
@@ -590,7 +609,10 @@ final class NarrationPlaybackService {
     private func syncProgressFromPlayer() {
         if let streamPlayer {
             let currentSeconds = finiteSeconds(streamPlayer.currentTime().seconds) ?? 0
-            if currentSeconds > 0,
+            // This is an observed progress milestone, quantized by the 0.5-second timer.
+            // A restored seek position alone must not count as resumed playback.
+            if currentSeconds > playbackProgressBaseline,
+               streamPlayer.timeControlStatus == .playing,
                !playbackFirstProgressLogged,
                let playbackStartedAt {
                 playbackFirstProgressLogged = true
@@ -608,6 +630,13 @@ final class NarrationPlaybackService {
         progress.reset()
     }
 
+    private func logStartupOutcome(_ outcome: String, for target: NarrationTarget) {
+        guard let playbackStartedAt, !playbackFirstProgressLogged else { return }
+        narrationPlaybackLogger.info(
+            "Streaming narration startup ended | target=\(String(describing: target), privacy: .public) outcome=\(outcome, privacy: .public) elapsedMs=\(narrationElapsedMilliseconds(since: playbackStartedAt))"
+        )
+    }
+
     private func resetPlaybackState(clearSavedPositionFor target: NarrationTarget? = nil) {
         stopProgressTimer()
         removeStreamObservers()
@@ -622,6 +651,7 @@ final class NarrationPlaybackService {
         speakingTarget = nil
         progress.reset()
         playbackStartedAt = nil
+        playbackProgressBaseline = 0
         playbackItemReadyLogged = false
         playbackTimeControlPlayingLogged = false
         playbackTimeControlWaitingLogged = false

@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Instant;
 
 use newsly_agent_runtime::ProviderUsage;
 use newsly_db::{
@@ -15,6 +16,7 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::PgPool;
+use tracing::info;
 
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
@@ -89,44 +91,92 @@ async fn execute_generation(
         ));
     };
 
+    let prepare_started = Instant::now();
     let prepared = {
         let mut transaction = match services.pool.begin().await {
             Ok(transaction) => transaction,
-            Err(error) => return plain_failure(error.to_string(), true),
+            Err(error) => {
+                log_timing(plan, audio_episode_id, "prepare", prepare_started, false);
+                return plain_failure(error.to_string(), true);
+            }
         };
         let outcome =
             match prepare_audio_episode_generation(&mut transaction, user_id, audio_episode_id)
                 .await
             {
                 Ok(outcome) => outcome,
-                Err(error) => return plain_failure(error.to_string(), true),
+                Err(error) => {
+                    log_timing(plan, audio_episode_id, "prepare", prepare_started, false);
+                    return plain_failure(error.to_string(), true);
+                }
             };
         if let Err(error) = transaction.commit().await {
+            log_timing(plan, audio_episode_id, "prepare", prepare_started, false);
             return plain_failure(error.to_string(), true);
         }
         match outcome {
             PrepareAudioEpisodeGenerationOutcome::Prepared(episode) => {
                 match prepared_attempt(plan, episode) {
                     Ok(attempt) => attempt,
-                    Err(message) => return plain_failure(message, false),
+                    Err(message) => {
+                        log_timing(plan, audio_episode_id, "prepare", prepare_started, false);
+                        return plain_failure(message, false);
+                    }
                 }
             }
             PrepareAudioEpisodeGenerationOutcome::AlreadyCompleted => {
+                log_timing(plan, audio_episode_id, "prepare", prepare_started, true);
                 return HandlerExecution::from_result(TaskResult::ok());
             }
             PrepareAudioEpisodeGenerationOutcome::AlreadyProcessing => {
+                log_timing(plan, audio_episode_id, "prepare", prepare_started, true);
                 return HandlerExecution::from_result(TaskResult::defer(15));
             }
             PrepareAudioEpisodeGenerationOutcome::NotFound => {
+                log_timing(plan, audio_episode_id, "prepare", prepare_started, false);
                 return plain_failure("Audio episode not found", false);
             }
         }
     };
+    log_timing(plan, audio_episode_id, "prepare", prepare_started, true);
 
+    let script_started = Instant::now();
     let script = match prepare_script(services, &prepared, &mut lease).await {
-        Ok(script) => script,
-        Err(GenerationStageError::LeaseLost) => return lease_lost_failure(),
+        Ok(script) => {
+            info!(
+                task_id = prepared.task_id,
+                audio_episode_id = prepared.audio_episode_id,
+                retry_count = prepared.retry_count,
+                stage = "script_generation",
+                elapsed_ms = elapsed_millis(script_started),
+                succeeded = true,
+                mode = script.mode,
+                model = %script.model,
+                request_count = script.usage.as_ref().map_or(0, |usage| usage.request_count),
+                input_tokens = script.usage.as_ref().map_or(0, |usage| usage.input_tokens),
+                output_tokens = script.usage.as_ref().map_or(0, |usage| usage.output_tokens),
+                cache_read_tokens = script.usage.as_ref().map_or(0, |usage| usage.cache_read_tokens),
+                cache_write_tokens = script.usage.as_ref().map_or(0, |usage| usage.cache_write_tokens),
+                "Audio timing"
+            );
+            script
+        }
+        Err(GenerationStageError::LeaseLost) => {
+            log_script_failure(
+                plan,
+                audio_episode_id,
+                script_started,
+                services.gateway.script_model(),
+            );
+            return lease_lost_failure();
+        }
         Err(GenerationStageError::Provider(error)) => {
+            log_script_failure(
+                plan,
+                audio_episode_id,
+                script_started,
+                services.gateway.script_model(),
+            );
             return failed_execution(
                 services,
                 prepared,
@@ -136,18 +186,39 @@ async fn execute_generation(
             );
         }
         Err(GenerationStageError::Input(message)) => {
+            log_timing(
+                plan,
+                audio_episode_id,
+                "script_generation",
+                script_started,
+                false,
+            );
             return failed_execution(services, prepared, message, false, None);
         }
     };
 
+    let tts_started = Instant::now();
     let dialogue = match provider_call(
         &mut lease,
         services.gateway.synthesize_dialogue(&script.script.turns),
     )
     .await
     {
-        Ok(Ok(dialogue)) => dialogue,
+        Ok(Ok(dialogue)) => {
+            info!(
+                task_id = prepared.task_id,
+                audio_episode_id = prepared.audio_episode_id,
+                retry_count = prepared.retry_count,
+                stage = "tts_total",
+                elapsed_ms = elapsed_millis(tts_started),
+                succeeded = true,
+                model = services.gateway.tts_model(),
+                "Audio timing"
+            );
+            dialogue
+        }
         Ok(Err(error)) => {
+            log_timing(plan, audio_episode_id, "tts_total", tts_started, false);
             let retryable = error.retryable();
             return failed_execution(
                 services,
@@ -157,11 +228,15 @@ async fn execute_generation(
                 Some(script),
             );
         }
-        Err(LeaseLost) => return lease_lost_failure(),
+        Err(LeaseLost) => {
+            log_timing(plan, audio_episode_id, "tts_total", tts_started, false);
+            return lease_lost_failure();
+        }
     };
     if lease.ownership_lost() {
         return lease_lost_failure();
     }
+    let storage_started = Instant::now();
     let audio_storage_path = match services
         .file_store
         .write(
@@ -172,8 +247,24 @@ async fn execute_generation(
         )
         .await
     {
-        Ok(path) => path,
+        Ok(path) => {
+            log_timing(
+                plan,
+                audio_episode_id,
+                "file_storage",
+                storage_started,
+                true,
+            );
+            path
+        }
         Err(error) => {
+            log_timing(
+                plan,
+                audio_episode_id,
+                "file_storage",
+                storage_started,
+                false,
+            );
             let retryable = error.retryable();
             return failed_execution(
                 services,
@@ -265,8 +356,14 @@ async fn prepare_script(
                 text: text.clone(),
             }],
         };
-        return prepared_script(script, text, "deterministic".to_owned(), None)
-            .map_err(GenerationStageError::Input);
+        return prepared_script(
+            script,
+            text,
+            "deterministic".to_owned(),
+            "preauthored",
+            None,
+        )
+        .map_err(GenerationStageError::Input);
     }
     if let Some(existing) = attempt.existing_script.clone()
         && let Ok(script) = serde_json::from_value::<AudioEpisodeScript>(existing)
@@ -280,7 +377,8 @@ async fn prepare_script(
             .existing_model
             .clone()
             .unwrap_or_else(|| services.gateway.script_model().to_owned());
-        return prepared_script(script, text, model, None).map_err(GenerationStageError::Input);
+        return prepared_script(script, text, model, "cache", None)
+            .map_err(GenerationStageError::Input);
     }
     let generated = match provider_call(
         lease,
@@ -296,14 +394,21 @@ async fn prepare_script(
     };
     let usage = script_usage(&generated.model, &generated.usage);
     let text = generated.script.render_text();
-    prepared_script(generated.script, text, generated.model, Some(usage))
-        .map_err(GenerationStageError::Input)
+    prepared_script(
+        generated.script,
+        text,
+        generated.model,
+        "generated",
+        Some(usage),
+    )
+    .map_err(GenerationStageError::Input)
 }
 
 fn prepared_script(
     mut script: AudioEpisodeScript,
     script_text: String,
     model: String,
+    mode: &'static str,
     usage: Option<AudioEpisodeScriptUsage>,
 ) -> Result<PreparedScript, String> {
     if script.title.trim().is_empty() || script.turns.is_empty() || script_text.trim().is_empty() {
@@ -319,6 +424,7 @@ fn prepared_script(
         script_json,
         script_text,
         model,
+        mode,
         duration_seconds,
         usage,
     })
@@ -348,6 +454,42 @@ fn script_usage(model: &str, usage: &ProviderUsage) -> AudioEpisodeScriptUsage {
 
 fn bounded_i32(value: u64) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
+}
+
+fn elapsed_millis(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+fn log_timing(
+    plan: &OwnedWorkPlan,
+    audio_episode_id: i64,
+    stage: &'static str,
+    started: Instant,
+    succeeded: bool,
+) {
+    info!(
+        task_id = plan.task_id,
+        audio_episode_id,
+        retry_count = plan.retry_count,
+        stage,
+        elapsed_ms = elapsed_millis(started),
+        succeeded,
+        "Audio timing"
+    );
+}
+
+fn log_script_failure(plan: &OwnedWorkPlan, audio_episode_id: i64, started: Instant, model: &str) {
+    info!(
+        task_id = plan.task_id,
+        audio_episode_id,
+        retry_count = plan.retry_count,
+        stage = "script_generation",
+        elapsed_ms = elapsed_millis(started),
+        succeeded = false,
+        mode = "generated",
+        model,
+        "Audio timing"
+    );
 }
 
 fn estimate_duration_seconds(text: &str) -> i32 {

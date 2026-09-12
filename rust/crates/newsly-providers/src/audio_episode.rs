@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Formatter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
 use newsly_agent_runtime::{
@@ -183,9 +183,33 @@ impl AudioEpisodeGateway {
         let text_chars = chunks.iter().fold(0_i32, |total, chunk| {
             total.saturating_add(i32::try_from(chunk.text.chars().count()).unwrap_or(i32::MAX))
         });
-        let calls = chunks.iter().map(|chunk| self.synthesize_chunk(chunk));
-        let audio_chunks = try_join_all(calls).await?;
-        let audio_bytes = self.stitch_mp3(&audio_chunks).await?;
+        let calls = chunks
+            .iter()
+            .enumerate()
+            .map(|(index, chunk)| self.synthesize_chunk(index, chunk));
+        let synthesis_started = Instant::now();
+        let audio_chunks = try_join_all(calls).await;
+        tracing::info!(
+            stage = "tts_requests",
+            elapsed_ms = synthesis_started.elapsed().as_millis(),
+            succeeded = audio_chunks.is_ok(),
+            request_count,
+            text_chars,
+            tts_model = %self.config.tts_model,
+            "Audio timing"
+        );
+        let audio_chunks = audio_chunks?;
+        let stitch_started = Instant::now();
+        let audio_bytes = self.stitch_mp3(&audio_chunks).await;
+        tracing::info!(
+            stage = "tts_stitch",
+            elapsed_ms = stitch_started.elapsed().as_millis(),
+            succeeded = audio_bytes.is_ok(),
+            chunk_count = audio_chunks.len(),
+            reencoded = audio_chunks.len() > 1,
+            "Audio timing"
+        );
+        let audio_bytes = audio_bytes?;
         Ok(SynthesizedDialogue {
             audio_bytes,
             request_count,
@@ -193,15 +217,21 @@ impl AudioEpisodeGateway {
         })
     }
 
+    #[tracing::instrument(name = "audio_tts_chunk", skip_all, fields(chunk_index = chunk_index))]
     async fn synthesize_chunk(
         &self,
+        chunk_index: usize,
         chunk: &TtsChunk,
     ) -> Result<Vec<u8>, AudioEpisodeGatewayError> {
-        let _slot = self
-            .tts_slots
-            .acquire()
-            .await
-            .map_err(|_| AudioEpisodeGatewayError::ProviderClosed)?;
+        let slot_started = Instant::now();
+        let slot = self.tts_slots.acquire().await;
+        tracing::info!(
+            stage = "tts_slot_wait",
+            elapsed_ms = slot_started.elapsed().as_millis(),
+            succeeded = slot.is_ok(),
+            "Audio timing"
+        );
+        let _slot = slot.map_err(|_| AudioEpisodeGatewayError::ProviderClosed)?;
         let voice_id = if chunk.speaker == AudioEpisodeSpeaker::Host {
             &self.config.host_voice_id
         } else {
@@ -220,6 +250,7 @@ impl AudioEpisodeGateway {
         endpoint
             .query_pairs_mut()
             .append_pair("output_format", &self.config.output_format);
+        let request_started = Instant::now();
         let response = self
             .client
             .post(endpoint)
@@ -233,7 +264,20 @@ impl AudioEpisodeGateway {
                 },
             })
             .send()
-            .await?;
+            .await;
+        tracing::info!(
+            stage = "tts_response_headers",
+            elapsed_ms = request_started.elapsed().as_millis(),
+            succeeded = response
+                .as_ref()
+                .is_ok_and(|response| response.status().is_success()),
+            status = response
+                .as_ref()
+                .ok()
+                .map(|response| response.status().as_u16()),
+            "Audio timing"
+        );
+        let response = response?;
         let status = response.status();
         if !status.is_success() {
             let detail = response
@@ -250,7 +294,17 @@ impl AudioEpisodeGateway {
         }) {
             return Err(AudioEpisodeGatewayError::AudioTooLarge);
         }
-        let bytes = response.bytes().await?;
+        // Headers are not first audio: this path still buffers the complete body.
+        let body_started = Instant::now();
+        let bytes = response.bytes().await;
+        tracing::info!(
+            stage = "tts_response_body",
+            elapsed_ms = body_started.elapsed().as_millis(),
+            request_elapsed_ms = request_started.elapsed().as_millis(),
+            succeeded = bytes.is_ok(),
+            "Audio timing"
+        );
+        let bytes = bytes?;
         if bytes.is_empty() {
             return Err(AudioEpisodeGatewayError::EmptyAudio);
         }

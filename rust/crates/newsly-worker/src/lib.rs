@@ -65,7 +65,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep};
-use tracing::{error, info, warn};
+use tracing::{Instrument, error, info, warn};
 
 /// A handler receives only an immutable, connection-free work plan plus lease-health state.
 /// Preparing input and persisting output remain kernel responsibilities.
@@ -418,6 +418,73 @@ impl WorkerKernel {
             return Ok(WorkerAttempt::Empty);
         };
 
+        if claim.task_type == TaskType::GenerateAudioEpisode {
+            let attempt_started = Instant::now();
+            let task_id = claim.id;
+            let retry_count = claim.retry_count;
+            let audio_episode_id = claim
+                .payload
+                .get("audio_episode_id")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(-1);
+            let span = tracing::info_span!(
+                "audio_episode_attempt",
+                task_id,
+                audio_episode_id,
+                retry_count,
+            );
+            return async {
+                info!(
+                    task_id,
+                    audio_episode_id,
+                    retry_count,
+                    stage = "queue_ready_to_claim",
+                    elapsed_ms = claim
+                        .started_at
+                        .signed_duration_since(claim.available_at)
+                        .num_milliseconds()
+                        .max(0),
+                    succeeded = true,
+                    "Audio timing"
+                );
+                if let Some(created_at) = claim.created_at {
+                    info!(
+                        task_id,
+                        audio_episode_id,
+                        retry_count,
+                        stage = "queue_creation_to_claim",
+                        elapsed_ms = claim
+                            .started_at
+                            .signed_duration_since(created_at)
+                            .num_milliseconds()
+                            .max(0),
+                        succeeded = true,
+                        "Audio timing"
+                    );
+                }
+
+                let result = self.run_claimed_attempt(claim).await;
+                let (succeeded, outcome) = audio_attempt_outcome(&result);
+                info!(
+                    task_id,
+                    audio_episode_id,
+                    retry_count,
+                    stage = "total_attempt",
+                    elapsed_ms = elapsed_millis(attempt_started),
+                    succeeded,
+                    outcome,
+                    "Audio timing"
+                );
+                result
+            }
+            .instrument(span)
+            .await;
+        }
+
+        self.run_claimed_attempt(claim).await
+    }
+
+    async fn run_claimed_attempt(&self, claim: ClaimedTask) -> Result<WorkerAttempt, WorkerError> {
         if claim.retry_count > self.config.max_retries {
             return self
                 .finalize_attempt(
@@ -589,6 +656,35 @@ impl WorkerKernel {
         claim: &ClaimedTask,
         execution: HandlerExecution,
     ) -> Result<WorkerAttempt, WorkerError> {
+        if claim.task_type != TaskType::GenerateAudioEpisode {
+            return self.finalize_attempt_inner(claim, execution).await;
+        }
+
+        let started = Instant::now();
+        let result = self.finalize_attempt_inner(claim, execution).await;
+        let (succeeded, outcome) = audio_finalization_outcome(&result);
+        info!(
+            task_id = claim.id,
+            audio_episode_id = claim
+                .payload
+                .get("audio_episode_id")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(-1),
+            retry_count = claim.retry_count,
+            stage = "fenced_finalize",
+            elapsed_ms = elapsed_millis(started),
+            succeeded,
+            outcome,
+            "Audio timing"
+        );
+        result
+    }
+
+    async fn finalize_attempt_inner(
+        &self,
+        claim: &ClaimedTask,
+        execution: HandlerExecution,
+    ) -> Result<WorkerAttempt, WorkerError> {
         let handler_succeeded = execution.task_result.success;
         let Some(mut finalization) = self
             .queue
@@ -679,6 +775,38 @@ impl WorkerKernel {
 enum ExecutedTask {
     Finished(HandlerExecution),
     OwnershipLost(HandlerExecution),
+}
+
+fn elapsed_millis(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+fn audio_attempt_outcome(result: &Result<WorkerAttempt, WorkerError>) -> (bool, &'static str) {
+    match result {
+        Ok(WorkerAttempt::Completed(_)) => (true, "completed"),
+        Ok(WorkerAttempt::Retried(_)) => (false, "retry_scheduled"),
+        Ok(WorkerAttempt::Deferred(_)) => (false, "deferred"),
+        Ok(WorkerAttempt::Failed(_)) => (false, "failed"),
+        Ok(WorkerAttempt::SkippedInactiveOwner(_)) => (false, "inactive_owner"),
+        Ok(WorkerAttempt::OwnershipLost { .. }) => (false, "ownership_lost"),
+        Ok(WorkerAttempt::FinalizationRejected { .. }) => (false, "finalization_rejected"),
+        Ok(WorkerAttempt::Empty) => (false, "empty"),
+        Err(_) => (false, "worker_error"),
+    }
+}
+
+fn audio_finalization_outcome(result: &Result<WorkerAttempt, WorkerError>) -> (bool, &'static str) {
+    match result {
+        Ok(WorkerAttempt::Completed(_)) => (true, "completed"),
+        Ok(WorkerAttempt::Retried(_)) => (true, "retry_committed"),
+        Ok(WorkerAttempt::Deferred(_)) => (true, "deferral_committed"),
+        Ok(WorkerAttempt::Failed(_)) => (true, "failure_committed"),
+        Ok(WorkerAttempt::SkippedInactiveOwner(_)) => (true, "inactive_owner_committed"),
+        Ok(WorkerAttempt::OwnershipLost { .. }) => (false, "ownership_lost"),
+        Ok(WorkerAttempt::FinalizationRejected { .. }) => (false, "rejected"),
+        Ok(WorkerAttempt::Empty) => (false, "empty"),
+        Err(_) => (false, "worker_error"),
+    }
 }
 
 async fn finish_finalization(

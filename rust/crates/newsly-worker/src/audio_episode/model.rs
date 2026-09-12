@@ -25,6 +25,7 @@ pub(super) struct PreparedScript {
     pub(super) script_json: Value,
     pub(super) script_text: String,
     pub(super) model: String,
+    pub(super) mode: &'static str,
     pub(super) duration_seconds: i32,
     pub(super) usage: Option<AudioEpisodeScriptUsage>,
 }

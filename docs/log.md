@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-12 — `detached e6bd96b0` — Briefing audio startup timing
+
+- **Status:** Complete locally; live latency measurements pending.
+- **Scope:** Briefing narration request, audio worker/provider stages, and native playback diagnostics.
+- **Decisions:** Measure the existing path before changing streaming, provider, scheduling, or narration quality. Use monotonic process-local durations and episode/task correlation; distinguish response headers from first audio and precommit work from committed completion.
+- **Changes:** Added request/snapshot/enqueue, queue wait, script mode/model/usage, speech response/stitch/storage, committed finalization, readiness polling, and playback-progress timing without logging source content or credentials. The startup plan documents correlation, nested durations, measurement limits, and a future OpenAI/ElevenLabs comparison.
+- **Validation:** Rust formatting and warning-denied Clippy passed for `newsly-providers`, `newsly-worker`, and `newsly-api`, including all targets. Focused provider audio tests, three narration API tests (including atomic deduplicated retry), and two worker finalizer retry/failure tests passed; database tests used a disposable local PostgreSQL cluster, stopped on exit. Final XcodeBuildMCP run passed all 26 BriefingNarrationController/NarrationPlaybackService tests. Diff checks passed. No paid provider calls or production mutations.
+- **Remaining:** Capture first play, resume, and chapter transition on an instrumented runtime before choosing an optimization or provider. First playback progress has 0.5-second sampling precision and does not prove physical audibility. No streaming/provider behavior changed; no deployment performed.
+- **Commits:** This commit; local merge to main requested. No push or deployment requested.
+
 ### 2026-09-12 — `main` — Agent skill boundaries and model roles
 
 - **Status:** Complete locally.

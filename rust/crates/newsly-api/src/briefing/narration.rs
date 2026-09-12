@@ -1,5 +1,7 @@
 //! Narration commands and observation keep immutable edition identity separate from lens selection.
 
+use std::time::Instant;
+
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Extension, Path, Query, State};
@@ -181,6 +183,7 @@ fn narration_selection(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(name = "briefing_narration_request", skip_all, fields(operation_id = operation_id))]
 async fn create_narration(
     state: &AppState,
     headers: &HeaderMap,
@@ -191,6 +194,7 @@ async fn create_narration(
     query: Result<Query<NarrationDeliveryQuery>, QueryRejection>,
     payload: Result<Json<BriefingNarrationRequest>, JsonRejection>,
 ) -> Result<Vec<AudioEpisodeProjection>, ApiError> {
+    let started = Instant::now();
     let request_id = request_id_from_headers(headers);
     require_operation(stamp, operation_id, &request_id)?;
     let Query(query) = query.map_err(|error| validation_error(error.body_text(), &request_id))?;
@@ -207,49 +211,80 @@ async fn create_narration(
             &request_id,
         )
     })?;
-    let mut transaction = state
-        .database
-        .pool()
-        .begin()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    let transaction = state.database.pool().begin().await;
+    tracing::info!(
+        stage = "narration_transaction",
+        %request_id,
+        elapsed_ms = started.elapsed().as_millis(),
+        succeeded = transaction.is_ok(),
+        "Audio timing"
+    );
+    let mut transaction = transaction.map_err(|error| internal_error(error, &request_id))?;
     verify_stamp(&mut transaction, stamp, &request_id).await?;
-    let episodes =
-        match prepare_briefing_narration(&mut transaction, user_id, &selection, chaptered)
-            .await
-            .map_err(|error| internal_error(error, &request_id))?
-        {
-            PrepareNarrationOutcome::Ready(episodes) => episodes,
-            PrepareNarrationOutcome::LensNotFound => {
-                return Err(not_found("Briefing lens", &request_id));
-            }
-            PrepareNarrationOutcome::Empty => {
-                if matches!(selection, BriefingNarrationSelection::AdaptedLens(_)) {
-                    return Err(ApiError::new(
-                        StatusCode::BAD_REQUEST,
-                        "briefing_narration_empty",
-                        "No unread sources are available for audio in this lens",
-                        &request_id,
-                    ));
-                }
-                return Err(bad_request(
-                    "No briefing narration is available",
+    let snapshot_started = Instant::now();
+    let prepared =
+        prepare_briefing_narration(&mut transaction, user_id, &selection, chaptered).await;
+    tracing::info!(
+        stage = "narration_snapshot",
+        %request_id,
+        elapsed_ms = snapshot_started.elapsed().as_millis(),
+        succeeded = prepared.is_ok(),
+        "Audio timing"
+    );
+    let episodes = match prepared.map_err(|error| internal_error(error, &request_id))? {
+        PrepareNarrationOutcome::Ready(episodes) => episodes,
+        PrepareNarrationOutcome::LensNotFound => {
+            return Err(not_found("Briefing lens", &request_id));
+        }
+        PrepareNarrationOutcome::Empty => {
+            if matches!(selection, BriefingNarrationSelection::AdaptedLens(_)) {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "briefing_narration_empty",
+                    "No unread sources are available for audio in this lens",
                     &request_id,
                 ));
             }
-        };
-    enqueue_narration(
+            return Err(bad_request(
+                "No briefing narration is available",
+                &request_id,
+            ));
+        }
+    };
+    let enqueue_started = Instant::now();
+    let enqueued = enqueue_narration(
         state.database.pool(),
         &mut transaction,
         &episodes,
         user_id,
         &request_id,
     )
-    .await?;
-    transaction
-        .commit()
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+    .await;
+    tracing::info!(
+        stage = "narration_enqueue",
+        %request_id,
+        elapsed_ms = enqueue_started.elapsed().as_millis(),
+        succeeded = enqueued.is_ok(),
+        chapter_count = episodes.len(),
+        pending_chapter_count = episodes.iter().filter(|episode| episode.status != "completed").count(),
+        audio_episode_id = episodes.first().map(|episode| episode.id),
+        episode_group_id = episodes.first().and_then(|episode| episode.episode_group_id.as_deref()),
+        "Audio timing"
+    );
+    enqueued?;
+    let commit_started = Instant::now();
+    let committed = transaction.commit().await;
+    tracing::info!(
+        stage = "narration_commit",
+        %request_id,
+        elapsed_ms = commit_started.elapsed().as_millis(),
+        request_elapsed_ms = started.elapsed().as_millis(),
+        succeeded = committed.is_ok(),
+        audio_episode_id = episodes.first().map(|episode| episode.id),
+        episode_group_id = episodes.first().and_then(|episode| episode.episode_group_id.as_deref()),
+        "Audio timing"
+    );
+    committed.map_err(|error| internal_error(error, &request_id))?;
     Ok(episodes)
 }
 
