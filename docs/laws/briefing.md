@@ -18,7 +18,7 @@ B7. One user-scoped version identifies the complete visible Briefing. Every visi
 
 B8. Paging at one fixed version returns the same ordered segments, sources, read flags, and summary as the complete lens.
 
-B9. Refreshes may coalesce, but publication requires successful composition and unchanged version, source ownership, and eligibility. A manual refresh observes its exact durable task, so successful same-version completion terminates without waiting for a version-change deadline. Failed or stale work leaves the last usable edition intact.
+B9. Refreshes may coalesce, but publication requires successful composition and unchanged version, source ownership, and eligibility. A manual refresh rebuilds the edition from currently eligible unread sources, removing previously read sources only when the replacement publishes successfully. It observes its exact durable task, so successful same-version completion terminates without waiting for a version-change deadline. Failed or stale work leaves the last usable edition intact.
 
 B10. Server state remains authoritative. Local snapshots support cold starts, and recoverable failures, retries, or reopening preserve readable content while unfinished work resumes safely.
 

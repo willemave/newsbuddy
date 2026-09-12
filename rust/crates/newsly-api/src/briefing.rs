@@ -364,12 +364,12 @@ pub(super) async fn refresh(
     let available_at = chrono::Utc::now();
     let mut request = EnqueueRequest::new(TaskType::BriefingRefresh);
     request.payload = Some(
-        json!({"user_id": current_user.id, "mode": "append"})
+        json!({"user_id": current_user.id, "mode": "full"})
             .as_object()
             .expect("Briefing refresh payload is an object")
             .clone(),
     );
-    request.dedupe_key = Some(format!("briefing_refresh:{}:append", current_user.id));
+    request.dedupe_key = Some(format!("briefing_refresh:{}:full", current_user.id));
     request.owner_user_id = Some(current_user.id);
     request.available_at = Some(available_at);
     let batch = QueueKernel::new(state.database.pool().clone())
