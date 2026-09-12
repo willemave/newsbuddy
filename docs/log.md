@@ -65,7 +65,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Decisions:** Remove underlines from structured and Markdown source links while preserving accent color and link destinations for a visual trial.
 - **Validation:** `newsly` built and launched on iPhone 17 Pro Max (iOS 26.3); all 11 existing BriefingAttributedTextBuilderTests passed, including source-link destination coverage. UI snapshot and screenshot showed the startup spinner, so the Briefing appearance and live tapping were not visually verified.
 - **Remaining:** Live authenticated Briefing preview remains blocked at app startup.
-- **Visual follow-up:** Captured before/after screenshots on iPhone 17 Pro Max using the actual Briefing passage renderer and identical sample text through a temporary DEBUG preview; removed the temporary preview afterward. The screenshots remained in the source worktree and are not included in this branch.
+- **Visual follow-up:** Captured before/after screenshots on iPhone 17 Pro Max using the actual Briefing passage renderer and identical sample text through a temporary DEBUG preview; removed the temporary preview afterward. Evidence: `test-results/briefing-link-preview/`.
 - **Commits:** Included in the Briefing link styling commit.
 
 ### 2026-09-11 — `main` — Relax News Briefing density
