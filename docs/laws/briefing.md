@@ -6,7 +6,7 @@ Briefing and the Knowledge list share the same bottom-edge fade, kept low behind
 
 B2. Eligible sources are completed, unread, non-skipped articles, podcasts, and news that the authenticated user can open directly.
 
-B3. A source key is the canonical unit of coverage, citation, and read state.
+B3. A source key is the canonical unit of coverage, citation, and read state. Briefing passage links retain their accent color and tap destination without an underline.
 
 B4. Article and podcast segments cover one source each, while news segments may combine several sources into a compact roundup. News prose follows a concise newspaper-brief style: a single-event passage never exceeds 40 words, while a multi-event roundup targets 45-65 words and never exceeds 75. Linked descriptive noun phrases appear early and fit grammatically into their sentence without duplicating a predicate. Supporting prose selects useful context or material qualifications without repeating the link, substituting a feature inventory, or expanding merely to reach a target; thematic connections appear only when informative. A news segment is sized by the distinct events it covers, not by source count: sources covering one event always stay in the same segment, however many there are.
 
