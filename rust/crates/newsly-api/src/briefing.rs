@@ -21,8 +21,9 @@ use newsly_contracts::{
     BriefingDigSummarizeResponse, BriefingDiscussionDto, BriefingFirstRunPhase,
     BriefingFirstRunProgress, BriefingFirstRunSourceOutcome, BriefingFirstRunSourceProgress,
     BriefingIndexResponse, BriefingLensResponse, BriefingLensSummary, BriefingReadMarkRequest,
-    BriefingReadMarkResponse, BriefingRefreshResponse, BriefingSegmentDto, BriefingSourceDto,
-    BriefingTier, ContentType,
+    BriefingReadMarkResponse, BriefingRefreshResponse, BriefingRefreshStatus,
+    BriefingRefreshStatusResponse, BriefingSegmentDto, BriefingSourceDto, BriefingTier,
+    ContentType,
 };
 use newsly_db::{
     BriefingDiscussionProjection, BriefingFirstRunProjection, BriefingIndexProjection,
@@ -30,8 +31,8 @@ use newsly_db::{
     BriefingReadMarkProjection, BriefingRepositoryError, BriefingSourceProjection,
     ContentBriefingSourceProjection, NewsBriefingSourceProjection, ensure_briefing_state_version,
     expedite_pending_briefing_refresh, load_briefing_index, load_briefing_index_validator,
-    load_briefing_lens_page, mark_briefing_lens_read, mark_briefing_sources_read,
-    recent_briefing_dig_count, record_briefing_dig_usage,
+    load_briefing_lens_page, load_briefing_refresh_task, mark_briefing_lens_read,
+    mark_briefing_sources_read, recent_briefing_dig_count, record_briefing_dig_usage,
 };
 use newsly_providers::{
     BriefingDigGateway, BriefingDigGatewayError, BriefingDigSummary, BriefingWebSearchResult,
@@ -56,6 +57,7 @@ mod presentation;
 const READ_OPERATION_ID: &str = "markBriefingRead";
 const LENS_READ_OPERATION_ID: &str = "markBriefingLensesLensRead";
 const REFRESH_OPERATION_ID: &str = "refreshBriefing";
+const REFRESH_STATUS_OPERATION_ID: &str = "getBriefingRefreshStatus";
 const DIG_SEARCH_OPERATION_ID: &str = "digBriefingSearch";
 const DIG_SUMMARIZE_OPERATION_ID: &str = "digBriefingSummarize";
 const BRIEFING_LENS_PAGE_MAX: usize = 12;
@@ -83,6 +85,7 @@ pub(super) fn router() -> Router<AppState> {
             post(mark_lens_read),
         )
         .route("/api/briefing/refresh", post(refresh))
+        .route("/api/briefing/refresh/{task_id}", get(refresh_status))
         .route("/api/briefing/dig/search", post(dig_search))
         .route("/api/briefing/dig/summarize", post(dig_summarize))
         .route("/api/briefing/narration", post(legacy_narration))
@@ -392,7 +395,62 @@ pub(super) async fn refresh(
         .map_err(|error| internal_error(error, &request_id))?;
     Ok(Json(BriefingRefreshResponse {
         enqueued: inserted || expedited,
+        task_id,
         version,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/briefing/refresh/{task_id}",
+    operation_id = "getBriefingRefreshStatus",
+    tag = "briefing",
+    params(("task_id" = i64, Path, description = "Briefing refresh task identifier")),
+    security(("HTTPBearer" = [])),
+    responses(
+        (status = 200, description = "Successful Response", body = BriefingRefreshStatusResponse),
+        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
+        (status = 404, description = "Briefing refresh not found", body = newsly_contracts::ErrorEnvelope),
+        (status = 409, description = "Stale runtime owner", body = newsly_contracts::ErrorEnvelope),
+        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
+    )
+)]
+pub(super) async fn refresh_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    current_user: AuthenticatedUser,
+    Extension(stamp): Extension<RouteOwnershipStamp>,
+    path: Result<Path<i64>, PathRejection>,
+) -> Result<Json<BriefingRefreshStatusResponse>, ApiError> {
+    let request_id = request_id_from_headers(&headers);
+    require_operation(&stamp, REFRESH_STATUS_OPERATION_ID, &request_id)?;
+    let Path(task_id) = path.map_err(|error| validation_error(error.body_text(), &request_id))?;
+    if task_id <= 0 {
+        return Err(validation_error(
+            "task_id must be greater than zero",
+            &request_id,
+        ));
+    }
+    let task = load_briefing_refresh_task(state.database.pool(), current_user.id, task_id)
+        .await
+        .map_err(|error| internal_error(error, &request_id))?
+        .ok_or_else(|| not_found("Briefing refresh", &request_id))?;
+    let status = match task.status.as_str() {
+        "pending" => BriefingRefreshStatus::Pending,
+        "processing" => BriefingRefreshStatus::Processing,
+        "completed" => BriefingRefreshStatus::Completed,
+        "failed" | "cancelled" => BriefingRefreshStatus::Failed,
+        other => {
+            return Err(internal_error(
+                format!("unexpected Briefing refresh status {other}"),
+                &request_id,
+            ));
+        }
+    };
+    Ok(Json(BriefingRefreshStatusResponse {
+        task_id,
+        status,
+        version: task.version,
     }))
 }
 

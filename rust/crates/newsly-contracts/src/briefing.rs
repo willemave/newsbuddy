@@ -438,5 +438,22 @@ pub struct BriefingNarrationResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct BriefingRefreshResponse {
     pub enqueued: bool,
+    pub task_id: i64,
+    pub version: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BriefingRefreshStatus {
+    Pending,
+    Processing,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BriefingRefreshStatusResponse {
+    pub task_id: i64,
+    pub status: BriefingRefreshStatus,
     pub version: i32,
 }

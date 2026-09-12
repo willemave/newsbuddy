@@ -109,6 +109,9 @@ enum APIEndpoints {
     }
     static let briefingReadMarks = "/api/briefing/read-marks"
     static let briefingRefresh = "/api/briefing/refresh"
+    static func briefingRefreshStatus(taskID: Int) -> String {
+        return "/api/briefing/refresh/\(taskID)"
+    }
     static let briefingDigSearch = "/api/briefing/dig/search"
     static let briefingDigSummarize = "/api/briefing/dig/summarize"
     static let briefingNarration = "/api/briefing/narrations"

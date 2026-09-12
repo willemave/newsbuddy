@@ -2656,6 +2656,83 @@
         ]
       }
     },
+    "/api/briefing/refresh/{task_id}": {
+      "get": {
+        "tags": [
+          "briefing"
+        ],
+        "operationId": "getBriefingRefreshStatus",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "description": "Briefing refresh task identifier",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingRefreshStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Briefing refresh not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale runtime owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/content/": {
       "get": {
         "tags": [
@@ -14055,11 +14132,46 @@
         "type": "object",
         "required": [
           "enqueued",
+          "task_id",
           "version"
         ],
         "properties": {
           "enqueued": {
             "type": "boolean"
+          },
+          "task_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "BriefingRefreshStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "processing",
+          "completed",
+          "failed"
+        ]
+      },
+      "BriefingRefreshStatusResponse": {
+        "type": "object",
+        "required": [
+          "task_id",
+          "status",
+          "version"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BriefingRefreshStatus"
           },
           "version": {
             "type": "integer",

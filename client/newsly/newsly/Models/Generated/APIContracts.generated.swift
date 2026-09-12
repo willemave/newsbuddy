@@ -686,6 +686,13 @@ enum APIBriefingFirstRunSourceOutcome: String, Codable, CaseIterable {
     case unavailable = "unavailable"
 }
 
+enum APIBriefingRefreshStatus: String, Codable, CaseIterable {
+    case pending = "pending"
+    case processing = "processing"
+    case completed = "completed"
+    case failed = "failed"
+}
+
 enum APIReadingExperience: String, Codable, CaseIterable {
     case classic = "classic"
     case briefing = "briefing"

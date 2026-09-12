@@ -304,6 +304,25 @@ async fn reclaimed_claim_rejects_prepared_lens_assignment(pool: PgPool) {
 }
 
 #[sqlx::test]
+async fn refresh_task_observation_is_scoped_to_its_owner(pool: PgPool) {
+    let user_id = insert_eligible_article(&pool).await;
+    let task_id = insert_live_briefing_task(&pool, user_id).await;
+    prepare_seed(&pool, task_id, user_id).await;
+
+    let observation = crate::briefing::load_briefing_refresh_task(&pool, user_id, task_id)
+        .await
+        .expect("refresh observation should load")
+        .expect("owner should see the refresh task");
+    assert_eq!(observation.status, "processing");
+    assert_eq!(observation.version, 0);
+
+    let hidden = crate::briefing::load_briefing_refresh_task(&pool, user_id + 1, task_id)
+        .await
+        .expect("non-owner observation should be a valid query");
+    assert!(hidden.is_none());
+}
+
+#[sqlx::test]
 async fn publication_atomically_replaces_pending_ownership_with_a_segment(pool: PgPool) {
     let user_id = insert_eligible_article(&pool).await;
     let publication = article_publication(prepare_article(&pool, user_id).await);

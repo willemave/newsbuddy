@@ -86,6 +86,12 @@ pub struct BriefingIndexValidatorProjection {
     pub first_run_revision: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefingRefreshTaskProjection {
+    pub status: String,
+    pub version: i32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContentBriefingSourceProjection {
     pub id: i64,
@@ -581,6 +587,28 @@ pub async fn ensure_briefing_state_version(
     user_id: i64,
 ) -> Result<i32, BriefingRepositoryError> {
     ensure_and_lock_state(transaction, user_id).await
+}
+
+pub async fn load_briefing_refresh_task(
+    pool: &PgPool,
+    user_id: i64,
+    task_id: i64,
+) -> Result<Option<BriefingRefreshTaskProjection>, BriefingRepositoryError> {
+    let row = sqlx::query_as::<_, (String, i32)>(
+        r#"
+        SELECT task.status, state.version
+        FROM processing_tasks AS task
+        JOIN briefing_states AS state ON state.user_id = task.owner_user_id
+        WHERE task.id::bigint = $1
+          AND task.owner_user_id::bigint = $2
+          AND task.task_type = 'briefing_refresh'
+        "#,
+    )
+    .bind(task_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(status, version)| BriefingRefreshTaskProjection { status, version }))
 }
 
 pub async fn expedite_pending_briefing_refresh(

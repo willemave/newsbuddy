@@ -140,7 +140,7 @@ final class BriefingViewModel {
     }
 
     var isRefreshing: Bool {
-        refreshPhase == .requesting || refreshPhase == .waitingForVersion
+        refreshPhase == .requesting || refreshPhase == .waitingForCompletion
     }
 
     var selectedLensKey: String? {

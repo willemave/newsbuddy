@@ -19,7 +19,7 @@ final class BriefingIndexSynchronizer {
     enum RefreshPhase: Equatable {
         case idle
         case requesting
-        case waitingForVersion
+        case waitingForCompletion
         case failed(String)
     }
 
@@ -185,15 +185,15 @@ final class BriefingIndexSynchronizer {
             let response = try await service.requestRefresh()
             guard tasks.isCurrent(token), !Task.isCancelled else { return }
             briefingIndexLogger.info(
-                "Refresh accepted | duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public) baseline_version=\(response.version, privacy: .public)"
+                "Refresh accepted | duration_ms=\(Int(Date().timeIntervalSince(startedAt) * 1_000), privacy: .public) task_id=\(response.taskId, privacy: .public) baseline_version=\(response.version, privacy: .public)"
             )
             guard isActive else {
                 refreshPhase = .idle
                 return
             }
-            refreshPhase = .waitingForVersion
+            refreshPhase = .waitingForCompletion
             startRefreshPolling(
-                baselineVersion: response.version,
+                taskID: response.taskId,
                 onIndexResult: onIndexResult
             )
         } catch where ClientFailure.classify(error) == .cancelled {
@@ -211,7 +211,7 @@ final class BriefingIndexSynchronizer {
     }
 
     private func startRefreshPolling(
-        baselineVersion: Int,
+        taskID: Int,
         onIndexResult: @escaping @MainActor (BriefingIndexFetchResult) -> Void
     ) {
         guard isActive else {
@@ -227,16 +227,23 @@ final class BriefingIndexSynchronizer {
                     let jitter = UInt64.random(in: 0...min(delay / 10, 250_000_000))
                     try await Task.sleep(nanoseconds: delay + jitter)
                     pollCount += 1
-                    let result = try await service.fetchIndex(ifNoneMatch: etag)
+                    let observation = try await service.fetchRefreshStatus(taskID: taskID)
                     guard tasks.isCurrent(token), !Task.isCancelled else { return }
-                    guard case .value(let response, _) = result else {
+                    if observation.status == .failed {
+                        refreshPhase = .failed("Briefing refresh couldn’t finish. Try again.")
+                        return
+                    }
+                    guard observation.status == .completed else {
                         continue
                     }
+                    let result = try await service.fetchIndex(ifNoneMatch: etag)
+                    guard tasks.isCurrent(token), !Task.isCancelled else { return }
                     updateETag(from: result)
-                    onIndexResult(result)
-                    guard response.version != baselineVersion else { continue }
+                    if case .value = result {
+                        onIndexResult(result)
+                    }
                     briefingIndexLogger.info(
-                        "Refresh poll completed | polls=\(pollCount, privacy: .public) baseline_version=\(baselineVersion, privacy: .public) new_version=\(response.version, privacy: .public)"
+                        "Refresh poll completed | polls=\(pollCount, privacy: .public) task_id=\(taskID, privacy: .public) final_version=\(observation.version, privacy: .public)"
                     )
                     refreshPhase = .idle
                     return
@@ -245,7 +252,7 @@ final class BriefingIndexSynchronizer {
                     briefingIndexLogger.info(
                         "Refresh poll cancelled | polls=\(pollCount, privacy: .public)"
                     )
-                    if refreshPhase == .waitingForVersion {
+                    if refreshPhase == .waitingForCompletion {
                         refreshPhase = .idle
                     }
                     return
@@ -259,9 +266,9 @@ final class BriefingIndexSynchronizer {
                 }
             }
             guard tasks.isCurrent(token), !Task.isCancelled else { return }
-            if refreshPhase == .waitingForVersion {
+            if refreshPhase == .waitingForCompletion {
                 briefingIndexLogger.info(
-                    "Refresh poll deadline reached | polls=\(pollCount, privacy: .public) baseline_version=\(baselineVersion, privacy: .public)"
+                    "Refresh poll deadline reached | polls=\(pollCount, privacy: .public) task_id=\(taskID, privacy: .public)"
                 )
                 refreshPhase = .idle
             }
