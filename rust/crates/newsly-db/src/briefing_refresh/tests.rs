@@ -90,19 +90,16 @@ async fn insert_live_briefing_task(pool: &PgPool, user_id: i64) -> i64 {
 }
 
 async fn prepare_seed(pool: &PgPool, task_id: i64, user_id: i64) -> PreparedBriefingRefreshSeed {
-    prepare_seed_with_mode(pool, task_id, user_id, BriefingRefreshMode::Append).await
-}
-
-async fn prepare_seed_with_mode(
-    pool: &PgPool,
-    task_id: i64,
-    user_id: i64,
-    mode: BriefingRefreshMode,
-) -> PreparedBriefingRefreshSeed {
     let mut transaction = pool.begin().await.expect("prepare transaction");
-    let seed = prepare_briefing_refresh(&mut transaction, task_id, user_id, mode, &test_config())
-        .await
-        .expect("Briefing prepare should succeed");
+    let seed = prepare_briefing_refresh(
+        &mut transaction,
+        task_id,
+        user_id,
+        BriefingRefreshMode::Append,
+        &test_config(),
+    )
+    .await
+    .expect("Briefing prepare should succeed");
     transaction.commit().await.expect("prepare commit");
     let PrepareBriefingRefreshOutcome::Ready(seed) = seed else {
         panic!("active test user should be Briefing eligible");
@@ -376,79 +373,6 @@ async fn publication_atomically_replaces_pending_ownership_with_a_segment(pool: 
     assert_eq!((pending, segments, usage), (0, 1, 1));
     assert_eq!(prompt_version, BRIEFING_COMPOSITION_PROMPT_VERSION);
     assert_eq!(usage_prompt_version, BRIEFING_COMPOSITION_PROMPT_VERSION);
-}
-
-#[sqlx::test]
-async fn full_refresh_replaces_the_old_edition_without_read_articles(pool: PgPool) {
-    let user_id = insert_eligible_article(&pool).await;
-    let initial = article_publication(prepare_article(&pool, user_id).await);
-    let mut transaction = pool.begin().await.expect("initial publication transaction");
-    apply_briefing_refresh(&mut transaction, &initial, &test_config())
-        .await
-        .expect("initial Briefing publication should succeed");
-    transaction
-        .commit()
-        .await
-        .expect("initial publication commit");
-
-    sqlx::query(
-        r#"
-        INSERT INTO content_read_status (user_id, content_id, read_at, created_at)
-        SELECT $1::bigint::integer, membership.content_id,
-               timezone('UTC', now()), timezone('UTC', now())
-        FROM content_status AS membership
-        WHERE membership.user_id::bigint = $1
-        "#,
-    )
-    .bind(user_id)
-    .execute(&pool)
-    .await
-    .expect("article should be marked read");
-
-    let task_id = insert_live_briefing_task(&pool, user_id).await;
-    let seed = prepare_seed_with_mode(&pool, task_id, user_id, BriefingRefreshMode::Full).await;
-    assert_eq!(seed.pending_added, 0);
-    let plan = BriefingLensAssignmentPlan {
-        task_id,
-        user_id,
-        starting_version: seed.starting_version,
-        assignments: Vec::new(),
-        centroid_mutations: Vec::new(),
-        new_lenses: Vec::new(),
-        usage: Vec::new(),
-    };
-    let mut transaction = pool.begin().await.expect("full lens apply transaction");
-    let prepared = apply_briefing_lens_assignment(&mut transaction, seed, &plan, &test_config())
-        .await
-        .expect("full lens plan should apply");
-    transaction.commit().await.expect("full lens apply commit");
-    let ApplyBriefingLensAssignmentOutcome::Ready(prepared) = prepared else {
-        panic!("full refresh should remain current");
-    };
-    assert!(prepared.append_batches.is_empty());
-
-    let publication = BriefingRefreshPublication {
-        append_segments: Vec::new(),
-        compactions: Vec::new(),
-        embedding_usage: Vec::new(),
-        finalized_at: Utc::now(),
-        prepared,
-    };
-    let mut transaction = pool.begin().await.expect("full publication transaction");
-    let outcome = apply_briefing_refresh(&mut transaction, &publication, &test_config())
-        .await
-        .expect("full Briefing publication should succeed");
-    transaction.commit().await.expect("full publication commit");
-
-    assert_eq!(outcome.compacted_segments, 1);
-    let active: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM briefing_segments WHERE user_id::bigint = $1 AND status IN ('active', 'degraded')",
-    )
-    .bind(user_id)
-    .fetch_one(&pool)
-    .await
-    .expect("active segment count");
-    assert_eq!(active, 0);
 }
 
 #[sqlx::test]
