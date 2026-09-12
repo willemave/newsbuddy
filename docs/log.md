@@ -35,7 +35,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Added an owner-scoped refresh-status endpoint and generated client contracts, task-aware iOS polling with same-version and failure handling, and the reduced-motion-aware animated AppMark waiting state. Pull-to-refresh now removes already-retired read segments from the visible list and rehydrates that lens without recomposing the edition. X mapping reads nested note entity sets and the content worker can resolve a lone trusted short link before falling back to native tweet text. Also retained the recovered Briefing source-link styling commit on this branch.
 - **Validation:** Rust formatting and warning-denied Clippy passed for API, contracts, DB, providers, and worker. Focused provider tests passed (5), worker content-handler tests passed (9), and the owner-scoped PostgreSQL refresh observation test passed against local PostgreSQL. Public contracts regenerated and drift check passed. All 12 native Briefing refresh tests and all 6 adjacent retention tests passed on an Xcode-built iPhone 17 Simulator, including same-version completion, failed-task handling, explicit list removal, and preservation of ordinary reading position. Diff checks passed.
 - **Remaining:** Human review of the combined branch; no push, deployment, or production mutation was requested.
-- **Commits:** This branch.
+- **Commits:** `374cae97`, `eacdf425`, `87ea4ce1`, `ac0ff66e`, `ae02b1d5`.
 
 ### 2026-09-12 — `main` — Agent skill boundaries and model roles
 
@@ -54,7 +54,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Decisions:** Remove underlines from structured and Markdown source links while preserving accent color and link destinations for a visual trial.
 - **Validation:** `newsly` built and launched on iPhone 17 Pro Max (iOS 26.3); all 11 existing BriefingAttributedTextBuilderTests passed, including source-link destination coverage. UI snapshot and screenshot showed the startup spinner, so the Briefing appearance and live tapping were not visually verified.
 - **Remaining:** Live authenticated Briefing preview remains blocked at app startup.
-- **Visual follow-up:** Captured before/after screenshots on iPhone 17 Pro Max using the actual Briefing passage renderer and identical sample text through a temporary DEBUG preview; removed the temporary preview afterward. Evidence: `test-results/briefing-link-preview/`.
+- **Visual follow-up:** Captured before/after screenshots on iPhone 17 Pro Max using the actual Briefing passage renderer and identical sample text through a temporary DEBUG preview; removed the temporary preview afterward. The screenshots remained in the source worktree and are not included in this branch.
 - **Commits:** Included in the Briefing link styling commit.
 
 ### 2026-09-11 — `main` — Relax News Briefing density

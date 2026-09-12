@@ -74,6 +74,7 @@ pub struct XSyncGateway {
 #[derive(Debug, Clone)]
 pub struct XLookupGateway {
     client: Client,
+    redirect_client: Client,
     api_base_url: Url,
 }
 
@@ -89,6 +90,10 @@ impl XLookupGateway {
         }
         Ok(Self {
             client: Client::builder().timeout(Duration::from_secs(20)).build()?,
+            redirect_client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .redirect(redirect::Policy::none())
+                .build()?,
             api_base_url,
         })
     }
@@ -232,11 +237,7 @@ impl XLookupGateway {
         };
         // Inspect the trusted shortener response without fetching the destination. Besides being
         // cheaper, this prevents an externally supplied redirect from becoming an SSRF hop.
-        let client = Client::builder()
-            .timeout(Duration::from_secs(20))
-            .redirect(redirect::Policy::none())
-            .build()?;
-        let response = client.get(url.clone()).send().await?;
+        let response = self.redirect_client.get(url.clone()).send().await?;
         if response.status().is_redirection() {
             return Ok(response
                 .headers()
@@ -701,13 +702,7 @@ fn article_parts(value: Option<&Value>) -> (Option<String>, Option<String>) {
 
 fn note_tweet_text(value: Option<&Value>) -> Option<String> {
     let note_data = value.and_then(Value::as_object)?;
-    let note_result = note_data
-        .get("note_tweet_results")
-        .and_then(Value::as_object)
-        .and_then(|results| results.get("result"))
-        .and_then(Value::as_object)
-        .or_else(|| note_data.get("result").and_then(Value::as_object))
-        .unwrap_or(note_data);
+    let note_result = note_tweet_result(value)?;
     first_text([
         note_result.get("text"),
         nested_value(note_result, &["richtext", "text"]),
@@ -726,13 +721,13 @@ fn note_tweet_text(value: Option<&Value>) -> Option<String> {
 
 fn note_tweet_result(value: Option<&Value>) -> Option<&Map<String, Value>> {
     let note_data = value.and_then(Value::as_object)?;
-    note_data
+    let note_result = note_data
         .get("note_tweet_results")
         .and_then(Value::as_object)
         .and_then(|results| results.get("result"))
         .and_then(Value::as_object)
-        .or_else(|| note_data.get("result").and_then(Value::as_object))
-        .or(Some(note_data))
+        .or_else(|| note_data.get("result").and_then(Value::as_object));
+    Some(note_result.unwrap_or(note_data))
 }
 
 fn tweet_external_urls(

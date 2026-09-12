@@ -187,16 +187,26 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         XCTAssertEqual(service.refreshRequestCount, 1)
     }
 
-    func testManualRefreshPollsPastOldDelayAndAppliesLaterVersion() async {
+    func testManualRefreshPollsUntilTaskCompletesAndAppliesLatestIndex() async {
         let service = MockBriefingService()
         service.indexResults = [
             .value(makeIndex(version: 1, lenses: [makeLensSummary(key: "today")]), etag: "etag-1"),
             .value(makeIndex(version: 2, lenses: [makeLensSummary(key: "today")]), etag: "etag-2")
         ]
         service.lensResponses["today"] = makeLens(key: "today", version: 1)
+        service.refreshResponse = APIBriefingRefreshResponse(
+            enqueued: true,
+            taskId: 42,
+            version: 1
+        )
+        service.refreshStatusResults = [
+            APIBriefingRefreshStatusResponse(taskId: 42, status: .pending, version: 1),
+            APIBriefingRefreshStatusResponse(taskId: 42, status: .processing, version: 1),
+            APIBriefingRefreshStatusResponse(taskId: 42, status: .completed, version: 2)
+        ]
         let viewModel = BriefingViewModel(
             service: service,
-            refreshPollDelays: [400_000_000]
+            refreshPollDelays: [1_000_000, 1_000_000, 1_000_000]
         )
         viewModel.setActive(true)
         await waitForBriefingCondition { viewModel.selectedLens?.version == 1 }
@@ -209,6 +219,7 @@ final class BriefingViewModelRefreshTests: XCTestCase {
         }
 
         XCTAssertEqual(viewModel.refreshPhase, .idle)
+        XCTAssertEqual(service.refreshStatusTaskIDs, [42, 42, 42])
     }
 
     func testSameVersionTaskCompletionEndsRefreshWithoutWaitingForVersionChange() async {

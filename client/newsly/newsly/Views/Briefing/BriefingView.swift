@@ -591,7 +591,7 @@ struct BriefingLoadingView: View {
     }
 }
 
-struct BriefingRefreshWaitingView: View {
+private struct BriefingRefreshWaitingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var breathing = false
 

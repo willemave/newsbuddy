@@ -239,9 +239,7 @@ final class BriefingIndexSynchronizer {
                     let result = try await service.fetchIndex(ifNoneMatch: etag)
                     guard tasks.isCurrent(token), !Task.isCancelled else { return }
                     updateETag(from: result)
-                    if case .value = result {
-                        onIndexResult(result)
-                    }
+                    onIndexResult(result)
                     briefingIndexLogger.info(
                         "Refresh poll completed | polls=\(pollCount, privacy: .public) task_id=\(taskID, privacy: .public) final_version=\(observation.version, privacy: .public)"
                     )

@@ -119,7 +119,14 @@ pub(super) async fn execute_tweet_analysis(
             }
         }
     };
-    if let Some(resolution) = resolve_short_text_target(services, &tweet, included.clone()).await {
+    let short_text_resolution = resolve_short_text_target(services, &tweet, &included).await;
+    if lease.ownership_lost() {
+        return HandlerExecution::from_result(TaskResult::fail(
+            Some("lease ownership was lost during X short link resolution".to_owned()),
+            true,
+        ));
+    }
+    if let Some(resolution) = short_text_resolution {
         return finalize_tweet_resolution(
             services,
             plan,
@@ -180,7 +187,7 @@ pub(super) async fn execute_tweet_analysis(
 async fn resolve_short_text_target(
     services: &ContentWorkerServices,
     root: &XTweet,
-    included: BTreeMap<String, XTweet>,
+    included: &BTreeMap<String, XTweet>,
 ) -> Option<TweetTargetResolution> {
     if !root.external_urls.is_empty() {
         return None;
@@ -189,7 +196,7 @@ async fn resolve_short_text_target(
     match services.x_lookup.resolve_short_url(&short_url).await {
         Ok(Some(url)) => Some(known_tweet_resolution(
             root,
-            included,
+            included.clone(),
             url,
             "root_text_url",
             &root.id,
