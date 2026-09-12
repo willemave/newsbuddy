@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-12 — `main` — Agent skill boundaries and model roles
+
+- **Status:** Complete locally.
+- **Scope:** Newsly `AGENTS.md` and selected personal skills under `~/.agents/skills`.
+- **Decisions:** Preserve Writing Assistant and release/production authorization boundaries. Prefer Sol medium for implementation subagents and Oracle Fable for complex planning reviews; narrow general skill triggers and unnecessary approval gates.
+- **Changes:** Narrowed Deslop, TypeScript Helpers, Brainstorming, PR Explore, and Hand Compute; clarified review versus edit scope in Cleanup and Code Review; removed Explain's default website requirement; simplified Oracle Fable to one high-effort read-only invocation. Added model roles, completion boundaries, scoped validation, and aligned SQL ownership in `AGENTS.md`.
+- **Validation:** All nine modified skills passed the skill validator; diffs and whitespace checks passed in both repositories. Writing Assistant SHA-256 is unchanged. Instruction-only changes; no application tests or live model calls were run.
+- **Remaining:** Observe routing in subsequent tasks; release-skill deduplication, retired remote-debug commands, and config cleanup remain outside this edit.
+- **Commits:** Included in the local main commit for agent guidance; no push or deployment requested.
+
 ### 2026-09-11 — `main` — Relax News Briefing density
 
 - **Status:** Complete locally; regeneration and release pending.

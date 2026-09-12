@@ -19,6 +19,14 @@ This file stays minimal and only captures repo-specific working rules.
 - Keep durable architecture notes in `docs/architecture.md`; keep this file limited to agent operating rules and routing.
 - Keep `docs/laws/` behavioral rather than structural: state what must remain true, not which files currently implement it.
 
+## Completion and Agent Roles
+
+- For implementation requests, continue through the scoped change, relevant validation, and correction of failures caused by the change. Finish applicable documentation updates before handoff.
+- Resolve routine choices from repository evidence and existing conventions. Ask only when missing information materially changes scope, intended behavior, external commitments, or authorized cost; continue independent work while awaiting an answer.
+- Review and investigation requests return evidence and recommendations. Fix and cleanup requests authorize scoped local edits. Reuse authorization already given; skill selection does not itself authorize commits, releases, or production mutations.
+- Prefer `gpt-5.6-sol` with `medium` reasoning for coding and implementation subagents. Delegate a bounded implementation slice when it can run independently alongside useful primary-agent work; keep trivial or tightly coupled edits local. Explicit user model choices take precedence.
+- During planning, use the `oracle-fable` skill for complex design or architecture reviews, such as changes to cross-package ownership, durable state, migrations, or concurrency semantics. This is standing authorization for a read-only Fable consultation in those cases. Give it the proposed design, constraints, and relevant repository context; verify its findings before implementation. Routine local changes do not require oracle review. If Fable is unavailable, report the review gap and continue independent work without silently substituting another model.
+
 ## Working Shape
 
 - Backend: Rust 1.94 modular monolith using Axum, Tokio, Tower, SQLx 0.9, and a
@@ -62,9 +70,9 @@ Backend change:
 
 1. Find the owning Axum route and `newsly-contracts` request/response types.
 2. Put orchestration in commands/queries, not route handlers.
-3. Keep SQL in `newsly-db` and external calls in provider/gateway crates.
-4. Add focused Rust tests, including PostgreSQL integration coverage when persistence changes.
-5. Run `cargo fmt`, warning-denied Clippy, focused tests, and contract drift checks.
+3. Keep shared persistence contracts in `newsly-db`; feature-local SQL may remain private to a repository module in its owning runtime crate. Keep external calls in provider/gateway crates.
+4. Ensure focused coverage for changed behavior, including isolated PostgreSQL integration coverage when persistence changes.
+5. Run formatting, warning-denied Clippy, and tests for the affected scope; include contract drift checks when contracts change. Use the canonical full release gate before a release.
 
 Processing change:
 
@@ -84,7 +92,7 @@ Python-island change:
 
 Production debug:
 
-1. Confirm whether the user is testing production or local.
+1. Establish production versus local context from the request and available evidence; ask only if it remains ambiguous.
 2. Use `newsly-admin` for health, queue/task, usage, and ownership evidence.
 3. Use the Rust admin log surface or container runtime only after narrowing the symptom.
 4. Prefer DB, log, runtime, and queue evidence over local speculation.
