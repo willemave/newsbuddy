@@ -176,6 +176,28 @@ impl Client {
             })
     }
 
+    /// List saved Knowledge content with the supplied pagination parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the request fails or the response is invalid.
+    pub async fn list_knowledge_content(
+        &self,
+        query: &[(String, String)],
+    ) -> Result<Value, ApiError> {
+        self.request_json(
+            Method::GET,
+            "/api/content/knowledge/list",
+            true,
+            query,
+            None,
+        )
+        .await
+        .map_err(|error| {
+            error.replace_message_for_status(StatusCode::NOT_FOUND, "Knowledge route not found")
+        })
+    }
+
     /// Fetch one canonical content item.
     ///
     /// # Errors

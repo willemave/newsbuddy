@@ -44,6 +44,9 @@ pub struct Envelope {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Value>,
+    /// Optional display body supplied by the command; never part of the JSON envelope.
+    #[serde(skip)]
+    pub text_data: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,6 +61,7 @@ impl Envelope {
             command: command.into(),
             ok: true,
             data,
+            text_data: None,
             job,
             error: None,
             config_path: None,
@@ -73,6 +77,7 @@ impl Envelope {
             command: command.into(),
             ok: false,
             data: None,
+            text_data: None,
             job: None,
             error: Some(error),
             config_path,
@@ -150,7 +155,9 @@ pub fn emit(
 fn emit_text(writer: &mut impl Write, envelope: &Envelope) -> Result<(), OutputError> {
     writeln!(writer, "command: {}", envelope.command)?;
     writeln!(writer, "ok: {}", envelope.ok)?;
-    if let Some(data) = &envelope.data {
+    if let Some(text) = &envelope.text_data {
+        writer.write_all(text.as_bytes())?;
+    } else if let Some(data) = &envelope.data {
         write_json_block(writer, data)?;
     }
     if let Some(job) = &envelope.job {
@@ -259,5 +266,23 @@ mod tests {
                 .to_string(),
             "unsupported output format; expected one of: json, text"
         );
+    }
+
+    #[test]
+    fn command_text_body_is_used_only_for_text_output() {
+        let mut envelope =
+            Envelope::success("example", Some(serde_json::json!({"count": 1})), None);
+        envelope.text_data = Some("One result\n".to_owned());
+        let mut text = Vec::new();
+        emit(&mut text, &envelope, OutputFormat::Text).unwrap();
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "command: example\nok: true\nOne result\n"
+        );
+        let mut json = Vec::new();
+        emit(&mut json, &envelope, OutputFormat::Json).unwrap();
+        let json: Value = serde_json::from_slice(&json).unwrap();
+        assert_eq!(json["data"]["count"], 1);
+        assert!(json.get("text_data").is_none());
     }
 }

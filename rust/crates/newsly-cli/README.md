@@ -30,6 +30,23 @@ The Homebrew formula is maintained in the external `willemave/newsbuddy` tap.
 Updating that formula to package the Rust binary is separate from this source
 cutover. Until the tap publishes the Rust build, install from source.
 
+## Get the last ten favorited articles
+
+```bash
+newsbuddy content favorites --limit 10
+newsbuddy content favorites --limit 10 --output text
+```
+
+Favorites are articles saved to Knowledge. Results follow the user's save time,
+newest first, rather than publication or ingestion time. The command follows
+Knowledge pages in batches of 100 and skips podcasts and other content types until it finds ten
+articles or exhausts the library. The default limit is 10; valid limits are 1–100.
+The whole lookup shares the `--timeout` deadline. Failures do not return a
+successful partial list.
+
+Use `rust/target/debug/newsbuddy` when testing a local build. An older installed
+Homebrew binary does not gain this command until it is updated.
+
 ## Configuration and login
 
 The default config file is:
@@ -65,6 +82,35 @@ The following overrides remain supported:
 
 The legacy `NEWSLY_AGENT_*` names are compatibility aliases, not separate
 configuration authorities.
+
+## Local API keys over HTTP
+
+The existing admin HTTP API can create a key without an iOS approval:
+
+1. Start the API with `scripts/start_services.sh server --env-file .env --port 8000`.
+2. `POST /auth/admin/login` with JSON `{"password":"<local ADMIN_PASSWORD>"}`.
+   Retain the returned `admin_session` cookie.
+3. `GET /admin/api-keys` with that cookie to list target users.
+4. `POST /admin/api-keys/create` with the cookie and form body `user_id=<id>`
+   (`application/x-www-form-urlencoded`). The HTML response reveals the new key
+   once in the **New Key** block. Select the user whose library you intend to read.
+5. Pass the key as `NEWSBUDDY_API_KEY` or in a dedicated owner-only config file.
+   `POST /admin/api-keys/<key-id>/revoke` revokes it when the test is finished.
+
+These are authenticated admin endpoints, not an anonymous token-generation
+route. The browser equivalent is <http://127.0.0.1:8000/admin/api-keys>.
+Do not put raw keys or admin cookies in test reports. A local key only grants
+access to the selected local account; an empty fixture account does not contain
+the user's production favorites.
+
+For an interactive test in zsh, paste the key at a hidden prompt:
+
+```zsh
+read -rs 'NEWSBUDDY_API_KEY?Local API key: '
+export NEWSBUDDY_API_KEY
+rust/target/debug/newsbuddy --server http://127.0.0.1:8000 content favorites
+unset NEWSBUDDY_API_KEY
+```
 
 ## Commands
 

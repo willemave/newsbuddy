@@ -87,6 +87,9 @@ struct ContentView: View {
                 compactTabBarHeight = max(height, 0)
             }
         }
+        // The floating bar leaves the home-indicator area exposed. Paint it at
+        // the root so it matches the reading surface instead of the system host.
+        .background(Color.surfacePrimary.ignoresSafeArea())
         .sheet(isPresented: $showSettingsSheet, onDismiss: {
             isSettingsSheetActive = false
             settingsPath = NavigationPath()

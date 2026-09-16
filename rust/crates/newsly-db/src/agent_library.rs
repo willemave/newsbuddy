@@ -48,7 +48,7 @@ struct AgentLibraryContentRow {
     created_at: NaiveDateTime,
     updated_at: Option<NaiveDateTime>,
     content_metadata: Value,
-    saved_at: Option<NaiveDateTime>,
+    saved_at: Option<DateTime<Utc>>,
     saved_to_knowledge: bool,
     chat_session_ids: Vec<i64>,
     source_storage_key: Option<String>,
@@ -69,7 +69,7 @@ impl From<AgentLibraryContentRow> for AgentLibraryContentProjection {
             created_at: row.created_at.and_utc(),
             updated_at: row.updated_at.map(|value| value.and_utc()),
             content_metadata: row.content_metadata,
-            saved_at: row.saved_at.map(|value| value.and_utc()),
+            saved_at: row.saved_at,
             saved_to_knowledge: row.saved_to_knowledge,
             chat_session_ids: row.chat_session_ids,
             source_body: row
@@ -111,7 +111,7 @@ pub async fn list_agent_library_content(
             SELECT
                 session.content_id::bigint AS content_id,
                 array_agg(session.id::bigint ORDER BY session.id) AS chat_session_ids,
-                min(session.created_at) AS saved_at
+                min(session.created_at) AT TIME ZONE 'UTC' AS saved_at
             FROM chat_sessions AS session
             WHERE session.user_id::bigint = $1
               AND session.content_id IS NOT NULL
@@ -249,4 +249,101 @@ pub enum AgentLibraryRepositoryError {
     InvalidInput,
     #[error("PostgreSQL agent-library query failed")]
     Sqlx(#[from] sqlx::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+    use sqlx::PgPool;
+
+    use super::list_agent_library_content;
+
+    #[sqlx::test]
+    async fn library_content_decodes_knowledge_and_chat_saved_timestamps(pool: PgPool) {
+        let user_id = sqlx::query_scalar::<_, i64>(
+            r#"
+            INSERT INTO users (apple_id, email, is_admin, is_active)
+            VALUES ('agent-library-test', 'agent-library@example.com', FALSE, TRUE)
+            RETURNING id::bigint
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("test user should insert");
+        let knowledge_content_id = sqlx::query_scalar::<_, i64>(
+            r#"
+            INSERT INTO contents (content_type, url, status, is_aggregate, content_metadata)
+            VALUES ('article', 'https://example.com/knowledge', 'completed', FALSE, '{}')
+            RETURNING id::bigint
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("Knowledge content should insert");
+        let chat_content_id = sqlx::query_scalar::<_, i64>(
+            r#"
+            INSERT INTO contents (content_type, url, status, is_aggregate, content_metadata)
+            VALUES ('article', 'https://example.com/chat', 'completed', FALSE, '{}')
+            RETURNING id::bigint
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("chat content should insert");
+
+        sqlx::query(
+            r#"
+            INSERT INTO content_knowledge_saves (user_id, content_id, saved_at, created_at)
+            VALUES ($1::bigint::integer, $2::bigint::integer, '2026-09-15 12:34:56+00', '2026-09-15 12:34:56+00')
+            "#,
+        )
+        .bind(user_id)
+        .bind(knowledge_content_id)
+        .execute(&pool)
+        .await
+        .expect("Knowledge save should insert");
+        let chat_session_id = sqlx::query_scalar::<_, i64>(
+            r#"
+            INSERT INTO chat_sessions (
+                user_id, content_id, title, session_type, created_at,
+                council_mode, is_hidden_from_history
+            )
+            VALUES (
+                $1::bigint::integer, $2::bigint::integer, 'Library chat', 'content',
+                '2026-09-15 13:45:00', FALSE, FALSE
+            )
+            RETURNING id::bigint
+            "#,
+        )
+        .bind(user_id)
+        .bind(chat_content_id)
+        .fetch_one(&pool)
+        .await
+        .expect("chat session should insert");
+
+        let rows = list_agent_library_content(&pool, user_id)
+            .await
+            .expect("library timestamps should decode");
+
+        assert_eq!(rows.len(), 2);
+        let knowledge = rows
+            .iter()
+            .find(|row| row.content_id == knowledge_content_id)
+            .expect("Knowledge row should be present");
+        assert!(knowledge.saved_to_knowledge);
+        assert_eq!(
+            knowledge.saved_at,
+            Utc.with_ymd_and_hms(2026, 9, 15, 12, 34, 56).single()
+        );
+        let chat = rows
+            .iter()
+            .find(|row| row.content_id == chat_content_id)
+            .expect("chat row should be present");
+        assert!(!chat.saved_to_knowledge);
+        assert_eq!(chat.chat_session_ids, vec![chat_session_id]);
+        assert_eq!(
+            chat.saved_at,
+            Utc.with_ymd_and_hms(2026, 9, 15, 13, 45, 0).single()
+        );
+    }
 }

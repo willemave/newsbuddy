@@ -6,6 +6,7 @@ mod app;
 pub mod args;
 pub mod client;
 pub mod config;
+mod favorites;
 pub mod library;
 pub mod output;
 pub mod wait;

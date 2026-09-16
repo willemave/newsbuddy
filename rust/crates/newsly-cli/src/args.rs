@@ -152,6 +152,11 @@ pub enum ContentCommand {
         #[arg(long, default_value = "all")]
         read_filter: String,
     },
+    /// List the most recently saved Knowledge articles.
+    Favorites {
+        #[arg(long, value_parser = parse_favorites_limit, default_value_t = 10)]
+        limit: usize,
+    },
     /// Fetch one content item.
     Get { content_id: i64 },
     /// Submit a URL for processing.
@@ -160,6 +165,16 @@ pub enum ContentCommand {
     Summarize(SubmitArgs),
     /// Inspect user-submitted content statuses.
     Submissions(ContentSubmissionsArgs),
+}
+
+fn parse_favorites_limit(raw: &str) -> Result<usize, String> {
+    let limit = raw
+        .parse::<usize>()
+        .map_err(|_| "limit must be an integer from 1 through 100".to_owned())?;
+    if !(1..=100).contains(&limit) {
+        return Err("limit must be from 1 through 100".to_owned());
+    }
+    Ok(limit)
 }
 
 #[derive(Debug, Args)]
@@ -471,5 +486,43 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn favorites_limit_defaults_to_ten_and_accepts_bounds() {
+        let default = Cli::try_parse_from(["newsbuddy", "content", "favorites"]).unwrap();
+        assert!(matches!(
+            default.command,
+            Command::Content(ContentArgs {
+                command: ContentCommand::Favorites { limit: 10 }
+            })
+        ));
+
+        for limit in [1, 100] {
+            let parsed = Cli::try_parse_from([
+                "newsbuddy",
+                "content",
+                "favorites",
+                "--limit",
+                &limit.to_string(),
+            ])
+            .unwrap();
+            assert!(matches!(
+                parsed.command,
+                Command::Content(ContentArgs {
+                    command: ContentCommand::Favorites { limit: parsed_limit }
+                }) if parsed_limit == limit
+            ));
+        }
+    }
+
+    #[test]
+    fn favorites_limit_rejects_values_outside_one_through_one_hundred() {
+        for limit in ["0", "101", "not-a-number"] {
+            let error =
+                Cli::try_parse_from(["newsbuddy", "content", "favorites", "--limit", limit])
+                    .unwrap_err();
+            assert!(error.to_string().contains("limit must"));
+        }
     }
 }

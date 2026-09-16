@@ -2543,3 +2543,32 @@ Use this append-only log to preserve implementation context across sessions and 
 - Feed stats now count terminal item-processing failures per configured source and distinguish access gates such as paywalls or sign-in requirements from other failures, without returning raw internal diagnostics.
 - Feed Sources and Feed Status rows show prominent error labels. Source details explain the available URL, pause, and removal actions; Feed Status drill-down opens Issues first when failures exist.
 - Validation passed: focused PostgreSQL stats/history coverage, 8 public-contract tests, five focused native tests on iPhone 17 Pro Simulator, warning-denied Clippy for affected Rust packages, generated-contract drift, iOS wire boundaries, formatting, and diff checks. The app build was installed in Simulator, but no access-gated local source fixture was available for a final populated-row screenshot. No commit, push, or deployment requested.
+
+### 2026-09-15 — `main` — CLI favorites and local authentication verification
+
+- Scope: add `content favorites` using existing Knowledge HTTP pagination; default ten articles by user save time. Preserve read/save state and existing API contracts.
+- Local test authentication uses existing admin login/key-create HTTP routes and a temporary owner-only config. Namespaced local E2E fixtures supply saved articles; no provider calls or production changes.
+- Found and fixed a library-export timestamp mismatch: PostgreSQL returns the merged save timestamp as timestamptz; decode it as UTC DateTime and explicitly interpret chat timestamps as UTC. Added isolated PostgreSQL regression coverage.
+- Validation passed: 46 CLI unit tests, four real-binary mock test groups spanning all command families, isolated SQLx library timestamp regression, warning-denied all-target Clippy for CLI/DB, formatting, and diff checks. Authenticated favorites matched the first ten of twelve local saved fixture articles; real CLI login, key creation, own/cross-user job checks, and timeout behavior passed. Rebuilt API library sync downloaded 24 files and a repeat found all unchanged.
+- Revoked all three temporary local API keys and proved 401 afterward; deleted temporary credential files. The default CLI config and Homebrew binary were preserved. Test data is namespaced local fixtures; provider-backed writes were tested with mocks, with no paid calls. Evidence: `test-results/cli-favorites/`. No commit or deployment.
+
+### 2026-09-15 — `main` — Bottom safe-area background
+
+- **Status:** Local fix implemented; visual validation blocked.
+- **Scope:** Root iOS tab container background and Briefing chrome law, following the reported dark bottom strip on iOS 27.
+- **Changes:** Paint the root container with the reading surface color through the safe areas, including the exposed home-indicator region beneath the compact tab bar. Preserve inset geometry, scrolling, and navigation behavior.
+- **Validation:** Scoped diff whitespace check passed. XcodeBuildMCP simulator discovery and direct simctl both fail because the installed Xcode license has not been accepted; no build or Simulator reproduction was possible. The safe-area background explanation remains unconfirmed on-device.
+- **Remaining:** Build and compare Briefing/Knowledge bottom edges in light and dark appearance on iOS 27 once Xcode is usable.
+- **Commits:** Uncommitted.
+
+### 2026-09-15 — `main` — CLI post-implementation cleanup
+
+- Reviewed favorites transport/output/pagination, command tests, library timestamp fix, and related documentation; preserved product behavior and API boundaries.
+- Collapsed duplicate test-process setup into one runner, removed argument-string copies before spawning, inlined one-use path/response helpers. Retained cursor/deadline validation and all regression coverage.
+- Validation passed: 46 CLI unit tests, four process-level test groups, warning-denied all-target CLI Clippy, workspace formatting, and diff checks. No commits or deployment.
+
+### 2026-09-15 — `main` — CLI code-review fixes
+
+- Replaced shrinking Knowledge pages with fixed 100-item batches; retain only the requested article count without exposing an unfiltered continuation cursor.
+- Favorites now has a validated typed result with unknown-field preservation and feature-owned text rendering. Generic output accepts a display body without command-name dispatch or reparsing favorites JSON. Explicit-null titles remain supported while missing titles fail validation.
+- Validation passed: 50 CLI unit tests and four process-level test groups, warning-denied all-target Clippy, formatting, and diff checks. The sparse regression (nine articles, 900 podcasts, final article) needs exactly ten HTTP requests; tests also cover excess-page truncation, unknown content types/fields, null versus missing titles, text rendering, and no partial failures. No commit or deployment.

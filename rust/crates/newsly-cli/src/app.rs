@@ -23,6 +23,7 @@ use crate::args::{
 };
 use crate::client::{ApiError, Client, QueryParameters};
 use crate::config::{self, FileConfig, RuntimeConfig};
+use crate::favorites::collect_favorite_articles;
 use crate::library::{LibrarySyncError, sync_library};
 use crate::output::{Envelope, EnvelopeError, OutputFormat, emit};
 use crate::wait::{WaitOptions, job_failed_or_skipped};
@@ -32,6 +33,7 @@ struct CommandResult {
     command: &'static str,
     data: Option<Value>,
     job: Option<Value>,
+    text_data: Option<String>,
 }
 
 #[derive(Debug)]
@@ -48,6 +50,7 @@ impl CommandResult {
             command,
             data: Some(data),
             job: None,
+            text_data: None,
         }
     }
 }
@@ -117,7 +120,8 @@ where
     let config_path = config::resolve_path(&path_override(cli.config.as_ref()));
     match execute(cli, stderr, version).await {
         Ok(result) => {
-            let envelope = Envelope::success(result.command, result.data, result.job);
+            let mut envelope = Envelope::success(result.command, result.data, result.job);
+            envelope.text_data = result.text_data;
             if let Err(error) = emit(stdout, &envelope, output_format) {
                 let _ = writeln!(stderr, "{error}");
                 return 1;
@@ -361,6 +365,14 @@ async fn execute_content(
             "content.get",
             client.get_content(content_id).await?,
         )),
+        ContentCommand::Favorites { limit } => {
+            let favorites = collect_favorite_articles(&client, limit, cli.timeout).await?;
+            let text_data = favorites.render_text();
+            let data = serde_json::to_value(favorites).map_err(CommandError::local)?;
+            let mut result = CommandResult::data("content.favorites", data);
+            result.text_data = Some(text_data);
+            Ok(result)
+        }
         ContentCommand::Submit(arguments) => {
             execute_submit(&client, arguments, false, "content.submit").await
         }
@@ -767,6 +779,7 @@ fn command_name(command: &Command) -> &'static str {
         },
         Command::Content(arguments) => match &arguments.command {
             ContentCommand::List { .. } => "content.list",
+            ContentCommand::Favorites { .. } => "content.favorites",
             ContentCommand::Get { .. } => "content.get",
             ContentCommand::Submit(_) => "content.submit",
             ContentCommand::Summarize(_) => "content.summarize",

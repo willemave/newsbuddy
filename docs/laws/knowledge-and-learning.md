@@ -2,7 +2,7 @@
 
 K1. Knowledge is the authenticated user's durable saved library. Saving twice creates one save, and removing it leaves read state, chats, and source content intact.
 
-K2. Saved items remain searchable, pageable, and readable after they leave the inbox.
+K2. Saved items remain searchable, pageable, and readable after they leave the inbox. The CLI favorites list returns the most recently saved articles in save-time order; other content types do not count toward its requested limit. It returns fewer only when the saved library is exhausted, and failed retrieval never reports a successful partial list.
 
 K3. A normal save leaves read state unchanged. Actions that save and mark read must say so explicitly.
 
