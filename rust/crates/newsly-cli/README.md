@@ -26,9 +26,18 @@ cargo run --manifest-path rust/Cargo.toml \
   -p newsly-cli --bin newsbuddy -- version
 ```
 
-The Homebrew formula is maintained in the external `willemave/newsbuddy` tap.
-Updating that formula to package the Rust binary is separate from this source
-cutover. Until the tap publishes the Rust build, install from source.
+Homebrew releases are maintained in the external `willemave/newsbuddy` tap:
+
+```bash
+brew install willemave/newsbuddy/newsbuddy
+# Existing installations:
+brew update
+brew upgrade newsbuddy
+```
+
+Version 0.2.0 replaces the Go implementation with this Rust CLI. CLI releases
+use `cli-v<version>` tags and a matching tap update; backend deployment does not
+publish a CLI release.
 
 ## Get the last ten favorited articles
 

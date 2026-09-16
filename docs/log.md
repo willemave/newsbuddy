@@ -2572,3 +2572,8 @@ Use this append-only log to preserve implementation context across sessions and 
 - Replaced shrinking Knowledge pages with fixed 100-item batches; retain only the requested article count without exposing an unfiltered continuation cursor.
 - Favorites now has a validated typed result with unknown-field preservation and feature-owned text rendering. Generic output accepts a display body without command-name dispatch or reparsing favorites JSON. Explicit-null titles remain supported while missing titles fail validation.
 - Validation passed: 50 CLI unit tests and four process-level test groups, warning-denied all-target Clippy, formatting, and diff checks. The sparse regression (nine articles, 900 podcasts, final article) needs exactly ten HTTP requests; tests also cover excess-page truncation, unknown content types/fields, null versus missing titles, text rendering, and no partial failures. No commit or deployment.
+
+### 2026-09-16 — `main` — Homebrew CLI 0.2.0 release
+
+- Version the Rust CLI independently at 0.2.0 and prepare the `cli-v0.2.0` source tag. Update the external Homebrew tap from Go to Cargo, preserving the executable/config names.
+- Publish the CLI tag and tap only; no backend deployment is part of this release. Validation: 50 CLI unit tests, four process-level test groups, warning-denied Clippy, formatting, and diff checks passed. Homebrew install/test proof is recorded in the external tap workflow.
