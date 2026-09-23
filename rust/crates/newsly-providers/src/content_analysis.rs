@@ -16,7 +16,7 @@ use thiserror::Error;
 
 use crate::{ModelSpec, OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
-const DEFAULT_CONTENT_ANALYSIS_MODEL: &str = "openai:gpt-5.6-terra";
+const DEFAULT_CONTENT_ANALYSIS_MODEL: &str = "openai:gpt-6-luna";
 const MAX_ANALYSIS_TEXT_CHARS: usize = 8_000;
 const MAX_INSTRUCTION_CHARS: usize = 2_000;
 const MAX_INSTRUCTION_LINKS: usize = 50;

@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
-const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-5.6-luna";
+const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-6-luna";
 use newsly_domain::DEFAULT_LENS_EMBEDDING_MODEL as DEFAULT_EMBEDDING_MODEL;
 const DEFAULT_OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1/";
 const MAX_EMBEDDING_BATCH: usize = 128;

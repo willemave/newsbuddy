@@ -128,14 +128,14 @@ pub struct TweetSuggestionsResponse {
     pub creativity: u8,
     pub length: TweetLength,
     #[serde(default = "default_tweet_model")]
-    #[schema(default = "openai:gpt-5.6-luna")]
+    #[schema(default = "openai:gpt-6-luna")]
     pub model: String,
     #[schema(min_items = 3, max_items = 3)]
     pub suggestions: Vec<TweetSuggestion>,
 }
 
 fn default_tweet_model() -> String {
-    "openai:gpt-5.6-luna".to_owned()
+    "openai:gpt-6-luna".to_owned()
 }
 
 #[derive(

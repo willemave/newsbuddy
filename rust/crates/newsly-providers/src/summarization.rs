@@ -18,7 +18,7 @@ use thiserror::Error;
 
 use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
-const DEFAULT_SUMMARIZATION_MODEL: &str = "openai:gpt-5.6-terra";
+const DEFAULT_SUMMARIZATION_MODEL: &str = "openai:gpt-6-luna";
 const MAX_SUMMARIZATION_PAYLOAD_CHARS: usize = 220_000;
 const CONTENT_TRUNCATION_MARKER: &str = "\n\n[... CONTENT TRUNCATED ...]\n\n";
 

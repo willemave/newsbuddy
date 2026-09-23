@@ -18,7 +18,7 @@ use thiserror::Error;
 
 use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
-const DEFAULT_NEWS_MODEL: &str = "openai:gpt-5.6-luna";
+const DEFAULT_NEWS_MODEL: &str = "openai:gpt-6-luna";
 const DEFAULT_EMBEDDING_MODEL: &str = "openrouter:qwen/qwen3-embedding-8b";
 const DEFAULT_OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1/";
 const MAX_EMBEDDING_BATCH: usize = 128;

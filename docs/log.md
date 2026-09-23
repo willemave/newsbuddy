@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-23 — `main` — GPT-6 Luna routine text defaults
+
+- **Status:** Complete locally.
+- **Scope:** Routine OpenAI text generation: content analysis/summaries, news enrichment, Briefing, onboarding, discussions/tweet suggestions, Learning Decks, share-action agents, and narration scripts.
+- **Decisions:** Use `openai:gpt-6-luna`; preserve explicit overrides, prompts, Responses transport, GPT-5.6 Sol chat default and existing sessions, specialized media/embedding models, and historical eval candidates/fixtures.
+- **Changes:** Updated provider/worker defaults and onboarding expectation; regenerated the tweet-suggestion model default in OpenAPI and Swift; documented the model-role invariant. Podcast content 60865 remains failed; no retry or production configuration change performed.
+- **Validation:** Official model/migration documentation checked. Production-key synthetic Responses canary succeeded with GPT-6 Luna (HTTP 200, completed, 15 tokens); checked model overrides were absent. Rust formatting, warning-denied Clippy for affected crates/all targets, contract drift check, and generated Swift typecheck passed. Provider/contract unit tests passed (87 passed, one opt-in live test ignored); the initial sandbox-denied HTTP fixture bind passed with loopback access.
+- **Remaining:** Deployment and podcast retry/recovery remain outstanding; the canary proves text API access, not podcast transcription or generation quality.
+- **Commits:** Included in the GPT-6 Luna defaults commit.
+
 ### 2026-09-20 — `main` — Inverted compact tab labels
 
 - **Status:** Complete locally; visual validation blocked.

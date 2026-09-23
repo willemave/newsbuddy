@@ -1,6 +1,6 @@
 use serde_json::{Map, Value, json};
 
-pub(super) const ONBOARDING_MODEL: &str = "openai:gpt-5.6-luna";
+pub(super) const ONBOARDING_MODEL: &str = "openai:gpt-6-luna";
 
 pub(super) const AUDIO_PLAN_SYSTEM_PROMPT: &str = concat!(
     "You design onboarding discovery lanes based on a user's spoken interests. Return a concise ",

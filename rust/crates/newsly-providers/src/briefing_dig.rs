@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
-const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-5.6-luna";
+const DEFAULT_BRIEFING_MODEL: &str = "openai:gpt-6-luna";
 const EXCLUDED_DOMAINS: [&str; 8] = [
     "facebook.com",
     "linkedin.com",

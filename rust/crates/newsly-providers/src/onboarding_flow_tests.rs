@@ -5,7 +5,7 @@ use super::{
 
 #[test]
 fn onboarding_uses_luna_priority_with_low_reasoning() {
-    assert_eq!(ONBOARDING_MODEL, "openai:gpt-5.6-luna");
+    assert_eq!(ONBOARDING_MODEL, "openai:gpt-6-luna");
 
     let parameters = onboarding_provider_parameters();
     assert_eq!(parameters["reasoning"]["effort"], "low");

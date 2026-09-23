@@ -41,7 +41,7 @@ use super::browser::{BrowserValidationError, hosted_viewer_html, validate_in_bro
 mod policy;
 use policy::{allowed_tools, ip_selector, learning_deck_agent_limits, source_provider_parameters};
 
-const DEFAULT_MODEL_SPEC: &str = "openai:gpt-5.6-luna";
+const DEFAULT_MODEL_SPEC: &str = "openai:gpt-6-luna";
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai/search";
 const INPUT_SOURCE_TEXT: &str = "input/source.txt";
 const INPUT_SOURCE_SNAPSHOT: &str = "input/source-snapshot.json";

@@ -1472,7 +1472,7 @@ struct APITweetSuggestionsResponse: Codable {
         contentId: Int,
         creativity: Int,
         length: APITweetLength,
-        model: String = "openai:gpt-5.6-luna",
+        model: String = "openai:gpt-6-luna",
         suggestions: [APITweetSuggestion]
     ) {
         self.contentId = contentId

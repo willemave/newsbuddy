@@ -21,9 +21,9 @@ use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
 const DEFAULT_ITUNES_SEARCH_URL: &str = "https://itunes.apple.com/search";
 const DEFAULT_ELEVENLABS_API_BASE: &str = "https://api.elevenlabs.io";
-const DEFAULT_TWEET_MODEL: &str = "openai:gpt-5.6-luna";
+const DEFAULT_TWEET_MODEL: &str = "openai:gpt-6-luna";
 const DEFAULT_ANTHROPIC_TWEET_MODEL: &str = "anthropic:claude-sonnet-4-5";
-const DEFAULT_DISCUSSION_MODEL: &str = "openai:gpt-5.6-luna";
+const DEFAULT_DISCUSSION_MODEL: &str = "openai:gpt-6-luna";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PodcastEpisodeHit {

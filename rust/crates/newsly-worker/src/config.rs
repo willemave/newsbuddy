@@ -738,7 +738,7 @@ impl AudioEpisodeWorkerProcessConfig {
         }
 
         let script_model =
-            env::var("AUDIO_EPISODE_MODEL").unwrap_or_else(|_| "openai:gpt-5.6-luna".to_owned());
+            env::var("AUDIO_EPISODE_MODEL").unwrap_or_else(|_| "openai:gpt-6-luna".to_owned());
         let parsed_model =
             ModelSpec::parse(&script_model).map_err(|_| WorkerConfigError::InvalidValue {
                 name: "AUDIO_EPISODE_MODEL",
