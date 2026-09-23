@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-20 — `main` — Inverted compact tab labels
+
+- **Status:** Complete locally; visual validation blocked.
+- **Scope:** Floating iOS root navigation between Briefing and Knowledge.
+- **Decisions:** Keep the selected destination visually highlighted but compact; show icon and name for unselected destinations so the other route is explicit.
+- **Changes:** Inverted the compact tab bar's label and padding conditions without changing selection, accessibility, feedback, or motion behavior. Updated the Briefing product law.
+- **Validation:** Swift parser validation passed with the Command Line Tools toolchain, as did the iOS wire-boundary guard, module-size guardrails, and diff whitespace check. Xcode build and Simulator inspection are blocked because the installed Xcode 27 license has not been accepted.
+- **Remaining:** Inspect both Briefing-selected and Knowledge-selected states in Simulator or on-device after the Xcode license is accepted.
+- **Commits:** Included in the compact-tab-label commit.
+
 ### 2026-09-12 — `main` — Release smoke active-deck conflict isolation
 
 - **Status:** Release correction complete locally; full release gate restart pending.

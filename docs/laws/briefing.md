@@ -2,7 +2,7 @@
 
 B1. Briefing is a per-user, continuously updated reading edition.
 
-Briefing and the Knowledge list share the same bottom-edge fade, kept low behind floating navigation so readable content above it stays clear. The exposed area beneath floating navigation matches the reading surface through the bottom screen edge.
+Briefing and the Knowledge list share the same bottom-edge fade, kept low behind floating navigation so readable content above it stays clear. The exposed area beneath floating navigation matches the reading surface through the bottom screen edge. Floating root navigation keeps the selected destination as a compact highlighted icon and expands each unselected destination to show its name.
 
 B2. Eligible sources are completed, unread, non-skipped articles, podcasts, and news that the authenticated user can open directly.
 

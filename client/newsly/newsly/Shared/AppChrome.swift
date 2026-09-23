@@ -184,15 +184,15 @@ struct CompactTabBar: View {
             HStack(spacing: 6) {
                 Image(systemName: item.icon)
                     .font(.appSymbol(size: 18, weight: .semibold))
-                if isSelected {
+                if !isSelected {
                     Text(item.label)
                         .font(.appCaption2.weight(.semibold))
                         .lineLimit(1)
                         .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .padding(.horizontal, isSelected ? 14 : 0)
-            .padding(.vertical, isSelected ? 9 : 0)
+            .padding(.horizontal, isSelected ? 0 : 14)
+            .padding(.vertical, isSelected ? 0 : 9)
             .frame(minWidth: 44, minHeight: 44)
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurfaceSecondary)
             .background {
