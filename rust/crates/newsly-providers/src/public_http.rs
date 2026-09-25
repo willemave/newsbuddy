@@ -8,6 +8,10 @@ use reqwest::{Client, header};
 use thiserror::Error;
 
 const MAX_REDIRECTS: usize = 5;
+/// Largest source document accepted anywhere a feed is validated or ingested. Podcast feeds with
+/// long back catalogs routinely run to several megabytes, so validation must not be stricter than
+/// the ingestion that follows it.
+pub(crate) const MAX_SOURCE_RESPONSE_BYTES: usize = 20 * 1024 * 1024;
 
 pub(crate) struct PublicDocument {
     pub effective_url: PublicUrl,

@@ -99,8 +99,11 @@ impl QueueWorkerProcessConfig {
             lease_duration,
             max_retries: i32::try_from(max_retries)
                 .map_err(|_| QueueWorkerProcessConfigError::Range("MAX_TASK_RETRIES"))?,
-            log_filter: env::var("RUST_LOG")
-                .unwrap_or_else(|_| "newsly_worker=info,newsly_queue=info".to_owned()),
+            // Provider crates log their own outages and empty results; without them a worker
+            // can fail or return nothing with no trace.
+            log_filter: env::var("RUST_LOG").unwrap_or_else(|_| {
+                "newsly_worker=info,newsly_queue=info,newsly_providers=info".to_owned()
+            }),
             log_format,
         })
     }

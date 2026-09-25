@@ -472,6 +472,15 @@ Onboarding has one canonical discovery orchestration path. Long search, feed,
 audio, and model operations execute outside transactions; persistence and task
 fan-out occur through fresh ownership-fenced transactions.
 
+Audio onboarding plans lanes by target, and each lane gathers evidence from the
+source that can ground it: feed lanes run one Exa search per planned query with a
+short text excerpt; podcast lanes add Apple's podcast directory (which carries
+RSS URLs) and resolve Apple Podcasts pages found on the web to their feeds;
+Reddit lanes use Reddit's own community search through app-only OAuth, since
+web search does not index reddit.com. One structured model call then selects
+across all lanes, and the worker validates every feed before persisting. Feed
+validation accepts documents up to the same body limit as feed ingestion.
+
 X bookmark sync owns OAuth refresh, bounded pagination, resource billing
 deduplication, synced-item ledger/checkpoints, canonical ingestion, Knowledge
 routing, and reauthentication state. Other scheduled sources follow the same

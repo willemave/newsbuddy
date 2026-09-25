@@ -18,7 +18,11 @@ pub(super) const AUDIO_PLAN_SYSTEM_PROMPT: &str = concat!(
     "lane a distinct discovery purpose. Across the whole plan, deliberately cover different source ",
     "archetypes and viewpoints where applicable: practitioner, academic/research, institutional, ",
     "independent, and contrasting perspectives. Encode that source archetype in the query; format ",
-    "differences alone do not count as diversity. Every lane must add distinct discovery value."
+    "differences alone do not count as diversity. Every lane must add distinct discovery value. ",
+    "If the narration names no specific subjects (for example only 'the news' or 'current events'), ",
+    "plan for broadly trusted general coverage instead: daily briefing newsletters and daily news ",
+    "podcasts from established outlets, world and national news, and large general news ",
+    "communities. Skip niche, academic, and journalism-about-journalism lanes in that case."
 );
 
 pub(super) fn onboarding_provider_parameters() -> Map<String, Value> {

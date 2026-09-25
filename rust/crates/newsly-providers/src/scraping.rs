@@ -8,7 +8,7 @@ use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::public_http::{PublicHttpError, fetch_public};
+use crate::public_http::{MAX_SOURCE_RESPONSE_BYTES, PublicHttpError, fetch_public};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use reqwest::{StatusCode, Url};
@@ -22,7 +22,6 @@ mod feed;
 
 pub use feed::normalize_feed_document;
 
-const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_HN_CONCURRENCY: usize = 8;
 const DEFAULT_USER_AGENT: &str = "newsly-scraper/2.0 (+https://newsly.app)";
 
@@ -391,7 +390,7 @@ impl ScrapeGateway {
         max_related: usize,
     ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
         let bytes = self
-            .fetch_public_bytes(feed_url, Some(MAX_RESPONSE_BYTES))
+            .fetch_public_bytes(feed_url, Some(MAX_SOURCE_RESPONSE_BYTES))
             .await?;
         let feed = feed_rs::parser::parse(bytes.as_slice())
             .map_err(|error| ScrapeGatewayError::Feed(error.to_string()))?;
@@ -490,7 +489,7 @@ impl ScrapeGateway {
         limit: usize,
     ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
         let bytes = self
-            .fetch_public_bytes(url, Some(MAX_RESPONSE_BYTES))
+            .fetch_public_bytes(url, Some(MAX_SOURCE_RESPONSE_BYTES))
             .await?;
         let document = Html::parse_document(std::str::from_utf8(&bytes).map_err(|error| {
             ScrapeGatewayError::Html(format!("{} returned non-UTF-8 HTML: {error}", key.as_str()))
@@ -578,7 +577,7 @@ impl ScrapeGateway {
         for topic in topics {
             let topic_url = format!("https://brutalist.report/topic/{topic}?limit=25&hours=24");
             let bytes = match self
-                .fetch_public_bytes(&topic_url, Some(MAX_RESPONSE_BYTES))
+                .fetch_public_bytes(&topic_url, Some(MAX_SOURCE_RESPONSE_BYTES))
                 .await
             {
                 Ok(bytes) => bytes,

@@ -37,7 +37,8 @@ struct OnboardingSuggestionCard: View {
                             Text(detail)
                                 .font(.appCaption)
                                 .foregroundColor(.onSurfaceSecondary)
-                                .lineLimit(1)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -88,12 +89,14 @@ struct OnboardingSuggestionCard: View {
         return Self.tilePalette[Int(hash % UInt64(Self.tilePalette.count))]
     }
 
+    /// Why this source was picked, which is what the review step is for; the host is only a
+    /// fallback, since podcast feeds share a handful of hosting domains.
     private var secondaryDetail: String? {
-        if let host = sourceDetail, !host.isEmpty {
-            return host
-        }
         if let rationale = suggestion.rationale, !rationale.isEmpty {
             return rationale
+        }
+        if let host = sourceDetail, !host.isEmpty {
+            return host
         }
         return nil
     }

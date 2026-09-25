@@ -5,7 +5,9 @@
 
 use std::time::Duration;
 
-use crate::public_http::{PublicDocument, PublicHttpError, fetch_public};
+use crate::public_http::{
+    MAX_SOURCE_RESPONSE_BYTES, PublicDocument, PublicHttpError, fetch_public,
+};
 use feed_rs::model::FeedType;
 use futures_util::{StreamExt as _, stream};
 use newsly_extraction::ExtractionClientError;
@@ -13,7 +15,6 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-const MAX_RESPONSE_BYTES: usize = 2_000_000;
 const MAX_PARALLEL_VALIDATIONS: usize = 8;
 const USER_AGENT: &str = "newsly-feed-validator/1.0 (+https://newsly.app)";
 const ACCEPT: &str =
@@ -145,7 +146,7 @@ impl FeedValidator {
         match fetch_public(
             raw_url,
             REQUEST_TIMEOUT,
-            Some(MAX_RESPONSE_BYTES),
+            Some(MAX_SOURCE_RESPONSE_BYTES),
             USER_AGENT,
             ACCEPT,
         )

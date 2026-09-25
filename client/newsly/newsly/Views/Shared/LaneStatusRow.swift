@@ -103,13 +103,15 @@ struct LaneStatusRow: View {
 
     private var isCompleted: Bool { lane.status == "completed" }
 
-    private var showsCountBadge: Bool {
-        lane.queryCount > 0 && !isCompleted && lane.status != "failed"
+    /// Counters appear only once the server reports real query progress; until then the row
+    /// says it is searching rather than showing a 0/N that never moves.
+    private var hasReportedProgress: Bool {
+        lane.queryCount > 0 && lane.completedQueries > 0 && !isCompleted && lane.status != "failed"
     }
 
-    private var showsProgressBar: Bool {
-        lane.queryCount > 0 && !isCompleted && lane.status != "failed"
-    }
+    private var showsCountBadge: Bool { hasReportedProgress }
+
+    private var showsProgressBar: Bool { hasReportedProgress }
 
     private var laneProgress: Double {
         guard lane.queryCount > 0 else { return 0 }
@@ -119,7 +121,7 @@ struct LaneStatusRow: View {
     private var statusLabel: String {
         switch lane.status {
         case "processing":
-            return lane.queryCount > 0 ? "Searching" : "Searching..."
+            return "Searching…"
         case "completed":
             return "Done"
         case "failed":

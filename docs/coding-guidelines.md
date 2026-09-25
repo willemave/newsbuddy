@@ -190,6 +190,21 @@ xcodebuild test \
   -only-testing:newslyUITests
 ```
 
+To run onboarding end to end with real audio, start the local stack
+(`scripts/dev.sh all --env-file .env --local-e2e`), install a DEBUG build on a
+booted simulator, and run:
+
+```bash
+scripts/ios_onboarding_audio_e2e.sh --phrase "I read about chess and space launches"
+```
+
+It synthesizes the spoken answer with macOS `say` and passes it to the app as
+`newslyE2EAudioFixture`. The real recorder, silence auto-stop, upload, backend
+transcription, discovery, and completion all run for a fresh debug user; only
+the microphone input is replaced. Screenshots and UI dumps for each step land in
+the printed output directory. To test with your own voice instead, run the same
+DEBUG build without the fixture; the simulator records from the Mac's microphone.
+
 For a Python-island change:
 
 ```bash

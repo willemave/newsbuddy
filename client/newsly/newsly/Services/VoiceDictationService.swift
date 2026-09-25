@@ -176,6 +176,10 @@ final class VoiceDictationService: NSObject, SpeechTranscribing {
 
     private let testTranscriptionOperation: (@MainActor (URL) async throws -> String)?
 
+    #if DEBUG
+    private var audioFixture: E2EAudioFixture?
+    #endif
+
     private override init() {
         testTranscriptionOperation = nil
         super.init()
@@ -332,6 +336,9 @@ final class VoiceDictationService: NSObject, SpeechTranscribing {
                 recorder: recorder,
                 url: audioFilename
             )
+            #if DEBUG
+            audioFixture = E2EAudioFixture.current()
+            #endif
             startMetering()
             recordingSessionID = sessionID
             observeAudioNotifications(sessionID: sessionID)
@@ -459,6 +466,12 @@ final class VoiceDictationService: NSObject, SpeechTranscribing {
         )
 
         let url = context.url
+        #if DEBUG
+        if let audioFixture {
+            self.audioFixture = nil
+            audioFixture.replaceRecording(at: url)
+        }
+        #endif
         let audioSizeBytes = fileSizeBytes(at: url)
         logger.info(
             "Voice recording ready for transcription | stopReason=\(String(describing: stopReason), privacy: .public) bytes=\(audioSizeBytes) recordingDurationMs=\(recordingDurationMs)"
@@ -536,9 +549,14 @@ final class VoiceDictationService: NSObject, SpeechTranscribing {
         let recorder = context.recorder
         recorder.updateMeters()
 
-        let powerDb = recorder.averagePower(forChannel: 0)
+        var powerDb = recorder.averagePower(forChannel: 0)
         let now = Date()
         let recordingDuration = now.timeIntervalSince(recordingStartedAt ?? now)
+        #if DEBUG
+        if let audioFixture {
+            powerDb = audioFixture.powerDb(atRecordingDuration: recordingDuration)
+        }
+        #endif
         guard let deadlines = activeSession?.deadlines else { return }
         switch meteringState.observe(
             powerDb: powerDb,
@@ -808,3 +826,50 @@ extension VoiceDictationService: AVAudioRecorderDelegate {
         }
     }
 }
+
+#if DEBUG
+/// A prerecorded clip that stands in for the microphone in simulator end-to-end runs. The
+/// real recorder, silence detection, upload, and backend transcription all still run; only
+/// what the microphone heard is replaced. Levels read as speech for the clip's length and as
+/// silence afterwards, so the normal silence auto-stop fires, and the clip is what gets
+/// uploaded.
+struct E2EAudioFixture {
+    let url: URL
+    let duration: TimeInterval
+
+    /// Quiet lead-in so the ambient calibration window sees room noise, as it would live.
+    private static let leadInSeconds: TimeInterval = 0.4
+
+    @MainActor
+    static func current() -> E2EAudioFixture? {
+        guard let path = E2ETestLaunch.audioFixturePath else { return nil }
+        let url = URL(fileURLWithPath: path)
+        do {
+            let duration = try AVAudioPlayer(contentsOf: url).duration
+            logger.info("E2E audio fixture active | seconds=\(duration)")
+            return E2EAudioFixture(url: url, duration: duration)
+        } catch {
+            logger.error(
+                "E2E audio fixture unreadable | error=\(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+    }
+
+    func powerDb(atRecordingDuration elapsed: TimeInterval) -> Float {
+        let speaking = elapsed >= Self.leadInSeconds && elapsed < Self.leadInSeconds + duration
+        return speaking ? -18 : -70
+    }
+
+    func replaceRecording(at recordingURL: URL) {
+        do {
+            try? FileManager.default.removeItem(at: recordingURL)
+            try FileManager.default.copyItem(at: url, to: recordingURL)
+        } catch {
+            logger.error(
+                "E2E audio fixture copy failed | error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+}
+#endif

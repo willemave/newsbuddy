@@ -290,6 +290,10 @@ async fn normalize_feed_seeds(
     let mut seen = HashSet::new();
     let mut requested = HashSet::new();
     let mut candidates = Vec::new();
+    let proposed = seeds.len();
+    let mut without_feed = 0_usize;
+    let mut not_a_feed = 0_usize;
+    let mut without_audio = 0_usize;
     for seed in seeds {
         let site_url = clean_optional(seed.site_url, 2_048);
         let mut candidate = clean_optional(seed.feed_url, 2_048)
@@ -303,6 +307,7 @@ async fn normalize_feed_seeds(
             candidate = site_url.as_deref().and_then(infer_feed_url);
         }
         let Some(candidate) = candidate else {
+            without_feed += 1;
             continue;
         };
         if requested.insert(candidate.clone()) {
@@ -322,13 +327,19 @@ async fn normalize_feed_seeds(
             Ok(Some(validated))
                 if suggestion_type == "podcast_rss" && !validated.has_audio_entries =>
             {
-                tracing::debug!(
+                tracing::info!(
                     url = %candidate,
                     "onboarding podcast candidate had no audio entries"
                 );
+                without_audio += 1;
                 None
             }
-            Ok(validated) => validated.map(|feed| feed.effective_url),
+            Ok(Some(validated)) => Some(validated.effective_url),
+            Ok(None) => {
+                tracing::info!(url = %candidate, "onboarding candidate was not a feed");
+                not_a_feed += 1;
+                None
+            }
             Err(error) => {
                 tracing::warn!(
                     url = %candidate,
@@ -367,6 +378,17 @@ async fn normalize_feed_seeds(
             break;
         }
     }
+    // One line per kind, so an empty category is explained without enabling debug logs.
+    tracing::info!(
+        suggestion_type,
+        proposed,
+        kept = seen.len(),
+        without_feed,
+        not_a_feed,
+        without_audio,
+        failed = failures.len(),
+        "onboarding feed suggestions normalized"
+    );
     failures
 }
 
@@ -377,6 +399,7 @@ fn normalize_subreddits(
     output: &mut Vec<NewOnboardingSuggestion>,
 ) {
     let mut seen = HashSet::new();
+    let proposed = seeds.len();
     for seed in seeds {
         let site_url = clean_optional(seed.site_url, 2_048);
         let subreddit = clean_optional(seed.subreddit, 255)
@@ -410,6 +433,11 @@ fn normalize_subreddits(
             break;
         }
     }
+    tracing::info!(
+        proposed,
+        kept = seen.len(),
+        "onboarding subreddit suggestions normalized"
+    );
 }
 
 #[derive(Debug)]

@@ -141,6 +141,7 @@ enum E2ETestLaunch {
     static let fakeSpeechEnabledKey = "newslyE2EFakeSpeechEnabled"
     static let fakeSpeechTranscriptKey = "newslyE2EFakeSpeechTranscript"
     static let fakeSpeechScenarioKey = "newslyE2EFakeSpeechScenario"
+    static let audioFixtureKey = "newslyE2EAudioFixture"
     static let visualNowKey = "newslyE2EVisualNow"
     static let visualStateKey = "newslyE2EVisualState"
 
@@ -212,6 +213,13 @@ enum E2ETestLaunch {
     static var fakeSpeechTranscript: String? {
         guard fakeSpeechEnabled else { return nil }
         return string(for: fakeSpeechTranscriptKey)
+    }
+
+    /// Path to an audio clip the real dictation service uploads in place of the microphone
+    /// recording, for simulator end-to-end runs of the full transcription path.
+    static var audioFixturePath: String? {
+        guard isEnabled else { return nil }
+        return string(for: audioFixtureKey)
     }
 
     static var fakeSpeechScenario: String? {

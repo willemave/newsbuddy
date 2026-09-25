@@ -18,6 +18,8 @@ use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
 #[path = "onboarding_agent_support.rs"]
 mod agent_support;
+#[path = "onboarding_lane_sources.rs"]
+mod lane_sources;
 #[path = "onboarding_model.rs"]
 mod model_config;
 use agent_support::{NoEvents, NoTools};
@@ -43,7 +45,7 @@ const EXCLUDED_DOMAINS: [&str; 8] = [
 
 const PROFILE_SYSTEM_PROMPT: &str = "You are building a short onboarding profile for a user. Use the provided interests and web snippets to infer a concise profile summary and 3-6 topical interests. Do not invent interests that contradict the user-provided topics. Return structured output only.";
 const VOICE_SYSTEM_PROMPT: &str = "You extract onboarding fields from a transcript. Return a first name if explicitly stated and a concise list of interest topics. Do not guess missing information. Return structured output only.";
-const FAST_DISCOVER_SYSTEM_PROMPT: &str = "You are selecting high-quality sources for a new user. Use only the profile summary, topics, and search snippets to suggest Substack/Atom feeds, podcast RSS feeds, and relevant subreddits. Every suggestion must be grounded in web_results; do not use static defaults, curated backups, or general prior knowledge as source candidates. Podcast suggestions must come from web_results only. If web_results contain no suitable sources for a category, return zero suggestions for that category. Every suggestion must include a concise, specific rationale sentence. Prefer sources with clear RSS URLs when possible. For feed-like sources, always provide a best-effort feed_url when available. If uncertain, include candidate_feed_url and set is_likely_feed plus feed_confidence (0-1). For reddit entries, include subreddit. Return structured output only.";
+const FAST_DISCOVER_SYSTEM_PROMPT: &str = "You are selecting high-quality sources for a new user. Use only the profile summary, topics, and search snippets to suggest Substack/Atom feeds, podcast RSS feeds, and relevant subreddits. Every suggestion must be grounded in web_results; do not use static defaults, curated backups, or general prior knowledge as source candidates. Podcast suggestions must come from web_results only. If web_results contain no suitable sources for a category, return zero suggestions for that category. Suggest up to 5 sources per category, spread across the profile topics so that every topic is represented in each category where web_results support it. Every suggestion must include a concise, specific rationale sentence. Prefer sources with clear RSS URLs when possible. Podcast directory entries and results marked RSS feed give the show's real feed; use that URL as feed_url. Reddit community results are real public communities; prefer active, substantive discussion communities over meme or joke subreddits, and use the name without the r/ prefix as subreddit. For feed-like sources, always provide a best-effort feed_url when available. If uncertain, include candidate_feed_url and set is_likely_feed plus feed_confidence (0-1). For reddit entries, include subreddit. Return structured output only.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OnboardingProfile {
@@ -165,6 +167,7 @@ pub struct OnboardingGateway {
     exa_api_key: Option<SecretString>,
     exa_search_url: Url,
     engine: RigAgentEngine,
+    reddit: Option<lane_sources::RedditCredentials>,
 }
 
 impl OnboardingGateway {
@@ -198,6 +201,7 @@ impl OnboardingGateway {
             exa_api_key: secret_env("EXA_API_KEY"),
             exa_search_url,
             engine,
+            reddit: lane_sources::RedditCredentials::from_env(),
         })
     }
 
@@ -373,9 +377,9 @@ impl OnboardingGateway {
         .await
     }
 
-    /// Executes one search-only request per persisted audio-discovery lane concurrently, then
-    /// balances prompt evidence across lanes before the structured model call. A lane whose search
-    /// request fails is retried by the durable task instead of being published as an empty success.
+    /// Gathers each persisted lane's evidence concurrently from the source that can ground its
+    /// target, then balances prompt evidence across lanes before the structured model call. A lane
+    /// whose web search fails outright is retried by the durable task, not published as empty.
     ///
     /// # Errors
     ///
@@ -387,26 +391,11 @@ impl OnboardingGateway {
         lanes: &[OnboardingAudioLane],
     ) -> Result<OnboardingDiscoverySeeds, OnboardingGatewayError> {
         let gateway = self.clone();
+        let topics = inferred_topics.to_vec();
         let groups = stream::iter(lanes.to_vec())
             .map(move |lane| {
-                let gateway = gateway.clone();
-                async move {
-                    let query = lane_search_query(&lane);
-                    let outcome = gateway
-                        .search_many(
-                            vec![query],
-                            20,
-                            lane.target == OnboardingLaneTarget::Reddit,
-                            FAST_DISCOVER_TIMEOUT,
-                        )
-                        .await;
-                    if outcome.all_attempts_failed() {
-                        return Err(OnboardingGatewayError::SearchUnavailable);
-                    }
-                    let mut results = outcome.results;
-                    dedupe_web_results(&mut results);
-                    Ok(results)
-                }
+                let (gateway, topics) = (gateway.clone(), topics.clone());
+                async move { gateway.lane_evidence(&lane, &topics).await }
             })
             .buffered(lanes.len().max(1))
             .collect::<Vec<Result<Vec<_>, OnboardingGatewayError>>>()
@@ -502,7 +491,7 @@ impl OnboardingGateway {
                     limits: AgentLimits {
                         request_limit: Some(3),
                         tool_call_limit: 0,
-                        output_token_limit: Some(1_500),
+                        output_token_limit: Some(3_000),
                         deadline,
                     },
                     provider_parameters: onboarding_provider_parameters(),
@@ -587,6 +576,20 @@ struct ExaSearchRequest<'a> {
     num_results: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     exclude_domains: Option<Vec<&'static str>>,
+    contents: ExaContents,
+}
+
+/// A short page excerpt per result, so the model selects on what a source covers rather than on
+/// its title alone. No summaries or live crawling: those are the slow, costly parts.
+#[derive(Debug, Serialize)]
+struct ExaContents {
+    text: ExaText,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExaText {
+    max_characters: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -618,6 +621,11 @@ async fn search_exa(
         query,
         num_results,
         exclude_domains: (!include_social).then(|| EXCLUDED_DOMAINS.to_vec()),
+        contents: ExaContents {
+            text: ExaText {
+                max_characters: DISCOVERY_SNIPPET_CHARS,
+            },
+        },
     };
     let response = client
         .post(endpoint)
@@ -675,15 +683,6 @@ fn discovery_queries(summary: &str, topics: &[String], max_queries: usize) -> Ve
     }
     queries.truncate(max_queries);
     queries
-}
-
-fn lane_search_query(lane: &OnboardingAudioLane) -> String {
-    let query = format!(
-        "{} Source requirements: {}",
-        lane.goal.trim(),
-        lane.queries.join("; ")
-    );
-    query.chars().take(1_000).collect()
 }
 
 fn profile_fallback_summary(first_name: &str, topics: &[String]) -> String {

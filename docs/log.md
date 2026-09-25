@@ -27,6 +27,63 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-24 — `main` — Onboarding discovery quality fixes
+
+- **Status:** Complete
+- **Scope:** `newsly-providers` onboarding discovery (new `onboarding_lane_sources.rs`, `onboarding_flow.rs`, `onboarding_model.rs`), feed validation body limit (`public_http.rs`, `feed_validation.rs`, `scraping.rs`), `newsly-worker` onboarding normalization logs and queue-worker log filter, iOS `LaneStatusRow` and `OnboardingSuggestionCard`, the E2E script, and law A18.
+- **Decisions:**
+  - Lanes gather evidence per target. Feeds run one Exa search per planned query (max 3) with 280-char text excerpts, but no summaries or livecrawl.
+  - Podcasts add the iTunes Search API (real RSS URLs, ≥5 episodes) and resolve Apple Podcasts pages with the iTunes lookup.
+  - Reddit uses `oauth.reddit.com/subreddits/search` with the existing app credentials: public, non-NSFW, ≥5k members. Exa returns no reddit.com results, even with `includeDomains`, and unauthenticated Reddit endpoints return 403/429.
+  - The selection prompt asks for up to 5 per category, spread across topics. The output cap went from 1.5k to 3k tokens, since reasoning counts against it.
+  - The plan prompt steers vague narrations ("just the news") to established general-news sources.
+  - Feed validation now shares the 20 MB ingestion limit. The old 2 MB cap silently rejected large podcast feeds such as Acast shows.
+  - Queue workers built on `QueueWorkerProcessConfig` now log `newsly_providers=info` by default. Provider warnings were invisible.
+  - Lane rows show "Searching…" until the server reports real query progress, instead of a 0/N that never moved. Mid-run lane progress writes were rejected: they would need a provider→worker progress sink and fenced writes, for little gain, since all lanes finish within seconds and the model call dominates.
+  - Suggestion rows show the rationale first; the host is only a fallback.
+- **Validation:** `cargo clippy -D warnings` and tests for `newsly-providers` (87 pass, 6 new lane-source tests) and `newsly-worker` onboarding. Eight audio E2E runs against the local stack. Results went from 3 newsletters + 0 podcasts + 0 subreddits before the fix to 12–15 grounded sources covering every stated topic, including niche interests (sourdough, jazz piano, birding, urban planning) and a vague answer (NPR Up First, BBC Global News, The Daily, Reuters, r/worldnews). Fixed a pipefail/SIGPIPE bug in the script's element wait.
+- **Remaining:** Picks vary run to run with the model. Exa cost per onboarding is now about 3 searches per web lane instead of 1.
+- **Commits:** Uncommitted
+
+### 2026-09-24 — `main` — Onboarding end-to-end with real audio
+
+- **Status:** Complete; discovery regression fixed in the entry above
+- **Scope:** DEBUG `newslyE2EAudioFixture` in `VoiceDictationService`, `scripts/ios_onboarding_audio_e2e.sh`, `docs/coding-guidelines.md`, loading-step topic cap.
+- **Decisions:** Audio is tested by replacing only the microphone. The fixture drives the metering levels (quiet lead-in, speech for the clip's length, then silence), so the real silence auto-stop fires. The clip is swapped into the recorded file before the real upload and backend transcription. The script synthesizes clips with `say` instead of committing audio, copies them into the app container, and creates a fresh debug user per run.
+- **Validation:** Local stack (`start_services.sh all --local-e2e`) plus iOS 26.4 simulator. Two full runs (Samantha, and Daniel en_GB with different topics) went intro → voice → transcription → discovery → picks → aggregators → reddit → Briefing "Start here", with transcribed topics matching each phrase. `VoiceMeteringStateTests` and `VoiceDictationServiceSessionTests` pass.
+- **Finding:** Since `a332a5ea` (2026-09-02) onboarding discovery sends one combined Exa query per lane with no contents/snippets. Reddit lanes return zero Exa results, so no subreddit suggestions: runs 5 and 6 have none, while runs 2 and 3 before the change did. Podcast lanes return directory pages without RSS URLs, and most seeds are then dropped silently in `normalize_feed_seeds`. Lanes still report completed 3/3, and all lanes update only at the end of the run, so the loading rows sit at 0/3 until the picks appear.
+- **Remaining:** Fix discovery: per-query searches with `includeDomains` for reddit instead of `site:`, direct subreddit validation, deterministic podcast feed resolution (e.g. iTunes lookup), capped snippets, a per-run drop summary at info level, and per-lane progress updates. Needs a decision on the extra Exa cost.
+- **Commits:** Uncommitted
+
+### 2026-09-24 — `main` — Onboarding walkthrough polish
+
+- **Status:** Complete
+- **Scope:** Onboarding flow chrome and step copy (`OnboardingFlowView`, intro, choice, audio, loading, suggestions, aggregators, reddit steps), the E2E onboarding stub, and law A14.
+- **Decisions:** A simulator walkthrough with axe found the floating 54pt `BuddyMark` guide covering step content on every leading-header step, including the Skip path's title. The guide now has its own 34pt slot beside the progress rail, drawn with `BuddyGlyph` and blinking every few seconds. It fades out on loading, where the full-size indicator shows, and keeps the rail's width. The rail and guide are hidden on the welcome so the first chosen step reads as step 1; before, intro and choice both showed "Step 1 of 5". Skip on the choice screen became the quieter "Skip for now" text button. The choice, voice, loading (heard topics), picks, aggregators and Reddit steps gained one-line guidance. The Reddit CTA now counts all selected sources; it said "Start reading" whenever no fast-news sources were chosen. Intro and choice use the shared margin, and the intro uses the shared primary button.
+- **Changes:** The DEBUG `E2EVisualOnboardingService` now walks discovery lanes over ~12 polls and returns sample newsletters, podcasts and subreddits, so `newslyE2EVisualState=onboarding-intro` shows the whole flow offline.
+- **Validation:** Debug build on the iPhone 17 Pro (iOS 26.4) simulator. Walked intro → choice → voice (fake speech) → loading → picks → aggregators → reddit, and the Skip path, with axe in light and dark mode. Checked the CTA count by deselecting subreddits.
+- **Remaining:** `BuddyMarkBlink` imageset and `build_blink_mark.py` are unused. `onboarding_personalized.yaml` now taps through the intro but was not run (needs the seeded discovery backend and a `TRANSCRIPT` env value, which `newsly-admin` e2e does not supply). Loading-step "Keep waiting" and "Try again" keep one-off button styles.
+- **Commits:** Uncommitted
+
+### 2026-09-23 — `main` — Animated launch intro
+
+- **Status:** Complete
+- **Scope:** Launch `LoadingView`, new `EnsoRing` imageset, `build_brand_mark.py`, law A17, and the E2E `launch` visual state.
+- **Decisions:** The launch drops the boxed `AppMark` and system spinner. The ring paints on in one stroke via a blurred clockwise wedge mask over the ring-only asset, then the vector `BuddyGlyph` springs into the seat the mark gives him, blinks, and settles into the reading loop. The landing's wordmark and tagline follow in the same type. Timing comes from one process-wide clock (`LaunchFrame.clockStart`), because startup swaps between up to three `LoadingView` instances and must not restart the intro. A later loading pass, such as after sign-in, shows the settled mark. There is no artificial minimum duration, so the intro never delays the next screen. `EnsoRing` is generated by `build_brand_mark.py` from the same mattes and frame as `BrandMark`, which the script regenerated byte-identical. Buddy placement fractions come from that script's printed bounds.
+- **Validation:** `xcodebuild` Debug build for the generic iOS Simulator succeeded with no warnings in the changed files. Stroke reveal and Buddy seating were checked with Python renders of the same timing and placement math. No simulator run: Xcode 27 reports CoreSimulator out of date (1051 vs 1171); fix with `sudo xcodebuild -runFirstLaunch`.
+- **Remaining:** Verified on the iOS 26.4 simulator (light and dark) on 2026-09-24. Consider a crossfade out of the launch into the landing or root.
+- **Commits:** Uncommitted
+
+### 2026-09-23 — `main` — Buddy loading indicator cleanup
+
+- **Status:** Complete (pending simulator check)
+- **Scope:** iOS loading states: `BuddyGlyph`, `BuddyLoadingIndicator`/`BuddyLoadingView`, briefing load and refresh pill, chat and suggestion loaders, onboarding `LoadingOverlay`, and the Recently Read, Submissions, chat history, and briefing-lens list loaders.
+- **Decisions:** Loaders draw the Buddy as a vector (`BuddyGlyph`, traced on the mark's 192-unit grid) instead of the 64pt `BuddyMark` raster, which blurred when upscaled to 74–96pt and carried a halo from `.appShadow(.floating)`. Motion is time-derived (`TimelineView`): bob, sway, a left-to-right reading glance, and an occasional blink, with a contact shadow that replaces the drop shadow. Under 36pt only the eyes move. Reduce Motion renders a static pose. The briefing refresh pill no longer spins the opaque square `AppMark`. The chat dot/glow loaders and in-app system spinners now use the Buddy. The launch `LoadingView` keeps the app icon for launch-screen continuity. Other `BuddyMark` raster uses (composer, action bar, onboarding guide and blink frame) are unchanged.
+- **Changes:** `briefing.loading` identifier moved from `BuddyLoadingView` to `BriefingLoadingView`. `BuddyLoadingView.message` is optional. Removed unused `AppMotion.loadingBubblePulse` and `chatIllustrationPulse`.
+- **Validation:** Geometry checked by rasterising the same paths next to the shipped mark. A later generic-simulator Debug build succeeded (see the launch intro entry); simulator run still pending.
+- **Remaining:** Build and visually check `briefing-loading` / `onboarding-loading` E2E visual states once Xcode is usable.
+- **Commits:** Uncommitted
+
 ### 2026-09-23 — `main` — GPT-6 Luna routine text defaults
 
 - **Status:** Complete locally.
