@@ -14,9 +14,10 @@ struct OnboardingLoadingStep: View {
             onboardingHeaderBlock(
                 eyebrow: "MATCHING SOURCES",
                 title: "Finding your feeds",
+                subtitle: heardTopicsLine,
                 titleAccessibilityIdentifier: "onboarding.loading.screen"
             )
-            .padding(.top, 24)
+            .padding(.top, 16)
 
             Spacer()
 
@@ -25,7 +26,7 @@ struct OnboardingLoadingStep: View {
                     .accessibilityIdentifier("onboarding.loading.buddy")
 
                 if viewModel.discoveryLanes.isEmpty {
-                    Text("Preparing search...")
+                    Text("Preparing search…")
                         .font(.appCallout)
                         .foregroundColor(.onSurfaceSecondary)
                 } else {
@@ -174,6 +175,13 @@ struct OnboardingLoadingStep: View {
                         .stroke(Color.statusDestructive.opacity(0.28), lineWidth: 0.5)
                 )
         )
+    }
+
+    /// Confirms what was heard, so the wait is visibly about the user's own interests.
+    private var heardTopicsLine: String? {
+        let topics = viewModel.inferredTopics.prefix(3)
+        guard !topics.isEmpty else { return nil }
+        return "For " + topics.joined(separator: " · ")
     }
 
     private var completedLaneCount: Int {

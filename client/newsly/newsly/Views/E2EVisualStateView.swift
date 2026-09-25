@@ -9,6 +9,8 @@ struct E2EVisualStateView: View {
 
     var body: some View {
         switch state {
+        case "launch":
+            LoadingView()
         case "landing":
             LandingView()
                 .environment(authViewModel)
@@ -361,33 +363,79 @@ private struct E2EBriefingPlayerPanel: View {
 @MainActor
 private final class E2EVisualOnboardingService: OnboardingServicing {
     private let runId = 999_901
+    private let topics = ["AI research", "Climate tech", "Formula 1"]
+    private var polls = 0
 
     func audioDiscover(
         request: OnboardingAudioDiscoverRequest
     ) async throws -> OnboardingAudioDiscoverResponse {
         _ = request
+        polls = 0
         return OnboardingAudioDiscoverResponse(
             runId: runId,
             runStatus: "running",
-            topicSummary: "Previewing your personalized sources",
-            inferredTopics: [],
-            lanes: []
+            topicSummary: "AI research, climate tech and Formula 1",
+            inferredTopics: topics,
+            lanes: lanes(at: 0)
         )
     }
 
+    /// Walks the lanes from queued to done over a few seconds of polling, so the loading
+    /// step shows real progress before the picks arrive.
     func discoveryStatus(runId: Int) async throws -> OnboardingDiscoveryStatusResponse {
-        OnboardingDiscoveryStatusResponse(
+        polls += 1
+        let done = polls >= 12
+        return OnboardingDiscoveryStatusResponse(
             runId: runId,
-            runStatus: "completed",
-            topicSummary: "Previewing your personalized sources",
-            inferredTopics: [],
-            lanes: [],
-            suggestions: OnboardingFastDiscoverResponse(
-                recommendedPods: [],
-                recommendedSubstacks: [],
-                recommendedSubreddits: []
-            ),
+            runStatus: done ? "completed" : "running",
+            topicSummary: "AI research, climate tech and Formula 1",
+            inferredTopics: topics,
+            lanes: lanes(at: polls),
+            suggestions: done ? Self.suggestions : nil,
             errorMessage: nil
+        )
+    }
+
+    private func lanes(at poll: Int) -> [OnboardingDiscoveryLaneStatus] {
+        [("Newsletters", 2), ("Podcasts", 5), ("Reddit", 8)].map { name, finishesAt in
+            let queries = 3
+            let completed = min(queries, max(0, poll - finishesAt + queries))
+            let status = poll >= finishesAt ? "completed" : (poll >= finishesAt - queries ? "processing" : "queued")
+            return OnboardingDiscoveryLaneStatus(
+                name: name, status: status, completedQueries: completed, queryCount: queries
+            )
+        }
+    }
+
+    private static let suggestions = OnboardingFastDiscoverResponse(
+        recommendedPods: [
+            suggestion(1, "podcast_rss", "Latent Space", "https://www.latent.space", "The AI engineer podcast"),
+            suggestion(2, "podcast_rss", "Catalyst with Shayle Kann", "https://www.canarymedia.com", "Climate tech, deeply reported"),
+        ],
+        recommendedSubstacks: [
+            suggestion(3, "substack", "Import AI", "https://importai.substack.com", "Weekly AI research digest"),
+            suggestion(4, "substack", "Heatmap Daily", "https://heatmap.news", "Climate and the economy"),
+            suggestion(5, "substack", "The Race", "https://the-race.com", "Formula 1 analysis"),
+        ],
+        recommendedSubreddits: [
+            suggestion(6, "reddit", "MachineLearning", "https://www.reddit.com/r/MachineLearning", nil),
+            suggestion(7, "reddit", "formula1", "https://www.reddit.com/r/formula1", nil),
+        ]
+    )
+
+    private static func suggestion(
+        _ id: Int, _ type: String, _ title: String, _ url: String, _ rationale: String?
+    ) -> OnboardingSuggestion {
+        OnboardingSuggestion(
+            id: id,
+            suggestionType: type,
+            title: title,
+            siteURL: url,
+            feedURL: url + "/feed",
+            subreddit: type == "reddit" ? title : nil,
+            rationale: rationale,
+            score: 0.9,
+            isDefault: false
         )
     }
 

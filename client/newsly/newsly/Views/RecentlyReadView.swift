@@ -22,7 +22,7 @@ struct RecentlyReadView: View {
         ZStack {
             VStack(spacing: 0) {
                 if viewModel.isLoading && viewModel.contents.isEmpty {
-                    LoadingView()
+                    BuddyLoadingView()
                 } else if let error = viewModel.errorMessage, viewModel.contents.isEmpty {
                     ErrorView(message: error) {
                         Task { await viewModel.loadRecentlyRead() }

@@ -12,7 +12,7 @@ struct OnboardingChoiceStep: View {
         VStack(spacing: 0) {
             Spacer()
 
-            // The docked guide stays visible in the upper-right, so this screen can ask
+            // The docked guide stays visible in the upper-left, so this screen can ask
             // its question directly without duplicating the character in the content.
             VStack(spacing: 32) {
                 VStack(spacing: 12) {
@@ -25,6 +25,12 @@ struct OnboardingChoiceStep: View {
                         .foregroundColor(.onSurface)
                         .multilineTextAlignment(.center)
                         .accessibilityIdentifier("onboarding.choice.screen")
+                    Text("Tell me what you like to read and I'll find newsletters, podcasts and communities to match. It takes about a minute.")
+                        .font(.onboardingSubtitle)
+                        .foregroundColor(.onSurfaceSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .padding(.horizontal, 8)
                     Rectangle()
                         .fill(Color.outlineVariant)
                         .frame(width: 54, height: 1)
@@ -42,9 +48,14 @@ struct OnboardingChoiceStep: View {
                 }
                 .accessibilityIdentifier("onboarding.choice.personalized")
 
-                onboardingPrimaryButton("Skip") {
+                // Skipping is a valid start but not the recommended one, so it reads as the
+                // quieter choice.
+                Button("Skip for now") {
                     viewModel.chooseDefaults()
                 }
+                .font(.appCallout.weight(.medium))
+                .foregroundColor(.onSurfaceSecondary)
+                .buttonStyle(OnboardingTextButtonStyle())
                 .accessibilityIdentifier("onboarding.choice.skip")
             }
 
@@ -55,7 +66,8 @@ struct OnboardingChoiceStep: View {
                     .padding(.top, 8)
             }
         }
-        .padding(24)
-        .padding(.bottom, 16)
+        .padding(.horizontal, Spacing.appHorizontalMargin)
+        .padding(.vertical, 24)
+        .padding(.bottom, 8)
     }
 }

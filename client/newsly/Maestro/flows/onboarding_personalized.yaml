@@ -15,6 +15,10 @@ appId: "${APP_ID}"
       newslyE2EFakeSpeechEnabled: true
       newslyE2EFakeSpeechTranscript: "${TRANSCRIPT}"
 - assertVisible:
+    id: onboarding.intro.screen
+- tapOn:
+    id: onboarding.intro.continue
+- assertVisible:
     id: onboarding.choice.screen
 - tapOn:
     id: onboarding.choice.personalized

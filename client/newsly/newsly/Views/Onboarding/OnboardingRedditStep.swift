@@ -15,12 +15,13 @@ struct OnboardingRedditStep: View {
                     onboardingHeaderBlock(
                         eyebrow: "REDDIT",
                         title: "Add subreddit feeds",
+                        subtitle: viewModel.subredditSuggestions.isEmpty ? nil : "Communities that match your interests.",
                         isLeading: true,
                         titleAccessibilityIdentifier: "onboarding.reddit.screen"
                     )
 
                     if viewModel.subredditSuggestions.isEmpty {
-                        Text("No matches.")
+                        Text("No subreddits matched your interests. You can add them later.")
                             .font(.appCallout)
                             .foregroundColor(.onSurfaceSecondary)
                             .padding(.vertical, 20)
@@ -86,9 +87,14 @@ struct OnboardingRedditStep: View {
     }
 
     private var completionPrimaryTitle: String {
-        if selectedShortformCount == 0 {
+        let total = selectedShortformCount + selectedLongformCount
+        switch total {
+        case 0:
             return "Start reading"
+        case 1:
+            return "Start with 1 source"
+        default:
+            return "Start with \(total) sources"
         }
-        return "Start with \(selectedShortformCount + selectedLongformCount) sources"
     }
 }

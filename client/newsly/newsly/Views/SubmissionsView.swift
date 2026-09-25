@@ -13,7 +13,7 @@ struct SubmissionsView: View {
     var body: some View {
         Group {
             if viewModel.isLoading && viewModel.submissions.isEmpty {
-                LoadingView()
+                BuddyLoadingView()
             } else if let error = viewModel.errorMessage, viewModel.submissions.isEmpty {
                 ErrorView(message: error) {
                     Task { await viewModel.load() }

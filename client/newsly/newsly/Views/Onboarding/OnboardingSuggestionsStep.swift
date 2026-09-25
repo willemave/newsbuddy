@@ -15,13 +15,12 @@ struct OnboardingSuggestionsStep: View {
                     onboardingHeaderBlock(
                         eyebrow: viewModel.isShowingDefaultConfirmation ? "QUICK START" : nil,
                         title: viewModel.isShowingDefaultConfirmation ? "Start without personalized sources" : "Your picks",
+                        subtitle: subtitle,
                         isLeading: true,
                         titleAccessibilityIdentifier: "onboarding.suggestions.screen"
                     )
 
-                    if viewModel.substackSuggestions.isEmpty
-                        && viewModel.podcastSuggestions.isEmpty
-                    {
+                    if !hasPicks, let emptyStateMessage {
                         Text(emptyStateMessage)
                             .font(.appCallout)
                             .foregroundColor(.onSurfaceSecondary)
@@ -99,10 +98,21 @@ struct OnboardingSuggestionsStep: View {
         .background(onboardingFooterBackground)
     }
 
-    private var emptyStateMessage: String {
+    private var hasPicks: Bool {
+        !viewModel.substackSuggestions.isEmpty || !viewModel.podcastSuggestions.isEmpty
+    }
+
+    private var subtitle: String? {
         if viewModel.isShowingDefaultConfirmation {
-            return "Nothing added automatically."
+            return "No newsletters or podcasts yet. Next you'll choose quick news feeds to follow."
         }
-        return "No matches yet."
+        return hasPicks ? "All selected. Tap any you'd rather leave out." : nil
+    }
+
+    private var emptyStateMessage: String? {
+        if viewModel.isShowingDefaultConfirmation {
+            return nil
+        }
+        return "No newsletters or podcasts matched yet. Try again, or continue and add some later."
     }
 }

@@ -12,8 +12,7 @@ struct LoadingOverlay: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            ProgressView()
-                .tint(.onboardingText)
+            BuddyLoadingIndicator(size: 44)
             Text(message)
                 .font(.appCallout)
                 .foregroundColor(.onSurfaceSecondary)

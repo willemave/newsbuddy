@@ -586,24 +586,16 @@ struct BriefingLoadingView: View {
             )
 
             BuddyLoadingView(message: "Preparing your briefing")
+                .accessibilityIdentifier("briefing.loading")
         }
         .background(Color.surfacePrimary)
     }
 }
 
 private struct BriefingRefreshWaitingView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var breathing = false
-
     var body: some View {
         HStack(spacing: 8) {
-            Image("AppMark")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 24, height: 24)
-                .scaleEffect(breathing ? 1.08 : 0.9)
-                .offset(y: breathing ? -1 : 1)
-                .rotationEffect(.degrees(breathing ? 3 : -3), anchor: .bottom)
+            BuddyLoadingIndicator(size: 22)
                 .accessibilityHidden(true)
 
             Text("Refreshing briefing…")
@@ -614,21 +606,5 @@ private struct BriefingRefreshWaitingView: View {
         .padding(.vertical, 6)
         .background(Color.surfaceSecondary)
         .accessibilityIdentifier("briefing.refresh.waiting")
-        .onAppear {
-            updateAnimation(for: reduceMotion)
-        }
-        .onChange(of: reduceMotion) { _, reduceMotion in
-            updateAnimation(for: reduceMotion)
-        }
-    }
-
-    private func updateAnimation(for reduceMotion: Bool) {
-        if reduceMotion {
-            breathing = false
-        } else {
-            withAnimation(AppMotion.finalizingPulse) {
-                breathing = true
-            }
-        }
     }
 }

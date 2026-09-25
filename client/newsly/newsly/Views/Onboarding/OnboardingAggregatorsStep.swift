@@ -16,6 +16,7 @@ struct OnboardingAggregatorsStep: View {
                     onboardingHeaderBlock(
                         eyebrow: "FAST NEWS",
                         title: "Add news aggregators",
+                        subtitle: "Optional. Headline feeds that are quick to skim.",
                         isLeading: true,
                         titleAccessibilityIdentifier: "onboarding.aggregators.screen"
                     )

@@ -26,13 +26,27 @@ struct OnboardingFlowView: View {
             Color.surfacePrimary.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                OnboardingProgressHeader(
-                    step: viewModel.step,
-                    reduceMotion: reduceMotion
-                )
-                .padding(.horizontal, Spacing.appHorizontalMargin)
-                .padding(.top, 14)
-                .padding(.bottom, 4)
+                // The welcome is not a step: the rail and the docked guide arrive together
+                // once a start is chosen, so progress visibly begins rather than stalling.
+                if viewModel.step != .intro {
+                    HStack(spacing: 12) {
+                        // Loading centres the full-size Buddy, so the guide steps aside
+                        // there while keeping its slot and the rail's width.
+                        OnboardingGuideBuddy()
+                            .matchedGeometryEffect(id: "welcomeBuddy", in: logoNamespace)
+                            .frame(width: 34, height: 34)
+                            .opacity(viewModel.step == .loading ? 0 : 1)
+
+                        OnboardingProgressHeader(
+                            step: viewModel.step,
+                            reduceMotion: reduceMotion
+                        )
+                    }
+                    .frame(height: 34)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
+                    .padding(.top, 6)
+                    .transition(.opacity)
+                }
 
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -42,23 +56,6 @@ struct OnboardingFlowView: View {
                 Color.black.opacity(0.15)
                     .ignoresSafeArea()
                 LoadingOverlay(message: viewModel.loadingMessage)
-            }
-
-            if viewModel.step != .loading && viewModel.step != .intro {
-                GeometryReader { proxy in
-                    Image("BuddyMark")
-                        .resizable()
-                        .scaledToFit()
-                        .matchedGeometryEffect(id: "welcomeBuddy", in: logoNamespace)
-                        .frame(width: 54, height: 54)
-                        .appShadow(.floating)
-                        .position(
-                            x: Spacing.appHorizontalMargin + 14,
-                            y: proxy.safeAreaInsets.top + 58
-                        )
-                        .accessibilityLabel("Newsbuddy onboarding guide")
-                }
-                .allowsHitTesting(false)
             }
         }
         .onChange(of: viewModel.completionResponse) { _, response in
@@ -113,5 +110,25 @@ struct OnboardingFlowView: View {
             insertion: .opacity.combined(with: .move(edge: .bottom)),
             removal: .opacity.combined(with: .offset(y: -10))
         )
+    }
+}
+
+/// The small upper-left guide beside the progress rail: the vector Buddy, blinking now and
+/// then so he reads as present without drawing the eye from the step's content.
+private struct OnboardingGuideBuddy: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { timeline in
+            BuddyGlyph(blink: reduceMotion ? 0 : blink(at: timeline.date.timeIntervalSinceReferenceDate))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Newsbuddy onboarding guide")
+    }
+
+    private func blink(at time: TimeInterval) -> CGFloat {
+        let phase = time.truncatingRemainder(dividingBy: 5.2)
+        guard phase < 0.18 else { return 0 }
+        return CGFloat(sin(phase / 0.18 * .pi))
     }
 }

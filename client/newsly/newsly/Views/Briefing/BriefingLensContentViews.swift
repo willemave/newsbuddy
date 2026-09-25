@@ -440,7 +440,7 @@ struct BriefingLensPageView: View, Equatable {
                 }
                 .accessibilityIdentifier("briefing.lens_page.\(lensKey)")
             } else {
-                LoadingView()
+                BuddyLoadingView()
                     .padding(.top, topContentInset)
                     .onAppear {
                         onLoad()

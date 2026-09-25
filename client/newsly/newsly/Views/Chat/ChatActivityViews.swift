@@ -74,50 +74,9 @@ struct ThinkingBubbleView: View {
 }
 
 struct InitialSuggestionsLoadingView: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dotOffset: CGFloat = 0
-    @State private var pulseScale: CGFloat = 1.0
-
     var body: some View {
-        VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(Color.chatAccent.opacity(0.08))
-                    .frame(width: 80, height: 80)
-                    .scaleEffect(reduceMotion ? 1.0 : pulseScale)
-
-                HStack(spacing: 6) {
-                    ForEach(0..<3) { index in
-                        Circle()
-                            .fill(Color.chatAccent.opacity(0.7))
-                            .frame(width: 10, height: 10)
-                            .offset(y: reduceMotion ? 0 : dotOffset)
-                            .animation(
-                                reduceMotion ? nil : AppMotion.typingDotPulse
-                                    .delay(Double(index) * 0.12),
-                                value: dotOffset
-                            )
-                    }
-                }
-            }
-            .onAppear {
-                guard !reduceMotion else { return }
-                dotOffset = -6
-                withAnimation(AppMotion.chatStatusPulse) {
-                    pulseScale = 1.15
-                }
-            }
-            .onChange(of: reduceMotion) { _, reduceMotion in
-                if reduceMotion {
-                    dotOffset = 0
-                    pulseScale = 1.0
-                } else {
-                    dotOffset = -6
-                    withAnimation(AppMotion.chatStatusPulse) {
-                        pulseScale = 1.15
-                    }
-                }
-            }
+        VStack(spacing: 18) {
+            BuddyLoadingIndicator(size: 72)
 
             VStack(spacing: 6) {
                 Text("Preparing suggestions")

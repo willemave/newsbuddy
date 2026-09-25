@@ -49,7 +49,7 @@ struct ChatSessionHistoryView: View {
     var body: some View {
         Group {
             if viewModel.isLoading && knowledgeSessions.isEmpty {
-                LoadingView()
+                BuddyLoadingView()
             } else if let error = viewModel.errorMessage, knowledgeSessions.isEmpty {
                 ErrorView(message: error) {
                     Task { await viewModel.loadSessions() }

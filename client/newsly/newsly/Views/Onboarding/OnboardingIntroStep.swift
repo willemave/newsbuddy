@@ -39,21 +39,13 @@ struct OnboardingIntroStep: View {
                             .foregroundColor(.onSurfaceSecondary)
                     }
                     Spacer(minLength: 0)
-                    Button {
+                    onboardingPrimaryButton("Continue") {
                         withAnimation(reduceMotion ? nil : AppMotion.panel) {
                             viewModel.advanceToChoice()
                         }
-                    } label: {
-                        Text("Continue")
-                            .font(.appCallout.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .foregroundColor(.surfacePrimary)
-                            .background(primaryButtonBackground)
                     }
-                    .buttonStyle(OnboardingPrimaryPressStyle())
                     .accessibilityIdentifier("onboarding.intro.continue")
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, Spacing.appHorizontalMargin)
                     .padding(.bottom, 24)
                 }
                 .frame(maxWidth: .infinity)

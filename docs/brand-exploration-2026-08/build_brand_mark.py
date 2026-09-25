@@ -1,6 +1,6 @@
 """Re-render the mark on transparency, for the signed-out landing.
 
-AppMark keeps its baked field on purpose: Settings and the launch state clip it into the
+AppMark keeps its baked field on purpose: Settings clips it into the
 rounded rect iOS gives the icon on the home screen, and it is the now-playing artwork, all
 of which want an opaque square. The landing is not showing an icon chip, though -- it is
 showing the brand -- so it needs the same drawing on transparency, or the field reads as a
@@ -19,7 +19,8 @@ and composited onto transparency. No pixel carries a ground, so both appearances
 same mattes with a different ring colour, and either one drops onto any surface cleanly.
 
 Usage: uv run python docs/brand-exploration-2026-08/build_brand_mark.py
-Writes client/newsly/newsly/Assets.xcassets/BrandMark.imageset. Safe to re-run.
+Writes client/newsly/newsly/Assets.xcassets/BrandMark.imageset and EnsoRing.imageset.
+Safe to re-run.
 """
 
 import json
@@ -31,6 +32,9 @@ from PIL import Image
 ASSETS = Path(__file__).resolve().parents[2] / "client/newsly/newsly/Assets.xcassets"
 ICONS = ASSETS / "AppIcon.appiconset"
 OUT = ASSETS / "BrandMark.imageset"
+# The ring alone, on the same frame as BrandMark, so the launch state can paint the stroke
+# and seat the vector Buddy (BuddyGlyph) where the mark has him.
+RING_OUT = ASSETS / "EnsoRing.imageset"
 
 BASE = 220  # points; the landing renders it at 220
 # The ring's colour on a dark ground, matching the dark app icon.
@@ -213,25 +217,51 @@ def main() -> None:
         .getbbox()
     )
 
+    write_imageset(OUT, "brandmark", marks, bounds)
+    rings = {
+        "light": compose(
+            ring_alpha, ring_on_light, np.zeros_like(buddy_alpha), buddy_colour
+        ),
+        "dark": compose(
+            ring_alpha, RING_ON_DARK, np.zeros_like(buddy_alpha), buddy_colour
+        ),
+    }
+    write_imageset(RING_OUT, "ensoring", rings, bounds)
+
+    # Where the Buddy sits within the squared frame, as fractions, for the launch layout.
+    left, top, right, bottom = bounds
+    side = max(right - left, bottom - top)
+    offset_x = left - (side - (right - left)) / 2
+    offset_y = top - (side - (bottom - top)) / 2
+    ys, xs = np.nonzero(buddy_alpha > 0.5)
+    print(
+        "buddy bounds (fraction of frame): "
+        f"x {(xs.min() - offset_x) / side:.4f}..{(xs.max() + 1 - offset_x) / side:.4f}, "
+        f"y {(ys.min() - offset_y) / side:.4f}..{(ys.max() + 1 - offset_y) / side:.4f}"
+    )
+
+
+def write_imageset(out: Path, stem: str, marks: dict[str, Image.Image], bounds) -> None:
+    out.mkdir(exist_ok=True)
     images = []
     for appearance, mark in marks.items():
         squared = square_to_content(mark, bounds)
         for scale in (1, 2, 3):
             suffix = "" if scale == 1 else f"@{scale}x"
-            name = f"brandmark-{appearance}{suffix}.png"
-            squared.resize((BASE * scale, BASE * scale), Image.LANCZOS).save(OUT / name)
+            name = f"{stem}-{appearance}{suffix}.png"
+            squared.resize((BASE * scale, BASE * scale), Image.LANCZOS).save(out / name)
             entry = {"filename": name, "idiom": "universal", "scale": f"{scale}x"}
             if appearance == "dark":
                 entry["appearances"] = [{"appearance": "luminosity", "value": "dark"}]
             images.append(entry)
 
-    (OUT / "Contents.json").write_text(
+    (out / "Contents.json").write_text(
         json.dumps(
             {"images": images, "info": {"author": "xcode", "version": 1}}, indent=2
         )
         + "\n"
     )
-    print(f"wrote {OUT.name}: {len(images)} images at {BASE}pt")
+    print(f"wrote {out.name}: {len(images)} images at {BASE}pt")
 
 
 if __name__ == "__main__":
