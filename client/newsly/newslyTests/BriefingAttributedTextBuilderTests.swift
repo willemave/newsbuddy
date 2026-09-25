@@ -498,6 +498,7 @@ final class BriefingRenderModelTests: XCTestCase {
             kind: "news",
             id: 2,
             title: "Story",
+            publisher: nil,
             summary: nil,
             keyPoints: nil,
             url: nil,
@@ -505,6 +506,8 @@ final class BriefingRenderModelTests: XCTestCase {
             thumbnailUrl: nil,
             publishedAt: nil,
             contentType: nil,
+            durationSeconds: nil,
+            readingMinutes: nil,
             read: true,
             discussion: APIBriefingDiscussion(
                 platform: "hackernews",
@@ -553,6 +556,7 @@ final class BriefingRenderModelTests: XCTestCase {
                     kind: source.kind,
                     id: source.id,
                     title: source.title,
+                    publisher: source.publisher,
                     summary: source.summary,
                     keyPoints: source.keyPoints,
                     url: source.url,
@@ -560,6 +564,8 @@ final class BriefingRenderModelTests: XCTestCase {
                     thumbnailUrl: source.thumbnailUrl,
                     publishedAt: source.publishedAt,
                     contentType: source.contentType,
+                    durationSeconds: source.durationSeconds,
+                    readingMinutes: source.readingMinutes,
                     read: true,
                     discussion: source.discussion
                 )

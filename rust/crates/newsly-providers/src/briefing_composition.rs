@@ -55,8 +55,10 @@ and conclusions. For `audio` and `longform`, treat every source as a full work r
 Give each source its own substantive treatment of 3-5 sentences, roughly 100-200 words, covering
 its thesis, key points, concrete evidence or counterpoints, and why it matters to the reader. Use
 the supplied `briefing_context` when present, including specific facts and attributable quotations
-when the context supports them. Identify the exact title near the beginning and include the
-supplied publication or show name when available. Suggest editorial pullquotes rather than
+when the context supports them. The app shows each deep source's title and publication or show
+name as a headline above its passage, so never restate the title, publication, or show name in
+the prose. Open directly with the work's central argument or finding, and link the source on a
+descriptive phrase about that claim or subject rather than its title. Suggest editorial pullquotes rather than
 pretending they are source quotations. Add a figure for each deep source that has an image,
 normally inset, with alternating alignment and at most one full figure. Cover every supplied source
 at least once.";
@@ -933,6 +935,11 @@ mod tests {
         assert!(COMPOSITION_SYSTEM_PROMPT.contains("3-5 sentences, roughly 100-200 words"));
         assert!(COMPOSITION_SYSTEM_PROMPT.contains("concrete evidence or counterpoints"));
         assert!(COMPOSITION_SYSTEM_PROMPT.contains("supplied `briefing_context`"));
+        assert!(
+            COMPOSITION_SYSTEM_PROMPT
+                .contains("never restate the title, publication, or show name")
+        );
+        assert!(!COMPOSITION_SYSTEM_PROMPT.contains("Identify the exact title"));
     }
 
     #[test]

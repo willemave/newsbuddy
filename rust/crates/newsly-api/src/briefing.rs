@@ -845,6 +845,7 @@ fn present_content_source(
             .title
             .clone()
             .unwrap_or_else(|| format!("Content {}", source.id)),
+        publisher: source.source.as_deref().and_then(clean_text),
         summary,
         key_points: Some(key_points),
         url: source
@@ -866,6 +867,12 @@ fn present_content_source(
             })
             .map(|url| versioned_image_url(url, version.as_deref())),
         published_at: source.publication_date.or(Some(source.created_at)),
+        duration_seconds: (content_type == ContentType::Podcast)
+            .then(|| positive_metadata_number(&metadata, "duration_seconds"))
+            .flatten(),
+        reading_minutes: (content_type == ContentType::Article)
+            .then(|| reading_minutes(source.source_char_count))
+            .flatten(),
         content_type: Some(content_type),
         read,
         discussion: None,
@@ -885,6 +892,7 @@ fn present_news_source(
         kind: "news".to_owned(),
         id: source.id,
         title: news_title(&metadata, source.summary_text.as_deref(), source.id),
+        publisher: None,
         summary: source.summary_text.as_deref().and_then(clean_text),
         key_points: Some(json_string_values(&source.summary_key_points)),
         url: source
@@ -904,6 +912,8 @@ fn present_news_source(
             .or(source.processed_at)
             .or(Some(source.ingested_at))
             .or(Some(source.created_at)),
+        duration_seconds: None,
+        reading_minutes: None,
         content_type: Some(ContentType::News),
         read,
         discussion: discussions_enabled()
@@ -1296,6 +1306,20 @@ fn truncate_chars(value: &str, max: usize) -> String {
     value.chars().take(max).collect()
 }
 
+fn positive_metadata_number(metadata: &Map<String, Value>, key: &str) -> Option<i64> {
+    metadata
+        .get(key)
+        .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+        .filter(|value| *value > 0)
+}
+
+/// Matches Feed history: about 1,200 source characters per reading minute.
+fn reading_minutes(source_char_count: Option<i32>) -> Option<i64> {
+    source_char_count
+        .filter(|count| *count > 0)
+        .map(|count| (i64::from(count) + 1199) / 1200)
+}
+
 fn clean_string(value: Option<&Value>) -> Option<String> {
     value.and_then(Value::as_str).and_then(clean_text)
 }
@@ -1555,5 +1579,52 @@ mod warm_progress_tests {
             present_first_run(&run, vec![]).phase,
             BriefingFirstRunPhase::WaitingForContent
         );
+    }
+}
+
+#[cfg(test)]
+mod source_presentation_tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    fn content_source(content_type: &str, metadata: Value) -> ContentBriefingSourceProjection {
+        ContentBriefingSourceProjection {
+            id: 7,
+            content_type: content_type.into(),
+            url: "https://example.com/item".into(),
+            source_url: None,
+            title: Some("A Work".into()),
+            source: Some("  Latent Space ".into()),
+            metadata,
+            source_char_count: Some(14_000),
+            created_at: Utc.with_ymd_and_hms(2026, 9, 25, 12, 0, 0).unwrap(),
+            publication_date: None,
+        }
+    }
+
+    #[test]
+    fn article_sources_carry_publisher_and_reading_minutes() {
+        let source = present_content_source(
+            "content:7",
+            &content_source("article", json!({})),
+            false,
+            "r",
+        )
+        .unwrap();
+        assert_eq!(source.publisher.as_deref(), Some("Latent Space"));
+        assert_eq!(source.reading_minutes, Some(12));
+        assert_eq!(source.duration_seconds, None);
+    }
+
+    #[test]
+    fn podcast_sources_carry_duration_but_not_reading_minutes() {
+        let projection = content_source("podcast", json!({"duration_seconds": "3939"}));
+        let source = present_content_source("content:7", &projection, false, "r").unwrap();
+        assert_eq!(source.duration_seconds, Some(3939));
+        assert_eq!(source.reading_minutes, None);
+
+        let projection = content_source("podcast", json!({"duration_seconds": 0}));
+        let source = present_content_source("content:7", &projection, false, "r").unwrap();
+        assert_eq!(source.duration_seconds, None);
     }
 }

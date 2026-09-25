@@ -14266,6 +14266,7 @@
           "kind",
           "id",
           "title",
+          "publisher",
           "summary",
           "key_points",
           "url",
@@ -14273,6 +14274,8 @@
           "thumbnail_url",
           "published_at",
           "content_type",
+          "duration_seconds",
+          "reading_minutes",
           "read",
           "discussion"
         ],
@@ -14289,6 +14292,13 @@
           },
           "title": {
             "type": "string"
+          },
+          "publisher": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Publication or show name for article and podcast sources."
           },
           "summary": {
             "type": [
@@ -14339,6 +14349,20 @@
                 "$ref": "#/components/schemas/ContentType"
               }
             ]
+          },
+          "duration_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "reading_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           },
           "read": {
             "type": "boolean"

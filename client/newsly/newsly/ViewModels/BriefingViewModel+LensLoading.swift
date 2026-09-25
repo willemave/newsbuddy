@@ -352,6 +352,7 @@ extension BriefingViewModel {
             kind: source.kind,
             id: source.id,
             title: source.title,
+            publisher: source.publisher,
             summary: source.summary,
             keyPoints: source.keyPoints,
             url: source.url,
@@ -359,6 +360,8 @@ extension BriefingViewModel {
             thumbnailUrl: source.thumbnailUrl,
             publishedAt: source.publishedAt,
             contentType: source.contentType,
+            durationSeconds: source.durationSeconds,
+            readingMinutes: source.readingMinutes,
             read: true,
             discussion: source.discussion
         )

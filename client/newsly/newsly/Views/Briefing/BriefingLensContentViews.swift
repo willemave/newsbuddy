@@ -21,6 +21,7 @@ enum BriefingDisplayBlock: Identifiable {
 final class BriefingSegmentRenderModel: Identifiable {
     let segment: APIBriefingSegment
     let sourcesByKey: [String: APIBriefingSource]
+    let headline: BriefingSegmentHeadline?
     let displayBlocks: [BriefingDisplayBlock]
     let discussionChipsByBlockIndex: [Int: [String: BriefingDiscussionChip]]
     let passageContentByBlockIndex: [Int: BriefingAttributedTextBuilder.Result]
@@ -36,6 +37,10 @@ final class BriefingSegmentRenderModel: Identifiable {
         )
         self.segment = segment
         self.sourcesByKey = segmentSourcesByKey
+        self.headline = BriefingSegmentHeadline(
+            segment: segment,
+            sourcesByKey: segmentSourcesByKey
+        )
         self.displayBlocks = Self.displayBlocks(
             for: segment.blocks,
             sourcesByKey: segmentSourcesByKey
@@ -357,6 +362,12 @@ struct BriefingLensPageView: View, Equatable {
                                     }
                                 }
                                 .padding(.horizontal, Spacing.appHorizontalMargin)
+                                // Headed stories get a longer pause, like a new column item.
+                                .padding(
+                                    .top,
+                                    segmentModel.headline != nil && segment.id != firstSegmentID
+                                        ? 14 : 0
+                                )
                             }
 
                             if let firstRunProgress, firstRunProgress.processing > 0 || firstRunProgress.pendingSources > 0 || firstRunProgress.failed > 0 {
@@ -663,6 +674,13 @@ private struct BriefingSegmentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if let headline = model.headline {
+                BriefingSegmentHeadlineView(
+                    headline: headline,
+                    segmentID: model.segment.id,
+                    onOpenSource: onOpenSource
+                )
+            }
             ForEach(model.displayBlocks) { item in
                 switch item {
                 case .single(let index, let block):

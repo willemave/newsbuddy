@@ -101,6 +101,7 @@ pub struct ContentBriefingSourceProjection {
     pub title: Option<String>,
     pub source: Option<String>,
     pub metadata: Value,
+    pub source_char_count: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub publication_date: Option<DateTime<Utc>>,
 }
@@ -261,6 +262,7 @@ struct ContentSourceRow {
     title: Option<String>,
     source: Option<String>,
     metadata: Value,
+    source_char_count: Option<i32>,
     created_at: NaiveDateTime,
     publication_date: Option<NaiveDateTime>,
 }
@@ -817,6 +819,9 @@ async fn load_sources(
             SELECT content.id::bigint AS id, content.content_type, content.url,
                    content.source_url, content.title, content.source,
                    content.content_metadata::jsonb AS metadata,
+                   (SELECT body.char_count FROM content_bodies AS body
+                    WHERE body.content_id = content.id AND body.variant = 'source')
+                       AS source_char_count,
                    content.created_at, content.publication_date
             FROM contents AS content
             WHERE content.id::bigint = ANY($2::bigint[])
@@ -843,6 +848,7 @@ async fn load_sources(
                     title: row.title,
                     source: row.source,
                     metadata: row.metadata,
+                    source_char_count: row.source_char_count,
                     created_at: row.created_at.and_utc(),
                     publication_date: row.publication_date.map(|value| value.and_utc()),
                 }),

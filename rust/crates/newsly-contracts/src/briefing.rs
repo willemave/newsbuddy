@@ -216,6 +216,8 @@ pub struct BriefingSourceDto {
     pub kind: String,
     pub id: i64,
     pub title: String,
+    /// Publication or show name for article and podcast sources.
+    pub publisher: Option<String>,
     pub summary: Option<String>,
     pub key_points: Option<Vec<String>>,
     pub url: Option<String>,
@@ -225,6 +227,8 @@ pub struct BriefingSourceDto {
     #[schema(value_type = Option<String>, format = DateTime)]
     pub published_at: Option<DateTime<Utc>>,
     pub content_type: Option<ContentType>,
+    pub duration_seconds: Option<i64>,
+    pub reading_minutes: Option<i64>,
     #[serde(default)]
     pub read: bool,
     pub discussion: Option<BriefingDiscussionDto>,

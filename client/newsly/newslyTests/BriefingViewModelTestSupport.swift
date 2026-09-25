@@ -541,6 +541,7 @@ func makeLens(
                 kind: "content",
                 id: 1,
                 title: "Long report",
+                publisher: nil,
                 summary: "Report summary",
                 keyPoints: nil,
                 url: nil,
@@ -548,6 +549,8 @@ func makeLens(
                 thumbnailUrl: nil,
                 publishedAt: nil,
                 contentType: .article,
+                durationSeconds: nil,
+                readingMinutes: nil,
                 read: false,
                 discussion: nil
             ),
@@ -556,6 +559,7 @@ func makeLens(
                 kind: "news",
                 id: 2,
                 title: "News item",
+                publisher: nil,
                 summary: "News summary",
                 keyPoints: nil,
                 url: nil,
@@ -563,6 +567,8 @@ func makeLens(
                 thumbnailUrl: nil,
                 publishedAt: nil,
                 contentType: nil,
+                durationSeconds: nil,
+                readingMinutes: nil,
                 read: false,
                 discussion: nil
             )

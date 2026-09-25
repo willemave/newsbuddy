@@ -27,6 +27,17 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-25 — `feature/briefing-source-headlines` — Briefing article/podcast headlines
+
+- **Status:** Complete
+- **Scope:** `newsly-contracts`/`newsly-db`/`newsly-api` Briefing source DTO; iOS Briefing segment rendering; `docs/laws/briefing.md` B14.
+- **Decisions:** Picked design option B from five HTML mockups: accent publication kicker, Lora headline (no underline, per follow-up) linking to the source, and a muted "Article · N min read" / "Podcast · N min" line. Only segments with a single content source (article or podcast) get a headline; news roundups do not. `BriefingSourceDto` gains `publisher` (from `contents.source`), `duration_seconds` (podcasts), and `reading_minutes` (articles, source body at 1,200 chars/min, matching Feed history). The client removes feed taglines after ` | ` / ` — ` in the kicker. Headed segments after the first get 14pt of extra leading space.
+- **Validation:** Rust fmt and warning-denied Clippy; `newsly-api` presentation unit tests; `newsly-db` briefing tests; contract drift check; focused iOS briefing unit tests, including the new `BriefingSegmentHeadlineTests`; simulator screenshots of the Articles and Podcasts lenses in light and dark mode against the local API.
+- **Follow-up (same day):** Removed the headline underline. The composition prompt (`briefing-v9-headlines`) now tells the model that the headline carries the title and publication: deep passages must not restate them, should open with the central argument, and should link a descriptive claim phrase. B14 was updated to match.
+- **Validation (prompt):** `newsly-providers` prompt tests; pipeline eval `article_briefing` + `podcast_briefing` with `openai:gpt-6-luna` published passages with no title or publication restatement, linking "three-month trial of 40 delivery vans" / "the pilot’s economics beyond token prices". The Codex judge step errored (CLI login/model availability), so those cases have no quality grade.
+- **Remaining:** Segments that already exist keep the old prose until they are recomposed. The pipeline judge still needs a rerun once the Codex CLI works.
+- **Commits:** Merged to `main` (see git history)
+
 ### 2026-09-24 — `main` — Onboarding discovery quality fixes
 
 - **Status:** Complete

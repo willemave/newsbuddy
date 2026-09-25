@@ -231,6 +231,7 @@ final class BriefingViewModelRetentionTests: XCTestCase {
                     kind: "news",
                     id: 9,
                     title: "Unrelated",
+                    publisher: nil,
                     summary: nil,
                     keyPoints: nil,
                     url: nil,
@@ -238,6 +239,8 @@ final class BriefingViewModelRetentionTests: XCTestCase {
                     thumbnailUrl: nil,
                     publishedAt: nil,
                     contentType: nil,
+                    durationSeconds: nil,
+                    readingMinutes: nil,
                     read: false,
                     discussion: nil
                 )

@@ -2970,6 +2970,7 @@ struct APIBriefingSource: Codable {
     let kind: String
     let id: Int
     let title: String
+    let publisher: String?
     let summary: String?
     let keyPoints: [String]?
     let url: String?
@@ -2977,6 +2978,8 @@ struct APIBriefingSource: Codable {
     let thumbnailUrl: String?
     let publishedAt: Date?
     let contentType: APIContentType?
+    let durationSeconds: Int?
+    let readingMinutes: Int?
     let read: Bool
     let discussion: APIBriefingDiscussion?
 
@@ -2985,6 +2988,7 @@ struct APIBriefingSource: Codable {
         kind: String,
         id: Int,
         title: String,
+        publisher: String?,
         summary: String?,
         keyPoints: [String]?,
         url: String?,
@@ -2992,6 +2996,8 @@ struct APIBriefingSource: Codable {
         thumbnailUrl: String?,
         publishedAt: Date?,
         contentType: APIContentType?,
+        durationSeconds: Int?,
+        readingMinutes: Int?,
         read: Bool = false,
         discussion: APIBriefingDiscussion?
     ) {
@@ -2999,6 +3005,7 @@ struct APIBriefingSource: Codable {
         self.kind = kind
         self.id = id
         self.title = title
+        self.publisher = publisher
         self.summary = summary
         self.keyPoints = keyPoints
         self.url = url
@@ -3006,6 +3013,8 @@ struct APIBriefingSource: Codable {
         self.thumbnailUrl = thumbnailUrl
         self.publishedAt = publishedAt
         self.contentType = contentType
+        self.durationSeconds = durationSeconds
+        self.readingMinutes = readingMinutes
         self.read = read
         self.discussion = discussion
     }
@@ -3015,6 +3024,7 @@ struct APIBriefingSource: Codable {
         case kind = "kind"
         case id = "id"
         case title = "title"
+        case publisher = "publisher"
         case summary = "summary"
         case keyPoints = "key_points"
         case url = "url"
@@ -3022,6 +3032,8 @@ struct APIBriefingSource: Codable {
         case thumbnailUrl = "thumbnail_url"
         case publishedAt = "published_at"
         case contentType = "content_type"
+        case durationSeconds = "duration_seconds"
+        case readingMinutes = "reading_minutes"
         case read = "read"
         case discussion = "discussion"
     }
@@ -3032,6 +3044,7 @@ struct APIBriefingSource: Codable {
         kind = try container.decode(String.self, forKey: .kind)
         id = try container.decode(Int.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
+        publisher = try container.decode(String?.self, forKey: .publisher)
         summary = try container.decode(String?.self, forKey: .summary)
         keyPoints = try container.decode([String]?.self, forKey: .keyPoints)
         url = try container.decode(String?.self, forKey: .url)
@@ -3046,6 +3059,8 @@ struct APIBriefingSource: Codable {
             publishedAt = nil
         }
         contentType = try container.decode(APIContentType?.self, forKey: .contentType)
+        durationSeconds = try container.decode(Int?.self, forKey: .durationSeconds)
+        readingMinutes = try container.decode(Int?.self, forKey: .readingMinutes)
         read = try container.decode(Bool.self, forKey: .read)
         discussion = try container.decode(APIBriefingDiscussion?.self, forKey: .discussion)
     }
@@ -3056,6 +3071,7 @@ struct APIBriefingSource: Codable {
         try container.encode(kind, forKey: .kind)
         try container.encode(id, forKey: .id)
         try container.encode(title, forKey: .title)
+        try container.encode(publisher, forKey: .publisher)
         try container.encode(summary, forKey: .summary)
         try container.encode(keyPoints, forKey: .keyPoints)
         try container.encode(url, forKey: .url)
@@ -3063,6 +3079,8 @@ struct APIBriefingSource: Codable {
         try container.encode(thumbnailUrl, forKey: .thumbnailUrl)
         try container.encode(publishedAt.map(ServerDate.format), forKey: .publishedAt)
         try container.encode(contentType, forKey: .contentType)
+        try container.encode(durationSeconds, forKey: .durationSeconds)
+        try container.encode(readingMinutes, forKey: .readingMinutes)
         try container.encode(read, forKey: .read)
         try container.encode(discussion, forKey: .discussion)
     }
