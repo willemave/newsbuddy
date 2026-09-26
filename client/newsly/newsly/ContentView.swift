@@ -116,6 +116,7 @@ struct ContentView: View {
         .environment(readingStateStore)
         .environment(readStateCache)
         .environment(session.badgeStatsStore)
+        .environment(session.xConnectionStore)
         .environment(submissionStatusViewModel)
         .environment(session.activeChatSessionManager)
         .environment(session.chatNavigation)

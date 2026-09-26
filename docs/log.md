@@ -27,6 +27,27 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-26 — `feature/x-connection-attention` — X connection error badging
+
+- **Status:** Complete
+- **Scope:** iOS `XConnectionStore` (new, owned by `AuthenticatedSession`), Knowledge header gear, Settings banner and X row, X / Twitter screen; `docs/laws/sharing-and-sources.md` S12.
+- **Context:** Production X sync for user 1 has been `reauth_required` since 2026-09-01 (X returned `400 invalid_request` on token refresh). The connection was deactivated and nothing flagged it outside Settings → X, so new bookmarks silently stopped. Bookmarks through 2026-08-30 are in Knowledge.
+- **Decisions:** Server sync state stays the only source of truth. The client keeps the connection in memory only and re-fetches it on every activation and from Settings/X screens, so a badge can't outlast the error. There's a red dot on the Knowledge Settings gear (never on the bottom tab bar, per user). Settings gets a top banner, because Connections is below the fold, and the X row gets a red subtitle and "!". `needsAttention` now excludes `last_status = disconnected` so a voluntary disconnect isn't flagged. A failed refresh keeps the last known state.
+- **Validation:** Full `newslyTests` passed (676 tests), including the new `XConnectionStoreTests` and the disconnect case. Simulator against the local API with temporary seeded `reauth_required` rows: gear dot, banner, row, and X screen checked; after switching to `disconnected`, no dot. Seed rows deleted.
+- **Cleanup:** Inlined the one-line `loadAccountState` wrapper. Removed the X refresh on auth-state changes, which the session-scoped store and the explicit post-connect/disconnect refreshes made redundant.
+- **Remaining:** The user still has to reconnect X in the production app. The root cause of the refresh-token rejection is unconfirmed (task history before 2026-09-12 was purged).
+- **Commits:** Merged to `main` (see git history)
+
+### 2026-09-26 — `main` — Briefing headline meta and inset-figure wrap
+
+- **Status:** Complete
+- **Scope:** iOS briefing segment headline and floating inset figure layout.
+- **Decisions:** Kind/duration meta ("Podcast · 33 min") moves into the publisher kicker row, trailing, so the title sits directly above the passage. Inset-figure text exclusion now hugs the image bottom (+2pt) instead of +12pt, which had left a narrow orphan line beside empty space below the image.
+- **Changes:** `BriefingSegmentHeadlineView` kicker row; `BriefingFigureLayoutPolicy` exclusion heights (compact 118, regular 150).
+- **Validation:** `BriefingFigureLayoutPolicyTests` pass, including new exclusion-height test. No simulator screenshot taken.
+- **Remaining:** None.
+- **Commits:** Uncommitted
+
 ### 2026-09-25 — `feature/briefing-source-headlines` — Briefing article/podcast headlines
 
 - **Status:** Complete

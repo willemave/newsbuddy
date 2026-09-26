@@ -96,6 +96,11 @@ final class RootDependencyFactory {
             user: user,
             dependencyFactory: self,
             badgeStatsStore: badgeStatsStore,
+            xConnectionStore: XConnectionStore(
+                fetchConnection: { [xIntegrationService = dependencies.xIntegrationService] in
+                    try await xIntegrationService.fetchConnection()
+                }
+            ),
             activeChatSessionManager: activeChatSessionManager,
             chatNavigation: chatNavigation,
             readingStateStore: ReadingStateStore(

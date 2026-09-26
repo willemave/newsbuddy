@@ -12,6 +12,7 @@ final class AuthenticatedSession {
 
     let dependencyFactory: RootDependencyFactory
     let badgeStatsStore: BadgeStatsStore
+    let xConnectionStore: XConnectionStore
     let activeChatSessionManager: ActiveChatSessionManager
     let chatNavigation: ChatNavigationCoordinator
     let readingStateStore: ReadingStateStore
@@ -31,6 +32,7 @@ final class AuthenticatedSession {
         user: User,
         dependencyFactory: RootDependencyFactory,
         badgeStatsStore: BadgeStatsStore,
+        xConnectionStore: XConnectionStore,
         activeChatSessionManager: ActiveChatSessionManager,
         chatNavigation: ChatNavigationCoordinator,
         readingStateStore: ReadingStateStore,
@@ -43,6 +45,7 @@ final class AuthenticatedSession {
         self.user = user
         self.dependencyFactory = dependencyFactory
         self.badgeStatsStore = badgeStatsStore
+        self.xConnectionStore = xConnectionStore
         self.activeChatSessionManager = activeChatSessionManager
         self.chatNavigation = chatNavigation
         self.readingStateStore = readingStateStore
@@ -72,6 +75,7 @@ final class AuthenticatedSession {
             handledActivationGeneration = generation
             activeChatSessionManager.setPollingSuspended(false)
             badgeStatsStore.activate()
+            Task { [xConnectionStore] in await xConnectionStore.refresh() }
         case .inactive:
             break
         case .background:

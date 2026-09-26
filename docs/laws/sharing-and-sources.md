@@ -22,7 +22,7 @@ S10. Global aggregator items appear only for users who selected that aggregator,
 
 S11. X connections belong to one user, sync incrementally, preserve provenance, and retain bounded-page continuations across retries, and advance their checkpoint only after the complete range through the previous checkpoint has been ingested.
 
-S12. Disconnecting or invalidating an integration removes usable credentials and reports when reauthorization is required.
+S12. Disconnecting or invalidating an integration removes usable credentials and reports when reauthorization is required. An integration that needs reauthorization stays visibly flagged at the app's Settings entry point until it is fixed; a user-initiated disconnect is not flagged.
 
 S13. Source refresh status distinguishes a successful check with no new items from a fetch, parsing, or persistence failure. Scheduled refresh accepts only unseen entries ahead of the first known item and never walks backward through feed history on repeated polls. An unchanged feed creates no further memberships or paid work. Intake is bounded even when the known boundary is missing; entries beyond the admitted head require explicit catch-up. Explicit catch-up scans past already known and rejected entries while preserving existing read, saved, and archive state.
 

@@ -31,6 +31,9 @@ struct SettingsSectionStack: View {
         // Section headers own the vertical rhythm (`Spacing.sectionTop`/`sectionBottom`),
         // so the stack adds none of its own — otherwise every gap was doubled.
         VStack(spacing: 0) {
+            if case .authenticated = authState, let xConnection, xConnection.needsAttention {
+                XConnectionAttentionBanner(connection: xConnection)
+            }
             SettingsBrandHeader()
             SettingsLibrarySection()
             SettingsAccountSection(

@@ -34,7 +34,8 @@ struct XConnectionResponse {
 
 extension XConnectionResponse {
     var needsAttention: Bool {
-        if connected {
+        // A user-initiated disconnect is a choice, not a problem to badge.
+        if connected || lastStatus == "disconnected" {
             return false
         }
         if lastError?.isEmpty == false {

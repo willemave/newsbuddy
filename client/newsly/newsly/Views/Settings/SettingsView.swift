@@ -58,6 +58,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AuthenticationViewModel.self) private var authViewModel
     @Environment(BadgeStatsStore.self) private var badgeStatsStore
+    @Environment(XConnectionStore.self) private var xConnectionStore
     @Environment(RootDependencyFactory.self) private var dependencyFactory
     private let scrollToCouncilOnAppear: Bool
     private let showsDismissButton: Bool
@@ -74,7 +75,6 @@ struct SettingsView: View {
     @State private var newExpertName = ""
     @State private var hasUnsavedCouncilPersonaEdits = false
     @State private var isSavingCouncilPersonas = false
-    @State private var xConnection: XConnectionResponse?
 
     init(
         scrollToCouncilOnAppear: Bool = false,
@@ -96,7 +96,7 @@ struct SettingsView: View {
                     isApprovingCLILink: isApprovingCLILink,
                     isDeletingAccount: isDeletingAccount,
                     isFeedbackVisible: authViewModel.authState.authenticatedUser != nil,
-                    xConnection: xConnection,
+                    xConnection: xConnectionStore.connection,
                     settings: settings,
                     councilPersonas: councilPersonasDraft,
                     newExpertName: $newExpertName,
@@ -196,11 +196,10 @@ struct SettingsView: View {
         }
         .onChange(of: authViewModel.authState) { _, _ in
             syncCouncilPersonasWithAuthenticatedUser(force: true)
-            Task { await loadXConnectionState(force: true) }
         }
         .task {
             syncCouncilPersonasWithAuthenticatedUser(force: true)
-            await loadXConnectionState(force: true)
+            await xConnectionStore.refresh()
         }
     }
 
@@ -355,21 +354,5 @@ struct SettingsView: View {
         }
 
         showingAlert = true
-    }
-
-    @MainActor
-    private func loadXConnectionState(force: Bool) async {
-        guard case .authenticated = authViewModel.authState else {
-            xConnection = nil
-            return
-        }
-        if !force, xConnection != nil {
-            return
-        }
-        do {
-            xConnection = try await dependencyFactory.xIntegrationService.fetchConnection()
-        } catch {
-            xConnection = nil
-        }
     }
 }

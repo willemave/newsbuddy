@@ -35,6 +35,7 @@ struct SettingsRow<Accessory: View>: View {
     let iconColor: Color
     let title: String
     var subtitle: String? = nil
+    var subtitleColor: Color = .onSurfaceSecondary
     @ViewBuilder var accessory: () -> Accessory
 
     init(
@@ -42,12 +43,14 @@ struct SettingsRow<Accessory: View>: View {
         iconColor: Color = .onSurfaceSecondary,
         title: String,
         subtitle: String? = nil,
+        subtitleColor: Color = .onSurfaceSecondary,
         @ViewBuilder accessory: @escaping () -> Accessory
     ) {
         self.icon = icon
         self.iconColor = iconColor
         self.title = title
         self.subtitle = subtitle
+        self.subtitleColor = subtitleColor
         self.accessory = accessory
     }
 
@@ -63,7 +66,7 @@ struct SettingsRow<Accessory: View>: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(.listCaption)
-                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .foregroundStyle(subtitleColor)
                         .lineLimit(1)
                 }
             }

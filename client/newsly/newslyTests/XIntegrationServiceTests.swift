@@ -44,6 +44,22 @@ final class XIntegrationServiceTests: XCTestCase {
         XCTAssertEqual(response.connectActionTitle, "Connect X")
     }
 
+    func testUserInitiatedDisconnectDoesNotNeedAttention() {
+        let response = XConnectionResponse(
+            provider: "x",
+            connected: false,
+            isActive: false,
+            providerUserID: "123",
+            providerUsername: "willemaw",
+            scopes: [],
+            lastSyncedAt: nil,
+            lastStatus: "disconnected",
+            lastError: nil
+        )
+
+        XCTAssertFalse(response.needsAttention)
+    }
+
     func testStartOAuthStartsWithoutUserEnteredUsername() async throws {
         let client = MockXIntegrationAPIClient()
         client.startResponse = XOAuthStartResponse(

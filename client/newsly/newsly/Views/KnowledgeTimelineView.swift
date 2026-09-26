@@ -8,6 +8,7 @@ import SwiftUI
 
 struct KnowledgeView: View {
     @Environment(AppLifecycle.self) private var lifecycle
+    @Environment(XConnectionStore.self) private var xConnectionStore
 
     let scrollToTopRequest: Int
     let isVisible: Bool
@@ -439,10 +440,21 @@ struct KnowledgeView: View {
                 Button(action: onOpenSettings) {
                     Image(systemName: "gearshape")
                         .font(.appSymbol(size: 19, weight: .semibold))
+                        .overlay(alignment: .topTrailing) {
+                            if xConnectionStore.needsAttention {
+                                Circle()
+                                    .fill(Color.statusDestructive)
+                                    .frame(width: 9, height: 9)
+                                    .overlay(Circle().stroke(Color.surfacePrimary, lineWidth: 2))
+                                    .offset(x: 3, y: -2)
+                                    .accessibilityIdentifier("knowledge.settings.attention")
+                            }
+                        }
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Settings")
+                .accessibilityValue(xConnectionStore.needsAttention ? "Needs attention" : "")
                 .accessibilityIdentifier("knowledge.settings")
             }
         }

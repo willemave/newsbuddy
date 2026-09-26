@@ -8,12 +8,12 @@ import SwiftUI
 struct TwitterSettingsView: View {
     @Environment(AuthenticationViewModel.self) private var authViewModel
     @Environment(RootDependencyFactory.self) private var dependencyFactory
+    @Environment(XConnectionStore.self) private var xConnectionStore
     @State private var showingAlert = false
     @State private var alertMessage = ""
     @State private var isUpdatingXConnection = false
     @State private var showingConnectDisclosure = false
     @State private var showingDisconnectConfirmation = false
-    @State private var xConnection: XConnectionResponse?
 
     var body: some View {
         ScrollView {
@@ -58,10 +58,7 @@ struct TwitterSettingsView: View {
             Text("Newsbuddy will securely store your X authorization and import your bookmarks in the background about every 15 minutes. You can disconnect and revoke access here at any time.")
         }
         .task {
-            await loadAccountState()
-        }
-        .onChange(of: authViewModel.authState) { _, _ in
-            Task { await loadAccountState() }
+            await xConnectionStore.refresh()
         }
     }
 
@@ -192,6 +189,10 @@ struct TwitterSettingsView: View {
         }
     }
 
+    private var xConnection: XConnectionResponse? {
+        xConnectionStore.connection
+    }
+
     private var isXConnected: Bool {
         xConnection?.connected == true
     }
@@ -245,6 +246,11 @@ struct TwitterSettingsView: View {
                         .foregroundStyle(Color.statusDestructive)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Text("Bookmarks already synced stay in Knowledge.")
+                    .font(.appCaption)
+                    .foregroundStyle(Color.onSurfaceSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
@@ -260,20 +266,6 @@ struct TwitterSettingsView: View {
     }
 
     @MainActor
-    private func loadAccountState() async {
-        guard case .authenticated = authViewModel.authState else {
-            xConnection = nil
-            return
-        }
-
-        do {
-            xConnection = try await dependencyFactory.xIntegrationService.fetchConnection()
-        } catch {
-            xConnection = nil
-        }
-    }
-
-    @MainActor
     private func connectX() async {
         guard !isUpdatingXConnection else { return }
         isUpdatingXConnection = true
@@ -283,7 +275,7 @@ struct TwitterSettingsView: View {
             _ = try await dependencyFactory.xIntegrationService.connectViaOAuth()
             let user = try await dependencyFactory.authenticationService.getCurrentUser()
             authViewModel.updateUser(user)
-            await loadAccountState()
+            await xConnectionStore.refresh()
             alertMessage = "X connected successfully."
             showingAlert = true
         } catch {
@@ -302,7 +294,7 @@ struct TwitterSettingsView: View {
             try await dependencyFactory.xIntegrationService.disconnect()
             let user = try await dependencyFactory.authenticationService.getCurrentUser()
             authViewModel.updateUser(user)
-            await loadAccountState()
+            await xConnectionStore.refresh()
             alertMessage = "X disconnected."
             showingAlert = true
         } catch {
