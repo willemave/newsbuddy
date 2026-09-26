@@ -6,13 +6,16 @@ struct BriefingFigureLayoutMetrics: Equatable {
 }
 
 enum BriefingFigureLayoutPolicy {
+    /// The exclusion keeps a horizontal gutter beside the figure but hugs its
+    /// bottom edge: any line fragment that touches the exclusion is shortened,
+    /// so extra height leaves a narrow line hanging below the image.
     private static let compactMetrics = BriefingFigureLayoutMetrics(
         imageSize: CGSize(width: 116, height: 116),
-        exclusionSize: CGSize(width: 128, height: 128)
+        exclusionSize: CGSize(width: 128, height: 118)
     )
     private static let regularMetrics = BriefingFigureLayoutMetrics(
         imageSize: CGSize(width: 148, height: 148),
-        exclusionSize: CGSize(width: 162, height: 160)
+        exclusionSize: CGSize(width: 162, height: 150)
     )
 
     static func canonicalPlacement(

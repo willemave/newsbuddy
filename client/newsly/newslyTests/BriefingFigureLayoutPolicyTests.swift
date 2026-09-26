@@ -60,4 +60,12 @@ final class BriefingFigureLayoutPolicyTests: XCTestCase {
         XCTAssertLessThan(compact.imageSize.width, regular.imageSize.width)
         XCTAssertGreaterThan(compact.exclusionSize.width, compact.imageSize.width)
     }
+
+    func testExclusionHugsFigureBottomSoTextFlowsBackUnderIt() {
+        for sizeClass: UserInterfaceSizeClass in [.compact, .regular] {
+            let metrics = BriefingFigureLayoutPolicy.metrics(for: sizeClass)
+            XCTAssertGreaterThanOrEqual(metrics.exclusionSize.height, metrics.imageSize.height)
+            XCTAssertLessThanOrEqual(metrics.exclusionSize.height - metrics.imageSize.height, 4)
+        }
+    }
 }

@@ -62,14 +62,22 @@ struct BriefingSegmentHeadlineView: View {
             onOpenSource(headline.sourceKey)
         } label: {
             VStack(alignment: .leading, spacing: 0) {
-                if let publisher = headline.publisher {
-                    Text(publisher.uppercased())
-                        .font(.editorialMeta)
-                        .tracking(1.6)
-                        .foregroundStyle(Color.brandPrimary)
-                        .lineLimit(1)
-                        .padding(.bottom, 7)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    if let publisher = headline.publisher {
+                        Text(publisher.uppercased())
+                            .font(.editorialMeta)
+                            .tracking(1.6)
+                            .foregroundStyle(Color.brandPrimary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+
+                    Text(headline.meta)
+                        .font(.appFootnote)
+                        .foregroundStyle(Color.onSurfaceTertiary)
+                        .fixedSize()
                 }
+                .padding(.bottom, 7)
 
                 Text(headline.title)
                     .font(.appSerif(size: 22, relativeTo: .title2, weight: .medium))
@@ -77,11 +85,6 @@ struct BriefingSegmentHeadlineView: View {
                     .lineSpacing(1)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-
-                Text(headline.meta)
-                    .font(.appFootnote)
-                    .foregroundStyle(Color.onSurfaceTertiary)
-                    .padding(.top, 6)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
