@@ -27,6 +27,15 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-26 — `main` — Floating tab bar labels under icons
+
+- **Status:** Complete
+- **Scope:** iOS `CompactTabBar` in `Shared/AppChrome.swift`.
+- **Decisions:** Every tab now shows its label stacked under the icon, including the selected tab, replacing the icon-only selected pill and side-by-side unselected label. Bar max width goes from 200 to 240 to fit the stacked items.
+- **Validation:** Simulator build succeeded; the iPhone 17 Pro screenshot shows "Briefing" and "Knowledge" under their icons.
+- **Remaining:** None.
+- **Commits:** See git history.
+
 ### 2026-09-26 — `feature/x-connection-attention` — X connection error badging
 
 - **Status:** Complete

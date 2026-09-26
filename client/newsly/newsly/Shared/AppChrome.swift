@@ -127,7 +127,7 @@ struct CompactTabBar: View {
                 fallbackBar
             }
         }
-        .frame(maxWidth: 200)
+        .frame(maxWidth: 240)
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.top, 8)
         .padding(.bottom, 6)
@@ -181,19 +181,17 @@ struct CompactTabBar: View {
         return Button {
             onSelect(item.tab)
         } label: {
-            HStack(spacing: 6) {
+            VStack(spacing: 2) {
                 Image(systemName: item.icon)
-                    .font(.appSymbol(size: 18, weight: .semibold))
-                if !isSelected {
-                    Text(item.label)
-                        .font(.appCaption2.weight(.semibold))
-                        .lineLimit(1)
-                        .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
-                }
+                    .font(.appSymbol(size: 17, weight: .semibold))
+                Text(item.label)
+                    .font(.appCaption2.weight(.semibold))
+                    .lineLimit(1)
+                    .fixedSize()
             }
-            .padding(.horizontal, isSelected ? 0 : 14)
-            .padding(.vertical, isSelected ? 0 : 9)
-            .frame(minWidth: 44, minHeight: 44)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .frame(minWidth: 72, minHeight: 44)
             .foregroundStyle(isSelected ? Color.surfacePrimary : Color.onSurfaceSecondary)
             .background {
                 if isSelected {
