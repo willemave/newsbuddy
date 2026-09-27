@@ -37,6 +37,20 @@ pub struct BriefingWebSearchResult {
     pub published_date: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExaSearchUsage {
+    pub request_count: u64,
+    pub result_count: u64,
+    pub summary_count: u64,
+    pub text_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefingWebSearchOutcome {
+    pub results: Vec<BriefingWebSearchResult>,
+    pub usage: ExaSearchUsage,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BriefingDigSummary {
     pub text: String,
@@ -109,7 +123,7 @@ impl BriefingDigGateway {
     pub async fn search(
         &self,
         query: &str,
-    ) -> Result<Vec<BriefingWebSearchResult>, BriefingDigGatewayError> {
+    ) -> Result<BriefingWebSearchOutcome, BriefingDigGatewayError> {
         self.search_limit(query, 5).await
     }
 
@@ -123,7 +137,7 @@ impl BriefingDigGateway {
         &self,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<BriefingWebSearchResult>, BriefingDigGatewayError> {
+    ) -> Result<BriefingWebSearchOutcome, BriefingDigGatewayError> {
         let key = self
             .exa_api_key
             .as_ref()
@@ -150,7 +164,17 @@ impl BriefingDigGateway {
             .await?
             .error_for_status()?;
         let payload = response.json::<ExaSearchResponse>().await?;
-        Ok(payload
+        let summary_count = payload
+            .results
+            .iter()
+            .filter(|result| nonempty(result.summary.clone()).is_some())
+            .count();
+        let text_count = payload
+            .results
+            .iter()
+            .filter(|result| nonempty(result.text.clone()).is_some())
+            .count();
+        let results = payload
             .results
             .into_iter()
             .filter(|result| !result.url.trim().is_empty())
@@ -160,7 +184,16 @@ impl BriefingDigGateway {
                 snippet: nonempty(result.summary).or_else(|| clean_snippet(result.text)),
                 published_date: nonempty(result.published_date),
             })
-            .collect())
+            .collect::<Vec<_>>();
+        Ok(BriefingWebSearchOutcome {
+            usage: ExaSearchUsage {
+                request_count: 1,
+                result_count: u64::try_from(results.len()).unwrap_or(u64::MAX),
+                summary_count: u64::try_from(summary_count).unwrap_or(u64::MAX),
+                text_count: u64::try_from(text_count).unwrap_or(u64::MAX),
+            },
+            results,
+        })
     }
 
     /// Produces a bounded text summary from the provided system and user prompts.

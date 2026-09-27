@@ -111,6 +111,15 @@ impl AudioEpisodeGateway {
         self.config.tts_model.as_str()
     }
 
+    pub fn uses_standard_elevenlabs_pricing(&self) -> bool {
+        let base = &self.config.elevenlabs_api_base;
+        base.scheme() == "https"
+            && base.host_str() == Some("api.elevenlabs.io")
+            && matches!(base.path(), "" | "/")
+            && base.query().is_none()
+            && base.fragment().is_none()
+    }
+
     /// Generates and validates a structured two-speaker script for the supplied source snapshot.
     ///
     /// # Errors

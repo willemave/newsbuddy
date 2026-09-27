@@ -365,6 +365,7 @@ pub struct AudioEpisodeTtsUsage {
     pub model: String,
     pub request_count: i32,
     pub text_chars: i32,
+    pub standard_pricing: bool,
 }
 
 #[derive(Debug)]
@@ -572,17 +573,21 @@ async fn insert_audio_episode_tts_usage(
     completed: &CompleteAudioEpisodeGeneration<'_>,
     usage: &AudioEpisodeTtsUsage,
 ) -> Result<(), sqlx::Error> {
-    let cost_usd = f64::from(usage.text_chars) * (50.0 / 1_000_000.0);
+    let priced = crate::elevenlabs_tts_cost(
+        &usage.model,
+        u64::try_from(usage.text_chars).unwrap_or_default(),
+        usage.standard_pricing,
+    );
     sqlx::query(
         r#"
         INSERT INTO vendor_usage_records (
             provider, model, feature, operation, source, task_id, content_id, user_id,
-            request_count, resource_count, cost_usd, currency, pricing_version, metadata,
+            request_count, resource_count, cost_usd, currency, pricing_version, cost_basis, metadata,
             created_at
         ) VALUES (
             'elevenlabs', $1, 'audio_episode_tts', 'narration.synthesize_dialogue_mp3',
             'rust_worker', $2::bigint::integer, $3::bigint::integer, $4::bigint::integer,
-            $5, $6, $7, 'USD', '2026-08-02', $8::jsonb,
+            $5, $6, $7, 'USD', $8, $9, $10::jsonb,
             timezone('UTC', clock_timestamp())
         )
         "#,
@@ -593,10 +598,17 @@ async fn insert_audio_episode_tts_usage(
     .bind(completed.user_id)
     .bind(usage.request_count)
     .bind(usage.text_chars)
-    .bind(cost_usd)
+    .bind(priced.map(|value| value.cost_usd))
+    .bind(priced.map(|value| value.pricing_version))
+    .bind(priced.map(|value| value.cost_basis))
     .bind(serde_json::json!({
         "audio_episode_id": completed.audio_episode_id,
         "text_chars": usage.text_chars,
+        "cost_rate_usd": priced.map(|value| value.rate_usd),
+        "cost_rate_unit": priced.map(|value| value.rate_unit),
+        "cost_source_url": priced.map(|value| value.source_url),
+        "cost_basis": priced.map(|value| value.cost_basis),
+        "cost_pricing_version": priced.map(|value| value.pricing_version),
     }))
     .execute(&mut **transaction)
     .await?;

@@ -282,6 +282,7 @@ async fn execute_generation(
         model: services.gateway.tts_model().to_owned(),
         request_count: dialogue.request_count,
         text_chars: dialogue.text_chars,
+        standard_pricing: services.gateway.uses_standard_elevenlabs_pricing(),
     };
     HandlerExecution::with_finalizer(
         TaskResult::ok(),

@@ -6,6 +6,7 @@ use std::path::{Component, Path};
 use std::time::Duration;
 
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -236,6 +237,18 @@ pub struct SandboxHandle {
     pub sandbox_domain: String,
     pub envd_access_token: Option<SecretString>,
     pub traffic_access_token: Option<SecretString>,
+}
+
+/// Non-secret control-plane facts used for lifecycle reconciliation and accounting.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SandboxInfo {
+    pub sandbox_id: SandboxId,
+    pub template_id: String,
+    pub metadata: BTreeMap<String, String>,
+    pub started_at: DateTime<Utc>,
+    pub end_at: DateTime<Utc>,
+    pub cpu_count: u32,
+    pub memory_mb: u32,
 }
 
 impl fmt::Debug for SandboxHandle {

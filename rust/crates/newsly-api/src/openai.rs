@@ -239,6 +239,11 @@ async fn persist_usage_best_effort(
         request_id,
         user_id,
         model: &result.model,
+        request_count: i32::try_from(result.chunk_count).unwrap_or(i32::MAX),
+        audio_duration_ms: result.audio_duration_ms,
+        audio_duration_estimate_ms: result.audio_duration_estimate_ms,
+        duration_source: result.audio_duration_source.as_str(),
+        standard_pricing: result.standard_pricing,
         metadata,
     };
     if let Err(error) = record_transcription_usage(&mut transaction, &usage).await {

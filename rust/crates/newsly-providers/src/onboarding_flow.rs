@@ -10,7 +10,7 @@ use newsly_agent_runtime::{
 };
 use reqwest::Url;
 use rig_core::schemars::{JsonSchema, schema_for};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
@@ -18,11 +18,14 @@ use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
 #[path = "onboarding_agent_support.rs"]
 mod agent_support;
+mod exa;
 #[path = "onboarding_lane_sources.rs"]
 mod lane_sources;
 #[path = "onboarding_model.rs"]
 mod model_config;
 use agent_support::{NoEvents, NoTools};
+pub use exa::OnboardingExaUsage;
+use exa::search_exa;
 use model_config::{AUDIO_PLAN_SYSTEM_PROMPT, ONBOARDING_MODEL, onboarding_provider_parameters};
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
 const EXA_MAX_CONCURRENCY: usize = 8;
@@ -32,17 +35,6 @@ const AUDIO_PLAN_TIMEOUT: Duration = Duration::from_secs(8);
 const FAST_DISCOVER_TIMEOUT: Duration = Duration::from_secs(12);
 const DISCOVERY_PROMPT_MAX_RESULTS: usize = 200;
 const DISCOVERY_SNIPPET_CHARS: usize = 280;
-const EXCLUDED_DOMAINS: [&str; 8] = [
-    "facebook.com",
-    "linkedin.com",
-    "twitter.com",
-    "x.com",
-    "instagram.com",
-    "tiktok.com",
-    "pinterest.com",
-    "reddit.com",
-];
-
 const PROFILE_SYSTEM_PROMPT: &str = "You are building a short onboarding profile for a user. Use the provided interests and web snippets to infer a concise profile summary and 3-6 topical interests. Do not invent interests that contradict the user-provided topics. Return structured output only.";
 const VOICE_SYSTEM_PROMPT: &str = "You extract onboarding fields from a transcript. Return a first name if explicitly stated and a concise list of interest topics. Do not guess missing information. Return structured output only.";
 const FAST_DISCOVER_SYSTEM_PROMPT: &str = "You are selecting high-quality sources for a new user. Use only the profile summary, topics, and search snippets to suggest Substack/Atom feeds, podcast RSS feeds, and relevant subreddits. Every suggestion must be grounded in web_results; do not use static defaults, curated backups, or general prior knowledge as source candidates. Podcast suggestions must come from web_results only. If web_results contain no suitable sources for a category, return zero suggestions for that category. Suggest up to 5 sources per category, spread across the profile topics so that every topic is represented in each category where web_results support it. Every suggestion must include a concise, specific rationale sentence. Prefer sources with clear RSS URLs when possible. Podcast directory entries and results marked RSS feed give the show's real feed; use that URL as feed_url. Reddit community results are real public communities; prefer active, substantive discussion communities over meme or joke subreddits, and use the name without the r/ prefix as subreddit. For feed-like sources, always provide a best-effort feed_url when available. If uncertain, include candidate_feed_url and set is_likely_feed plus feed_confidence (0-1). For reddit entries, include subreddit. Return structured output only.";
@@ -52,6 +44,18 @@ pub struct OnboardingProfile {
     pub profile_summary: String,
     pub inferred_topics: Vec<String>,
     pub candidate_sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnboardingProfileOutcome {
+    pub profile: OnboardingProfile,
+    pub exa_usage: OnboardingExaUsage,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OnboardingDiscoveryOutcome {
+    pub seeds: OnboardingDiscoverySeeds,
+    pub exa_usage: OnboardingExaUsage,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -153,6 +157,7 @@ struct SearchManyOutcome {
     results: Vec<WebResult>,
     attempted: usize,
     succeeded: usize,
+    usage: OnboardingExaUsage,
 }
 
 impl SearchManyOutcome {
@@ -214,17 +219,18 @@ impl OnboardingGateway {
         &self,
         first_name: &str,
         interest_topics: &[String],
-    ) -> Result<OnboardingProfile, OnboardingGatewayError> {
+    ) -> Result<OnboardingProfileOutcome, OnboardingGatewayError> {
         let queries = profile_queries(interest_topics, first_name);
-        let results = self
-            .search_many(queries, 3, false, PROFILE_TIMEOUT)
-            .await
-            .results;
+        let outcome = self.search_many(queries, 3, false, PROFILE_TIMEOUT).await;
+        let results = outcome.results;
         if results.is_empty() {
-            return Ok(OnboardingProfile {
-                profile_summary: profile_fallback_summary(first_name, interest_topics),
-                inferred_topics: merge_topics([interest_topics.iter().map(String::as_str)], 8),
-                candidate_sources: Vec::new(),
+            return Ok(OnboardingProfileOutcome {
+                profile: OnboardingProfile {
+                    profile_summary: profile_fallback_summary(first_name, interest_topics),
+                    inferred_topics: merge_topics([interest_topics.iter().map(String::as_str)], 8),
+                    candidate_sources: Vec::new(),
+                },
+                exa_usage: outcome.usage,
             });
         }
 
@@ -262,10 +268,13 @@ impl OnboardingGateway {
             ],
             8,
         );
-        Ok(OnboardingProfile {
-            profile_summary: output.profile_summary,
-            inferred_topics,
-            candidate_sources: output.candidate_sources,
+        Ok(OnboardingProfileOutcome {
+            profile: OnboardingProfile {
+                profile_summary: output.profile_summary,
+                inferred_topics,
+                candidate_sources: output.candidate_sources,
+            },
+            exa_usage: outcome.usage,
         })
     }
 
@@ -357,7 +366,7 @@ impl OnboardingGateway {
         &self,
         profile_summary: &str,
         inferred_topics: &[String],
-    ) -> Result<OnboardingDiscoverySeeds, OnboardingGatewayError> {
+    ) -> Result<OnboardingDiscoveryOutcome, OnboardingGatewayError> {
         let queries = discovery_queries(profile_summary, inferred_topics, 6);
         let outcome = self
             .search_many(queries, 12, false, FAST_DISCOVER_TIMEOUT)
@@ -365,16 +374,22 @@ impl OnboardingGateway {
         if outcome.all_attempts_failed() {
             return Err(OnboardingGatewayError::SearchUnavailable);
         }
+        let usage = outcome.usage;
         let mut results = outcome.results;
         dedupe_web_results(&mut results);
         results.truncate(DISCOVERY_PROMPT_MAX_RESULTS);
-        self.discovery_from_results(
-            "onboarding.fast_discover",
-            profile_summary,
-            inferred_topics,
-            &results,
-        )
-        .await
+        let seeds = self
+            .discovery_from_results(
+                "onboarding.fast_discover",
+                profile_summary,
+                inferred_topics,
+                &results,
+            )
+            .await?;
+        Ok(OnboardingDiscoveryOutcome {
+            seeds,
+            exa_usage: usage,
+        })
     }
 
     /// Gathers each persisted lane's evidence concurrently from the source that can ground its
@@ -389,7 +404,7 @@ impl OnboardingGateway {
         profile_summary: &str,
         inferred_topics: &[String],
         lanes: &[OnboardingAudioLane],
-    ) -> Result<OnboardingDiscoverySeeds, OnboardingGatewayError> {
+    ) -> Result<OnboardingDiscoveryOutcome, OnboardingGatewayError> {
         let gateway = self.clone();
         let topics = inferred_topics.to_vec();
         let groups = stream::iter(lanes.to_vec())
@@ -398,17 +413,30 @@ impl OnboardingGateway {
                 async move { gateway.lane_evidence(&lane, &topics).await }
             })
             .buffered(lanes.len().max(1))
-            .collect::<Vec<Result<Vec<_>, OnboardingGatewayError>>>()
+            .collect::<Vec<Result<lane_sources::LaneEvidence, OnboardingGatewayError>>>()
             .await;
         let groups = groups.into_iter().collect::<Result<Vec<_>, _>>()?;
+        let mut usage = OnboardingExaUsage::default();
+        let groups = groups
+            .into_iter()
+            .map(|group| {
+                usage.add_assign(group.exa_usage);
+                group.results
+            })
+            .collect::<Vec<_>>();
         let results = balanced_web_results(groups, DISCOVERY_PROMPT_MAX_RESULTS);
-        self.discovery_from_results(
-            "onboarding.audio_discover",
-            profile_summary,
-            inferred_topics,
-            &results,
-        )
-        .await
+        let seeds = self
+            .discovery_from_results(
+                "onboarding.audio_discover",
+                profile_summary,
+                inferred_topics,
+                &results,
+            )
+            .await?;
+        Ok(OnboardingDiscoveryOutcome {
+            seeds,
+            exa_usage: usage,
+        })
     }
 
     async fn discovery_from_results(
@@ -550,6 +578,29 @@ impl OnboardingGateway {
             match result {
                 Ok(results) => {
                     outcome.succeeded += 1;
+                    outcome.usage.request_count = outcome.usage.request_count.saturating_add(1);
+                    outcome.usage.result_count = outcome
+                        .usage
+                        .result_count
+                        .saturating_add(u64::try_from(results.len()).unwrap_or(u64::MAX));
+                    outcome.usage.summary_count = outcome.usage.summary_count.saturating_add(
+                        u64::try_from(
+                            results
+                                .iter()
+                                .filter(|row| clean(row.summary.clone()).is_some())
+                                .count(),
+                        )
+                        .unwrap_or(u64::MAX),
+                    );
+                    outcome.usage.text_count = outcome.usage.text_count.saturating_add(
+                        u64::try_from(
+                            results
+                                .iter()
+                                .filter(|row| clean(row.text.clone()).is_some())
+                                .count(),
+                        )
+                        .unwrap_or(u64::MAX),
+                    );
                     outcome
                         .results
                         .extend(results.into_iter().map(|result| WebResult {
@@ -567,81 +618,6 @@ impl OnboardingGateway {
         }
         outcome
     }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaSearchRequest<'a> {
-    query: &'a str,
-    num_results: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    exclude_domains: Option<Vec<&'static str>>,
-    contents: ExaContents,
-}
-
-/// A short page excerpt per result, so the model selects on what a source covers rather than on
-/// its title alone. No summaries or live crawling: those are the slow, costly parts.
-#[derive(Debug, Serialize)]
-struct ExaContents {
-    text: ExaText,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaText {
-    max_characters: usize,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExaSearchResponse {
-    #[serde(default)]
-    results: Vec<ExaSearchRow>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaSearchRow {
-    title: Option<String>,
-    url: String,
-    summary: Option<String>,
-    text: Option<String>,
-    published_date: Option<String>,
-}
-
-async fn search_exa(
-    client: &reqwest::Client,
-    endpoint: Url,
-    api_key: &SecretString,
-    query: &str,
-    num_results: usize,
-    include_social: bool,
-    timeout: Duration,
-) -> Result<Vec<ExaSearchRow>, reqwest::Error> {
-    let payload = ExaSearchRequest {
-        query,
-        num_results,
-        exclude_domains: (!include_social).then(|| EXCLUDED_DOMAINS.to_vec()),
-        contents: ExaContents {
-            text: ExaText {
-                max_characters: DISCOVERY_SNIPPET_CHARS,
-            },
-        },
-    };
-    let response = client
-        .post(endpoint)
-        .timeout(timeout)
-        .header("x-api-key", api_key.expose_secret())
-        .json(&payload)
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<ExaSearchResponse>()
-        .await?;
-    Ok(response
-        .results
-        .into_iter()
-        .filter(|result| !result.url.trim().is_empty())
-        .collect())
 }
 
 fn profile_queries(topics: &[String], first_name: &str) -> Vec<String> {

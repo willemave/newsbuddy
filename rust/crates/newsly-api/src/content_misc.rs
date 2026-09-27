@@ -23,11 +23,12 @@ use newsly_contracts::{
     TweetSuggestionsRequest, TweetSuggestionsResponse,
 };
 use newsly_db::{
-    ContentMiscRepositoryError, DiscussionRefreshPlan, DiscussionTargetKind, SubmissionProjection,
-    finalize_article_conversion, list_active_feed_urls, list_submission_projections,
-    persist_content_discussion, persist_news_discussion, prepare_content_conversion,
-    prepare_content_discussion_refresh, prepare_content_narration, prepare_news_conversion,
-    prepare_news_discussion_refresh, prepare_tweet_content, search_visible_content,
+    ContentMiscRepositoryError, DiscussionRefreshPlan, DiscussionTargetKind, NewNarrationTtsUsage,
+    SubmissionProjection, finalize_article_conversion, list_active_feed_urls,
+    list_submission_projections, persist_content_discussion, persist_news_discussion,
+    prepare_content_conversion, prepare_content_discussion_refresh, prepare_content_narration,
+    prepare_news_conversion, prepare_news_discussion_refresh, prepare_tweet_content,
+    record_narration_tts_usage, search_visible_content,
 };
 use newsly_providers::{
     ContentMiscGatewayError, DiscussionRefreshResult, FeedDiscoveryHit, PodcastEpisodeHit,
@@ -298,12 +299,20 @@ pub(super) async fn get_narration(
     );
     let narration_text = build_summary_narration(&title, &plan.content.content_metadata);
     if accepts_audio(&headers) {
-        let audio = state
+        let narration = state
             .content_misc
             .synthesize_narration_mp3(&narration_text)
             .await
             .map_err(|error| narration_error(&error, &request_id))?;
-        let mut response = audio.into_response();
+        persist_narration_usage_best_effort(
+            &state,
+            &request_id,
+            current_user.id,
+            target_id,
+            &narration,
+        )
+        .await;
+        let mut response = narration.audio.into_response();
         response
             .headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static("audio/mpeg"));
@@ -324,6 +333,38 @@ pub(super) async fn get_narration(
         narration_text,
     })
     .into_response())
+}
+
+async fn persist_narration_usage_best_effort(
+    state: &AppState,
+    request_id: &str,
+    user_id: i64,
+    content_id: i64,
+    narration: &newsly_providers::SynthesizedNarration,
+) {
+    let mut transaction = match state.database.pool().begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::warn!(error = %error, request_id, "narration usage transaction unavailable");
+            return;
+        }
+    };
+    let usage = NewNarrationTtsUsage {
+        request_id,
+        user_id,
+        content_id,
+        model: &narration.model,
+        request_count: i32::try_from(narration.request_count).unwrap_or(i32::MAX),
+        text_chars: narration.text_chars,
+        standard_pricing: narration.standard_pricing,
+    };
+    if let Err(error) = record_narration_tts_usage(&mut transaction, &usage).await {
+        tracing::warn!(error = %error, request_id, user_id, content_id, "narration usage insert failed");
+        return;
+    }
+    if let Err(error) = transaction.commit().await {
+        tracing::warn!(error = %error, request_id, user_id, content_id, "narration usage commit failed");
+    }
 }
 
 #[utoipa::path(

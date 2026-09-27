@@ -16,6 +16,7 @@ async-trait = "=0.1.92"
 base64.workspace = true
 buffa = { version = "=0.9.1", features = ["json"] }
 bytes = { version = "=1.11.1", features = ["serde"] }
+chrono.workspace = true
 connectrpc = { version = "=0.9.0", features = ["client-tls"] }
 futures-core = "=0.3.34"
 futures-util.workspace = true

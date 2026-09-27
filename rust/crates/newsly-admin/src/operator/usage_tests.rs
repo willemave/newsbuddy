@@ -20,6 +20,7 @@ fn usage_text_renders_tokens_vendor_units_and_cost() {
             resource_count: 9,
             cost_usd: Some(0.42),
             known_cost_usd: 0.42,
+            public_list_estimate_usd: 0.0,
             unpriced_call_count: 0,
             providers: BTreeMap::new(),
             models: BTreeMap::new(),
@@ -36,6 +37,7 @@ fn usage_text_renders_tokens_vendor_units_and_cost() {
             resource_count: 8,
             cost_usd: Some(0.28),
             known_cost_usd: 0.28,
+            public_list_estimate_usd: 0.0,
             unpriced_call_count: 0,
         }],
     };
@@ -55,18 +57,18 @@ async fn usage_cost_distinguishes_missing_partial_free_and_empty(pool: PgPool) {
             provider text, model text, feature text, operation text, source text, user_id bigint,
             input_tokens bigint, cache_read_tokens bigint, cache_write_tokens bigint,
             output_tokens bigint, total_tokens bigint, request_count bigint, resource_count bigint,
-            cost_usd double precision, created_at timestamp NOT NULL
+            cost_usd double precision, cost_basis text, created_at timestamp NOT NULL
         )",
     )
     .execute(&pool)
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO vendor_usage_records (provider, cost_usd, created_at) VALUES
-         ('mixed', 0.25, timezone('UTC', now())),
-         ('mixed', NULL, timezone('UTC', now())),
-         ('unknown', NULL, timezone('UTC', now())),
-         ('free', 0.0, timezone('UTC', now()))",
+        "INSERT INTO vendor_usage_records (provider, cost_usd, cost_basis, created_at) VALUES
+         ('mixed', 0.25, 'public_list_estimate', timezone('UTC', now())),
+         ('mixed', NULL, NULL, timezone('UTC', now())),
+         ('unknown', NULL, NULL, timezone('UTC', now())),
+         ('free', 0.0, NULL, timezone('UTC', now()))",
     )
     .execute(&pool)
     .await
@@ -77,6 +79,7 @@ async fn usage_cost_distinguishes_missing_partial_free_and_empty(pool: PgPool) {
         .unwrap();
     assert_eq!(summary.totals.cost_usd, None);
     assert!((summary.totals.known_cost_usd - 0.25).abs() < f64::EPSILON);
+    assert!((summary.totals.public_list_estimate_usd - 0.25).abs() < f64::EPSILON);
     assert_eq!(summary.totals.unpriced_call_count, 2);
     let group = |key: &str| {
         summary
@@ -94,7 +97,7 @@ async fn usage_cost_distinguishes_missing_partial_free_and_empty(pool: PgPool) {
     assert!(
         summary
             .render_text()
-            .contains("cost unknown ($0.2500 known; 2 unpriced calls)")
+            .contains("cost unknown ($0.2500 priced subtotal, including $0.2500 public-list estimates; 2 unpriced records)")
     );
     let json = serde_json::to_value(&summary).unwrap();
     assert!(json["totals"]["cost_usd"].is_null());

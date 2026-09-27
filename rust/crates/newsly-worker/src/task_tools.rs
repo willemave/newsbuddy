@@ -326,19 +326,27 @@ impl TaskToolExecutor {
                     ));
                 }
                 let result_limit = input.num_results.unwrap_or(5).clamp(1, MAX_SEARCH_RESULTS);
-                let results = self
+                let outcome = self
                     .exa
                     .search(query, result_limit, category)
                     .await
                     .map_err(|error| {
                         AgentRuntimeError::Tool(format!("web_search failed: {error}"))
                     })?;
+                record_exa_tool_usage(
+                    &self.pool,
+                    self.user_id,
+                    &call.id,
+                    "task_tool.web_search",
+                    outcome.usage,
+                )
+                .await;
                 let _ = events.publish(AgentEvent::ToolProgress {
                     id: call.id.clone(),
-                    text: format!("web_search returned {} results", results.len()),
+                    text: format!("web_search returned {} results", outcome.results.len()),
                 });
                 Ok(ToolOutput {
-                    content: json!({"ok": true, "query": query, "results": results}),
+                    content: json!({"ok": true, "query": query, "results": outcome.results}),
                     is_error: false,
                 })
             }
@@ -650,6 +658,23 @@ pub(crate) struct ExaSearchClient {
     endpoint: Url,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ExaSearchUsage {
+    pub(crate) request_count: u64,
+    pub(crate) result_count: u64,
+    pub(crate) summary_count: u64,
+    pub(crate) text_count: u64,
+    pub(crate) summary_requested: bool,
+    pub(crate) text_requested: bool,
+    pub(crate) livecrawl_fallback: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct ExaSearchOutcome {
+    pub(crate) results: Vec<ExaSearchResult>,
+    pub(crate) usage: ExaSearchUsage,
+}
+
 impl ExaSearchClient {
     pub(crate) fn new(
         api_key: Option<SecretString>,
@@ -668,7 +693,7 @@ impl ExaSearchClient {
         query: &str,
         num_results: usize,
         category: Option<&str>,
-    ) -> Result<Vec<ExaSearchResult>, ExaSearchError> {
+    ) -> Result<ExaSearchOutcome, ExaSearchError> {
         let key = self.api_key.as_ref().ok_or(ExaSearchError::NotConfigured)?;
         let mut request = json!({
             "query": query,
@@ -692,7 +717,17 @@ impl ExaSearchClient {
             .await?
             .error_for_status()?;
         let body: ExaSearchResponse = response.json().await?;
-        Ok(body
+        let summary_count = body
+            .results
+            .iter()
+            .filter(|result| nonempty(result.summary.clone()).is_some())
+            .count();
+        let text_count = body
+            .results
+            .iter()
+            .filter(|result| nonempty(result.text.clone()).is_some())
+            .count();
+        let results = body
             .results
             .into_iter()
             .filter(|result| !result.url.trim().is_empty())
@@ -703,7 +738,73 @@ impl ExaSearchClient {
                 snippet: nonempty(result.summary).or_else(|| nonempty(result.text)),
                 published_date: nonempty(result.published_date),
             })
-            .collect())
+            .collect::<Vec<_>>();
+        Ok(ExaSearchOutcome {
+            usage: ExaSearchUsage {
+                request_count: 1,
+                result_count: u64::try_from(results.len()).unwrap_or(u64::MAX),
+                summary_count: u64::try_from(summary_count).unwrap_or(u64::MAX),
+                text_count: u64::try_from(text_count).unwrap_or(u64::MAX),
+                summary_requested: true,
+                text_requested: true,
+                livecrawl_fallback: true,
+            },
+            results,
+        })
+    }
+}
+
+pub(crate) async fn record_exa_tool_usage(
+    pool: &PgPool,
+    user_id: i64,
+    request_id: &str,
+    operation: &str,
+    usage: ExaSearchUsage,
+) {
+    if usage.request_count == 0 {
+        return;
+    }
+    let metadata = json!({
+        "result_count": usage.result_count,
+        "summary_count": usage.summary_count,
+        "text_count": usage.text_count,
+        "search_type": "auto",
+        "contents_text_requested": usage.text_requested,
+        "contents_summary_requested": usage.summary_requested,
+        "livecrawl": if usage.livecrawl_fallback { "fallback" } else { "never" },
+        "cost_status": "unpriced",
+        "cost_reason": "Exa response does not expose every billable search, contents, summary, and livecrawl unit",
+        "cost_source_url": "https://exa.ai/pricing"
+    });
+    let result = sqlx::query(
+        r"
+        INSERT INTO vendor_usage_records (
+            provider, model, feature, operation, source, request_id, user_id,
+            request_count, resource_count, cost_usd, currency, pricing_version,
+            cost_basis, metadata, idempotency_key, created_at
+        )
+        SELECT
+            'exa', 'search', 'agent_tool', $1, 'worker', $2, users.id,
+            $4, $5, NULL, 'USD', NULL,
+            'unpriced_incomplete_provider_units', $6,
+            concat('exa:', $1::text, ':', $3::text, ':', $2::text),
+            timezone('UTC', clock_timestamp())
+        FROM users
+        WHERE users.id = $3
+          AND users.is_active IS TRUE
+        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+        ",
+    )
+    .bind(operation)
+    .bind(request_id)
+    .bind(user_id)
+    .bind(i32::try_from(usage.request_count).unwrap_or(i32::MAX))
+    .bind(i32::try_from(usage.result_count).unwrap_or(i32::MAX))
+    .bind(metadata)
+    .execute(pool)
+    .await;
+    if let Err(error) = result {
+        tracing::error!(error = %error, operation, request_id, "failed to record Exa tool usage");
     }
 }
 

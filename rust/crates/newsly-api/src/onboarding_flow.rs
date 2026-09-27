@@ -41,6 +41,9 @@ use crate::write_support::{
 };
 use crate::{AppState, request_id_from_headers};
 
+mod exa_usage;
+use exa_usage::record_onboarding_exa_usage;
+
 const PROFILE_OPERATION_ID: &str = "buildOnboardingProfile";
 const VOICE_OPERATION_ID: &str = "parseOnboardingVoice";
 const FAST_DISCOVER_OPERATION_ID: &str = "runOnboardingFastDiscover";
@@ -111,12 +114,20 @@ pub(super) async fn build_profile(
         return Err(validation_error("interest_topics is required", &request_id));
     }
     verify_before_external(&state, &stamp, &request_id).await?;
-    let profile = state
+    let outcome = state
         .onboarding
         .build_profile(&payload.first_name, &interest_topics)
         .await
         .map_err(|error| internal_error(error, &request_id))?;
-    let _ = current_user;
+    record_onboarding_exa_usage(
+        &state,
+        current_user.id,
+        &request_id,
+        "onboarding.build_profile",
+        outcome.exa_usage,
+    )
+    .await;
+    let profile = outcome.profile;
     Ok(Json(OnboardingProfileResponse {
         profile_summary: profile.profile_summary,
         inferred_topics: profile.inferred_topics,
@@ -222,12 +233,12 @@ pub(super) async fn fast_discover(
         ));
     }
     verify_before_external(&state, &stamp, &request_id).await?;
-    let seeds = match state
+    let outcome = match state
         .onboarding
         .fast_discover(&payload.profile_summary, &payload.inferred_topics)
         .await
     {
-        Ok(seeds) => seeds,
+        Ok(outcome) => outcome,
         Err(error) => {
             tracing::error!(
                 error = %error,
@@ -237,9 +248,17 @@ pub(super) async fn fast_discover(
             return Ok(Json(empty_discovery_response()));
         }
     };
+    record_onboarding_exa_usage(
+        &state,
+        current_user.id,
+        &request_id,
+        "onboarding.fast_discover",
+        outcome.exa_usage,
+    )
+    .await;
     let response = normalize_discovery_seeds(
         &state,
-        seeds,
+        outcome.seeds,
         &payload.profile_summary,
         &payload.inferred_topics,
     )

@@ -15,6 +15,7 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
+use crate::task_tools::{ExaSearchUsage, record_exa_tool_usage};
 use crate::{
     HandlerExecution, HandlerFinalizerFuture, HandlerFuture, LeaseHealth, TaskFinalizer,
     TaskFinalizerResult, TaskHandler,
@@ -133,16 +134,32 @@ async fn execute_audio_discovery(
             return audio_failure(services, task, snapshot, error, false);
         }
     };
-    let seeds = match services
+    let outcome = match services
         .provider
         .discover_from_lanes(&snapshot.topic_summary, &snapshot.inferred_topics, &lanes)
         .await
     {
-        Ok(seeds) => seeds,
+        Ok(outcome) => outcome,
         Err(error) => {
             return audio_failure(services, task, snapshot, error.to_string(), true);
         }
     };
+    record_exa_tool_usage(
+        &services.pool,
+        user_id,
+        &format!("task-{}-attempt-{}", task.task_id, task.retry_count),
+        "onboarding.audio_discover.search",
+        ExaSearchUsage {
+            request_count: outcome.exa_usage.request_count,
+            result_count: outcome.exa_usage.result_count,
+            summary_count: outcome.exa_usage.summary_count,
+            text_count: outcome.exa_usage.text_count,
+            summary_requested: false,
+            text_requested: true,
+            livecrawl_fallback: false,
+        },
+    )
+    .await;
     if lease.ownership_lost() {
         return HandlerExecution::from_result(TaskResult::fail(
             Some("Onboarding discovery lease was lost after provider work".to_owned()),
@@ -151,7 +168,7 @@ async fn execute_audio_discovery(
     }
     let suggestions = match normalize_seeds(
         &services.feed_validator,
-        seeds,
+        outcome.seeds,
         &snapshot.topic_summary,
         &snapshot.inferred_topics,
     )

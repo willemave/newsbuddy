@@ -17,7 +17,8 @@ use crate::files::{BoxByteStream, EnvdFileClient, FileLimits};
 use crate::network::NetworkPolicy;
 use crate::types::{
     CommandOutput, CommandRequest, CommandResult, ExecutionTag, ExitStatus, OutputLimits,
-    ProcessInfo, ProcessSelector, SandboxHandle, SandboxId, SandboxRequest, WorkspacePath,
+    ProcessInfo, ProcessSelector, SandboxHandle, SandboxId, SandboxInfo, SandboxRequest,
+    WorkspacePath,
 };
 
 const RESULT_MANIFEST_LIMIT_BYTES: usize = 1024 * 1024;
@@ -44,6 +45,15 @@ pub trait SandboxProvider: Send + Sync {
     async fn create_sandbox(&self, request: &SandboxRequest) -> Result<SandboxHandle, E2bError>;
 
     async fn kill_sandbox(&self, sandbox_id: &SandboxId) -> Result<bool, E2bError>;
+
+    async fn get_sandbox_info(&self, sandbox_id: &SandboxId) -> Result<SandboxInfo, E2bError>;
+
+    async fn list_sandboxes_by_metadata(
+        &self,
+        key: &str,
+        value: &str,
+        limit: u8,
+    ) -> Result<Vec<SandboxInfo>, E2bError>;
 
     async fn check_sandbox_health(
         &self,
@@ -387,6 +397,19 @@ impl SandboxProvider for DirectE2bProvider {
 
     async fn kill_sandbox(&self, sandbox_id: &SandboxId) -> Result<bool, E2bError> {
         self.control.kill(sandbox_id).await
+    }
+
+    async fn get_sandbox_info(&self, sandbox_id: &SandboxId) -> Result<SandboxInfo, E2bError> {
+        self.control.get_info(sandbox_id).await
+    }
+
+    async fn list_sandboxes_by_metadata(
+        &self,
+        key: &str,
+        value: &str,
+        limit: u8,
+    ) -> Result<Vec<SandboxInfo>, E2bError> {
+        self.control.list_by_metadata(key, value, limit).await
     }
 
     async fn check_sandbox_health(

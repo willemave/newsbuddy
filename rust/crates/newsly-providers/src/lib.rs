@@ -41,7 +41,8 @@ pub use briefing_composition::{
     GeneratedBriefingLensName,
 };
 pub use briefing_dig::{
-    BriefingDigGateway, BriefingDigGatewayError, BriefingDigSummary, BriefingWebSearchResult,
+    BriefingDigGateway, BriefingDigGatewayError, BriefingDigSummary, BriefingWebSearchOutcome,
+    BriefingWebSearchResult, ExaSearchUsage,
 };
 pub use content_analysis::{
     AnalyzedContentType, ContentAnalysisGateway, ContentAnalysisGatewayError,
@@ -52,7 +53,7 @@ pub use content_misc::{
     DiscussionRefreshResult, DiscussionSummaryArtifact, DiscussionSummaryComment,
     DiscussionSummaryLink, DiscussionSummaryTopic, DiscussionThreadHit, FeedDiscoveryHit,
     GeneratedDiscussionSummary, GeneratedTweetSuggestion, GeneratedTweetSuggestions,
-    PodcastEpisodeHit,
+    PodcastEpisodeHit, SynthesizedNarration,
 };
 pub use feed_validation::{
     FeedValidationError, FeedValidator, ValidatedFeed, ValidatedFeedFormat, ValidatedSharedItem,
@@ -72,9 +73,9 @@ pub use news_item::{
     NewsItemGatewayError, NewsSummary, RelevantLink, RelevantLinkCategory, SelectedRelevantLinks,
 };
 pub use onboarding_flow::{
-    OnboardingAudioLane, OnboardingAudioPlan, OnboardingDiscoverySeeds, OnboardingGateway,
-    OnboardingGatewayError, OnboardingLaneTarget, OnboardingProfile, OnboardingSuggestionSeed,
-    OnboardingVoiceFields,
+    OnboardingAudioLane, OnboardingAudioPlan, OnboardingDiscoveryOutcome, OnboardingDiscoverySeeds,
+    OnboardingExaUsage, OnboardingGateway, OnboardingGatewayError, OnboardingLaneTarget,
+    OnboardingProfile, OnboardingProfileOutcome, OnboardingSuggestionSeed, OnboardingVoiceFields,
 };
 pub use openai_background::{
     BackgroundBuiltInTools, BackgroundProviderError, BackgroundReasoningSummary,
@@ -83,7 +84,7 @@ pub use openai_background::{
     OpenAiBackgroundResult, OpenAiGatewayError,
 };
 pub use openai_transcription::{
-    OpenAiTranscriptionError, OpenAiTranscriptionGateway, TranscriptionResult,
+    AudioDurationSource, OpenAiTranscriptionError, OpenAiTranscriptionGateway, TranscriptionResult,
 };
 pub use openrouter::{OpenRouterPrivacyPolicy, OpenRouterRoutingError};
 pub use rig_engine::{RigAgentEngine, RigAgentEngineError};

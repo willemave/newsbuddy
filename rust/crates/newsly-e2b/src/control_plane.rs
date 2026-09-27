@@ -10,7 +10,7 @@ use url::Url;
 
 use crate::error::E2bError;
 use crate::network::NetworkPolicy;
-use crate::types::{SandboxHandle, SandboxId, SandboxRequest};
+use crate::types::{SandboxHandle, SandboxId, SandboxInfo, SandboxRequest};
 
 const ENVD_PORT: u16 = 49_983;
 const DEFAULT_ERROR_BODY_LIMIT: usize = 16 * 1024;
@@ -112,6 +112,24 @@ struct SandboxWire {
     traffic_access_token: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SandboxInfoWire {
+    #[serde(rename = "sandboxID")]
+    sandbox_id: String,
+    #[serde(rename = "templateID")]
+    template_id: String,
+    #[serde(default)]
+    metadata: std::collections::BTreeMap<String, String>,
+    #[serde(rename = "startedAt")]
+    started_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "endAt")]
+    end_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "cpuCount")]
+    cpu_count: u32,
+    #[serde(rename = "memoryMB")]
+    memory_mb: u32,
+}
+
 impl ControlPlaneClient {
     pub fn new(config: ControlPlaneConfig) -> Result<Self, E2bError> {
         config.validate()?;
@@ -152,6 +170,59 @@ impl ControlPlaneClient {
             )
             .await?
             .is_some())
+    }
+
+    pub async fn get_info(&self, sandbox_id: &SandboxId) -> Result<SandboxInfo, E2bError> {
+        let path = format!("sandboxes/{}", encode_segment(sandbox_id.as_str()));
+        let response = self
+            .send(
+                self.api_request(Method::GET, &path)?,
+                "get_sandbox_info",
+                true,
+                None,
+            )
+            .await?;
+        decode_sandbox_info(response).await
+    }
+
+    pub async fn list_by_metadata(
+        &self,
+        key: &str,
+        value: &str,
+        limit: u8,
+    ) -> Result<Vec<SandboxInfo>, E2bError> {
+        if key.is_empty() || value.is_empty() || limit == 0 || limit > 10 {
+            return Err(E2bError::InvalidInput(
+                "sandbox metadata lookup is invalid".to_owned(),
+            ));
+        }
+        let mut url = self
+            .config
+            .api_base
+            .join("v2/sandboxes")
+            .map_err(|error| E2bError::Configuration(error.to_string()))?;
+        let metadata = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair(key, value)
+            .finish();
+        url.query_pairs_mut()
+            .append_pair("metadata", &metadata)
+            .append_pair("state", "running")
+            .append_pair("limit", &limit.to_string());
+        let response = self
+            .send(
+                self.http
+                    .get(url)
+                    .header("X-API-Key", self.config.api_key.expose_secret()),
+                "list_sandboxes",
+                true,
+                None,
+            )
+            .await?;
+        let rows = response
+            .json::<Vec<SandboxInfoWire>>()
+            .await
+            .map_err(|error| E2bError::Protocol(error.to_string()))?;
+        rows.into_iter().map(sandbox_info_from_wire).collect()
     }
 
     pub async fn update_network(
@@ -300,6 +371,31 @@ impl ControlPlaneClient {
         }
         Err(response_error(response, self.config.error_body_limit).await)
     }
+}
+
+async fn decode_sandbox_info(response: Response) -> Result<SandboxInfo, E2bError> {
+    let wire = response
+        .json::<SandboxInfoWire>()
+        .await
+        .map_err(|error| E2bError::Protocol(error.to_string()))?;
+    sandbox_info_from_wire(wire)
+}
+
+fn sandbox_info_from_wire(wire: SandboxInfoWire) -> Result<SandboxInfo, E2bError> {
+    if wire.cpu_count == 0 || wire.memory_mb == 0 {
+        return Err(E2bError::Protocol(
+            "E2B sandbox resource sizes must be positive".to_owned(),
+        ));
+    }
+    Ok(SandboxInfo {
+        sandbox_id: SandboxId::parse(wire.sandbox_id)?,
+        template_id: wire.template_id,
+        metadata: wire.metadata,
+        started_at: wire.started_at,
+        end_at: wire.end_at,
+        cpu_count: wire.cpu_count,
+        memory_mb: wire.memory_mb,
+    })
 }
 
 fn encode_segment(value: &str) -> String {

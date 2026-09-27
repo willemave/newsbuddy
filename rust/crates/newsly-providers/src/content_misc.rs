@@ -222,6 +222,15 @@ pub struct GeneratedTweetSuggestions {
     pub suggestions: Vec<GeneratedTweetSuggestion>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SynthesizedNarration {
+    pub audio: Vec<u8>,
+    pub model: String,
+    pub request_count: u32,
+    pub text_chars: u64,
+    pub standard_pricing: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ContentMiscGateway {
     client: reqwest::Client,
@@ -579,7 +588,7 @@ impl ContentMiscGateway {
     pub async fn synthesize_narration_mp3(
         &self,
         narration_text: &str,
-    ) -> Result<Vec<u8>, ContentMiscGatewayError> {
+    ) -> Result<SynthesizedNarration, ContentMiscGatewayError> {
         let api_key = self
             .elevenlabs_api_key
             .as_ref()
@@ -599,7 +608,7 @@ impl ContentMiscGateway {
         endpoint
             .query_pairs_mut()
             .append_pair("output_format", &self.elevenlabs_output_format);
-        let response = self
+        let audio = self
             .client
             .post(endpoint)
             .header("xi-api-key", api_key.expose_secret())
@@ -617,11 +626,25 @@ impl ContentMiscGateway {
             .bytes()
             .await?
             .to_vec();
-        if response.is_empty() {
+        if audio.is_empty() {
             return Err(ContentMiscGatewayError::EmptyNarrationAudio);
         }
-        Ok(response)
+        Ok(SynthesizedNarration {
+            audio,
+            model: self.elevenlabs_model.clone(),
+            request_count: 1,
+            text_chars: u64::try_from(narration_text.chars().count()).unwrap_or(u64::MAX),
+            standard_pricing: is_standard_elevenlabs_api_base(&self.elevenlabs_api_base),
+        })
     }
+}
+
+fn is_standard_elevenlabs_api_base(value: &Url) -> bool {
+    value.scheme() == "https"
+        && value.host_str() == Some("api.elevenlabs.io")
+        && matches!(value.path(), "" | "/")
+        && value.query().is_none()
+        && value.fragment().is_none()
 }
 
 #[derive(Debug, Deserialize)]

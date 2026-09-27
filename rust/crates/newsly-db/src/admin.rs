@@ -32,6 +32,7 @@ pub struct AdminProviderCostRow {
     pub resource_count: i64,
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
+    pub public_list_estimate_usd: f64,
     pub unpriced_call_count: i64,
 }
 
@@ -105,6 +106,7 @@ pub struct AdminVendorUsageRow {
     pub request_count: Option<i32>,
     pub resource_count: Option<i32>,
     pub cost_usd: Option<f64>,
+    pub cost_basis: Option<String>,
     pub pricing_version: Option<String>,
 }
 
@@ -119,6 +121,7 @@ pub struct AdminVendorUsageTotals {
     pub resource_count: i64,
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
+    pub public_list_estimate_usd: f64,
     pub unpriced_call_count: i64,
 }
 
@@ -128,6 +131,7 @@ pub struct AdminVendorUsageDailyRow {
     pub row_count: i64,
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
+    pub public_list_estimate_usd: f64,
     pub unpriced_call_count: i64,
     pub request_count: i64,
     pub resource_count: i64,
@@ -291,6 +295,7 @@ pub async fn load_admin_dashboard(
                 THEN COALESCE(SUM(cost_usd), 0.0)::double precision
                 ELSE NULL END AS cost_usd,
             COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
+            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::double precision AS public_list_estimate_usd,
             COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
         FROM vendor_usage_records
         WHERE created_at >= timezone('UTC', clock_timestamp()) - interval '30 days'
@@ -396,6 +401,7 @@ pub async fn load_admin_vendor_usage(
             usage.request_count,
             usage.resource_count,
             usage.cost_usd,
+            usage.cost_basis,
             usage.pricing_version
         FROM vendor_usage_records AS usage
         LEFT JOIN users ON users.id = usage.user_id
@@ -432,6 +438,7 @@ pub async fn load_admin_vendor_usage(
                 THEN COALESCE(SUM(cost_usd), 0.0)::double precision
                 ELSE NULL END AS cost_usd,
             COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
+            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::double precision AS public_list_estimate_usd,
             COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
         FROM vendor_usage_records
         WHERE ($1::text IS NULL OR provider = $1)
@@ -459,6 +466,7 @@ pub async fn load_admin_vendor_usage(
                 THEN COALESCE(SUM(cost_usd), 0.0)::double precision
                 ELSE NULL END AS cost_usd,
             COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
+            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::double precision AS public_list_estimate_usd,
             COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count,
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
             COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
@@ -499,6 +507,96 @@ pub enum AdminRepositoryError {
 #[cfg(test)]
 mod usage_tests {
     use super::*;
+
+    #[sqlx::test]
+    async fn token_prices_apply_only_to_observed_standard_single_requests(pool: PgPool) {
+        sqlx::query(
+            "INSERT INTO vendor_usage_records
+                (provider, model, feature, operation, request_count, input_tokens,
+                 cache_read_tokens, cache_write_tokens, output_tokens, metadata, created_at)
+             VALUES
+                ('openai', 'openai:gpt-6-luna', 'news_processing',
+                 'news_processing.summarize_short_form', 1, 1000, 200, 100, 100,
+                 '{}'::json, timezone('UTC', now())),
+                ('openrouter', 'Qwen/Qwen3-Embedding-8B', 'news_processing',
+                 'news_processing.embed_relations', 1, 1000000, 0, 0, 0,
+                 '{}'::json, timezone('UTC', now())),
+                ('openrouter', 'openrouter:qwen/qwen3-embedding-8b', 'news_processing',
+                 'news_processing.embed_relations', 1, 1000, 0, 0, 0,
+                 '{}'::json, timezone('UTC', now())),
+                ('openai', 'gpt-6-luna', 'onboarding', 'onboarding.generate',
+                 1, 1000, 0, 0, 100, '{\"service_tier\":\"priority\"}'::json,
+                 timezone('UTC', now())),
+                ('openai', 'gpt-6-luna', 'news_processing',
+                 'news_processing.summarize_short_form', 2, 1000, 0, 0, 100,
+                 '{}'::json, timezone('UTC', now())),
+                ('openai', 'gpt-6-luna', 'news_processing',
+                 'news_processing.summarize_short_form', 1, 273000, 0, 0, 100,
+                 '{}'::json, timezone('UTC', now()))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let rows: Vec<(Option<f64>, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT cost_usd, cost_basis, pricing_version
+             FROM vendor_usage_records ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 6);
+        assert!((rows[0].0.unwrap() - 0.000_134_5).abs() < 1e-10);
+        assert_eq!(rows[0].1.as_deref(), Some("public_list_estimate"));
+        assert_eq!(rows[0].2.as_deref(), Some("openai-standard-2026-09-27"));
+        assert!((rows[1].0.unwrap() - 0.01).abs() < 1e-10);
+        assert!((rows[2].0.unwrap() - 0.000_01).abs() < 1e-10);
+        assert!(
+            rows[3..]
+                .iter()
+                .all(|row| row.0.is_none() && row.2.is_none())
+        );
+
+        sqlx::query(
+            "INSERT INTO vendor_usage_records
+                (provider, model, feature, operation, request_count, cost_usd,
+                 pricing_version, created_at)
+             VALUES ('runware', 'image', 'image_generation', 'generate_image', 1,
+                     0.42, 'provider-reported', timezone('UTC', now()))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let preserved: (Option<f64>, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT cost_usd, pricing_version, cost_basis FROM vendor_usage_records
+             WHERE provider = 'runware'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            preserved,
+            (
+                Some(0.42),
+                Some("provider-reported".to_owned()),
+                Some("provider_reported".to_owned())
+            )
+        );
+
+        let exa_basis: Option<String> = sqlx::query_scalar(
+            "INSERT INTO vendor_usage_records
+                (provider, model, feature, operation, request_count, cost_basis, created_at)
+             VALUES ('exa', 'search', 'agent_search', 'agent_search.query', 1,
+                     'unpriced_incomplete_provider_units', timezone('UTC', now()))
+             RETURNING cost_basis",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            exa_basis.as_deref(),
+            Some("unpriced_incomplete_provider_units")
+        );
+    }
 
     #[sqlx::test]
     async fn admin_cost_aggregates_preserve_unknown_prices(pool: PgPool) {

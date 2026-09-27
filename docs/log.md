@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-27 — `main` — Vendor spend accounting
+
+- **Status:** Complete locally. Not deployed.
+- **Scope:** Forward-looking vendor price catalog and usage attribution for model calls, E2B runtime, Exa search, transcription, and narration; operator and admin cost views.
+- **Decisions:** Preserve unknown historical cost and distinguish public list estimates from recorded charges. Price only exact models with measured units and supported request tiers. The 2 vCPU/2 GiB E2B template has a published component rate of $0.000037 per second. Persist an unpriced E2B intent before remote creation, then price exactly once after confirmed cleanup. Exa remains unpriced when add-on units or plan rates are unknown.
+- **Changes:** Added dated token rates, cost basis, E2B lifecycle ledger/reconciliation, observed Exa usage across API and worker paths, measured-duration transcription and model-aware ElevenLabs estimates. The CLI and admin views expose priced subtotals, estimate portions, and unpriced record counts. `docs/operations/vendor-costs.md` records rates and accounting limits.
+- **Validation:** Production baseline inspected read-only; published rates and cross-package design independently reviewed. Formatting and diff checks passed; warning-denied Clippy passed for affected DB, E2B, provider, worker, API, admin, and account-deletion crates. Focused SQLx tests for pricing, admin aggregation, and E2B lifecycle passed; provider, E2B, API, admin, and discovery tests passed. No paid live provider call was made.
+- **Remaining:** Deploy only after a separately authorized release. Reconcile account invoices for base plans and infrastructure, ambiguous E2B creation/account deletion races, provider requests lost during DB outages, and partial failed multichunk transcriptions; these cannot be asserted as exact spend from application rows.
+- **Commits:** Uncommitted.
+
 ### 2026-09-26 — detached `83f93acb` — Disposable E2B template deck canary
 
 - **Status:** Complete locally.
