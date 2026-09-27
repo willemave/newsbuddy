@@ -61,6 +61,7 @@ const SUPPORTED_AGGREGATOR_KEYS: [&str; 7] = [
     "sciurls",
     "techmeme",
 ];
+const BRUTALIST_TOPICS: [&str; 4] = ["science", "business", "politics", "sports"];
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -560,6 +561,9 @@ async fn complete_onboarding(
         .await
         .map_err(|error| completion_unavailable(error, request_id))?;
     verify_stamp(&mut transaction, stamp, request_id).await?;
+    let prior_demand = crate::aggregator_demand::snapshot(&mut transaction)
+        .await
+        .map_err(|error| completion_unavailable(error, request_id))?;
     let persisted = complete_onboarding_selection(&mut transaction, &input.selection)
         .await
         .map_err(|error| match error {
@@ -574,8 +578,12 @@ async fn complete_onboarding(
             other => completion_unavailable(other, request_id),
         })?;
     let (requests, primary_index, briefing_index) = completion_tasks(user_id, &persisted);
-    let batch = QueueKernel::new(state.database.pool().clone())
+    let queue = QueueKernel::new(state.database.pool().clone());
+    let batch = queue
         .enqueue_many_in_transaction(&mut transaction, requests)
+        .await
+        .map_err(|error| completion_unavailable(error, request_id))?;
+    crate::aggregator_demand::enqueue_new_demand(&mut transaction, &queue, &prior_demand)
         .await
         .map_err(|error| completion_unavailable(error, request_id))?;
     let briefing_task_id = batch.task_ids.get(briefing_index).copied().ok_or_else(|| {
@@ -641,7 +649,7 @@ async fn prepare_completion(
             sources.push(prepare_source(state, suggestion, &existing, request_id).await?);
         }
     }
-    let aggregators = normalize_aggregators(payload.selected_aggregators);
+    let aggregators = normalize_aggregators(payload.selected_aggregators, request_id)?;
     let (update_twitter_username, twitter_username) = match payload.twitter_username {
         None => (false, None),
         Some(value) => (true, normalize_twitter_username(&value, request_id)?),
@@ -778,19 +786,11 @@ fn completion_tasks(
     }
     for source in &persisted.sources_to_scrape {
         primary_index.get_or_insert(requests.len());
-        let global = newsly_db::aggregator_corpus::is_aggregator(source);
         let mut request = EnqueueRequest::new(TaskType::Scrape);
-        request.payload = object(if global {
-            json!({"sources": [source], "due_only": true})
-        } else {
-            json!({"sources": [source], "first_edition_run_id": persisted.first_edition_run_id})
-        });
-        if global {
-            request.dedupe = Some(true);
-            request.dedupe_key = Some(format!("scrape:aggregator:{source}"));
-        } else {
-            request.access_user_id = Some(user_id);
-        }
+        request.payload = object(
+            json!({"sources": [source], "first_edition_run_id": persisted.first_edition_run_id}),
+        );
+        request.access_user_id = Some(user_id);
         requests.push(request);
     }
     if !persisted.has_feed_discovery_task {
@@ -1049,7 +1049,8 @@ fn present_suggestions(
 
 fn normalize_aggregators(
     aggregators: Vec<OnboardingSelectedAggregator>,
-) -> Vec<OnboardingCompletionAggregator> {
+    request_id: &str,
+) -> Result<Vec<OnboardingCompletionAggregator>, ApiError> {
     aggregators
         .into_iter()
         .filter_map(|aggregator| {
@@ -1065,11 +1066,18 @@ fn normalize_aggregators(
                 .collect::<Vec<_>>();
             topics.sort();
             topics.dedup();
-            Some(OnboardingCompletionAggregator {
+            if key == "brutalist"
+                && topics
+                    .iter()
+                    .any(|topic| !BRUTALIST_TOPICS.contains(&topic.as_str()))
+            {
+                return Some(Err(bad_request("Unsupported Brutalist topic", request_id)));
+            }
+            Some(Ok(OnboardingCompletionAggregator {
                 key,
                 title: aggregator.title,
                 topics,
-            })
+            }))
         })
         .collect()
 }

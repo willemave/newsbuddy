@@ -69,13 +69,7 @@ pub async fn get_unread_counts(
                           WHERE lower(n.platform) = va.source_key
                             AND (
                                 va.source_key <> 'brutalist'
-                                OR jsonb_array_length(va.topics) = 0
-                                OR EXISTS (
-                                    SELECT 1 FROM jsonb_array_elements_text(va.topics) AS topic(value)
-                                    WHERE lower(btrim(topic.value)) = lower(btrim(
-                                        n.raw_metadata::jsonb #>> '{aggregator,topic}'
-                                    ))
-                                )
+                                OR newsly_brutalist_visible(va.topics, n.raw_metadata::jsonb)
                             )
                       )
                   )
@@ -177,13 +171,7 @@ pub async fn get_processing_counts(
                           WHERE lower(n.platform) = va.source_key
                             AND (
                                 va.source_key <> 'brutalist'
-                                OR jsonb_array_length(va.topics) = 0
-                                OR EXISTS (
-                                    SELECT 1 FROM jsonb_array_elements_text(va.topics) AS topic(value)
-                                    WHERE lower(btrim(topic.value)) = lower(btrim(
-                                        n.raw_metadata::jsonb #>> '{aggregator,topic}'
-                                    ))
-                                )
+                                OR newsly_brutalist_visible(va.topics, n.raw_metadata::jsonb)
                             )
                       )
                   )

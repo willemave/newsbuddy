@@ -1,4 +1,3 @@
-use chrono::Utc;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::sync::Arc;
@@ -156,12 +155,8 @@ async fn execute_scrape(
         let mut due = Vec::new();
         for source in source_plans {
             if matches!(source.kind, SourcePlanKind::Aggregator { .. }) {
-                match newsly_db::aggregator_corpus::aggregator_due(
-                    &mut connection,
-                    &source.source,
-                    Utc::now(),
-                )
-                .await
+                match newsly_db::aggregator_corpus::aggregator_due(&mut connection, &source.source)
+                    .await
                 {
                     Ok(false) => continue,
                     Ok(true) => {}
@@ -176,6 +171,47 @@ async fn execute_scrape(
             due.push(source);
         }
         source_plans = due;
+    }
+    if source_plans.iter().any(|source| {
+        matches!(
+            source.kind,
+            SourcePlanKind::Aggregator {
+                key: AggregatorKey::Brutalist,
+                ..
+            }
+        )
+    }) {
+        let mut connection = match services.pool.acquire().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                return HandlerExecution::from_result(TaskResult::fail(
+                    Some(error.to_string()),
+                    true,
+                ));
+            }
+        };
+        let topics = match newsly_db::brutalist::demanded_topics(&mut connection).await {
+            Ok(topics) => topics,
+            Err(error) => {
+                return HandlerExecution::from_result(TaskResult::fail(
+                    Some(error.to_string()),
+                    true,
+                ));
+            }
+        };
+        for source in &mut source_plans {
+            if let SourcePlanKind::Aggregator {
+                key: AggregatorKey::Brutalist,
+                brutalist_topics,
+                ..
+            } = &mut source.kind
+            {
+                brutalist_topics.clone_from(&topics);
+            }
+        }
+        source_plans.retain(|source| !matches!(&source.kind,
+            SourcePlanKind::Aggregator { key: AggregatorKey::Brutalist, brutalist_topics, .. } if brutalist_topics.is_empty()
+        ));
     }
     let mut children = isolated_scrape_requests(&source_plans, request.first_edition_run_id);
     if due_only {
@@ -381,6 +417,7 @@ enum SourcePlanKind {
     Aggregator {
         key: AggregatorKey,
         required_config_ids: Vec<i64>,
+        brutalist_topics: Vec<String>,
     },
     Feed(Vec<FeedScrapeTarget>),
     Reddit(Vec<RedditScrapeTarget>),
@@ -393,108 +430,8 @@ struct SourcePlan {
     kind: SourcePlanKind,
 }
 
-fn build_source_plans(
-    request: &ScrapeRequest,
-    prepared: &PreparedScrapeSources,
-) -> Result<Vec<SourcePlan>, String> {
-    let mut plans = Vec::new();
-    for source in &request.sources {
-        match *source {
-            RequestedSource::All => unreachable!("all is expanded while parsing"),
-            RequestedSource::Aggregator(key) => {
-                let required_config_ids = prepared
-                    .configs
-                    .iter()
-                    .filter(|config| {
-                        config.scraper_type == "aggregator"
-                            && config
-                                .config
-                                .get("key")
-                                .and_then(Value::as_str)
-                                .is_some_and(|value| AggregatorKey::parse(value) == Some(key))
-                    })
-                    .map(|config| config.id)
-                    .collect::<Vec<_>>();
-                if request.first_edition_run_id.is_some() && required_config_ids.is_empty() {
-                    return Err(format!(
-                        "first-edition run has no active {} source",
-                        key.as_str()
-                    ));
-                }
-                plans.push(SourcePlan {
-                    source: key.as_str().to_owned(),
-                    kind: SourcePlanKind::Aggregator {
-                        key,
-                        required_config_ids,
-                    },
-                });
-            }
-            RequestedSource::Reddit => {
-                let targets = prepared
-                    .configs
-                    .iter()
-                    .filter(|config| config.scraper_type == "reddit")
-                    .filter_map(reddit_target)
-                    .collect::<Vec<_>>();
-                plans.push(SourcePlan {
-                    source: source.canonical_name(),
-                    kind: SourcePlanKind::Reddit(targets),
-                });
-            }
-            RequestedSource::Substack | RequestedSource::Atom | RequestedSource::Podcast => {
-                let scraper_type = match source {
-                    RequestedSource::Substack => "substack",
-                    RequestedSource::Atom => "atom",
-                    RequestedSource::Podcast => "podcast_rss",
-                    _ => unreachable!(),
-                };
-                let targets = prepared
-                    .configs
-                    .iter()
-                    .filter(|config| config.scraper_type == scraper_type)
-                    .filter_map(feed_target)
-                    .collect::<Vec<_>>();
-                plans.push(SourcePlan {
-                    source: source.canonical_name(),
-                    kind: SourcePlanKind::Feed(targets),
-                });
-            }
-            RequestedSource::DiscussionComments => plans.push(SourcePlan {
-                source: source.canonical_name(),
-                kind: SourcePlanKind::DiscussionComments,
-            }),
-        }
-    }
-    Ok(plans)
-}
-
-fn feed_target(config: &ScrapeConfigSnapshot) -> Option<FeedScrapeTarget> {
-    let feed_url = config
-        .feed_url
-        .clone()
-        .or_else(|| clean_string(config.config.get("feed_url")))
-        .or_else(|| clean_string(config.config.get("url")))?;
-    Some(FeedScrapeTarget {
-        known_urls: std::collections::BTreeSet::new(),
-        entry_selection: FeedEntrySelection::StopAtKnown,
-        config_id: config.id,
-        user_id: config.user_id,
-        scraper_type: config.scraper_type.clone(),
-        display_name: config
-            .display_name
-            .clone()
-            .or_else(|| clean_string(config.config.get("name"))),
-        feed_url,
-        limit: config
-            .config
-            .get("limit")
-            .and_then(Value::as_u64)
-            .and_then(|value| usize::try_from(value).ok())
-            .filter(|value| (1..=100).contains(value))
-            .unwrap_or(10),
-        fingerprint: config.fingerprint.clone(),
-    })
-}
+mod source_plans;
+use source_plans::build_source_plans;
 
 fn reddit_target(config: &ScrapeConfigSnapshot) -> Option<RedditScrapeTarget> {
     let subreddit = clean_string(config.config.get("subreddit"))?
@@ -548,11 +485,12 @@ async fn execute_source(gateway: &ScrapeGateway, plan: SourcePlan) -> SourceOutc
         SourcePlanKind::Aggregator {
             key,
             required_config_ids,
+            brutalist_topics,
         } => SourceOutcome {
             source: plan.source,
             required_config_ids,
             result: gateway
-                .fetch_aggregator(key)
+                .fetch_aggregator(key, &brutalist_topics)
                 .await
                 .map_err(ScrapeFailure::from),
             discussion_catchup: false,
@@ -757,12 +695,45 @@ impl ScrapeFinalizer {
         &self,
         transaction: &mut Transaction<'static, Postgres>,
     ) -> Result<TaskFinalizerResult, Box<dyn Error + Send + Sync>> {
-        let valid_config_ids =
-            matching_scrape_config_ids(transaction, &self.prepared.configs).await?;
+        let required_config_ids = self
+            .outcomes
+            .iter()
+            .flat_map(|outcome| {
+                outcome.required_config_ids.iter().copied().chain(
+                    outcome
+                        .result
+                        .as_ref()
+                        .ok()
+                        .into_iter()
+                        .flat_map(|result| result.items.iter().filter_map(item_config_id)),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        let required_configs = self
+            .prepared
+            .configs
+            .iter()
+            .filter(|config| required_config_ids.contains(&config.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let valid_config_ids = matching_scrape_config_ids(transaction, &required_configs).await?;
         let mut downstream = Vec::new();
         let mut process_content_ids = BTreeSet::new();
         let mut enrich_news_ids = BTreeSet::new();
         let mut discussion_ids = BTreeSet::new();
+        let mut brutalist_counts = if self
+            .outcomes
+            .iter()
+            .any(|outcome| outcome.source == "brutalist")
+        {
+            newsly_db::brutalist::recent_section_counts(transaction)
+                .await?
+                .into_iter()
+                .map(|(topic, section, count)| ((topic, section), count))
+                .collect::<BTreeMap<_, _>>()
+        } else {
+            BTreeMap::new()
+        };
         let config_mismatch = self.outcomes.iter().any(|outcome| {
             outcome
                 .required_config_ids
@@ -787,6 +758,13 @@ impl ScrapeFinalizer {
                     if config_id.is_some_and(|id| !valid_config_ids.contains(&id)) {
                         continue;
                     }
+                    let budget_keys = brutalist_budget_keys(item);
+                    if budget_keys.iter().any(|key| {
+                        brutalist_counts.get(key).copied().unwrap_or(0)
+                            >= newsly_db::brutalist::DAILY_SECTION_LIMIT
+                    }) {
+                        continue;
+                    }
                     let mut savepoint = transaction.begin().await?;
                     match persist_scrape_item(&mut savepoint, item).await {
                         Ok(PersistedScrapeItem::Content(persisted)) => {
@@ -802,6 +780,11 @@ impl ScrapeFinalizer {
                         }
                         Ok(PersistedScrapeItem::News(persisted)) => {
                             savepoint.commit().await?;
+                            if persisted.created {
+                                for key in budget_keys {
+                                    *brutalist_counts.entry(key).or_default() += 1;
+                                }
+                            }
                             created += i64::from(persisted.created);
                             if persisted.created
                                 && !matches!(item, ScrapedItem::News(item) if item.status == "ready")
@@ -834,6 +817,7 @@ impl ScrapeFinalizer {
             if !outcome.discussion_catchup && !config_mismatch {
                 let error = match &outcome.result {
                     Err(error) => Some(error.message.as_str()),
+                    Ok(_) if outcome.source == "brutalist" && processed > 0 && !rejected => None,
                     Ok(value) if rejected || !value.item_errors.is_empty() => {
                         Some("source_items_rejected")
                     }
@@ -941,6 +925,28 @@ fn item_config_id(item: &ScrapedItem) -> Option<i64> {
         ScrapedItem::News(item) => item.user_scraper_config_id,
         ScrapedItem::Content(item) => Some(item.config_id),
     }
+}
+
+fn brutalist_budget_keys(item: &ScrapedItem) -> Vec<(String, String)> {
+    let ScrapedItem::News(news) = item else {
+        return Vec::new();
+    };
+    if news.platform != "brutalist" {
+        return Vec::new();
+    }
+    let metadata = &news.raw_metadata["aggregator"];
+    let section = metadata["metadata"]["source_name"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    let topics = metadata["topics"].as_array().map_or_else(
+        || metadata["topic"].as_str().into_iter().collect(),
+        |topics| topics.iter().filter_map(Value::as_str).collect::<Vec<_>>(),
+    );
+    topics
+        .into_iter()
+        .map(|topic| (topic.to_owned(), section.clone()))
+        .collect()
 }
 
 fn normalize_name(value: &str) -> String {

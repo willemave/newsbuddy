@@ -56,6 +56,7 @@ impl ContentExtractionRuntime {
             url,
             "article",
             Vec::new(),
+            true,
         )
         .await
     }
@@ -66,6 +67,24 @@ impl ContentExtractionRuntime {
         content_type: &str,
         request_id_base: &str,
         deadline: DateTime<Utc>,
+    ) -> ExtractionAttempt {
+        self.process_article_with_firecrawl_policy(
+            url,
+            content_type,
+            request_id_base,
+            deadline,
+            true,
+        )
+        .await
+    }
+
+    pub(crate) async fn process_article_with_firecrawl_policy(
+        &self,
+        url: &str,
+        content_type: &str,
+        request_id_base: &str,
+        deadline: DateTime<Utc>,
+        allow_firecrawl: bool,
     ) -> ExtractionAttempt {
         let original_url = url.to_owned();
         let public_url = match PublicUrl::parse(url) {
@@ -80,6 +99,7 @@ impl ContentExtractionRuntime {
                     content_type,
                     request_id_base,
                     deadline,
+                    allow_firecrawl,
                 )
                 .await;
         }
@@ -91,6 +111,7 @@ impl ContentExtractionRuntime {
             &original_url,
             content_type,
             Vec::new(),
+            allow_firecrawl,
         )
         .await
     }
@@ -102,6 +123,7 @@ impl ContentExtractionRuntime {
         content_type: &str,
         request_id_base: &str,
         deadline: DateTime<Utc>,
+        allow_firecrawl: bool,
     ) -> ExtractionAttempt {
         let request = ExtractRequest::new(
             format!("{request_id_base}-pubmed"),
@@ -135,6 +157,7 @@ impl ContentExtractionRuntime {
                         original_url,
                         content_type,
                         usage,
+                        allow_firecrawl,
                     )
                     .await;
                 if let ExtractionAttempt::Success { article, .. } = &mut attempt {
@@ -156,16 +179,20 @@ impl ContentExtractionRuntime {
                 Vec::new(),
             ),
             ExtractResult::FallbackRequired(fallback) => {
-                self.firecrawl_fallback(
-                    fallback,
-                    ExtractIntent::ResolvePubmed,
-                    original_url,
-                    content_type,
-                    request_id_base,
-                    deadline,
-                    Vec::new(),
-                )
-                .await
+                if allow_firecrawl {
+                    self.firecrawl_fallback(
+                        fallback,
+                        ExtractIntent::ResolvePubmed,
+                        original_url,
+                        content_type,
+                        request_id_base,
+                        deadline,
+                        Vec::new(),
+                    )
+                    .await
+                } else {
+                    fallback_not_permitted(fallback, ExtractIntent::ResolvePubmed, Vec::new())
+                }
             }
         }
     }
@@ -180,6 +207,7 @@ impl ContentExtractionRuntime {
         original_url: &str,
         content_type: &str,
         mut usage: Vec<UsageWrite>,
+        allow_firecrawl: bool,
     ) -> ExtractionAttempt {
         let request = ExtractRequest::new(request_id, url, intent, deadline);
         let result = match self.extractor.extract(&request).await {
@@ -192,16 +220,20 @@ impl ContentExtractionRuntime {
             }
             ExtractResult::Failure(failure) => typed_failure(failure, usage),
             ExtractResult::FallbackRequired(fallback) => {
-                self.firecrawl_fallback(
-                    fallback,
-                    intent,
-                    original_url,
-                    content_type,
-                    request_id,
-                    deadline,
-                    usage,
-                )
-                .await
+                if allow_firecrawl {
+                    self.firecrawl_fallback(
+                        fallback,
+                        intent,
+                        original_url,
+                        content_type,
+                        request_id,
+                        deadline,
+                        usage,
+                    )
+                    .await
+                } else {
+                    fallback_not_permitted(fallback, intent, usage)
+                }
             }
             ExtractResult::Delegation(delegation) => {
                 if let Some(write) =
@@ -292,6 +324,25 @@ impl ContentExtractionRuntime {
             },
             usage,
         }
+    }
+}
+
+fn fallback_not_permitted(
+    fallback: ExtractionFallbackRequired,
+    intent: ExtractIntent,
+    mut usage: Vec<UsageWrite>,
+) -> ExtractionAttempt {
+    if let Some(write) = usage_write(fallback.request_id, intent, None, fallback.usage_events) {
+        usage.push(write);
+    }
+    ExtractionAttempt::Failure {
+        reason: format!(
+            "Firecrawl fallback was not permitted because the global aggregator item is not visible to any active subscriber: {}",
+            fallback.reason
+        ),
+        code: "fallback_not_permitted".to_owned(),
+        retryable: false,
+        usage,
     }
 }
 
@@ -501,10 +552,10 @@ fn failure_code(code: ExtractionFailureCode) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use newsly_extraction::{ExtractIntent, ExtractionSuccess};
+    use newsly_extraction::{ExtractIntent, ExtractionFallbackRequired, ExtractionSuccess};
     use serde_json::json;
 
-    use super::{ExtractionAttempt, is_pubmed_article, success_attempt};
+    use super::{ExtractionAttempt, fallback_not_permitted, is_pubmed_article, success_attempt};
 
     #[test]
     fn success_projection_keeps_tables_feeds_and_usage() {
@@ -553,5 +604,33 @@ mod tests {
                 .unwrap();
         assert!(is_pubmed_article(&article));
         assert!(!is_pubmed_article(&search));
+    }
+
+    #[test]
+    fn denied_paid_fallback_has_a_stable_soft_failure_code() {
+        let fallback: ExtractionFallbackRequired = serde_json::from_value(json!({
+            "schema_version": 1,
+            "request_id": "worker-fixture-fallback",
+            "fallback": "firecrawl",
+            "url": "https://example.com/article",
+            "reason": "access gate",
+            "retryable": false,
+            "usage_events": [],
+            "timings": []
+        }))
+        .unwrap();
+
+        let ExtractionAttempt::Failure {
+            code,
+            retryable,
+            reason,
+            ..
+        } = fallback_not_permitted(fallback, ExtractIntent::ExtractArticle, Vec::new())
+        else {
+            panic!("denied fallback must remain a soft extraction failure");
+        };
+        assert_eq!(code, "fallback_not_permitted");
+        assert!(!retryable);
+        assert!(reason.contains("not visible to any active subscriber"));
     }
 }

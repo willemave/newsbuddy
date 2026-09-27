@@ -164,6 +164,7 @@ async fn execute_enrichment(
             content_id,
             final_url,
             source_metadata,
+            allow_firecrawl,
             ..
         } => {
             let article_url = super::input::choose_article_url(&snapshot);
@@ -193,7 +194,15 @@ async fn execute_enrichment(
                             Vec::new(),
                         );
                     };
-                    return extract_enrichment(services, plan, snapshot, article_url, lease).await;
+                    return extract_enrichment(
+                        services,
+                        plan,
+                        snapshot,
+                        article_url,
+                        allow_firecrawl,
+                        lease,
+                    )
+                    .await;
                 }
                 BodyRead::LeaseLost => {
                     return plain_failure("queue lease was lost reading news article body", true);
@@ -201,8 +210,20 @@ async fn execute_enrichment(
                 BodyRead::Failed(error) => return plain_failure(error, true),
             }
         }
-        EnrichmentPreparation::Extract { article_url, .. } => {
-            return extract_enrichment(services, plan, snapshot, article_url, lease).await;
+        EnrichmentPreparation::Extract {
+            article_url,
+            allow_firecrawl,
+            ..
+        } => {
+            return extract_enrichment(
+                services,
+                plan,
+                snapshot,
+                article_url,
+                allow_firecrawl,
+                lease,
+            )
+            .await;
         }
     };
     soft_enrichment(services, plan, snapshot, mutation, usage)
@@ -213,15 +234,19 @@ async fn extract_enrichment(
     plan: &OwnedWorkPlan,
     snapshot: super::model::NewsSnapshot,
     article_url: String,
+    allow_firecrawl: bool,
     mut lease: LeaseHealth,
 ) -> HandlerExecution {
     let deadline = Utc::now() + services.extraction_timeout;
     let request_id = format!("news-item-{}-task-{}", snapshot.id, plan.task_id);
     let extraction_url = article_url.clone();
-    let extraction =
-        services
-            .extraction
-            .process_article(&extraction_url, "article", &request_id, deadline);
+    let extraction = services.extraction.process_article_with_firecrawl_policy(
+        &extraction_url,
+        "article",
+        &request_id,
+        deadline,
+        allow_firecrawl,
+    );
     tokio::pin!(extraction);
     let attempt = tokio::select! {
         attempt = &mut extraction => attempt,
@@ -247,6 +272,7 @@ async fn extract_enrichment(
                             article_url: Some(article_url),
                             final_url: Some(article.final_url),
                             strategy: Some(article.extraction_method),
+                            error_code: "body_storage_failed".to_owned(),
                             reason: error.to_string(),
                         },
                         usage,
@@ -291,7 +317,12 @@ async fn extract_enrichment(
                 EnrichmentMutation::Failed {
                     article_url: Some(article_url.clone()),
                     final_url: Some(article_url),
-                    strategy: Some("document_extractor".to_owned()),
+                    strategy: Some(if code == "fallback_not_permitted" {
+                        "metadata_only".to_owned()
+                    } else {
+                        "document_extractor".to_owned()
+                    }),
+                    error_code: code,
                     reason,
                 },
                 usage,

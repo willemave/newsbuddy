@@ -17,7 +17,7 @@ use super::model::{
     DiscussionFinalizationPlan, DiscussionMutation, DiscussionPreparation, DiscussionSnapshot,
     DiscussionSummaryMode, DiscussionUsage, FetchedDiscussionArtifact, SummaryPublication,
 };
-use super::repository::prepare_discussion;
+use super::repository::{discussion_summary_is_demanded, prepare_discussion};
 use super::storage::{DiscussionObjectStore, DiscussionObjectStoreError};
 
 #[derive(Debug, Clone)]
@@ -193,114 +193,171 @@ async fn execute_discussion(
         &fetched_artifact.pointer.sha256,
         fetched_at,
     );
-    let publication = match summary_plan.mode {
-        DiscussionSummaryMode::None if summary_input.comment_count == 0 => {
-            if snapshot.summary.is_none() {
-                SummaryPublication::NotReady
-            } else {
-                SummaryPublication::Preserve
+    let initial_summary = snapshot.summary.is_none() || snapshot.summary_status != "completed";
+    let summary_is_demanded = if matches!(
+        summary_plan.mode,
+        DiscussionSummaryMode::Full | DiscussionSummaryMode::Merge
+    ) {
+        let mut transaction = match services.pool.begin().await {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                return failed_execution(
+                    plan,
+                    snapshot,
+                    error.to_string(),
+                    true,
+                    Some(fetched_artifact),
+                );
             }
-        }
-        DiscussionSummaryMode::None => SummaryPublication::Preserve,
-        DiscussionSummaryMode::TrackSummarized => SummaryPublication::TrackSummarized {
-            input: summary_input,
-        },
-        DiscussionSummaryMode::TrackSeen => SummaryPublication::TrackSeen {
-            input: summary_input,
-        },
-        DiscussionSummaryMode::Full | DiscussionSummaryMode::Merge => {
-            let requested_mode = summary_plan.mode;
-            let prompt = if requested_mode == DiscussionSummaryMode::Merge {
-                build_merge_prompt(&snapshot, &summary_input, &summary_plan.changed_comments)
-            } else {
-                summary_input.prompt.clone()
-            };
-            let first = summarize_with_lease(
-                &services.gateway,
-                &prompt,
-                requested_mode == DiscussionSummaryMode::Merge,
-                &snapshot.discussion_url,
-                &mut lease,
-            )
-            .await;
-            let (generated, effective_mode) = match first {
-                SummaryCall::Generated(generated) => (generated, requested_mode),
-                SummaryCall::LeaseLost => {
-                    return plain_failure("queue lease was lost during discussion summary", true);
-                }
-                SummaryCall::Failed(error)
-                    if requested_mode == DiscussionSummaryMode::Merge
-                        && matches!(
-                            error,
-                            ContentMiscGatewayError::InvalidDiscussionSummary(_)
-                                | ContentMiscGatewayError::DiscussionGeneration(
-                                    newsly_agent_runtime::AgentRuntimeError::Validation(_)
-                                )
-                        ) =>
-                {
-                    tracing::warn!(
-                        news_item_id,
-                        error = %error,
-                        "discussion merge failed; falling back to full summary"
-                    );
-                    match summarize_with_lease(
-                        &services.gateway,
-                        &summary_input.prompt,
-                        false,
-                        &snapshot.discussion_url,
-                        &mut lease,
-                    )
-                    .await
-                    {
-                        SummaryCall::Generated(generated) => {
-                            (generated, DiscussionSummaryMode::Full)
-                        }
-                        SummaryCall::LeaseLost => {
-                            return plain_failure(
-                                "queue lease was lost during full discussion-summary fallback",
-                                true,
-                            );
-                        }
-                        SummaryCall::Failed(error) => {
-                            return failed_execution(
-                                plan,
-                                snapshot,
-                                error.to_string(),
-                                error.discussion_retryable(),
-                                Some(fetched_artifact),
-                            );
-                        }
-                    }
-                }
-                SummaryCall::Failed(error) => {
+        };
+        let demanded =
+            match discussion_summary_is_demanded(&mut transaction, news_item_id, initial_summary)
+                .await
+            {
+                Ok(demanded) => demanded,
+                Err(error) => {
                     return failed_execution(
                         plan,
                         snapshot,
                         error.to_string(),
-                        error.discussion_retryable(),
+                        true,
                         Some(fetched_artifact),
                     );
                 }
             };
-            let usage = DiscussionUsage {
-                provider: generated.provider.clone(),
-                model: generated.model.clone(),
-                provider_response_id: generated.provider_response_id.clone(),
-                usage: generated.usage.clone(),
-                summary_mode: effective_mode,
-                summary_input_sha256: summary_input.input_sha256.clone(),
-                summary_comment_count: summary_input.comment_count,
-                changed_comment_count: i32::try_from(summary_plan.changed_comments.len())
-                    .unwrap_or(i32::MAX),
-            };
-            SummaryPublication::Generated {
+        if let Err(error) = transaction.commit().await {
+            return failed_execution(
+                plan,
+                snapshot,
+                error.to_string(),
+                true,
+                Some(fetched_artifact),
+            );
+        }
+        demanded
+    } else {
+        true
+    };
+    let publication = if summary_is_demanded {
+        match summary_plan.mode {
+            DiscussionSummaryMode::None if summary_input.comment_count == 0 => {
+                if snapshot.summary.is_none() {
+                    SummaryPublication::NotReady
+                } else {
+                    SummaryPublication::Preserve
+                }
+            }
+            DiscussionSummaryMode::None => SummaryPublication::Preserve,
+            DiscussionSummaryMode::TrackSummarized => SummaryPublication::TrackSummarized {
                 input: summary_input,
-                summary: generated.summary_json,
-                model: generated.model,
-                mode: effective_mode,
-                usage,
+            },
+            DiscussionSummaryMode::TrackSeen => SummaryPublication::TrackSeen {
+                input: summary_input,
+            },
+            DiscussionSummaryMode::Full | DiscussionSummaryMode::Merge => {
+                let requested_mode = summary_plan.mode;
+                let prompt = if requested_mode == DiscussionSummaryMode::Merge {
+                    build_merge_prompt(&snapshot, &summary_input, &summary_plan.changed_comments)
+                } else {
+                    summary_input.prompt.clone()
+                };
+                let first = summarize_with_lease(
+                    &services.gateway,
+                    &prompt,
+                    requested_mode == DiscussionSummaryMode::Merge,
+                    &snapshot.discussion_url,
+                    &mut lease,
+                )
+                .await;
+                let (generated, effective_mode) = match first {
+                    SummaryCall::Generated(generated) => (generated, requested_mode),
+                    SummaryCall::LeaseLost => {
+                        return plain_failure(
+                            "queue lease was lost during discussion summary",
+                            true,
+                        );
+                    }
+                    SummaryCall::Failed(error)
+                        if requested_mode == DiscussionSummaryMode::Merge
+                            && matches!(
+                                error,
+                                ContentMiscGatewayError::InvalidDiscussionSummary(_)
+                                    | ContentMiscGatewayError::DiscussionGeneration(
+                                        newsly_agent_runtime::AgentRuntimeError::Validation(_)
+                                    )
+                            ) =>
+                    {
+                        tracing::warn!(
+                            news_item_id,
+                            error = %error,
+                            "discussion merge failed; falling back to full summary"
+                        );
+                        match summarize_with_lease(
+                            &services.gateway,
+                            &summary_input.prompt,
+                            false,
+                            &snapshot.discussion_url,
+                            &mut lease,
+                        )
+                        .await
+                        {
+                            SummaryCall::Generated(generated) => {
+                                (generated, DiscussionSummaryMode::Full)
+                            }
+                            SummaryCall::LeaseLost => {
+                                return plain_failure(
+                                    "queue lease was lost during full discussion-summary fallback",
+                                    true,
+                                );
+                            }
+                            SummaryCall::Failed(error) => {
+                                return failed_execution(
+                                    plan,
+                                    snapshot,
+                                    error.to_string(),
+                                    error.discussion_retryable(),
+                                    Some(fetched_artifact),
+                                );
+                            }
+                        }
+                    }
+                    SummaryCall::Failed(error) => {
+                        return failed_execution(
+                            plan,
+                            snapshot,
+                            error.to_string(),
+                            error.discussion_retryable(),
+                            Some(fetched_artifact),
+                        );
+                    }
+                };
+                let usage = DiscussionUsage {
+                    provider: generated.provider.clone(),
+                    model: generated.model.clone(),
+                    provider_response_id: generated.provider_response_id.clone(),
+                    usage: generated.usage.clone(),
+                    summary_mode: effective_mode,
+                    summary_input_sha256: summary_input.input_sha256.clone(),
+                    summary_comment_count: summary_input.comment_count,
+                    changed_comment_count: i32::try_from(summary_plan.changed_comments.len())
+                        .unwrap_or(i32::MAX),
+                };
+                SummaryPublication::Generated {
+                    input: summary_input,
+                    summary: generated.summary_json,
+                    model: generated.model,
+                    mode: effective_mode,
+                    usage,
+                }
             }
         }
+    } else {
+        tracing::info!(
+            news_item_id,
+            initial_summary,
+            "preserving fetched discussion comments without model summary because demand ended"
+        );
+        SummaryPublication::Preserve
     };
     with_finalizer(
         TaskResult::ok(),

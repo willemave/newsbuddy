@@ -98,6 +98,7 @@ pub(super) async fn prepare_enrichment(
             reason: "No outbound article URL to enrich".to_owned(),
         });
     };
+    let allow_firecrawl = firecrawl_fallback_allowed(transaction, &row).await?;
     if let Some(content) = find_existing_content(transaction, &article_url).await? {
         snapshot.body_source = BodySource::Stored(BodyPointer {
             storage_provider: content.storage_provider,
@@ -109,13 +110,18 @@ pub(super) async fn prepare_enrichment(
             final_url: normalize_http_url(&content.url)
                 .or_else(|| content.source_url.as_deref().and_then(normalize_http_url)),
             source_metadata: content.content_metadata.get("source_metadata").cloned(),
+            allow_firecrawl,
         });
     }
     Ok(EnrichmentPreparation::Extract {
         snapshot,
         article_url,
+        allow_firecrawl,
     })
 }
+
+mod firecrawl;
+use firecrawl::firecrawl_fallback_allowed;
 
 pub(super) async fn prepare_processing(
     transaction: &mut Transaction<'_, Postgres>,
@@ -889,6 +895,7 @@ fn apply_enrichment_metadata(
             final_url,
             strategy,
             reason,
+            ..
         } => (
             "failed",
             None,
@@ -907,6 +914,10 @@ fn apply_enrichment_metadata(
             "article_url": result.2,
             "final_url": result.3,
             "strategy": result.4,
+            "error_code": match mutation {
+                EnrichmentMutation::Failed { error_code, .. } => Some(error_code.as_str()),
+                _ => None,
+            },
             "error": result.5,
             "extracted_chars": result.6,
             "updated_at": updated_at,
@@ -1508,12 +1519,6 @@ async fn visible_user_ids(
     if !SUPPORTED_AGGREGATORS.contains(&platform.to_ascii_lowercase().as_str()) {
         return Ok(Vec::new());
     }
-    let topic = snapshot
-        .raw_metadata
-        .pointer("/aggregator/topic")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
     sqlx::query_scalar::<_, i64>(
         r#"
         SELECT DISTINCT users.id::bigint
@@ -1525,20 +1530,13 @@ async fn visible_user_ids(
           AND lower(COALESCE(config.config->>'key', '')) = lower($1)
           AND (
               lower($1) <> 'brutalist'
-              OR jsonb_array_length(COALESCE(config.config::jsonb->'topics', '[]'::jsonb)) = 0
-              OR EXISTS (
-                  SELECT 1
-                  FROM jsonb_array_elements_text(
-                      COALESCE(config.config::jsonb->'topics', '[]'::jsonb)
-                  ) AS selected(topic)
-                  WHERE lower(btrim(selected.topic)) = $2
-              )
+              OR newsly_brutalist_visible(config.config::jsonb->'topics', $2::jsonb)
           )
         ORDER BY users.id::bigint
         "#,
     )
     .bind(platform)
-    .bind(topic)
+    .bind(&snapshot.raw_metadata)
     .fetch_all(&mut **transaction)
     .await
 }
@@ -1730,3 +1728,7 @@ pub(super) use error::NewsRepositoryError;
 #[cfg(test)]
 #[path = "checkpoint_tests.rs"]
 mod checkpoint_tests;
+
+#[cfg(test)]
+#[path = "repository_tests.rs"]
+mod repository_tests;

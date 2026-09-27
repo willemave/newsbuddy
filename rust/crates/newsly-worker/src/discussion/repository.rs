@@ -24,6 +24,7 @@ struct NewsItemSource {
     canonical_item_url: Option<String>,
     discussion_url: Option<String>,
     raw_metadata: Value,
+    merge_refresh_deadline: NaiveDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +72,9 @@ pub(super) async fn prepare_discussion(
             source_external_id,
             canonical_item_url,
             discussion_url,
-            COALESCE(raw_metadata, '{}'::json) AS raw_metadata
+            COALESCE(raw_metadata, '{}'::json) AS raw_metadata,
+            COALESCE(published_at, processed_at, ingested_at, created_at)
+                + interval '24 hours' AS merge_refresh_deadline
         FROM news_items
         WHERE id::bigint = $1
         FOR UPDATE
@@ -155,8 +158,89 @@ pub(super) async fn prepare_discussion(
         summary_seen_input_sha256: row.summary_seen_input_sha256,
         summary_incremental_update_count: row.summary_incremental_update_count,
         summary_generated_at: row.summary_generated_at,
+        merge_refresh_deadline: news_item.merge_refresh_deadline,
         claim_token,
     }))
+}
+
+/// Rechecks item-level product demand immediately before a discussion model call. Initial
+/// summaries may be requested by a pending Briefing source, a published segment, or an explicit
+/// open. Later summary refreshes require an unread pending/published Briefing consumer.
+pub(super) async fn discussion_summary_is_demanded(
+    transaction: &mut Transaction<'_, Postgres>,
+    news_item_id: i64,
+    initial_summary: bool,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r"
+        SELECT EXISTS (
+            SELECT 1
+            FROM news_items AS item
+            JOIN users AS demand_user ON demand_user.is_active IS TRUE
+              AND (
+                  (item.visibility_scope = 'user'
+                      AND item.owner_user_id = demand_user.id)
+                  OR
+                  (item.visibility_scope = 'global' AND EXISTS (
+                      SELECT 1
+                      FROM user_scraper_configs AS config
+                      WHERE config.user_id = demand_user.id
+                        AND config.is_active IS TRUE
+                        AND config.scraper_type = 'aggregator'
+                        AND lower(btrim(COALESCE(config.config::jsonb ->> 'key', ''))) =
+                            CASE lower(btrim(COALESCE(item.platform, '')))
+                                WHEN 'hn' THEN 'hackernews'
+                                ELSE lower(btrim(COALESCE(item.platform, '')))
+                            END
+                  ))
+              )
+            WHERE item.id::bigint = $1
+              AND (
+                  (
+                      EXISTS (
+                          SELECT 1 FROM briefing_pending_sources AS pending
+                          WHERE pending.user_id = demand_user.id
+                            AND pending.source_kind = 'news'
+                            AND pending.source_id = item.id
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM briefing_segments AS segment
+                          WHERE segment.user_id = demand_user.id
+                            AND segment.status IN ('active', 'degraded')
+                            AND segment.source_keys::jsonb @>
+                                jsonb_build_array('news:' || item.id::text)
+                      )
+                  )
+                  AND (
+                      $2::boolean IS TRUE
+                      OR NOT EXISTS (
+                          SELECT 1
+                          FROM news_items AS member
+                          JOIN news_item_read_status AS read_status
+                            ON read_status.news_item_id = member.id
+                          WHERE read_status.user_id = demand_user.id
+                            AND COALESCE(member.representative_news_item_id, member.id) = item.id
+                      )
+                  )
+                  OR (
+                      $2::boolean IS TRUE
+                      AND EXISTS (
+                          SELECT 1
+                          FROM news_items AS member
+                          JOIN news_item_read_status AS read_status
+                            ON read_status.news_item_id = member.id
+                          WHERE read_status.user_id = demand_user.id
+                            AND COALESCE(member.representative_news_item_id, member.id) = item.id
+                      )
+                  )
+              )
+        )
+        ",
+    )
+    .bind(news_item_id)
+    .bind(initial_summary)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 async fn upsert_and_lock_discussion(
@@ -763,76 +847,8 @@ async fn bump_briefing_versions(
     Ok(())
 }
 
-fn resolve_identity(news_item: &NewsItemSource) -> Option<DiscussionIdentity> {
-    let metadata = news_item.raw_metadata.as_object();
-    let mut platform = clean_string(news_item.platform.as_deref())
-        .or_else(|| metadata.and_then(|value| clean_value(value.get("platform"))))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if platform == "hn" || platform == "hacker_news" {
-        "hackernews".clone_into(&mut platform);
-    }
-    let mut discussion_url = news_item
-        .discussion_url
-        .as_deref()
-        .and_then(normalize_http_url)
-        .or_else(|| {
-            news_item
-                .canonical_item_url
-                .as_deref()
-                .and_then(normalize_http_url)
-        });
-    if platform == "reddit" {
-        discussion_url = discussion_url.and_then(|value| normalize_reddit_url(&value));
-    }
-    if !matches!(platform.as_str(), "hackernews" | "reddit") {
-        platform = infer_platform(discussion_url.as_deref())?;
-        if platform == "reddit" {
-            discussion_url = discussion_url.and_then(|value| normalize_reddit_url(&value));
-        }
-    }
-    let discussion_url = discussion_url?;
-    let aggregator = metadata
-        .and_then(|value| value.get("aggregator"))
-        .and_then(Value::as_object);
-    let external_id = clean_string(news_item.source_external_id.as_deref())
-        .or_else(|| aggregator.and_then(|value| clean_value(value.get("external_id"))))
-        .or_else(|| metadata.and_then(|value| clean_value(value.get("source_external_id"))))
-        .or_else(|| match platform.as_str() {
-            "hackernews" => hacker_news_id(&discussion_url),
-            "reddit" => reddit_submission_id(&discussion_url),
-            _ => None,
-        })?;
-    let title = metadata
-        .and_then(|value| nested_clean(value, &["summary", "title"]))
-        .or_else(|| metadata.and_then(|value| nested_clean(value, &["article", "title"])))
-        .or_else(|| aggregator.and_then(|value| clean_value(value.get("title"))));
-    let author = aggregator.and_then(|value| clean_value(value.get("author")));
-    let score = metadata
-        .and_then(|value| nonnegative_i32(value.get("score")))
-        .or_else(|| aggregator.and_then(|value| nonnegative_i32(value.get("score"))));
-    let comment_count = metadata
-        .and_then(|value| nonnegative_i32(value.get("comment_count")))
-        .or_else(|| metadata.and_then(|value| nonnegative_i32(value.get("comments_count"))))
-        .or_else(|| {
-            aggregator
-                .and_then(|value| value.get("metadata"))
-                .and_then(Value::as_object)
-                .and_then(|value| {
-                    nonnegative_i32(value.get("comments_count"))
-                        .or_else(|| nonnegative_i32(value.get("comment_count")))
-                })
-        });
-    Some(DiscussionIdentity {
-        platform,
-        external_id,
-        discussion_url,
-        title,
-        author,
-        score,
-        comment_count,
-    })
-}
+mod identity;
+use identity::resolve_identity;
 
 fn normalize_http_url(value: &str) -> Option<String> {
     let value = value.trim();
@@ -967,58 +983,4 @@ pub(super) enum DiscussionRepositoryError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn source(
-        platform: Option<&str>,
-        url: Option<&str>,
-        external_id: Option<&str>,
-    ) -> NewsItemSource {
-        NewsItemSource {
-            id: 1,
-            owner_user_id: None,
-            platform: platform.map(str::to_owned),
-            source_external_id: external_id.map(str::to_owned),
-            canonical_item_url: None,
-            discussion_url: url.map(str::to_owned),
-            raw_metadata: json!({}),
-        }
-    }
-
-    #[test]
-    fn normalizes_hn_alias_and_extracts_identity() {
-        let identity = resolve_identity(&source(
-            Some("HN"),
-            Some("http://news.ycombinator.com/item?id=123"),
-            None,
-        ))
-        .unwrap();
-        assert_eq!(identity.platform, "hackernews");
-        assert_eq!(identity.external_id, "123");
-        assert!(identity.discussion_url.starts_with("https://"));
-    }
-
-    #[test]
-    fn infers_and_canonicalizes_reddit() {
-        let identity = resolve_identity(&source(
-            None,
-            Some("https://old.reddit.com/r/rust/comments/AbC123/example"),
-            None,
-        ))
-        .unwrap();
-        assert_eq!(identity.platform, "reddit");
-        assert_eq!(identity.external_id, "abc123");
-        assert_eq!(
-            Url::parse(&identity.discussion_url).unwrap().host_str(),
-            Some("www.reddit.com")
-        );
-    }
-
-    #[test]
-    fn rejects_unrelated_discussion_source() {
-        assert!(
-            resolve_identity(&source(None, Some("https://example.com/thread"), None)).is_none()
-        );
-    }
-}
+mod tests;

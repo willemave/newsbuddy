@@ -363,7 +363,10 @@ owned by normal feature tasks.
 
 News enrichment may obtain article evidence through the same extractor and
 Rust Firecrawl boundary. Extraction failure is soft when metadata-only
-processing remains possible.
+processing remains possible. Global aggregator news permits paid Firecrawl fallback
+only when visible to an active subscriber. A denied fallback records a stable reason;
+the first new audience queues bounded re-enrichment of recent affected items. User-owned
+content and user-scoped news retain normal fallback access.
 
 Processing reuses a durable or exact-representative summary before paid work,
 bounds evidence, runs canonical relation policy in Rust, and performs production
@@ -376,9 +379,16 @@ Summary, relation/cluster state, relevant links, remaining provider usage, Brief
 sources, Agent Data synchronization, and the queue transition publish
 atomically. News never enters the long-form generated-artwork path.
 
-Shared aggregator checks use `source_ingestion_health` for hourly subscribed and
-two-hour unsubscribed eligibility. Scheduler and onboarding coalesce global
-scrapes by aggregator key; workers recheck eligibility without suppressing retries.
+Shared aggregator checks use `source_ingestion_health` for 15-minute subscribed and
+60-minute unsubscribed eligibility, with five minutes of tick grace so fetch completion
+does not skip the next slot. The scheduler owns routine global scrapes; onboarding
+attaches from the shared corpus. Workers recheck eligibility without suppressing retries.
+Newly demanded Brutalist topics enqueue one shared fetch. Its provider reads only topics
+selected by active subscribers, and persistence caps new items at 12 per topic and source
+section in a rolling 24-hour window. Cross-listed topics are retained across re-scrapes
+and the same topic visibility rule is used by reading and Briefing paths. Routine
+backpressure can postpone a check; subscribed sources with no success for 45 minutes
+surface as stale.
 Ready representative news schedules `prepare_news_lens`, handled by a dedicated
 `newsly-news-lens-worker` process using the existing worker binary dispatcher. `news_lens_embeddings` stores the canonical planner input hash, encoder
 version, model and dimension-validated vector. Preparation releases its database
@@ -391,7 +401,9 @@ Briefing assigns cached news semantically, isolates failed sources, and leaves
 uncached news pending while publishing other ready tiers. Queue priority orders work within existing retry
 fairness buckets, and promotion preserves `available_at` backoff.
 
-First-run news admission freezes up to 40 eligible stories in
+First-run source checks reconcile immediately from the warm corpus, accepting a successful
+check within 75 minutes before the run. A source with no successful check or new attempt
+settles unavailable after 45 minutes. First-run news admission freezes up to 40 eligible stories in
 `onboarding_first_edition_items`, balanced across platform/topic before recency.
 The cohort settles through coverage, read state, or loss of eligibility before
 normal admission resumes. Feed backfill records both reused and new content in
@@ -414,6 +426,10 @@ projection reconciles sources once per response using a bounded ingestion window
 Briefing uses durable source/pending/publication state and versioned client
 observation. Publication is atomic; partial provider success cannot expose a
 half-assembled edition.
+Discussion comment collection remains independent of model summarization. An initial
+summary needs an active user's admission, citation, or open. Merge refreshes need unread
+admitted or citing demand and stop after 24 hours; the handler rechecks before an LLM call
+so stale queued work can preserve fetched comments without model spend.
 
 Discussion collection and summary refresh have independent cadences and durable
 claim fences. The first usable summary is immediate; later changes coalesce by

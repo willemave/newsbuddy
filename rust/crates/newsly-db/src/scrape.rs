@@ -290,6 +290,21 @@ pub async fn persist_scraped_news(
     }
     let ingest_key = news_ingest_key(record)?;
     let existing_id = find_existing_news(transaction, record, &ingest_key).await?;
+    let raw_metadata = if record.platform == "brutalist" {
+        if let Some(id) = existing_id {
+            let previous: Value = sqlx::query_scalar(
+                "SELECT raw_metadata::jsonb FROM news_items WHERE id::bigint=$1",
+            )
+            .bind(id)
+            .fetch_one(&mut **transaction)
+            .await?;
+            merge_brutalist_topics(&previous, &record.raw_metadata)
+        } else {
+            record.raw_metadata.clone()
+        }
+    } else {
+        record.raw_metadata.clone()
+    };
     let (news_item_id, created) = if let Some(news_item_id) = existing_id {
         sqlx::query(
             r#"
@@ -337,7 +352,7 @@ pub async fn persist_scraped_news(
         .bind(&record.discussion_url)
         .bind(json!(record.summary_key_points))
         .bind(&record.summary_text)
-        .bind(&record.raw_metadata)
+        .bind(&raw_metadata)
         .bind(&record.status)
         .bind(record.published_at.map(|value| value.naive_utc()))
         .execute(&mut **transaction)
@@ -378,7 +393,7 @@ pub async fn persist_scraped_news(
         .bind(&record.discussion_url)
         .bind(json!(record.summary_key_points))
         .bind(&record.summary_text)
-        .bind(&record.raw_metadata)
+        .bind(&raw_metadata)
         .bind(&record.status)
         .bind(record.published_at.map(|value| value.naive_utc()))
         .fetch_one(&mut **transaction)
@@ -391,6 +406,25 @@ pub async fn persist_scraped_news(
         created,
         discussion_refresh_ready,
     })
+}
+
+fn merge_brutalist_topics(previous: &Value, incoming: &Value) -> Value {
+    let mut merged = incoming.clone();
+    let mut topics = BTreeSet::new();
+    for metadata in [previous, incoming] {
+        if let Some(values) = metadata["aggregator"]["topics"].as_array() {
+            topics.extend(values.iter().filter_map(Value::as_str).map(str::to_owned));
+        } else if let Some(topic) = metadata["aggregator"]["topic"].as_str() {
+            topics.insert(topic.to_owned());
+        }
+    }
+    if let Some(aggregator) = merged["aggregator"].as_object_mut() {
+        aggregator.insert("topics".to_owned(), json!(topics));
+        if let Some(topic) = previous["aggregator"]["topic"].as_str() {
+            aggregator.insert("topic".to_owned(), Value::from(topic));
+        }
+    }
+    merged
 }
 
 async fn find_existing_news(
@@ -550,24 +584,52 @@ pub async fn due_discussion_refresh_ids(
           AND item.platform IN ('hackernews', 'hn', 'reddit')
           AND item.source_external_id IS NOT NULL
           AND COALESCE(item.discussion_url, item.canonical_item_url) IS NOT NULL
+          AND EXISTS (
+              SELECT 1
+              FROM users AS demand_user
+              WHERE demand_user.is_active IS TRUE
+                AND (
+                    (item.visibility_scope = 'user' AND item.owner_user_id = demand_user.id)
+                    OR
+                    (item.visibility_scope = 'global' AND EXISTS (
+                        SELECT 1 FROM user_scraper_configs AS config
+                        WHERE config.user_id = demand_user.id
+                          AND config.is_active IS TRUE
+                          AND config.scraper_type = 'aggregator'
+                          AND lower(btrim(COALESCE(config.config::jsonb ->> 'key', ''))) =
+                              CASE lower(btrim(COALESCE(item.platform, '')))
+                                  WHEN 'hn' THEN 'hackernews'
+                                  ELSE lower(btrim(COALESCE(item.platform, '')))
+                              END
+                    ))
+                )
+                AND (
+                    EXISTS (
+                        SELECT 1 FROM briefing_pending_sources AS pending
+                        WHERE pending.user_id = demand_user.id
+                          AND pending.source_kind = 'news'
+                          AND pending.source_id = item.id
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM briefing_segments AS segment
+                        WHERE segment.user_id = demand_user.id
+                          AND segment.status IN ('active', 'degraded')
+                          AND segment.source_keys::jsonb @>
+                              jsonb_build_array('news:' || item.id::text)
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM news_items AS member
+                        JOIN news_item_read_status AS read_status
+                          ON read_status.news_item_id = member.id
+                        WHERE read_status.user_id = demand_user.id
+                          AND COALESCE(member.representative_news_item_id, member.id) = item.id
+                    )
+                )
+          )
           AND NOT EXISTS (
               SELECT 1 FROM news_item_discussions AS existing
               WHERE existing.news_item_id = item.id
-          )
-          AND (
-              (item.visibility_scope = 'user' AND EXISTS (
-                  SELECT 1 FROM users AS owner
-                  WHERE owner.id = item.owner_user_id AND owner.is_active IS TRUE
-              ))
-              OR
-              (item.visibility_scope = 'global' AND EXISTS (
-                  SELECT 1
-                  FROM user_scraper_configs AS config
-                  JOIN users AS owner ON owner.id = config.user_id AND owner.is_active IS TRUE
-                  WHERE config.is_active IS TRUE
-                    AND config.scraper_type = 'aggregator'
-                    AND lower(config.config::jsonb ->> 'key') = lower(item.platform)
-              ))
           )
         ORDER BY COALESCE(item.published_at, item.ingested_at, item.created_at) DESC
         LIMIT $1
@@ -589,20 +651,85 @@ pub async fn due_discussion_refresh_ids(
           AND (discussion.next_refresh_after IS NULL OR discussion.next_refresh_after <= timezone('UTC', now()))
           AND item.status = 'ready'
           AND item.representative_news_item_id IS NULL
-          AND (
-              (item.visibility_scope = 'user' AND EXISTS (
-                  SELECT 1 FROM users AS owner
-                  WHERE owner.id = item.owner_user_id AND owner.is_active IS TRUE
-              ))
-              OR
-              (item.visibility_scope = 'global' AND EXISTS (
-                  SELECT 1
-                  FROM user_scraper_configs AS config
-                  JOIN users AS owner ON owner.id = config.user_id AND owner.is_active IS TRUE
-                  WHERE config.is_active IS TRUE
-                    AND config.scraper_type = 'aggregator'
-                    AND lower(config.config::jsonb ->> 'key') = lower(item.platform)
-              ))
+          AND EXISTS (
+              SELECT 1
+              FROM users AS demand_user
+              WHERE demand_user.is_active IS TRUE
+                AND (
+                    (item.visibility_scope = 'user' AND item.owner_user_id = demand_user.id)
+                    OR
+                    (item.visibility_scope = 'global' AND EXISTS (
+                        SELECT 1 FROM user_scraper_configs AS config
+                        WHERE config.user_id = demand_user.id
+                          AND config.is_active IS TRUE
+                          AND config.scraper_type = 'aggregator'
+                          AND lower(btrim(COALESCE(config.config::jsonb ->> 'key', ''))) =
+                              CASE lower(btrim(COALESCE(item.platform, '')))
+                                  WHEN 'hn' THEN 'hackernews'
+                                  ELSE lower(btrim(COALESCE(item.platform, '')))
+                              END
+                    ))
+                )
+                AND (
+                    (
+                        discussion.summary IS NULL
+                        OR discussion.summary_status <> 'completed'
+                        OR discussion.raw_comments_ref IS NULL
+                    )
+                    AND (
+                        EXISTS (
+                            SELECT 1 FROM briefing_pending_sources AS pending
+                            WHERE pending.user_id = demand_user.id
+                              AND pending.source_kind = 'news'
+                              AND pending.source_id = item.id
+                        )
+                        OR EXISTS (
+                            SELECT 1 FROM briefing_segments AS segment
+                            WHERE segment.user_id = demand_user.id
+                              AND segment.status IN ('active', 'degraded')
+                              AND segment.source_keys::jsonb @>
+                                  jsonb_build_array('news:' || item.id::text)
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM news_items AS member
+                            JOIN news_item_read_status AS read_status
+                              ON read_status.news_item_id = member.id
+                            WHERE read_status.user_id = demand_user.id
+                              AND COALESCE(member.representative_news_item_id, member.id) = item.id
+                        )
+                    )
+                    OR
+                    (
+                        discussion.summary IS NOT NULL
+                        AND discussion.summary_status = 'completed'
+                        AND COALESCE(item.published_at, item.processed_at, item.ingested_at, item.created_at)
+                            > timezone('UTC', now()) - interval '24 hours'
+                        AND (
+                            EXISTS (
+                                SELECT 1 FROM briefing_pending_sources AS pending
+                                WHERE pending.user_id = demand_user.id
+                                  AND pending.source_kind = 'news'
+                                  AND pending.source_id = item.id
+                            )
+                            OR EXISTS (
+                                SELECT 1 FROM briefing_segments AS segment
+                                WHERE segment.user_id = demand_user.id
+                                  AND segment.status IN ('active', 'degraded')
+                                  AND segment.source_keys::jsonb @>
+                                      jsonb_build_array('news:' || item.id::text)
+                            )
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM news_items AS member
+                            JOIN news_item_read_status AS read_status
+                              ON read_status.news_item_id = member.id
+                            WHERE read_status.user_id = demand_user.id
+                              AND COALESCE(member.representative_news_item_id, member.id) = item.id
+                        )
+                    )
+                )
           )
         ORDER BY
             CASE WHEN discussion.summary IS NULL OR discussion.summary_status <> 'completed'

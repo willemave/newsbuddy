@@ -250,12 +250,7 @@ const VISIBLE_NEWS_ITEM_SQL: &str = r#"
                     AND lower(btrim(config.config->>'key')) = lower(COALESCE(item.platform, ''))
                     AND (
                         lower(btrim(config.config->>'key')) <> 'brutalist'
-                        OR jsonb_array_length(COALESCE(config.config::jsonb->'topics', '[]'::jsonb)) = 0
-                        OR EXISTS(
-                            SELECT 1
-                            FROM jsonb_array_elements_text(COALESCE(config.config::jsonb->'topics', '[]'::jsonb)) AS topic(value)
-                            WHERE lower(btrim(topic.value)) = lower(btrim(item.raw_metadata::jsonb->'aggregator'->>'topic'))
-                        )
+                        OR newsly_brutalist_visible(config.config::jsonb->'topics', item.raw_metadata::jsonb)
                     )
               )
           )

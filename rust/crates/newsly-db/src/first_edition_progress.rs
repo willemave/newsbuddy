@@ -86,7 +86,7 @@ pub async fn reconcile_sources(
         WHERE s.run_id=r.id AND r.user_id::bigint=$1 AND r.status='active' AND s.source_kind='aggregator'
           AND s.status NOT IN ('processed','unavailable') AND s.check_cutoff IS NULL
           AND h.source_key='aggregator:' || substr(s.source_key,9)
-          AND h.last_success_at >= (r.started_at AT TIME ZONE 'UTC') - interval '1 hour'
+          AND h.last_success_at >= (r.started_at AT TIME ZONE 'UTC') - interval '75 minutes'
           AND (h.error_code IS NULL OR h.last_success_at >= r.started_at AT TIME ZONE 'UTC')")
         .bind(user_id).execute(&mut *connection).await?;
     sqlx::query(r"WITH counts AS (
@@ -99,8 +99,7 @@ pub async fn reconcile_sources(
           AND COALESCE(n.published_at,n.ingested_at) >= timezone('UTC',s.check_cutoff)-interval '24 hours'
           AND EXISTS(SELECT 1 FROM user_scraper_configs c WHERE c.user_id=r.user_id AND c.is_active AND c.scraper_type='aggregator'
             AND lower(c.config::jsonb->>'key')=lower(n.platform)
-            AND (lower(n.platform)<>'brutalist' OR COALESCE(c.config::jsonb->'topics','[]'::jsonb)='[]'::jsonb
-              OR c.config::jsonb->'topics' ? (n.raw_metadata::jsonb #>> '{aggregator,topic}')))
+            AND (lower(n.platform)<>'brutalist' OR newsly_brutalist_visible(c.config::jsonb->'topics', n.raw_metadata::jsonb)))
         WHERE r.user_id::bigint=$1 AND r.status='active' AND s.source_kind='aggregator'
           AND s.status NOT IN ('processed','unavailable') AND s.check_cutoff IS NOT NULL GROUP BY s.id
     ) UPDATE onboarding_first_edition_sources s SET processed_item_count=c.ready,
@@ -114,6 +113,13 @@ pub async fn reconcile_sources(
           AND s.status NOT IN ('processed','unavailable') AND s.check_cutoff IS NULL
           AND h.source_key='aggregator:' || substr(s.source_key,9) AND h.error_code IS NOT NULL
           AND h.last_attempt_at >= r.started_at AT TIME ZONE 'UTC'")
+        .bind(user_id).execute(&mut *connection).await?;
+    sqlx::query(r"UPDATE onboarding_first_edition_sources s SET status='unavailable',completed_at=timezone('UTC',now())
+        FROM onboarding_first_edition_runs r
+        WHERE s.run_id=r.id AND r.user_id::bigint=$1 AND r.status='active'
+          AND s.source_kind='aggregator' AND s.status NOT IN ('processed','unavailable')
+          AND s.check_cutoff IS NULL
+          AND r.started_at < timezone('UTC',now()) - interval '45 minutes'")
         .bind(user_id).execute(connection).await?;
     Ok(())
 }

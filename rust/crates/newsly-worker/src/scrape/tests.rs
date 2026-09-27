@@ -21,6 +21,37 @@ use crate::{
     TaskHandler, WorkerAttempt, WorkerConfig, WorkerKernel,
 };
 
+#[test]
+fn brutalist_budget_counts_each_topic_in_its_section() {
+    let item = ScrapedItem::News(Box::new(newsly_providers::ScrapedNewsItem {
+        url: "https://example.com/story".to_owned(),
+        title: Some("Story".to_owned()),
+        visibility_scope: "global".to_owned(),
+        owner_user_id: None,
+        platform: "brutalist".to_owned(),
+        source_type: "Brutalist".to_owned(),
+        source_label: None,
+        source_external_id: None,
+        user_scraper_config_id: None,
+        canonical_item_url: None,
+        canonical_story_url: None,
+        article_url: None,
+        article_domain: None,
+        discussion_url: None,
+        summary_key_points: Vec::new(),
+        summary_text: None,
+        raw_metadata: serde_json::json!({"aggregator":{"topic":"science","topics":["science","politics"],"metadata":{"source_name":"Example"}}}),
+        status: "new".to_owned(),
+        published_at: None,
+    }));
+    assert_eq!(
+        super::brutalist_budget_keys(&item),
+        vec![
+            ("science".to_owned(), "Example".to_owned()),
+            ("politics".to_owned(), "Example".to_owned())
+        ]
+    );
+}
 #[derive(Debug)]
 struct PreparedScrapeHandler(Mutex<Option<ScrapeFinalizer>>);
 
@@ -76,6 +107,71 @@ fn display_names_normalize_to_canonical_aggregators() {
     assert_eq!(
         request.sources,
         vec![RequestedSource::Aggregator(AggregatorKey::HackerNews)]
+    );
+}
+
+fn aggregator_config(id: i64, key: &str) -> newsly_db::ScrapeConfigSnapshot {
+    newsly_db::ScrapeConfigSnapshot {
+        id,
+        user_id: 7,
+        scraper_type: "aggregator".to_owned(),
+        display_name: None,
+        feed_url: Some(format!("aggregator://{key}")),
+        config: json!({"key": key}),
+        fingerprint: "fixture".to_owned(),
+    }
+}
+
+#[test]
+fn scheduled_aggregator_plans_are_not_fenced_to_subscriber_configs() {
+    let request = ScrapeRequest {
+        sources: vec![RequestedSource::Aggregator(AggregatorKey::HackerNews)],
+        first_edition_run_id: None,
+    };
+    let prepared = newsly_db::PreparedScrapeSources {
+        first_edition_user_id: None,
+        configs: vec![aggregator_config(41, "hackernews")],
+    };
+
+    let plans = build_source_plans(&request, &prepared).expect("scheduled plan should build");
+    let SourcePlanKind::Aggregator {
+        required_config_ids,
+        ..
+    } = &plans[0].kind
+    else {
+        panic!("expected aggregator plan");
+    };
+    assert!(required_config_ids.is_empty());
+}
+
+#[test]
+fn first_edition_aggregator_plans_keep_legacy_config_fencing() {
+    let request = ScrapeRequest {
+        sources: vec![RequestedSource::Aggregator(AggregatorKey::HackerNews)],
+        first_edition_run_id: Some(9),
+    };
+    let prepared = newsly_db::PreparedScrapeSources {
+        first_edition_user_id: Some(7),
+        configs: vec![aggregator_config(41, "hackernews")],
+    };
+
+    let plans = build_source_plans(&request, &prepared).expect("first-edition plan should build");
+    let SourcePlanKind::Aggregator {
+        required_config_ids,
+        ..
+    } = &plans[0].kind
+    else {
+        panic!("expected aggregator plan");
+    };
+    assert_eq!(required_config_ids, &[41]);
+
+    let missing = newsly_db::PreparedScrapeSources {
+        first_edition_user_id: Some(7),
+        configs: Vec::new(),
+    };
+    assert_eq!(
+        build_source_plans(&request, &missing).unwrap_err(),
+        "first-edition run has no active hackernews source"
     );
 }
 

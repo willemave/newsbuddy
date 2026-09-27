@@ -76,10 +76,12 @@ pub(super) enum EnrichmentPreparation {
         content_id: i64,
         final_url: Option<String>,
         source_metadata: Option<Value>,
+        allow_firecrawl: bool,
     },
     Extract {
         snapshot: NewsSnapshot,
         article_url: String,
+        allow_firecrawl: bool,
     },
     Skip {
         snapshot: NewsSnapshot,
@@ -130,6 +132,7 @@ pub(super) enum EnrichmentMutation {
         article_url: Option<String>,
         final_url: Option<String>,
         strategy: Option<String>,
+        error_code: String,
         reason: String,
     },
 }

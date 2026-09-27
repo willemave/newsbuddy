@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-24 — `HEAD` — Aggregator freshness and demand gating
+
+- **Status:** Complete locally; production intake and cost effects unmeasured.
+- **Scope:** `newsly-db`, `newsly-worker`, `newsly-providers`, `newsly-api`, aggregator and first-run laws, and architecture.
+- **Decisions:** Claude Opus 5.5 read-only review found that `source_ingestion_health` already owns refresh state, a full-interval due check skips every other tick after fetch completion, topic-only Brutalist fetching needs a new-demand trigger and rolling cap, and first-run source checks need a bounded no-check outcome. Reused health state with five-minute tick grace; retained the scheduler backpressure gate and normal task retry backoff. Kept the already implemented first-run tiers, bounded admission, and embedding reuse.
+- **Changes:** Added 15/60-minute source cadence, 45-minute subscribed success monitoring, immediate first-run warm attachment and timeout, subscription-triggered Brutalist refresh and bounded metadata-only re-enrichment, demanded Brutalist topics with a rolling 12-item section budget, cross-listed topic visibility, Firecrawl fallback demand gate, and item-level discussion summary demand with a 24-hour merge cap. Removed the extra onboarding aggregator scrape; Reddit remains targeted.
+- **Validation:** Warning-denied Clippy for the five affected crates; all tests for those crates passed against isolated PostgreSQL test databases. Focused migration, demand-transition, and cross-listing tests passed. Full release gate and live provider smoke were not run.
+- **Remaining:** Confirm production aggregator intake and measure vendor usage after deployment. The scheduler can still postpone all scrapes while content backpressure persists; subscribed success staleness is observable.
+- **Commits:** Uncommitted
+
 ### 2026-09-27 — `main` — Vendor spend accounting
 
 - **Status:** Complete locally. Not deployed.

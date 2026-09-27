@@ -83,7 +83,7 @@ pub async fn pipeline_health_counts(
            WHERE c.is_active AND u.is_active AND c.scraper_type IN ('atom', 'rss', 'podcast_rss', 'substack', 'reddit', 'aggregator')
              AND COALESCE(c.updated_at,c.created_at) < timezone('UTC', now()) - interval '45 minutes'
              AND NOT EXISTS (SELECT 1 FROM source_ingestion_health h WHERE (h.config_id = c.id OR (c.scraper_type='aggregator' AND h.source_key='aggregator:' || lower(btrim(c.config::jsonb->>'key'))))
-                 AND h.last_attempt_at >= timezone('UTC', now()) - CASE WHEN c.scraper_type='aggregator' THEN interval '90 minutes' ELSE interval '45 minutes' END)) AS missing_source_checks,
+                 AND CASE WHEN c.scraper_type='aggregator' THEN h.last_success_at ELSE h.last_attempt_at END >= timezone('UTC', now()) - interval '45 minutes')) AS missing_source_checks,
           (SELECT count(*) FROM contents c WHERE c.status = 'awaiting_image'
              AND c.updated_at < timezone('UTC', now()) - interval '30 minutes'
              AND NOT EXISTS (SELECT 1 FROM processing_tasks t WHERE t.content_id = c.id
@@ -103,4 +103,56 @@ pub async fn pipeline_health_counts(
             AND (SELECT task.status FROM processing_tasks AS task WHERE task.content_id = product.id AND task.task_type IN ('analyze_url','process_content','summarize','process_podcast_media','download_tweet_video_audio','transcribe_tweet_video') ORDER BY task.id DESC LIMIT 1) = 'failed'
             AND NOT EXISTS (SELECT 1 FROM processing_tasks AS task WHERE task.content_id = product.id AND task.status IN ('pending', 'processing'))) AS terminal_product_mismatches
     "#).fetch_one(connection).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::PgPool;
+
+    #[sqlx::test]
+    async fn subscribed_aggregator_is_stale_after_three_expected_ticks(pool: PgPool) {
+        crate::run_migrations(&pool).await.unwrap();
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users(apple_id,email,is_active,is_admin) VALUES('aggregator-health','aggregator-health@example.com',true,false) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active,created_at) VALUES($1::bigint::integer,'aggregator','aggregator://hackernews','{\"key\":\"hackernews\"}',true,timezone('UTC',now()) - interval '1 hour')",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO source_ingestion_health(source_key,last_attempt_at,last_success_at) VALUES('aggregator:hackernews',timezone('UTC',now()) - interval '44 minutes',timezone('UTC',now()) - interval '44 minutes')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut connection = pool.acquire().await.unwrap();
+        assert_eq!(
+            pipeline_health_counts(&mut connection)
+                .await
+                .unwrap()
+                .missing_source_checks,
+            0
+        );
+        sqlx::query(
+            "UPDATE source_ingestion_health SET last_success_at=timezone('UTC',now()) - interval '46 minutes' WHERE source_key='aggregator:hackernews'",
+        )
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+        assert_eq!(
+            pipeline_health_counts(&mut connection)
+                .await
+                .unwrap()
+                .missing_source_checks,
+            1
+        );
+    }
 }

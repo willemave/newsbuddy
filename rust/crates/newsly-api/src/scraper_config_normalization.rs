@@ -16,6 +16,7 @@ const SUPPORTED_AGGREGATOR_KEYS: [&str; 7] = [
     "sciurls",
     "techmeme",
 ];
+const BRUTALIST_TOPICS: [&str; 4] = ["science", "business", "politics", "sports"];
 
 pub(super) fn validate_display_name(value: Option<&str>) -> Result<(), ConfigValidationError> {
     if value.is_some_and(|value| value.chars().count() > 255) {
@@ -233,6 +234,13 @@ fn normalize_aggregator_config(
             .filter(|topic| !topic.is_empty())
             .map(str::to_lowercase)
             .collect::<BTreeSet<_>>();
+        if key == "brutalist"
+            && topics
+                .iter()
+                .any(|topic| !BRUTALIST_TOPICS.contains(&topic.as_str()))
+        {
+            return Err(ConfigValidationError::new("unsupported Brutalist topic"));
+        }
         if topics.is_empty() {
             config.remove("topics");
         } else {
@@ -331,5 +339,14 @@ mod tests {
             "https://www.reddit.com/r/MachineLearning/"
         );
         assert_eq!(config["limit"], DEFAULT_NEW_FEED_LIMIT);
+    }
+
+    #[test]
+    fn brutalist_rejects_topics_the_fetcher_cannot_request() {
+        let config = serde_json::from_value::<Map<String, serde_json::Value>>(json!({
+            "key": "brutalist", "topics": ["science", "unknown"]
+        }))
+        .unwrap();
+        assert!(normalize_create_input(ScraperType::Aggregator, config).is_err());
     }
 }

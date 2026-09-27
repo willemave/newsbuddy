@@ -304,14 +304,7 @@ AND (
             WHERE lower(news.platform) = aggregator.source_key
               AND (
                   aggregator.source_key <> 'brutalist'
-                  OR jsonb_array_length(aggregator.topics) = 0
-                  OR EXISTS (
-                      SELECT 1
-                      FROM jsonb_array_elements_text(aggregator.topics) AS topic(value)
-                      WHERE lower(btrim(topic.value)) = lower(btrim(
-                          news.raw_metadata::jsonb #>> '{aggregator,topic}'
-                      ))
-                  )
+                  OR newsly_brutalist_visible(aggregator.topics, news.raw_metadata::jsonb)
               )
         )
     )

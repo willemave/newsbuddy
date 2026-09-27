@@ -3,7 +3,7 @@
 //! Provider work is deliberately database-free. Callers pass immutable source snapshots and
 //! receive owned items which can be published later under the queue lease fence.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,6 +23,7 @@ mod feed;
 pub use feed::normalize_feed_document;
 
 const MAX_HN_CONCURRENCY: usize = 8;
+pub(crate) const BRUTALIST_TOPICS: [&str; 4] = ["science", "business", "politics", "sports"];
 const DEFAULT_USER_AGENT: &str = "newsly-scraper/2.0 (+https://newsly.app)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -220,6 +221,7 @@ impl ScrapeGateway {
     pub async fn fetch_aggregator(
         &self,
         key: AggregatorKey,
+        brutalist_topics: &[String],
     ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
         match key {
             AggregatorKey::HackerNews => self.fetch_hacker_news().await,
@@ -243,7 +245,7 @@ impl ScrapeGateway {
                 self.fetch_html_grouped(key, "https://finurls.com", 100)
                     .await
             }
-            AggregatorKey::Brutalist => self.fetch_brutalist().await,
+            AggregatorKey::Brutalist => self.fetch_brutalist(brutalist_topics).await,
         }
     }
 
@@ -568,13 +570,22 @@ impl ScrapeGateway {
         Ok(ScrapeProviderOutcome::new(items, Vec::new()))
     }
 
-    async fn fetch_brutalist(&self) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
-        let topics = ["science", "business", "politics", "sports"];
+    #[expect(
+        clippy::too_many_lines,
+        reason = "topic fetch and section parsing form one source operation"
+    )]
+    async fn fetch_brutalist(
+        &self,
+        demanded_topics: &[String],
+    ) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
         let mut items = Vec::new();
         let mut errors = Vec::new();
         let mut retryable_failure = false;
-        let mut seen = BTreeSet::new();
-        for topic in topics {
+        let mut seen = BTreeMap::<String, usize>::new();
+        for topic in BRUTALIST_TOPICS
+            .into_iter()
+            .filter(|topic| demanded_topics.iter().any(|demanded| demanded == topic))
+        {
             let topic_url = format!("https://brutalist.report/topic/{topic}?limit=25&hours=24");
             let bytes = match self
                 .fetch_public_bytes(&topic_url, Some(MAX_SOURCE_RESPONSE_BYTES))
@@ -614,9 +625,16 @@ impl ScrapeGateway {
                     else {
                         continue;
                     };
-                    if host_matches(&article_url, "brutalist.report")
-                        || !seen.insert(article_url.clone())
-                    {
+                    if host_matches(&article_url, "brutalist.report") {
+                        continue;
+                    }
+                    if let Some(index) = seen.get(&article_url).copied() {
+                        if let Some(ScrapedItem::News(existing)) = items.get_mut(index)
+                            && let Some(topics) =
+                                existing.raw_metadata["aggregator"]["topics"].as_array_mut()
+                        {
+                            topics.push(Value::String(topic.to_owned()));
+                        }
                         continue;
                     }
                     let Some(title) = clean(Some(anchor.text().collect::<Vec<_>>().join(" ")))
@@ -633,12 +651,14 @@ impl ScrapeGateway {
                             "key": "brutalist",
                             "name": "Brutalist Report",
                             "topic": topic,
+                            "topics": [topic],
                             "metadata": {"source_name": source_name, "topic_url": topic_url},
                         },
                         "discussion_url": null,
                         "excerpt": null,
                         "discovery_time": Utc::now().to_rfc3339(),
                     });
+                    seen.insert(article_url.clone(), items.len());
                     items.push(ScrapedItem::News(Box::new(news_item(NewsItemInput {
                         key: AggregatorKey::Brutalist,
                         article_url,

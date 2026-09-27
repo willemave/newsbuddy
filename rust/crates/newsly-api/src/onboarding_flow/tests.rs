@@ -21,6 +21,15 @@ fn completion_never_requeues_onboarding_discovery() {
             .iter()
             .all(|request| request.task_type != TaskType::OnboardingDiscover)
     );
+    let scrape = requests
+        .iter()
+        .filter(|request| request.task_type == TaskType::Scrape)
+        .collect::<Vec<_>>();
+    assert_eq!(scrape.len(), 1);
+    assert_eq!(
+        scrape[0].payload.as_ref().unwrap().get("sources"),
+        Some(&serde_json::json!(["Reddit"]))
+    );
 }
 
 #[test]

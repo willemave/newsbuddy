@@ -897,13 +897,7 @@ async fn load_sources(
                           WHERE selected.source_key = lower(btrim(coalesce(news.platform, '')))
                             AND (
                                 selected.source_key <> 'brutalist'
-                                OR jsonb_array_length(selected.topics) = 0
-                                OR lower(btrim(coalesce(
-                                    news.raw_metadata::jsonb #>> '{aggregator,topic}', ''
-                                ))) IN (
-                                    SELECT lower(btrim(value))
-                                    FROM jsonb_array_elements_text(selected.topics) AS value
-                                )
+                                OR newsly_brutalist_visible(selected.topics, news.raw_metadata::jsonb)
                             )
                       )
                   )

@@ -1,5 +1,4 @@
 use crate::{aggregator_corpus::aggregator_due, news_lens_embeddings as embeddings};
-use chrono::{Duration, Utc};
 use sqlx::PgPool;
 
 async fn user(pool: &PgPool) -> i64 {
@@ -14,44 +13,26 @@ async fn run(pool: &PgPool, user_id: i64) -> i64 {
 }
 
 #[sqlx::test(migrations = false)]
-async fn warm_cadence_uses_active_demand_and_exact_boundaries(pool: PgPool) {
+async fn warm_cadence_uses_active_demand_and_tick_grace(pool: PgPool) {
     crate::run_migrations(&pool).await.unwrap();
     let id = user(&pool).await;
-    let now = Utc::now();
     let mut c = pool.acquire().await.unwrap();
-    assert!(aggregator_due(&mut c, "hackernews", now).await.unwrap());
-    sqlx::query("INSERT INTO source_ingestion_health(source_key,last_attempt_at) VALUES ('aggregator:hackernews',$1)").bind(now).execute(&mut *c).await.unwrap();
-    assert!(
-        !aggregator_due(&mut c, "hackernews", now + Duration::minutes(119))
-            .await
-            .unwrap()
-    );
-    assert!(
-        aggregator_due(&mut c, "hackernews", now + Duration::hours(2))
-            .await
-            .unwrap()
-    );
+    assert!(aggregator_due(&mut c, "hackernews").await.unwrap());
+    sqlx::query("INSERT INTO source_ingestion_health(source_key,last_attempt_at) VALUES ('aggregator:hackernews',timezone('UTC', now()) - interval '52 minutes')").execute(&mut *c).await.unwrap();
+    assert!(!aggregator_due(&mut c, "hackernews").await.unwrap());
+    sqlx::query("UPDATE source_ingestion_health SET last_attempt_at=timezone('UTC', now()) - interval '57 minutes' WHERE source_key='aggregator:hackernews'").execute(&mut *c).await.unwrap();
+    assert!(aggregator_due(&mut c, "hackernews").await.unwrap());
     sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active) VALUES ($1::bigint::integer,'aggregator','aggregator://hackernews','{\"key\":\"hackernews\"}',true)").bind(id).execute(&mut *c).await.unwrap();
-    assert!(
-        !aggregator_due(&mut c, "hackernews", now + Duration::minutes(59))
-            .await
-            .unwrap()
-    );
-    assert!(
-        aggregator_due(&mut c, "hackernews", now + Duration::hours(1))
-            .await
-            .unwrap()
-    );
+    sqlx::query("UPDATE source_ingestion_health SET last_attempt_at=timezone('UTC', now()) - interval '8 minutes' WHERE source_key='aggregator:hackernews'").execute(&mut *c).await.unwrap();
+    assert!(!aggregator_due(&mut c, "hackernews").await.unwrap());
+    sqlx::query("UPDATE source_ingestion_health SET last_attempt_at=timezone('UTC', now()) - interval '12 minutes' WHERE source_key='aggregator:hackernews'").execute(&mut *c).await.unwrap();
+    assert!(aggregator_due(&mut c, "hackernews").await.unwrap());
     sqlx::query("UPDATE users SET is_active=false WHERE id::bigint=$1")
         .bind(id)
         .execute(&mut *c)
         .await
         .unwrap();
-    assert!(
-        !aggregator_due(&mut c, "hackernews", now + Duration::hours(1))
-            .await
-            .unwrap()
-    );
+    assert!(!aggregator_due(&mut c, "hackernews").await.unwrap());
 }
 
 #[sqlx::test(migrations = false)]
@@ -238,6 +219,51 @@ async fn aggregator_progress_freezes_a_run_check_and_ignores_later_arrivals(pool
         .unwrap();
     let state:(String,i32)=sqlx::query_as("SELECT status,processed_item_count FROM onboarding_first_edition_sources WHERE run_id::bigint=$1").bind(run_id).fetch_one(&mut *c).await.unwrap();
     assert_eq!(state, ("processed".into(), 1));
+}
+
+#[sqlx::test(migrations = false)]
+async fn first_run_accepts_hourly_warm_check_and_times_out_missing_checks(pool: PgPool) {
+    crate::run_migrations(&pool).await.unwrap();
+    let id = user(&pool).await;
+    let run_id = run(&pool, id).await;
+    sqlx::query("INSERT INTO user_scraper_configs(user_id,scraper_type,feed_url,config,is_active) VALUES ($1::bigint::integer,'aggregator','aggregator://hackernews','{\"key\":\"hackernews\"}',true)")
+        .bind(id).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO onboarding_first_edition_sources(run_id,source_key,source_kind,display_name,position,status,processed_item_count) VALUES ($1::bigint::integer,'scraper:hackernews','aggregator','HN',0,'queued',0)")
+        .bind(run_id).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO source_ingestion_health(source_key,last_attempt_at,last_success_at) VALUES ('aggregator:hackernews',now()-interval '65 minutes',now()-interval '65 minutes')")
+        .execute(&pool).await.unwrap();
+    let mut connection = pool.acquire().await.unwrap();
+    crate::first_edition_progress::reconcile_sources(&mut connection, id)
+        .await
+        .unwrap();
+    let state: String = sqlx::query_scalar(
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint=$1",
+    )
+    .bind(run_id)
+    .fetch_one(&mut *connection)
+    .await
+    .unwrap();
+    assert_eq!(state, "processed");
+
+    sqlx::query("UPDATE onboarding_first_edition_sources SET status='queued',check_cutoff=NULL,completed_at=NULL WHERE run_id::bigint=$1")
+        .bind(run_id).execute(&mut *connection).await.unwrap();
+    sqlx::query("DELETE FROM source_ingestion_health WHERE source_key='aggregator:hackernews'")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE onboarding_first_edition_runs SET started_at=timezone('UTC',now())-interval '46 minutes' WHERE id::bigint=$1")
+        .bind(run_id).execute(&mut *connection).await.unwrap();
+    crate::first_edition_progress::reconcile_sources(&mut connection, id)
+        .await
+        .unwrap();
+    let state: String = sqlx::query_scalar(
+        "SELECT status FROM onboarding_first_edition_sources WHERE run_id::bigint=$1",
+    )
+    .bind(run_id)
+    .fetch_one(&mut *connection)
+    .await
+    .unwrap();
+    assert_eq!(state, "unavailable");
 }
 
 #[sqlx::test(migrations = false)]

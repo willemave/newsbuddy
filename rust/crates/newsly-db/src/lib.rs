@@ -370,6 +370,7 @@ mod feed_history;
 pub use feed_history::{FeedHistoryProjection, load_feed_history};
 
 pub mod aggregator_corpus;
+pub mod brutalist;
 pub mod first_edition_progress;
 pub mod news_lens_embeddings;
 

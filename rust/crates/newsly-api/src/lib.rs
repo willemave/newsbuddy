@@ -10,6 +10,7 @@ mod admin_logs;
 mod admin_onboarding;
 mod admin_pages;
 mod agent;
+mod aggregator_demand;
 mod apple_auth;
 mod audio_episodes;
 mod audio_storage;

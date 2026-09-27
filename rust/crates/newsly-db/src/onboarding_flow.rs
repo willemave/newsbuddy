@@ -379,15 +379,6 @@ pub async fn complete_onboarding_selection(
         )
         .await?;
         configured_source_count += 1;
-        if crate::aggregator_corpus::aggregator_due(
-            transaction,
-            &aggregator.key,
-            chrono::Utc::now(),
-        )
-        .await?
-        {
-            push_unique(&mut sources_to_scrape, &mut source_names, &aggregator.key);
-        }
     }
 
     feed_config_ids.sort_unstable();
@@ -438,6 +429,7 @@ pub async fn complete_onboarding_selection(
 
     crate::briefing_refresh::preparation::ensure_fixed_lenses(transaction, input.user_id).await?;
     let first_edition_run_id = start_first_edition(transaction, input.user_id).await?;
+    crate::first_edition_progress::reconcile_sources(transaction, input.user_id).await?;
     crate::first_edition_progress::attach_content(
         transaction,
         first_edition_run_id,

@@ -77,6 +77,9 @@ pub(super) fn plan_summary(
     {
         return summary_plan(DiscussionSummaryMode::None, Vec::new());
     }
+    if now.naive_utc() >= snapshot.merge_refresh_deadline {
+        return summary_plan(DiscussionSummaryMode::TrackSeen, Vec::new());
+    }
     if previous_raw_sha == Some(current_raw_sha) && snapshot.summary_input_sha256.is_none() {
         return summary_plan(DiscussionSummaryMode::TrackSummarized, Vec::new());
     }
@@ -334,6 +337,7 @@ mod tests {
             summary_seen_input_sha256: None,
             summary_incremental_update_count: 0,
             summary_generated_at: Some((Utc::now() - Duration::hours(7)).naive_utc()),
+            merge_refresh_deadline: Utc::now().naive_utc() + Duration::hours(1),
             claim_token: uuid::Uuid::new_v4(),
         }
     }
@@ -404,5 +408,27 @@ mod tests {
         snapshot.summary_incremental_update_count = 4;
         let full = plan_summary(&snapshot, &input, Some("old"), "new", Utc::now());
         assert_eq!(full.mode, DiscussionSummaryMode::Full);
+    }
+
+    #[test]
+    fn changed_comments_do_not_refresh_after_item_deadline() {
+        let mut snapshot = snapshot();
+        snapshot.merge_refresh_deadline = Utc::now().naive_utc() - Duration::seconds(1);
+        let raw = json!({
+            "comments": (0..26).map(|index| json!({
+                "comment_id": index.to_string(),
+                "text": format!("new detail {index}"),
+            })).collect::<Vec<_>>(),
+        });
+        let input = build_summary_input(
+            &snapshot.platform,
+            &snapshot.discussion_url,
+            snapshot.title.as_deref(),
+            &raw,
+        );
+
+        let plan = plan_summary(&snapshot, &input, Some("old"), "new", Utc::now());
+
+        assert_eq!(plan.mode, DiscussionSummaryMode::TrackSeen);
     }
 }

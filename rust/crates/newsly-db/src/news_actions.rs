@@ -47,15 +47,7 @@ pub async fn mark_visible_news_items_read(
                         )
                         AND (
                             lower(btrim(COALESCE(config.config::jsonb ->> 'key', ''))) <> 'brutalist'
-                            OR COALESCE(jsonb_typeof(config.config::jsonb -> 'topics'), 'null') <> 'array'
-                            OR jsonb_array_length(config.config::jsonb -> 'topics') = 0
-                            OR lower(btrim(COALESCE(
-                                news_item.raw_metadata::jsonb #>> '{aggregator,topic}',
-                                ''
-                            ))) IN (
-                                SELECT lower(btrim(topic))
-                                FROM jsonb_array_elements_text(config.config::jsonb -> 'topics') AS topic
-                            )
+                            OR newsly_brutalist_visible(config.config::jsonb -> 'topics', news_item.raw_metadata::jsonb)
                         )
                   )
               )

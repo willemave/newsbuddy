@@ -1,7 +1,7 @@
 # Aggregator Corpus, Demand-Sensitive Cost, and First-Run Tier Progress
 
 **Date:** 2026-09-02
-**Status:** Proposed. Validated against the current Rust checkout and two local databases.
+**Status:** Implemented in the Rust checkout on 2026-09-24; production intake and cost effects remain to be measured.
 **Scope:** aggregator refresh cadence, per-item enrichment gating, onboarding attach path,
 first-run Briefing progress for the fixed Articles and Podcasts lenses.
 
@@ -72,6 +72,14 @@ items, and a 25-item RSS feed polled hourly yields almost the same unique set as
 discussion enrichment, Brutalist volume, and the Firecrawl fixed cost.
 
 ## Design
+
+The implementation reuses `source_ingestion_health` for per-aggregator attempt, success, and
+new-item state instead of adding `aggregator_refresh_state`. A five-minute tick grace makes the
+15/60-minute tiers effective when a fetch finishes just after a scheduled tick. Brutalist topic
+gating has a shared refresh on new demand, a rolling cap of 12 new items per topic and source
+section in 24 hours, and durable cross-listed topic visibility. First-run checks attach from a
+75-minute warm window and settle unavailable after 45 minutes without a successful check.
+These choices supersede the literal table and per-fetch cap in the proposal below.
 
 ### 1. Keep the corpus warm; gate enrichment by demand
 
