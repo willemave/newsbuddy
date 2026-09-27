@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-27 — `main` — Raise sandbox agent tool-call ceiling
+
+- **Status:** Complete locally.
+- **Scope:** Shared sandbox agent configuration and Learning Deck generation policy.
+- **Decisions:** Raised the default from 32 to 1,000 calls and the configurable maximum from 200 to 10,000. The execution deadline remains the routine bound; the tool-call ceiling guards against runaway loops.
+- **Changes:** Updated the shared default and the Knowledge and Learning law.
+- **Validation:** `cargo fmt --all --check`, the focused Learning Deck limits test, warning-denied worker Clippy (SQLx offline), and `git diff --check` passed.
+- **Remaining:** Commit and deploy when authorized; the production worker still uses its current image.
+- **Commits:** Uncommitted.
+
 ### 2026-09-27 — `main` — Settings header app icon
 
 - **Status:** Complete locally.
