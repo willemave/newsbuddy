@@ -82,6 +82,7 @@ pub(super) async fn submit_content(
             share_and_chat: normalized.share_and_chat,
             chat_initial_message: normalized.chat_initial_message.as_deref(),
             save_to_knowledge_and_mark_read: normalized.save_to_knowledge_and_mark_read,
+            deck_source_only: false,
             user_id: current_user.id,
             submitted_via: "share_sheet",
         },

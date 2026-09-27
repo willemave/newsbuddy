@@ -29,6 +29,8 @@ pub struct ContentSubmissionInput<'a> {
     pub share_and_chat: bool,
     pub chat_initial_message: Option<&'a str>,
     pub save_to_knowledge_and_mark_read: bool,
+    /// Keep a deck-only URL as readable source text without the editorial content pipeline.
+    pub deck_source_only: bool,
     pub user_id: i64,
     pub submitted_via: &'a str,
 }
@@ -104,7 +106,7 @@ pub async fn apply_content_submission(
     let (mut content, already_exists) = if let Some(existing) = existing {
         (existing, true)
     } else {
-        let metadata = build_new_metadata(
+        let mut metadata = build_new_metadata(
             input.user_id,
             behavior.channel,
             input.platform,
@@ -112,6 +114,9 @@ pub async fn apply_content_submission(
             behavior.share_and_chat,
             input.chat_initial_message,
         );
+        if input.deck_source_only {
+            set_processing_field(&mut metadata, "deck_source_only", Value::Bool(true));
+        }
         match insert_content(transaction, input, metadata).await? {
             Some(inserted) => (inserted, false),
             None => (
@@ -146,7 +151,8 @@ pub async fn apply_content_submission(
     } else {
         SubmissionTaskResolution::EnqueueAnalyze
     };
-    let enqueue_generated_image = is_generated_image_candidate(transaction, &content).await?;
+    let enqueue_generated_image =
+        !input.deck_source_only && is_generated_image_candidate(transaction, &content).await?;
 
     Ok(AppliedContentSubmission {
         content_id: content.id,
@@ -289,6 +295,7 @@ async fn update_existing_content(
     let original_title = content.title.clone();
     let original_platform = content.platform.clone();
     let original_metadata = content.content_metadata.clone();
+    let original_status = content.status.clone();
 
     if content.source_url.as_deref().is_none_or(str::is_empty) {
         content.source_url = Some(input.url.to_owned());
@@ -300,6 +307,22 @@ async fn update_existing_content(
     }
     if input.platform.is_some() && content.platform.as_deref().is_none_or(str::is_empty) {
         content.platform = input.platform.map(str::to_owned);
+    }
+
+    // A later ordinary submission upgrades a deck-only source. Never downgrade a shared
+    // content row when a deck is requested for material already in the normal pipeline.
+    if !input.deck_source_only
+        && processing_flag(
+            &metadata_object(&content.content_metadata),
+            "deck_source_only",
+        ) == Some(Value::Bool(true))
+    {
+        let mut metadata = metadata_object(&content.content_metadata);
+        set_processing_field(&mut metadata, "deck_source_only", Value::Bool(false));
+        content.content_metadata = Value::Object(metadata);
+        if content.status == "completed" {
+            "new".clone_into(&mut content.status);
+        }
     }
 
     if input.subscribe_to_feed {
@@ -342,6 +365,7 @@ async fn update_existing_content(
         || content.title != original_title
         || content.platform != original_platform
         || content.content_metadata != original_metadata
+        || content.status != original_status
     {
         sqlx::query(
             r"
@@ -351,6 +375,7 @@ async fn update_existing_content(
                 title = $3,
                 platform = $4,
                 content_metadata = $5,
+                status = $6,
                 updated_at = timezone('UTC', now())
             WHERE id::bigint = $1::bigint
             ",
@@ -360,6 +385,7 @@ async fn update_existing_content(
         .bind(&content.title)
         .bind(&content.platform)
         .bind(&content.content_metadata)
+        .bind(&content.status)
         .execute(&mut **transaction)
         .await?;
     }
@@ -548,4 +574,79 @@ pub enum ContentSubmissionRepositoryError {
     LostDuplicateRace,
     #[error("content action persistence failed")]
     ContentAction(#[from] ContentActionRepositoryError),
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::PgPool;
+
+    use super::{ContentSubmissionInput, SubmissionTaskResolution, apply_content_submission};
+
+    #[sqlx::test(migrations = false)]
+    async fn ordinary_submission_promotes_a_completed_deck_source(pool: PgPool) {
+        crate::run_migrations(&pool).await.unwrap();
+        let user_id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('deck-source-promotion', 'deck-source-promotion@example.com', FALSE, TRUE) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let mut input = ContentSubmissionInput {
+            url: "https://example.test/deck-source-promotion",
+            title: None,
+            platform: None,
+            instruction: None,
+            crawl_links: false,
+            subscribe_to_feed: false,
+            share_and_chat: false,
+            chat_initial_message: None,
+            save_to_knowledge_and_mark_read: false,
+            deck_source_only: true,
+            user_id,
+            submitted_via: "learning_deck",
+        };
+        let mut transaction = pool.begin().await.unwrap();
+        let first = apply_content_submission(&mut transaction, &input)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+        assert_eq!(
+            first.task_resolution,
+            SubmissionTaskResolution::EnqueueAnalyze
+        );
+
+        sqlx::query("UPDATE contents SET status = 'completed' WHERE id::bigint = $1")
+            .bind(first.content_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        input.deck_source_only = false;
+        input.submitted_via = "share_sheet";
+        let mut transaction = pool.begin().await.unwrap();
+        let promoted = apply_content_submission(&mut transaction, &input)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+        assert_eq!(promoted.content_id, first.content_id);
+        assert_eq!(promoted.status, "new");
+        assert_eq!(
+            promoted.task_resolution,
+            SubmissionTaskResolution::EnqueueAnalyze
+        );
+
+        input.deck_source_only = true;
+        let mut transaction = pool.begin().await.unwrap();
+        apply_content_submission(&mut transaction, &input)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+        let source_only = sqlx::query_scalar::<_, bool>(
+            "SELECT (content_metadata->'processing'->>'deck_source_only')::bool FROM contents WHERE id::bigint = $1",
+        )
+        .bind(first.content_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!source_only);
+    }
 }

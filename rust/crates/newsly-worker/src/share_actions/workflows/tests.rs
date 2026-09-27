@@ -6,6 +6,29 @@ use serde_json::{Map, Value};
 use super::{ShareActionHostInput, build_host_action, validated_scraper_type};
 
 #[test]
+fn presentation_uses_the_shared_url_without_agent_output() {
+    let mut task = snapshot("presentation");
+    task.input
+        .insert("title".to_owned(), Value::from("Rust digest"));
+    task.input.insert(
+        "interests_prompt".to_owned(),
+        Value::from("Focus on compilers"),
+    );
+    let action = super::build_deterministic_presentation_action(&task).unwrap();
+    assert_eq!(action.action_name, "create_learning_deck");
+    let ShareActionHostInput::LearningDeck(input) = action.typed_input else {
+        panic!("expected a deck action");
+    };
+    assert_eq!(input.source_url, "https://this-week-in-rust.org/");
+    assert_eq!(input.title.as_deref(), Some("Rust digest"));
+    assert_eq!(
+        input.interests_prompt.as_deref(),
+        Some("Focus on compilers")
+    );
+    assert!(super::build_deterministic_presentation_action(&snapshot("chat")).is_err());
+}
+
+#[test]
 fn add_feed_action_uses_the_host_validated_url_and_format() {
     let snapshot = snapshot("add_feed");
     let result = ShareActionAgentResult {

@@ -17,6 +17,7 @@ const PROCESSING_FIELDS: &[&str] = &[
     "canonical_content_id",
     "tweet_enrichment",
     "tweet_only",
+    "deck_source_only",
 ];
 
 pub(super) fn build_new_metadata(

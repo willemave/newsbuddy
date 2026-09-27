@@ -324,6 +324,12 @@ Content bodies are staged by hash and published only through the exact fenced
 transaction. Feed links returned by extraction are candidates; Rust validates
 and persists subscriptions/backfill work.
 
+Deck-only submissions share the canonical content identity but carry a durable
+source-only processing flag. They extract readable source text without editorial
+summarization or content artwork. An ordinary submission clears that flag and
+reenqueues full processing when the source-only row had completed; requesting
+a deck from already processed content does not downgrade it.
+
 Scheduled and backfill dispatchers enqueue one task per configured feed/Reddit
 source or global aggregator. Each leaf prepares only its selected configuration,
 runs provider work independently, and fences that configuration at persistence.
@@ -452,8 +458,11 @@ Provider response IDs support resumable operations without replaying accepted
 work.
 
 Directly verified Share feeds and articles/episodes use the existing host action
-finalizer without starting an agent. Ambiguous discovery retains the agent path;
-rejected feed output can recover only a host-verified original item.
+finalizer without starting an agent. Explicit chat and presentation requests also
+build host actions from their validated input without an agent; presentation
+persists its source and deck generation task in the fenced finalizer. Ambiguous
+discovery retains the agent path; rejected feed output can recover only a
+host-verified original item.
 
 Learning Deck and Share Action agents use the same Newsly-owned agent runtime,
 E2B session layer, workspace bounds, artifact validators, and signed artifact
@@ -544,8 +553,11 @@ items through host tools, and atomically publish only explicitly selected, bound
 back when their object is missing. The sandbox cannot call back
 into Newsly, read provider credentials, use passwordless sudo, or write outside
 its task workspace. `newsly-vm-bootstrap` performs feed and capability
-operations inside the sandbox. Other sandbox workload languages are not
-backend authorities.
+operations inside the sandbox. Capability probing checks Playwright and the
+Chromium executable without starting a browser; deck artifact validation still
+launches Chromium. The capability command remains bounded by the task deadline
+and transport idle limit. Other sandbox workload languages are not backend
+authorities.
 
 ## 10. Python islands
 

@@ -194,6 +194,7 @@ pub(crate) async fn create_deck(
                         share_and_chat: false,
                         chat_initial_message: None,
                         save_to_knowledge_and_mark_read: true,
+                        deck_source_only: true,
                         user_id: current_user.id,
                         submitted_via: "learning_deck",
                     },

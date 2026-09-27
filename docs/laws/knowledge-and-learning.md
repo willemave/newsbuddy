@@ -10,7 +10,7 @@ K4. Knowledge preserves source provenance and remains authoritative over best-ef
 
 K5. Knowledge combines saved items, chats, Learning Decks, and narrations in one reverse-chronological stream. Entries stay compact and keep titles to one trailing-truncated line. A saved item's activity time is when that user saved it, not when the source was published or ingested. Failure in one source cannot erase the others.
 
-K6. A Learning Deck keeps one explicit source identity, its notes, and its attribution. A URL submitted for a deck becomes saved source material and stays out of unread Briefing.
+K6. A Learning Deck keeps one explicit source identity, its notes, and its attribution. A URL submitted for a deck becomes saved source material and stays out of unread Briefing. A source saved only for a deck is prepared as readable text without an editorial summary or content artwork; a later ordinary submission may promote the same source to full content processing.
 
 K7. At most one deck generation is active per user, and rerunning the same source reuses its deck identity.
 

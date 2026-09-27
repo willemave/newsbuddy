@@ -150,7 +150,7 @@ pub async fn apply_media_mutation(
     }
 
     let mut metadata = metadata_map(&content.content_metadata);
-    let next_task = match mutation {
+    let mut next_task = match mutation {
         MediaMutation::PodcastCompleted {
             body,
             transcript,
@@ -320,6 +320,13 @@ pub async fn apply_media_mutation(
         }
     };
 
+    if matches!(next_task, Some(MediaNextTask::Summarize))
+        && runtime_value(&metadata, "deck_source_only").and_then(Value::as_bool) == Some(true)
+    {
+        next_task = None;
+        "completed".clone_into(&mut content.status);
+        content.processed_at = Some(Utc::now().naive_utc());
+    }
     update_content(transaction, &content, Value::Object(metadata)).await?;
     Ok(MediaApplyOutcome::Applied { next_task })
 }

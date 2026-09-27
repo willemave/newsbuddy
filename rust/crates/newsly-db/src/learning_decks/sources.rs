@@ -116,7 +116,7 @@ pub async fn convert_news_item_to_learning_deck_source(
         )
         VALUES (
             'article', $1, $1, $2, $3, 'pending', 0,
-            NULL, NULL, FALSE, '{}'::jsonb, timezone('UTC', now()), timezone('UTC', now())
+            NULL, NULL, FALSE, '{"deck_source_only":true,"processing":{"deck_source_only":true}}'::jsonb, timezone('UTC', now()), timezone('UTC', now())
         )
         ON CONFLICT (url, content_type) DO NOTHING
         RETURNING id::bigint

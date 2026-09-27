@@ -321,6 +321,24 @@ pub fn build_deterministic_chat_action(
     ))
 }
 
+pub(crate) fn build_deterministic_presentation_action(
+    task: &ShareActionAgentSnapshot,
+) -> Result<PreparedHostAction, ShareActionWorkflowError> {
+    if task.mode != "presentation" {
+        return Err(ShareActionWorkflowError::UnsupportedMode(task.mode.clone()));
+    }
+    let input = ShareActionHostInput::LearningDeck(LearningDeckActionInput {
+        source_url: required_input_url(task)?,
+        title: input_optional_text(task, "title"),
+        interests_prompt: input_optional_text(task, "interests_prompt"),
+    });
+    Ok(prepare_host_action(
+        "create_learning_deck",
+        input,
+        Some("Create the requested deck from its saved source".to_owned()),
+    ))
+}
+
 /// Strictly decodes an already-approved durable action before applying it from the HTTP callback.
 /// The action name must be the single host action owned by the task mode, and unknown input fields
 /// are rejected rather than silently ignored.

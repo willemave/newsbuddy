@@ -450,7 +450,7 @@ impl ShareActionApplicator<'_> {
                     instruction: None,
                     chat_initial_message: None,
                 },
-                ShareSubmissionPolicy::content_saved(),
+                ShareSubmissionPolicy::deck_source(),
             )
             .await?;
             content_id = Some(submitted.content_id);

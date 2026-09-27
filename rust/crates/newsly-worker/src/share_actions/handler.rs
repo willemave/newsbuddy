@@ -14,7 +14,10 @@ use crate::{HandlerExecution, LeaseHealth};
 use super::agent::ShareActionAgentRuntime;
 use super::finalizer::{ShareActionFailureFinalizer, ShareActionSuccessFinalizer};
 use super::submission::{ShareSubmissionPolicy, submit_content_action};
-use super::workflows::{ContentActionInput, build_deterministic_chat_action, build_host_action};
+use super::workflows::{
+    ContentActionInput, build_deterministic_chat_action, build_deterministic_presentation_action,
+    build_host_action,
+};
 
 /// Outcome used by the shared `run_llm_task` dispatcher.
 ///
@@ -163,6 +166,8 @@ impl ShareActionTaskExecutor {
                 };
                 let policy = if draft.mode == "chat" {
                     ShareSubmissionPolicy::chat()
+                } else if draft.mode == "presentation" {
+                    ShareSubmissionPolicy::deck_source()
                 } else {
                     ShareSubmissionPolicy::content_saved()
                 };
@@ -210,8 +215,13 @@ impl ShareActionTaskExecutor {
             snapshot
         };
 
-        if snapshot.mode == "chat" {
-            return match build_deterministic_chat_action(&snapshot) {
+        if matches!(snapshot.mode.as_str(), "chat" | "presentation") {
+            let action = if snapshot.mode == "chat" {
+                build_deterministic_chat_action(&snapshot)
+            } else {
+                build_deterministic_presentation_action(&snapshot)
+            };
+            return match action {
                 Ok(action) => {
                     ShareActionDispatchOutcome::Handled(HandlerExecution::with_finalizer(
                         TaskResult::ok(),

@@ -151,6 +151,7 @@ impl XSyncFinalizer {
                         share_and_chat: false,
                         chat_initial_message: None,
                         save_to_knowledge_and_mark_read: false,
+                        deck_source_only: false,
                         user_id: self.plan.prepared.user_id,
                         submitted_via: "x_bookmarks",
                     },

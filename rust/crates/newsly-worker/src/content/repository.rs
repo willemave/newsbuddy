@@ -22,6 +22,10 @@ use super::model::{
 };
 use super::storage::StagedContentBody;
 
+mod feed_url;
+
+use feed_url::{canonicalize_feed_url, feed_display_name};
+
 const PROCESSING_KEY: &str = "processing";
 const DOMAIN_KEY: &str = "domain";
 const CONTENT_USER_LOCK_ATTEMPTS: usize = 2;
@@ -123,6 +127,7 @@ impl ContentFinalizer {
                     platform.as_deref(),
                     &[],
                     *subscribe_to_feed,
+                    false,
                 )
                 .await?;
             }
@@ -180,6 +185,7 @@ impl ContentFinalizer {
                     platform.as_deref(),
                     feed_candidates,
                     *subscribe_to_feed,
+                    *body_char_count > 0,
                 )
                 .await?;
                 apply_instruction_links(
@@ -363,12 +369,20 @@ impl ContentFinalizer {
                 } else {
                     false
                 };
-                if !subscribed {
+                let source_only = deck_source_only(&metadata);
+                if !subscribed && !source_only {
                     let next_task = next_content_task(&metadata, content.platform.as_deref());
                     enqueue_content_task(transaction, &self.queue, next_task, content.id).await?;
                 }
 
-                if subscribed { "skipped" } else { "processing" }.clone_into(&mut content.status);
+                if subscribed {
+                    "skipped"
+                } else if source_only {
+                    "completed"
+                } else {
+                    "processing"
+                }
+                .clone_into(&mut content.status);
                 content.error_message = None;
                 content.processed_at = Some(Utc::now().naive_utc());
                 content.publication_date = article
@@ -569,6 +583,7 @@ async fn finalize_analysis(
     platform: Option<&str>,
     feed_candidates: &[FeedCandidate],
     subscribe_to_feed: bool,
+    source_body_ready: bool,
 ) -> Result<(), ContentRepositoryError> {
     attach_feed_candidates(metadata, feed_candidates);
     if let Some(platform) = platform.and_then(nonempty) {
@@ -594,11 +609,22 @@ async fn finalize_analysis(
         "skipped".clone_into(&mut content.status);
         content.error_message = None;
         content.processed_at = Some(Utc::now().naive_utc());
+    } else if deck_source_only(metadata)
+        && source_body_ready
+        && matches!(content_type, "article" | "news")
+    {
+        "completed".clone_into(&mut content.status);
+        content.error_message = None;
+        content.processed_at = Some(Utc::now().naive_utc());
     } else {
         enqueue_content_task(transaction, queue, TaskType::ProcessContent, content.id).await?;
     }
     update_content(transaction, content, metadata.clone()).await?;
     Ok(())
+}
+
+fn deck_source_only(metadata: &Map<String, Value>) -> bool {
+    runtime_value(metadata, "deck_source_only").and_then(Value::as_bool) == Some(true)
 }
 
 async fn apply_instruction_links(
@@ -1721,31 +1747,6 @@ fn nonempty(value: &str) -> Option<&str> {
 
 fn truncate_chars(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
-}
-
-fn canonicalize_feed_url(value: &str) -> String {
-    let Ok(mut url) = Url::parse(value.trim()) else {
-        return value.trim().trim_end_matches('/').to_owned();
-    };
-    url.set_fragment(None);
-    let path = url.path().trim_end_matches('/').to_owned();
-    url.set_path(&path);
-    url.to_string()
-}
-
-fn feed_display_name(candidate: &FeedCandidate, content: &LockedContent) -> String {
-    let host = Url::parse(&candidate.url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_owned));
-    let selected = candidate
-        .title
-        .as_deref()
-        .and_then(nonempty)
-        .or_else(|| content.title.as_deref().and_then(nonempty))
-        .or(host.as_deref())
-        .unwrap_or("Feed")
-        .to_owned();
-    truncate_chars(&selected, 255)
 }
 
 fn is_terminal_status(status: &str) -> bool {

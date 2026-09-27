@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-26 — detached `83f93acb` — Disposable E2B template deck canary
+
+- **Status:** Complete locally.
+- **Scope:** Predeploy end-to-end validation of the deck-only Share Action and rebuilt E2B VM bootstrap.
+- **Decisions:** Build a uniquely named template from an exact snapshot of the current checkout; leave the canonical `newsly-agent` template untouched.
+- **Validation:** Built `newsly-agent-predeploy-0926234851-ac78` with `newsly-vm-bootstrap` from the current source, then submitted a presentation Share Action against a disposable local PostgreSQL database and local services. Share Action and URL analysis completed; the deck task completed with zero retries and generated a viewable nine-slide deck with source notes. The saved source was marked `deck_source_only`, and no content processing, summary, or image task was queued. The sandbox's recorded template revision matched the current source inputs, its Chromium/Playwright capability probe passed, and browser validation passed. Deck generation took 277.9s in this run; one model-driven run does not establish a performance gain. Evidence is in `/tmp/newsly-e2b-predeploy.tJfWbW`.
+- **Cleanup:** Deleted only the disposable E2B template, stopped the local services, and dropped the disposable database; verified the canonical `newsly-agent` alias remains.
+- **Remaining:** Publishing the rebuilt canonical E2B template is a separate release action from the Docker deployment. A production canary and retry of the original failed deck request still require release authorization.
+- **Commits:** Uncommitted.
+
 ### 2026-09-26 — detached `83f93acb` — PostgreSQL JSON persistence repairs
 
 - **Status:** Complete locally.
@@ -37,6 +47,26 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** All 91 `newsly-db` tests passed against isolated PostgreSQL databases; warning-denied all-target `newsly-db` Clippy, Rust formatting, and diff checks passed. Structured production worker logs showed 29 JSON conversion errors across eight X tasks and none in other task types; API logs showed no observed scraper config failure. Static audit found no other unsafe mixed-type JSON `CASE` or `COALESCE` expression.
 - **Remaining:** Production deployment and another X reconnection are required to resume bookmark syncing; the refresh-token rejection's original cause remains unconfirmed.
 - **Commits:** See git history.
+
+### 2026-09-26 — `main` — Pin briefing news category strip
+
+- **Status:** Complete
+- **Scope:** iOS briefing header chrome (`BriefingView`, `BriefingChromeCollapse`, `BriefingViewModel`).
+- **Decisions:** The news category (sub-lens) strip now stays pinned under the tier strip while reading; only the masthead collapses on scroll. The scroll-collapse / tap-to-reopen strip state was removed rather than kept as a fallback.
+- **Changes:** Dropped `isCategoryStripExpanded`, `categoryStripPinnedOpen`, and `noteScrolledDown`; the collapsible chrome height is now the masthead alone, so read-marking and content insets follow automatically.
+- **Validation:** `BriefingViewModelNavigationTests`, `BriefingViewModelTests`, `BriefingReadMarkingTests` pass on iPhone 17 Pro sim. Not visually checked in the simulator.
+- **Remaining:** None.
+- **Commits:** Uncommitted
+
+### 2026-09-26 — `main` — Deck source routing and E2B startup
+
+- **Status:** Complete locally
+- **Scope:** Share Action presentation, content submission and processing, Learning Deck sources, E2B capability probe.
+- **Decisions:** Explicit presentation requests create a host deck action directly. New deck-only sources carry a durable processing flag and stop after readable source extraction; an ordinary later submission promotes the same content to full processing. E2B checks browser availability without launching Chromium; deck browser validation still launches it.
+- **Changes:** Saved deck sources bypass generic summary and content artwork; removed nested capability-probe timeouts and preserved diagnostics.
+- **Validation:** Isolated SQLx source-promotion regression passed; 10 Share Action tests passed; 32 E2B/bootstrap tests passed; scoped warning-denied Clippy and format checks passed. A native local end-to-end presentation Share Action on a disposable database completed, extracted 11,848 source characters, queued no process/summary/image tasks, and produced a viewable nine-slide deck with source notes. Share Action, analysis, and deck task durations were 0.0s, 3.7s, and 86.5s. The disposable database and services were removed; report and artifacts are in `/tmp/newsly-deck-e2e.Y8ShQc`.
+- **Remaining:** The local E2B sandbox used the previously published template revision, so the changed in-VM static capability check is unit-tested but not yet exercised in a newly built template. Deploy and confirm a new deck request on production when release is authorized; the existing failed request requires a separate retry. Read-only external architecture review was blocked by automatic approval review.
+- **Commits:** Uncommitted.
 
 ### 2026-09-26 — `main` — Floating tab bar labels under icons
 

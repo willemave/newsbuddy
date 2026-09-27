@@ -29,10 +29,12 @@ pub(crate) struct AppliedShareFeedSubscription {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)] // Mirrors the shared submission's independent decisions.
 pub(crate) struct ShareSubmissionPolicy {
     pub subscribe_to_feed: bool,
     pub share_and_chat: bool,
     pub save_to_knowledge_and_mark_read: bool,
+    pub deck_source_only: bool,
 }
 
 impl ShareSubmissionPolicy {
@@ -41,6 +43,16 @@ impl ShareSubmissionPolicy {
             subscribe_to_feed: false,
             share_and_chat: false,
             save_to_knowledge_and_mark_read: true,
+            deck_source_only: false,
+        }
+    }
+
+    pub(crate) const fn deck_source() -> Self {
+        Self {
+            subscribe_to_feed: false,
+            share_and_chat: false,
+            save_to_knowledge_and_mark_read: true,
+            deck_source_only: true,
         }
     }
 
@@ -49,6 +61,7 @@ impl ShareSubmissionPolicy {
             subscribe_to_feed: false,
             share_and_chat: false,
             save_to_knowledge_and_mark_read: false,
+            deck_source_only: false,
         }
     }
 
@@ -57,6 +70,7 @@ impl ShareSubmissionPolicy {
             subscribe_to_feed: false,
             share_and_chat: true,
             save_to_knowledge_and_mark_read: true,
+            deck_source_only: false,
         }
     }
 }
@@ -163,6 +177,7 @@ async fn submit(
             share_and_chat: policy.share_and_chat,
             chat_initial_message,
             save_to_knowledge_and_mark_read: policy.save_to_knowledge_and_mark_read,
+            deck_source_only: policy.deck_source_only,
             user_id,
             submitted_via: "share_action",
         },
