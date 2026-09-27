@@ -29,11 +29,11 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ### 2026-09-27 — `willem/aggregator-freshness` — Release preparation
 
-- **Status:** Release validation in progress.
+- **Status:** Release blocked by the mandatory live Learning Deck smoke.
 - **Scope:** Aggregator freshness and demand gating implementation from the 2026-09-24 entry.
 - **Decisions:** Rebased onto current `origin/main` before the release gate. Split four touched modules to satisfy the repository's size guardrails; the code rebase was clean and both sides of the append-only log were retained.
-- **Validation:** Pre-commit module guardrails and Rust formatting passed; affected API and worker targets passed `cargo check` before the rebase. The first release gate stopped at warning-denied Clippy on wildcard imports introduced by the module split; explicit imports fixed it, and workspace Clippy now passes. The complete release gate and live provider smoke remain to rerun on the corrected commit.
-- **Remaining:** Run the release gate, push the exact tested SHA, and prove production revision and ingestion behavior.
+- **Validation:** Pre-commit module guardrails and Rust formatting passed; affected API and worker targets passed `cargo check` before the rebase. Explicit imports fixed the first gate's Clippy failure. Two complete gate runs on `b3fa89b0` passed Rust, SQLx, contracts, Python, iOS simulator tests, and AXe smoke; both live matrices passed authentication, direct chat, share-to-chat, and failure/ownership checks. The first Learning Deck run failed browser validation because generated slides overflowed the responsive canvas; the second exceeded the agent tool-call limit. Neither full gate passed.
+- **Remaining:** Resolve or isolate the live Learning Deck smoke blocker, rerun the complete gate on a clean exact commit, then push and prove production revision and ingestion behavior. No push or deployment occurred.
 - **Commits:** See git history.
 
 ### 2026-09-24 — `HEAD` — Aggregator freshness and demand gating
