@@ -67,7 +67,7 @@ struct BriefingSegmentHeadlineView: View {
                         Text(publisher.uppercased())
                             .font(.editorialMeta)
                             .tracking(1.6)
-                            .foregroundStyle(Color.brandPrimary)
+                            .foregroundStyle(Color.onSurfaceSecondary)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
@@ -81,7 +81,8 @@ struct BriefingSegmentHeadlineView: View {
 
                 Text(headline.title)
                     .font(.appSerif(size: 22, relativeTo: .title2, weight: .medium))
-                    .foregroundStyle(Color.onSurface)
+                    // Same accent as inline source links, so it reads as tappable.
+                    .foregroundStyle(Color.brandPrimary)
                     .lineSpacing(1)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
