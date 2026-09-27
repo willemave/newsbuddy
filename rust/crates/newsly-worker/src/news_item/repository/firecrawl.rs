@@ -1,4 +1,4 @@
-use super::*;
+use super::{NewsRow, Postgres, SUPPORTED_AGGREGATORS, Transaction};
 
 pub(super) async fn firecrawl_fallback_allowed(
     transaction: &mut Transaction<'_, Postgres>,

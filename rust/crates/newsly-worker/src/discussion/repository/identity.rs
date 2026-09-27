@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    DiscussionIdentity, NewsItemSource, Value, clean_string, clean_value, hacker_news_id,
+    infer_platform, nested_clean, nonnegative_i32, normalize_http_url, normalize_reddit_url,
+    reddit_submission_id,
+};
 
 pub(super) fn resolve_identity(news_item: &NewsItemSource) -> Option<DiscussionIdentity> {
     let metadata = news_item.raw_metadata.as_object();
