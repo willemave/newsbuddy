@@ -482,12 +482,12 @@ pub(super) async fn dig_search(
     validate_fragment(&payload.fragment, &request_id)?;
     verify_external_operation(&state, &stamp, &request_id).await?;
     let started_at = Instant::now();
-    let results = dig_gateway(&request_id)?
+    let outcome = dig_gateway(&request_id)?
         .search(&truncate_chars(&payload.fragment, 200))
         .await
         .map_err(|error| provider_error(&error, &request_id))?;
     let elapsed_ms = elapsed_millis(started_at);
-    persist_dig_usage(
+    if let Err(error) = persist_dig_usage(
         &state,
         &stamp,
         current_user.id,
@@ -497,11 +497,29 @@ pub(super) async fn dig_search(
         &request_id,
         None,
         None,
-        json!({"result_count": results.len()}),
+        json!({
+            "result_count": outcome.usage.result_count,
+            "summary_count": outcome.usage.summary_count,
+            "text_count": outcome.usage.text_count,
+            "search_type": "auto",
+            "contents_text_requested": true,
+            "contents_summary_requested": true,
+            "livecrawl": "fallback",
+            "cost_status": "unpriced",
+            "cost_reason": "Exa response does not expose every billable search, contents, summary, and livecrawl unit",
+            "cost_source_url": "https://exa.ai/pricing"
+        }),
     )
-    .await?;
+    .await
+    {
+        tracing::error!(error = ?error, request_id, "failed to record Exa Briefing Dig usage");
+    }
     Ok(Json(BriefingDigSearchResponse {
-        results: results.into_iter().map(present_search_result).collect(),
+        results: outcome
+            .results
+            .into_iter()
+            .map(present_search_result)
+            .collect(),
         elapsed_ms,
     }))
 }

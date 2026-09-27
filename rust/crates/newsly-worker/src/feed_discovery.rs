@@ -13,6 +13,7 @@ use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::onboarding_discovery::normalize_seeds;
+use crate::task_tools::{ExaSearchUsage, record_exa_tool_usage};
 use crate::{
     HandlerExecution, HandlerFinalizerFuture, HandlerFuture, LeaseHealth, TaskFinalizer,
     TaskFinalizerResult, TaskHandler,
@@ -141,16 +142,32 @@ async fn execute_feed_discovery(
         );
     }
     let (profile_summary, inferred_topics) = discovery_context(&snapshot);
-    let seeds = match services
+    let outcome = match services
         .provider
         .fast_discover(&profile_summary, &inferred_topics)
         .await
     {
-        Ok(seeds) => seeds,
+        Ok(outcome) => outcome,
         Err(error) => {
             return failure(services, task, snapshot, error.to_string(), true);
         }
     };
+    record_exa_tool_usage(
+        &services.pool,
+        request.user_id,
+        &format!("task-{}-attempt-{}", task.task_id, task.retry_count),
+        "feed_discovery.search",
+        ExaSearchUsage {
+            request_count: outcome.exa_usage.request_count,
+            result_count: outcome.exa_usage.result_count,
+            summary_count: outcome.exa_usage.summary_count,
+            text_count: outcome.exa_usage.text_count,
+            summary_requested: false,
+            text_requested: true,
+            livecrawl_fallback: false,
+        },
+    )
+    .await;
     if lease.ownership_lost() {
         return failure(
             services,
@@ -162,7 +179,7 @@ async fn execute_feed_discovery(
     }
     let suggestions = match normalize_seeds(
         &services.feed_validator,
-        seeds,
+        outcome.seeds,
         &profile_summary,
         &inferred_topics,
     )

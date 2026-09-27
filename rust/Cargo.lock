@@ -2506,6 +2506,7 @@ dependencies = [
  "base64",
  "buffa",
  "bytes",
+ "chrono",
  "connectrpc",
  "connectrpc-build",
  "futures-core",

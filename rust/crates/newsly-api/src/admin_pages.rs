@@ -284,7 +284,12 @@ fn render_dashboard(snapshot: &AdminDashboardSnapshot, range: &str) -> String {
             row.row_count,
             row.request_count,
             row.resource_count,
-            render_usage_cost(row.cost_usd, row.known_cost_usd, row.unpriced_call_count)
+            render_usage_cost(
+                row.cost_usd,
+                row.known_cost_usd,
+                row.public_list_estimate_usd,
+                row.unpriced_call_count
+            )
         );
     }
     html.push_str("</tbody></table><h2>Recent task failures</h2>");
@@ -359,6 +364,7 @@ fn render_vendor_usage(snapshot: &AdminVendorUsageSnapshot, query: &VendorUsageQ
         render_usage_cost(
             snapshot.totals.cost_usd,
             snapshot.totals.known_cost_usd,
+            snapshot.totals.public_list_estimate_usd,
             snapshot.totals.unpriced_call_count
         )
     );
@@ -372,7 +378,12 @@ fn render_vendor_usage(snapshot: &AdminVendorUsageSnapshot, query: &VendorUsageQ
             row.total_tokens,
             row.request_count,
             row.resource_count,
-            render_usage_cost(row.cost_usd, row.known_cost_usd, row.unpriced_call_count)
+            render_usage_cost(
+                row.cost_usd,
+                row.known_cost_usd,
+                row.public_list_estimate_usd,
+                row.unpriced_call_count
+            )
         );
     }
     html.push_str("</tbody></table><h2>Recent calls</h2><table><thead><tr><th>Time</th><th>Provider</th><th>Model</th><th>Feature</th><th>User</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>");
@@ -397,18 +408,28 @@ fn render_vendor_usage(snapshot: &AdminVendorUsageSnapshot, query: &VendorUsageQ
             escape_html(&row.feature),
             escape_html(&user),
             row.total_tokens.unwrap_or_default(),
-            row.cost_usd
-                .map_or_else(|| "Unknown".to_owned(), |cost| format!("${cost:.6}"))
+            row.cost_usd.map_or_else(
+                || "Unknown".to_owned(),
+                |cost| format!(
+                    "${cost:.6} ({})",
+                    escape_html(row.cost_basis.as_deref().unwrap_or("basis unknown"))
+                )
+            )
         );
     }
     html.push_str("</tbody></table></main></body></html>");
     html
 }
 
-fn render_usage_cost(cost: Option<f64>, known_cost: f64, unpriced_calls: i64) -> String {
+fn render_usage_cost(
+    cost: Option<f64>,
+    known_cost: f64,
+    estimated_cost: f64,
+    unpriced_records: i64,
+) -> String {
     cost.map_or_else(
-        || format!("Unknown (${known_cost:.6} known; {unpriced_calls} unpriced calls)"),
-        |cost| format!("${cost:.6}"),
+        || format!("Unknown (${known_cost:.6} priced subtotal, including ${estimated_cost:.6} public-list estimates; {unpriced_records} unpriced records)"),
+        |cost| format!("${cost:.6} (including ${estimated_cost:.6} public-list estimates)"),
     )
 }
 
@@ -454,13 +475,17 @@ mod usage_tests {
                 resource_count: 0,
                 cost_usd: None,
                 known_cost_usd: 0.25,
+                public_list_estimate_usd: 0.20,
                 unpriced_call_count: 1,
             },
         };
         let query: VendorUsageQuery = serde_json::from_value(serde_json::json!({})).unwrap();
         let html = render_vendor_usage(&snapshot, &query);
-        assert!(html.contains("Unknown ($0.250000 known; 1 unpriced calls)"));
+        assert!(html.contains("Unknown ($0.250000 priced subtotal, including $0.200000 public-list estimates; 1 unpriced records)"));
         assert!(!html.contains("<strong>$0.000000</strong>"));
-        assert_eq!(render_usage_cost(Some(0.0), 0.0, 0), "$0.000000");
+        assert_eq!(
+            render_usage_cost(Some(0.0), 0.0, 0.0, 0),
+            "$0.000000 (including $0.000000 public-list estimates)"
+        );
     }
 }

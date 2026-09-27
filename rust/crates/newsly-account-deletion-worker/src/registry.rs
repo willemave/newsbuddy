@@ -140,6 +140,11 @@ pub const USER_OWNED_RELATIONS: &[UserOwnedRelation] = &[
         "DELETE FROM learning_decks WHERE user_id::bigint = $1",
     ),
     owned_relation(
+        "task_sandbox_sessions",
+        "user_id",
+        "DELETE FROM task_sandbox_sessions WHERE user_id::bigint = $1",
+    ),
+    owned_relation(
         "llm_tasks",
         "user_id",
         "DELETE FROM llm_tasks WHERE user_id::bigint = $1",

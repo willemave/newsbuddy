@@ -58,7 +58,9 @@ P26. Discussion summaries and news key points expose their persisted character l
 
 Briefing has one bounded correction budget with actionable validation feedback. Exhausted unchanged input cannot immediately restart through a new queue job; materially changed input or generator/parser version is eligible, and unchanged input has a bounded later recovery time. The previous usable edition remains readable.
 
-P27. Usage reports distinguish unknown cost from a known zero charge. Any aggregate containing unpriced calls has an unknown total and separately reports its known subtotal and unpriced call count. Missing historical prices are never invented.
+P27. Usage reports distinguish unknown cost from a known zero charge. Any aggregate containing unpriced records has an unknown total and separately reports its priced subtotal, public list-price estimate portion, and unpriced record count. Missing historical prices are never invented.
+
+New usage may carry a public list-price estimate only when its billable unit, exact model or resource size, and applicable service tier are known. Reports identify that estimated portion separately from provider-reported charges. A running E2B sandbox remains visible with unknown final cost; confirmed cleanup records its measured lifetime once, while a missing sandbox with an unknown stop time stays unpriced. Repeated cleanup or product finalization must not double-count one sandbox.
 
 Observed Briefing usage is recorded independently of successful edition publication, including rejected output and accepted sibling units. Re-recording an observed attempt does not double-count it. Provider failures without observable usage remain explicitly unknown; absent token counts and historical responses are not reconstructed as facts.
 

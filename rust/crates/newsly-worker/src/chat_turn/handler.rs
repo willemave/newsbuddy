@@ -318,7 +318,7 @@ impl TaskHandler for ChatPartitionHandler {
     }
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {
-        Box::pin(async move { self.execute_inner(&plan, lease).await })
+        Box::pin(async move { Box::pin(self.execute_inner(&plan, lease)).await })
     }
 }
 

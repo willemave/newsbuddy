@@ -15,7 +15,7 @@ use newsly_contracts::{
 use newsly_db::{AgentLibraryContentProjection, list_agent_library_content};
 use newsly_providers::{
     BriefingDigGateway, BriefingDigGatewayError, BriefingWebSearchResult, ContentMiscGatewayError,
-    PodcastEpisodeHit,
+    ExaSearchUsage, PodcastEpisodeHit,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -57,7 +57,7 @@ pub(super) fn router() -> Router<AppState> {
 pub(super) async fn search_agent(
     State(state): State<AppState>,
     headers: HeaderMap,
-    _current_user: AuthenticatedUser,
+    current_user: AuthenticatedUser,
     payload: Result<Json<AgentSearchRequest>, JsonRejection>,
 ) -> Result<Json<AgentSearchResponse>, ApiError> {
     let request_id = request_id_from_headers(&headers);
@@ -76,6 +76,14 @@ pub(super) async fn search_agent(
         .search_limit(query, payload.limit)
         .await
         .map_err(|error| search_provider_error(&error, &request_id))?;
+    record_exa_search_usage(
+        &state,
+        current_user.id,
+        &request_id,
+        "agent.search_web",
+        web.usage,
+    )
+    .await;
     let podcasts = if payload.include_podcasts {
         state
             .content_misc
@@ -85,7 +93,7 @@ pub(super) async fn search_agent(
     } else {
         Vec::new()
     };
-    let mut results = web.into_iter().map(present_web).collect::<Vec<_>>();
+    let mut results = web.results.into_iter().map(present_web).collect::<Vec<_>>();
     results.extend(podcasts.into_iter().map(present_podcast));
     results.truncate(payload.limit);
     Ok(Json(AgentSearchResponse { results }))
@@ -546,6 +554,53 @@ fn require_personal_markdown(request_id: &str) -> Result<(), ApiError> {
             "Personal markdown library is disabled",
             request_id,
         ))
+    }
+}
+
+async fn record_exa_search_usage(
+    state: &AppState,
+    user_id: i64,
+    request_id: &str,
+    operation: &str,
+    usage: ExaSearchUsage,
+) {
+    let metadata = serde_json::json!({
+        "result_count": usage.result_count,
+        "summary_count": usage.summary_count,
+        "text_count": usage.text_count,
+        "search_type": "auto",
+        "contents_text_requested": true,
+        "contents_summary_requested": true,
+        "livecrawl": "fallback",
+        "cost_status": "unpriced",
+        "cost_reason": "Exa response does not expose every billable search, contents, summary, and livecrawl unit",
+        "cost_source_url": "https://exa.ai/pricing"
+    });
+    if let Err(error) = sqlx::query(
+        r"
+        INSERT INTO vendor_usage_records (
+            provider, model, feature, operation, source, request_id, user_id,
+            request_count, resource_count, cost_usd, currency, pricing_version,
+            cost_basis, metadata, idempotency_key, created_at
+        ) VALUES (
+            'exa', 'search', 'agent_search', $1, 'api', $2, $3::bigint::integer,
+            $4, $5, NULL, 'USD', NULL,
+            'unpriced_incomplete_provider_units', $6,
+            concat('exa:', $1::text, ':', $2::text), timezone('UTC', clock_timestamp())
+        )
+        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+        ",
+    )
+    .bind(operation)
+    .bind(request_id)
+    .bind(user_id)
+    .bind(i32::try_from(usage.request_count).unwrap_or(i32::MAX))
+    .bind(i32::try_from(usage.result_count).unwrap_or(i32::MAX))
+    .bind(metadata)
+    .execute(state.database.pool())
+    .await
+    {
+        tracing::error!(error = %error, operation, request_id, "failed to record Exa search usage");
     }
 }
 

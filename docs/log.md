@@ -27,6 +27,15 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-27 — `main` — Settings header app icon
+
+- **Status:** Complete locally.
+- **Scope:** iOS `SettingsBrandHeader`, `AppMark` image set.
+- **Decisions:** `AppMark` was a 64pt export shown at 96pt, which made it blurry, and it no longer matched the current icon. Regenerated it at 96pt (1x/2x/3x) from the light/dark `AppIcon` masters. The now-playing artwork also uses this set. Added a `borderSubtle` hairline because the dark icon tile blends into the sheet surface.
+- **Validation:** Simulator build succeeded. Not visually verified on device.
+- **Remaining:** None.
+- **Commits:** Uncommitted.
+
 ### 2026-09-27 — `main` — Reprocess unavailable Knowledge saves
 
 - **Status:** Complete locally. Not deployed.
@@ -35,6 +44,16 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** The status sheet now uses the mini-sheet header and option rows at a fitted height. It shows the item title, a status-specific message, Reprocess (unavailable/stalled) or Check progress (preparing), Open original, and Remove, with an inline error when reprocess fails. Law K18 added.
 - **Validation:** Warning-denied Clippy for newsly-api; newsly-db lib Clippy clean (all-targets Clippy fails only on pre-existing vendor-cost test code in `admin.rs`). Four SQLx tests for reset/not-saved/ready/active-task passed; newsly-api tests passed; public contracts regenerated and checked. iOS ContentList/KnowledgeTimeline/ContentDetail unit tests passed, including the new reprocess reload test.
 - **Remaining:** Sheet not visually verified on simulator: the local API needs a restart onto this build and a failed saved item. Deploy only with a separately authorized release.
+- **Commits:** Uncommitted.
+
+### 2026-09-27 — `main` — Vendor spend accounting
+
+- **Status:** Complete locally. Not deployed.
+- **Scope:** Forward-looking vendor price catalog and usage attribution for model calls, E2B runtime, Exa search, transcription, and narration; operator and admin cost views.
+- **Decisions:** Preserve unknown historical cost and distinguish public list estimates from recorded charges. Price only exact models with measured units and supported request tiers. The 2 vCPU/2 GiB E2B template has a published component rate of $0.000037 per second. Persist an unpriced E2B intent before remote creation, then price exactly once after confirmed cleanup. Exa remains unpriced when add-on units or plan rates are unknown.
+- **Changes:** Added dated token rates, cost basis, E2B lifecycle ledger/reconciliation, observed Exa usage across API and worker paths, measured-duration transcription and model-aware ElevenLabs estimates. The CLI and admin views expose priced subtotals, estimate portions, and unpriced record counts. `docs/operations/vendor-costs.md` records rates and accounting limits.
+- **Validation:** Production baseline inspected read-only; published rates and cross-package design independently reviewed. Formatting and diff checks passed; warning-denied Clippy passed for affected DB, E2B, provider, worker, API, admin, and account-deletion crates. Focused SQLx tests for pricing, admin aggregation, and E2B lifecycle passed; provider, E2B, API, admin, and discovery tests passed. No paid live provider call was made.
+- **Remaining:** Deploy only after a separately authorized release. Reconcile account invoices for base plans and infrastructure, ambiguous E2B creation/account deletion races, provider requests lost during DB outages, and partial failed multichunk transcriptions; these cannot be asserted as exact spend from application rows.
 - **Commits:** Uncommitted.
 
 ### 2026-09-26 — detached `83f93acb` — Disposable E2B template deck canary
@@ -67,6 +86,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Validation:** `BriefingViewModelNavigationTests`, `BriefingViewModelTests`, `BriefingReadMarkingTests` pass on iPhone 17 Pro sim. Not visually checked in the simulator.
 - **Remaining:** None.
 - **Commits:** Uncommitted
+- **2026-09-27 follow-up:** Article/podcast segment headline title now uses the link accent (`brandPrimary`) so it reads as tappable; publisher kicker moved to `onSurfaceSecondary`, meta stays `onSurfaceTertiary`. Checked in simulator (dark mode, local API, user 41) on the Articles and Podcasts lenses.
 
 ### 2026-09-26 — `main` — Deck source routing and E2B startup
 
@@ -76,7 +96,6 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Saved deck sources bypass generic summary and content artwork; removed nested capability-probe timeouts and preserved diagnostics.
 - **Validation:** Isolated SQLx source-promotion regression passed; 10 Share Action tests passed; 32 E2B/bootstrap tests passed; scoped warning-denied Clippy and format checks passed. A native local end-to-end presentation Share Action on a disposable database completed, extracted 11,848 source characters, queued no process/summary/image tasks, and produced a viewable nine-slide deck with source notes. Share Action, analysis, and deck task durations were 0.0s, 3.7s, and 86.5s. The disposable database and services were removed; report and artifacts are in `/tmp/newsly-deck-e2e.Y8ShQc`.
 - **Remaining:** The local E2B sandbox used the previously published template revision, so the changed in-VM static capability check is unit-tested but not yet exercised in a newly built template. Deploy and confirm a new deck request on production when release is authorized; the existing failed request requires a separate retry. Read-only external architecture review was blocked by automatic approval review.
-- **2026-09-27 follow-up:** Article/podcast segment headline title now uses the link accent (`brandPrimary`) so it reads as tappable; publisher kicker moved to `onSurfaceSecondary`, meta stays `onSurfaceTertiary`. Checked in simulator (dark mode, local API, user 41) on the Articles and Podcasts lenses.
 - **Commits:** Uncommitted.
 
 ### 2026-09-26 — `main` — Floating tab bar labels under icons

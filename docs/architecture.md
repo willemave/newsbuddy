@@ -840,6 +840,15 @@ queue diagnostics, bounded failed-task inspection, usage summaries, and
 privacy-safe eval export. Mutations require explicit audit context and expected
 versions.
 
+`vendor_usage_records` is the durable meter for external calls and sandbox
+runtime. Forward-only token prices come from dated `vendor_token_price_rates`
+rows at the PostgreSQL insert boundary; exact model names, observed units,
+standard service tier, and short single-request context are required before a
+public list estimate is stored. `cost_basis` separates estimates from recorded
+vendor charges. E2B runtime has its own durable session identity because sandbox
+creation and cleanup span external calls and worker restarts. Fixed plan fees and
+self-hosted infrastructure remain separate from per-call vendor estimates.
+
 Structured `tracing` records request ID, component, operation, resource IDs,
 duration, ownership version, task lease/generation, and bounded error context.
 Secrets, tokens, prompt/user content, raw provider responses, and database URLs

@@ -18,11 +18,15 @@ use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
 #[path = "onboarding_agent_support.rs"]
 mod agent_support;
+#[path = "onboarding_exa.rs"]
+mod exa;
 #[path = "onboarding_lane_sources.rs"]
 mod lane_sources;
 #[path = "onboarding_model.rs"]
 mod model_config;
 use agent_support::{NoEvents, NoTools};
+use exa::search_exa;
+pub use exa::{OnboardingDiscoveryOutcome, OnboardingExaUsage, OnboardingProfileOutcome};
 use model_config::{AUDIO_PLAN_SYSTEM_PROMPT, ONBOARDING_MODEL, onboarding_provider_parameters};
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
 const EXA_MAX_CONCURRENCY: usize = 8;
@@ -153,6 +157,7 @@ struct SearchManyOutcome {
     results: Vec<WebResult>,
     attempted: usize,
     succeeded: usize,
+    usage: OnboardingExaUsage,
 }
 
 impl SearchManyOutcome {
@@ -214,17 +219,18 @@ impl OnboardingGateway {
         &self,
         first_name: &str,
         interest_topics: &[String],
-    ) -> Result<OnboardingProfile, OnboardingGatewayError> {
+    ) -> Result<OnboardingProfileOutcome, OnboardingGatewayError> {
         let queries = profile_queries(interest_topics, first_name);
-        let results = self
-            .search_many(queries, 3, false, PROFILE_TIMEOUT)
-            .await
-            .results;
+        let outcome = self.search_many(queries, 3, false, PROFILE_TIMEOUT).await;
+        let results = outcome.results;
         if results.is_empty() {
-            return Ok(OnboardingProfile {
-                profile_summary: profile_fallback_summary(first_name, interest_topics),
-                inferred_topics: merge_topics([interest_topics.iter().map(String::as_str)], 8),
-                candidate_sources: Vec::new(),
+            return Ok(OnboardingProfileOutcome {
+                profile: OnboardingProfile {
+                    profile_summary: profile_fallback_summary(first_name, interest_topics),
+                    inferred_topics: merge_topics([interest_topics.iter().map(String::as_str)], 8),
+                    candidate_sources: Vec::new(),
+                },
+                exa_usage: outcome.usage,
             });
         }
 
@@ -262,10 +268,13 @@ impl OnboardingGateway {
             ],
             8,
         );
-        Ok(OnboardingProfile {
-            profile_summary: output.profile_summary,
-            inferred_topics,
-            candidate_sources: output.candidate_sources,
+        Ok(OnboardingProfileOutcome {
+            profile: OnboardingProfile {
+                profile_summary: output.profile_summary,
+                inferred_topics,
+                candidate_sources: output.candidate_sources,
+            },
+            exa_usage: outcome.usage,
         })
     }
 
@@ -357,7 +366,7 @@ impl OnboardingGateway {
         &self,
         profile_summary: &str,
         inferred_topics: &[String],
-    ) -> Result<OnboardingDiscoverySeeds, OnboardingGatewayError> {
+    ) -> Result<OnboardingDiscoveryOutcome, OnboardingGatewayError> {
         let queries = discovery_queries(profile_summary, inferred_topics, 6);
         let outcome = self
             .search_many(queries, 12, false, FAST_DISCOVER_TIMEOUT)
@@ -365,16 +374,22 @@ impl OnboardingGateway {
         if outcome.all_attempts_failed() {
             return Err(OnboardingGatewayError::SearchUnavailable);
         }
+        let usage = outcome.usage;
         let mut results = outcome.results;
         dedupe_web_results(&mut results);
         results.truncate(DISCOVERY_PROMPT_MAX_RESULTS);
-        self.discovery_from_results(
-            "onboarding.fast_discover",
-            profile_summary,
-            inferred_topics,
-            &results,
-        )
-        .await
+        let seeds = self
+            .discovery_from_results(
+                "onboarding.fast_discover",
+                profile_summary,
+                inferred_topics,
+                &results,
+            )
+            .await?;
+        Ok(OnboardingDiscoveryOutcome {
+            seeds,
+            exa_usage: usage,
+        })
     }
 
     /// Gathers each persisted lane's evidence concurrently from the source that can ground its
@@ -389,7 +404,7 @@ impl OnboardingGateway {
         profile_summary: &str,
         inferred_topics: &[String],
         lanes: &[OnboardingAudioLane],
-    ) -> Result<OnboardingDiscoverySeeds, OnboardingGatewayError> {
+    ) -> Result<OnboardingDiscoveryOutcome, OnboardingGatewayError> {
         let gateway = self.clone();
         let topics = inferred_topics.to_vec();
         let groups = stream::iter(lanes.to_vec())
@@ -398,17 +413,30 @@ impl OnboardingGateway {
                 async move { gateway.lane_evidence(&lane, &topics).await }
             })
             .buffered(lanes.len().max(1))
-            .collect::<Vec<Result<Vec<_>, OnboardingGatewayError>>>()
+            .collect::<Vec<Result<lane_sources::LaneEvidence, OnboardingGatewayError>>>()
             .await;
         let groups = groups.into_iter().collect::<Result<Vec<_>, _>>()?;
+        let mut usage = OnboardingExaUsage::default();
+        let groups = groups
+            .into_iter()
+            .map(|group| {
+                usage.add_assign(group.exa_usage);
+                group.results
+            })
+            .collect::<Vec<_>>();
         let results = balanced_web_results(groups, DISCOVERY_PROMPT_MAX_RESULTS);
-        self.discovery_from_results(
-            "onboarding.audio_discover",
-            profile_summary,
-            inferred_topics,
-            &results,
-        )
-        .await
+        let seeds = self
+            .discovery_from_results(
+                "onboarding.audio_discover",
+                profile_summary,
+                inferred_topics,
+                &results,
+            )
+            .await?;
+        Ok(OnboardingDiscoveryOutcome {
+            seeds,
+            exa_usage: usage,
+        })
     }
 
     async fn discovery_from_results(
@@ -550,6 +578,7 @@ impl OnboardingGateway {
             match result {
                 Ok(results) => {
                     outcome.succeeded += 1;
+                    outcome.usage.record_search(&results);
                     outcome
                         .results
                         .extend(results.into_iter().map(|result| WebResult {
@@ -567,81 +596,6 @@ impl OnboardingGateway {
         }
         outcome
     }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaSearchRequest<'a> {
-    query: &'a str,
-    num_results: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    exclude_domains: Option<Vec<&'static str>>,
-    contents: ExaContents,
-}
-
-/// A short page excerpt per result, so the model selects on what a source covers rather than on
-/// its title alone. No summaries or live crawling: those are the slow, costly parts.
-#[derive(Debug, Serialize)]
-struct ExaContents {
-    text: ExaText,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaText {
-    max_characters: usize,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExaSearchResponse {
-    #[serde(default)]
-    results: Vec<ExaSearchRow>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaSearchRow {
-    title: Option<String>,
-    url: String,
-    summary: Option<String>,
-    text: Option<String>,
-    published_date: Option<String>,
-}
-
-async fn search_exa(
-    client: &reqwest::Client,
-    endpoint: Url,
-    api_key: &SecretString,
-    query: &str,
-    num_results: usize,
-    include_social: bool,
-    timeout: Duration,
-) -> Result<Vec<ExaSearchRow>, reqwest::Error> {
-    let payload = ExaSearchRequest {
-        query,
-        num_results,
-        exclude_domains: (!include_social).then(|| EXCLUDED_DOMAINS.to_vec()),
-        contents: ExaContents {
-            text: ExaText {
-                max_characters: DISCOVERY_SNIPPET_CHARS,
-            },
-        },
-    };
-    let response = client
-        .post(endpoint)
-        .timeout(timeout)
-        .header("x-api-key", api_key.expose_secret())
-        .json(&payload)
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<ExaSearchResponse>()
-        .await?;
-    Ok(response
-        .results
-        .into_iter()
-        .filter(|result| !result.url.trim().is_empty())
-        .collect())
 }
 
 fn profile_queries(topics: &[String], first_name: &str) -> Vec<String> {

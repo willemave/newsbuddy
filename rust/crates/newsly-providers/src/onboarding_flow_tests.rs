@@ -1,6 +1,7 @@
+use super::exa::{ExaContents, ExaSearchRequest, ExaText};
 use super::{
-    AUDIO_PLAN_SYSTEM_PROMPT, DISCOVERY_SNIPPET_CHARS, ExaContents, ExaSearchRequest, ExaText,
-    ONBOARDING_MODEL, OnboardingGateway, OnboardingLaneTarget, onboarding_provider_parameters,
+    AUDIO_PLAN_SYSTEM_PROMPT, DISCOVERY_SNIPPET_CHARS, ONBOARDING_MODEL, OnboardingGateway,
+    OnboardingLaneTarget, onboarding_provider_parameters,
 };
 
 #[test]

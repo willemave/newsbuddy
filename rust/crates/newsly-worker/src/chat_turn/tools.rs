@@ -41,7 +41,7 @@ use crate::share_actions::workflows::{
     ContentActionInput, FeedActionInput, validated_scraper_type,
 };
 use crate::task_sandbox::{AcquiredTaskSandbox, TaskSandboxOwner};
-use crate::task_tools::{ExaSearchClient, TaskToolExecutor};
+use crate::task_tools::{ExaSearchClient, TaskToolExecutor, record_exa_tool_usage};
 
 #[path = "tools/support.rs"]
 mod support;
@@ -446,7 +446,7 @@ impl ChatToolExecutor {
     async fn search_web(&self, call: ToolCall) -> Result<ToolOutput, AgentRuntimeError> {
         let input: WebSearchInput = arguments(&call)?;
         let query = bounded_query(&input.query)?;
-        let results = self
+        let outcome = self
             .dependencies
             .exa
             .search(
@@ -456,7 +456,15 @@ impl ChatToolExecutor {
             )
             .await
             .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
-        Ok(success(json!({"query": query, "results": results})))
+        record_exa_tool_usage(
+            &self.dependencies.pool,
+            self.snapshot.user_id,
+            &call.id,
+            "chat_tool.web_search",
+            outcome.usage,
+        )
+        .await;
+        Ok(success(json!({"query": query, "results": outcome.results})))
     }
 
     async fn find_feed_options(&self, call: ToolCall) -> Result<ToolOutput, AgentRuntimeError> {
@@ -464,19 +472,37 @@ impl ChatToolExecutor {
         let query = bounded_query(&input.query)?;
         let limit = input.limit.or(input.num_results).unwrap_or(5).clamp(1, 5);
         let topics = vec![query.to_owned()];
-        let seeds = self
-            .dependencies
-            .onboarding
-            .fast_discover(query, &topics)
+        let outcome = Box::pin(self.dependencies.onboarding.fast_discover(query, &topics))
             .await
             .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
-        let suggestions = normalize_seeds(&self.dependencies.feed_validator, seeds, query, &topics)
-            .await
-            .map_err(|error| {
-                AgentRuntimeError::Tool(format!(
-                    "Candidates were discovered, but feed validation failed: {error}"
-                ))
-            })?;
+        record_exa_tool_usage(
+            &self.dependencies.pool,
+            self.snapshot.user_id,
+            &call.id,
+            "chat_tool.find_feed_options",
+            crate::task_tools::ExaSearchUsage {
+                request_count: outcome.exa_usage.request_count,
+                result_count: outcome.exa_usage.result_count,
+                summary_count: outcome.exa_usage.summary_count,
+                text_count: outcome.exa_usage.text_count,
+                summary_requested: false,
+                text_requested: true,
+                livecrawl_fallback: false,
+            },
+        )
+        .await;
+        let suggestions = normalize_seeds(
+            &self.dependencies.feed_validator,
+            outcome.seeds,
+            query,
+            &topics,
+        )
+        .await
+        .map_err(|error| {
+            AgentRuntimeError::Tool(format!(
+                "Candidates were discovered, but feed validation failed: {error}"
+            ))
+        })?;
         let mut options = suggestions
             .into_iter()
             .filter_map(assistant_feed_option)

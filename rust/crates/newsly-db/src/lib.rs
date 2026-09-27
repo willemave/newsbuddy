@@ -67,6 +67,7 @@ mod share_actions;
 mod stats;
 mod task_sandboxes;
 mod users;
+mod vendor_pricing;
 mod vendor_usage;
 mod x_sync;
 
@@ -327,18 +328,20 @@ pub use stats::{
     get_long_form_unread_count, get_processing_counts, get_unread_counts,
 };
 pub use task_sandboxes::{
-    TaskSandboxCleanupCandidate, TaskSandboxRepositoryError, clear_task_sandbox,
-    find_recorded_task_sandbox, list_task_sandbox_cleanup_candidates,
-    mark_task_sandbox_cleanup_required, record_task_sandbox,
+    NewTaskSandboxSession, RecordedTaskSandbox, TaskSandboxCleanupCandidate, TaskSandboxEnd,
+    TaskSandboxProviderInfo, TaskSandboxRepositoryError, attach_task_sandbox,
+    begin_task_sandbox_session, finalize_task_sandbox_session, find_recorded_task_sandbox,
+    list_task_sandbox_cleanup_candidates, mark_task_sandbox_cleanup_required,
 };
 pub use users::{
     AppleUserUpsert, DebugUserPatch, UserProfilePatch, UserProfileProjection,
     UserProfileRepositoryError, create_or_update_debug_user, deactivate_active_user,
     find_or_create_apple_user, find_user_profile, update_user_profile,
 };
+pub(crate) use vendor_pricing::{elevenlabs_tts_cost, openai_transcription_cost};
 pub use vendor_usage::{
-    NewTranscriptionUsage, NewXUserLookupUsage, VendorUsageRepositoryError,
-    record_transcription_usage, record_x_user_lookup_usage,
+    NewNarrationTtsUsage, NewTranscriptionUsage, NewXUserLookupUsage, VendorUsageRepositoryError,
+    record_narration_tts_usage, record_transcription_usage, record_x_user_lookup_usage,
 };
 pub use x_sync::{
     NewXSyncUsage, PrepareXSyncOutcome, PreparedXSync, XSyncConnectionUpdate, XSyncRepositoryError,

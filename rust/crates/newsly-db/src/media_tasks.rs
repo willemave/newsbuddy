@@ -52,6 +52,10 @@ pub struct MediaTranscriptionUsage {
     pub chunk_count: i32,
     pub prompt_chars: i32,
     pub audio_size_bytes: i64,
+    pub audio_duration_ms: Option<u64>,
+    pub audio_duration_estimate_ms: Option<u64>,
+    pub duration_source: String,
+    pub standard_pricing: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +342,12 @@ pub async fn record_media_transcription_usage(
     transaction: &mut Transaction<'_, Postgres>,
     usage: &MediaTranscriptionUsage,
 ) -> Result<(), MediaTaskRepositoryError> {
+    let priced = crate::openai_transcription_cost(
+        &usage.model,
+        usage.audio_duration_ms,
+        usage.duration_source == "ffprobe",
+        usage.standard_pricing,
+    );
     sqlx::query(
         r#"
         INSERT INTO vendor_usage_records (
@@ -354,6 +364,8 @@ pub async fn record_media_transcription_usage(
             resource_count,
             currency,
             pricing_version,
+            cost_usd,
+            cost_basis,
             metadata,
             created_at
         ) VALUES (
@@ -371,11 +383,13 @@ pub async fn record_media_transcription_usage(
                 WHERE users.id::bigint = $5
                   AND users.is_active IS TRUE
             ),
-            1,
-            1,
-            'USD',
-            '2026-08-02',
             $6,
+            $7,
+            'USD',
+            $8,
+            $9,
+            $10,
+            $11,
             timezone('UTC', clock_timestamp())
         )
         "#,
@@ -385,12 +399,29 @@ pub async fn record_media_transcription_usage(
     .bind(usage.task_id)
     .bind(usage.content_id)
     .bind(usage.user_id)
+    .bind(usage.chunk_count)
+    .bind(
+        usage
+            .audio_duration_ms
+            .map(|value| i32::try_from(value.div_ceil(1_000)).unwrap_or(i32::MAX)),
+    )
+    .bind(priced.map(|value| value.pricing_version))
+    .bind(priced.map(|value| value.cost_usd))
+    .bind(priced.map(|value| value.cost_basis))
     .bind(json!({
         "media_kind": usage.media_kind,
         "language": usage.language,
         "chunk_count": usage.chunk_count,
         "prompt_chars": usage.prompt_chars,
         "audio_size_bytes": usage.audio_size_bytes,
+        "audio_duration_ms": usage.audio_duration_ms,
+        "audio_duration_estimate_ms": usage.audio_duration_estimate_ms,
+        "duration_source": usage.duration_source,
+        "cost_rate_usd": priced.map(|value| value.rate_usd),
+        "cost_rate_unit": priced.map(|value| value.rate_unit),
+        "cost_source_url": priced.map(|value| value.source_url),
+        "cost_basis": priced.map(|value| value.cost_basis),
+        "cost_pricing_version": priced.map(|value| value.pricing_version),
     }))
     .execute(&mut **transaction)
     .await?;

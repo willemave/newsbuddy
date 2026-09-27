@@ -13,9 +13,14 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
 use super::{
-    FAST_DISCOVER_TIMEOUT, OnboardingAudioLane, OnboardingGateway, OnboardingGatewayError,
-    OnboardingLaneTarget, WebResult, dedupe_web_results, secret_env,
+    FAST_DISCOVER_TIMEOUT, OnboardingAudioLane, OnboardingExaUsage, OnboardingGateway,
+    OnboardingGatewayError, OnboardingLaneTarget, WebResult, dedupe_web_results, secret_env,
 };
+
+pub(super) struct LaneEvidence {
+    pub(super) results: Vec<WebResult>,
+    pub(super) exa_usage: OnboardingExaUsage,
+}
 
 const ITUNES_SEARCH_URL: &str = "https://itunes.apple.com/search";
 const ITUNES_LOOKUP_URL: &str = "https://itunes.apple.com/lookup";
@@ -75,7 +80,8 @@ impl OnboardingGateway {
         &self,
         lane: &OnboardingAudioLane,
         inferred_topics: &[String],
-    ) -> Result<Vec<WebResult>, OnboardingGatewayError> {
+    ) -> Result<LaneEvidence, OnboardingGatewayError> {
+        let mut exa_usage = OnboardingExaUsage::default();
         let mut results = match lane.target {
             OnboardingLaneTarget::Reddit => {
                 self.subreddit_results(&reddit_terms(lane, inferred_topics))
@@ -86,6 +92,7 @@ impl OnboardingGateway {
                 if outcome.all_attempts_failed() {
                     return Err(OnboardingGatewayError::SearchUnavailable);
                 }
+                exa_usage = outcome.usage;
                 outcome.results
             }
             OnboardingLaneTarget::Podcasts => {
@@ -96,6 +103,7 @@ impl OnboardingGateway {
                 if outcome.all_attempts_failed() && results.is_empty() {
                     return Err(OnboardingGatewayError::SearchUnavailable);
                 }
+                exa_usage = outcome.usage;
                 let mut web = outcome.results;
                 self.attach_apple_podcast_feeds(&mut web).await;
                 results.extend(web);
@@ -109,7 +117,7 @@ impl OnboardingGateway {
             results = results.len(),
             "onboarding lane evidence collected"
         );
-        Ok(results)
+        Ok(LaneEvidence { results, exa_usage })
     }
 
     async fn web_lane_results(&self, lane: &OnboardingAudioLane) -> super::SearchManyOutcome {

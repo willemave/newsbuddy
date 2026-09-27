@@ -698,9 +698,20 @@ fn newsly_assistant_parts(content: &[AssistantContent]) -> Vec<MessagePart> {
 }
 
 fn provider_usage(response: &CompletionResponse) -> ProviderUsage {
+    // Rig reports Anthropic cache reads/writes separately from input_tokens,
+    // while OpenAI includes them. The Newsly ledger always stores inclusive input.
+    let input_tokens = if response.provider == "anthropic" {
+        response
+            .usage
+            .input_tokens
+            .saturating_add(response.usage.cached_input_tokens)
+            .saturating_add(response.usage.cache_creation_input_tokens)
+    } else {
+        response.usage.input_tokens
+    };
     ProviderUsage {
         request_count: 1,
-        input_tokens: response.usage.input_tokens,
+        input_tokens,
         output_tokens: response.usage.output_tokens,
         cached_input_tokens: response.usage.cached_input_tokens,
         cache_write_tokens: response.usage.cache_creation_input_tokens,

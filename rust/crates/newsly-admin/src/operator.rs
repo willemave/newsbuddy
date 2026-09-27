@@ -622,6 +622,7 @@ pub struct UsageTotals {
     pub resource_count: i64,
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
+    pub public_list_estimate_usd: f64,
     pub unpriced_call_count: i64,
     pub providers: BTreeMap<String, i64>,
     pub models: BTreeMap<String, i64>,
@@ -632,11 +633,11 @@ impl UsageTotals {
         self.cost_usd.map_or_else(
             || {
                 format!(
-                    "cost unknown (${:.4} known; {} unpriced calls)",
-                    self.known_cost_usd, self.unpriced_call_count
+                    "cost unknown (${:.4} priced subtotal, including ${:.4} public-list estimates; {} unpriced records)",
+                    self.known_cost_usd, self.public_list_estimate_usd, self.unpriced_call_count
                 )
             },
-            |cost| format!("${cost:.4}"),
+            |cost| format!("${cost:.4} (including ${:.4} public-list estimates)", self.public_list_estimate_usd),
         )
     }
 
@@ -678,6 +679,7 @@ pub struct UsageGroup {
     pub resource_count: i64,
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
+    pub public_list_estimate_usd: f64,
     pub unpriced_call_count: i64,
 }
 
@@ -694,6 +696,7 @@ impl UsageGroup {
             resource_count: self.resource_count,
             cost_usd: self.cost_usd,
             known_cost_usd: self.known_cost_usd,
+            public_list_estimate_usd: self.public_list_estimate_usd,
             unpriced_call_count: self.unpriced_call_count,
             providers: BTreeMap::new(),
             models: BTreeMap::new(),
@@ -713,6 +716,7 @@ struct UsageTotalsRow {
     resource_count: i64,
     cost_usd: Option<f64>,
     known_cost_usd: f64,
+    public_list_estimate_usd: f64,
     unpriced_call_count: i64,
 }
 
@@ -786,6 +790,7 @@ pub async fn load_usage_summary(
                 THEN ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision
                 ELSE NULL END AS cost_usd,
             ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS known_cost_usd,
+            ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::numeric, 8)::double precision AS public_list_estimate_usd,
             COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
         FROM vendor_usage_records
         WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
@@ -820,6 +825,7 @@ pub async fn load_usage_summary(
         resource_count: totals.resource_count,
         cost_usd: totals.cost_usd,
         known_cost_usd: totals.known_cost_usd,
+        public_list_estimate_usd: totals.public_list_estimate_usd,
         unpriced_call_count: totals.unpriced_call_count,
         providers,
         models,
@@ -866,6 +872,7 @@ async fn load_usage_groups(
                     THEN ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision
                     ELSE NULL END AS cost_usd,
                 ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS known_cost_usd,
+                ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::numeric, 8)::double precision AS public_list_estimate_usd,
                 COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
             FROM vendor_usage_records
             WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
@@ -874,7 +881,7 @@ async fn load_usage_groups(
         )
         SELECT key, call_count, input_tokens, cache_read_tokens, cache_write_tokens,
                output_tokens, total_tokens, request_count, resource_count, cost_usd,
-               known_cost_usd, unpriced_call_count
+               known_cost_usd, public_list_estimate_usd, unpriced_call_count
         FROM grouped
         ORDER BY (key = 'unknown'), LOWER(key)
         ",

@@ -20,6 +20,7 @@ const CONTINUATION_SUFFIX: &str = "This is a continuation of the previous segmen
 pub struct OpenAiTranscriptionGateway {
     client: Client<OpenAIConfig>,
     request_timeout: Duration,
+    standard_pricing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +30,31 @@ pub struct TranscriptionResult {
     pub chunk_count: usize,
     pub model: String,
     pub prompt_chars: usize,
+    pub audio_duration_ms: Option<u64>,
+    pub audio_duration_estimate_ms: Option<u64>,
+    pub audio_duration_source: AudioDurationSource,
+    pub standard_pricing: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioDurationSource {
+    Ffprobe,
+    EstimatedFromBytes,
+}
+
+impl AudioDurationSource {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ffprobe => "ffprobe",
+            Self::EstimatedFromBytes => "estimated_from_bytes",
+        }
+    }
+
+    #[must_use]
+    pub const fn is_measured(self) -> bool {
+        matches!(self, Self::Ffprobe)
+    }
 }
 
 impl OpenAiTranscriptionGateway {
@@ -53,12 +79,14 @@ impl OpenAiTranscriptionGateway {
             ));
         }
         let mut config = OpenAIConfig::new().with_api_key(api_key.expose_secret());
+        let standard_pricing = api_base.is_none_or(is_standard_openai_api_base);
         if let Some(api_base) = api_base {
             config = config.with_api_base(api_base);
         }
         Ok(Self {
             client: Client::with_config(config),
             request_timeout,
+            standard_pricing,
         })
     }
 
@@ -86,6 +114,7 @@ impl OpenAiTranscriptionGateway {
                 "Uploaded audio file is empty".to_owned(),
             ));
         }
+        let duration = audio_duration(path).await?;
         if metadata.len() <= MAX_PROVIDER_FILE_BYTES {
             let (transcript, language) = self
                 .transcribe_one(path, original_filename, VOICE_DICTATION_PROMPT)
@@ -96,17 +125,22 @@ impl OpenAiTranscriptionGateway {
                 chunk_count: 1,
                 model: MODEL.to_owned(),
                 prompt_chars: VOICE_DICTATION_PROMPT.chars().count(),
+                audio_duration_ms: duration.observed_milliseconds(),
+                audio_duration_estimate_ms: duration.estimated_milliseconds(),
+                audio_duration_source: duration.source,
+                standard_pricing: self.standard_pricing,
             });
         }
 
         ensure_ffmpeg().await?;
-        let chunks = split_audio(path, original_filename).await?;
+        let chunks = split_audio(path, original_filename, duration.duration).await?;
         let chunk_count = chunks.paths.len();
         if chunk_count == 0 {
             return Err(OpenAiTranscriptionError::Media(
                 "ffmpeg produced no audio chunks".to_owned(),
             ));
         }
+        let chunk_duration_ms = observed_chunk_duration_ms(&chunks.paths).await;
 
         let mut transcripts = Vec::with_capacity(chunk_count);
         let mut language = None;
@@ -133,6 +167,16 @@ impl OpenAiTranscriptionGateway {
             chunk_count,
             model: MODEL.to_owned(),
             prompt_chars: VOICE_DICTATION_PROMPT.chars().count(),
+            audio_duration_ms: chunk_duration_ms,
+            audio_duration_estimate_ms: chunk_duration_ms
+                .is_none()
+                .then_some(duration.milliseconds()),
+            audio_duration_source: if chunk_duration_ms.is_some() {
+                AudioDurationSource::Ffprobe
+            } else {
+                AudioDurationSource::EstimatedFromBytes
+            },
+            standard_pricing: self.standard_pricing,
         })
     }
 
@@ -187,6 +231,13 @@ impl OpenAiTranscriptionGateway {
     }
 }
 
+fn is_standard_openai_api_base(value: &str) -> bool {
+    matches!(
+        value.trim().trim_end_matches('/'),
+        "https://api.openai.com" | "https://api.openai.com/v1"
+    )
+}
+
 #[derive(Debug, Deserialize)]
 struct FlexibleTranscriptionResponse {
     text: String,
@@ -231,10 +282,8 @@ async fn ensure_ffmpeg() -> Result<(), OpenAiTranscriptionError> {
 async fn split_audio(
     input: &Path,
     original_filename: &str,
+    duration: Duration,
 ) -> Result<AudioChunks, OpenAiTranscriptionError> {
-    let duration = Duration::try_from_secs_f64(audio_duration(input).await?).map_err(|error| {
-        OpenAiTranscriptionError::Media(format!("Audio duration is invalid: {error}"))
-    })?;
     let duration_seconds = duration
         .as_secs()
         .saturating_add(u64::from(duration.subsec_nanos() > 0));
@@ -283,7 +332,51 @@ async fn split_audio(
     })
 }
 
-async fn audio_duration(path: &Path) -> Result<f64, OpenAiTranscriptionError> {
+#[derive(Debug, Clone, Copy)]
+struct AudioDurationMeasurement {
+    duration: Duration,
+    source: AudioDurationSource,
+}
+
+impl AudioDurationMeasurement {
+    fn milliseconds(self) -> u64 {
+        u64::try_from(self.duration.as_millis()).unwrap_or(u64::MAX)
+    }
+
+    fn observed_milliseconds(self) -> Option<u64> {
+        self.source.is_measured().then_some(self.milliseconds())
+    }
+
+    fn estimated_milliseconds(self) -> Option<u64> {
+        (!self.source.is_measured()).then_some(self.milliseconds())
+    }
+}
+
+async fn audio_duration(path: &Path) -> Result<AudioDurationMeasurement, OpenAiTranscriptionError> {
+    if let Some(duration) = probe_audio_duration(path).await {
+        return Ok(AudioDurationMeasurement {
+            duration,
+            source: AudioDurationSource::Ffprobe,
+        });
+    }
+    let bytes = tokio::fs::metadata(path).await?.len();
+    let whole_mebibytes = u32::try_from(bytes / (1024 * 1024)).map_err(|_| {
+        OpenAiTranscriptionError::Media("Audio file is too large to estimate duration".to_owned())
+    })?;
+    let remainder_bytes =
+        u32::try_from(bytes % (1024 * 1024)).expect("the remainder of one mebibyte fits u32");
+    let estimated_seconds =
+        (f64::from(whole_mebibytes) + f64::from(remainder_bytes) / (1024.0 * 1024.0)) * 60.0;
+    let duration = Duration::try_from_secs_f64(estimated_seconds.max(0.001)).map_err(|error| {
+        OpenAiTranscriptionError::Media(format!("Audio duration estimate is invalid: {error}"))
+    })?;
+    Ok(AudioDurationMeasurement {
+        duration,
+        source: AudioDurationSource::EstimatedFromBytes,
+    })
+}
+
+async fn probe_audio_duration(path: &Path) -> Option<Duration> {
     let output = Command::new("ffprobe")
         .arg("-i")
         .arg(path)
@@ -294,22 +387,25 @@ async fn audio_duration(path: &Path) -> Result<f64, OpenAiTranscriptionError> {
         .arg("-of")
         .arg("csv=p=0")
         .output()
-        .await?;
+        .await
+        .ok()?;
     if output.status.success()
         && let Ok(text) = std::str::from_utf8(&output.stdout)
         && let Ok(duration) = text.trim().parse::<f64>()
         && duration.is_finite()
         && duration > 0.0
     {
-        return Ok(duration);
+        return Duration::try_from_secs_f64(duration).ok();
     }
-    let bytes = tokio::fs::metadata(path).await?.len();
-    let whole_mebibytes = u32::try_from(bytes / (1024 * 1024)).map_err(|_| {
-        OpenAiTranscriptionError::Media("Audio file is too large to estimate duration".to_owned())
-    })?;
-    let remainder_bytes =
-        u32::try_from(bytes % (1024 * 1024)).expect("the remainder of one mebibyte fits u32");
-    Ok((f64::from(whole_mebibytes) + f64::from(remainder_bytes) / (1024.0 * 1024.0)) * 60.0)
+    None
+}
+
+async fn observed_chunk_duration_ms(paths: &[PathBuf]) -> Option<u64> {
+    let mut total = Duration::ZERO;
+    for path in paths {
+        total = total.checked_add(probe_audio_duration(path).await?)?;
+    }
+    u64::try_from(total.as_millis()).ok()
 }
 
 fn provider_extension(filename: &str) -> &'static str {

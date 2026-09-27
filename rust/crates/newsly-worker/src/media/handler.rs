@@ -658,6 +658,10 @@ fn transcription_usage(
         chunk_count: bounded_i32(result.chunk_count),
         prompt_chars: bounded_i32(result.prompt_chars),
         audio_size_bytes: i64::try_from(audio_size_bytes).unwrap_or(i64::MAX),
+        audio_duration_ms: result.audio_duration_ms,
+        audio_duration_estimate_ms: result.audio_duration_estimate_ms,
+        duration_source: result.audio_duration_source.as_str().to_owned(),
+        standard_pricing: result.standard_pricing,
     }
 }
 

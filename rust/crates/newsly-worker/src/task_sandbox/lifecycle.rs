@@ -3,20 +3,26 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use chrono::Utc;
 use newsly_db::{
-    TaskSandboxCleanupCandidate, TaskSandboxRepositoryError, clear_task_sandbox,
-    find_recorded_task_sandbox, list_task_sandbox_cleanup_candidates,
-    mark_task_sandbox_cleanup_required, record_task_sandbox,
+    NewTaskSandboxSession, TaskSandboxCleanupCandidate, TaskSandboxEnd, TaskSandboxProviderInfo,
+    TaskSandboxRepositoryError, attach_task_sandbox, begin_task_sandbox_session,
+    finalize_task_sandbox_session, find_recorded_task_sandbox,
+    list_task_sandbox_cleanup_candidates, mark_task_sandbox_cleanup_required,
 };
 use newsly_e2b::{
-    CommandRequest, DirectE2bProvider, E2bError, ExecutionTag, ExitStatus, NetworkPolicy,
-    OutputLimits, SandboxHandle, SandboxId, SandboxProvider, SandboxRequest, SandboxUser,
-    VmBootstrapProvider, VmCapabilities,
+    CommandRequest, DeliveryState, DirectE2bProvider, E2bError, ExecutionTag, ExitStatus,
+    NetworkPolicy, OutputLimits, SandboxHandle, SandboxId, SandboxInfo, SandboxProvider,
+    SandboxRequest, SandboxUser, VmBootstrapProvider, VmCapabilities,
 };
 use sqlx::PgPool;
 use thiserror::Error;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
+
+static PERIODIC_CLEANUP_STARTED: AtomicBool = AtomicBool::new(false);
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 
 const HARDEN_DEFAULT_USER: &str = r"set -eu
 sed -i '/^user[[:space:]].*NOPASSWD:[[:space:]]*ALL[[:space:]]*$/d' /etc/sudoers
@@ -66,12 +72,14 @@ impl TaskSandboxOwner {
         config: TaskSandboxConfig,
     ) -> Result<Self, TaskSandboxError> {
         config.validate()?;
-        Ok(Self {
+        let owner = Self {
             pool,
             provider,
             config,
             cleanup_sweep_active: Arc::new(AtomicBool::new(false)),
-        })
+        };
+        owner.start_periodic_cleanup();
+        Ok(owner)
     }
 
     pub async fn acquire_for_task(
@@ -90,19 +98,42 @@ impl TaskSandboxOwner {
         require_time(absolute_deadline)?;
         self.schedule_pending_cleanups();
         if let Some(previous) = find_recorded_task_sandbox(&self.pool, task_id, user_id).await? {
-            SandboxCleanup::recorded(
-                Arc::clone(&self.provider),
-                self.pool.clone(),
-                task_id,
-                user_id,
-                SandboxId::parse(previous)?,
-            )
-            .run()
-            .await?;
+            let sandbox_id = SandboxId::parse(previous.sandbox_id)?;
+            if let Some(session_id) = previous.session_id {
+                let mut cleanup = SandboxCleanup::recorded(
+                    Arc::clone(&self.provider),
+                    self.pool.clone(),
+                    session_id,
+                    task_id,
+                    user_id,
+                    sandbox_id,
+                );
+                cleanup.run().await?;
+            } else {
+                kill(&self.provider, &sandbox_id).await?;
+            }
         }
         let timeout = u32::try_from(self.config.sandbox_timeout.as_secs()).map_err(|_| {
             TaskSandboxError::Configuration("sandbox timeout is too large".to_owned())
         })?;
+        let session_id = Uuid::new_v4();
+        let requested_at = Utc::now();
+        begin_task_sandbox_session(
+            &self.pool,
+            &NewTaskSandboxSession {
+                id: session_id,
+                task_id,
+                user_id,
+                feature,
+                template_id: &self.config.template_id,
+                template_revision: &self.config.template_revision,
+                timeout_seconds: i32::try_from(timeout).map_err(|_| {
+                    TaskSandboxError::Configuration("sandbox timeout is too large".to_owned())
+                })?,
+                requested_at,
+            },
+        )
+        .await?;
         let request = SandboxRequest {
             template_id: self.config.template_id.clone(),
             timeout,
@@ -114,6 +145,7 @@ impl TaskSandboxOwner {
                 ("feature".to_owned(), feature.to_owned()),
                 ("user_id".to_owned(), user_id.to_string()),
                 ("llm_task_id".to_owned(), task_id.to_string()),
+                ("newsly_session_id".to_owned(), session_id.to_string()),
                 (
                     "template_revision".to_owned(),
                     self.config.template_revision.clone(),
@@ -123,25 +155,56 @@ impl TaskSandboxOwner {
             env_vars: BTreeMap::new(),
             network: Some(NetworkPolicy::deny_all()),
         };
-        // Once dispatched, creation must be observed to completion. Dropping this future on
-        // cancellation loses the remote sandbox ID and makes cleanup impossible.
-        let sandbox = self.provider.create_sandbox(&request).await?;
+        // The durable session and its metadata key let the periodic reconciler recover a sandbox
+        // even if this future is dropped after E2B accepts the create request.
+        let sandbox = match self.provider.create_sandbox(&request).await {
+            Ok(sandbox) => sandbox,
+            Err(source) => {
+                if source.delivery_state() == DeliveryState::NotDelivered {
+                    let _ = finalize_task_sandbox_session(
+                        &self.pool,
+                        session_id,
+                        task_id,
+                        user_id,
+                        None,
+                        TaskSandboxEnd::TimeoutBound {
+                            observed_at: Utc::now(),
+                        },
+                    )
+                    .await;
+                }
+                return Err(source.into());
+            }
+        };
+        let provider_info = match self.provider.get_sandbox_info(&sandbox.sandbox_id).await {
+            Ok(info) => provider_info(&info),
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    sandbox_id = %sandbox.sandbox_id,
+                    error = %error,
+                    "E2B sandbox resource details are unavailable; runtime cost will remain unpriced"
+                );
+                TaskSandboxProviderInfo {
+                    sandbox_id: sandbox.sandbox_id.as_str().to_owned(),
+                    started_at: None,
+                    end_at: None,
+                    cpu_count: None,
+                    memory_mb: None,
+                }
+            }
+        };
         let mut pending = PendingSandbox::new(
             Arc::clone(&self.provider),
             self.pool.clone(),
+            session_id,
             task_id,
             user_id,
             sandbox,
         );
-        record_task_sandbox(
-            &self.pool,
-            task_id,
-            user_id,
-            pending.sandbox().sandbox_id.as_str(),
-        )
-        .await?;
-        pending.mark_recorded();
-        if cancellation.is_cancelled() {
+        let task_attached =
+            attach_task_sandbox(&self.pool, session_id, task_id, user_id, &provider_info).await?;
+        if !task_attached || cancellation.is_cancelled() {
             pending.cleanup().await?;
             return Err(TaskSandboxError::Cancelled);
         }
@@ -183,28 +246,70 @@ impl TaskSandboxOwner {
         };
         for candidate in candidates {
             let TaskSandboxCleanupCandidate {
+                session_id,
                 task_id,
                 user_id,
                 sandbox_id,
             } = candidate;
-            let sandbox_id = match SandboxId::parse(sandbox_id) {
-                Ok(sandbox_id) => sandbox_id,
-                Err(error) => {
-                    tracing::error!(task_id, user_id, error = %error, "stored task sandbox ID is invalid");
-                    continue;
-                }
-            };
-            let cleanup = SandboxCleanup::recorded(
-                Arc::clone(&self.provider),
-                self.pool.clone(),
-                task_id,
-                user_id,
-                sandbox_id,
-            );
-            if let Err(error) = cleanup.run().await {
-                tracing::warn!(task_id, user_id, error = %error, "pending task sandbox cleanup failed");
+            if let Err(error) = self
+                .reconcile_cleanup_candidate(session_id, task_id, user_id, sandbox_id)
+                .await
+            {
+                tracing::warn!(session_id = %session_id, task_id, user_id, error = %error, "pending task sandbox cleanup failed");
             }
         }
+    }
+
+    async fn reconcile_cleanup_candidate(
+        &self,
+        session_id: Uuid,
+        task_id: i64,
+        user_id: i64,
+        sandbox_id: Option<String>,
+    ) -> Result<(), TaskSandboxError> {
+        let sandbox_id = if let Some(sandbox_id) = sandbox_id {
+            SandboxId::parse(sandbox_id)?
+        } else {
+            let matches = self
+                .provider
+                .list_sandboxes_by_metadata("newsly_session_id", &session_id.to_string(), 2)
+                .await
+                .map_err(|source| TaskSandboxError::ProviderOperation {
+                    operation: "list_sandboxes_by_session",
+                    source,
+                })?;
+            let Some(info) = matches.first() else {
+                finalize_task_sandbox_session(
+                    &self.pool,
+                    session_id,
+                    task_id,
+                    user_id,
+                    None,
+                    TaskSandboxEnd::TimeoutBound {
+                        observed_at: Utc::now(),
+                    },
+                )
+                .await?;
+                return Ok(());
+            };
+            if matches.len() != 1 {
+                return Err(TaskSandboxError::Configuration(format!(
+                    "session {session_id} matched multiple E2B sandboxes"
+                )));
+            }
+            let provider_info = provider_info(info);
+            attach_task_sandbox(&self.pool, session_id, task_id, user_id, &provider_info).await?;
+            info.sandbox_id.clone()
+        };
+        let mut cleanup = SandboxCleanup::recorded(
+            Arc::clone(&self.provider),
+            self.pool.clone(),
+            session_id,
+            task_id,
+            user_id,
+            sandbox_id,
+        );
+        cleanup.run().await
     }
 
     fn schedule_pending_cleanups(&self) {
@@ -219,6 +324,27 @@ impl TaskSandboxOwner {
         tokio::spawn(async move {
             owner.reap_pending_cleanups().await;
             owner.cleanup_sweep_active.store(false, Ordering::Release);
+        });
+    }
+
+    fn start_periodic_cleanup(&self) {
+        if PERIODIC_CLEANUP_STARTED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            PERIODIC_CLEANUP_STARTED.store(false, Ordering::Release);
+            return;
+        };
+        let owner = self.clone();
+        runtime.spawn(async move {
+            let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
+            loop {
+                interval.tick().await;
+                owner.schedule_pending_cleanups();
+            }
         });
     }
 
@@ -286,13 +412,15 @@ impl PendingSandbox {
     fn new(
         provider: Arc<DirectE2bProvider>,
         pool: PgPool,
+        session_id: Uuid,
         task_id: i64,
         user_id: i64,
         sandbox: SandboxHandle,
     ) -> Self {
-        let cleanup = SandboxCleanup::unrecorded(
+        let cleanup = SandboxCleanup::recorded(
             provider,
             pool,
+            session_id,
             task_id,
             user_id,
             sandbox.sandbox_id.clone(),
@@ -307,15 +435,8 @@ impl PendingSandbox {
         self.sandbox.as_ref().expect("pending sandbox is armed")
     }
 
-    fn mark_recorded(&mut self) {
-        self.cleanup
-            .as_mut()
-            .expect("pending sandbox cleanup is armed")
-            .recorded = true;
-    }
-
     async fn cleanup(&mut self) -> Result<(), TaskSandboxError> {
-        let cleanup = self
+        let mut cleanup = self
             .cleanup
             .take()
             .expect("pending sandbox cleanup is armed");
@@ -354,7 +475,7 @@ pub struct AcquiredTaskSandbox {
 impl AcquiredTaskSandbox {
     /// Destroys the attempt sandbox. Task sandboxes are never paused or retained.
     pub async fn release(mut self) -> Result<(), TaskSandboxError> {
-        let Some(cleanup) = self.cleanup.take() else {
+        let Some(mut cleanup) = self.cleanup.take() else {
             return Ok(());
         };
         if let Err(error) = cleanup.run().await {
@@ -378,16 +499,18 @@ impl Drop for AcquiredTaskSandbox {
 struct SandboxCleanup {
     provider: Arc<DirectE2bProvider>,
     pool: PgPool,
+    session_id: Uuid,
     task_id: i64,
     user_id: i64,
     sandbox_id: SandboxId,
-    recorded: bool,
+    observed_end: Option<TaskSandboxEnd>,
 }
 
 impl SandboxCleanup {
-    fn unrecorded(
+    fn recorded(
         provider: Arc<DirectE2bProvider>,
         pool: PgPool,
+        session_id: Uuid,
         task_id: i64,
         user_id: i64,
         sandbox_id: SandboxId,
@@ -395,59 +518,44 @@ impl SandboxCleanup {
         Self {
             provider,
             pool,
+            session_id,
             task_id,
             user_id,
             sandbox_id,
-            recorded: false,
+            observed_end: None,
         }
     }
 
-    fn recorded(
-        provider: Arc<DirectE2bProvider>,
-        pool: PgPool,
-        task_id: i64,
-        user_id: i64,
-        sandbox_id: SandboxId,
-    ) -> Self {
-        Self {
-            recorded: true,
-            ..Self::unrecorded(provider, pool, task_id, user_id, sandbox_id)
+    async fn run(&mut self) -> Result<(), TaskSandboxError> {
+        match mark_task_sandbox_cleanup_required(
+            &self.pool,
+            self.session_id,
+            self.task_id,
+            self.user_id,
+            self.sandbox_id.as_str(),
+        )
+        .await
+        {
+            Ok(()) => {}
+            Err(TaskSandboxRepositoryError::AttemptUnavailable) => return Ok(()),
+            Err(error) => return Err(error.into()),
         }
-    }
-
-    async fn run(&self) -> Result<(), TaskSandboxError> {
-        let tracked = if self.recorded {
-            match mark_task_sandbox_cleanup_required(
-                &self.pool,
-                self.task_id,
-                self.user_id,
-                self.sandbox_id.as_str(),
-            )
-            .await
-            {
-                Ok(()) => true,
-                // The exact record was deleted or replaced. The old remote ID still belongs to
-                // this guard and must be killed, but clearing must not touch its replacement.
-                Err(TaskSandboxRepositoryError::AttemptUnavailable) => false,
-                Err(error) => return Err(error.into()),
-            }
+        let end = if let Some(end) = self.observed_end {
+            end
         } else {
-            false
+            let end = kill(&self.provider, &self.sandbox_id).await?;
+            self.observed_end = Some(end);
+            end
         };
-        kill(&self.provider, &self.sandbox_id).await?;
-        if tracked {
-            match clear_task_sandbox(
-                &self.pool,
-                self.task_id,
-                self.user_id,
-                self.sandbox_id.as_str(),
-            )
-            .await
-            {
-                Ok(()) | Err(TaskSandboxRepositoryError::AttemptUnavailable) => {}
-                Err(error) => return Err(error.into()),
-            }
-        }
+        finalize_task_sandbox_session(
+            &self.pool,
+            self.session_id,
+            self.task_id,
+            self.user_id,
+            Some(self.sandbox_id.as_str()),
+            end,
+        )
+        .await?;
         Ok(())
     }
 }
@@ -455,9 +563,14 @@ impl SandboxCleanup {
 async fn kill(
     provider: &DirectE2bProvider,
     sandbox_id: &SandboxId,
-) -> Result<(), TaskSandboxError> {
+) -> Result<TaskSandboxEnd, TaskSandboxError> {
     match provider.kill_sandbox(sandbox_id).await {
-        Ok(_) | Err(E2bError::NotFound { .. }) => Ok(()),
+        Ok(true) => Ok(TaskSandboxEnd::Confirmed {
+            observed_at: Utc::now(),
+        }),
+        Ok(false) | Err(E2bError::NotFound { .. }) => Ok(TaskSandboxEnd::Missing {
+            observed_at: Utc::now(),
+        }),
         Err(source) => Err(TaskSandboxError::ProviderOperation {
             operation: "kill_sandbox",
             source,
@@ -465,7 +578,17 @@ async fn kill(
     }
 }
 
-fn schedule_cleanup(cleanup: SandboxCleanup) {
+fn provider_info(info: &SandboxInfo) -> TaskSandboxProviderInfo {
+    TaskSandboxProviderInfo {
+        sandbox_id: info.sandbox_id.as_str().to_owned(),
+        started_at: Some(info.started_at),
+        end_at: Some(info.end_at),
+        cpu_count: i32::try_from(info.cpu_count).ok(),
+        memory_mb: i32::try_from(info.memory_mb).ok(),
+    }
+}
+
+fn schedule_cleanup(mut cleanup: SandboxCleanup) {
     let Ok(runtime) = tokio::runtime::Handle::try_current() else {
         tracing::error!(sandbox_id = %cleanup.sandbox_id, "cannot schedule task sandbox cleanup outside Tokio");
         return;

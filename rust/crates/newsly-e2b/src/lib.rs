@@ -43,6 +43,6 @@ pub use network::{NetworkPolicy, NetworkRule, NetworkTransform};
 pub use session::{DirectE2bProvider, RecoveredCommand, ResultManifestLocation, SandboxProvider};
 pub use types::{
     CommandEvent, CommandOutput, CommandRequest, CommandResult, ExecutionTag, ExitStatus,
-    OutputLimits, ProcessInfo, ProcessSelector, SandboxHandle, SandboxId, SandboxPath,
+    OutputLimits, ProcessInfo, ProcessSelector, SandboxHandle, SandboxId, SandboxInfo, SandboxPath,
     SandboxRequest, SandboxUser, WorkspacePath,
 };
