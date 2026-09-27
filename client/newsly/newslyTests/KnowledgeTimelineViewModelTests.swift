@@ -628,6 +628,10 @@ private final class KnowledgeTimelineContentService: ContentSummaryListServicing
         throw Failure.unused
     }
 
+    func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse {
+        throw Failure.unused
+    }
+
     func downloadMoreFromSeries(
         contentId: Int,
         count: Int
@@ -690,6 +694,7 @@ private final class ControlledKnowledgeTimelineContentService: ContentSummaryLis
     ) async throws -> ContentListResponse { throw Failure.unused }
     func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse { throw Failure.unused }
     func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse { throw Failure.unused }
+    func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse { throw Failure.unused }
     func downloadMoreFromSeries(
         contentId: Int,
         count: Int

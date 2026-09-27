@@ -254,6 +254,7 @@ async fn check_readiness(state: &AppState) -> (StatusCode, Json<HealthResponse>)
         crate::content_actions::bulk_mark_read,
         crate::content_actions::save_to_knowledge,
         crate::content_actions::remove_from_knowledge,
+        crate::content_actions::reprocess_knowledge_content,
         crate::content_submission::submit_content,
         crate::news_actions::mark_news_items_read,
         crate::onboarding::discovery_status,

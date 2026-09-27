@@ -23,6 +23,7 @@ protocol ContentSummaryListServicing: AnyObject {
     ) async throws -> ContentListResponse
     func saveToKnowledge(id: Int) async throws -> KnowledgeMutationResponse
     func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse
+    func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse
     func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse
     func markContentAsUnread(id: Int) async throws
 }
@@ -199,6 +200,18 @@ final class ContentListViewModel {
             recordContentMutation(.savedToKnowledge(originalSavedState), for: contentId)
             actionErrorMessage = "Couldn't update this save. Try the action again."
         }
+    }
+
+    /// Restarts full preparation for an unavailable or stalled save, then reloads the list so
+    /// the row reflects its new preparing state. Returns false when the request fails.
+    func reprocessKnowledgeItem(_ contentId: Int) async -> Bool {
+        do {
+            _ = try await contentService.reprocessKnowledgeItem(id: contentId)
+        } catch {
+            return false
+        }
+        await reloadForCurrentFilters()
+        return true
     }
 
     func loadKnowledgeLibrary(query: String? = nil) async {

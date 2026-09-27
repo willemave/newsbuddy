@@ -87,6 +87,7 @@ struct KnowledgeSearchView: View {
                             onRefresh: {
                                 Task { await viewModel.loadKnowledgeLibrary(query: trimmedQuery) }
                             },
+                            onReprocess: { await viewModel.reprocessKnowledgeItem(content.id) },
                             onRemove: { Task { await viewModel.toggleKnowledgeSave(content.id) } }
                         )
                         .listRowInsets(EdgeInsets())
@@ -166,6 +167,7 @@ struct KnowledgeSavedContentButton: View {
     let accessibilityIdentifier: String
     let onOpen: () -> Void
     let onRefresh: () -> Void
+    let onReprocess: () async -> Bool
     let onRemove: () -> Void
 
     @State private var showsPreparationStatus = false
@@ -196,6 +198,7 @@ struct KnowledgeSavedContentButton: View {
             KnowledgePreparationStatusSheet(
                 content: content,
                 onRefresh: onRefresh,
+                onReprocess: onReprocess,
                 onRemove: onRemove
             )
         }
@@ -291,33 +294,42 @@ private struct KnowledgePreparationStatusSheet: View {
 
     let content: ContentSummary
     let onRefresh: () -> Void
+    let onReprocess: () async -> Bool
     let onRemove: () -> Void
 
     @State private var browserDestination: BrowserDestination?
+    @State private var isReprocessing = false
+    @State private var reprocessFailed = false
+    @State private var sheetHeight: CGFloat = 380
+
+    private var isStalled: Bool {
+        content.hasStalledKnowledgePreparation
+    }
+
+    private var canReprocess: Bool {
+        isStalled || content.savedLibraryItemState == .unavailable
+    }
 
     private var title: String {
-        if content.hasStalledKnowledgePreparation {
+        if isStalled {
             return "Preparation stalled"
         }
         switch content.savedLibraryItemState {
-        case .processing:
-            return "Preparing this item"
-        case .unavailable:
-            return "Item unavailable"
-        case .ready:
-            return "Ready to read"
+        case .processing: return "Still preparing"
+        case .unavailable: return "Couldn't prepare"
+        case .ready: return "Ready to read"
         }
     }
 
     private var message: String {
-        if content.hasStalledKnowledgePreparation {
-            return "Newsbuddy has not finished preparing this save. Refresh its status or open the original source."
+        if isStalled {
+            return "This save has been preparing for over a day. Reprocess to start it over."
         }
         switch content.savedLibraryItemState {
         case .processing:
-            return "Newsbuddy is still preparing this save. You can refresh its status or read the original source now."
+            return "This usually takes a minute or two. You can read the original in the meantime."
         case .unavailable:
-            return "Newsbuddy could not prepare this save, but the original source may still be available."
+            return "Reprocess to run the full preparation again, or read the original source."
         case .ready:
             return "This save is ready."
         }
@@ -332,52 +344,109 @@ private struct KnowledgePreparationStatusSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                Label(title, systemImage: content.hasStalledKnowledgePreparation ? "exclamationmark.circle" : "hourglass")
-                    .font(.terracottaHeadlineMedium)
-                    .accessibilityIdentifier("knowledge.status.screen")
+        VStack(spacing: 0) {
+            MiniSheetHeader(
+                title: title,
+                titleAccessibilityIdentifier: "knowledge.status.screen",
+                dismiss: { dismiss() }
+            )
 
-                Text(message)
-                    .font(.terracottaBodyMedium)
-                    .foregroundStyle(Color.onSurfaceSecondary)
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(content.displayTitle)
+                        .font(.terracottaHeadlineSmall)
+                        .foregroundStyle(Color.onSurface)
+                        .lineLimit(2)
 
-                Button("Refresh status") {
-                    onRefresh()
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("knowledge.status.refresh")
+                    Text(message)
+                        .font(.terracottaBodySmall)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                if let originalURL {
-                    Button("Open original") {
-                        browserDestination = BrowserDestination(url: originalURL)
+                    if reprocessFailed {
+                        Text("Couldn't restart preparation. Try again.")
+                            .font(.appCaption)
+                            .foregroundStyle(Color.statusDestructive)
+                            .accessibilityIdentifier("knowledge.status.reprocess_error")
                     }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("knowledge.status.open_original")
                 }
 
-                Button("Remove from Knowledge", role: .destructive) {
-                    onRemove()
-                    dismiss()
-                }
-                .accessibilityIdentifier("knowledge.status.remove")
+                VStack(spacing: 10) {
+                    primaryAction
 
-                Spacer(minLength: 0)
-            }
-            .padding(Spacing.appHorizontalMargin)
-            .background(Color.surfacePrimary.ignoresSafeArea())
-            .navigationTitle("Saved item status")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    if let originalURL {
+                        MiniSheetOptionRow(
+                            icon: "safari",
+                            title: "Open original",
+                            subtitle: originalURL.host() ?? originalURL.absoluteString,
+                            accessibilityIdentifier: "knowledge.status.open_original"
+                        ) {
+                            browserDestination = BrowserDestination(url: originalURL)
+                        }
+                    }
+
+                    MiniSheetOptionRow(
+                        icon: "bookmark.slash",
+                        iconColor: .statusDestructive,
+                        title: "Remove from Knowledge",
+                        subtitle: "Delete this save",
+                        disabled: isReprocessing,
+                        accessibilityIdentifier: "knowledge.status.remove"
+                    ) {
+                        onRemove()
+                        dismiss()
+                    }
                 }
             }
+            .padding(.horizontal, Spacing.appHorizontalMargin)
+            .padding(.bottom, 24)
         }
-        .presentationDetents([.medium])
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { sheetHeight = $0 }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color.surfacePrimary.ignoresSafeArea())
+        .presentationDetents([.height(sheetHeight)])
+        .presentationDragIndicator(.hidden)
+        .presentationCornerRadius(24)
         .sheet(item: $browserDestination) { destination in
             SafariView(url: destination.url)
+        }
+    }
+
+    @ViewBuilder
+    private var primaryAction: some View {
+        if canReprocess {
+            MiniSheetOptionRow(
+                icon: "arrow.clockwise",
+                title: isReprocessing ? "Reprocessing…" : "Reprocess",
+                subtitle: "Run the full preparation again",
+                disabled: isReprocessing,
+                accessibilityIdentifier: "knowledge.status.reprocess"
+            ) {
+                Task { await reprocess() }
+            }
+        } else {
+            MiniSheetOptionRow(
+                icon: "arrow.triangle.2.circlepath",
+                title: "Check progress",
+                subtitle: "Refresh this save's status",
+                accessibilityIdentifier: "knowledge.status.refresh"
+            ) {
+                onRefresh()
+                dismiss()
+            }
+        }
+    }
+
+    private func reprocess() async {
+        isReprocessing = true
+        reprocessFailed = false
+        let succeeded = await onReprocess()
+        isReprocessing = false
+        if succeeded {
+            dismiss()
+        } else {
+            reprocessFailed = true
         }
     }
 }

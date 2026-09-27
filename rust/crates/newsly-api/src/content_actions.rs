@@ -8,11 +8,13 @@ use newsly_contracts::{
     MarkReadResponse, MarkUnreadResponse, OperationStatus,
 };
 use newsly_db::{
-    content_exists, mark_content_read as persist_content_read,
+    KnowledgeReprocessOutcome, content_exists, mark_content_read as persist_content_read,
     mark_content_unread as persist_content_unread, mark_contents_read,
     remove_content_from_knowledge as persist_knowledge_removal,
-    save_content_to_knowledge as persist_knowledge_save,
+    reset_saved_content_for_reprocessing, save_content_to_knowledge as persist_knowledge_save,
 };
+use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
+use serde_json::{Map, Value};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
@@ -27,6 +29,7 @@ const MARK_UNREAD_OPERATION_ID: &str = "markContentUnread";
 const BULK_MARK_READ_OPERATION_ID: &str = "bulkContentMarkRead";
 const SAVE_KNOWLEDGE_OPERATION_ID: &str = "saveContentToKnowledge";
 const REMOVE_KNOWLEDGE_OPERATION_ID: &str = "removeContentFromKnowledge";
+const REPROCESS_KNOWLEDGE_OPERATION_ID: &str = "reprocessKnowledgeContent";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -42,6 +45,10 @@ pub(super) fn router() -> Router<AppState> {
         .route(
             "/api/content/{content_id}/knowledge",
             post(save_to_knowledge).delete(remove_from_knowledge),
+        )
+        .route(
+            "/api/content/{content_id}/knowledge/reprocess",
+            post(reprocess_knowledge_content),
         )
 }
 
@@ -274,6 +281,89 @@ pub(super) async fn remove_from_knowledge(
         }
         .to_owned(),
     }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/content/{content_id}/knowledge/reprocess",
+    operation_id = "reprocessKnowledgeContent",
+    tag = "content",
+    params(("content_id" = i64, Path, description = "Content ID")),
+    security(("HTTPBearer" = [])),
+    responses(
+        (status = 200, description = "Saved item queued for full reprocessing", body = KnowledgeMutationResponse),
+        (status = 401, description = "Invalid credentials", body = newsly_contracts::ErrorEnvelope),
+        (status = 404, description = "Content not saved to Knowledge", body = newsly_contracts::ErrorEnvelope),
+        (status = 409, description = "Content already ready or stale runtime owner", body = newsly_contracts::ErrorEnvelope),
+        (status = 500, description = "Internal server error", body = newsly_contracts::ErrorEnvelope)
+    )
+)]
+pub(super) async fn reprocess_knowledge_content(
+    State(state): State<AppState>,
+    Path(content_id): Path<i64>,
+    headers: HeaderMap,
+    current_user: AuthenticatedUser,
+    Extension(stamp): Extension<RouteOwnershipStamp>,
+) -> Result<Json<KnowledgeMutationResponse>, ApiError> {
+    let request_id = request_id_from_headers(&headers);
+    require_operation(&stamp, REPROCESS_KNOWLEDGE_OPERATION_ID, &request_id)?;
+    validate_content_id(content_id, &request_id)?;
+    let mut transaction = begin_write(&state, &request_id).await?;
+    verify_stamp(&mut transaction, &stamp, &request_id).await?;
+    let outcome =
+        reset_saved_content_for_reprocessing(&mut transaction, current_user.id, content_id)
+            .await
+            .map_err(|error| internal_error(error, &request_id))?;
+    let message = match outcome {
+        KnowledgeReprocessOutcome::NotSaved => {
+            return Err(not_found("Saved content", &request_id));
+        }
+        KnowledgeReprocessOutcome::AlreadyReady => {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "content_ready",
+                "Content is already ready",
+                request_id,
+            ));
+        }
+        KnowledgeReprocessOutcome::AlreadyActive => "Already preparing",
+        KnowledgeReprocessOutcome::Reset => {
+            QueueKernel::new(state.database.pool().clone())
+                .enqueue_many_in_transaction(
+                    &mut transaction,
+                    vec![analyze_request(content_id, current_user.id)],
+                )
+                .await
+                .map_err(|error| internal_error(error, &request_id))?;
+            tracing::info!(
+                content_id,
+                user_id = current_user.id,
+                "saved content reprocess queued"
+            );
+            "Reprocessing started"
+        }
+    };
+    commit_write(transaction, &request_id).await?;
+    Ok(Json(KnowledgeMutationResponse {
+        status: KnowledgeMutationStatus::Success,
+        content_id,
+        is_saved_to_knowledge: true,
+        message: message.to_owned(),
+    }))
+}
+
+/// `analyze_url` is the head of every content pipeline, so it re-derives type and platform and
+/// fans out to extraction, media, summarization, and image tasks as it would for a new save.
+fn analyze_request(content_id: i64, user_id: i64) -> EnqueueRequest {
+    let mut request = EnqueueRequest::new(TaskType::AnalyzeUrl);
+    request.content_id = Some(content_id);
+    request.payload = Some(Map::from_iter([(
+        "content_id".to_owned(),
+        Value::from(content_id),
+    )]));
+    request.dedupe = Some(true);
+    request.access_user_id = Some(user_id);
+    request
 }
 
 fn validate_content_id(content_id: i64, request_id: &str) -> Result<(), ApiError> {

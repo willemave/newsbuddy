@@ -63,6 +63,9 @@ enum APIEndpoints {
     static func removeFromKnowledge(id: Int) -> String {
         return "/api/content/\(id)/knowledge"
     }
+    static func reprocessKnowledgeItem(id: Int) -> String {
+        return "/api/content/\(id)/knowledge/reprocess"
+    }
     static let knowledgeLibraryList = "/api/content/knowledge/list"
     static let recentlyReadList = "/api/content/recently-read/list"
     static func contentDiscussion(id: Int) -> String {

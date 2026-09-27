@@ -99,6 +99,25 @@ final class ContentListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.contents.first?.isSavedToKnowledge, true)
     }
 
+    func testReprocessingUnavailableSaveReloadsItsPreparingState() async {
+        let service = KnowledgeRemovalReconciliationService(
+            contents: [makeReadSummary(id: 42, status: .failed, isSavedToKnowledge: true)]
+        )
+        service.reprocessedContent = makeReadSummary(id: 42, status: .new, isSavedToKnowledge: true)
+        let viewModel = ContentListViewModel(
+            contentService: service,
+            readStateCache: ReadStateCache()
+        )
+        await viewModel.loadKnowledgeLibrary()
+        XCTAssertEqual(viewModel.contents.first?.savedLibraryItemState, .unavailable)
+
+        let succeeded = await viewModel.reprocessKnowledgeItem(42)
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(service.reprocessedIDs, [42])
+        XCTAssertEqual(viewModel.contents.first?.savedLibraryItemState, .processing)
+    }
+
     private func waitUntil(
         _ predicate: @escaping () -> Bool,
         attempts: Int = 100
@@ -143,6 +162,8 @@ final class ContentListViewModelTests: XCTestCase {
 
 private final class KnowledgeRemovalReconciliationService: ContentSummaryListServicing {
     var contents: [ContentSummary]
+    var reprocessedContent: ContentSummary?
+    private(set) var reprocessedIDs: [Int] = []
 
     init(contents: [ContentSummary]) {
         self.contents = contents
@@ -186,6 +207,19 @@ private final class KnowledgeRemovalReconciliationService: ContentSummaryListSer
             contentId: id,
             isSavedToKnowledge: false,
             message: "Removed"
+        )
+    }
+
+    func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse {
+        reprocessedIDs.append(id)
+        if let reprocessedContent {
+            contents = [reprocessedContent]
+        }
+        return KnowledgeMutationResponse(
+            status: .success,
+            contentId: id,
+            isSavedToKnowledge: true,
+            message: "Reprocessing started"
         )
     }
 
@@ -262,6 +296,10 @@ private final class StaleKnowledgeMutationContentService: ContentSummaryListServ
         throw RecentlyReadContentServiceError.unexpectedCall
     }
 
+    func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse {
+        throw RecentlyReadContentServiceError.unexpectedCall
+    }
+
     func downloadMoreFromSeries(contentId: Int, count: Int) async throws -> DownloadMoreResponse {
         throw RecentlyReadContentServiceError.unexpectedCall
     }
@@ -317,6 +355,10 @@ private final class ModeSwapContentService: ContentSummaryListServicing {
     }
 
     func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
+        throw RecentlyReadContentServiceError.unexpectedCall
+    }
+
+    func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse {
         throw RecentlyReadContentServiceError.unexpectedCall
     }
 
@@ -415,6 +457,10 @@ private final class RecentlyReadContentService: ContentSummaryListServicing {
     }
 
     func removeFromKnowledge(id: Int) async throws -> KnowledgeMutationResponse {
+        throw RecentlyReadContentServiceError.unexpectedCall
+    }
+
+    func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse {
         throw RecentlyReadContentServiceError.unexpectedCall
     }
 

@@ -33,3 +33,5 @@ K15. A successful Learning Deck may publish a source-specific, deck-cover-style 
 K16. Knowledge keeps its published merged timeline during lifecycle revalidation and recoverable connectivity failure. Temporary inactivity is not a reload trigger; a true warm resume may revalidate once without exposing partial-source results. Backgrounding may cancel lifecycle-owned reads, but it cannot cancel an explicit user refresh that already joined the same work.
 
 K17. While a Knowledge item is actively preparing, generating, or answering, a loading spinner replaces its leading icon or thumbnail without changing row layout. Ready, failed, unavailable, and stalled items do not show an active-processing spinner.
+
+K18. A saved item that is unavailable or stalled can be reprocessed by the user who saved it. Reprocessing restarts the item's full preparation from URL analysis for every content type, never duplicates preparation that is already queued or running, and does not apply to items that are already ready.

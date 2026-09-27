@@ -341,6 +341,7 @@ struct KnowledgeView: View {
                     )
                 },
                 onRefresh: { Task { await viewModel.savedContent.loadKnowledgeLibrary() } },
+                onReprocess: { await viewModel.savedContent.reprocessKnowledgeItem(content.id) },
                 onRemove: { Task { await viewModel.savedContent.toggleKnowledgeSave(content.id) } }
             )
             .appListRow()

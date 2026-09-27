@@ -712,6 +712,14 @@ e2b_namespace = "none"
 
 [[routes]]
 method = "POST"
+path = "/api/content/{content_id}/knowledge/reprocess"
+operation_id = "reprocessKnowledgeContent"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"
+
+[[routes]]
+method = "POST"
 path = "/api/content/{content_id}/mark-read"
 operation_id = "markContentRead"
 current_owner = "rust"

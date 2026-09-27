@@ -27,6 +27,16 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-27 — `main` — Reprocess unavailable Knowledge saves
+
+- **Status:** Complete locally. Not deployed.
+- **Scope:** `POST /api/content/{content_id}/knowledge/reprocess` (newsly-api, newsly-db, contracts, ownership migration `20260927000002`); iOS Knowledge status sheet, `ContentListViewModel`, `ContentService`.
+- **Decisions:** Workers ignore finalization for terminal (`failed`/`skipped`) rows, so resubmitting a failed URL never re-prepared it. Reprocess locks the user's saved row, resets it to `new` (clears error, retry count, processed time), and enqueues `analyze_url`, the head of every content pipeline, in the same transaction. Any pending/leased pipeline task (analyze, process, podcast/tweet media, summarize, image) returns "Already preparing" without a reset; completed content returns 409; unsaved content returns 404. Reused `KnowledgeMutationResponse`, so no new client contract types. Content metadata is kept, so submission attribution survives.
+- **Changes:** The status sheet now uses the mini-sheet header and option rows at a fitted height. It shows the item title, a status-specific message, Reprocess (unavailable/stalled) or Check progress (preparing), Open original, and Remove, with an inline error when reprocess fails. Law K18 added.
+- **Validation:** Warning-denied Clippy for newsly-api; newsly-db lib Clippy clean (all-targets Clippy fails only on pre-existing vendor-cost test code in `admin.rs`). Four SQLx tests for reset/not-saved/ready/active-task passed; newsly-api tests passed; public contracts regenerated and checked. iOS ContentList/KnowledgeTimeline/ContentDetail unit tests passed, including the new reprocess reload test.
+- **Remaining:** Sheet not visually verified on simulator: the local API needs a restart onto this build and a failed saved item. Deploy only with a separately authorized release.
+- **Commits:** Uncommitted.
+
 ### 2026-09-26 — detached `83f93acb` — Disposable E2B template deck canary
 
 - **Status:** Complete locally.

@@ -418,6 +418,10 @@ class ContentService {
         try await client.request(APIEndpoints.removeFromKnowledge(id: id), method: .delete)
     }
 
+    func reprocessKnowledgeItem(id: Int) async throws -> KnowledgeMutationResponse {
+        try await client.request(APIEndpoints.reprocessKnowledgeItem(id: id), method: .post)
+    }
+
     func fetchKnowledgeLibrary(
         query: String? = nil,
         cursor: String? = nil,

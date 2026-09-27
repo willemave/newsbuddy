@@ -169,9 +169,9 @@ pub use cli_link::{
 };
 pub use config::{DatabaseConfig, DatabaseConfigError, normalize_database_url};
 pub use content_actions::{
-    BulkReadResult, ContentActionRepositoryError, content_exists, mark_content_read,
-    mark_content_unread, mark_contents_read, remove_content_from_knowledge,
-    save_content_to_knowledge,
+    BulkReadResult, ContentActionRepositoryError, KnowledgeReprocessOutcome, content_exists,
+    mark_content_read, mark_content_unread, mark_contents_read, remove_content_from_knowledge,
+    reset_saved_content_for_reprocessing, save_content_to_knowledge,
 };
 pub use content_bodies::{
     ContentBodyPointer, ContentBodyProjection, ContentBodyRepositoryError, ContentBodyVariant,
