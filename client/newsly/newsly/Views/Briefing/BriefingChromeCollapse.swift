@@ -2,7 +2,7 @@ import Observation
 import SwiftUI
 
 /// Per-lens chrome collapse driven directly by scroll position, so the
-/// masthead and category strip track the finger 1:1 instead of snapping at a
+/// masthead tracks the finger 1:1 instead of snapping at a
 /// threshold. This remains view-owned interaction state rather than feature
 /// state, so per-frame geometry writes only invalidate the small chrome views
 /// that read it — never the pager.
@@ -65,8 +65,6 @@ private struct BriefingExpandedChromeHeightModifier: ViewModifier {
     var model: BriefingChromeCollapseModel
     var lensKey: String?
     let mastheadHeight: CGFloat
-    let categoryStripHeight: CGFloat
-    let keepsCategoryStripOpen: Bool
     /// Height given up by pinned chrome that is not scroll-driven (the
     /// minimized player), added back so the reported height stays expanded.
     let additionalShrink: CGFloat
@@ -75,10 +73,7 @@ private struct BriefingExpandedChromeHeightModifier: ViewModifier {
     func body(content: Content) -> some View {
         let collapse = model.collapse(forLens: lensKey)
         let mastheadShrink = min(max(collapse, 0), mastheadHeight)
-        let categoryShrink = keepsCategoryStripOpen
-            ? 0
-            : min(max(collapse - mastheadHeight, 0), categoryStripHeight)
-        let totalShrink = mastheadShrink + categoryShrink + max(additionalShrink, 0)
+        let totalShrink = mastheadShrink + max(additionalShrink, 0)
 
         content
             .onGeometryChange(for: CGFloat.self) { proxy in
@@ -95,8 +90,6 @@ extension View {
         model: BriefingChromeCollapseModel,
         lensKey: String?,
         mastheadHeight: CGFloat,
-        categoryStripHeight: CGFloat,
-        keepsCategoryStripOpen: Bool,
         additionalShrink: CGFloat = 0,
         expandedHeight: Binding<CGFloat>
     ) -> some View {
@@ -105,8 +98,6 @@ extension View {
                 model: model,
                 lensKey: lensKey,
                 mastheadHeight: mastheadHeight,
-                categoryStripHeight: categoryStripHeight,
-                keepsCategoryStripOpen: keepsCategoryStripOpen,
                 additionalShrink: additionalShrink,
                 expandedHeight: expandedHeight
             )

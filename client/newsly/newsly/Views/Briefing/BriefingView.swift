@@ -36,7 +36,6 @@ struct BriefingView: View {
     @State private var activeNarrationChapters: BriefingNarrationChapterSheetItem?
     @State private var chromeCollapse = BriefingChromeCollapseModel()
     @State private var mastheadHeight: CGFloat = 0
-    @State private var categoryStripHeight: CGFloat = 0
     @State private var expandedChromeHeight: CGFloat = 0
     @State private var listenPanelFullHeight: CGFloat = 0
     @State private var listenPanelMinimizedHeight: CGFloat = 0
@@ -83,14 +82,15 @@ struct BriefingView: View {
         )
     }
 
-    /// Whether the category strip participates in the chrome at all — it only
-    /// exists while a news category is selected.
+    /// The category strip only exists while a news category is selected; it
+    /// stays pinned beneath the tier strip while reading.
     private var showsCategoryStrip: Bool {
         viewModel.isNewsTierSelected && !viewModel.newsLenses.isEmpty
     }
 
+    /// Only the masthead collapses; the tier and category strips stay pinned.
     private var collapsibleChromeHeight: CGFloat {
-        mastheadHeight + (showsCategoryStrip ? categoryStripHeight : 0)
+        mastheadHeight
     }
 
     private var isListenPanelMinimized: Bool {
@@ -249,7 +249,6 @@ struct BriefingView: View {
                                 viewModel.noteFirstPassageVisible(for: lens.key)
                             },
                             onScrolledDown: {
-                                viewModel.noteScrolledDown(forLens: lens.key)
                                 listenPanelPinnedOpen = false
                             },
                             onMarkSegmentSeen: viewModel.markSegmentSeen,
@@ -298,17 +297,13 @@ struct BriefingView: View {
 
     /// Everything above the pager — masthead, tier strip, category strip, and
     /// the playback panel — stays pinned while pages swipe underneath. The
-    /// masthead and category strip collapse in lockstep with the scroll
-    /// offset (via `BriefingCollapsibleChromeSlot`), so content is never
-    /// clipped under the chrome before the chrome itself has moved away.
+    /// masthead collapses in lockstep with the scroll offset (via
+    /// `BriefingCollapsibleChromeSlot`), so content is never clipped under
+    /// the chrome before the chrome itself has moved away.
     /// Today's date (not the generation timestamp) keeps the kicker identical
     /// to the Knowledge tab's masthead.
     private var headerChrome: some View {
-        // A tap-opened category strip overlays the content at full height
-        // while the masthead stays collapsed; it is retired on scroll.
-        let stripPinnedOpen = viewModel.isCategoryStripExpanded && viewModel.isMastheadCompact
-
-        return VStack(spacing: 0) {
+        VStack(spacing: 0) {
             BriefingCollapsibleChromeSlot(
                 model: chromeCollapse,
                 lensKey: activeCollapseLensKey,
@@ -341,26 +336,15 @@ struct BriefingView: View {
             }
 
             if showsCategoryStrip {
-                BriefingCollapsibleChromeSlot(
-                    model: chromeCollapse,
-                    lensKey: activeCollapseLensKey,
-                    shrink: { [mastheadHeight, categoryStripHeight] collapse in
-                        stripPinnedOpen
-                            ? 0
-                            : min(max(collapse - mastheadHeight, 0), categoryStripHeight)
+                BriefingCategoryStrip(
+                    viewModel: viewModel,
+                    onSelectLens: { key in
+                        withAnimation(.smooth(duration: 0.28)) {
+                            viewModel.selectLens(key: key)
+                        }
                     },
-                    naturalHeight: $categoryStripHeight
-                ) {
-                    BriefingCategoryStrip(
-                        viewModel: viewModel,
-                        onSelectLens: { key in
-                            withAnimation(.smooth(duration: 0.28)) {
-                                viewModel.selectLens(key: key)
-                            }
-                        },
-                        onRequestMarkAllRead: presentMarkAllReadPrompt
-                    )
-                }
+                    onRequestMarkAllRead: presentMarkAllReadPrompt
+                )
             }
 
             VStack(spacing: 0) {
@@ -374,8 +358,6 @@ struct BriefingView: View {
             model: chromeCollapse,
             lensKey: activeCollapseLensKey,
             mastheadHeight: mastheadHeight,
-            categoryStripHeight: showsCategoryStrip ? categoryStripHeight : 0,
-            keepsCategoryStripOpen: stripPinnedOpen,
             additionalShrink: listenPanelShrink,
             expandedHeight: $expandedChromeHeight
         )
@@ -392,7 +374,6 @@ struct BriefingView: View {
                 listenPanelPinnedOpen = false
             }
         }
-        .animation(.smooth(duration: 0.28), value: viewModel.isCategoryStripExpanded)
         .animation(.smooth(duration: 0.28), value: viewModel.selectedLensKey)
         .zIndex(1)
     }

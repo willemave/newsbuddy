@@ -138,49 +138,14 @@ final class BriefingViewModelNavigationTests: XCTestCase {
         await viewModel.loadIndexIfNeeded()
         await waitForBriefingCondition { viewModel.selectedLens != nil }
         XCTAssertEqual(viewModel.selectedLensKey, "podcasts")
-        XCTAssertFalse(viewModel.isCategoryStripExpanded)
 
         viewModel.selectNewsTier()
         XCTAssertEqual(viewModel.selectedLensKey, "news-tech")
-        XCTAssertTrue(viewModel.isCategoryStripExpanded)
 
         viewModel.selectLens(key: "news-world")
         viewModel.selectLens(key: "podcasts")
-        XCTAssertFalse(viewModel.isCategoryStripExpanded)
         viewModel.selectNewsTier()
         XCTAssertEqual(viewModel.selectedLensKey, "news-world")
-    }
-
-    func testCategoryStripCollapsesOnScrollAndReopensOnNewsTap() async {
-        let service = MockBriefingService()
-        service.indexResults = [
-            .value(
-                makeIndex(lenses: [
-                    makeLensSummary(key: "news-tech", title: "Tech", position: 1),
-                    makeLensSummary(key: "news-world", title: "World", position: 2)
-                ]),
-                etag: nil
-            )
-        ]
-        let viewModel = BriefingViewModel(service: service)
-
-        await viewModel.loadIndexIfNeeded()
-        await waitForBriefingCondition { viewModel.selectedLens != nil }
-        XCTAssertTrue(viewModel.isCategoryStripExpanded)
-
-        viewModel.setHeaderPinned(true, forLens: "news-tech")
-        XCTAssertTrue(viewModel.isMastheadCompact)
-        XCTAssertFalse(viewModel.isCategoryStripExpanded)
-
-        viewModel.selectNewsTier()
-        XCTAssertEqual(viewModel.selectedLensKey, "news-tech")
-        XCTAssertTrue(viewModel.isCategoryStripExpanded)
-
-        viewModel.noteScrolledDown(forLens: "news-tech")
-        XCTAssertFalse(viewModel.isCategoryStripExpanded)
-
-        viewModel.setHeaderPinned(false, forLens: "news-tech")
-        XCTAssertTrue(viewModel.isCategoryStripExpanded)
     }
 
     func testMarkAllSourcesReadUsesCategoryEndpointAndRefreshesIndex() async throws {

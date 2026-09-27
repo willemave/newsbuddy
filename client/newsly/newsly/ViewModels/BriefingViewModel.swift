@@ -57,10 +57,6 @@ final class BriefingViewModel {
     /// True while the selected lens is scrolled into reading — the masthead
     /// above the pager collapses to hand the space to the content.
     private(set) var isMastheadCompact = false
-    /// True while the news category strip is showing beneath the tier strip.
-    /// Expanded at the top of a news page (or after tapping News while
-    /// reading); collapses as soon as the reader scrolls down.
-    private(set) var isCategoryStripExpanded = false
 
     let service: BriefingServicing
     let narrationController: BriefingNarrationController
@@ -80,9 +76,6 @@ final class BriefingViewModel {
     private var headerPinnedLensKeys: Set<String> = []
     /// The news category to return to when the reader re-enters the news tier.
     private var lastNewsLensKey: String?
-    /// Keeps the category strip open after an explicit News tap while the
-    /// masthead is compact; cleared on the next scroll-down.
-    private var categoryStripPinnedOpen = false
     private var dismissedFirstRunID: Int?
     private var lastValidatedAt: Date?
 
@@ -277,12 +270,10 @@ final class BriefingViewModel {
     }
 
     /// Tapping the single News pill: return to the last-read category, or the
-    /// first one on the first visit, and reveal the category strip.
+    /// first one on the first visit.
     func selectNewsTier() {
         guard let targetKey = resolvedNewsLensKey() else { return }
-        categoryStripPinnedOpen = true
         selectLens(key: targetKey)
-        refreshHeaderChrome()
     }
 
     func setHeaderPinned(_ pinned: Bool, forLens key: String) {
@@ -291,18 +282,6 @@ final class BriefingViewModel {
         } else {
             headerPinnedLensKeys.remove(key)
         }
-        // Back at the top the strip shows on its own; drop the tap override
-        // so the next scroll-down collapses it again.
-        if !pinned, key == selectedLensKey {
-            categoryStripPinnedOpen = false
-        }
-        refreshHeaderChrome()
-    }
-
-    /// Any downward scroll retires a tap-opened category strip.
-    func noteScrolledDown(forLens key: String) {
-        guard key == selectedLensKey, categoryStripPinnedOpen else { return }
-        categoryStripPinnedOpen = false
         refreshHeaderChrome()
     }
 
@@ -312,8 +291,6 @@ final class BriefingViewModel {
         }
         if selectedLensSummary?.tier == .news {
             lastNewsLensKey = selectedLensKey
-        } else {
-            categoryStripPinnedOpen = false
         }
         refreshHeaderChrome()
     }
@@ -329,11 +306,6 @@ final class BriefingViewModel {
         let compact = selectedLensKey.map(headerPinnedLensKeys.contains) ?? false
         if isMastheadCompact != compact {
             isMastheadCompact = compact
-        }
-        let expanded = isNewsTierSelected && !newsLenses.isEmpty
-            && (!compact || categoryStripPinnedOpen)
-        if isCategoryStripExpanded != expanded {
-            isCategoryStripExpanded = expanded
         }
     }
     func markSegmentSeen(_ segment: APIBriefingSegment) {
