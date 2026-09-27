@@ -27,6 +27,17 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-26 — detached `83f93acb` — PostgreSQL JSON persistence repairs
+
+- **Status:** Complete locally.
+- **Scope:** X connection persistence, scraper config updates, and nearby PostgreSQL JSON query audit.
+- **Context:** Production connection 1 was reauthorized at 18:16 UTC, but seven scheduled syncs failed finalization with PostgreSQL 42846 (`jsonb` versus `json` in a `CASE` expression). At 20:16 UTC, X rejected token refresh and the connection became `reauth_required`; no bookmark ledger rows were added after reconnect.
+- **Decisions:** Cast bound JSONB values to the owning `json` column type inside mixed-type `CASE` and `COALESCE` expressions. Keep the schema and public contracts unchanged.
+- **Changes:** Fixed X scopes finalization and the same reproducible type mismatch in scraper config updates. Added isolated PostgreSQL regressions for populated and empty X scopes and for scraper config replacement and preservation.
+- **Validation:** All 91 `newsly-db` tests passed against isolated PostgreSQL databases; warning-denied all-target `newsly-db` Clippy, Rust formatting, and diff checks passed. Structured production worker logs showed 29 JSON conversion errors across eight X tasks and none in other task types; API logs showed no observed scraper config failure. Static audit found no other unsafe mixed-type JSON `CASE` or `COALESCE` expression.
+- **Remaining:** Production deployment and another X reconnection are required to resume bookmark syncing; the refresh-token rejection's original cause remains unconfirmed.
+- **Commits:** See git history.
+
 ### 2026-09-26 — `main` — Floating tab bar labels under icons
 
 - **Status:** Complete

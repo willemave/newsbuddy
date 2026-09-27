@@ -515,7 +515,7 @@ pub async fn update_scraper_config(
         SET
             display_name = COALESCE($3, display_name),
             feed_url = COALESCE($4, feed_url),
-            config = COALESCE($5, config),
+            config = COALESCE($5::json, config),
             is_active = COALESCE($6, is_active),
             updated_at = timezone('UTC', now())
         WHERE id::bigint = $1 AND user_id::bigint = $2
@@ -649,7 +649,10 @@ pub enum ScraperConfigRepositoryError {
 
 #[cfg(test)]
 mod tests {
-    use super::canonicalize_feed_url;
+    use serde_json::json;
+    use sqlx::PgPool;
+
+    use super::{ScraperConfigPatch, canonicalize_feed_url, update_scraper_config};
 
     #[test]
     fn canonical_url_identity_preserves_existing_rules() {
@@ -662,5 +665,56 @@ mod tests {
             "aggregator://hackernews"
         );
         assert_eq!(canonicalize_feed_url("relative/feed/"), "relative/feed");
+    }
+
+    #[sqlx::test]
+    async fn config_update_accepts_json_patch_and_preserves_it_when_absent(pool: PgPool) {
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ('scraper-json', 'scraper-json@example.test', FALSE, TRUE) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let config_id: i64 = sqlx::query_scalar(
+            "INSERT INTO user_scraper_configs (user_id, scraper_type, display_name, config) VALUES ($1::integer, 'atom', 'Original', '{}'::json) RETURNING id::bigint",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let new_config = json!({"feed_url": "https://example.test/feed", "feed_format": "atom"});
+        let mut transaction = pool.begin().await.unwrap();
+        let updated = update_scraper_config(
+            &mut transaction,
+            user_id,
+            config_id,
+            "atom",
+            &ScraperConfigPatch {
+                display_name: Some("Renamed"),
+                config: Some(&new_config),
+                ..ScraperConfigPatch::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.config, new_config);
+        transaction.commit().await.unwrap();
+
+        let mut transaction = pool.begin().await.unwrap();
+        let updated = update_scraper_config(
+            &mut transaction,
+            user_id,
+            config_id,
+            "atom",
+            &ScraperConfigPatch {
+                display_name: Some("Renamed again"),
+                ..ScraperConfigPatch::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.config, new_config);
+        transaction.commit().await.unwrap();
     }
 }

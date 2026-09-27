@@ -300,7 +300,7 @@ pub async fn persist_x_sync_connection_update(
             access_token_encrypted = $4,
             refresh_token_encrypted = $5,
             token_expires_at = $6,
-            scopes = CASE WHEN json_array_length($7::json) > 0 THEN $7 ELSE scopes END,
+            scopes = CASE WHEN json_array_length($7::json) > 0 THEN $7::json ELSE scopes END,
             updated_at = timezone('UTC', now())
         WHERE id::bigint = $1::bigint
         "#,
@@ -972,3 +972,7 @@ pub enum XSyncRepositoryError {
     #[error("X synchronization database operation failed")]
     Sqlx(#[from] sqlx::Error),
 }
+
+#[cfg(test)]
+#[path = "x_sync_tests.rs"]
+mod tests;
