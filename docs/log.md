@@ -27,6 +27,15 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-27 — `willem/aggregator-freshness` — Release preparation
+
+- **Status:** Release validation in progress.
+- **Scope:** Aggregator freshness and demand gating implementation from the 2026-09-24 entry.
+- **Decisions:** Rebased onto current `origin/main` before the release gate. Split four touched modules to satisfy the repository's size guardrails; the code rebase was clean and both sides of the append-only log were retained.
+- **Validation:** Pre-commit module guardrails and Rust formatting passed; affected API and worker targets passed `cargo check` before the rebase. Full release gate and live provider smoke remain to run on the rebased commit.
+- **Remaining:** Run the release gate, push the exact tested SHA, and prove production revision and ingestion behavior.
+- **Commits:** See git history.
+
 ### 2026-09-24 — `HEAD` — Aggregator freshness and demand gating
 
 - **Status:** Complete locally; production intake and cost effects unmeasured.
