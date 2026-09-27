@@ -1,12 +1,22 @@
-//! Exa search transport and the usage units it reports for onboarding.
+use std::time::Duration;
 
-use super::{
-    DISCOVERY_SNIPPET_CHARS, Duration, EXCLUDED_DOMAINS, ExposeSecret, OnboardingDiscoverySeeds,
-    OnboardingProfile, SecretString, Url, clean,
-};
+use reqwest::Url;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-/// Exa search units observed during one onboarding operation.
+use super::{DISCOVERY_SNIPPET_CHARS, clean};
+
+const EXCLUDED_DOMAINS: [&str; 8] = [
+    "facebook.com",
+    "linkedin.com",
+    "twitter.com",
+    "x.com",
+    "instagram.com",
+    "tiktok.com",
+    "pinterest.com",
+    "reddit.com",
+];
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OnboardingExaUsage {
     pub request_count: u64,
@@ -23,7 +33,6 @@ impl OnboardingExaUsage {
         self.text_count = self.text_count.saturating_add(other.text_count);
     }
 
-    /// Counts one successful search request and the result contents it returned.
     pub(super) fn record_search(&mut self, rows: &[ExaSearchRow]) {
         let count = |present: fn(&ExaSearchRow) -> bool| {
             u64::try_from(rows.iter().filter(|row| present(row)).count()).unwrap_or(u64::MAX)
@@ -37,39 +46,27 @@ impl OnboardingExaUsage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OnboardingProfileOutcome {
-    pub profile: OnboardingProfile,
-    pub exa_usage: OnboardingExaUsage,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct OnboardingDiscoveryOutcome {
-    pub seeds: OnboardingDiscoverySeeds,
-    pub exa_usage: OnboardingExaUsage,
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ExaSearchRequest<'a> {
-    pub(super) query: &'a str,
-    pub(super) num_results: usize,
+struct ExaSearchRequest<'a> {
+    query: &'a str,
+    num_results: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) exclude_domains: Option<Vec<&'static str>>,
-    pub(super) contents: ExaContents,
+    exclude_domains: Option<Vec<&'static str>>,
+    contents: ExaContents,
 }
 
 /// A short page excerpt per result, so the model selects on what a source covers rather than on
 /// its title alone. No summaries or live crawling: those are the slow, costly parts.
 #[derive(Debug, Serialize)]
-pub(super) struct ExaContents {
-    pub(super) text: ExaText,
+struct ExaContents {
+    text: ExaText,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ExaText {
-    pub(super) max_characters: usize,
+struct ExaText {
+    max_characters: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,4 +119,31 @@ pub(super) async fn search_exa(
         .into_iter()
         .filter(|result| !result.url.trim().is_empty())
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovery_search_requests_only_a_short_text_excerpt() {
+        let payload = serde_json::to_value(ExaSearchRequest {
+            query: "piano RSS feeds",
+            num_results: 8,
+            exclude_domains: None,
+            contents: ExaContents {
+                text: ExaText {
+                    max_characters: DISCOVERY_SNIPPET_CHARS,
+                },
+            },
+        })
+        .expect("Exa search request serializes");
+
+        assert_eq!(payload["query"], "piano RSS feeds");
+        assert_eq!(payload["numResults"], 8);
+        assert_eq!(
+            payload["contents"],
+            serde_json::json!({ "text": { "maxCharacters": DISCOVERY_SNIPPET_CHARS } })
+        );
+    }
 }

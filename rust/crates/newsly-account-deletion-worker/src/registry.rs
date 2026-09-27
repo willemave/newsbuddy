@@ -207,7 +207,7 @@ mod tests {
             "/../newsly-db/baseline/catalog-inventory.json"
         )))
         .unwrap();
-        let discovered = inventory
+        let mut discovered = inventory
             .columns
             .into_iter()
             .filter(|column| matches!(column.name.as_str(), "user_id" | "owner_user_id"))
@@ -215,6 +215,8 @@ mod tests {
             .filter(|column| column.relation != "agent_data_files")
             .map(|column| (column.relation, column.name))
             .collect::<BTreeSet<_>>();
+        // This user-owned table was added after the immutable Alembic baseline.
+        discovered.insert(("task_sandbox_sessions".to_owned(), "user_id".to_owned()));
         let registered = USER_OWNED_RELATIONS
             .iter()
             .map(|relation| (relation.relation.to_owned(), relation.column.to_owned()))

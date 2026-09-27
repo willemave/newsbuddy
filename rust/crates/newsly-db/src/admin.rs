@@ -537,23 +537,23 @@ mod usage_tests {
         .execute(&pool)
         .await
         .unwrap();
-        let rows: Vec<(String, Option<f64>, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT model, cost_usd, cost_basis, pricing_version
+        let rows: Vec<(Option<f64>, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT cost_usd, cost_basis, pricing_version
              FROM vendor_usage_records ORDER BY id",
         )
         .fetch_all(&pool)
         .await
         .unwrap();
         assert_eq!(rows.len(), 6);
-        assert!((rows[0].1.unwrap() - 0.0001345).abs() < 1e-10);
-        assert_eq!(rows[0].2.as_deref(), Some("public_list_estimate"));
-        assert_eq!(rows[0].3.as_deref(), Some("openai-standard-2026-09-27"));
-        assert!((rows[1].1.unwrap() - 0.01).abs() < 1e-10);
-        assert!((rows[2].1.unwrap() - 0.00001).abs() < 1e-10);
+        assert!((rows[0].0.unwrap() - 0.000_134_5).abs() < 1e-10);
+        assert_eq!(rows[0].1.as_deref(), Some("public_list_estimate"));
+        assert_eq!(rows[0].2.as_deref(), Some("openai-standard-2026-09-27"));
+        assert!((rows[1].0.unwrap() - 0.01).abs() < 1e-10);
+        assert!((rows[2].0.unwrap() - 0.000_01).abs() < 1e-10);
         assert!(
             rows[3..]
                 .iter()
-                .all(|row| row.1.is_none() && row.3.is_none())
+                .all(|row| row.0.is_none() && row.2.is_none())
         );
 
         sqlx::query(

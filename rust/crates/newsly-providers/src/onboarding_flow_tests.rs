@@ -1,7 +1,6 @@
-use super::exa::{ExaContents, ExaSearchRequest, ExaText};
 use super::{
-    AUDIO_PLAN_SYSTEM_PROMPT, DISCOVERY_SNIPPET_CHARS, ONBOARDING_MODEL, OnboardingGateway,
-    OnboardingLaneTarget, onboarding_provider_parameters,
+    AUDIO_PLAN_SYSTEM_PROMPT, ONBOARDING_MODEL, OnboardingGateway, OnboardingLaneTarget,
+    onboarding_provider_parameters,
 };
 
 #[test]
@@ -23,28 +22,6 @@ fn audio_plan_prompt_requires_durable_and_meaningfully_diverse_sources() {
     assert!(AUDIO_PLAN_SYSTEM_PROMPT.contains("source archetypes and viewpoints"));
     assert!(AUDIO_PLAN_SYSTEM_PROMPT.contains("format differences alone do not count"));
     assert!(AUDIO_PLAN_SYSTEM_PROMPT.contains("names no specific subjects"));
-}
-
-#[test]
-fn discovery_search_requests_only_a_short_text_excerpt() {
-    let payload = serde_json::to_value(ExaSearchRequest {
-        query: "piano RSS feeds",
-        num_results: 8,
-        exclude_domains: None,
-        contents: ExaContents {
-            text: ExaText {
-                max_characters: DISCOVERY_SNIPPET_CHARS,
-            },
-        },
-    })
-    .expect("Exa search request serializes");
-
-    assert_eq!(payload["query"], "piano RSS feeds");
-    assert_eq!(payload["numResults"], 8);
-    assert_eq!(
-        payload["contents"],
-        serde_json::json!({ "text": { "maxCharacters": DISCOVERY_SNIPPET_CHARS } })
-    );
 }
 
 #[tokio::test]

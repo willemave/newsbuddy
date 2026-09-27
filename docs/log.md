@@ -34,8 +34,8 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Decisions:** Raised the default from 32 to 1,000 calls and the configurable maximum from 200 to 10,000. The execution deadline remains the routine bound; the tool-call ceiling guards against runaway loops.
 - **Changes:** Updated the shared default and the Knowledge and Learning law.
 - **Validation:** `cargo fmt --all --check`, the focused Learning Deck limits test, warning-denied worker Clippy (SQLx offline), and `git diff --check` passed.
-- **Remaining:** Commit and deploy when authorized; the production worker still uses its current image.
-- **Commits:** Uncommitted.
+- **Remaining:** Deploy only with a separately authorized release; the production worker still uses its current image.
+- **Commits:** `54c0803b`.
 
 ### 2026-09-27 — `main` — Settings header app icon
 
@@ -44,7 +44,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Decisions:** `AppMark` was a 64pt export shown at 96pt, which made it blurry, and it no longer matched the current icon. Regenerated it at 96pt (1x/2x/3x) from the light/dark `AppIcon` masters. The now-playing artwork also uses this set. Added a `borderSubtle` hairline because the dark icon tile blends into the sheet surface.
 - **Validation:** Simulator build succeeded. Not visually verified on device.
 - **Remaining:** None.
-- **Commits:** Uncommitted.
+- **Commits:** `fe9cbaf6`.
 
 ### 2026-09-27 — `main` — Reprocess unavailable Knowledge saves
 
@@ -54,7 +54,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** The status sheet now uses the mini-sheet header and option rows at a fitted height. It shows the item title, a status-specific message, Reprocess (unavailable/stalled) or Check progress (preparing), Open original, and Remove, with an inline error when reprocess fails. Law K18 added.
 - **Validation:** Warning-denied Clippy for newsly-api; newsly-db lib Clippy clean (all-targets Clippy fails only on pre-existing vendor-cost test code in `admin.rs`). Four SQLx tests for reset/not-saved/ready/active-task passed; newsly-api tests passed; public contracts regenerated and checked. iOS ContentList/KnowledgeTimeline/ContentDetail unit tests passed, including the new reprocess reload test.
 - **Remaining:** Sheet not visually verified on simulator: the local API needs a restart onto this build and a failed saved item. Deploy only with a separately authorized release.
-- **Commits:** Uncommitted.
+- **Commits:** `7aee57ce`.
 
 ### 2026-09-27 — `main` — Vendor spend accounting
 
@@ -64,7 +64,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Added dated token rates, cost basis, E2B lifecycle ledger/reconciliation, observed Exa usage across API and worker paths, measured-duration transcription and model-aware ElevenLabs estimates. The CLI and admin views expose priced subtotals, estimate portions, and unpriced record counts. `docs/operations/vendor-costs.md` records rates and accounting limits.
 - **Validation:** Production baseline inspected read-only; published rates and cross-package design independently reviewed. Formatting and diff checks passed; warning-denied Clippy passed for affected DB, E2B, provider, worker, API, admin, and account-deletion crates. Focused SQLx tests for pricing, admin aggregation, and E2B lifecycle passed; provider, E2B, API, admin, and discovery tests passed. No paid live provider call was made.
 - **Remaining:** Deploy only after a separately authorized release. Reconcile account invoices for base plans and infrastructure, ambiguous E2B creation/account deletion races, provider requests lost during DB outages, and partial failed multichunk transcriptions; these cannot be asserted as exact spend from application rows.
-- **Commits:** Uncommitted.
+- **Commits:** `776317d2`, `e14dba98` (parallel vendor-spend implementations merged).
 
 ### 2026-09-26 — detached `83f93acb` — Disposable E2B template deck canary
 
