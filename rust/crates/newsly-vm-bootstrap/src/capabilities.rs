@@ -1,38 +1,21 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::Command;
 
 use serde_json::Value;
 
 use crate::error::{BootstrapError, Result};
 
 const REQUIRED_TOOLS: [&str; 7] = ["bash", "python", "node", "git", "curl", "jq", "rg"];
-const BROWSER_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
-const BROWSER_OUTPUT_LIMIT: usize = 16 * 1024;
 const BROWSER_ERROR_CHAR_LIMIT: usize = 1_000;
 const PLAYWRIGHT_PROBE: &str = r"
+const fs = require('fs');
 const { chromium } = require('playwright');
-(async () => {
-  let browser;
-  const timer = setTimeout(() => {
-    console.error('Playwright browser probe timed out');
-    process.exit(124);
-  }, 18000);
-  try {
-    browser = await chromium.launch({headless: true});
-    await browser.close();
-    clearTimeout(timer);
-    process.exit(0);
-  } catch (error) {
-    clearTimeout(timer);
-    console.error(error);
-    process.exit(1);
-  }
-})();
+const executable = chromium.executablePath();
+fs.accessSync(executable, fs.constants.R_OK | fs.constants.X_OK);
+process.stdout.write(executable);
 ";
 
 /// Build the sorted capability object consumed by sandbox acquisition.
@@ -84,7 +67,7 @@ struct BrowserProbe {
 }
 
 fn probe_browser(node: &Path) -> BrowserProbe {
-    match run_browser_probe(node) {
+    match Command::new(node).arg("-e").arg(PLAYWRIGHT_PROBE).output() {
         Ok(output) if output.status.success() => BrowserProbe {
             ready: true,
             error: None,
@@ -98,10 +81,11 @@ fn probe_browser(node: &Path) -> BrowserProbe {
             let detail = String::from_utf8_lossy(raw_error).trim().to_owned();
             let detail = if detail.contains("Cannot find module 'playwright'") {
                 "Node Playwright package is unavailable".to_owned()
-            } else if output.timed_out {
-                "Playwright browser probe timed out".to_owned()
             } else if detail.is_empty() {
-                format!("Playwright browser probe exited with {}", output.status)
+                format!(
+                    "Playwright static browser check exited with {}",
+                    output.status
+                )
             } else {
                 truncate_chars(&detail, BROWSER_ERROR_CHAR_LIMIT)
             };
@@ -112,93 +96,11 @@ fn probe_browser(node: &Path) -> BrowserProbe {
         }
         Err(error) => BrowserProbe {
             ready: false,
-            error: Some(truncate_chars(&error.to_string(), BROWSER_ERROR_CHAR_LIMIT)),
+            error: Some(truncate_chars(
+                &format!("starting Playwright static browser check failed: {error}"),
+                BROWSER_ERROR_CHAR_LIMIT,
+            )),
         },
-    }
-}
-
-#[derive(Debug)]
-struct BrowserOutput {
-    status: ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    timed_out: bool,
-}
-
-fn run_browser_probe(node: &Path) -> Result<BrowserOutput> {
-    let mut child = Command::new(node)
-        .arg("-e")
-        .arg(PLAYWRIGHT_PROBE)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| BootstrapError::io("starting Playwright browser probe", node, error))?;
-
-    let stdout = child.stdout.take().ok_or_else(|| {
-        BootstrapError::Process("browser probe stdout was unavailable".to_owned())
-    })?;
-    let stderr = child.stderr.take().ok_or_else(|| {
-        BootstrapError::Process("browser probe stderr was unavailable".to_owned())
-    })?;
-    let stdout_reader = thread::spawn(move || read_tail(stdout, BROWSER_OUTPUT_LIMIT));
-    let stderr_reader = thread::spawn(move || read_tail(stderr, BROWSER_OUTPUT_LIMIT));
-
-    let (status, timed_out) = wait_with_timeout(&mut child, BROWSER_PROBE_TIMEOUT)?;
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| BootstrapError::WorkerPanicked)?
-        .map_err(|error| BootstrapError::io("reading browser probe stdout", "node", error))?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| BootstrapError::WorkerPanicked)?
-        .map_err(|error| BootstrapError::io("reading browser probe stderr", "node", error))?;
-    Ok(BrowserOutput {
-        status,
-        stdout,
-        stderr,
-        timed_out,
-    })
-}
-
-fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<(ExitStatus, bool)> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| BootstrapError::io("polling browser probe", "node", error))?
-        {
-            return Ok((status, false));
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let status = child
-                .wait()
-                .map_err(|error| BootstrapError::io("reaping browser probe", "node", error))?;
-            return Ok((status, true));
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-}
-
-fn read_tail(mut reader: impl Read, limit: usize) -> std::io::Result<Vec<u8>> {
-    let mut tail = Vec::with_capacity(limit);
-    let mut buffer = [0_u8; 8 * 1024];
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            return Ok(tail);
-        }
-        if read >= limit {
-            tail.clear();
-            tail.extend_from_slice(&buffer[read - limit..read]);
-            continue;
-        }
-        let overflow = tail.len().saturating_add(read).saturating_sub(limit);
-        if overflow > 0 {
-            tail.drain(..overflow);
-        }
-        tail.extend_from_slice(&buffer[..read]);
     }
 }
 
@@ -237,7 +139,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{find_executable_in, read_tail, truncate_chars};
+    use super::{PLAYWRIGHT_PROBE, find_executable_in, truncate_chars};
 
     #[test]
     #[cfg(unix)]
@@ -258,11 +160,10 @@ mod tests {
     }
 
     #[test]
-    fn tail_reader_drains_and_keeps_only_the_bound() {
-        assert_eq!(
-            read_tail(&b"0123456789"[..], 4).expect("read tail"),
-            b"6789"
-        );
+    fn browser_probe_is_static() {
+        assert!(PLAYWRIGHT_PROBE.contains("executablePath"));
+        assert!(PLAYWRIGHT_PROBE.contains("accessSync"));
+        assert!(!PLAYWRIGHT_PROBE.contains(".launch"));
     }
 
     #[test]

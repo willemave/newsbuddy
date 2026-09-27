@@ -24,14 +24,12 @@ const REQUIRED_BROWSER_CAPABILITIES: [&str; 2] = ["chromium", "playwright"];
 
 #[derive(Clone, Copy, Debug)]
 pub struct VmBootstrapLimits {
-    pub capability_timeout: Duration,
     pub command_idle_timeout: Duration,
 }
 
 impl Default for VmBootstrapLimits {
     fn default() -> Self {
         Self {
-            capability_timeout: Duration::from_secs(30),
             command_idle_timeout: Duration::from_secs(30),
         }
     }
@@ -39,9 +37,9 @@ impl Default for VmBootstrapLimits {
 
 impl VmBootstrapLimits {
     fn validate(self) -> Result<(), E2bError> {
-        if self.capability_timeout.is_zero() || self.command_idle_timeout.is_zero() {
+        if self.command_idle_timeout.is_zero() {
             return Err(E2bError::InvalidInput(
-                "VM capability limits must be greater than zero".to_owned(),
+                "VM command idle timeout must be greater than zero".to_owned(),
             ));
         }
         Ok(())
@@ -75,8 +73,19 @@ impl VmCapabilities {
         );
         if !missing.is_empty() {
             missing.sort_unstable();
+            let diagnostic = values
+                .get("browser_validation_error")
+                .and_then(Value::as_str)
+                .filter(|detail| !detail.trim().is_empty())
+                .map(|detail| {
+                    format!(
+                        "; browser validation: {}",
+                        detail.trim().chars().take(1_000).collect::<String>()
+                    )
+                })
+                .unwrap_or_default();
             return Err(E2bError::MissingVmCapabilities {
-                capabilities: missing.join(", "),
+                capabilities: format!("{}{diagnostic}", missing.join(", ")),
             });
         }
         Ok(Self(values))
@@ -119,11 +128,6 @@ impl VmBootstrapClient {
         requested_deadline: Instant,
         cancellation: CancellationToken,
     ) -> Result<VmCapabilities, E2bError> {
-        let deadline = requested_deadline.min(
-            Instant::now()
-                .checked_add(self.limits.capability_timeout)
-                .ok_or(E2bError::Deadline)?,
-        );
         let stream = self
             .process
             .start(
@@ -136,7 +140,7 @@ impl VmBootstrapClient {
                     username: Some(SandboxUser::parse("user")?),
                     tag: ExecutionTag::new(),
                     stdin_enabled: false,
-                    absolute_deadline: deadline,
+                    absolute_deadline: requested_deadline,
                     idle_timeout: self.limits.command_idle_timeout,
                     output_limits: OutputLimits {
                         stdout_bytes: 64 * 1024,
@@ -264,5 +268,17 @@ mod tests {
         let valid = r#"{"bash":"/bin/bash","python":"/usr/bin/python3","node":"/usr/bin/node","git":"/usr/bin/git","curl":"/usr/bin/curl","jq":"/usr/bin/jq","rg":"/usr/bin/rg","chromium":true,"playwright":true}"#;
         assert!(VmCapabilities::parse(valid).is_ok());
         assert!(VmCapabilities::parse(r#"{"bash":"/bin/bash"}"#).is_err());
+    }
+
+    #[test]
+    fn capability_manifest_preserves_browser_failure_detail() {
+        let invalid = r#"{"bash":"/bin/bash","python":"/usr/bin/python3","node":"/usr/bin/node","git":"/usr/bin/git","curl":"/usr/bin/curl","jq":"/usr/bin/jq","rg":"/usr/bin/rg","chromium":false,"playwright":false,"browser_validation_error":"Chromium executable is unavailable"}"#;
+        let error = VmCapabilities::parse(invalid).expect_err("browser must be required");
+
+        assert!(
+            error
+                .to_string()
+                .contains("Chromium executable is unavailable")
+        );
     }
 }
