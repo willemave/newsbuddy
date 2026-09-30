@@ -20,6 +20,7 @@
     clippy::too_many_lines
 )]
 
+mod agent_usage;
 pub mod audio_episode;
 pub mod briefing_refresh;
 pub mod chat_turn;

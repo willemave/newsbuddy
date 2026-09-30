@@ -1,7 +1,10 @@
 use std::sync::Arc;
+use std::{future::Future, pin::Pin};
 
 use chrono::Utc;
-use newsly_providers::ImageGenerationGateway;
+use newsly_providers::{
+    ImageGenerationGateway, ImageGenerationUsage, ImageGenerationUsageObserver,
+};
 use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -13,7 +16,7 @@ use super::model::{ImageFinalizationPlan, PreparedImageAttempt};
 use super::prompt::{
     build_infographic_prompt, has_generated_image, image_input_fingerprint, runtime_metadata_view,
 };
-use super::repository::load_image_snapshot;
+use super::repository::{load_image_snapshot, record_image_generation_usage};
 use super::storage::ImageFileStore;
 
 #[derive(Debug, Clone)]
@@ -81,10 +84,17 @@ async fn execute_image_generation(
     let content_id = prepared.attempt.content.id;
     let task_id = prepared.attempt.task_id;
 
-    let provider_call =
-        services
-            .gateway
-            .generate_infographic(&prepared.prompt, content_id, task_id);
+    let usage_observer: Arc<dyn ImageGenerationUsageObserver> =
+        Arc::new(DurableImageUsageObserver {
+            pool: services.pool.clone(),
+            attempt: prepared.attempt.clone(),
+        });
+    let provider_call = services.gateway.generate_infographic(
+        &prepared.prompt,
+        content_id,
+        task_id,
+        usage_observer,
+    );
     tokio::pin!(provider_call);
     let generated = tokio::select! {
         result = &mut provider_call => result,
@@ -130,7 +140,6 @@ async fn execute_image_generation(
             ImageFinalizationPlan {
                 attempt: prepared.attempt,
                 staged,
-                usage: generated.usage,
                 generated_at: Utc::now(),
             },
             services.queue.clone(),
@@ -138,6 +147,40 @@ async fn execute_image_generation(
             services.briefing_batch_minimum,
         ),
     )
+}
+
+#[derive(Debug, Clone)]
+struct DurableImageUsageObserver {
+    pool: PgPool,
+    attempt: PreparedImageAttempt,
+}
+
+impl ImageGenerationUsageObserver for DurableImageUsageObserver {
+    fn observe(
+        &self,
+        usage: ImageGenerationUsage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+        let pool = self.pool.clone();
+        let attempt = self.attempt.clone();
+        Box::pin(async move {
+            tokio::spawn(async move {
+                let result = record_image_generation_usage(&pool, &attempt, &usage).await;
+                if let Err(error) = &result {
+                    tracing::error!(
+                        task_id = attempt.task_id,
+                        content_id = attempt.content.id,
+                        provider = usage.provider,
+                        model = usage.model,
+                        error = %error,
+                        "image generation usage persistence failed"
+                    );
+                }
+                result.map(|_| ()).map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| format!("image usage persistence task failed: {error}"))?
+        })
+    }
 }
 
 struct PreparedImageGeneration {
@@ -236,4 +279,109 @@ async fn prepare_image_generation(
 
 fn plain_failure(message: impl Into<String>, retryable: bool) -> HandlerExecution {
     HandlerExecution::from_result(TaskResult::fail(Some(message.into()), retryable))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use newsly_providers::{ImageGenerationUsage, ImageGenerationUsageObserver};
+    use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
+    use serde_json::json;
+    use sqlx::PgPool;
+
+    use super::{DurableImageUsageObserver, PreparedImageAttempt};
+    use crate::image_generation::repository::load_image_snapshot;
+
+    #[sqlx::test]
+    async fn cancelling_observer_wait_does_not_cancel_durable_usage_insert(pool: PgPool) {
+        newsly_db::run_migrations(&pool).await.unwrap();
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users(apple_id,email,is_active,is_admin)
+             VALUES('image-observer','image-observer@example.com',true,false)
+             RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let content_id: i64 = sqlx::query_scalar(
+            "INSERT INTO contents(content_type,url,title,status,is_aggregate,content_metadata)
+             VALUES('article','https://example.com/observer','Test','awaiting_image',false,$1)
+             RETURNING id::bigint",
+        )
+        .bind(json!({
+            "summary": {"title": "Test", "overview": "Observed"},
+            "submitted_by_user_id": user_id
+        }))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let queue = QueueKernel::new(pool.clone());
+        let mut enqueue = EnqueueRequest::new(TaskType::GenerateImage);
+        enqueue.content_id = Some(content_id);
+        let task_id = queue.enqueue(enqueue).await.unwrap();
+        let mut snapshot_tx = pool.begin().await.unwrap();
+        let content = load_image_snapshot(&mut snapshot_tx, content_id)
+            .await
+            .unwrap()
+            .unwrap();
+        snapshot_tx.commit().await.unwrap();
+        let observer = Arc::new(DurableImageUsageObserver {
+            pool: pool.clone(),
+            attempt: PreparedImageAttempt {
+                task_id,
+                content,
+                input_fingerprint: "observer-fixture".to_owned(),
+                force: false,
+            },
+        });
+        let usage = ImageGenerationUsage {
+            provider: "runware".to_owned(),
+            model: "fixture".to_owned(),
+            request_id: Some("detached-response".to_owned()),
+            input_tokens: None,
+            cache_read_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            request_count: 1,
+            response_cost_usd: Some(0.01),
+            metadata: json!({}),
+        };
+
+        let mut blocker = pool.begin().await.unwrap();
+        sqlx::query("LOCK TABLE vendor_usage_records IN ACCESS EXCLUSIVE MODE")
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+        let waiting_observer = tokio::spawn(async move { observer.observe(usage).await });
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        let blocked_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM vendor_usage_records WHERE request_id='detached-response'",
+        )
+        .fetch_one(&mut *blocker)
+        .await
+        .unwrap();
+        assert_eq!(blocked_count, 0);
+        waiting_observer.abort();
+        blocker.rollback().await.unwrap();
+
+        let inserted = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let count: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM vendor_usage_records WHERE request_id='detached-response'",
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+                if count == 1 {
+                    break count;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("detached usage insert should finish after caller cancellation");
+        assert_eq!(inserted, 1);
+    }
 }

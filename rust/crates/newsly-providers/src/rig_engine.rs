@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentOutcome, AgentRequest, AgentRuntimeError,
-    AssistantPart, BoxAgentFuture, MessagePart, MessageRole, NewslyMessage, ProviderUsage,
-    ReasoningContentKind, RequestPart, ResponseContract, ToolCall as NewslyToolCall, ToolExecutor,
-    TranscriptFinishReason,
+    AgentEngine, AgentEvent, AgentEventSink, AgentModelUsageObservation, AgentOutcome,
+    AgentRequest, AgentRuntimeError, AssistantPart, BoxAgentFuture, MessagePart, MessageRole,
+    NewslyMessage, ProviderUsage, ReasoningContentKind, RequestPart, ResponseContract,
+    ToolCall as NewslyToolCall, ToolExecutor, TranscriptFinishReason,
 };
 use rig_core::client::CompletionClient;
 use rig_core::completion::{
@@ -25,6 +25,8 @@ use uuid::Uuid;
 use crate::{
     ModelProvider, ModelSpec, OpenRouterPrivacyPolicy, OpenRouterRoutingError, ProviderCredentials,
 };
+
+mod openai_response;
 
 #[derive(Debug, Clone)]
 pub struct RigAgentEngine {
@@ -114,6 +116,7 @@ impl RigAgentEngine {
         let mut tool_call_count = 0_u32;
         let mut validation_failures = 0_u16;
         let mut last_response_id = None;
+        let run_id = Uuid::new_v4();
 
         loop {
             enforce_request_limit(request_count, request.limits.request_limit)?;
@@ -153,7 +156,32 @@ impl RigAgentEngine {
             let response_usage = provider_usage(&response);
             usage.add_assign(&response_usage);
             events.publish(AgentEvent::Usage {
-                usage: response_usage.clone(),
+                observation: Box::new(AgentModelUsageObservation {
+                    run_id,
+                    sequence: request_count,
+                    feature: request.feature.clone(),
+                    provider: response.provider.clone(),
+                    model: response
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| model_spec.model.clone()),
+                    endpoint: provider_endpoint(model_spec.provider, &model_spec.model),
+                    response_id: response.response_id.clone(),
+                    provider_request_id: response.provider_request_id.clone(),
+                    requested_service_tier: request
+                        .provider_parameters
+                        .get("service_tier")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    processing_tier: response
+                        .raw
+                        .get("service_tier")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    usage_is_observed: response_reports_usage(&response),
+                    provider_reported_cost_usd: provider_reported_cost_usd(&response),
+                    usage: response_usage.clone(),
+                }),
             })?;
             if response.response_id.is_some() {
                 last_response_id.clone_from(&response.response_id);
@@ -366,7 +394,10 @@ impl RigAgentEngine {
             .to_owned();
         match spec.provider {
             ModelProvider::OpenAi => openai::Client::new(key)
-                .map(|client| RigModel::OpenAi(client.completion_model(spec.model.clone())))
+                .map(|client| RigModel::OpenAi {
+                    client,
+                    model: spec.model.clone(),
+                })
                 .map_err(|error| AgentRuntimeError::Provider(error.to_string())),
             ModelProvider::Anthropic => anthropic::Client::new(key)
                 .map(|client| RigModel::Anthropic(client.completion_model(spec.model.clone())))
@@ -423,10 +454,63 @@ impl AgentEngine for RigAgentEngine {
 }
 
 enum RigModel {
-    OpenAi(openai::responses_api::ResponsesCompletionModel),
+    OpenAi {
+        client: openai::Client,
+        model: String,
+    },
     Anthropic(anthropic::completion::CompletionModel),
     Google(gemini::completion::CompletionModel),
     OpenRouter(openrouter::CompletionModel),
+}
+
+fn provider_endpoint(provider: ModelProvider, model: &str) -> String {
+    match provider {
+        ModelProvider::OpenAi => "https://api.openai.com/v1/responses".to_owned(),
+        ModelProvider::Anthropic => "https://api.anthropic.com/v1/messages".to_owned(),
+        ModelProvider::Google => format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        ),
+        ModelProvider::OpenRouter => "https://openrouter.ai/api/v1/chat/completions".to_owned(),
+    }
+}
+
+fn response_reports_usage(response: &CompletionResponse) -> bool {
+    match response.provider.as_str() {
+        "anthropic" => response
+            .raw
+            .get("usage")
+            .is_some_and(|usage| has_u64_fields(usage, &["input_tokens", "output_tokens"])),
+        "google" | "gemini" => response
+            .raw
+            .get("usageMetadata")
+            .or_else(|| response.raw.get("usage_metadata"))
+            .is_some_and(|usage| has_u64_fields(usage, &["promptTokenCount", "totalTokenCount"])),
+        "openrouter" => response
+            .raw
+            .get("usage")
+            .is_some_and(|usage| has_u64_fields(usage, &["prompt_tokens", "total_tokens"])),
+        _ => response.raw.get("usage").is_some_and(|usage| {
+            has_u64_fields(usage, &["input_tokens", "output_tokens", "total_tokens"])
+        }),
+    }
+}
+
+fn has_u64_fields(value: &Value, fields: &[&str]) -> bool {
+    fields
+        .iter()
+        .all(|field| value.get(field).and_then(Value::as_u64).is_some())
+}
+
+fn provider_reported_cost_usd(response: &CompletionResponse) -> Option<f64> {
+    if response.provider != "openrouter" {
+        return None;
+    }
+    response
+        .raw
+        .get("usage")?
+        .get("cost")?
+        .as_f64()
+        .filter(|cost| cost.is_finite() && *cost >= 0.0)
 }
 
 impl RigModel {
@@ -435,7 +519,9 @@ impl RigModel {
         request: CompletionRequest,
     ) -> Result<CompletionResponse, AgentRuntimeError> {
         let response = match self {
-            Self::OpenAi(model) => model.completion(request).await,
+            Self::OpenAi { client, model } => {
+                return openai_response::complete(client, model, request).await;
+            }
             Self::Anthropic(model) => model.completion(request).await,
             Self::Google(model) => model.completion(request).await,
             Self::OpenRouter(model) => model.completion(request).await,
@@ -714,11 +800,24 @@ fn provider_usage(response: &CompletionResponse) -> ProviderUsage {
         input_tokens,
         output_tokens: response.usage.output_tokens,
         cached_input_tokens: response.usage.cached_input_tokens,
-        cache_write_tokens: response.usage.cache_creation_input_tokens,
+        cache_write_tokens: provider_cache_write_tokens(response),
         reasoning_tokens: response.usage.reasoning_tokens,
         input_audio_tokens: 0,
         output_audio_tokens: 0,
     }
+}
+
+fn provider_cache_write_tokens(response: &CompletionResponse) -> u64 {
+    if response.provider == "openai" {
+        return response
+            .raw
+            .get("usage")
+            .and_then(|usage| usage.get("input_tokens_details"))
+            .and_then(|details| details.get("cache_write_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(response.usage.cache_creation_input_tokens);
+    }
+    response.usage.cache_creation_input_tokens
 }
 
 fn validate_output(contract: &ResponseContract, output: &str) -> Result<Option<Value>, String> {
@@ -787,10 +886,14 @@ pub enum RigAgentEngineError {
 #[cfg(test)]
 mod tests {
     use newsly_agent_runtime::AgentRuntimeError;
-    use rig_core::completion::AssistantContent;
+    use rig_core::completion::{AssistantContent, CompletionResponse, Usage};
     use rig_core::message::{Reasoning, ReasoningContent};
+    use serde_json::json;
 
-    use super::{assistant_content, enforce_request_limit, newsly_assistant_parts};
+    use super::{
+        assistant_content, enforce_request_limit, newsly_assistant_parts,
+        provider_reported_cost_usd, response_reports_usage,
+    };
 
     #[test]
     fn finite_request_limit_stops_the_rig_loop_at_the_bound() {
@@ -804,6 +907,39 @@ mod tests {
     #[test]
     fn absent_request_limit_never_stops_the_rig_loop_by_count() {
         assert!(enforce_request_limit(u32::MAX, None).is_ok());
+    }
+
+    #[test]
+    fn usage_is_observed_only_for_complete_provider_counters() {
+        let valid = CompletionResponse::new(Vec::new(), Usage::default(), "openai").with_raw(
+            json!({"usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}}),
+        );
+        let empty = CompletionResponse::new(Vec::new(), Usage::default(), "openai")
+            .with_raw(json!({"usage": {}}));
+        let malformed = CompletionResponse::new(Vec::new(), Usage::default(), "anthropic")
+            .with_raw(json!({"usage": {"input_tokens": "10", "output_tokens": 2}}));
+        let google = CompletionResponse::new(Vec::new(), Usage::default(), "gemini")
+            .with_raw(json!({"usageMetadata": {"promptTokenCount": 10, "totalTokenCount": 10}}));
+
+        assert!(response_reports_usage(&valid));
+        assert!(!response_reports_usage(&empty));
+        assert!(!response_reports_usage(&malformed));
+        assert!(response_reports_usage(&google));
+    }
+
+    #[test]
+    fn openrouter_account_charge_is_captured_only_when_finite_and_nonnegative() {
+        let charged = CompletionResponse::new(Vec::new(), Usage::default(), "openrouter")
+            .with_raw(json!({"usage": {"cost": 0.0042}}));
+        let negative = CompletionResponse::new(Vec::new(), Usage::default(), "openrouter")
+            .with_raw(json!({"usage": {"cost": -0.0042}}));
+        let other_provider = CompletionResponse::new(Vec::new(), Usage::default(), "openai")
+            .with_raw(json!({"usage": {"cost": 0.0042}}));
+
+        let cost = provider_reported_cost_usd(&charged).expect("valid account charge");
+        assert!((cost - 0.0042).abs() < f64::EPSILON);
+        assert_eq!(provider_reported_cost_usd(&negative), None);
+        assert_eq!(provider_reported_cost_usd(&other_provider), None);
     }
 
     #[test]

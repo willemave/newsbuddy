@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use newsly_providers::ImageGenerationUsage;
 use serde_json::Value;
 use sqlx::FromRow;
 
@@ -26,7 +25,6 @@ pub(super) struct PreparedImageAttempt {
 pub(super) struct ImageFinalizationPlan {
     pub(super) attempt: PreparedImageAttempt,
     pub(super) staged: StagedImage,
-    pub(super) usage: ImageGenerationUsage,
     pub(super) generated_at: DateTime<Utc>,
 }
 

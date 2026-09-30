@@ -29,15 +29,12 @@ impl AudioEpisodeFinalizer {
             AudioEpisodeMutation::Complete {
                 script,
                 audio_storage_path,
-                tts_usage,
             } => {
                 complete_audio_episode_generation(
                     transaction,
                     &CompleteAudioEpisodeGeneration {
-                        task_id: attempt.task_id,
                         user_id: attempt.user_id,
                         audio_episode_id: attempt.audio_episode_id,
-                        source_content_id: attempt.source_content_id,
                         prepared_started_at: attempt.prepared_started_at,
                         title: &script.script.title,
                         script: &script.script_json,
@@ -45,8 +42,6 @@ impl AudioEpisodeFinalizer {
                         model: &script.model,
                         audio_storage_path,
                         duration_seconds: script.duration_seconds,
-                        script_usage: script.usage.as_ref(),
-                        tts_usage,
                     },
                 )
                 .await?;
@@ -56,23 +51,18 @@ impl AudioEpisodeFinalizer {
                 retry_scheduled,
                 generated_script,
             } => {
-                if let Some(script) = generated_script
-                    && let Some(usage) = script.usage.as_ref()
-                {
+                if let Some(script) = generated_script {
                     checkpoint_audio_episode_script(
                         transaction,
                         &CheckpointAudioEpisodeScript {
-                            task_id: attempt.task_id,
                             user_id: attempt.user_id,
                             audio_episode_id: attempt.audio_episode_id,
-                            source_content_id: attempt.source_content_id,
                             prepared_started_at: attempt.prepared_started_at,
                             title: &script.script.title,
                             script: &script.script_json,
                             script_text: &script.script_text,
                             model: &script.model,
                             duration_seconds: script.duration_seconds,
-                            usage,
                         },
                     )
                     .await?;

@@ -1647,7 +1647,7 @@ async fn persist_extraction_usage(
                 )
                 .await?;
             }
-            UsageWrite::Model(_) | UsageWrite::X(_) => {
+            UsageWrite::X(_) => {
                 return Err(NewsRepositoryError::UnexpectedContentAnalysisUsage);
             }
         }

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use newsly_db::{AudioEpisodeScriptUsage, AudioEpisodeTtsUsage};
+use newsly_agent_runtime::ProviderUsage;
 use newsly_providers::AudioEpisodeScript;
 use serde_json::Value;
 
@@ -27,7 +27,7 @@ pub(super) struct PreparedScript {
     pub(super) model: String,
     pub(super) mode: &'static str,
     pub(super) duration_seconds: i32,
-    pub(super) usage: Option<AudioEpisodeScriptUsage>,
+    pub(super) usage: Option<ProviderUsage>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +35,6 @@ pub(super) enum AudioEpisodeMutation {
     Complete {
         script: PreparedScript,
         audio_storage_path: String,
-        tts_usage: AudioEpisodeTtsUsage,
     },
     Failed {
         error_message: String,

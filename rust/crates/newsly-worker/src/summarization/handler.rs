@@ -6,6 +6,7 @@ use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::PgPool;
 
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
 use super::finalizer::SummarizationFinalizer;
@@ -14,7 +15,6 @@ use super::input::{
 };
 use super::model::{
     PreparedSummarizationAttempt, SummarizationFinalizationPlan, SummarizationMutation,
-    SummaryUsage,
 };
 use super::repository::load_summarization_snapshot;
 use super::storage::SummarizationBodyStore;
@@ -163,7 +163,6 @@ async fn execute_summarization(
     }
     if summary_matches(&snapshot.content_metadata, &fingerprint) {
         let attempt = PreparedSummarizationAttempt {
-            task_id: plan.task_id,
             content: snapshot,
             input_fingerprint: fingerprint,
         };
@@ -189,22 +188,41 @@ async fn execute_summarization(
         metadata: snapshot.content_metadata.clone(),
         text: payload,
     };
-    let provider_call = services.gateway.summarize(&source);
+    let usage_user_id = metadata_view
+        .get("submitted_by_user_id")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+        .or(plan.owner_user_id);
+    let usage_sink = Arc::new(AgentUsageSink::new(
+        services.pool.clone(),
+        AgentUsageAttribution {
+            operation: "summarization.llm_summarization".to_owned(),
+            source: "queue".to_owned(),
+            task_id: plan.task_id,
+            content_id: Some(content_id),
+            session_id: None,
+            message_id: None,
+            user_id: usage_user_id,
+        },
+    ));
+    let provider_call = services
+        .gateway
+        .summarize_with_events(&source, usage_sink.clone());
     tokio::pin!(provider_call);
     let generated = tokio::select! {
-        result = &mut provider_call => result,
-        () = lease.wait_for_ownership_loss() => {
-            return plain_failure("lease ownership was lost during summarization", true);
-        }
+        result = &mut provider_call => Some(result),
+        () = lease.wait_for_ownership_loss() => None,
+    };
+    usage_sink.finish().await;
+    let Some(generated) = generated else {
+        return plain_failure("lease ownership was lost during summarization", true);
     };
     match generated {
         Ok(generated) => {
             if lease.ownership_lost() {
                 return plain_failure("lease ownership was lost during summarization", true);
             }
-            let (provider, fallback_model) = split_model_spec(services.gateway.model_spec());
             let attempt = PreparedSummarizationAttempt {
-                task_id: plan.task_id,
                 content: snapshot,
                 input_fingerprint: fingerprint,
             };
@@ -215,13 +233,6 @@ async fn execute_summarization(
                     attempt,
                     mutation: SummarizationMutation::Complete {
                         summary: generated.summary_json,
-                        usage: SummaryUsage {
-                            provider: provider.to_owned(),
-                            model: nonempty(&generated.model)
-                                .unwrap_or_else(|| fallback_model.to_owned()),
-                            provider_response_id: generated.provider_response_id,
-                            usage: generated.usage,
-                        },
                     },
                     finalized_at: Utc::now(),
                 },
@@ -262,7 +273,6 @@ fn failed_execution(
         task_result,
         SummarizationFinalizationPlan {
             attempt: PreparedSummarizationAttempt {
-                task_id: plan.task_id,
                 content: snapshot,
                 input_fingerprint,
             },
@@ -290,15 +300,6 @@ fn with_finalizer(
             services.briefing_batch_minimum,
         ),
     )
-}
-
-fn split_model_spec(value: &str) -> (&str, &str) {
-    value.split_once(':').unwrap_or(("unknown", value))
-}
-
-fn nonempty(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()).then(|| value.to_owned())
 }
 
 fn plain_failure(message: impl Into<String>, retryable: bool) -> HandlerExecution {

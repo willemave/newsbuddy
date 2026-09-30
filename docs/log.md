@@ -27,6 +27,26 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-30 — `willem/vendor-cost-accounting` — Vendor price catalog and response accounting
+
+- **Status:** Complete locally; ready for the requested local merge to `main`. Not deployed.
+- **Scope:** Price-catalog migration, shared DB pricing/observations, agent/provider adapters, worker/API accounting, admin reports, architecture and P27.
+- **Decisions:** Research official model/vendor sheets; activate new rates from migration time and preserve quote snapshots. Separate provider charges/estimates, configured account rates, public estimates and known-zero local extraction. Use measured billable units and actual tiers; retain unknown costs rather than invent historical usage. Accounting responses survive product failures and use stable identities.
+- **Changes:** Added non-token catalog (audio, characters, images, sandbox CPU/RAM, Exa, X and plan-specific Firecrawl reference rates); refreshed GPT-6 token/cache/long-context/tier rates. Replaced hardcoded calculators. Added per-response model, image, script, synthesis and transcription recording before downstream work; removed duplicate completion-time aggregates. Capture Exa response estimates and OpenRouter account charges. Reports expose estimate portions, unknown reasons and typed resource quantities.
+- **Validation:** Affected six-crate library suite passed 411 tests, with one paid live canary ignored. Focused PostgreSQL catalog, response idempotency, image cancellation and audio observation coverage passed. Warning-denied all-target Clippy, formatting, module-size and architecture guards, public-contract drift and diff checks passed. No paid vendor calls or production mutations.
+- **Remaining:** Oracle Fable review was attempted but Claude CLI is not authenticated. Independent local correctness review findings were corrected, including canonical metadata/resource units and preservation of OpenAI wire cache-write usage. Production activation requires a separately authorized release.
+- **Commits:** Included in the cost-accounting commit for the authorized local merge.
+
+### 2026-09-29 — detached worktree — Durable audio-episode provider usage
+
+- **Status:** Complete locally.
+- **Scope:** Audio-episode script-model, ElevenLabs, and OpenAI transcription provider callbacks; API and worker accounting observers; audio usage repositories; reliability law.
+- **Decisions:** Record every complete model response and TTS response before decoding, validation, stitching, or product publication. Use the shared per-response model recorder and a stable task-attempt-chunk TTS request identity with a transaction advisory lock; keep provider calls and accounting transactions separate.
+- **Changes:** Script generation now passes a draining agent-event usage sink carrying task, owner, source-content, and operation attribution. Added TTS and transcription usage-observer seams with exact model and measured quantities. API uploads and worker podcast/tweet media durably record each successful transcription chunk before JSON decoding. Later decoding, validation, sibling request, stitch, storage, lease, or finalization failures do not erase known usage. Removed completion/checkpoint aggregate model, TTS, and transcription metering while retaining script checkpointing for retry reuse.
+- **Validation:** The focused mocked TTS-stitch-failure and transcription-decode-failure observer tests passed without paid calls. The isolated PostgreSQL test proved transcription chunk persistence before product finalization and duplicate-delivery idempotency. `cargo check` and warning-denied all-target Clippy passed for `newsly-db`, `newsly-providers`, `newsly-worker`, and `newsly-api`; focused formatting and diff checks passed.
+- **Remaining:** The shared agent-usage repository owns its separate multi-response SQLx coverage; no live provider call is needed for this slice.
+- **Commits:** Uncommitted.
+
 ### 2026-09-27 — `main` — Raise sandbox agent tool-call ceiling
 
 - **Status:** Complete locally.

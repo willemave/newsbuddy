@@ -126,7 +126,10 @@ pub async fn publish_chat_turn(
         )
         .await?;
     }
-    record_chat_usage_best_effort(transaction, publication).await?;
+    if snapshot.context.kind == super::ChatTurnKind::DeepResearch {
+        // Background Responses do not run through the Rig per-response event ledger.
+        record_chat_usage_best_effort(transaction, publication).await?;
+    }
     Ok(ChatTerminalMutationOutcome::Applied)
 }
 

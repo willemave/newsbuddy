@@ -2,8 +2,8 @@ use std::error::Error;
 use std::sync::Mutex;
 
 use newsly_db::{
-    LearningDeckModelUsage, PublishLearningDeck, PublishLearningDeckOutcome,
-    StoredLearningDeckArtifact, fail_learning_deck_task, publish_learning_deck,
+    PublishLearningDeck, PublishLearningDeckOutcome, StoredLearningDeckArtifact,
+    fail_learning_deck_task, publish_learning_deck,
 };
 use newsly_queue::TaskResult;
 use serde_json::{Map, Value};
@@ -28,7 +28,6 @@ pub(super) struct LearningDeckSuccessFinalizer {
     sandbox_id: Option<String>,
     agent_log_object_key: Option<String>,
     usage_json: Map<String, Value>,
-    vendor_usage: LearningDeckModelUsage,
     cleanup_after_commit: Mutex<Vec<String>>,
 }
 
@@ -48,7 +47,6 @@ impl LearningDeckSuccessFinalizer {
         sandbox_id: Option<String>,
         agent_log_object_key: Option<String>,
         usage_json: Map<String, Value>,
-        vendor_usage: LearningDeckModelUsage,
     ) -> Self {
         Self {
             artifact_store,
@@ -64,7 +62,6 @@ impl LearningDeckSuccessFinalizer {
             sandbox_id,
             agent_log_object_key,
             usage_json,
-            vendor_usage,
             cleanup_after_commit: Mutex::new(Vec::new()),
         }
     }
@@ -86,7 +83,7 @@ impl LearningDeckSuccessFinalizer {
             sandbox_id: self.sandbox_id.as_deref(),
             agent_log_object_key: self.agent_log_object_key.as_deref(),
             usage_json: &self.usage_json,
-            vendor_usage: Some(&self.vendor_usage),
+            vendor_usage: None,
         };
         let outcome = publish_learning_deck(transaction, &publication).await?;
         let (cleanup, result) = match outcome {

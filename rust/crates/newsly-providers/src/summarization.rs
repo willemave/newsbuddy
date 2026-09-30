@@ -426,6 +426,19 @@ impl SummarizationGateway {
         &self,
         source: &SummarizationSource,
     ) -> Result<GeneratedLongformSummary, SummarizationGatewayError> {
+        self.summarize_with_events(source, Arc::new(NoEvents)).await
+    }
+
+    /// Generates a long-form artifact while publishing per-response model observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same input, provider, and validation errors as [`Self::summarize`].
+    pub async fn summarize_with_events(
+        &self,
+        source: &SummarizationSource,
+        events: Arc<dyn AgentEventSink>,
+    ) -> Result<GeneratedLongformSummary, SummarizationGatewayError> {
         if source.text.trim().is_empty() {
             return Err(SummarizationGatewayError::EmptyInput);
         }
@@ -461,7 +474,7 @@ impl SummarizationGateway {
                     provider_parameters: Map::new(),
                 },
                 Arc::new(NoTools),
-                Arc::new(NoEvents),
+                events,
             )
             .await?;
         let value = outcome

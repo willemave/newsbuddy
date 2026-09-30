@@ -1,15 +1,16 @@
 use newsly_domain::{BriefingNarrationMetadata, BriefingNarrationStyle, NewsNarrationWindow};
 use std::collections::BTreeSet;
 use std::fmt::{self, Debug, Formatter};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
 use newsly_agent_runtime::{
-    AgentEngine, AgentEvent, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError,
-    BoxToolFuture, NewslyTranscript, ProviderUsage, ResponseContract, ToolCall, ToolExecutor,
-    ToolPolicy,
+    AgentEngine, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, BoxToolFuture,
+    NewslyTranscript, ProviderUsage, ResponseContract, ToolCall, ToolExecutor, ToolPolicy,
 };
 use reqwest::{StatusCode, Url};
 use schemars::{JsonSchema, schema_for};
@@ -26,6 +27,23 @@ use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine, RigAge
 const SCRIPT_SYSTEM_PROMPT: &str = "You write concise, natural podcast scripts for Newsly. Create spoken dialogue, not an essay. The format should feel like a smart tech and business podcast roundtable: quick context, clear stakes, grounded analysis, and a brisk close. Do not mention or imitate any specific real podcast, host, or brand. Do not invent facts outside the supplied source material. Do not emit stage directions, music cues, sponsor reads, or markdown.";
 const ELEVENLABS_FLASH_MAX_INPUT_CHARS: usize = 40_000;
 const TTS_CHUNK_TARGET_CHARS: usize = 36_000;
+const ELEVENLABS_TTS_ENDPOINT: &str = "POST /v1/text-to-speech/{voice_id}";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioEpisodeTtsChunkUsage {
+    pub chunk_index: usize,
+    pub model: String,
+    pub text_chars: u64,
+    pub endpoint: &'static str,
+    pub standard_endpoint: bool,
+}
+
+pub trait AudioEpisodeTtsUsageObserver: Send + Sync {
+    fn observe(
+        &self,
+        usage: AudioEpisodeTtsChunkUsage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
+}
 
 #[derive(Debug, Clone)]
 pub struct AudioEpisodeGatewayConfig {
@@ -130,6 +148,7 @@ impl AudioEpisodeGateway {
         &self,
         kind: &str,
         source_snapshot: &Value,
+        events: Arc<dyn AgentEventSink>,
     ) -> Result<GeneratedAudioEpisodeScript, AudioEpisodeGatewayError> {
         let schema = schema_for!(AudioEpisodeScript);
         let request = AgentRequest {
@@ -160,7 +179,7 @@ impl AudioEpisodeGateway {
         };
         let outcome = self
             .script_engine
-            .run(request, Arc::new(NoTools), Arc::new(NoEvents))
+            .run(request, Arc::new(NoTools), events)
             .await?;
         let payload = outcome
             .structured_output
@@ -186,6 +205,7 @@ impl AudioEpisodeGateway {
     pub async fn synthesize_dialogue(
         &self,
         turns: &[AudioEpisodeTurn],
+        usage_observer: Arc<dyn AudioEpisodeTtsUsageObserver>,
     ) -> Result<SynthesizedDialogue, AudioEpisodeGatewayError> {
         let chunks = normalize_tts_chunks(turns)?;
         let request_count = i32::try_from(chunks.len()).unwrap_or(i32::MAX);
@@ -195,7 +215,7 @@ impl AudioEpisodeGateway {
         let calls = chunks
             .iter()
             .enumerate()
-            .map(|(index, chunk)| self.synthesize_chunk(index, chunk));
+            .map(|(index, chunk)| self.synthesize_chunk(index, chunk, Arc::clone(&usage_observer)));
         let synthesis_started = Instant::now();
         let audio_chunks = try_join_all(calls).await;
         tracing::info!(
@@ -231,6 +251,7 @@ impl AudioEpisodeGateway {
         &self,
         chunk_index: usize,
         chunk: &TtsChunk,
+        usage_observer: Arc<dyn AudioEpisodeTtsUsageObserver>,
     ) -> Result<Vec<u8>, AudioEpisodeGatewayError> {
         let slot_started = Instant::now();
         let slot = self.tts_slots.acquire().await;
@@ -320,6 +341,14 @@ impl AudioEpisodeGateway {
         if bytes.len() > self.config.max_tts_response_bytes {
             return Err(AudioEpisodeGatewayError::AudioTooLarge);
         }
+        observe_tts_chunk_usage(
+            usage_observer,
+            chunk_index,
+            &self.config.tts_model,
+            &chunk.text,
+            self.uses_standard_elevenlabs_pricing(),
+        )
+        .await?;
         Ok(bytes.to_vec())
     }
 
@@ -388,6 +417,25 @@ impl AudioEpisodeGateway {
         }
         Ok(bytes)
     }
+}
+
+async fn observe_tts_chunk_usage(
+    observer: Arc<dyn AudioEpisodeTtsUsageObserver>,
+    chunk_index: usize,
+    model: &str,
+    text: &str,
+    standard_endpoint: bool,
+) -> Result<(), AudioEpisodeGatewayError> {
+    observer
+        .observe(AudioEpisodeTtsChunkUsage {
+            chunk_index,
+            model: model.to_owned(),
+            text_chars: u64::try_from(text.chars().count()).unwrap_or(u64::MAX),
+            endpoint: ELEVENLABS_TTS_ENDPOINT,
+            standard_endpoint,
+        })
+        .await
+        .map_err(AudioEpisodeGatewayError::UsageObservation)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -466,15 +514,6 @@ struct ElevenLabsRequest<'a> {
 #[derive(Debug, Serialize)]
 struct ElevenLabsVoiceSettings {
     speed: f32,
-}
-
-#[derive(Debug)]
-struct NoEvents;
-
-impl AgentEventSink for NoEvents {
-    fn publish(&self, _event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
@@ -700,6 +739,8 @@ pub enum AudioEpisodeGatewayError {
     AudioTooLarge,
     #[error("audio provider concurrency gate closed")]
     ProviderClosed,
+    #[error("audio episode TTS usage observation failed: {0}")]
+    UsageObservation(String),
     #[error("audio episode file operation failed")]
     Io(#[from] std::io::Error),
     #[error("ffmpeg audio stitching timed out")]
@@ -721,7 +762,10 @@ impl AudioEpisodeGatewayError {
                     | AgentRuntimeError::Validation(_)
                     | AgentRuntimeError::Tool(_)
             ),
-            Self::EmptyAudio | Self::FfmpegTimeout | Self::FfmpegFailed(_) => true,
+            Self::EmptyAudio
+            | Self::FfmpegTimeout
+            | Self::FfmpegFailed(_)
+            | Self::UsageObservation(_) => true,
             Self::InvalidConfiguration(_)
             | Self::UnsupportedKind(_)
             | Self::InvalidScript(_)
@@ -736,9 +780,76 @@ impl AudioEpisodeGatewayError {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
+
     use serde_json::json;
 
-    use super::script_user_prompt;
+    use super::{
+        AudioEpisodeGatewayError, AudioEpisodeTtsChunkUsage, AudioEpisodeTtsUsageObserver,
+        observe_tts_chunk_usage, script_user_prompt,
+    };
+
+    #[derive(Debug, Default)]
+    struct RecordingUsageObserver {
+        observations: Mutex<Vec<AudioEpisodeTtsChunkUsage>>,
+    }
+
+    impl AudioEpisodeTtsUsageObserver for RecordingUsageObserver {
+        fn observe(
+            &self,
+            usage: AudioEpisodeTtsChunkUsage,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+            Box::pin(async move {
+                self.observations.lock().unwrap().push(usage);
+                Ok(())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_chunks_are_observed_before_stitching_failure() {
+        let observer = Arc::new(RecordingUsageObserver::default());
+        observe_tts_chunk_usage(
+            Arc::clone(&observer) as Arc<dyn AudioEpisodeTtsUsageObserver>,
+            0,
+            "eleven_flash_v2_5",
+            "first chunk",
+            true,
+        )
+        .await
+        .unwrap();
+        observe_tts_chunk_usage(
+            Arc::clone(&observer) as Arc<dyn AudioEpisodeTtsUsageObserver>,
+            1,
+            "eleven_flash_v2_5",
+            "second chunk",
+            true,
+        )
+        .await
+        .unwrap();
+        let later_failure: Result<(), AudioEpisodeGatewayError> = Err(
+            AudioEpisodeGatewayError::FfmpegFailed("mock failure".to_owned()),
+        );
+
+        assert!(later_failure.is_err());
+        let observations = observer.observations.lock().unwrap();
+        assert_eq!(observations.len(), 2);
+        assert_eq!(observations[0].model, "eleven_flash_v2_5");
+        assert_eq!(
+            observations[0].endpoint,
+            "POST /v1/text-to-speech/{voice_id}"
+        );
+        assert_eq!(
+            observations
+                .iter()
+                .map(|usage| usage.text_chars)
+                .sum::<u64>(),
+            23
+        );
+        assert!(observations.iter().all(|usage| usage.standard_endpoint));
+    }
 
     #[test]
     fn briefing_document_prompt_uses_long_context_without_reading_visible_copy() {

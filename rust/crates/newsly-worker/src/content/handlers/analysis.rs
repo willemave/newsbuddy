@@ -1,13 +1,14 @@
+use std::sync::Arc;
+
 use newsly_providers::{AnalyzedContentType, GeneratedContentAnalysis, InstructionLink};
 use newsly_queue::{OwnedWorkPlan, TaskResult};
 use serde_json::{Map, Value};
 
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
 use crate::{HandlerExecution, LeaseHealth};
 
 use super::super::extraction::ExtractionAttempt;
-use super::super::model::{
-    ContentFinalizationPlan, ContentMutation, InstructionLinkPlan, ModelUsageWrite, UsageWrite,
-};
+use super::super::model::{ContentFinalizationPlan, ContentMutation, InstructionLinkPlan};
 use super::ContentWorkerServices;
 use super::support::{
     classify_known_url, content_id, extraction_deadline, extraction_failure, is_tweet_url,
@@ -90,22 +91,37 @@ pub(super) async fn execute_analyze_url(
     };
 
     match attempt {
-        ExtractionAttempt::Success { article, mut usage } => {
+        ExtractionAttempt::Success { article, usage } => {
             let mut content_type = "article".to_owned();
             let mut platform = None;
             let mut title = article.title.clone();
             let mut metadata_updates = Map::new();
             let mut instruction_links = Vec::new();
-            let analysis = services.content_analysis.analyze(
+            let usage_sink = Arc::new(AgentUsageSink::new(
+                services.pool.clone(),
+                AgentUsageAttribution {
+                    operation: "content_analyzer.analyze_url".to_owned(),
+                    source: "queue".to_owned(),
+                    task_id: plan.task_id,
+                    content_id: Some(content_id),
+                    session_id: None,
+                    message_id: None,
+                    user_id: plan.owner_user_id,
+                },
+            ));
+            let analysis = services.content_analysis.analyze_with_events(
                 &snapshot.url,
                 &article.body,
                 analysis_instruction,
+                usage_sink.clone(),
             );
             tokio::pin!(analysis);
-            match tokio::select! {
+            let analysis = tokio::select! {
                 result = &mut analysis => Some(result),
                 () = lease.wait_for_ownership_loss() => None,
-            } {
+            };
+            usage_sink.finish().await;
+            match analysis {
                 None => {
                     return HandlerExecution::from_result(TaskResult::fail(
                         Some("lease ownership was lost during structured URL analysis".to_owned()),
@@ -123,7 +139,6 @@ pub(super) async fn execute_analyze_url(
                         &mut instruction_links,
                         crawl_links,
                     );
-                    usage.push(UsageWrite::Model(model_usage(&generated)));
                 }
                 Some(Err(error)) => {
                     tracing::warn!(
@@ -188,19 +203,6 @@ pub(super) async fn execute_analyze_url(
             retryable,
             usage,
         ),
-    }
-}
-
-fn model_usage(generated: &GeneratedContentAnalysis) -> ModelUsageWrite {
-    let (provider, model) = generated.model.split_once(':').map_or_else(
-        || ("openai".to_owned(), generated.model.clone()),
-        |(provider, model)| (provider.to_owned(), model.to_owned()),
-    );
-    ModelUsageWrite {
-        provider,
-        model,
-        response_id: generated.provider_response_id.clone(),
-        usage: generated.usage.clone(),
     }
 }
 

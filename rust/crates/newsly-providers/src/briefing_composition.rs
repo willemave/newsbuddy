@@ -747,14 +747,14 @@ struct ObservedUsage(Mutex<Option<ProviderUsage>>);
 
 impl AgentEventSink for ObservedUsage {
     fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        if let AgentEvent::Usage { usage } = event {
+        if let AgentEvent::Usage { observation } = event {
             let mut observed = self
                 .0
                 .lock()
                 .map_err(|_| AgentRuntimeError::Tool("usage observation lock failed".to_owned()))?;
             observed
                 .get_or_insert_with(ProviderUsage::default)
-                .add_assign(&usage);
+                .add_assign(&observation.usage);
         }
         Ok(())
     }

@@ -1,8 +1,8 @@
 //! Native generated-image worker.
 //!
 //! Each attempt snapshots prompt input in one short transaction, performs provider and image
-//! transformation work without a database connection, then publishes metadata, usage, and local
-//! files only inside the queue kernel's exact-lease finalization fence.
+//! transformation work without a database connection, records parsed provider responses in short
+//! accounting transactions, then publishes metadata and local files inside the exact-lease fence.
 
 mod finalizer;
 mod handler;

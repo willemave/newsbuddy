@@ -2,7 +2,7 @@ use super::*;
 use crate::image_generation::{
     model::PreparedImageAttempt,
     prompt::{build_infographic_prompt, image_input_fingerprint},
-    repository::load_image_snapshot,
+    repository::{load_image_snapshot, record_image_generation_usage},
     storage::ImageFileStore,
 };
 use crate::{
@@ -67,6 +67,60 @@ async fn finalize_case(pool: PgPool, changed: bool) {
         .stage(&pool, content_id, task_id, bytes.get_ref())
         .await
         .unwrap();
+    let usage = ImageGenerationUsage {
+        provider: "fixture".to_owned(),
+        model: "fixture".to_owned(),
+        request_id: Some("image-response-1".to_owned()),
+        input_tokens: None,
+        cache_read_tokens: None,
+        output_tokens: None,
+        total_tokens: None,
+        request_count: 1,
+        response_cost_usd: None,
+        metadata: json!({}),
+    };
+    let usage_attempt = PreparedImageAttempt {
+        task_id,
+        content: content.clone(),
+        input_fingerprint: fingerprint.clone(),
+        force: false,
+    };
+    assert!(
+        record_image_generation_usage(&pool, &usage_attempt, &usage)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !record_image_generation_usage(&pool, &usage_attempt, &usage)
+            .await
+            .unwrap()
+    );
+    let unmetered: (Option<i32>, Option<String>) = sqlx::query_as(
+        "SELECT resource_count, metadata::jsonb ->> 'resource_count_unit'
+         FROM vendor_usage_records WHERE request_id = 'image-response-1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(unmetered, (None, None));
+    let metered_usage = ImageGenerationUsage {
+        request_id: Some("image-response-2".to_owned()),
+        metadata: json!({"billable_image_count": 2}),
+        ..usage.clone()
+    };
+    assert!(
+        record_image_generation_usage(&pool, &usage_attempt, &metered_usage)
+            .await
+            .unwrap()
+    );
+    let metered: (Option<i32>, Option<String>) = sqlx::query_as(
+        "SELECT resource_count, metadata::jsonb ->> 'resource_count_unit'
+         FROM vendor_usage_records WHERE request_id = 'image-response-2'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(metered, (Some(2), Some("image".to_owned())));
     let image_path = root
         .path()
         .join(staged.image_url().strip_prefix("/static/images/").unwrap());
@@ -80,18 +134,6 @@ async fn finalize_case(pool: PgPool, changed: bool) {
             },
             staged,
             generated_at: chrono::Utc::now(),
-            usage: ImageGenerationUsage {
-                provider: "fixture".to_owned(),
-                model: "fixture".to_owned(),
-                request_id: None,
-                input_tokens: None,
-                cache_read_tokens: None,
-                output_tokens: None,
-                total_tokens: None,
-                request_count: 1,
-                response_cost_usd: None,
-                metadata: json!({}),
-            },
         },
         queue.clone(),
         0,
@@ -142,6 +184,13 @@ async fn finalize_case(pool: PgPool, changed: bool) {
     );
     assert_eq!(followups, i64::from(!changed));
     assert_eq!(image_path.is_file(), !changed);
+    let usage_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM vendor_usage_records WHERE idempotency_key = $1")
+            .bind(format!("image:{task_id}:fixture:image-response-1"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(usage_count, 1);
 }
 
 #[sqlx::test]

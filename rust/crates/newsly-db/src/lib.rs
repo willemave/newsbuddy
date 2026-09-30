@@ -22,6 +22,7 @@
 mod admin;
 mod adoption;
 mod agent_library;
+mod agent_usage;
 mod api_keys;
 mod audio_episodes;
 mod auth;
@@ -86,6 +87,7 @@ pub use agent_library::{
     AgentKnowledgeItem, AgentLibraryBodyPointer, AgentLibraryContentProjection,
     AgentLibraryRepositoryError, find_agent_knowledge_items, list_agent_library_content,
 };
+pub use agent_usage::{AgentUsageRepositoryError, NewAgentModelUsage, record_agent_model_usage};
 pub use api_keys::{
     ApiKeyRepositoryError, ApiKeySummaryProjection, ApiKeyTargetUser, CreatedApiKey,
     GeneratedApiKey, create_api_key, ensure_system_admin_user, extract_api_key_prefix,
@@ -94,14 +96,13 @@ pub use api_keys::{
 };
 pub use audio_episodes::{
     AudioEpisodeReadTrigger, AudioEpisodeRecord, AudioEpisodeRepositoryError,
-    AudioEpisodeScriptUsage, AudioEpisodeShareOutcome, AudioEpisodeTtsUsage,
-    CheckpointAudioEpisodeScript, CompleteAudioEpisodeGeneration, NewAudioEpisode,
-    PrepareAudioEpisodeGenerationOutcome, checkpoint_audio_episode_script,
-    complete_audio_episode_generation, disable_audio_episode_share, enable_audio_episode_share,
-    fail_audio_episode_generation, find_shared_audio_episode, find_user_audio_episode,
-    find_user_audio_episode_for_update, list_user_custom_narrations,
-    mark_audio_episode_sources_read, prepare_audio_episode_generation,
-    reset_audio_episode_for_generation, upsert_audio_episode,
+    AudioEpisodeShareOutcome, CheckpointAudioEpisodeScript, CompleteAudioEpisodeGeneration,
+    NewAudioEpisode, NewAudioEpisodeTtsChunkUsage, PrepareAudioEpisodeGenerationOutcome,
+    checkpoint_audio_episode_script, complete_audio_episode_generation,
+    disable_audio_episode_share, enable_audio_episode_share, fail_audio_episode_generation,
+    find_shared_audio_episode, find_user_audio_episode, find_user_audio_episode_for_update,
+    list_user_custom_narrations, mark_audio_episode_sources_read, prepare_audio_episode_generation,
+    record_audio_episode_tts_chunk_usage, reset_audio_episode_for_generation, upsert_audio_episode,
 };
 pub use auth::{
     AuthenticatedUserRow, AuthenticationRepositoryError, find_user_by_api_key, find_user_by_id,
@@ -255,8 +256,8 @@ pub use llm_tasks::{
 };
 pub use media_tasks::{
     MediaApplyOutcome, MediaContentSnapshot, MediaMutation, MediaNextTask,
-    MediaTaskRepositoryError, MediaTranscriptPointer, MediaTranscriptionUsage,
-    apply_media_mutation, prepare_media_content, record_media_transcription_usage,
+    MediaTaskRepositoryError, MediaTranscriptPointer, MediaTranscriptionChunkUsage,
+    apply_media_mutation, prepare_media_content, record_media_transcription_chunk_usage,
 };
 pub use migrations::{
     BASELINE_VERSION, MigrationError, embedded_migration_count, run_migrations,
@@ -337,6 +338,9 @@ pub use users::{
     AppleUserUpsert, DebugUserPatch, UserProfilePatch, UserProfileProjection,
     UserProfileRepositoryError, create_or_update_debug_user, deactivate_active_user,
     find_or_create_apple_user, find_user_profile, update_user_profile,
+};
+pub use vendor_pricing::{
+    CalculatedVendorCost, VendorResourceMeter, calculate_vendor_resource_cost,
 };
 pub(crate) use vendor_pricing::{elevenlabs_tts_cost, openai_transcription_cost};
 pub use vendor_usage::{

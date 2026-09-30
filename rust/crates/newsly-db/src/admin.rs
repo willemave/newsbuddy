@@ -33,6 +33,8 @@ pub struct AdminProviderCostRow {
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
     pub public_list_estimate_usd: f64,
+    pub provider_estimate_usd: f64,
+    pub non_billable_record_count: i64,
     pub unpriced_call_count: i64,
 }
 
@@ -122,6 +124,8 @@ pub struct AdminVendorUsageTotals {
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
     pub public_list_estimate_usd: f64,
+    pub provider_estimate_usd: f64,
+    pub non_billable_record_count: i64,
     pub unpriced_call_count: i64,
 }
 
@@ -132,6 +136,8 @@ pub struct AdminVendorUsageDailyRow {
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
     pub public_list_estimate_usd: f64,
+    pub provider_estimate_usd: f64,
+    pub non_billable_record_count: i64,
     pub unpriced_call_count: i64,
     pub request_count: i64,
     pub resource_count: i64,
@@ -296,6 +302,8 @@ pub async fn load_admin_dashboard(
                 ELSE NULL END AS cost_usd,
             COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
             COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::double precision AS public_list_estimate_usd,
+            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::double precision AS provider_estimate_usd,
+            COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
             COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
         FROM vendor_usage_records
         WHERE created_at >= timezone('UTC', clock_timestamp()) - interval '30 days'
@@ -439,6 +447,8 @@ pub async fn load_admin_vendor_usage(
                 ELSE NULL END AS cost_usd,
             COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
             COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::double precision AS public_list_estimate_usd,
+            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::double precision AS provider_estimate_usd,
+            COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
             COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
         FROM vendor_usage_records
         WHERE ($1::text IS NULL OR provider = $1)
@@ -467,6 +477,8 @@ pub async fn load_admin_vendor_usage(
                 ELSE NULL END AS cost_usd,
             COALESCE(SUM(cost_usd), 0.0)::double precision AS known_cost_usd,
             COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::double precision AS public_list_estimate_usd,
+            COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::double precision AS provider_estimate_usd,
+            COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
             COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count,
             COALESCE(SUM(request_count), 0)::bigint AS request_count,
             COALESCE(SUM(resource_count), 0)::bigint AS resource_count,
@@ -547,21 +559,24 @@ mod usage_tests {
         assert_eq!(rows.len(), 6);
         assert!((rows[0].0.unwrap() - 0.000_134_5).abs() < 1e-10);
         assert_eq!(rows[0].1.as_deref(), Some("public_list_estimate"));
-        assert_eq!(rows[0].2.as_deref(), Some("openai-standard-2026-09-27"));
+        assert_eq!(rows[0].2.as_deref(), Some("openai-standard-2026-09-29"));
         assert!((rows[1].0.unwrap() - 0.01).abs() < 1e-10);
         assert!((rows[2].0.unwrap() - 0.000_01).abs() < 1e-10);
         assert!(
-            rows[3..]
+            rows[3..5]
                 .iter()
                 .all(|row| row.0.is_none() && row.2.is_none())
         );
+        assert!((rows[5].0.unwrap() - 0.054_675).abs() < 1e-10);
+        assert_eq!(rows[5].1.as_deref(), Some("public_list_estimate"));
+        assert_eq!(rows[5].2.as_deref(), Some("openai-standard-2026-09-29"));
 
         sqlx::query(
             "INSERT INTO vendor_usage_records
                 (provider, model, feature, operation, request_count, cost_usd,
-                 pricing_version, created_at)
+                 pricing_version, cost_basis, created_at)
              VALUES ('runware', 'image', 'image_generation', 'generate_image', 1,
-                     0.42, 'provider-reported', timezone('UTC', now()))",
+                     0.42, 'provider-reported', 'provider_reported', timezone('UTC', now()))",
         )
         .execute(&pool)
         .await
@@ -602,10 +617,11 @@ mod usage_tests {
     async fn admin_cost_aggregates_preserve_unknown_prices(pool: PgPool) {
         sqlx::query(
             "INSERT INTO vendor_usage_records
-                (provider, model, feature, operation, cost_usd, created_at)
-             VALUES ('test', 'priced', 'test', 'test', 0.25, timezone('UTC', now())),
-                    ('test', 'unpriced', 'test', 'test', NULL, timezone('UTC', now())),
-                    ('free', 'free', 'test', 'test', 0.0, timezone('UTC', now()))",
+                (provider, model, feature, operation, cost_usd, cost_basis, created_at)
+             VALUES ('test', 'priced', 'test', 'test', 0.25, 'public_list_estimate', timezone('UTC', now())),
+                    ('test', 'estimated', 'test', 'test', 0.05, 'provider_estimate', timezone('UTC', now())),
+                    ('test', 'unpriced', 'test', 'test', NULL, NULL, timezone('UTC', now())),
+                    ('free', 'free', 'test', 'test', 0.0, 'non_billable', timezone('UTC', now()))",
         )
         .execute(&pool)
         .await
@@ -614,7 +630,10 @@ mod usage_tests {
             .await
             .unwrap();
         assert_eq!(snapshot.totals.cost_usd, None);
-        assert!((snapshot.totals.known_cost_usd - 0.25).abs() < f64::EPSILON);
+        assert!((snapshot.totals.known_cost_usd - 0.30).abs() < f64::EPSILON);
+        assert!((snapshot.totals.public_list_estimate_usd - 0.25).abs() < f64::EPSILON);
+        assert!((snapshot.totals.provider_estimate_usd - 0.05).abs() < f64::EPSILON);
+        assert_eq!(snapshot.totals.non_billable_record_count, 1);
         assert_eq!(snapshot.totals.unpriced_call_count, 1);
         assert_eq!(snapshot.daily[0].cost_usd, None);
         assert_eq!(snapshot.daily[0].unpriced_call_count, 1);
@@ -625,6 +644,7 @@ mod usage_tests {
             .find(|row| row.provider == "test")
             .unwrap();
         assert_eq!(unpriced.cost_usd, None);
+        assert!((unpriced.provider_estimate_usd - 0.05).abs() < f64::EPSILON);
         assert_eq!(unpriced.unpriced_call_count, 1);
         let free = load_admin_vendor_usage(
             &pool,
@@ -636,6 +656,7 @@ mod usage_tests {
         .await
         .unwrap();
         assert_eq!(free.totals.cost_usd, Some(0.0));
+        assert_eq!(free.totals.non_billable_record_count, 1);
         assert_eq!(free.totals.unpriced_call_count, 0);
     }
 }

@@ -14,6 +14,7 @@ use newsly_contracts::{
 use crate::admin_api_keys::{admin_login_redirect, escape_html, has_valid_admin_session};
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
+use crate::model_usage::onboarding_gateway_with_usage;
 use crate::write_support::{decode_json, require_operation, verify_stamp};
 use crate::{AppState, request_id_from_headers};
 
@@ -94,10 +95,12 @@ pub(super) async fn preview(
         .await
         .map_err(|error| crate::write_support::internal_error(error, &request_id))?;
 
-    let (plan, used_fallback, fallback_reason) = state
-        .onboarding
+    let (gateway, usage) =
+        onboarding_gateway_with_usage(&state, None, "onboarding.admin_audio_plan_preview");
+    let (plan, used_fallback, fallback_reason) = gateway
         .build_audio_plan_with_metadata(payload.transcript.trim(), payload.locale.as_deref())
         .await;
+    usage.finish().await;
     let response = OnboardingAudioLanePreviewResponse {
         topic_summary: plan.topic_summary,
         inferred_topics: plan.inferred_topics,

@@ -771,6 +771,7 @@ pub async fn record_x_sync_usage(
     };
     let mut metadata = Map::from_iter([
         ("resource_ids".to_owned(), Value::from(resource_ids)),
+        ("resource_count_unit".to_owned(), Value::from("resource")),
         (
             "billable_resource_count".to_owned(),
             Value::from(billable_resource_count),

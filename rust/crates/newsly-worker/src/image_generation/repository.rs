@@ -1,9 +1,12 @@
 use chrono::NaiveDateTime;
+use newsly_providers::ImageGenerationUsage;
 use serde_json::{Map, Value};
-use sqlx::{Acquire, FromRow, Postgres, Transaction};
+use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use thiserror::Error;
 
-use super::model::{ImageContentSnapshot, ImageFinalizationPlan, ImageTargetOutcome};
+use super::model::{
+    ImageContentSnapshot, ImageFinalizationPlan, ImageTargetOutcome, PreparedImageAttempt,
+};
 use super::prompt::{
     build_infographic_prompt, has_generated_image, image_input_fingerprint, runtime_metadata_view,
 };
@@ -29,7 +32,7 @@ pub(super) async fn load_image_snapshot(
     .await?)
 }
 
-/// Applies image metadata and usage inside the queue kernel's exact-lease transaction. The caller
+/// Applies image metadata inside the queue kernel's exact-lease transaction. The caller
 /// publishes already-staged local files only when this returns `Ready`, before the transaction is
 /// committed. No provider work or image transformation runs while `PostgreSQL` is held.
 pub(super) async fn apply_generated_image(
@@ -39,7 +42,6 @@ pub(super) async fn apply_generated_image(
     let Some(mut content) = load_locked_content(transaction, plan.attempt.content.id).await? else {
         return Ok(ImageTargetOutcome::ContentMissing);
     };
-    persist_usage_best_effort(transaction, plan, &content.content_metadata).await?;
     if content.content_type == "news" {
         return Ok(ImageTargetOutcome::ContentBecameNews);
     }
@@ -147,34 +149,15 @@ async fn persist_locked_content(
     Ok(())
 }
 
-async fn persist_usage_best_effort(
-    transaction: &mut Transaction<'static, Postgres>,
-    plan: &ImageFinalizationPlan,
-    latest_metadata: &Value,
-) -> Result<(), sqlx::Error> {
-    let mut savepoint = transaction.begin().await?;
-    if let Err(error) = insert_usage(&mut savepoint, plan, latest_metadata).await {
-        savepoint.rollback().await?;
-        tracing::warn!(
-            task_id = plan.attempt.task_id,
-            content_id = plan.attempt.content.id,
-            provider = %plan.usage.provider,
-            model = %plan.usage.model,
-            error = %error,
-            "image generation usage persistence degraded without blocking publication"
-        );
-        return Ok(());
-    }
-    savepoint.commit().await
-}
-
-async fn insert_usage(
-    transaction: &mut Transaction<'_, Postgres>,
-    plan: &ImageFinalizationPlan,
-    latest_metadata: &Value,
-) -> Result<(), sqlx::Error> {
-    let usage = &plan.usage;
-    let runtime = runtime_metadata_view(latest_metadata);
+/// Records one parsed provider response independently of image download, transformation, lease,
+/// and product publication. The provider request identity makes retries idempotent.
+pub(super) async fn record_image_generation_usage(
+    pool: &PgPool,
+    attempt: &PreparedImageAttempt,
+    usage: &ImageGenerationUsage,
+) -> Result<bool, ImageRepositoryError> {
+    let mut transaction = pool.begin().await?;
+    let runtime = runtime_metadata_view(&attempt.content.content_metadata);
     let submitted_by = runtime.get("submitted_by_user_id").and_then(positive_i64);
     let total_tokens = usage.total_tokens.or_else(|| {
         usage
@@ -182,17 +165,89 @@ async fn insert_usage(
             .zip(usage.output_tokens)
             .map(|(input, output)| input.saturating_add(output))
     });
-    let cost_usd = usage.response_cost_usd.or_else(|| estimated_cost(usage));
+    let reported_cost = usage
+        .response_cost_usd
+        .filter(|cost| cost.is_finite() && *cost >= 0.0);
+    let billable_image_count = usage
+        .metadata
+        .get("billable_image_count")
+        .and_then(Value::as_u64)
+        .and_then(|count| i32::try_from(count).ok());
+    let estimate = if reported_cost.is_none()
+        && usage.response_cost_usd.is_none()
+        && usage.provider == "runware"
+        && usage.request_count == 1
+        && usage
+            .metadata
+            .get("standard_pricing_endpoint")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && usage
+            .metadata
+            .get("billable_image_count")
+            .and_then(Value::as_u64)
+            == Some(1)
+    {
+        newsly_db::calculate_vendor_resource_cost(
+            &mut transaction,
+            &usage.provider,
+            &usage.model,
+            &[newsly_db::VendorResourceMeter {
+                unit: "image",
+                quantity: 1.0,
+            }],
+            chrono::Utc::now(),
+        )
+        .await?
+    } else {
+        None
+    };
+    let cost_usd = reported_cost.or_else(|| estimate.as_ref().map(|cost| cost.cost_usd));
+    let cost_basis = reported_cost
+        .map(|_| "provider_reported")
+        .or_else(|| estimate.as_ref().map(|_| "public_list_estimate"));
+    let pricing_version = if reported_cost.is_some() {
+        Some("provider-response")
+    } else {
+        estimate.as_ref().map(|cost| cost.pricing_version.as_str())
+    };
     let mut metadata = usage.metadata.as_object().cloned().unwrap_or_default();
+    if billable_image_count.is_some() {
+        metadata.insert(
+            "resource_count_unit".to_owned(),
+            Value::String("image".to_owned()),
+        );
+    }
+    metadata.insert(
+        "pricing".to_owned(),
+        estimate
+            .as_ref()
+            .map_or(Value::Null, |cost| cost.metadata.clone()),
+    );
+    if cost_usd.is_none() {
+        metadata.insert(
+            "cost_reason".to_owned(),
+            Value::from("missing_provider_cost_or_applicable_image_rate"),
+        );
+    }
     metadata.insert(
         "content_type".to_owned(),
-        Value::String(plan.attempt.content.content_type.clone()),
+        Value::String(attempt.content.content_type.clone()),
     );
     metadata.insert(
         "input_fingerprint".to_owned(),
-        Value::String(plan.attempt.input_fingerprint.clone()),
+        Value::String(attempt.input_fingerprint.clone()),
     );
-    sqlx::query(
+    let request_id = usage
+        .request_id
+        .as_deref()
+        .filter(|request_id| request_id.len() <= 100);
+    let response_identity = usage.request_id.as_deref().unwrap_or("missing-request-id");
+    let idempotency_key = format!(
+        "image:{}:{}:{}",
+        attempt.task_id, usage.provider, response_identity
+    );
+    let inserted = sqlx::query_scalar::<_, i64>(
         r"
         INSERT INTO vendor_usage_records (
             provider,
@@ -209,57 +264,47 @@ async fn insert_usage(
             output_tokens,
             total_tokens,
             request_count,
+            resource_count,
             cost_usd,
             currency,
             pricing_version,
+            cost_basis,
             metadata,
+            idempotency_key,
             created_at
         )
         VALUES (
             $1, $2, 'image_generation', 'image_generation.infographic', 'queue', $3,
             $4, $5,
             (SELECT id FROM users WHERE id::bigint = $6 AND is_active IS TRUE),
-            $7, $8, $9, $10, $11, $12, 'USD', '2026-08-02', $13,
+            $7, $8, $9, $10, $11, $12, $13, 'USD', $14, $15, $16, $17,
             timezone('UTC', clock_timestamp())
         )
+        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+        RETURNING id::bigint
         ",
     )
     .bind(&usage.provider)
     .bind(&usage.model)
-    .bind(&usage.request_id)
-    .bind(plan.attempt.task_id)
-    .bind(plan.attempt.content.id)
+    .bind(request_id)
+    .bind(attempt.task_id)
+    .bind(attempt.content.id)
     .bind(submitted_by)
     .bind(usage.input_tokens.map(saturating_i32))
     .bind(usage.cache_read_tokens.map(saturating_i32))
     .bind(usage.output_tokens.map(saturating_i32))
     .bind(total_tokens.map(saturating_i32))
     .bind(saturating_i32(usage.request_count))
+    .bind(billable_image_count)
     .bind(cost_usd)
+    .bind(pricing_version)
+    .bind(cost_basis)
     .bind(Value::Object(metadata))
-    .execute(&mut **transaction)
+    .bind(idempotency_key)
+    .fetch_optional(&mut *transaction)
     .await?;
-    Ok(())
-}
-
-fn estimated_cost(usage: &newsly_providers::ImageGenerationUsage) -> Option<f64> {
-    if usage.provider == "runware" {
-        return match usage.model.as_str() {
-            "bytedance:seedream@5.0-lite" => Some(0.035),
-            "runware:101@1" => Some(0.0038),
-            _ => None,
-        };
-    }
-    if usage.provider == "google"
-        && usage.model == "gemini-3.1-flash-image-preview"
-        && let (Some(input), Some(output)) = (usage.input_tokens, usage.output_tokens)
-    {
-        let input = f64::from(saturating_i32(input).max(0));
-        let output = f64::from(saturating_i32(output).max(0));
-        let cost = input / 1_000_000.0 * 0.50 + output / 1_000_000.0 * 60.00;
-        return Some((cost * 100_000_000.0).round() / 100_000_000.0);
-    }
-    None
+    transaction.commit().await?;
+    Ok(inserted.is_some())
 }
 
 fn metadata_map(value: &Value) -> Map<String, Value> {
@@ -293,41 +338,9 @@ pub(super) enum ImageRepositoryError {
 
 #[cfg(test)]
 mod tests {
-    use newsly_providers::ImageGenerationUsage;
     use serde_json::json;
 
     use super::*;
-
-    #[test]
-    fn estimates_seedream_and_google_image_costs() {
-        let runware = ImageGenerationUsage {
-            provider: "runware".to_owned(),
-            model: "bytedance:seedream@5.0-lite".to_owned(),
-            request_id: None,
-            input_tokens: None,
-            cache_read_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-            request_count: 1,
-            response_cost_usd: None,
-            metadata: json!({}),
-        };
-        assert_eq!(estimated_cost(&runware), Some(0.035));
-
-        let google = ImageGenerationUsage {
-            provider: "google".to_owned(),
-            model: "gemini-3.1-flash-image-preview".to_owned(),
-            request_id: None,
-            input_tokens: Some(1_000_000),
-            cache_read_tokens: None,
-            output_tokens: Some(1_000_000),
-            total_tokens: Some(2_000_000),
-            request_count: 1,
-            response_cost_usd: None,
-            metadata: json!({}),
-        };
-        assert_eq!(estimated_cost(&google), Some(60.5));
-    }
 
     #[test]
     fn domain_metadata_receives_image_fields_without_overwriting_processing() {

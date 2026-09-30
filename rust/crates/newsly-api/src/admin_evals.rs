@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::env;
 use std::fmt::Write as _;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::rejection::JsonRejection;
@@ -20,6 +21,7 @@ use utoipa::ToSchema;
 use crate::admin_api_keys::{admin_login_redirect, escape_html, has_valid_admin_session};
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
+use crate::model_usage::ApiAgentUsageSink;
 use crate::write_support::{decode_json, internal_error, require_operation, verify_stamp};
 use crate::{AppState, request_id_from_headers};
 
@@ -310,7 +312,14 @@ pub(super) async fn run(
             if disabled.contains(model.alias) {
                 continue;
             }
-            let cell = run_cell(source, *model, gateway, request.pricing.get(model.alias)).await;
+            let cell = run_cell(
+                state.database.pool(),
+                source,
+                *model,
+                gateway,
+                request.pricing.get(model.alias),
+            )
+            .await;
             if cell.status == "error" && cell.error.as_deref().is_some_and(is_hard_provider_error) {
                 disabled.insert(model.alias);
                 skipped_models.push(AdminEvalSkippedModel {
@@ -555,6 +564,7 @@ fn sample_key(seed: Option<i64>, content_type: &str, content_id: i64) -> [u8; 32
 }
 
 async fn run_cell(
+    pool: &sqlx::PgPool,
     source: &EvalSource,
     model: EvalModel,
     gateway: &SummarizationGateway,
@@ -577,7 +587,17 @@ async fn run_cell(
         metadata: source.candidate.content_metadata.clone(),
         text: source.text.clone(),
     };
-    match gateway.summarize(&provider_source).await {
+    let usage = Arc::new(ApiAgentUsageSink::new(
+        pool.clone(),
+        None,
+        "admin_evals.summarize",
+        Some(source.candidate.content_id),
+    ));
+    let result = gateway
+        .summarize_with_events(&provider_source, usage.clone())
+        .await;
+    usage.finish().await;
+    match result {
         Ok(output) => {
             let latency_ms = duration_millis(started.elapsed());
             let generated_title = Some(output.summary.title.clone());

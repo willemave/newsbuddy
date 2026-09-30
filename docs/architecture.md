@@ -841,13 +841,30 @@ privacy-safe eval export. Mutations require explicit audit context and expected
 versions.
 
 `vendor_usage_records` is the durable meter for external calls and sandbox
-runtime. Forward-only token prices come from dated `vendor_token_price_rates`
-rows at the PostgreSQL insert boundary; exact model names, observed units,
-standard service tier, and short single-request context are required before a
-public list estimate is stored. `cost_basis` separates estimates from recorded
-vendor charges. E2B runtime has its own durable session identity because sandbox
-creation and cleanup span external calls and worker restarts. Fixed plan fees and
-self-hosted infrastructure remain separate from per-call vendor estimates.
+runtime. Dated `vendor_token_price_rates` and `vendor_resource_price_rates`
+rows hold published rates and their sources. Quotes require observed units,
+exact model, applicable endpoint and service tier; token quotes distinguish
+uncached input, cache reads/writes and whole-request long-context rates. Each
+quote stores the rate snapshot so later catalog updates cannot change its
+meaning. New catalog entries apply from activation, never invented historical
+prices. See [vendor cost accounting](vendor-cost-accounting.md) for researched
+rates, applicability and reconciliation limits.
+
+Agent model responses are observed before validation or tool execution and
+drained into independent short accounting transactions. Audio synthesis chunks
+and generated images use response observers before downstream assembly or
+storage. Stable response/attempt identities prevent duplicate observations;
+product finalization retains its exact-lease fence without owning these charges.
+E2B runtime has its own durable session identity because creation and cleanup
+span external calls and worker restarts. Confirmed undelivered creation is known
+zero; ambiguous creation or unknown stop time remains unpriced.
+
+`cost_basis` separates published estimates, provider estimates, provider-reported
+charges and configured account rates. Reports retain unknown totals whenever
+any record is unpriced, show the known subtotal and estimate portions, and group
+resource quantities by unit. Known self-hosted extractor work is zero only for
+external vendor charges. Fixed plan fees, taxes and self-hosted infrastructure
+remain separate from per-call estimates.
 
 Structured `tracing` records request ID, component, operation, resource IDs,
 duration, ownership version, task lease/generation, and bounded error context.

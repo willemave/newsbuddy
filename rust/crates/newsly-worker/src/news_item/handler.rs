@@ -10,6 +10,7 @@ use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
 use crate::content::{ContentExtractionRuntime, ExtractionAttempt};
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
@@ -384,22 +385,39 @@ async fn execute_processing(
         (resolved_summary(summary, &preparation.snapshot), true)
     } else {
         let prompt = build_summary_prompt(&preparation.snapshot, article_body.as_deref());
-        let call = services.gateway.summarize(prompt);
+        let usage_sink = Arc::new(AgentUsageSink::new(
+            services.pool.clone(),
+            AgentUsageAttribution {
+                operation: "news_processing.summarize_short_form".to_owned(),
+                source: "queue".to_owned(),
+                task_id: plan.task_id,
+                content_id: None,
+                session_id: None,
+                message_id: None,
+                user_id: preparation.snapshot.owner_user_id,
+            },
+        ));
+        let call = services
+            .gateway
+            .summarize_with_events(prompt, usage_sink.clone());
         tokio::pin!(call);
         let generated = tokio::select! {
-            result = &mut call => match result {
-                Ok(result) => result,
-                Err(error) => {
-                    return processing_failure(
-                        services,
-                        plan,
-                        preparation.snapshot,
-                        &error.to_string(),
-                        error.retryable(),
-                    );
-                }
-            },
-            () = lease.wait_for_ownership_loss() => {
+            result = &mut call => Some(result),
+            () = lease.wait_for_ownership_loss() => None,
+        };
+        usage_sink.finish().await;
+        let generated = match generated {
+            Some(Ok(result)) => result,
+            Some(Err(error)) => {
+                return processing_failure(
+                    services,
+                    plan,
+                    preparation.snapshot,
+                    &error.to_string(),
+                    error.retryable(),
+                );
+            }
+            None => {
                 return processing_failure(
                     services,
                     plan,
@@ -409,15 +427,6 @@ async fn execute_processing(
                 );
             }
         };
-        usage.push(model_usage(
-            &generated.model,
-            "news_processing",
-            "news_processing.summarize_short_form",
-            generated.provider_response_id,
-            generated.usage,
-            news_item_id,
-            preparation.snapshot.source_type.as_deref(),
-        ));
         (
             resolved_summary(generated.summary, &preparation.snapshot),
             false,
@@ -615,38 +624,42 @@ async fn execute_processing(
             .and_then(|body| relevant_link_input(&preparation.snapshot, body))
         {
             Some(input) => {
-                let call = services.gateway.select_relevant_links(
+                let usage_sink = Arc::new(AgentUsageSink::new(
+                    services.pool.clone(),
+                    AgentUsageAttribution {
+                        operation: "news_processing.select_article_links".to_owned(),
+                        source: "queue".to_owned(),
+                        task_id: plan.task_id,
+                        content_id: None,
+                        session_id: None,
+                        message_id: None,
+                        user_id: preparation.snapshot.owner_user_id,
+                    },
+                ));
+                let call = services.gateway.select_relevant_links_with_events(
                     input.title.as_deref(),
                     input.source_url.as_deref(),
                     &input.candidates,
+                    usage_sink.clone(),
                 );
                 tokio::pin!(call);
                 let selection = tokio::select! {
-                    result = &mut call => result,
-                    () = lease.wait_for_ownership_loss() => {
-                        return processing_failure_with_usage(
-                            services,
-                            plan,
-                            preparation.snapshot,
-                            "queue lease was lost during relevant-link selection",
-                            true,
-                            usage,
-                        );
-                    }
+                    result = &mut call => Some(result),
+                    () = lease.wait_for_ownership_loss() => None,
+                };
+                usage_sink.finish().await;
+                let Some(selection) = selection else {
+                    return processing_failure_with_usage(
+                        services,
+                        plan,
+                        preparation.snapshot,
+                        "queue lease was lost during relevant-link selection",
+                        true,
+                        usage,
+                    );
                 };
                 match selection {
-                    Ok(selected) => {
-                        usage.push(model_usage(
-                            &selected.model,
-                            "news_relevant_links",
-                            "news_processing.select_article_links",
-                            selected.provider_response_id,
-                            selected.usage,
-                            news_item_id,
-                            preparation.snapshot.source_type.as_deref(),
-                        ));
-                        Some(selected.links)
-                    }
+                    Ok(selected) => Some(selected.links),
                     Err(error) => {
                         tracing::warn!(
                             news_item_id,
@@ -757,30 +770,6 @@ fn processing_failure_with_usage(
             },
         ),
     )
-}
-
-fn model_usage(
-    model: &str,
-    feature: &'static str,
-    operation: &'static str,
-    provider_response_id: Option<String>,
-    usage: newsly_agent_runtime::ProviderUsage,
-    news_item_id: i64,
-    source_type: Option<&str>,
-) -> ModelUsageWrite {
-    let provider = model
-        .split_once(':')
-        .map_or("openai", |(provider, _)| provider)
-        .to_owned();
-    ModelUsageWrite {
-        provider,
-        model: model.to_owned(),
-        feature,
-        operation,
-        provider_response_id,
-        usage,
-        metadata: json!({"news_item_id": news_item_id, "source_type": source_type}),
-    }
 }
 
 fn news_item_id(plan: &OwnedWorkPlan) -> Option<i64> {

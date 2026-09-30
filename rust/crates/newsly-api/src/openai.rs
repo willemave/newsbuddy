@@ -1,4 +1,7 @@
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::Arc;
 
 use axum::extract::{DefaultBodyLimit, Extension, Multipart, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -6,7 +9,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use newsly_contracts::{AudioTranscriptionHealthResponse, AudioTranscriptionResponse};
 use newsly_db::{NewTranscriptionUsage, record_transcription_usage};
-use newsly_providers::OpenAiTranscriptionError;
+use newsly_providers::{
+    OpenAiTranscriptionError, TranscriptionChunkUsage, TranscriptionUsageObserver,
+};
+use sqlx::PgPool;
 use tempfile::{Builder as TempFileBuilder, NamedTempFile};
 use tokio::io::AsyncWriteExt;
 use utoipa::ToSchema;
@@ -112,19 +118,19 @@ pub(super) async fn transcribe_audio(
         .map_err(|error| internal_error(error, &request_id))?;
 
     let result = provider
-        .transcribe_upload(&upload.path, &upload.filename)
+        .transcribe_upload_observed(
+            &upload.path,
+            &upload.filename,
+            Arc::new(ApiTranscriptionUsageObserver {
+                pool: state.database.pool().clone(),
+                request_id: request_id.clone(),
+                user_id: current_user.id,
+                file_name: upload.filename.clone(),
+                content_type: upload.content_type.clone(),
+            }),
+        )
         .await
         .map_err(|error| provider_error(error, &request_id))?;
-
-    persist_usage_best_effort(
-        &state,
-        &stamp,
-        &request_id,
-        current_user.id,
-        &upload,
-        &result,
-    )
-    .await;
 
     Ok(Json(AudioTranscriptionResponse {
         transcript: result.transcript,
@@ -138,7 +144,6 @@ struct StoredUpload {
     path: PathBuf,
     filename: String,
     content_type: Option<String>,
-    size_bytes: u64,
 }
 
 async fn store_upload(
@@ -194,7 +199,6 @@ async fn store_upload(
             path,
             filename,
             content_type,
-            size_bytes,
         });
     }
     Err(validation_error(
@@ -203,55 +207,61 @@ async fn store_upload(
     ))
 }
 
-async fn persist_usage_best_effort(
-    state: &AppState,
-    stamp: &RouteOwnershipStamp,
-    request_id: &str,
+#[derive(Debug, Clone)]
+struct ApiTranscriptionUsageObserver {
+    pool: PgPool,
+    request_id: String,
     user_id: i64,
-    upload: &StoredUpload,
-    result: &newsly_providers::TranscriptionResult,
-) {
-    let mut transaction = match state.database.pool().begin().await {
-        Ok(transaction) => transaction,
-        Err(error) => {
-            tracing::warn!(error = %error, request_id, "transcription usage transaction unavailable");
-            return;
-        }
-    };
-    if let Err(error) = verify_stamp(&mut transaction, stamp, request_id).await {
-        tracing::warn!(
-            ?error,
-            request_id,
-            "skipping transcription usage after ownership change"
-        );
-        return;
-    }
-    let metadata = serde_json::json!({
-        "file_name": upload.filename,
-        "audio_format": audio_format(&upload.filename),
-        "audio_size_bytes": upload.size_bytes,
-        "content_type": upload.content_type,
-        "language": result.language,
-        "chunk_count": result.chunk_count,
-        "prompt_chars": result.prompt_chars,
-    });
-    let usage = NewTranscriptionUsage {
-        request_id,
-        user_id,
-        model: &result.model,
-        request_count: i32::try_from(result.chunk_count).unwrap_or(i32::MAX),
-        audio_duration_ms: result.audio_duration_ms,
-        audio_duration_estimate_ms: result.audio_duration_estimate_ms,
-        duration_source: result.audio_duration_source.as_str(),
-        standard_pricing: result.standard_pricing,
-        metadata,
-    };
-    if let Err(error) = record_transcription_usage(&mut transaction, &usage).await {
-        tracing::warn!(error = %error, request_id, user_id, "transcription usage insert failed");
-        return;
-    }
-    if let Err(error) = transaction.commit().await {
-        tracing::warn!(error = %error, request_id, user_id, "transcription usage commit failed");
+    file_name: String,
+    content_type: Option<String>,
+}
+
+impl TranscriptionUsageObserver for ApiTranscriptionUsageObserver {
+    fn observe(
+        &self,
+        usage: TranscriptionChunkUsage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+        let observer = self.clone();
+        Box::pin(async move {
+            tokio::spawn(async move {
+                let chunk_request_id =
+                    format!("{}:chunk:{}", observer.request_id, usage.chunk_index);
+                let mut transaction = observer
+                    .pool
+                    .begin()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                record_transcription_usage(
+                    &mut transaction,
+                    &NewTranscriptionUsage {
+                        request_id: &chunk_request_id,
+                        user_id: observer.user_id,
+                        model: usage.model,
+                        request_count: 1,
+                        audio_duration_ms: usage.audio_duration_ms,
+                        audio_duration_estimate_ms: usage.audio_duration_estimate_ms,
+                        duration_source: usage.audio_duration_source.as_str(),
+                        standard_pricing: usage.standard_pricing,
+                        metadata: serde_json::json!({
+                            "file_name": observer.file_name,
+                            "audio_format": audio_format(&observer.file_name),
+                            "audio_size_bytes": usage.audio_size_bytes,
+                            "content_type": observer.content_type,
+                            "chunk_index": usage.chunk_index,
+                            "prompt_chars": usage.prompt_chars,
+                        }),
+                    },
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+                transaction
+                    .commit()
+                    .await
+                    .map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| format!("transcription usage persistence task failed: {error}"))?
+        })
     }
 }
 

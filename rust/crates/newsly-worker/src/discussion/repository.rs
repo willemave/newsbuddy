@@ -467,7 +467,6 @@ async fn apply_summary_publication(
             summary,
             model,
             mode,
-            usage,
         } => {
             let incremental_updates = if *mode == DiscussionSummaryMode::Merge {
                 plan.snapshot
@@ -499,7 +498,6 @@ async fn apply_summary_publication(
             .await?;
             store_summarized_tracking(transaction, plan, input, incremental_updates).await?;
             store_seen_tracking(transaction, plan, input).await?;
-            persist_usage(transaction, plan, usage).await?;
             bump_briefing_versions(transaction, plan.snapshot.news_item_id).await?;
         }
     }
@@ -663,76 +661,6 @@ async fn release_changed_identity(
     )
     .bind(plan.snapshot.discussion_id)
     .bind(plan.snapshot.claim_token)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-async fn persist_usage(
-    transaction: &mut Transaction<'static, Postgres>,
-    plan: &DiscussionFinalizationPlan,
-    usage: &super::model::DiscussionUsage,
-) -> Result<(), sqlx::Error> {
-    let total_tokens = usage
-        .usage
-        .input_tokens
-        .saturating_add(usage.usage.output_tokens);
-    let operation = if usage.summary_mode == DiscussionSummaryMode::Merge {
-        "news_discussions.merge_summary"
-    } else {
-        "news_discussions.summarize"
-    };
-    sqlx::query(
-        r"
-        INSERT INTO vendor_usage_records (
-            provider,
-            model,
-            feature,
-            operation,
-            source,
-            request_id,
-            task_id,
-            user_id,
-            input_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
-            output_tokens,
-            total_tokens,
-            request_count,
-            currency,
-            metadata,
-            created_at
-        )
-        VALUES (
-            $1, $2, 'news_discussions', $3, 'discussion_scraper', $4, $5,
-            (SELECT id FROM users WHERE id::bigint = $6 AND is_active IS TRUE),
-            $7, $8, $9, $10, $11, $12, 'USD', $13,
-            timezone('UTC', clock_timestamp())
-        )
-        ",
-    )
-    .bind(&usage.provider)
-    .bind(&usage.model)
-    .bind(operation)
-    .bind(&usage.provider_response_id)
-    .bind(plan.task_id)
-    .bind(plan.snapshot.owner_user_id)
-    .bind(saturating_i32(usage.usage.input_tokens))
-    .bind(saturating_i32(usage.usage.cached_input_tokens))
-    .bind(saturating_i32(usage.usage.cache_write_tokens))
-    .bind(saturating_i32(usage.usage.output_tokens))
-    .bind(saturating_i32(total_tokens))
-    .bind(saturating_i32(usage.usage.request_count))
-    .bind(json!({
-        "news_item_id": plan.snapshot.news_item_id,
-        "news_item_discussion_id": plan.snapshot.discussion_id,
-        "platform": plan.snapshot.platform,
-        "summary_mode": usage.summary_mode.usage_label(),
-        "summary_input_sha256": usage.summary_input_sha256,
-        "summary_comment_count": usage.summary_comment_count,
-        "changed_comment_count": usage.changed_comment_count,
-        "reasoning_tokens": usage.usage.reasoning_tokens,
-    }))
     .execute(&mut **transaction)
     .await?;
     Ok(())
@@ -952,10 +880,6 @@ fn retry_after_seconds(next_refresh: Option<NaiveDateTime>, now: NaiveDateTime) 
 
 fn truncate_chars(value: &str, limit: usize) -> String {
     value.chars().take(limit).collect()
-}
-
-fn saturating_i32(value: u64) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 #[derive(Debug, Error)]

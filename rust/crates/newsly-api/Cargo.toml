@@ -20,6 +20,7 @@ futures-util.workspace = true
 getrandom.workspace = true
 jsonwebtoken.workspace = true
 newsly-contracts = { path = "../newsly-contracts" }
+newsly-agent-runtime = { path = "../newsly-agent-runtime" }
 newsly-db = { path = "../newsly-db" }
 newsly-domain = { path = "../newsly-domain" }
 newsly-providers = { path = "../newsly-providers" }

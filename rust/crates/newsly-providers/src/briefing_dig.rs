@@ -11,7 +11,7 @@ use newsly_agent_runtime::{
 use reqwest::Url;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
-use serde_json::Map;
+use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
@@ -37,15 +37,16 @@ pub struct BriefingWebSearchResult {
     pub published_date: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExaSearchUsage {
     pub request_count: u64,
     pub result_count: u64,
     pub summary_count: u64,
     pub text_count: u64,
+    pub estimated_cost_usd: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BriefingWebSearchOutcome {
     pub results: Vec<BriefingWebSearchResult>,
     pub usage: ExaSearchUsage,
@@ -191,6 +192,7 @@ impl BriefingDigGateway {
                 result_count: u64::try_from(results.len()).unwrap_or(u64::MAX),
                 summary_count: u64::try_from(summary_count).unwrap_or(u64::MAX),
                 text_count: u64::try_from(text_count).unwrap_or(u64::MAX),
+                estimated_cost_usd: exa_estimated_cost_usd(payload.cost_dollars.as_ref()),
             },
             results,
         })
@@ -205,6 +207,21 @@ impl BriefingDigGateway {
         &self,
         system_prompt: String,
         user_prompt: String,
+    ) -> Result<BriefingDigSummary, BriefingDigGatewayError> {
+        self.summarize_with_events(system_prompt, user_prompt, Arc::new(NoEvents))
+            .await
+    }
+
+    /// Produces a bounded summary while publishing per-response model observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same provider and validation errors as [`Self::summarize`].
+    pub async fn summarize_with_events(
+        &self,
+        system_prompt: String,
+        user_prompt: String,
+        events: Arc<dyn AgentEventSink>,
     ) -> Result<BriefingDigSummary, BriefingDigGatewayError> {
         let outcome = self
             .engine
@@ -231,7 +248,7 @@ impl BriefingDigGateway {
                     provider_parameters: Map::new(),
                 },
                 Arc::new(NoTools),
-                Arc::new(NoEvents),
+                events,
             )
             .await?;
         let text = outcome.output_text.trim().to_owned();
@@ -277,6 +294,15 @@ struct ExaTextRequest {
 struct ExaSearchResponse {
     #[serde(default)]
     results: Vec<ExaSearchRow>,
+    #[serde(rename = "costDollars")]
+    cost_dollars: Option<Value>,
+}
+
+fn exa_estimated_cost_usd(cost_dollars: Option<&Value>) -> Option<f64> {
+    cost_dollars
+        .and_then(|value| value.get("total"))
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && *value >= 0.0)
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,4 +379,33 @@ pub enum BriefingDigGatewayError {
     AgentConfiguration(#[from] crate::RigAgentEngineError),
     #[error("Briefing Dig agent request failed")]
     Agent(#[from] AgentRuntimeError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ExaSearchResponse, exa_estimated_cost_usd};
+
+    #[test]
+    fn exa_cost_estimate_accepts_only_finite_nonnegative_total() {
+        let valid: ExaSearchResponse = serde_json::from_value(serde_json::json!({
+            "results": [],
+            "costDollars": {"total": 0.0123}
+        }))
+        .expect("valid Exa response");
+        assert_eq!(
+            exa_estimated_cost_usd(valid.cost_dollars.as_ref()),
+            Some(0.0123)
+        );
+
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"costDollars": null}),
+            serde_json::json!({"costDollars": {"total": "unknown"}}),
+            serde_json::json!({"costDollars": {"total": -0.01}}),
+        ] {
+            let response: ExaSearchResponse =
+                serde_json::from_value(value).expect("malformed estimate must not reject response");
+            assert_eq!(exa_estimated_cost_usd(response.cost_dollars.as_ref()), None);
+        }
+    }
 }

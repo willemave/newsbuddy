@@ -1,10 +1,7 @@
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use newsly_db::{
-    MediaApplyOutcome, MediaNextTask, MediaTaskRepositoryError, apply_media_mutation,
-    record_media_transcription_usage,
-};
+use newsly_db::{MediaApplyOutcome, MediaNextTask, MediaTaskRepositoryError, apply_media_mutation};
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde_json::{Map, Value};
 use sqlx::{Postgres, Transaction};
@@ -44,9 +41,6 @@ impl MediaFinalizer {
         let outcome =
             apply_media_mutation(transaction, self.plan.content_id, &self.plan.mutation).await?;
         let mutation_applied = matches!(outcome, MediaApplyOutcome::Applied { .. });
-        if let Some(usage) = &self.plan.usage {
-            record_media_transcription_usage(transaction, usage).await?;
-        }
         let MediaApplyOutcome::Applied {
             next_task: Some(next_task),
         } = outcome
