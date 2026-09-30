@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use newsly_queue::{EnqueueRequest, TaskType};
 use serde_json::{Map, Value};
 use sqlx::{Postgres, Transaction};
@@ -6,6 +7,74 @@ use super::{ScheduledJobReport, SchedulerRepository, SchedulerRepositoryError};
 use crate::{SchedulerConfig, SchedulerJob};
 
 impl SchedulerRepository {
+    pub(super) async fn enqueue_news_category_maintenance(
+        &self,
+        transaction: &mut Transaction<'static, Postgres>,
+        now: DateTime<Utc>,
+        config: &SchedulerConfig,
+    ) -> Result<ScheduledJobReport, SchedulerRepositoryError> {
+        let runs = newsly_db::prepare_due_news_category_runs(
+            transaction,
+            now,
+            config.news_category_maintenance_batch_size,
+            config.news_category_maintenance_mode,
+        )
+        .await?;
+        let requests = runs
+            .iter()
+            .map(|run| {
+                let mut request = EnqueueRequest::new(TaskType::ReclusterNewsLenses);
+                request.priority = -10;
+                request.payload = Some(Map::from_iter([
+                    ("user_id".to_owned(), Value::from(run.user_id)),
+                    ("run_id".to_owned(), Value::from(run.run_id)),
+                    (
+                        "local_date".to_owned(),
+                        Value::from(run.local_date.to_string()),
+                    ),
+                    ("timezone".to_owned(), Value::from(run.timezone.clone())),
+                    (
+                        "timezone_revision".to_owned(),
+                        Value::from(run.timezone_revision),
+                    ),
+                    (
+                        "window_start_at".to_owned(),
+                        Value::from(run.window_start_at.to_rfc3339()),
+                    ),
+                    (
+                        "window_end_at".to_owned(),
+                        Value::from(run.window_end_at.to_rfc3339()),
+                    ),
+                    ("mode".to_owned(), Value::from(run.mode.as_str())),
+                ]));
+                request.owner_user_id = Some(run.user_id);
+                request.dedupe = Some(true);
+                request.dedupe_key = Some(format!(
+                    "news-lens-recluster:{}:{}",
+                    run.user_id, run.local_date
+                ));
+                request
+            })
+            .collect();
+        let result = self
+            .queue
+            .enqueue_many_in_transaction(transaction, requests)
+            .await?;
+        for (run, task_id) in runs.iter().zip(&result.task_ids) {
+            if !newsly_db::attach_news_category_run_task(transaction, run.run_id, *task_id).await? {
+                return Err(SchedulerRepositoryError::RunTaskAttach(run.run_id));
+            }
+        }
+        Ok(ScheduledJobReport {
+            job: SchedulerJob::NewsCategoryMaintenance,
+            considered: runs.len(),
+            enqueued: result.inserted_task_ids.len(),
+            skipped: runs.len().saturating_sub(result.inserted_task_ids.len()),
+            detail: "news_category_maintenance_enqueued",
+            maintenance: None,
+        })
+    }
+
     pub(super) async fn enqueue_scrape(
         &self,
         transaction: &mut Transaction<'static, Postgres>,
@@ -260,5 +329,106 @@ impl SchedulerRepository {
             detail,
             maintenance: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use chrono::TimeZone;
+    use newsly_db::{DatabaseConfig, NewsCategoryMaintenanceMode};
+    use secrecy::SecretString;
+    use sqlx::PgPool;
+
+    use super::*;
+    use crate::SchedulerLogFormat;
+
+    fn config() -> SchedulerConfig {
+        SchedulerConfig {
+            database: DatabaseConfig::new(
+                SecretString::from("postgres://test.invalid/newsly"),
+                "scheduler-test",
+            ),
+            instance_id: "scheduler-test".to_owned(),
+            poll_interval: Duration::from_secs(15),
+            lens_embedding_model: "test-embedding".to_owned(),
+            x_sync_enabled: false,
+            feed_discovery_min_reads: 0,
+            news_category_maintenance_batch_size: 8,
+            news_category_maintenance_mode: NewsCategoryMaintenanceMode::Shadow,
+            queue_backpressure_max_pending_content: 150,
+            queue_backpressure_max_pending_process_news_item: 75,
+            orphan_lease_grace: Duration::from_secs(600),
+            terminal_retention_days: 14,
+            terminal_cleanup_batch_size: 5_000,
+            terminal_cleanup_max_delete: 50_000,
+            watchdog_alert_threshold: 1,
+            watchdog_slack_webhook_url: None,
+            log_filter: "info".to_owned(),
+            log_format: SchedulerLogFormat::Pretty,
+        }
+    }
+
+    #[sqlx::test(migrations = "../newsly-db/migrations")]
+    async fn due_news_category_run_enqueues_owned_llm_task_and_attaches_identity(pool: PgPool) {
+        let user_id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO users(apple_id,email,is_admin,is_active) VALUES('scheduler-nightly','scheduler-nightly@example.com',false,true) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let mut transaction = pool.begin().await.unwrap();
+        newsly_db::set_user_news_category_timezone(
+            &mut transaction,
+            user_id,
+            "America/Los_Angeles",
+            None,
+        )
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+
+        let now = Utc.with_ymd_and_hms(2026, 9, 28, 10, 10, 0).unwrap();
+        sqlx::query("UPDATE user_news_category_schedule SET next_due_at=$2,next_local_date='2026-09-28',next_window_start_at=$3,next_window_end_at=$4 WHERE user_id::bigint=$1")
+            .bind(user_id)
+            .bind(now.naive_utc())
+            .bind(Utc.with_ymd_and_hms(2026, 9, 28, 10, 0, 0).unwrap().naive_utc())
+            .bind(Utc.with_ymd_and_hms(2026, 9, 28, 12, 0, 0).unwrap().naive_utc())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let repository = SchedulerRepository::new(pool.clone());
+        let mut transaction = pool.begin().await.unwrap();
+        let report = repository
+            .enqueue_news_category_maintenance(&mut transaction, now, &config())
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+        assert_eq!(
+            (report.considered, report.enqueued, report.skipped),
+            (1, 1, 0)
+        );
+
+        let row = sqlx::query_as::<_, (String, String, i64, i64, String, i32)>(
+            r"
+            SELECT task.task_type, task.queue_name, task.owner_user_id::bigint,
+                   run.id, task.executor_runtime, task.priority
+            FROM news_category_maintenance_runs AS run
+            JOIN processing_tasks AS task ON task.id=run.task_id
+            WHERE run.user_id::bigint=$1 AND run.local_date='2026-09-28'
+            ",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, "recluster_news_lenses");
+        assert_eq!(row.1, "llm");
+        assert_eq!(row.2, user_id);
+        assert!(row.3 > 0);
+        assert_eq!(row.4, "rust");
+        assert_eq!(row.5, -10);
     }
 }

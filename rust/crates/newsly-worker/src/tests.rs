@@ -9,8 +9,8 @@ use sqlx::{PgPool, Postgres, Transaction};
 
 use super::{
     FinalizerErrorDisposition, HandlerExecution, HandlerFinalizerFuture, HandlerFuture,
-    HandlerRegistry, LeaseHealth, TaskFinalizer, TaskHandler, WorkerAttempt, WorkerConfig,
-    WorkerKernel, heartbeat_interval, heartbeat_retry_interval,
+    HandlerInterruptionPolicy, HandlerRegistry, LeaseHealth, TaskFinalizer, TaskHandler,
+    WorkerAttempt, WorkerConfig, WorkerKernel, heartbeat_interval, heartbeat_retry_interval,
 };
 
 #[derive(Debug)]
@@ -69,6 +69,17 @@ fn heartbeat_cadence_preserves_existing_bounds() {
     assert_eq!(
         heartbeat_retry_interval(Duration::from_secs(2)),
         Duration::from_secs(2)
+    );
+}
+
+#[test]
+fn handlers_cancel_on_interruption_unless_they_explicitly_opt_into_draining() {
+    let handler = FailingHandler {
+        disposition: FinalizerErrorDisposition::Retryable,
+    };
+    assert_eq!(
+        handler.interruption_policy(),
+        HandlerInterruptionPolicy::Cancel
     );
 }
 
@@ -316,9 +327,163 @@ async fn terminal_queue_failure_settles_running_llm_ledger(pool: PgPool) {
 struct DelayedAllocation {
     cleaned: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
+
+#[derive(Debug)]
+struct AuditedPaidCalls {
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    audit_completed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl TaskHandler for AuditedPaidCalls {
+    fn task_type(&self) -> TaskType {
+        TaskType::ReclusterNewsLenses
+    }
+
+    fn interruption_policy(&self) -> HandlerInterruptionPolicy {
+        HandlerInterruptionPolicy::DrainBounded
+    }
+
+    fn execute(
+        &self,
+        _plan: std::sync::Arc<newsly_queue::OwnedWorkPlan>,
+        lease: LeaseHealth,
+    ) -> HandlerFuture<'_> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            self.audit_completed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            if !lease.ownership_lost() {
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            HandlerExecution::from_result(TaskResult::ok())
+        })
+    }
+}
+
+#[derive(Debug)]
+struct AuditedReclustering {
+    started: std::sync::Arc<tokio::sync::Notify>,
+    audit_completed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    finalizer_applied: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl TaskHandler for AuditedReclustering {
+    fn task_type(&self) -> TaskType {
+        TaskType::ReclusterNewsLenses
+    }
+
+    fn interruption_policy(&self) -> HandlerInterruptionPolicy {
+        HandlerInterruptionPolicy::DrainBounded
+    }
+
+    fn execute(
+        &self,
+        _plan: std::sync::Arc<newsly_queue::OwnedWorkPlan>,
+        mut lease: LeaseHealth,
+    ) -> HandlerFuture<'_> {
+        Box::pin(async move {
+            self.started.notify_one();
+            lease.wait_for_ownership_loss().await;
+            self.audit_completed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            HandlerExecution::with_finalizer(
+                TaskResult::ok(),
+                AuditFinalizer {
+                    applied: self.finalizer_applied.clone(),
+                },
+            )
+        })
+    }
+}
+
+#[derive(Debug)]
+struct AuditFinalizer {
+    applied: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl TaskFinalizer for AuditFinalizer {
+    fn apply<'a>(
+        &'a self,
+        _transaction: &'a mut Transaction<'static, Postgres>,
+    ) -> HandlerFinalizerFuture<'a> {
+        Box::pin(async move {
+            self.applied
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(super::TaskFinalizerResult::Keep)
+        })
+    }
+}
+
+#[sqlx::test]
+async fn lease_loss_drains_reclustering_audit_without_applying_finalizer(pool: PgPool) {
+    newsly_db::run_migrations(&pool).await.unwrap();
+    let user_id: i64 = sqlx::query_scalar("INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('audit-reclustering','audit-reclustering@example.test',false,true) RETURNING id::bigint")
+        .fetch_one(&pool).await.unwrap();
+    let now = chrono::Utc::now();
+    let mut request = EnqueueRequest::new(TaskType::ReclusterNewsLenses);
+    request.owner_user_id = Some(user_id);
+    request.payload = json!({
+        "user_id": user_id,
+        "run_id": 1,
+        "timezone_revision": 1,
+        "local_date": now.date_naive().to_string(),
+        "timezone": "UTC",
+        "window_start_at": (now - chrono::Duration::minutes(5)).to_rfc3339(),
+        "window_end_at": (now + chrono::Duration::hours(1)).to_rfc3339(),
+        "mode": "shadow"
+    })
+    .as_object()
+    .cloned();
+    let queue = QueueKernel::new(pool.clone());
+    let task_id = queue.enqueue(request).await.unwrap();
+    let scope = ClaimRuntimeScope::namespaces(
+        RuntimeOwner::Rust,
+        [ResourceKey::new("recluster_news_lenses").unwrap()],
+    )
+    .unwrap();
+    let mut claim = ClaimRequest::for_queue("audit-reclustering", TaskQueue::Llm, scope);
+    claim.task_type = Some(TaskType::ReclusterNewsLenses);
+    claim.lease_duration = Duration::from_millis(30);
+    let config = WorkerConfig::new(claim);
+    let started = std::sync::Arc::new(tokio::sync::Notify::new());
+    let audit_completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let finalizer_applied = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut handlers = HandlerRegistry::new();
+    handlers
+        .register(AuditedReclustering {
+            started: started.clone(),
+            audit_completed: audit_completed.clone(),
+            finalizer_applied: finalizer_applied.clone(),
+        })
+        .unwrap();
+    let worker = WorkerKernel::new(queue, handlers, config, None).unwrap();
+
+    let attempt = tokio::spawn(async move { worker.run_once().await });
+    started.notified().await;
+    sqlx::query(
+        "UPDATE processing_tasks SET status='failed',completed_at=timezone('UTC',now()),locked_by=NULL,locked_at=NULL,lease_token=NULL,lease_expires_at=NULL WHERE id::bigint=$1",
+    )
+    .bind(task_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let attempt = tokio::time::timeout(Duration::from_secs(2), attempt)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    assert!(matches!(attempt, WorkerAttempt::OwnershipLost { .. }));
+    assert!(audit_completed.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(!finalizer_applied.load(std::sync::atomic::Ordering::SeqCst));
+}
 impl TaskHandler for DelayedAllocation {
     fn task_type(&self) -> TaskType {
         TaskType::RunLlmTask
+    }
+    fn interruption_policy(&self) -> HandlerInterruptionPolicy {
+        HandlerInterruptionPolicy::DrainBounded
     }
     fn execute(
         &self,
@@ -368,6 +533,58 @@ async fn deadline_drains_sandbox_allocation_before_finalizing(pool: PgPool) {
         .unwrap();
     assert!(matches!(attempt, WorkerAttempt::Failed(_)));
     assert!(cleaned.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[sqlx::test]
+async fn deadline_drains_in_flight_audit_without_starting_a_second_paid_call(pool: PgPool) {
+    newsly_db::run_migrations(&pool).await.unwrap();
+    let user_id: i64 = sqlx::query_scalar("INSERT INTO users (apple_id,email,is_admin,is_active) VALUES ('audit-deadline','audit-deadline@example.test',false,true) RETURNING id::bigint")
+        .fetch_one(&pool).await.unwrap();
+    let now = chrono::Utc::now();
+    let mut request = EnqueueRequest::new(TaskType::ReclusterNewsLenses);
+    request.owner_user_id = Some(user_id);
+    request.payload = json!({
+        "user_id": user_id,
+        "run_id": 1,
+        "timezone_revision": 1,
+        "local_date": now.date_naive().to_string(),
+        "timezone": "UTC",
+        "window_start_at": (now - chrono::Duration::minutes(5)).to_rfc3339(),
+        "window_end_at": (now + chrono::Duration::hours(1)).to_rfc3339(),
+        "mode": "shadow"
+    })
+    .as_object()
+    .cloned();
+    let queue = QueueKernel::new(pool);
+    queue.enqueue(request).await.unwrap();
+    let scope = ClaimRuntimeScope::namespaces(
+        RuntimeOwner::Rust,
+        [ResourceKey::new("recluster_news_lenses").unwrap()],
+    )
+    .unwrap();
+    let mut claim = ClaimRequest::for_queue("audit-deadline", TaskQueue::Llm, scope);
+    claim.task_type = Some(TaskType::ReclusterNewsLenses);
+    let mut config = WorkerConfig::new(claim);
+    config.attempt_timeout = Duration::from_millis(20);
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let audit_completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut handlers = HandlerRegistry::new();
+    handlers
+        .register(AuditedPaidCalls {
+            calls: calls.clone(),
+            audit_completed: audit_completed.clone(),
+        })
+        .unwrap();
+    let worker = WorkerKernel::new(queue, handlers, config, None).unwrap();
+
+    let attempt = tokio::time::timeout(Duration::from_secs(2), worker.run_once())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(matches!(attempt, WorkerAttempt::Retried(_)));
+    assert!(audit_completed.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[sqlx::test]

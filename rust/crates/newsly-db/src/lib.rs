@@ -53,6 +53,7 @@ mod llm_tasks;
 mod media_tasks;
 mod migrations;
 mod news_actions;
+mod news_category_schedule;
 mod onboarding;
 mod onboarding_flow;
 mod onboarding_tasks;
@@ -265,6 +266,14 @@ pub use migrations::{
 pub use news_actions::{
     BulkNewsReadResult, NewsActionRepositoryError, mark_visible_news_items_read,
 };
+pub use news_category_schedule::{
+    BeginNewsCategoryRunOutcome, DueNewsCategoryRun, NewsCategoryMaintenanceMode,
+    NewsCategoryNight, NewsCategoryRunClaimFence, NewsCategoryRunContext, NewsCategoryRunStatus,
+    NewsCategorySchedule, NewsCategoryScheduleError, attach_news_category_run_task,
+    begin_news_category_run, canonicalize_timezone, finish_news_category_run,
+    next_news_category_night, prepare_due_news_category_runs, reserve_news_category_naming_attempt,
+    set_user_news_category_timezone, settle_stale_news_category_runs,
+};
 pub use onboarding::{
     OnboardingDiscoveryLaneProjection, OnboardingDiscoveryStatusProjection,
     OnboardingRepositoryError, OnboardingSuggestionProjection, complete_onboarding_tutorial,
@@ -375,3 +384,5 @@ pub mod news_lens_embeddings;
 
 #[cfg(test)]
 mod warm_news_tests;
+
+pub use briefing_refresh::reclustering as news_category_reclustering;

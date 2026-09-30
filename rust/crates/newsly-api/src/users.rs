@@ -10,8 +10,9 @@ use newsly_contracts::{
     UserResponse,
 };
 use newsly_db::{
-    RouteWriteFenceError, UserProfilePatch, UserProfileProjection, find_user_profile,
-    update_user_profile, verify_route_write_fence,
+    NewsCategoryScheduleError, RouteWriteFenceError, UserProfilePatch, UserProfileProjection,
+    canonicalize_timezone, find_user_profile, set_user_news_category_timezone, update_user_profile,
+    verify_route_write_fence,
 };
 
 use crate::auth::AuthenticatedUser;
@@ -94,6 +95,21 @@ pub(super) async fn update_current_user(
                 .clone(),
         )
     })?;
+    let timezone_revision = payload.timezone_revision;
+    let timezone = payload
+        .timezone
+        .as_deref()
+        .map(canonicalize_timezone)
+        .transpose()
+        .map_err(|error| timezone_error(error, &request_id))?;
+    if timezone.is_none() && timezone_revision.is_some() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "timezone_revision requires timezone",
+            request_id,
+        ));
+    }
     let patch = validate_patch(payload).map_err(|message| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -115,6 +131,16 @@ pub(super) async fn update_current_user(
     )
     .await
     .map_err(|error| route_fence_error(error, &request_id))?;
+    if let Some(timezone) = timezone {
+        set_user_news_category_timezone(
+            &mut transaction,
+            current_user.id,
+            &timezone,
+            timezone_revision,
+        )
+        .await
+        .map_err(|error| timezone_error(error, &request_id))?;
+    }
     let profile = update_user_profile(&mut transaction, current_user.id, &patch)
         .await
         .map_err(|error| internal_error(error, &request_id))?
@@ -242,6 +268,8 @@ pub(super) fn user_response(profile: UserProfileProjection) -> UserResponse {
         has_completed_onboarding: profile.has_completed_onboarding,
         has_completed_new_user_tutorial: profile.has_completed_new_user_tutorial,
         reading_experience,
+        timezone: profile.timezone,
+        timezone_revision: Some(profile.timezone_revision),
         created_at: profile.created_at,
         updated_at: profile.updated_at,
     }
@@ -274,6 +302,39 @@ fn route_fence_error(error: RouteWriteFenceError, request_id: &str) -> ApiError 
             stale_owner(request_id)
         }
         RouteWriteFenceError::Sqlx(source) => internal_error(source, request_id),
+    }
+}
+
+fn timezone_error(error: NewsCategoryScheduleError, request_id: &str) -> ApiError {
+    match error {
+        NewsCategoryScheduleError::InvalidTimezone(_) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "timezone must be a valid IANA timezone identifier",
+            request_id.to_owned(),
+        ),
+        NewsCategoryScheduleError::StaleRevision { current } => ApiError::new(
+            StatusCode::CONFLICT,
+            "timezone_revision_conflict",
+            "Timezone changed since this profile was loaded",
+            request_id.to_owned(),
+        )
+        .with_details(
+            serde_json::json!({"current_timezone_revision": current})
+                .as_object()
+                .expect("timezone conflict details are an object")
+                .clone(),
+        ),
+        NewsCategoryScheduleError::UserNotFound => invalid_credentials(request_id),
+        NewsCategoryScheduleError::NoValidLocalNight => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "timezone has no schedulable local night",
+            request_id.to_owned(),
+        ),
+        error @ (NewsCategoryScheduleError::InvalidMode | NewsCategoryScheduleError::Sqlx(_)) => {
+            internal_error(error, request_id)
+        }
     }
 }
 

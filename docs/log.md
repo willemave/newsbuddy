@@ -27,6 +27,48 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-30 — `willem/nightly-news-categories` — Reclustering review corrections
+
+- **Status:** Corrections complete locally; main integration, commit and push authorized.
+- **Scope:** Novel-topic discovery, canonical candidate identity/history, immutable run-start claim fencing, cancellation and bounded usage audit, and atomic pending-source assignment.
+- **Decisions:** Preserve ten semantic categories, 25 naming examples per category, two-night/three-event support, exact cached embeddings, local-night scheduling and existing composed/read/audio state. Use one candidate partition as identity history; published routing profiles only bootstrap it. Reject stale execution claims before run mutation; drain only an in-flight naming observation after cancellation.
+- **Review:** Required read-only Oracle Fable consultation attempted with Claude Opus 5.5; Claude Code returned `Not logged in · Please run /login`. No model substitution. Source review and focused regressions cover the fixes; independent advisory review remains unavailable.
+- **Changes:** Remove unsupported warm centers before existing farthest seeding, preserving the Lloyd refinement loop; persist one schema-v2 candidate partition; compare original claim stamps at run startup; use explicit handler interruption policy and cancellation checkpoints; update fitted pending rows with one bound relational statement. Queue normalization now rejects nonpositive user IDs.
+- **Validation:** 163 focused domain/DB/schedule/worker/queue tests pass, including reclaimed-start rejection, deadline/audit behavior, full-cap novelty and two-night support. Warning-denied affected-package Clippy, formatting, architecture and public-contract guards pass. A 450-story/three-checkpoint cached production replay is byte-identical to the baseline, with no missing coverage or provider calls. The first iterative reseeding attempt regressed mixed coverage and was replaced by the simpler pre-fit warm filter before commit.
+- **Remaining:** Preserve unrelated main-checkout changes, validate the clean integrated SHA with the release gate, merge to main and push. Independent Fable review remains unavailable.
+- **Commits:** Uncommitted.
+
+### 2026-09-29 — `detached 776317d2` — Nightly category cleanup
+
+- **Status:** Cleanup complete locally; production rollout pending.
+- **Scope:** Reviewed the pending reclustering diff with read-only parallel reviews; simplified domain scoring, candidate persistence, schedule selection, naming audit plumbing, and lease-loss test synchronization.
+- **Changes:** Cache invariant representative scores and farthest-seed distances; retain arithmetic/tie order. Remove unused candidate naming hash/date columns, snapshot version field, schedule getter, and partition boolean result. Load candidates directly through the typed SQLx row; select only due user IDs before authoritative reread. Parse naming model once and derive audit outcome from result. Correct the timezone-report comment and replace a fixed test sleep with ownership-loss observation.
+- **Validation:** 23 focused domain/worker/schedule/isolated-PostgreSQL tests pass. A 450-story, three-checkpoint cached production replay is byte-identical before/after. Formatting, warning-denied Clippy and architecture/contract guards checked before handoff; no provider calls.
+- **Remaining:** Separate correctness repair before deployment: begin_news_category_run reads the current task claim without comparing the executing claim, so a stale worker can inherit a newer naming-reservation fence. Queue normalization also permits nonpositive user IDs contrary to the task schema. Deferred those behavior fixes, candidate-format consolidation and wider scoring refactors from this cleanup. No commit, push or deployment.
+- **Commits:** Uncommitted.
+
+
+### 2026-09-27 — `detached 776317d2` — Nightly news category implementation
+
+- **Status:** Complete locally; production rollout pending.
+- **Scope:** Domain fitter, exact cached-vector snapshots, bounded Luna batch naming, durable local-night scheduler/worker, timezone API/iOS reporting, and existing routing/draining behavior.
+- **Decisions:** 03:00–05:00 local window; unknown timezone skips; shadow rollout default; 25 representative stories/category, at most 10 categories and two attempts/run; new topics require three distinct events and two nights. Dedicated worker preserves normal refresh capacity. Existing composed/read/audio state remains intact.
+- **Changes:** Revisioned timezone and indexed due state; exact lease/snapshot/timezone publication fences; independent naming observations/cache and global daily reservation; production-core replay and read-only Opus architecture review with findings addressed.
+- **Validation:** Domain/provider/replay, schedule, Briefing DB/worker, account-deletion and ingestion regression tests pass; isolated PostgreSQL checks cover stale snapshots, read/composed preservation, naming cache, timezone/window/lease rejection and late-call accounting. All-target warning-denied Clippy passes for affected Rust crates; architecture/contract guards, iOS Simulator build and focused lifecycle/auth/profile tests pass. Imported the existing origin/main admin-test lint correction to unblock verification. Implemented-core replay reduces movement (1.67% to 0.86%) but raises held-out weak matches (9.93% to 12.90%), supporting shadow rollout.
+- **Remaining:** Explicit commit/push approval under AGENTS.md, account identity for initial Pacific timezone, clean exact-SHA release gate/live smoke, deployment and production next-due verification. No live naming or embedding calls were made during this implementation.
+- **Commits:** Uncommitted.
+
+
+### 2026-09-27 — detached `776317d2` — Nightly news-category replay and design
+
+- **Status:** Offline experiments and proposed implementation plan complete locally.
+- **Scope:** Production-sampled, cached-vector category reclustering ablations; proposed nightly scheduling in each user's IANA timezone. Production behavior is unchanged.
+- **Decisions:** Export only public canonical news through bounded read-only `newsly-admin` queries; keep raw samples in ignored `test-results/news-lens-replay-20260927/`. Verify encoder input hashes, distinguish final-text counterfactual history from original production state, and evaluate next-period fit as well as churn. No embedding, naming, or judge API calls; external experiment API spend ceiling is zero. Restricted read-only Claude Opus 5.5 reviews architecture separately through the authorized local CLI.
+- **Results:** Accepted 1,436 of 1,445 sampled public stories after exact-hash validation; replayed 15 weekly and six nightly variants across three cohorts (1,224 checkpoint evaluations). Nightly warm14 is the shadow candidate: late-period weak matches 9.9% versus incremental-surrogate 16.1%, with 1.7% mean nightly shared-story movement. Documented tiny-cluster failures, counterfactual history, approximate baseline, and cumulative churn limits. Plan uses local 03:00 jitter through a 05:00 publication cutoff, authoritative IANA timezone, and fenced future-routing/pending-only changes.
+- **Validation:** Rust formatting, warning-denied eval-driver Clippy, 12 Rust tests; Python Ruff/MyPy and five focused tests; complete replay outputs and aggregate report. Full release, database and iOS gates were not run for this offline-only change.
+- **Remaining:** Production planner/scheduler implementation, supported-cluster ablation, faithful routing baseline and per-user shadow trial are future work. See `docs/initiatives/2026-09-27-nightly-news-category-reclustering-plan.md` and companion replay report. No commit, push or deployment.
+- **Naming follow-up:** User selected 25 representative stories per category. Updated the proposed nightly Luna review to include all active routing categories (up to 10, at most 250 examples), retain accurate names and permit any supported rename. Removed the two-name cap; retained one batch plus one retry and token limits. Documentation-only; no naming calls or production changes.
+
 ### 2026-09-27 — `main` — Settings header app icon
 
 - **Status:** Complete locally.

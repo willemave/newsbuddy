@@ -187,7 +187,7 @@ pub(super) async fn upsert_lens(
             timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp())
         )
         ON CONFLICT (user_id, key) DO UPDATE
-        SET status = 'active', retired_at = NULL, updated_at = timezone('UTC', clock_timestamp())
+        SET status = 'active', accepts_news = true, retired_at = NULL, updated_at = timezone('UTC', clock_timestamp())
         RETURNING id::bigint
         "#,
     )
@@ -421,7 +421,7 @@ pub(super) async fn assign_nonsemantic_pending_lenses(
         return Ok(changed);
     }
     let active_lens_keys = sqlx::query_scalar::<_, String>(
-        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active'",
+        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' AND accepts_news",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
@@ -480,7 +480,7 @@ pub(super) async fn load_lens_assignment_snapshot(
     .fetch_all(&mut **transaction)
     .await?;
     let active_news_lens_keys = sqlx::query_scalar::<_, String>(
-        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' ORDER BY position, id",
+        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' AND accepts_news ORDER BY position, id",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)
@@ -528,7 +528,7 @@ pub(super) async fn semantic_lens_rows(
         SELECT id::bigint AS id, key, title, deck, position, centroid::jsonb AS centroid,
                centroid_weight, centroid_model, routing_rule, updated_at
         FROM briefing_lenses
-        WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' AND key <> 'misc'
+        WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' AND accepts_news AND key <> 'misc'
         ORDER BY position, id
         FOR SHARE
         "#,
@@ -763,8 +763,16 @@ pub(super) async fn load_compaction_batches(
     for segment in segments {
         by_lens.entry(segment.lens_id).or_default().push(segment);
     }
+    let draining: HashSet<i64> = sqlx::query_scalar::<_, i64>(
+        "SELECT id::bigint FROM briefing_lenses WHERE user_id::bigint=$1 AND NOT accepts_news",
+    )
+    .bind(user_id)
+    .fetch_all(&mut **transaction)
+    .await?
+    .into_iter()
+    .collect();
     let mut batches = Vec::new();
-    for (_lens_id, lens_segments) in by_lens {
+    for (lens_id, lens_segments) in by_lens {
         let mut repair_ids = HashSet::new();
         let mut regular_ids = Vec::new();
         for segment in &lens_segments {
@@ -782,7 +790,9 @@ pub(super) async fn load_compaction_batches(
                 regular_ids.push(segment.id);
             }
         }
-        if lens_segments[0].lens_tier == "news" && regular_ids.len() < 2 {
+        if draining.contains(&lens_id)
+            || (lens_segments[0].lens_tier == "news" && regular_ids.len() < 2)
+        {
             regular_ids.clear();
         }
         let repair_required = !repair_ids.is_empty();

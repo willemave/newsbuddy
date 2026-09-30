@@ -24,16 +24,34 @@ pub(super) async fn plan_semantic_lenses(
     if snapshot.pending_sources.is_empty() {
         return Ok(empty_plan(seed));
     }
-    let texts = snapshot
+    let vector_size = source_vectors.first().map_or(0, Vec::len);
+    let centroid_model = format!("openrouter:{}", gateway.embedding_model());
+    // A compatible durable centroid already is the routing vector. Embedding its
+    // display profile on every arrival wastes provider work and is never used.
+    let mut vectors: Vec<Option<Vec<f64>>> = snapshot
         .active_lenses
         .iter()
-        .map(BriefingSemanticLens::profile_text)
-        .collect::<Vec<_>>();
-    let mut vectors = Vec::with_capacity(texts.len());
+        .map(|lens| compatible_centroid(lens, &centroid_model, vector_size).cloned())
+        .collect();
+    let missing: Vec<usize> = vectors
+        .iter()
+        .enumerate()
+        .filter_map(|(index, vector)| vector.is_none().then_some(index))
+        .collect();
     let mut usage = Vec::new();
-    for chunk in texts.chunks(embedding_batch_size.clamp(1, 128)) {
-        match gateway.embed(chunk).await {
+    for indices in missing.chunks(embedding_batch_size.clamp(1, 128)) {
+        let texts: Vec<String> = indices
+            .iter()
+            .map(|index| snapshot.active_lenses[*index].profile_text())
+            .collect();
+        match gateway.embed(&texts).await {
             Ok(batch) => {
+                if batch.vectors.len() != indices.len() {
+                    return Err(SemanticLensPlanningError::EmbeddingShape {
+                        expected: indices.len(),
+                        actual: batch.vectors.len(),
+                    });
+                }
                 usage.push(BriefingLensAssignmentUsage {
                     provider: "openrouter".to_owned(),
                     model: batch.model,
@@ -42,27 +60,18 @@ pub(super) async fn plan_semantic_lenses(
                     feature: "briefing_category_assignment".to_owned(),
                     operation: "briefing.embed_categories".to_owned(),
                 });
-                vectors.extend(batch.vectors);
+                for (index, vector) in indices.iter().zip(batch.vectors) {
+                    vectors[*index] = Some(vector);
+                }
             }
             Err(error) => {
-                tracing::warn!(
-                    task_id = seed.task_id,
-                    user_id = seed.user_id,
-                    source_count = snapshot.pending_sources.len(),
-                    lens_count = snapshot.active_lenses.len(),
-                    error = %error,
-                    "Briefing semantic category embedding failed; using bounded non-semantic assignment"
-                );
+                tracing::warn!(task_id=seed.task_id, user_id=seed.user_id, error=%error,
+                    "Briefing category fallback embedding failed");
                 return plan_nonsemantic_lenses(gateway, seed, config, usage).await;
             }
         }
     }
-    if vectors.len() != texts.len() {
-        return Err(SemanticLensPlanningError::EmbeddingShape {
-            expected: texts.len(),
-            actual: vectors.len(),
-        });
-    }
+    let vectors: Vec<Vec<f64>> = vectors.into_iter().flatten().collect();
     if source_vectors.len() != snapshot.pending_sources.len() {
         return Err(SemanticLensPlanningError::EmbeddingShape {
             expected: snapshot.pending_sources.len(),
@@ -70,7 +79,6 @@ pub(super) async fn plan_semantic_lenses(
         });
     }
     let profile_vectors = &vectors;
-    let vector_size = source_vectors.first().map_or(0, Vec::len);
     if vector_size == 0
         || source_vectors
             .iter()
@@ -81,7 +89,6 @@ pub(super) async fn plan_semantic_lenses(
     {
         return Err(SemanticLensPlanningError::InconsistentEmbeddingWidth);
     }
-    let centroid_model = format!("openrouter:{}", gateway.embedding_model());
     let mut lenses = snapshot
         .active_lenses
         .iter()
@@ -109,7 +116,11 @@ pub(super) async fn plan_semantic_lenses(
         .iter()
         .cloned()
         .collect::<HashSet<_>>();
-    let mut active_count = snapshot.active_news_lens_keys.len();
+    let mut active_count = snapshot
+        .active_news_lens_keys
+        .iter()
+        .filter(|key| *key != "misc")
+        .count();
     let mut next_position = snapshot.next_news_position;
     let mut misc_plan = None;
     if active_count >= config.max_news_lenses {
@@ -652,6 +663,20 @@ fn oldest(cluster: &Cluster) -> chrono::DateTime<Utc> {
         .unwrap_or_else(Utc::now)
 }
 
+fn compatible_centroid<'a>(
+    lens: &'a BriefingSemanticLens,
+    model: &str,
+    size: usize,
+) -> Option<&'a Vec<f64>> {
+    lens.centroid.as_ref().filter(|vector| {
+        !vector.is_empty()
+            && vector.len() == size
+            && lens.centroid_model.as_deref() == Some(model)
+            && vector.iter().all(|v| v.is_finite())
+            && vector.iter().any(|v| *v != 0.0)
+    })
+}
+
 #[derive(Debug, Clone)]
 struct WorkingLens {
     id: Option<i64>,
@@ -673,9 +698,7 @@ impl WorkingLens {
         model: &str,
         vector_size: usize,
     ) -> Self {
-        let valid_centroid = lens.centroid.as_ref().filter(|centroid| {
-            centroid.len() == vector_size && lens.centroid_model.as_deref() == Some(model)
-        });
+        let valid_centroid = compatible_centroid(lens, model, vector_size);
         Self {
             id: Some(lens.id),
             key: lens.key.clone(),

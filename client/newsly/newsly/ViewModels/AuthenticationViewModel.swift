@@ -59,6 +59,14 @@ final class AuthenticationController {
     @ObservationIgnored
     private var pendingSessionEnd: PendingSessionEnd?
     @ObservationIgnored
+    private var timezoneReportTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var reportingTimezone: String?
+    @ObservationIgnored
+    private var rejectedTimezone: String?
+    @ObservationIgnored
+    private var hasValidatedProfile = false
+    @ObservationIgnored
     private var restorationRetryPending = false
     @ObservationIgnored
     private var handledRestorationActivationGeneration: UInt64?
@@ -165,7 +173,9 @@ final class AuthenticationController {
                 restorationRetryPending = false
                 lastKnownUser = user
                 userCache.save(user)
+                hasValidatedProfile = true
                 authState = .authenticated(user)
+                reportCurrentTimezoneIfNeeded()
             } catch {
                 guard canCommit(generation) else { return }
                 handleRestorationFailure(error)
@@ -196,7 +206,9 @@ final class AuthenticationController {
                 errorMessage = nil
                 lastKnownUser = session.user
                 userCache.save(session.user)
+                hasValidatedProfile = true
                 authState = .authenticated(session.user)
+                reportCurrentTimezoneIfNeeded()
             } catch {
                 guard canCommit(generation) else { return }
                 presentAuthError(error)
@@ -227,6 +239,7 @@ final class AuthenticationController {
     private func applyLoggedOutPresentationState() {
         userCache.clear()
         lastKnownUser = nil
+        hasValidatedProfile = false
         errorMessage = nil
         authState = .unauthenticated
     }
@@ -245,6 +258,78 @@ final class AuthenticationController {
         authState = .authenticated(user)
     }
 
+    /// Reports a changed system timezone after profile validation. A conflict
+    /// refreshes the profile and defers retry until the next foreground activation.
+    func reportCurrentTimezoneIfNeeded(
+        _ timezone: String = TimeZone.autoupdatingCurrent.identifier
+    ) {
+        guard case .authenticated(let user) = authState,
+              hasValidatedProfile,
+              user.timezone != timezone,
+              rejectedTimezone != timezone,
+              reportingTimezone != timezone else {
+            return
+        }
+
+        timezoneReportTask?.cancel()
+        reportingTimezone = timezone
+        let userID = user.id
+        let revision = user.timezoneRevision
+        timezoneReportTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if reportingTimezone == timezone {
+                    reportingTimezone = nil
+                }
+            }
+            do {
+                let updated = try await authService.updateCurrentUserTimezone(
+                    timezone,
+                    revision: revision
+                )
+                rejectedTimezone = nil
+                publishTimezoneProfile(updated, expectedUserID: userID)
+            } catch AuthError.serverError(let statusCode, _) where statusCode == 409 {
+                await refreshTimezoneProfile(expectedUserID: userID)
+            } catch AuthError.serverError(let statusCode, _) where statusCode == 422 {
+                rejectedTimezone = timezone
+                authViewModelLogger.error(
+                    "[AuthState] Server rejected system timezone | timezone=\(timezone, privacy: .public)"
+                )
+            } catch is CancellationError {
+            } catch {
+                authViewModelLogger.error(
+                    "[AuthState] Timezone report failed | error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func refreshTimezoneProfile(expectedUserID: Int) async {
+        do {
+            let refreshed = try await authService.getCurrentUser()
+            guard refreshed.id == expectedUserID else { return }
+            publishTimezoneProfile(refreshed, expectedUserID: expectedUserID)
+        } catch {
+            authViewModelLogger.error(
+                "[AuthState] Timezone conflict refresh failed | error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func publishTimezoneProfile(_ user: User, expectedUserID: Int) {
+        guard user.id == expectedUserID,
+              case .authenticated(let currentUser) = authState,
+              currentUser.id == expectedUserID,
+              currentUser != user else {
+            return
+        }
+        lastKnownUser = user
+        userCache.save(user)
+        hasValidatedProfile = true
+        authState = .authenticated(user)
+    }
+
     #if DEBUG
     func startDebugSession(userID: Int) {
         let generation = beginAuthWork(
@@ -253,6 +338,7 @@ final class AuthenticationController {
         )
         userCache.clear()
         lastKnownUser = nil
+        hasValidatedProfile = false
         errorMessage = nil
         authState = .loading
         let clearTask = startSessionEnd(matching: nil)
@@ -270,7 +356,9 @@ final class AuthenticationController {
                 guard canCommit(generation) else { return }
                 lastKnownUser = session.user
                 userCache.save(session.user)
+                hasValidatedProfile = true
                 authState = .authenticated(session.user)
+                reportCurrentTimezoneIfNeeded()
             } catch {
                 guard canCommit(generation) else { return }
                 presentAuthError(error)
@@ -374,7 +462,9 @@ final class AuthenticationController {
                 errorMessage = nil
                 lastKnownUser = session.user
                 userCache.save(session.user)
+                hasValidatedProfile = true
                 authState = .authenticated(session.user)
+                reportCurrentTimezoneIfNeeded()
             } catch {
                 guard canCommit(generation) else { return }
                 presentAuthError(error)
@@ -398,6 +488,11 @@ final class AuthenticationController {
         authWorkGeneration &+= 1
         if changesCredentialIdentity {
             credentialIntentGeneration &+= 1
+            timezoneReportTask?.cancel()
+            timezoneReportTask = nil
+            reportingTimezone = nil
+            rejectedTimezone = nil
+            hasValidatedProfile = false
         }
         authWorkKind = kind
         return authWorkGeneration

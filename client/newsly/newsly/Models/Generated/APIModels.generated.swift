@@ -4910,17 +4910,23 @@ struct APIUpdateUserProfileRequest: Codable {
     let twitterUsername: String?
     let councilPersonas: [APICouncilPersonaInput]?
     let readingExperience: APIReadingExperience?
+    let timezone: String?
+    let timezoneRevision: Int?
 
     init(
         fullName: String? = nil,
         twitterUsername: String? = nil,
         councilPersonas: [APICouncilPersonaInput]? = nil,
-        readingExperience: APIReadingExperience? = nil
+        readingExperience: APIReadingExperience? = nil,
+        timezone: String? = nil,
+        timezoneRevision: Int? = nil
     ) {
         self.fullName = fullName
         self.twitterUsername = twitterUsername
         self.councilPersonas = councilPersonas
         self.readingExperience = readingExperience
+        self.timezone = timezone
+        self.timezoneRevision = timezoneRevision
     }
 
     enum CodingKeys: String, CodingKey {
@@ -4928,6 +4934,8 @@ struct APIUpdateUserProfileRequest: Codable {
         case twitterUsername = "twitter_username"
         case councilPersonas = "council_personas"
         case readingExperience = "reading_experience"
+        case timezone = "timezone"
+        case timezoneRevision = "timezone_revision"
     }
 
     init(from decoder: Decoder) throws {
@@ -4936,6 +4944,8 @@ struct APIUpdateUserProfileRequest: Codable {
         twitterUsername = try container.decodeIfPresent(String.self, forKey: .twitterUsername)
         councilPersonas = try container.decodeIfPresent([APICouncilPersonaInput].self, forKey: .councilPersonas)
         readingExperience = try container.decodeIfPresent(APIReadingExperience.self, forKey: .readingExperience)
+        timezone = try container.decodeIfPresent(String.self, forKey: .timezone)
+        timezoneRevision = try container.decodeIfPresent(Int.self, forKey: .timezoneRevision)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -4944,6 +4954,8 @@ struct APIUpdateUserProfileRequest: Codable {
         try container.encodeIfPresent(twitterUsername, forKey: .twitterUsername)
         try container.encodeIfPresent(councilPersonas, forKey: .councilPersonas)
         try container.encodeIfPresent(readingExperience, forKey: .readingExperience)
+        try container.encodeIfPresent(timezone, forKey: .timezone)
+        try container.encodeIfPresent(timezoneRevision, forKey: .timezoneRevision)
     }
 }
 
@@ -7611,6 +7623,8 @@ struct APIUserResponse: Codable {
     let hasCompletedOnboarding: Bool
     let hasCompletedNewUserTutorial: Bool
     let readingExperience: APIReadingExperience
+    let timezone: String?
+    let timezoneRevision: Int?
     let createdAt: Date
     let updatedAt: Date
 
@@ -7627,6 +7641,8 @@ struct APIUserResponse: Codable {
         hasCompletedOnboarding: Bool,
         hasCompletedNewUserTutorial: Bool,
         readingExperience: APIReadingExperience = .briefing,
+        timezone: String?,
+        timezoneRevision: Int?,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -7642,6 +7658,8 @@ struct APIUserResponse: Codable {
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.hasCompletedNewUserTutorial = hasCompletedNewUserTutorial
         self.readingExperience = readingExperience
+        self.timezone = timezone
+        self.timezoneRevision = timezoneRevision
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -7659,6 +7677,8 @@ struct APIUserResponse: Codable {
         case hasCompletedOnboarding = "has_completed_onboarding"
         case hasCompletedNewUserTutorial = "has_completed_new_user_tutorial"
         case readingExperience = "reading_experience"
+        case timezone = "timezone"
+        case timezoneRevision = "timezone_revision"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -7677,6 +7697,8 @@ struct APIUserResponse: Codable {
         hasCompletedOnboarding = try container.decode(Bool.self, forKey: .hasCompletedOnboarding)
         hasCompletedNewUserTutorial = try container.decode(Bool.self, forKey: .hasCompletedNewUserTutorial)
         readingExperience = try container.decode(APIReadingExperience.self, forKey: .readingExperience)
+        timezone = try container.decode(String?.self, forKey: .timezone)
+        timezoneRevision = try container.decode(Int?.self, forKey: .timezoneRevision)
         let createdAtRaw = try container.decode(String.self, forKey: .createdAt)
         guard let createdAtParsed = ServerDate.parse(createdAtRaw) else {
             throw DecodingError.dataCorruptedError(forKey: .createdAt, in: container, debugDescription: "Unparseable date for createdAt")
@@ -7703,6 +7725,8 @@ struct APIUserResponse: Codable {
         try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
         try container.encode(hasCompletedNewUserTutorial, forKey: .hasCompletedNewUserTutorial)
         try container.encode(readingExperience, forKey: .readingExperience)
+        try container.encode(timezone, forKey: .timezone)
+        try container.encode(timezoneRevision, forKey: .timezoneRevision)
         try container.encode(ServerDate.format(createdAt), forKey: .createdAt)
         try container.encode(ServerDate.format(updatedAt), forKey: .updatedAt)
     }

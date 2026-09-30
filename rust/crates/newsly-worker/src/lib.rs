@@ -72,7 +72,21 @@ use tracing::{Instrument, error, info, warn};
 pub trait TaskHandler: Debug + Send + Sync + 'static {
     fn task_type(&self) -> TaskType;
 
+    /// Controls whether the worker waits for a handler after signalling interruption.
+    ///
+    /// This is reserved for handlers whose in-flight operation must return durable remote
+    /// identity or append-only accounting before its future may be dropped.
+    fn interruption_policy(&self) -> HandlerInterruptionPolicy {
+        HandlerInterruptionPolicy::Cancel
+    }
+
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandlerInterruptionPolicy {
+    Cancel,
+    DrainBounded,
 }
 
 pub type HandlerFuture<'a> = Pin<Box<dyn Future<Output = HandlerExecution> + Send + 'a>>;
@@ -193,6 +207,10 @@ impl LeaseHealth {
             _ = self.ownership_lost_rx.wait_for(|lost| *lost) => {},
             _ = self.cancellation_rx.wait_for(|cancelled| *cancelled) => {},
         }
+    }
+
+    pub(crate) const fn claim(&self) -> &ClaimedTask {
+        &self.claim
     }
 }
 
@@ -606,6 +624,7 @@ impl WorkerKernel {
 
         let execution = match self.handlers.handler(claim.task_type) {
             Some(handler) => {
+                let interruption_policy = handler.interruption_policy();
                 let mut cancellation = lease.clone();
                 let work = AssertUnwindSafe(handler.execute(plan, lease.clone())).catch_unwind();
                 tokio::pin!(work);
@@ -617,13 +636,14 @@ impl WorkerKernel {
                     },
                     () = cancellation.wait_for_ownership_loss() => {
                         // Sandbox allocation must return its remote ID before cleanup can own it.
-                        // These handlers already bound their provider calls and cooperate with cancellation.
-                        if claim.task_type == TaskType::RunLlmTask { let _ = work.await; }
+                        // Nightly naming must also finish its bounded provider call and append-only
+                        // usage audit. Their resulting finalizers remain exact-lease fenced.
+                        if interruption_policy == HandlerInterruptionPolicy::DrainBounded { let _ = work.await; }
                         HandlerExecution::from_result(TaskResult::fail(Some("Task lease was lost".to_owned()), true))
                     },
                     () = tokio::time::sleep(self.config.attempt_timeout) => {
                         cancellation_tx.send_replace(true);
-                        if claim.task_type == TaskType::RunLlmTask { let _ = work.await; }
+                        if interruption_policy == HandlerInterruptionPolicy::DrainBounded { let _ = work.await; }
                         HandlerExecution::from_result(TaskResult::fail(Some("Task execution deadline exceeded".to_owned()), true))
                     },
                 }

@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use newsly_domain::{LeaseToken, RuntimeOwner};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -72,6 +72,7 @@ string_enum!(TaskType {
     RunLlmTask => "run_llm_task",
     BriefingRefresh => "briefing_refresh",
     PrepareNewsLens => "prepare_news_lens",
+    ReclusterNewsLenses => "recluster_news_lenses",
     DeleteUserAccount => "delete_user_account",
 });
 
@@ -123,7 +124,9 @@ impl TaskType {
             Self::DigDeeper | Self::ChatTurn => (TaskQueue::Chat, false, true),
             Self::SyncIntegration => (TaskQueue::Twitter, true, true),
             Self::GenerateAudioEpisode => (TaskQueue::AudioEpisode, true, true),
-            Self::RunLlmTask | Self::BriefingRefresh => (TaskQueue::Llm, false, true),
+            Self::RunLlmTask | Self::BriefingRefresh | Self::ReclusterNewsLenses => {
+                (TaskQueue::Llm, false, true)
+            }
             Self::PrepareNewsLens => (TaskQueue::Llm, false, false),
             Self::BackfillFeeds => (TaskQueue::Backfill, false, true),
             Self::DeleteUserAccount => (TaskQueue::Backfill, false, false),
@@ -166,6 +169,9 @@ impl TaskType {
             Self::RunLlmTask => "newsly_worker::run_llm_task::RunLlmTaskHandler",
             Self::BriefingRefresh => "newsly_worker::briefing_refresh::BriefingRefreshHandler",
             Self::PrepareNewsLens => "newsly_worker::briefing_refresh::PrepareNewsLensHandler",
+            Self::ReclusterNewsLenses => {
+                "newsly_worker::briefing_refresh::ReclusterNewsLensesHandler"
+            }
             Self::DeleteUserAccount => "newsly_account_deletion_worker::AccountDeletionHandler",
         }
     }
@@ -211,21 +217,21 @@ impl TaskType {
                 required_integer(&payload, self, "news_item_id", true)?;
             }
             Self::DiscoverFeeds | Self::DeleteUserAccount => {
-                required_integer(&payload, self, "user_id", false)?;
+                required_integer(&payload, self, "user_id", true)?;
             }
             Self::OnboardingDiscover => {
-                required_integer(&payload, self, "user_id", false)?;
+                required_integer(&payload, self, "user_id", true)?;
                 optional_integer(&mut payload, self, "run_id", true)?;
             }
             Self::DigDeeper => {
-                required_integer(&payload, self, "user_id", false)?;
+                required_integer(&payload, self, "user_id", true)?;
                 optional_integer(&mut payload, self, "session_id", true)?;
                 optional_integer(&mut payload, self, "message_id", true)?;
                 optional_string(&mut payload, self, "initial_message")?;
                 optional_string(&mut payload, self, "prompt")?;
             }
             Self::ChatTurn => {
-                required_integer(&payload, self, "user_id", false)?;
+                required_integer(&payload, self, "user_id", true)?;
                 required_integer(&payload, self, "session_id", false)?;
                 required_integer(&payload, self, "message_id", false)?;
             }
@@ -234,17 +240,81 @@ impl TaskType {
                 required_integer(&payload, self, "audio_episode_id", true)?;
             }
             Self::RunLlmTask => {
-                required_integer(&payload, self, "user_id", false)?;
+                required_integer(&payload, self, "user_id", true)?;
                 required_integer(&payload, self, "llm_task_id", false)?;
             }
             Self::SyncIntegration => {
-                required_integer(&payload, self, "user_id", false)?;
+                required_integer(&payload, self, "user_id", true)?;
                 default_string(&mut payload, self, "provider", "x")?;
                 default_string(&mut payload, self, "trigger", "cron")?;
             }
             Self::BriefingRefresh => {
-                required_integer(&payload, self, "user_id", false)?;
+                required_integer(&payload, self, "user_id", true)?;
                 default_string(&mut payload, self, "mode", "append")?;
+            }
+            Self::ReclusterNewsLenses => {
+                required_integer(&payload, self, "user_id", true)?;
+                required_integer(&payload, self, "run_id", true)?;
+                required_integer(&payload, self, "timezone_revision", true)?;
+                required_string(&payload, self, "local_date")?;
+                required_string(&payload, self, "timezone")?;
+                required_string(&payload, self, "window_start_at")?;
+                required_string(&payload, self, "window_end_at")?;
+                if payload
+                    .get("local_date")
+                    .and_then(Value::as_str)
+                    .is_none_or(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").is_err())
+                {
+                    return Err(PayloadError::OutOfRange {
+                        task_type: self,
+                        field: "local_date",
+                    });
+                }
+                let window_start = payload
+                    .get("window_start_at")
+                    .and_then(Value::as_str)
+                    .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                    .ok_or(PayloadError::OutOfRange {
+                        task_type: self,
+                        field: "window_start_at",
+                    })?;
+                let window_end = payload
+                    .get("window_end_at")
+                    .and_then(Value::as_str)
+                    .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                    .ok_or(PayloadError::OutOfRange {
+                        task_type: self,
+                        field: "window_end_at",
+                    })?;
+                if window_start >= window_end {
+                    return Err(PayloadError::OutOfRange {
+                        task_type: self,
+                        field: "window_end_at",
+                    });
+                }
+                default_string(&mut payload, self, "mode", "shadow")?;
+                if !matches!(
+                    payload.get("mode").and_then(Value::as_str),
+                    Some("shadow" | "publish")
+                ) {
+                    return Err(PayloadError::OutOfRange {
+                        task_type: self,
+                        field: "mode",
+                    });
+                }
+                payload.retain(|key, _| {
+                    matches!(
+                        key.as_str(),
+                        "user_id"
+                            | "run_id"
+                            | "timezone_revision"
+                            | "local_date"
+                            | "timezone"
+                            | "window_start_at"
+                            | "window_end_at"
+                            | "mode"
+                    )
+                });
             }
             Self::BackfillFeeds => {
                 required_integer(&payload, self, "user_id", true)?;
@@ -613,6 +683,23 @@ fn optional_string(
     Ok(())
 }
 
+fn required_string(
+    payload: &Map<String, Value>,
+    task_type: TaskType,
+    field: &'static str,
+) -> Result<(), PayloadError> {
+    let value = payload
+        .get(field)
+        .ok_or(PayloadError::MissingField { task_type, field })?;
+    let value = value
+        .as_str()
+        .ok_or(PayloadError::WrongType { task_type, field })?;
+    if value.trim().is_empty() {
+        return Err(PayloadError::OutOfRange { task_type, field });
+    }
+    Ok(())
+}
+
 fn default_bool(
     payload: &mut Map<String, Value>,
     task_type: TaskType,
@@ -762,6 +849,60 @@ mod tests {
             TaskType::EnrichNewsItemArticle.normalize_payload(Some(payload.clone())),
             Ok(payload)
         );
+    }
+
+    #[test]
+    fn recluster_news_lenses_requires_a_valid_bounded_window() {
+        let valid = json!({
+            "user_id": 7,
+            "run_id": 11,
+            "timezone_revision": 2,
+            "local_date": "2026-09-28",
+            "timezone": "America/Los_Angeles",
+            "window_start_at": "2026-09-28T10:00:00Z",
+            "window_end_at": "2026-09-28T12:00:00Z"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let normalized = TaskType::ReclusterNewsLenses
+            .normalize_payload(Some(valid))
+            .unwrap();
+        assert_eq!(normalized.get("mode"), Some(&json!("shadow")));
+
+        let mut reversed = normalized;
+        reversed.insert("window_end_at".to_owned(), json!("2026-09-28T09:00:00Z"));
+        assert_eq!(
+            TaskType::ReclusterNewsLenses.normalize_payload(Some(reversed)),
+            Err(PayloadError::OutOfRange {
+                task_type: TaskType::ReclusterNewsLenses,
+                field: "window_end_at",
+            })
+        );
+    }
+
+    #[test]
+    fn owner_scoped_payloads_reject_nonpositive_user_ids() {
+        for user_id in [0, -1] {
+            let payload = json!({
+                "user_id": user_id,
+                "run_id": 11,
+                "timezone_revision": 2,
+                "local_date": "2026-09-28",
+                "timezone": "UTC",
+                "window_start_at": "2026-09-28T10:00:00Z",
+                "window_end_at": "2026-09-28T12:00:00Z"
+            })
+            .as_object()
+            .cloned();
+            assert_eq!(
+                TaskType::ReclusterNewsLenses.normalize_payload(payload),
+                Err(PayloadError::OutOfRange {
+                    task_type: TaskType::ReclusterNewsLenses,
+                    field: "user_id",
+                })
+            );
+        }
     }
 
     #[test]

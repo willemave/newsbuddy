@@ -20078,6 +20078,19 @@
                 "$ref": "#/components/schemas/ReadingExperience"
               }
             ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           }
         },
         "additionalProperties": false
@@ -20181,6 +20194,8 @@
           "has_completed_onboarding",
           "has_completed_new_user_tutorial",
           "reading_experience",
+          "timezone",
+          "timezone_revision",
           "created_at",
           "updated_at"
         ],
@@ -20230,6 +20245,19 @@
           },
           "reading_experience": {
             "$ref": "#/components/schemas/ReadingExperience"
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           },
           "created_at": {
             "type": "string",

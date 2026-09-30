@@ -8,12 +8,19 @@ pub use narration::{
     BriefingNarrationMetadata, BriefingNarrationStyle, InvalidNarrationMetadata, NarrationScope,
     NarrationTier, NewsNarrationWindow,
 };
+mod news_lens_reclustering;
 mod news_relations;
 mod ownership;
 
 pub use ids::{
     BriefingVersion, ChatSessionId, ContentId, InvalidDatabaseId, InvalidGeneration, LeaseToken,
     LlmTaskId, NewsItemId, StreamGeneration, UserId,
+};
+pub use news_lens_reclustering::{
+    NewsLensClusterIdentity, NewsLensLineage, NewsLensLineageKind, NewsLensReclusterCluster,
+    NewsLensReclusterDiagnostics, NewsLensReclusterExistingCluster, NewsLensReclusterStory,
+    NewsLensReclusteringConfig, NewsLensReclusteringError, NewsLensReclusteringInput,
+    NewsLensReclusteringPlan, plan_news_lens_reclustering,
 };
 pub use news_relations::{
     EmbeddingVector, EmbeddingVectorStore, InvalidEmbeddingBundle, NewsRelationDocument,

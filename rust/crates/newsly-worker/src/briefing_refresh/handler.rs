@@ -104,6 +104,16 @@ async fn execute_refresh(
         Err(error) => return plain_failure(error.to_string(), false),
     };
 
+    // Nightly maintenance has its own worker. Avoid starting paid composition
+    // while it holds this user's routing generation; nightly work reciprocally
+    // defers behind an already running normal refresh.
+    match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM processing_tasks WHERE owner_user_id::bigint=$1 AND task_type='recluster_news_lenses' AND status='processing' AND lease_expires_at>timezone('UTC',clock_timestamp()))")
+        .bind(user_id).fetch_one(&services.pool).await {
+        Ok(true) => return HandlerExecution::from_result(TaskResult::defer(30)),
+        Ok(false) => {},
+        Err(error) => return plain_failure(error.to_string(), true),
+    }
+
     let mut repository_config = services.config.repository.clone();
     let initial = match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM onboarding_first_edition_runs WHERE user_id::bigint=$1 AND status='active' AND NOT news_seed_settled)").bind(user_id).fetch_one(&services.pool).await {
         Ok(value) => value, Err(error) => return plain_failure(error.to_string(), true),

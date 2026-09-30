@@ -27,6 +27,7 @@ protocol AuthenticationServicing: AnyObject {
     @discardableResult
     func logout(matching event: CredentialTerminalEvent?) async -> CredentialSessionEndResult
     func getCurrentUser() async throws -> User
+    func updateCurrentUserTimezone(_ timezone: String, revision: Int) async throws -> User
 
     #if DEBUG
     @MainActor
@@ -163,6 +164,26 @@ final class AuthenticationService: NSObject {
             twitterUsername: twitterUsername,
             councilPersonas: councilPersonas?.map(\.apiInput),
             readingExperience: readingExperience
+        )
+        do {
+            let response: APIUserResponse = try await APIClient.shared.request(
+                APIEndpoints.authMe,
+                method: .patch,
+                body: JSONEncoder().encode(body),
+                authentication: .required,
+                decoding: .iso8601
+            )
+            return User(api: response)
+        } catch {
+            throw mapAuthenticationClientError(error)
+        }
+    }
+
+    /// Report the device's current IANA timezone using the last profile revision.
+    func updateCurrentUserTimezone(_ timezone: String, revision: Int) async throws -> User {
+        let body = APIUpdateUserProfileRequest(
+            timezone: timezone,
+            timezoneRevision: revision
         )
         do {
             let response: APIUserResponse = try await APIClient.shared.request(

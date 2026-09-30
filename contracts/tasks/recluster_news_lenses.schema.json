@@ -1,0 +1,52 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "local_date": {
+      "format": "date",
+      "type": "string"
+    },
+    "mode": {
+      "default": "shadow",
+      "enum": [
+        "shadow",
+        "publish"
+      ],
+      "type": "string"
+    },
+    "run_id": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "timezone": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "timezone_revision": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "user_id": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "window_end_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "window_start_at": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "required": [
+    "local_date",
+    "run_id",
+    "timezone",
+    "timezone_revision",
+    "user_id",
+    "window_end_at",
+    "window_start_at"
+  ],
+  "title": "ReclusterNewsLensesPayload",
+  "type": "object"
+}

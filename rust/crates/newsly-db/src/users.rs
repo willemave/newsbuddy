@@ -16,6 +16,8 @@ pub struct UserProfileProjection {
     pub has_completed_new_user_tutorial: bool,
     pub has_completed_onboarding: bool,
     pub reading_experience: String,
+    pub timezone: Option<String>,
+    pub timezone_revision: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub has_x_bookmark_sync: bool,
@@ -278,6 +280,8 @@ where
             app_user.has_completed_new_user_tutorial,
             app_user.has_completed_onboarding,
             app_user.reading_experience,
+            news_category_schedule.timezone,
+            COALESCE(news_category_schedule.timezone_revision, 0)::bigint AS timezone_revision,
             app_user.created_at,
             app_user.updated_at,
             EXISTS (
@@ -289,6 +293,8 @@ where
                   AND COALESCE(connection.access_token_encrypted, '') <> ''
             ) AS has_x_bookmark_sync
         FROM users AS app_user
+        LEFT JOIN user_news_category_schedule AS news_category_schedule
+          ON news_category_schedule.user_id = app_user.id
         WHERE app_user.id = $1
         "#,
     )

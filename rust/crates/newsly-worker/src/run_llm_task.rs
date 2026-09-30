@@ -12,8 +12,8 @@ use sqlx::{PgPool, Postgres, Transaction};
 use crate::learning_deck::{LearningDeckDispatchOutcome, LearningDeckTaskExecutor};
 use crate::share_actions::{ShareActionDispatchOutcome, ShareActionTaskExecutor};
 use crate::{
-    HandlerExecution, HandlerFinalizerFuture, HandlerFuture, LeaseHealth, TaskFinalizer,
-    TaskFinalizerResult, TaskHandler,
+    HandlerExecution, HandlerFinalizerFuture, HandlerFuture, HandlerInterruptionPolicy,
+    LeaseHealth, TaskFinalizer, TaskFinalizerResult, TaskHandler,
 };
 
 /// Sole Rust owner of the shared `run_llm_task` queue namespace.
@@ -118,6 +118,10 @@ impl RunLlmTaskHandler {
 impl TaskHandler for RunLlmTaskHandler {
     fn task_type(&self) -> TaskType {
         TaskType::RunLlmTask
+    }
+
+    fn interruption_policy(&self) -> HandlerInterruptionPolicy {
+        HandlerInterruptionPolicy::DrainBounded
     }
 
     fn execute(&self, plan: Arc<OwnedWorkPlan>, lease: LeaseHealth) -> HandlerFuture<'_> {

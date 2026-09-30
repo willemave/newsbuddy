@@ -9,7 +9,7 @@ use newsly_queue::{
 };
 use newsly_worker::briefing_refresh::{
     BriefingRefreshHandler, BriefingRefreshWorkerConfig, BriefingRefreshWorkerServices,
-    PrepareNewsLensHandler,
+    PrepareNewsLensHandler, ReclusterNewsLensesHandler,
 };
 use newsly_worker::process::{
     initialize_observability, notification_database_url, spawn_shutdown_signal,
@@ -18,21 +18,12 @@ use newsly_worker::queue_process_config::QueueWorkerProcessConfig;
 use newsly_worker::{HandlerRegistry, WorkerConfig, WorkerKernel};
 
 #[tokio::main]
-pub(crate) async fn run(preparation_only: bool) -> Result<()> {
-    let task_type = if preparation_only {
-        TaskType::PrepareNewsLens
-    } else {
-        TaskType::BriefingRefresh
-    };
-    let process_name = if preparation_only {
-        "newsly-news-lens-worker"
-    } else {
-        "newsly-briefing-refresh-worker"
-    };
-    let worker_id = if preparation_only {
-        "rust-news-lens"
-    } else {
-        "rust-briefing-refresh"
+pub(crate) async fn run(task_type: TaskType) -> Result<()> {
+    let (process_name, worker_id) = match task_type {
+        TaskType::PrepareNewsLens => ("newsly-news-lens-worker", "rust-news-lens"),
+        TaskType::ReclusterNewsLenses => ("newsly-news-recluster-worker", "rust-news-recluster"),
+        TaskType::BriefingRefresh => ("newsly-briefing-refresh-worker", "rust-briefing-refresh"),
+        _ => anyhow::bail!("unsupported Briefing worker task type"),
     };
     let process = QueueWorkerProcessConfig::from_env(process_name, worker_id)
         .context("invalid Newsly Rust Briefing-refresh worker process configuration")?;
@@ -58,10 +49,12 @@ pub(crate) async fn run(preparation_only: bool) -> Result<()> {
     ));
 
     let mut handlers = HandlerRegistry::new();
-    if preparation_only {
-        handlers.register(PrepareNewsLensHandler::new(services))?;
-    } else {
-        handlers.register(BriefingRefreshHandler::new(services))?;
+    match task_type {
+        TaskType::PrepareNewsLens => handlers.register(PrepareNewsLensHandler::new(services))?,
+        TaskType::ReclusterNewsLenses => {
+            handlers.register(ReclusterNewsLensesHandler::new(services)?)?;
+        }
+        _ => handlers.register(BriefingRefreshHandler::new(services))?,
     }
     let scope =
         ClaimRuntimeScope::namespaces(RuntimeOwner::Rust, [ResourceKey::new(task_type.as_str())?])?;

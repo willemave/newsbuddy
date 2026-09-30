@@ -10,3 +10,6 @@ pub use handler::{BriefingRefreshHandler, BriefingRefreshWorkerServices};
 
 mod warm_news;
 pub use warm_news::PrepareNewsLensHandler;
+
+mod reclustering;
+pub use reclustering::ReclusterNewsLensesHandler;

@@ -99,6 +99,123 @@ final class AuthenticationViewModelTests: XCTestCase {
         XCTAssertEqual(cache.clearCount, 0)
     }
 
+    func testTimezoneReportPublishesChangedZoneOnlyOnce() async {
+        let initial = makeUser(fullName: "Reader")
+        let updated = makeUser(
+            fullName: "Reader",
+            timezone: "America/Los_Angeles",
+            timezoneRevision: 1
+        )
+        let service = AuthenticationTestService(currentUserResult: .success(initial))
+        let viewModel = AuthenticationViewModel(
+            authService: service,
+            tokenStore: AuthenticationTestTokenStore(
+                accessToken: "access",
+                refreshToken: "refresh",
+                userID: initial.id
+            ),
+            userCache: AuthenticationTestUserCache(user: nil)
+        )
+        await waitUntil { viewModel.authState == .authenticated(initial) }
+        await waitUntil { service.timezoneUpdates.count == 1 }
+        await Task.yield()
+        service.resetTimezoneUpdates()
+        service.setCurrentUserResult(.success(updated))
+
+        viewModel.reportCurrentTimezoneIfNeeded("America/Los_Angeles")
+
+        await waitUntil { viewModel.authState == .authenticated(updated) }
+        XCTAssertEqual(service.timezoneUpdates.count, 1)
+        XCTAssertEqual(service.timezoneUpdates.first?.timezone, "America/Los_Angeles")
+        XCTAssertEqual(service.timezoneUpdates.first?.revision, 0)
+
+        viewModel.reportCurrentTimezoneIfNeeded("America/Los_Angeles")
+        try? await Task.sleep(nanoseconds: 5_000_000)
+        XCTAssertEqual(service.timezoneUpdates.count, 1)
+    }
+
+    func testTimezoneConflictRefreshesAndDefersRetryUntilNextActivation() async {
+        let initial = makeUser(
+            fullName: "Reader",
+            timezone: "America/Los_Angeles",
+            timezoneRevision: 2
+        )
+        let refreshed = makeUser(
+            fullName: "Reader",
+            timezone: "America/Los_Angeles",
+            timezoneRevision: 3
+        )
+        let updated = makeUser(
+            fullName: "Reader",
+            timezone: "Europe/Helsinki",
+            timezoneRevision: 4
+        )
+        let service = AuthenticationTestService(
+            currentUserResult: .success(initial)
+        )
+        let viewModel = AuthenticationViewModel(
+            authService: service,
+            tokenStore: AuthenticationTestTokenStore(
+                accessToken: "access",
+                refreshToken: "refresh",
+                userID: initial.id
+            ),
+            userCache: AuthenticationTestUserCache(user: nil)
+        )
+        await waitUntil { viewModel.authState == .authenticated(initial) }
+        await waitUntil { service.timezoneUpdates.count == 1 }
+        await Task.yield()
+        service.resetTimezoneUpdates()
+        service.setCurrentUserResult(.success(refreshed))
+        service.setTimezoneUpdateResults([
+            .failure(AuthError.serverError(statusCode: 409, message: "stale")),
+            .success(updated)
+        ])
+
+        viewModel.reportCurrentTimezoneIfNeeded("Europe/Helsinki")
+
+        await waitUntil { viewModel.authState == .authenticated(refreshed) }
+        XCTAssertEqual(service.timezoneUpdates.map(\.revision), [2])
+        await Task.yield()
+
+        viewModel.reportCurrentTimezoneIfNeeded("Europe/Helsinki")
+
+        await waitUntil { viewModel.authState == .authenticated(updated) }
+        XCTAssertEqual(service.timezoneUpdates.map(\.revision), [2, 3])
+    }
+
+    func testRejectedTimezoneIsNotRepeatedWhileIdentifierIsUnchanged() async {
+        let initial = makeUser(fullName: "Reader")
+        let service = AuthenticationTestService(
+            currentUserResult: .success(initial)
+        )
+        let viewModel = AuthenticationViewModel(
+            authService: service,
+            tokenStore: AuthenticationTestTokenStore(
+                accessToken: "access",
+                refreshToken: "refresh",
+                userID: initial.id
+            ),
+            userCache: AuthenticationTestUserCache(user: nil)
+        )
+        await waitUntil { viewModel.authState == .authenticated(initial) }
+        await waitUntil { service.timezoneUpdates.count == 1 }
+        await Task.yield()
+        service.resetTimezoneUpdates()
+        service.setTimezoneUpdateResults([
+            .failure(AuthError.serverError(statusCode: 422, message: "invalid timezone"))
+        ])
+
+        viewModel.reportCurrentTimezoneIfNeeded("Unsupported/Zone")
+        await waitUntil { service.timezoneUpdates.count == 1 }
+        await Task.yield()
+        viewModel.reportCurrentTimezoneIfNeeded("Unsupported/Zone")
+        try? await Task.sleep(nanoseconds: 5_000_000)
+
+        XCTAssertEqual(service.timezoneUpdates.count, 1)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     func testUnavailableCredentialStorageDoesNotClearOrValidateSession() {
         let tokenStore = AuthenticationTestTokenStore(
             accessToken: nil,
@@ -437,7 +554,12 @@ final class AuthenticationViewModelTests: XCTestCase {
         XCTFail("Condition was not satisfied before timeout")
     }
 
-    private func makeUser(fullName: String, id: Int = 42) -> User {
+    private func makeUser(
+        fullName: String,
+        id: Int = 42,
+        timezone: String? = nil,
+        timezoneRevision: Int = 0
+    ) -> User {
         User(
             id: id,
             appleId: "apple-\(id)",
@@ -449,6 +571,8 @@ final class AuthenticationViewModelTests: XCTestCase {
             isActive: true,
             hasCompletedOnboarding: true,
             hasCompletedNewUserTutorial: true,
+            timezone: timezone,
+            timezoneRevision: timezoneRevision,
             createdAt: Date(timeIntervalSince1970: 1_700_000_000),
             updatedAt: Date(timeIntervalSince1970: 1_700_000_001)
         )
@@ -481,9 +605,11 @@ final class AuthenticationTestService: AuthenticationServicing, @unchecked Senda
     private let logoutGate: AuthenticationTestGate?
     private let explicitLogoutResult: CredentialSessionEndResult
     private let terminalLogoutResult: CredentialSessionEndResult
+    private var timezoneUpdateResults: [Result<User, Error>]
     private var recordedLogoutCount = 0
     private var recordedCurrentUserCount = 0
     private var recordedSignInCount = 0
+    private var recordedTimezoneUpdates: [(timezone: String, revision: Int)] = []
     private var recordedLogoutEvents: [CredentialTerminalEvent?] = []
 
     init(
@@ -493,7 +619,8 @@ final class AuthenticationTestService: AuthenticationServicing, @unchecked Senda
         signInGate: AuthenticationTestGate? = nil,
         logoutGate: AuthenticationTestGate? = nil,
         explicitLogoutResult: CredentialSessionEndResult = .ended,
-        terminalLogoutResult: CredentialSessionEndResult = .ended
+        terminalLogoutResult: CredentialSessionEndResult = .ended,
+        timezoneUpdateResults: [Result<User, Error>] = []
     ) {
         self.currentUserResult = currentUserResult
         self.currentUserGate = currentUserGate
@@ -502,11 +629,15 @@ final class AuthenticationTestService: AuthenticationServicing, @unchecked Senda
         self.logoutGate = logoutGate
         self.explicitLogoutResult = explicitLogoutResult
         self.terminalLogoutResult = terminalLogoutResult
+        self.timezoneUpdateResults = timezoneUpdateResults
     }
 
     var logoutCount: Int { lock.withLock { recordedLogoutCount } }
     var currentUserCount: Int { lock.withLock { recordedCurrentUserCount } }
     var signInCount: Int { lock.withLock { recordedSignInCount } }
+    var timezoneUpdates: [(timezone: String, revision: Int)] {
+        lock.withLock { recordedTimezoneUpdates }
+    }
     var logoutEvents: [CredentialTerminalEvent?] {
         lock.withLock { recordedLogoutEvents }
     }
@@ -544,8 +675,27 @@ final class AuthenticationTestService: AuthenticationServicing, @unchecked Senda
         return try result.get()
     }
 
+    func updateCurrentUserTimezone(_ timezone: String, revision: Int) async throws -> User {
+        let result = lock.withLock {
+            recordedTimezoneUpdates.append((timezone, revision))
+            if timezoneUpdateResults.isEmpty {
+                return currentUserResult
+            }
+            return timezoneUpdateResults.removeFirst()
+        }
+        return try result.get()
+    }
+
     func setCurrentUserResult(_ result: Result<User, Error>) {
         lock.withLock { currentUserResult = result }
+    }
+
+    func setTimezoneUpdateResults(_ results: [Result<User, Error>]) {
+        lock.withLock { timezoneUpdateResults = results }
+    }
+
+    func resetTimezoneUpdates() {
+        lock.withLock { recordedTimezoneUpdates.removeAll() }
     }
 
     #if DEBUG

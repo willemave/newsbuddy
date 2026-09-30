@@ -160,6 +160,21 @@ pub const USER_OWNED_RELATIONS: &[UserOwnedRelation] = &[
         "DELETE FROM news_items WHERE owner_user_id::bigint = $1",
     ),
     owned_relation(
+        "user_news_category_schedule",
+        "user_id",
+        "DELETE FROM user_news_category_schedule WHERE user_id::bigint = $1",
+    ),
+    owned_relation(
+        "news_category_maintenance_runs",
+        "user_id",
+        "DELETE FROM news_category_maintenance_runs WHERE user_id::bigint = $1",
+    ),
+    owned_relation(
+        "news_category_candidates",
+        "user_id",
+        "DELETE FROM news_category_candidates WHERE user_id::bigint = $1",
+    ),
+    owned_relation(
         "onboarding_discovery_suggestions",
         "user_id",
         "DELETE FROM onboarding_discovery_suggestions WHERE user_id::bigint = $1",
@@ -207,7 +222,7 @@ mod tests {
             "/../newsly-db/baseline/catalog-inventory.json"
         )))
         .unwrap();
-        let discovered = inventory
+        let mut discovered = inventory
             .columns
             .into_iter()
             .filter(|column| matches!(column.name.as_str(), "user_id" | "owner_user_id"))
@@ -215,11 +230,44 @@ mod tests {
             .filter(|column| column.relation != "agent_data_files")
             .map(|column| (column.relation, column.name))
             .collect::<BTreeSet<_>>();
+        // The immutable baseline inventory predates these SQLx-owned tables.
+        discovered.extend([
+            ("task_sandbox_sessions".to_owned(), "user_id".to_owned()),
+            (
+                "user_news_category_schedule".to_owned(),
+                "user_id".to_owned(),
+            ),
+            (
+                "news_category_maintenance_runs".to_owned(),
+                "user_id".to_owned(),
+            ),
+            ("news_category_candidates".to_owned(), "user_id".to_owned()),
+        ]);
         let registered = USER_OWNED_RELATIONS
             .iter()
             .map(|relation| (relation.relation.to_owned(), relation.column.to_owned()))
             .collect::<BTreeSet<_>>();
         assert_eq!(USER_OWNED_RELATIONS.len(), registered.len());
         assert_eq!(registered, discovered);
+    }
+
+    #[test]
+    fn registry_covers_nightly_news_category_direct_ownership() {
+        let registered = USER_OWNED_RELATIONS
+            .iter()
+            .map(|relation| (relation.relation, relation.column))
+            .collect::<BTreeSet<_>>();
+        assert!(registered.contains(&("user_news_category_schedule", "user_id")));
+        assert!(registered.contains(&("news_category_maintenance_runs", "user_id")));
+        assert!(registered.contains(&("news_category_candidates", "user_id")));
+
+        // Naming attempts are owned transitively by their maintenance run, while the daily
+        // naming budget is global rather than account-owned.
+        assert!(!registered.iter().any(|(relation, _)| {
+            matches!(
+                *relation,
+                "news_category_naming_attempts" | "news_category_naming_budget"
+            )
+        }));
     }
 }

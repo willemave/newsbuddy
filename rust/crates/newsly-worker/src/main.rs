@@ -53,6 +53,7 @@ enum WorkerProcess {
     OnboardingDiscovery,
     BriefingRefresh,
     NewsLens,
+    NewsRecluster,
     Chat,
     RunLlmTask,
 }
@@ -90,6 +91,7 @@ impl WorkerProcess {
                 Ok(Self::OnboardingDiscovery)
             }
             "newsly-news-lens-worker" | "news_lens" => Ok(Self::NewsLens),
+            "newsly-news-recluster-worker" | "news_recluster" => Ok(Self::NewsRecluster),
             "newsly-briefing-refresh-worker" | "briefing_refresh" => Ok(Self::BriefingRefresh),
             "newsly-chat-worker" | "chat" => Ok(Self::Chat),
             "newsly-run-llm-task-worker" | "run_llm_task" => Ok(Self::RunLlmTask),
@@ -113,8 +115,13 @@ impl WorkerProcess {
             Self::FeedBackfill => feed_backfill_worker::main(),
             Self::FeedDiscovery => feed_discovery_worker::main(),
             Self::OnboardingDiscovery => onboarding_discovery_worker::main(),
-            Self::BriefingRefresh => briefing_refresh_worker::run(false),
-            Self::NewsLens => briefing_refresh_worker::run(true),
+            Self::BriefingRefresh => {
+                briefing_refresh_worker::run(newsly_queue::TaskType::BriefingRefresh)
+            }
+            Self::NewsLens => briefing_refresh_worker::run(newsly_queue::TaskType::PrepareNewsLens),
+            Self::NewsRecluster => {
+                briefing_refresh_worker::run(newsly_queue::TaskType::ReclusterNewsLenses)
+            }
             Self::Chat => chat_worker::main(),
             Self::RunLlmTask => run_llm_task_worker::main(),
         }
@@ -149,6 +156,7 @@ mod tests {
                 WorkerProcess::OnboardingDiscovery,
             ),
             ("newsly-news-lens-worker", WorkerProcess::NewsLens),
+            ("newsly-news-recluster-worker", WorkerProcess::NewsRecluster),
             (
                 "newsly-briefing-refresh-worker",
                 WorkerProcess::BriefingRefresh,

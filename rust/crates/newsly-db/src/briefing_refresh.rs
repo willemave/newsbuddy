@@ -528,6 +528,7 @@ pub enum BriefingRefreshRepositoryError {
 mod lens_assignment;
 pub(crate) mod preparation;
 mod publication;
+pub mod reclustering;
 pub(crate) mod sources;
 
 pub(crate) use sources::load_eligible_sources_for_keys;

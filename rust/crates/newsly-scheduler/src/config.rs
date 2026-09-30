@@ -3,6 +3,7 @@ use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
 
 use newsly_db::DatabaseConfig;
+use newsly_db::NewsCategoryMaintenanceMode;
 use secrecy::SecretString;
 use thiserror::Error;
 
@@ -19,6 +20,8 @@ pub struct SchedulerConfig {
     pub lens_embedding_model: String,
     pub x_sync_enabled: bool,
     pub feed_discovery_min_reads: i64,
+    pub news_category_maintenance_batch_size: i64,
+    pub news_category_maintenance_mode: NewsCategoryMaintenanceMode,
     pub queue_backpressure_max_pending_content: i64,
     pub queue_backpressure_max_pending_process_news_item: i64,
     pub orphan_lease_grace: Duration,
@@ -41,6 +44,14 @@ impl Debug for SchedulerConfig {
             .field("poll_interval", &self.poll_interval)
             .field("x_sync_enabled", &self.x_sync_enabled)
             .field("feed_discovery_min_reads", &self.feed_discovery_min_reads)
+            .field(
+                "news_category_maintenance_batch_size",
+                &self.news_category_maintenance_batch_size,
+            )
+            .field(
+                "news_category_maintenance_mode",
+                &self.news_category_maintenance_mode,
+            )
             .field(
                 "queue_backpressure_max_pending_content",
                 &self.queue_backpressure_max_pending_content,
@@ -132,6 +143,11 @@ impl SchedulerConfig {
             poll_interval,
             x_sync_enabled: parse_bool("X_BOOKMARK_SYNC_ENABLED", false)?,
             feed_discovery_min_reads: parse_i64("DISCOVERY_MIN_RECENT_READS", 0)?,
+            news_category_maintenance_batch_size: parse_i64(
+                "NEWS_CATEGORY_MAINTENANCE_BATCH_SIZE",
+                32,
+            )?,
+            news_category_maintenance_mode: parse_news_category_mode()?,
             queue_backpressure_max_pending_content: parse_i64(
                 "QUEUE_BACKPRESSURE_MAX_PENDING_CONTENT",
                 150,
@@ -160,6 +176,11 @@ impl SchedulerConfig {
     fn validate(&self) -> Result<(), SchedulerConfigError> {
         if self.feed_discovery_min_reads < 0 {
             return Err(SchedulerConfigError::Range("DISCOVERY_MIN_RECENT_READS"));
+        }
+        if !(1..=1_000).contains(&self.news_category_maintenance_batch_size) {
+            return Err(SchedulerConfigError::Range(
+                "NEWS_CATEGORY_MAINTENANCE_BATCH_SIZE",
+            ));
         }
         if self.queue_backpressure_max_pending_content < 1 {
             return Err(SchedulerConfigError::Range(
@@ -246,6 +267,18 @@ fn parse_log_format() -> Result<SchedulerLogFormat, SchedulerConfigError> {
         "pretty" | "text" => Ok(SchedulerLogFormat::Pretty),
         _ => Err(SchedulerConfigError::Invalid {
             name: "NEWSLY_RUST_LOG_FORMAT",
+            value,
+        }),
+    }
+}
+
+fn parse_news_category_mode() -> Result<NewsCategoryMaintenanceMode, SchedulerConfigError> {
+    let value = env::var("NEWS_CATEGORY_MAINTENANCE_MODE").unwrap_or_else(|_| "shadow".to_owned());
+    match value.trim().to_ascii_lowercase().as_str() {
+        "shadow" => Ok(NewsCategoryMaintenanceMode::Shadow),
+        "publish" => Ok(NewsCategoryMaintenanceMode::Publish),
+        _ => Err(SchedulerConfigError::Invalid {
+            name: "NEWS_CATEGORY_MAINTENANCE_MODE",
             value,
         }),
     }

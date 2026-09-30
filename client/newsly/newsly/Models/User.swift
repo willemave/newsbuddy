@@ -76,6 +76,8 @@ struct User: Codable, Identifiable, Equatable {
     let hasCompletedOnboarding: Bool
     let hasCompletedNewUserTutorial: Bool
     let readingExperience: ReadingExperience
+    let timezone: String?
+    let timezoneRevision: Int
     let createdAt: Date
     let updatedAt: Date
 
@@ -92,6 +94,8 @@ struct User: Codable, Identifiable, Equatable {
         case hasCompletedOnboarding = "has_completed_onboarding"
         case hasCompletedNewUserTutorial = "has_completed_new_user_tutorial"
         case readingExperience = "reading_experience"
+        case timezone
+        case timezoneRevision = "timezone_revision"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -109,6 +113,8 @@ struct User: Codable, Identifiable, Equatable {
         hasCompletedOnboarding: Bool,
         hasCompletedNewUserTutorial: Bool,
         readingExperience: ReadingExperience = .briefing,
+        timezone: String? = nil,
+        timezoneRevision: Int = 0,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -124,6 +130,8 @@ struct User: Codable, Identifiable, Equatable {
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.hasCompletedNewUserTutorial = hasCompletedNewUserTutorial
         self.readingExperience = readingExperience
+        self.timezone = timezone
+        self.timezoneRevision = timezoneRevision
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -142,6 +150,8 @@ struct User: Codable, Identifiable, Equatable {
             hasCompletedOnboarding: response.hasCompletedOnboarding,
             hasCompletedNewUserTutorial: response.hasCompletedNewUserTutorial,
             readingExperience: response.readingExperience,
+            timezone: response.timezone,
+            timezoneRevision: response.timezoneRevision ?? 0,
             createdAt: response.createdAt,
             updatedAt: response.updatedAt
         )
@@ -165,6 +175,8 @@ struct User: Codable, Identifiable, Equatable {
             ReadingExperience.self,
             forKey: .readingExperience
         ) ?? .briefing
+        timezone = try container.decodeIfPresent(String.self, forKey: .timezone)
+        timezoneRevision = try container.decodeIfPresent(Int.self, forKey: .timezoneRevision) ?? 0
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }

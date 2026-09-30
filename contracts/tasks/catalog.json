@@ -127,6 +127,15 @@
       "task_type": "prepare_news_lens"
     },
     {
+      "dedupe_by_content": false,
+      "handler": "newsly_worker::briefing_refresh::ReclusterNewsLensesHandler",
+      "payload_schema": "tasks/recluster_news_lenses.schema.json",
+      "payload_schema_sha256": "96229d0779df9b010bfb9fce811a26f9fddab41b64773d55c384c42ed2a3f9b8",
+      "queue": "llm",
+      "requires_owner": true,
+      "task_type": "recluster_news_lenses"
+    },
+    {
       "dedupe_by_content": true,
       "handler": "newsly_worker::content::ProcessContentHandler",
       "payload_schema": "tasks/process_content.schema.json",

@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use newsly_eval_driver::{
-    PrepareRelationsRequest, ScoreRelationsRequest, prepare_relations, score_relations,
+    PrepareRelationsRequest, ReplayNewsLensesRequest, ScoreRelationsRequest, prepare_relations,
+    replay_news_lenses, replay_production_news_lenses, score_relations,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -32,6 +33,18 @@ enum Command {
         #[arg(long, default_value = "-")]
         output: PathBuf,
     },
+    ReplayNewsLenses {
+        #[arg(long, default_value = "-")]
+        input: PathBuf,
+        #[arg(long, default_value = "-")]
+        output: PathBuf,
+    },
+    ReplayProductionNewsLenses {
+        #[arg(long, default_value = "-")]
+        input: PathBuf,
+        #[arg(long, default_value = "-")]
+        output: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -43,6 +56,14 @@ fn main() -> Result<()> {
         Command::ScoreRelations { input, output } => {
             let request = read_json::<ScoreRelationsRequest>(&input)?;
             write_json(&output, &score_relations(request)?)
+        }
+        Command::ReplayNewsLenses { input, output } => {
+            let request = read_json::<ReplayNewsLensesRequest>(&input)?;
+            write_json(&output, &replay_news_lenses(&request)?)
+        }
+        Command::ReplayProductionNewsLenses { input, output } => {
+            let request = read_json::<ReplayNewsLensesRequest>(&input)?;
+            write_json(&output, &replay_production_news_lenses(&request)?)
         }
     }
 }

@@ -514,8 +514,9 @@ pub(crate) enum AccountRepositoryError {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use sqlx::PgPool;
 
-    use super::remove_user_references;
+    use super::{delete_direct_rows, delete_indirect_rows, remove_user_references};
 
     #[test]
     fn shared_metadata_scrub_preserves_other_users() {
@@ -542,6 +543,94 @@ mod tests {
                     "share_and_chat_requests": [{"user_id": 8}]
                 }
             })
+        );
+    }
+
+    #[sqlx::test(migrations = "../newsly-db/migrations")]
+    async fn nightly_news_category_state_and_task_are_account_owned(pool: PgPool) {
+        let user_id: i64 = sqlx::query_scalar(
+            "INSERT INTO users(apple_id,email,is_admin,is_active) VALUES('deletion-nightly-news','deletion-nightly-news@example.com',false,false) RETURNING id::bigint",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let task_id: i64 = sqlx::query_scalar(
+            "INSERT INTO processing_tasks(task_type,queue_name,status,owner_user_id,executor_runtime,executor_version,executor_namespace) VALUES('recluster_news_lenses','llm','pending',$1,'rust',1,'recluster_news_lenses') RETURNING id::bigint",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_news_category_schedule(user_id,timezone,timezone_revision,next_due_at,next_local_date,next_window_start_at,next_window_end_at) VALUES($1,'UTC',1,'2026-09-28 03:00:00','2026-09-28','2026-09-28 02:30:00','2026-09-28 04:00:00')",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let run_id: i64 = sqlx::query_scalar(
+            "INSERT INTO news_category_maintenance_runs(user_id,local_date,timezone,timezone_revision,scheduled_at,window_start_at,window_end_at,task_id) VALUES($1,'2026-09-28','UTC',1,'2026-09-28 03:00:00','2026-09-28 02:30:00','2026-09-28 04:00:00',$2) RETURNING id",
+        )
+        .bind(user_id)
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO news_category_candidates(user_id,input_hash,candidate) VALUES($1,$2,'{}'::jsonb)",
+        )
+        .bind(user_id)
+        .bind("a".repeat(64))
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO news_category_naming_attempts(attempt_id,run_id,input_hash,outcome) VALUES('00000000-0000-0000-0000-000000000001',$1,$2,'failed')",
+        )
+        .bind(run_id)
+        .bind("b".repeat(64))
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO news_category_naming_budget(utc_date,reserved_tokens) VALUES('2026-09-28',100)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut transaction = pool.begin().await.unwrap();
+        delete_indirect_rows(&mut transaction, user_id)
+            .await
+            .unwrap();
+        delete_direct_rows(&mut transaction, user_id, -1)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+
+        let remaining: Vec<(String, i64)> = sqlx::query_as(
+            r"
+            SELECT 'user_news_category_schedule', count(*)::bigint FROM user_news_category_schedule
+            UNION ALL SELECT 'news_category_maintenance_runs', count(*)::bigint FROM news_category_maintenance_runs
+            UNION ALL SELECT 'news_category_candidates', count(*)::bigint FROM news_category_candidates
+            UNION ALL SELECT 'news_category_naming_attempts', count(*)::bigint FROM news_category_naming_attempts
+            UNION ALL SELECT 'processing_tasks', count(*)::bigint FROM processing_tasks
+            ",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        for (relation, count) in remaining {
+            assert_eq!(count, 0, "{relation} retained account-owned data");
+        }
+        let budget_rows: i64 =
+            sqlx::query_scalar("SELECT count(*)::bigint FROM news_category_naming_budget")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            budget_rows, 1,
+            "global naming budget must survive account deletion"
         );
     }
 }

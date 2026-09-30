@@ -428,7 +428,7 @@ pub(super) async fn retire_idle_lenses(
             updated_at = timezone('UTC', clock_timestamp())
         WHERE lens.user_id::bigint = $1 AND lens.status = 'active'
           AND lens.key NOT IN ('podcasts', 'articles')
-          AND lens.updated_at < timezone('UTC', clock_timestamp()) - ($2::text || ' days')::interval
+          AND (NOT lens.accepts_news OR lens.updated_at < timezone('UTC', clock_timestamp()) - ($2::text || ' days')::interval)
           AND NOT EXISTS (
               SELECT 1 FROM briefing_segments AS segment
               WHERE segment.lens_id = lens.id AND segment.status IN ('active', 'degraded')

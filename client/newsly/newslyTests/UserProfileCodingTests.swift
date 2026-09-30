@@ -85,6 +85,19 @@ final class UserProfileCodingTests: XCTestCase {
         XCTAssertEqual(json["reading_experience"] as? String, "briefing")
     }
 
+    func testUpdateUserProfileRequestEncodesTimezoneRevision() throws {
+        let request = APIUpdateUserProfileRequest(
+            timezone: "America/Los_Angeles",
+            timezoneRevision: 7
+        )
+
+        let data = try JSONEncoder().encode(request)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(json["timezone"] as? String, "America/Los_Angeles")
+        XCTAssertEqual(json["timezone_revision"] as? Int, 7)
+    }
+
     func testUserFallsBackToDefaultCouncilPersonasWhenMissingFromPayload() throws {
         let json = """
         {

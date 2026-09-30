@@ -6,6 +6,7 @@ pub enum SchedulerJob {
     IntegrationSync,
     QueueWatchdog,
     BriefingSweepReconcile,
+    NewsCategoryMaintenance,
     FeedDiscovery,
     TerminalTaskCleanup,
 }
@@ -17,6 +18,7 @@ impl SchedulerJob {
             Self::IntegrationSync => "integration_sync",
             Self::QueueWatchdog => "queue_watchdog",
             Self::BriefingSweepReconcile => "briefing_sweep_reconcile",
+            Self::NewsCategoryMaintenance => "news_category_maintenance",
             Self::FeedDiscovery => "feed_discovery",
             Self::TerminalTaskCleanup => "terminal_task_cleanup",
         }
@@ -26,7 +28,7 @@ impl SchedulerJob {
         let minute_of_hour = minute.minute();
         match self {
             Self::Scrape | Self::IntegrationSync => minute_of_hour.is_multiple_of(15),
-            Self::QueueWatchdog => minute_of_hour.is_multiple_of(5),
+            Self::QueueWatchdog | Self::NewsCategoryMaintenance => minute_of_hour.is_multiple_of(5),
             Self::BriefingSweepReconcile => minute_of_hour == 0,
             Self::FeedDiscovery => {
                 minute.weekday() == Weekday::Mon && minute.hour() == 3 && minute_of_hour == 0
@@ -53,11 +55,12 @@ impl SchedulerJob {
     }
 }
 
-pub(crate) const JOBS: [SchedulerJob; 6] = [
+pub(crate) const JOBS: [SchedulerJob; 7] = [
     SchedulerJob::Scrape,
     SchedulerJob::IntegrationSync,
     SchedulerJob::QueueWatchdog,
     SchedulerJob::BriefingSweepReconcile,
+    SchedulerJob::NewsCategoryMaintenance,
     SchedulerJob::FeedDiscovery,
     SchedulerJob::TerminalTaskCleanup,
 ];
@@ -88,6 +91,7 @@ mod tests {
         assert!(due.contains(&SchedulerJob::QueueWatchdog));
         assert!(due.contains(&SchedulerJob::BriefingSweepReconcile));
         assert!(due.contains(&SchedulerJob::FeedDiscovery));
+        assert!(due.contains(&SchedulerJob::NewsCategoryMaintenance));
 
         let cleanup = Utc.with_ymd_and_hms(2026, 8, 31, 4, 45, 59).unwrap();
         let due = due_jobs(minute_bucket(cleanup));

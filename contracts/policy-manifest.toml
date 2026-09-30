@@ -1395,3 +1395,12 @@ handler = "newsly_worker::briefing_refresh::PrepareNewsLensHandler"
 current_owner = "rust"
 database_writer = "rust"
 e2b_namespace = "none"
+
+[[tasks]]
+task_type = "recluster_news_lenses"
+queue = "llm"
+payload_schema = "tasks/recluster_news_lenses.schema.json"
+handler = "newsly_worker::briefing_refresh::ReclusterNewsLensesHandler"
+current_owner = "rust"
+database_writer = "rust"
+e2b_namespace = "none"

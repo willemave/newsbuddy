@@ -415,6 +415,36 @@ Briefing uses durable source/pending/publication state and versioned client
 observation. Publication is atomic; partial provider success cannot expose a
 half-assembled edition.
 
+Nightly news-category maintenance is a separate `recluster_news_lenses` task
+and worker process. The authenticated profile owns a revisioned IANA timezone;
+iOS reports it after validated authentication and real foreground transitions.
+The scheduler scans indexed UTC due times, creates one run per user/local date,
+and targets 03:00 local time with deterministic jitter inside a 03:00–05:00 window.
+Historical accounts without a reported timezone remain unscheduled.
+
+The domain fitter consumes at most 1,500 matching cached vectors from 14 days,
+weights distinct events, preserves supported identities, and keeps weak matches
+outside semantic centroids. Unsupported warm centers can yield fitting capacity
+to uncovered topics. One candidate partition owns centers, membership, identity
+and consecutive-night support; published routing profiles bootstrap the first
+partition and do not displace unpublished candidate history on later nights.
+A dedicated Luna request reviews at most ten categories with up to 25 diverse
+representative stories each. Token reservations, attempt observations, and an
+exact naming-input cache survive publication retries. Shadow mode is the rollout
+default (`NEWS_CATEGORY_MAINTENANCE_MODE`); publish mode changes routing only
+through the exact queue lease, unchanged snapshot, timezone revision, and night
+window fences. Run startup validates the caller's original claim rather than
+reading a replacement claim as execution authority. Cancellation permits an
+in-flight naming call's append-only audit to finish but stops new reservations
+and retries. A successor lease may use the remaining reserved attempt while an
+old call drains; the two-attempt cap and independent usage audit still apply,
+and this does not grant the old execution authority to publish. Pending
+assignments publish through one bound relational update.
+`accepts_news` separates future routing from existing readable
+segments; empty draining lenses retire, while composed Markdown, source coverage,
+and narration remain intact. Normal refresh and maintenance defer around each
+other's active external-work phase. This work never owns new story embeddings.
+
 Discussion collection and summary refresh have independent cadences and durable
 claim fences. The first usable summary is immediate; later changes coalesce by
 materiality and age.

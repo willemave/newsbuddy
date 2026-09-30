@@ -97,6 +97,10 @@ impl SchedulerRepository {
             SchedulerJob::BriefingSweepReconcile => {
                 self.enqueue_briefing_sweeps(&mut transaction).await?
             }
+            SchedulerJob::NewsCategoryMaintenance => {
+                self.enqueue_news_category_maintenance(&mut transaction, scheduled_for, config)
+                    .await?
+            }
             SchedulerJob::FeedDiscovery => {
                 self.enqueue_feed_discovery(&mut transaction, config)
                     .await?
@@ -132,6 +136,10 @@ pub enum SchedulerRepositoryError {
     Sqlx(#[from] sqlx::Error),
     #[error("scheduler queue enqueue failed")]
     Queue(#[from] newsly_queue::QueueError),
+    #[error("news-category schedule operation failed")]
+    NewsCategorySchedule(#[from] newsly_db::NewsCategoryScheduleError),
+    #[error("news-category run {0} could not attach its durable queue task")]
+    RunTaskAttach(i64),
     #[error("{0:?} must use the scheduler maintenance execution path")]
     WrongExecutionMode(SchedulerJob),
     #[error("scheduler duration exceeds PostgreSQL interval bounds")]

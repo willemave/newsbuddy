@@ -34,11 +34,15 @@ pub use audio_episode::{
     AudioEpisodeSpeaker, AudioEpisodeTurn, GeneratedAudioEpisodeScript, SynthesizedDialogue,
 };
 pub use briefing_composition::{
+    BRIEFING_LENS_NAMING_MAX_CATEGORIES, BRIEFING_LENS_NAMING_MAX_INPUT_BYTES,
+    BRIEFING_LENS_NAMING_MAX_OUTPUT_TOKENS, BRIEFING_LENS_NAMING_MAX_STORIES_PER_CATEGORY,
     BriefingCompositionBlock, BriefingCompositionGateway, BriefingCompositionGatewayError,
     BriefingCompositionLayout, BriefingCompositionRequest, BriefingCompositionSource,
     BriefingEmbeddingBatch, BriefingFigureAlignment, BriefingFigurePlacement, BriefingLensName,
-    BriefingPassageWeight, BriefingSuggestedQuote, GeneratedBriefingLayout,
-    GeneratedBriefingLensName,
+    BriefingLensNamingBatch, BriefingLensNamingBatchRequest, BriefingLensNamingCategory,
+    BriefingLensNamingResult, BriefingLensNamingStory, BriefingPassageWeight,
+    BriefingSuggestedQuote, GeneratedBriefingLayout, GeneratedBriefingLensName,
+    GeneratedBriefingLensNamingBatch,
 };
 pub use briefing_dig::{
     BriefingDigGateway, BriefingDigGatewayError, BriefingDigSummary, BriefingWebSearchOutcome,

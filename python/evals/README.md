@@ -46,6 +46,39 @@ they never persist application state.
 
 The package is intentionally absent from production images.
 
+## Cached-vector news category replay
+
+`prepare_news_lens_replay.py` accepts a bounded public-news export from the Rust
+operator, checks the encoder-v1 input hash and cached vector dimensions, and
+creates versioned inputs for the Rust `replay-news-lenses` command. Python never
+connects to the source database. The preparation script defines the dates and
+cohorts of the September 2026 experiment; adjust those explicitly for a new study.
+
+```bash
+PYTHONPATH=python/evals/src uv run --project python/evals python \
+  python/evals/scripts/prepare_news_lens_replay.py \
+  --operator-export test-results/news-lens-replay-20260927/production-sample.operator-json \
+  --output-dir test-results/news-lens-replay-20260927 \
+  --cohort all --cadence weekly
+cargo run --release --manifest-path rust/Cargo.toml -p newsly-eval-driver -- \
+  replay-news-lenses \
+  --input test-results/news-lens-replay-20260927/all-weekly.input.json \
+  --output test-results/news-lens-replay-20260927/all-weekly.output.json
+uv run --project python/evals python python/evals/scripts/summarize_news_lens_replay.py \
+  --directory test-results/news-lens-replay-20260927
+```
+
+Repeat with `--cohort technology` or `general`, and `--cadence nightly
+--compact-matrix`. The Rust driver owns the experimental clustering algorithms;
+these are geometric counterfactuals, not production routing policy. In particular,
+`incremental_surrogate` is not an exact production baseline. Current backfilled
+vectors do not reconstruct historical deployed state. Raw samples and outputs
+stay under ignored `test-results/`; check in the aggregate report and method only.
+
+The workflow makes no embedding, category-naming, or model-judge calls. See the
+[September replay report](../../docs/initiatives/2026-09-27-news-category-replay-results.md)
+for the sample provenance, limitations, and results.
+
 Run the isolated static and behavioral checks from the repository root:
 
 ```bash

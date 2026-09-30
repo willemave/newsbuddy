@@ -69,6 +69,9 @@ pub struct UserResponse {
     pub has_completed_new_user_tutorial: bool,
     #[serde(default = "default_reading_experience")]
     pub reading_experience: ReadingExperience,
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub timezone_revision: Option<i64>,
     #[schemars(with = "String")]
     #[schema(value_type = String, format = DateTime)]
     pub created_at: DateTime<Utc>,
@@ -88,4 +91,41 @@ pub struct UpdateUserProfileRequest {
     pub twitter_username: Option<String>,
     pub council_personas: Option<Vec<CouncilPersonaInput>>,
     pub reading_experience: Option<ReadingExperience>,
+    #[serde(default, deserialize_with = "deserialize_optional_timezone")]
+    pub timezone: Option<String>,
+    pub timezone_revision: Option<i64>,
+}
+
+fn deserialize_optional_timezone<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer).map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UpdateUserProfileRequest;
+
+    #[test]
+    fn omitted_timezone_preserves_existing_value() {
+        let request: UpdateUserProfileRequest = serde_json::from_str("{}").expect("valid patch");
+        assert_eq!(request.timezone, None);
+    }
+
+    #[test]
+    fn timezone_accepts_a_string() {
+        let request: UpdateUserProfileRequest =
+            serde_json::from_str(r#"{"timezone":"America/Los_Angeles","timezone_revision":3}"#)
+                .expect("valid timezone patch");
+        assert_eq!(request.timezone.as_deref(), Some("America/Los_Angeles"));
+        assert_eq!(request.timezone_revision, Some(3));
+    }
+
+    #[test]
+    fn explicit_null_timezone_is_rejected() {
+        let error = serde_json::from_str::<UpdateUserProfileRequest>(r#"{"timezone":null}"#)
+            .expect_err("null must not behave like omission");
+        assert!(error.to_string().contains("expected a string"));
+    }
 }

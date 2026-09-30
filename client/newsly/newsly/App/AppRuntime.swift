@@ -19,6 +19,8 @@ final class AppRuntime {
 
     @ObservationIgnored
     private let makeAuthenticatedSession: @MainActor (User) -> AuthenticatedSession
+    @ObservationIgnored
+    private var handledTimezoneActivationGeneration: UInt64?
 
     init(dependencies: Dependencies) {
         self.lifecycle = dependencies.lifecycle
@@ -53,6 +55,11 @@ final class AppRuntime {
             authenticationController.resumeRestorationIfNeeded(
                 for: lifecycle.activation
             )
+            if let generation = lifecycle.activation?.generation,
+               generation != handledTimezoneActivationGeneration {
+                handledTimezoneActivationGeneration = generation
+                authenticationController.reportCurrentTimezoneIfNeeded()
+            }
         }
         authenticatedSession?.synchronize(with: lifecycle)
     }

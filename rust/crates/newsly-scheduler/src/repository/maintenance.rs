@@ -56,6 +56,7 @@ impl SchedulerRepository {
                     ('run_llm_task', 'llm'),
                     ('briefing_refresh', 'llm'),
                     ('prepare_news_lens', 'llm'),
+                    ('recluster_news_lenses', 'llm'),
                     ('delete_user_account', 'backfill')
             ),
             repaired AS (

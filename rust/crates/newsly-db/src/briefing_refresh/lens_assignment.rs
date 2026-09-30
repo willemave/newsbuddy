@@ -45,7 +45,7 @@ pub async fn apply_briefing_lens_assignment(
                 $7, $8, timezone('UTC', clock_timestamp()), timezone('UTC', clock_timestamp())
             )
             ON CONFLICT (user_id, key) DO UPDATE
-            SET status = 'active', retired_at = NULL,
+            SET status = 'active', accepts_news = true, retired_at = NULL,
                 updated_at = timezone('UTC', clock_timestamp())
             "#,
         )
@@ -67,7 +67,7 @@ pub async fn apply_briefing_lens_assignment(
             SET centroid = $4, centroid_weight = $5, centroid_model = $6,
                 updated_at = timezone('UTC', clock_timestamp())
             WHERE user_id::bigint = $1 AND id::bigint = $2 AND key = $3
-              AND tier = 'news' AND status = 'active'
+              AND tier = 'news' AND status = 'active' AND accepts_news
             "#,
         )
         .bind(seed.user_id)
@@ -166,8 +166,15 @@ pub(super) fn validate_lens_assignment_plan(
         || seed
             .lens_assignment
             .active_news_lens_keys
-            .len()
-            .saturating_add(plan.new_lenses.len())
+            .iter()
+            .filter(|key| *key != "misc")
+            .count()
+            .saturating_add(
+                plan.new_lenses
+                    .iter()
+                    .filter(|lens| lens.key != "misc")
+                    .count(),
+            )
             > config.max_news_lenses
     {
         return Err(BriefingRefreshRepositoryError::InvalidLensAssignmentPlan(
@@ -330,7 +337,7 @@ pub(super) async fn lens_snapshot_is_current(
     .fetch_all(&mut **transaction)
     .await?;
     let active_keys = sqlx::query_scalar::<_, String>(
-        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' ORDER BY position, id FOR SHARE",
+        "SELECT key FROM briefing_lenses WHERE user_id::bigint = $1 AND tier = 'news' AND status = 'active' AND accepts_news ORDER BY position, id FOR SHARE",
     )
     .bind(user_id)
     .fetch_all(&mut **transaction)

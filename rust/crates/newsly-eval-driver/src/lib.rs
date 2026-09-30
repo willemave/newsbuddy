@@ -13,6 +13,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+mod production_replay;
+mod replay;
+
+pub use production_replay::{
+    ProductionNewsLensReplayError, ProductionNewsLensReplayResponse, replay_production_news_lenses,
+};
+pub use replay::{ReplayNewsLensesRequest, ReplayNewsLensesResponse, replay_news_lenses};
+
 pub const EVAL_PROTOCOL_VERSION: u16 = 1;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
