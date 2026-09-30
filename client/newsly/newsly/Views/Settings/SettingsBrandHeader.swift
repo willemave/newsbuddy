@@ -14,6 +14,11 @@ struct SettingsBrandHeader: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 96, height: 96)
                 .clipShape(RoundedRectangle(cornerRadius: 21.5, style: .continuous))
+                // The dark icon tile nearly matches the sheet surface; a hairline keeps its edge legible.
+                .overlay {
+                    RoundedRectangle(cornerRadius: 21.5, style: .continuous)
+                        .strokeBorder(Color.borderSubtle, lineWidth: 1)
+                }
                 .accessibilityLabel("Newsbuddy app icon")
 
             VStack(spacing: 2) {

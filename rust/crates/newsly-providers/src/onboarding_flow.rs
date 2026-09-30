@@ -10,7 +10,7 @@ use newsly_agent_runtime::{
 };
 use reqwest::Url;
 use rig_core::schemars::{JsonSchema, schema_for};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
@@ -18,15 +18,14 @@ use crate::{OpenRouterPrivacyPolicy, ProviderCredentials, RigAgentEngine};
 
 #[path = "onboarding_agent_support.rs"]
 mod agent_support;
-#[path = "onboarding_exa.rs"]
 mod exa;
 #[path = "onboarding_lane_sources.rs"]
 mod lane_sources;
 #[path = "onboarding_model.rs"]
 mod model_config;
 use agent_support::{NoEvents, NoTools};
+pub use exa::OnboardingExaUsage;
 use exa::search_exa;
-pub use exa::{OnboardingDiscoveryOutcome, OnboardingExaUsage, OnboardingProfileOutcome};
 use model_config::{AUDIO_PLAN_SYSTEM_PROMPT, ONBOARDING_MODEL, onboarding_provider_parameters};
 const DEFAULT_EXA_API_BASE: &str = "https://api.exa.ai";
 const EXA_MAX_CONCURRENCY: usize = 8;
@@ -36,17 +35,6 @@ const AUDIO_PLAN_TIMEOUT: Duration = Duration::from_secs(8);
 const FAST_DISCOVER_TIMEOUT: Duration = Duration::from_secs(12);
 const DISCOVERY_PROMPT_MAX_RESULTS: usize = 200;
 const DISCOVERY_SNIPPET_CHARS: usize = 280;
-const EXCLUDED_DOMAINS: [&str; 8] = [
-    "facebook.com",
-    "linkedin.com",
-    "twitter.com",
-    "x.com",
-    "instagram.com",
-    "tiktok.com",
-    "pinterest.com",
-    "reddit.com",
-];
-
 const PROFILE_SYSTEM_PROMPT: &str = "You are building a short onboarding profile for a user. Use the provided interests and web snippets to infer a concise profile summary and 3-6 topical interests. Do not invent interests that contradict the user-provided topics. Return structured output only.";
 const VOICE_SYSTEM_PROMPT: &str = "You extract onboarding fields from a transcript. Return a first name if explicitly stated and a concise list of interest topics. Do not guess missing information. Return structured output only.";
 const FAST_DISCOVER_SYSTEM_PROMPT: &str = "You are selecting high-quality sources for a new user. Use only the profile summary, topics, and search snippets to suggest Substack/Atom feeds, podcast RSS feeds, and relevant subreddits. Every suggestion must be grounded in web_results; do not use static defaults, curated backups, or general prior knowledge as source candidates. Podcast suggestions must come from web_results only. If web_results contain no suitable sources for a category, return zero suggestions for that category. Suggest up to 5 sources per category, spread across the profile topics so that every topic is represented in each category where web_results support it. Every suggestion must include a concise, specific rationale sentence. Prefer sources with clear RSS URLs when possible. Podcast directory entries and results marked RSS feed give the show's real feed; use that URL as feed_url. Reddit community results are real public communities; prefer active, substantive discussion communities over meme or joke subreddits, and use the name without the r/ prefix as subreddit. For feed-like sources, always provide a best-effort feed_url when available. If uncertain, include candidate_feed_url and set is_likely_feed plus feed_confidence (0-1). For reddit entries, include subreddit. Return structured output only.";
@@ -56,6 +44,18 @@ pub struct OnboardingProfile {
     pub profile_summary: String,
     pub inferred_topics: Vec<String>,
     pub candidate_sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OnboardingProfileOutcome {
+    pub profile: OnboardingProfile,
+    pub exa_usage: OnboardingExaUsage,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OnboardingDiscoveryOutcome {
+    pub seeds: OnboardingDiscoverySeeds,
+    pub exa_usage: OnboardingExaUsage,
 }
 
 #[derive(Debug, Clone, PartialEq)]

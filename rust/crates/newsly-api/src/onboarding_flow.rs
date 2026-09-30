@@ -40,6 +40,7 @@ use crate::write_support::{
     bad_request, decode_json, internal_error, not_found, require_operation, verify_stamp,
 };
 use crate::{AppState, request_id_from_headers};
+mod exa_usage;
 use exa_usage::record_onboarding_exa_usage;
 
 const PROFILE_OPERATION_ID: &str = "buildOnboardingProfile";
@@ -1324,6 +1325,5 @@ fn queue_internal_error(error: QueueError, request_id: &str) -> ApiError {
     internal_error(error, request_id)
 }
 
-mod exa_usage;
 #[cfg(test)]
 mod tests;

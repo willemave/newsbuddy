@@ -36,7 +36,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Remove unsupported warm centers before existing farthest seeding, preserving the Lloyd refinement loop; persist one schema-v2 candidate partition; compare original claim stamps at run startup; use explicit handler interruption policy and cancellation checkpoints; update fitted pending rows with one bound relational statement. Queue normalization now rejects nonpositive user IDs.
 - **Validation:** 163 focused domain/DB/schedule/worker/queue tests pass, including reclaimed-start rejection, deadline/audit behavior, full-cap novelty and two-night support. Warning-denied affected-package Clippy, formatting, architecture and public-contract guards pass. A 450-story/three-checkpoint cached production replay is byte-identical to the baseline, with no missing coverage or provider calls. The first iterative reseeding attempt regressed mixed coverage and was replaced by the simpler pre-fit warm filter before commit.
 - **Remaining:** Preserve unrelated main-checkout changes, validate the clean integrated SHA with the release gate, merge to main and push. Independent Fable review remains unavailable.
-- **Commits:** Uncommitted.
+- **Commits:** Feature and fixes committed as `0fe99134`; current `origin/main` integration preserves the sandbox ownership inventory and both engineering-log histories.
 
 ### 2026-09-29 — `detached 776317d2` — Nightly category cleanup
 
@@ -69,6 +69,16 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Remaining:** Production planner/scheduler implementation, supported-cluster ablation, faithful routing baseline and per-user shadow trial are future work. See `docs/initiatives/2026-09-27-nightly-news-category-reclustering-plan.md` and companion replay report. No commit, push or deployment.
 - **Naming follow-up:** User selected 25 representative stories per category. Updated the proposed nightly Luna review to include all active routing categories (up to 10, at most 250 examples), retain accurate names and permit any supported rename. Removed the two-name cap; retained one batch plus one retry and token limits. Documentation-only; no naming calls or production changes.
 
+### 2026-09-27 — `main` — Raise sandbox agent tool-call ceiling
+
+- **Status:** Complete locally.
+- **Scope:** Shared sandbox agent configuration and Learning Deck generation policy.
+- **Decisions:** Raised the default from 32 to 1,000 calls and the configurable maximum from 200 to 10,000. The execution deadline remains the routine bound; the tool-call ceiling guards against runaway loops.
+- **Changes:** Updated the shared default and the Knowledge and Learning law.
+- **Validation:** `cargo fmt --all --check`, the focused Learning Deck limits test, warning-denied worker Clippy (SQLx offline), and `git diff --check` passed.
+- **Remaining:** Deploy only with a separately authorized release; the production worker still uses its current image.
+- **Commits:** `54c0803b`.
+
 ### 2026-09-27 — `main` — Settings header app icon
 
 - **Status:** Complete locally.
@@ -76,7 +86,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Decisions:** `AppMark` was a 64pt export shown at 96pt, which made it blurry, and it no longer matched the current icon. Regenerated it at 96pt (1x/2x/3x) from the light/dark `AppIcon` masters. The now-playing artwork also uses this set. Added a `borderSubtle` hairline because the dark icon tile blends into the sheet surface.
 - **Validation:** Simulator build succeeded. Not visually verified on device.
 - **Remaining:** None.
-- **Commits:** Uncommitted.
+- **Commits:** `fe9cbaf6`.
 
 ### 2026-09-27 — `main` — Reprocess unavailable Knowledge saves
 
@@ -86,7 +96,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** The status sheet now uses the mini-sheet header and option rows at a fitted height. It shows the item title, a status-specific message, Reprocess (unavailable/stalled) or Check progress (preparing), Open original, and Remove, with an inline error when reprocess fails. Law K18 added.
 - **Validation:** Warning-denied Clippy for newsly-api; newsly-db lib Clippy clean (all-targets Clippy fails only on pre-existing vendor-cost test code in `admin.rs`). Four SQLx tests for reset/not-saved/ready/active-task passed; newsly-api tests passed; public contracts regenerated and checked. iOS ContentList/KnowledgeTimeline/ContentDetail unit tests passed, including the new reprocess reload test.
 - **Remaining:** Sheet not visually verified on simulator: the local API needs a restart onto this build and a failed saved item. Deploy only with a separately authorized release.
-- **Commits:** Uncommitted.
+- **Commits:** `7aee57ce`.
 
 ### 2026-09-27 — `main` — Vendor spend accounting
 
@@ -96,7 +106,7 @@ Use this append-only log to preserve implementation context across sessions and 
 - **Changes:** Added dated token rates, cost basis, E2B lifecycle ledger/reconciliation, observed Exa usage across API and worker paths, measured-duration transcription and model-aware ElevenLabs estimates. The CLI and admin views expose priced subtotals, estimate portions, and unpriced record counts. `docs/operations/vendor-costs.md` records rates and accounting limits.
 - **Validation:** Production baseline inspected read-only; published rates and cross-package design independently reviewed. Formatting and diff checks passed; warning-denied Clippy passed for affected DB, E2B, provider, worker, API, admin, and account-deletion crates. Focused SQLx tests for pricing, admin aggregation, and E2B lifecycle passed; provider, E2B, API, admin, and discovery tests passed. No paid live provider call was made.
 - **Remaining:** Deploy only after a separately authorized release. Reconcile account invoices for base plans and infrastructure, ambiguous E2B creation/account deletion races, provider requests lost during DB outages, and partial failed multichunk transcriptions; these cannot be asserted as exact spend from application rows.
-- **Commits:** Uncommitted.
+- **Commits:** `776317d2`, `e14dba98` (parallel vendor-spend implementations merged).
 
 ### 2026-09-26 — detached `83f93acb` — Disposable E2B template deck canary
 

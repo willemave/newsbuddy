@@ -129,7 +129,7 @@ impl ShareActionAgentConfig {
             1,
             u64::from(MAX_REQUEST_LIMIT),
         )?;
-        let tool_call_limit = parse_bounded("LLM_TASK_SANDBOX_TOOL_CALL_LIMIT", 32, 1, 200)?;
+        let tool_call_limit = parse_bounded("LLM_TASK_SANDBOX_TOOL_CALL_LIMIT", 1_000, 1, 10_000)?;
         let max_output_chars =
             parse_bounded("LLM_TASK_SANDBOX_MAX_OUTPUT_CHARS", 20_000, 1_000, 200_000)?;
         let template_id = env::var("NEWSLY_TASK_SANDBOX_TEMPLATE_ID")
