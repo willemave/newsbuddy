@@ -611,7 +611,7 @@ impl BriefingCompositionGateway {
         &self,
         request: StructuredRunRequest<'_>,
     ) -> Result<AgentOutcome, BriefingCompositionGatewayError> {
-        self.run_structured_with_model(request, &self.model_spec)
+        self.run_structured_with_model(request, &self.model_spec, None)
             .await
     }
 
@@ -619,6 +619,7 @@ impl BriefingCompositionGateway {
         &self,
         request: StructuredRunRequest<'_>,
         model_spec: &str,
+        forwarded_events: Option<Arc<dyn AgentEventSink>>,
     ) -> Result<AgentOutcome, BriefingCompositionGatewayError> {
         let StructuredRunRequest {
             feature,
@@ -629,7 +630,7 @@ impl BriefingCompositionGateway {
             output_tokens,
             validation_retries,
         } = request;
-        let events = Arc::new(ObservedUsage::default());
+        let events = Arc::new(ObservedUsage::new(forwarded_events));
         self.engine
             .run(
                 AgentRequest {
@@ -664,7 +665,7 @@ impl BriefingCompositionGateway {
             .await
             .map_err(|source| BriefingCompositionGatewayError::ObservedAgent {
                 source,
-                usage: events.0.lock().ok().and_then(|usage| usage.clone()),
+                usage: events.usage.lock().ok().and_then(|usage| usage.clone()),
             })
     }
 }
@@ -766,19 +767,34 @@ impl ToolExecutor for NoTools {
     }
 }
 
-#[derive(Debug, Default)]
-struct ObservedUsage(Mutex<Option<ProviderUsage>>);
+#[derive(Debug)]
+struct ObservedUsage {
+    usage: Mutex<Option<ProviderUsage>>,
+    forwarded: Option<Arc<dyn AgentEventSink>>,
+}
+
+impl ObservedUsage {
+    fn new(forwarded: Option<Arc<dyn AgentEventSink>>) -> Self {
+        Self {
+            usage: Mutex::new(None),
+            forwarded,
+        }
+    }
+}
 
 impl AgentEventSink for ObservedUsage {
     fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError> {
-        if let AgentEvent::Usage { usage } = event {
+        if let AgentEvent::Usage { observation } = &event {
             let mut observed = self
-                .0
+                .usage
                 .lock()
                 .map_err(|_| AgentRuntimeError::Tool("usage observation lock failed".to_owned()))?;
             observed
                 .get_or_insert_with(ProviderUsage::default)
-                .add_assign(&usage);
+                .add_assign(&observation.usage);
+        }
+        if let Some(forwarded) = &self.forwarded {
+            forwarded.publish(event)?;
         }
         Ok(())
     }

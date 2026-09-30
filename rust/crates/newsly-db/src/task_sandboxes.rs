@@ -4,11 +4,6 @@ use sqlx::PgPool;
 use thiserror::Error;
 use uuid::Uuid;
 
-const E2B_CPU_COST_PER_VCPU_SECOND_USD: f64 = 0.000_014;
-const E2B_MEMORY_COST_PER_GIB_SECOND_USD: f64 = 0.000_004_5;
-const E2B_PRICING_VERSION: &str = "e2b-public-2026-09-27";
-const E2B_COST_BASIS: &str = "public_list_estimate";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedTaskSandbox {
     pub session_id: Option<Uuid>,
@@ -47,6 +42,7 @@ pub struct TaskSandboxProviderInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskSandboxEnd {
     Confirmed { observed_at: DateTime<Utc> },
+    NotDelivered { observed_at: DateTime<Utc> },
     Missing { observed_at: DateTime<Utc> },
     TimeoutBound { observed_at: DateTime<Utc> },
 }
@@ -54,7 +50,8 @@ pub enum TaskSandboxEnd {
 impl TaskSandboxEnd {
     fn observed_at(self) -> DateTime<Utc> {
         match self {
-            Self::Confirmed { observed_at }
+            Self::NotDelivered { observed_at }
+            | Self::Confirmed { observed_at }
             | Self::Missing { observed_at }
             | Self::TimeoutBound { observed_at } => observed_at,
         }
@@ -63,6 +60,7 @@ impl TaskSandboxEnd {
     const fn basis(self) -> &'static str {
         match self {
             Self::Confirmed { .. } => "kill_confirmed",
+            Self::NotDelivered { .. } => "create_not_delivered",
             Self::Missing { .. } => "sandbox_missing",
             Self::TimeoutBound { .. } => "timeout_bound",
         }
@@ -297,7 +295,7 @@ pub async fn finalize_task_sandbox_session(
     let session = sqlx::query_as::<_, TaskSandboxSessionRow>(
         r#"
         SELECT feature, template_id, template_revision, timeout_seconds,
-               requested_at, provider_started_at, cpu_count, memory_mb, ended_at
+               requested_at, provider_started_at, cpu_count, memory_mb, ended_at, sandbox_id
         FROM task_sandbox_sessions
         WHERE id = $1 AND llm_task_id::bigint = $2 AND user_id::bigint = $3
         FOR UPDATE
@@ -314,18 +312,67 @@ pub async fn finalize_task_sandbox_session(
         return Ok(false);
     }
 
+    if matches!(end, TaskSandboxEnd::NotDelivered { .. })
+        && (session.sandbox_id.is_some() || session.provider_started_at.is_some())
+    {
+        return Err(TaskSandboxRepositoryError::InvalidInput);
+    }
     let observed_at = end.observed_at();
-    let priced = price_confirmed_runtime(&session, end, observed_at);
-    let metadata_patch = usage_end_metadata(&session, end, observed_at, priced.as_ref());
-    let (resource_count, cost_usd, pricing_version, cost_basis) =
-        priced.map_or((None, None, None, None), |priced| {
-            (
-                Some(priced.billed_seconds),
-                Some(priced.cost_usd),
-                Some(E2B_PRICING_VERSION),
-                Some(E2B_COST_BASIS),
-            )
+    let runtime = measure_confirmed_runtime(&session, end, observed_at);
+    let priced = if let (Some(runtime), Some(started_at)) = (&runtime, session.provider_started_at)
+    {
+        crate::calculate_vendor_resource_cost(
+            &mut transaction,
+            "e2b",
+            "sandbox",
+            &[
+                crate::VendorResourceMeter {
+                    unit: "vcpu_second",
+                    quantity: runtime.duration_seconds * f64::from(session.cpu_count.unwrap_or(0)),
+                },
+                crate::VendorResourceMeter {
+                    unit: "gib_second",
+                    quantity: runtime.duration_seconds * f64::from(session.memory_mb.unwrap_or(0))
+                        / 1024.0,
+                },
+            ],
+            started_at,
+        )
+        .await?
+    } else {
+        None
+    };
+    let mut metadata_patch = usage_end_metadata(&session, end, observed_at, runtime.as_ref());
+    metadata_patch["pricing"] = priced
+        .as_ref()
+        .map_or(Value::Null, |cost| cost.metadata.clone());
+    let not_delivered = matches!(end, TaskSandboxEnd::NotDelivered { .. });
+    metadata_patch["billing_status"] = json!(if not_delivered {
+        "not_billable"
+    } else if priced.is_some() {
+        "priced"
+    } else {
+        "unpriced"
+    });
+    if !not_delivered && priced.is_none() {
+        metadata_patch["cost_reason"] = json!(if runtime.is_some() {
+            "missing_applicable_resource_rate"
+        } else {
+            "unconfirmed_runtime_or_resource_size"
         });
+    }
+    let resource_count = runtime.as_ref().map(|runtime| runtime.billed_seconds);
+    let cost_usd = if not_delivered {
+        Some(0.0)
+    } else {
+        priced.as_ref().map(|cost| cost.cost_usd)
+    };
+    let pricing_version = priced.as_ref().map(|cost| cost.pricing_version.as_str());
+    let cost_basis = if not_delivered {
+        Some("non_billable")
+    } else {
+        priced.as_ref().map(|_| "public_list_estimate")
+    };
     let usage_finalized = sqlx::query(
         r#"
         UPDATE vendor_usage_records
@@ -428,41 +475,38 @@ struct TaskSandboxSessionRow {
     cpu_count: Option<i32>,
     memory_mb: Option<i32>,
     ended_at: Option<NaiveDateTime>,
+    sandbox_id: Option<String>,
 }
 
 #[derive(Debug)]
-struct PricedRuntime {
+struct MeasuredRuntime {
     duration_milliseconds: i64,
     duration_seconds: f64,
     billed_seconds: i32,
-    cost_usd: f64,
 }
 
-fn price_confirmed_runtime(
+fn measure_confirmed_runtime(
     session: &TaskSandboxSessionRow,
     end: TaskSandboxEnd,
     observed_at: DateTime<Utc>,
-) -> Option<PricedRuntime> {
+) -> Option<MeasuredRuntime> {
     if !matches!(end, TaskSandboxEnd::Confirmed { .. }) {
         return None;
     }
     let started_at = session.provider_started_at?;
-    let cpu_count = session.cpu_count?;
-    let memory_mb = session.memory_mb?;
-    let elapsed = observed_at
-        .signed_duration_since(started_at)
-        .max(chrono::TimeDelta::zero());
+    session.cpu_count?;
+    session.memory_mb?;
+    let elapsed = observed_at.signed_duration_since(started_at);
+    if elapsed < chrono::TimeDelta::zero() {
+        return None;
+    }
     let duration_milliseconds = elapsed.num_milliseconds();
     let duration_seconds = elapsed.to_std().map_or(0.0, |value| value.as_secs_f64());
-    let memory_gib = f64::from(memory_mb) / 1_024.0;
-    let rate = f64::from(cpu_count) * E2B_CPU_COST_PER_VCPU_SECOND_USD
-        + memory_gib * E2B_MEMORY_COST_PER_GIB_SECOND_USD;
     let billed_seconds = i32::try_from((duration_milliseconds + 999) / 1_000).unwrap_or(i32::MAX);
-    Some(PricedRuntime {
+    Some(MeasuredRuntime {
         duration_milliseconds,
         duration_seconds,
         billed_seconds,
-        cost_usd: duration_seconds * rate,
     })
 }
 
@@ -470,7 +514,7 @@ fn usage_end_metadata(
     session: &TaskSandboxSessionRow,
     end: TaskSandboxEnd,
     observed_at: DateTime<Utc>,
-    priced: Option<&PricedRuntime>,
+    priced: Option<&MeasuredRuntime>,
 ) -> Value {
     let requested_at = session.requested_at.and_utc();
     let upper_bound_seconds = observed_at
@@ -491,8 +535,6 @@ fn usage_end_metadata(
         "template_revision": session.template_revision,
         "feature": session.feature,
         "upper_bound_seconds": upper_bound_seconds,
-        "cpu_cost_per_vcpu_second_usd": E2B_CPU_COST_PER_VCPU_SECOND_USD,
-        "memory_cost_per_gib_second_usd": E2B_MEMORY_COST_PER_GIB_SECOND_USD,
         "pricing_source": "https://e2b.dev/pricing",
     });
     if let (Some(object), Some(priced)) = (value.as_object_mut(), priced) {
@@ -587,7 +629,7 @@ pub enum TaskSandboxRepositoryError {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{TimeZone, Utc};
+    use chrono::Utc;
     use sqlx::PgPool;
     use uuid::Uuid;
 
@@ -632,7 +674,7 @@ mod tests {
     async fn lifecycle_records_provisional_and_confirmed_usage_once(pool: PgPool) {
         let (user_id, task_id) = fixture(&pool, "confirmed").await;
         let session_id = Uuid::new_v4();
-        let requested_at = Utc.with_ymd_and_hms(2026, 9, 27, 12, 0, 0).unwrap();
+        let requested_at = Utc::now();
         begin_task_sandbox_session(
             &pool,
             &NewTaskSandboxSession {
@@ -709,7 +751,7 @@ mod tests {
         assert_eq!(usage.0, 1);
         assert_eq!(usage.1, Some(2));
         assert!((usage.2.unwrap() - 0.000_055_5).abs() < 1e-12);
-        assert_eq!(usage.3.as_deref(), Some("e2b-public-2026-09-27"));
+        assert_eq!(usage.3.as_deref(), Some("official-public-2026-09-29"));
         assert_eq!(usage.4.as_deref(), Some("public_list_estimate"));
         assert_eq!(usage.5, "priced");
     }
@@ -718,7 +760,7 @@ mod tests {
     async fn missing_sandbox_stays_unpriced_and_retry_is_idempotent(pool: PgPool) {
         let (user_id, task_id) = fixture(&pool, "missing").await;
         let session_id = Uuid::new_v4();
-        let requested_at = Utc.with_ymd_and_hms(2026, 9, 27, 12, 0, 0).unwrap();
+        let requested_at = Utc::now();
         begin_task_sandbox_session(
             &pool,
             &NewTaskSandboxSession {
@@ -768,6 +810,51 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(usage, (None, None, None, None, "timeout_bound".to_owned()));
+    }
+
+    #[sqlx::test]
+    async fn undelivered_create_has_zero_external_charge_once(pool: PgPool) {
+        let (user_id, task_id) = fixture(&pool, "not-delivered").await;
+        let session_id = Uuid::new_v4();
+        begin_task_sandbox_session(
+            &pool,
+            &NewTaskSandboxSession {
+                id: session_id,
+                task_id,
+                user_id,
+                feature: "chat",
+                template_id: "newsly-agent",
+                template_revision: "revision-1",
+                timeout_seconds: 300,
+                requested_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+        let end = TaskSandboxEnd::NotDelivered {
+            observed_at: Utc::now(),
+        };
+        assert!(
+            finalize_task_sandbox_session(&pool, session_id, task_id, user_id, None, end)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !finalize_task_sandbox_session(&pool, session_id, task_id, user_id, None, end)
+                .await
+                .unwrap()
+        );
+        let usage: (Option<f64>, Option<String>, String) = sqlx::query_as(
+            "SELECT cost_usd, cost_basis, metadata->>'end_basis' FROM vendor_usage_records WHERE idempotency_key=$1"
+        ).bind(format!("e2b:{session_id}")).fetch_one(&pool).await.unwrap();
+        assert_eq!(
+            usage,
+            (
+                Some(0.0),
+                Some("non_billable".to_owned()),
+                "create_not_delivered".to_owned()
+            )
+        );
     }
 
     #[test]

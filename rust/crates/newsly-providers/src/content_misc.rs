@@ -414,6 +414,31 @@ impl ContentMiscGateway {
         length: &str,
         provider: Option<&str>,
     ) -> Result<GeneratedTweetSuggestions, ContentMiscGatewayError> {
+        self.generate_tweet_suggestions_with_events(
+            content_context,
+            guidance,
+            creativity,
+            length,
+            provider,
+            Arc::new(NoEvents),
+        )
+        .await
+    }
+
+    /// Generates structured tweet suggestions while publishing per-response model observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same provider and validation errors as [`Self::generate_tweet_suggestions`].
+    pub async fn generate_tweet_suggestions_with_events(
+        &self,
+        content_context: &str,
+        guidance: Option<&str>,
+        creativity: u8,
+        length: &str,
+        provider: Option<&str>,
+        events: Arc<dyn AgentEventSink>,
+    ) -> Result<GeneratedTweetSuggestions, ContentMiscGatewayError> {
         let model_spec = if provider == Some("anthropic") {
             self.anthropic_tweet_model.clone()
         } else {
@@ -458,7 +483,7 @@ impl ContentMiscGateway {
                     provider_parameters: Map::new(),
                 },
                 Arc::new(NoTools),
-                Arc::new(NoEvents),
+                events,
             )
             .await?;
         let mut document: GeneratedTweetDocument = serde_json::from_str(&outcome.output_text)
@@ -501,6 +526,27 @@ impl ContentMiscGateway {
         prompt: &str,
         merge: bool,
         external_discussion_url: Option<&str>,
+    ) -> Result<GeneratedDiscussionSummary, ContentMiscGatewayError> {
+        self.summarize_discussion_with_events(
+            prompt,
+            merge,
+            external_discussion_url,
+            Arc::new(NoEvents),
+        )
+        .await
+    }
+
+    /// Generates a discussion summary while publishing per-response model observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same provider and validation errors as [`Self::summarize_discussion`].
+    pub async fn summarize_discussion_with_events(
+        &self,
+        prompt: &str,
+        merge: bool,
+        external_discussion_url: Option<&str>,
+        events: Arc<dyn AgentEventSink>,
     ) -> Result<GeneratedDiscussionSummary, ContentMiscGatewayError> {
         if prompt.trim().is_empty() {
             return Err(ContentMiscGatewayError::InvalidDiscussionSummary(
@@ -556,7 +602,7 @@ impl ContentMiscGateway {
                     provider_parameters: Map::new(),
                 },
                 Arc::new(NoTools),
-                Arc::new(NoEvents),
+                events,
             )
             .await
             .map_err(ContentMiscGatewayError::DiscussionGeneration)?;

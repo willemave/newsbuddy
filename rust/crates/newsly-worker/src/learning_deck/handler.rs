@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use newsly_db::{
-    LearningDeckModelUsage, LearningDeckPreparationOutcome, LearningDeckSourceSettlement,
-    LearningDeckTaskRepositoryError, MarkLearningDeckRunningOutcome,
-    begin_learning_deck_preparation, mark_learning_deck_running,
+    LearningDeckPreparationOutcome, LearningDeckSourceSettlement, LearningDeckTaskRepositoryError,
+    MarkLearningDeckRunningOutcome, begin_learning_deck_preparation, mark_learning_deck_running,
     settle_learning_deck_source_missing,
 };
 use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
@@ -275,40 +274,14 @@ impl LearningDeckTaskExecutor {
         }
 
         let model_name = agent.outcome.model_name.clone();
-        let provider_response_id = agent.outcome.provider_response_id.clone();
         let provider_usage = agent.outcome.usage.clone();
-        let request_count = u64::from(agent.outcome.request_count);
         let usage_json = json_object(json!({
             "provider_usage": provider_usage,
             "request_count": agent.outcome.request_count,
             "tool_call_count": agent.outcome.tool_call_count,
-            "provider_response_id": provider_response_id,
+            "provider_response_id": agent.outcome.provider_response_id,
             "events": agent.events,
         }));
-        let vendor_usage = LearningDeckModelUsage {
-            provider: agent.model_provider.clone(),
-            model: model_name.clone(),
-            provider_response_id,
-            request_count,
-            input_tokens: provider_usage.input_tokens,
-            output_tokens: provider_usage.output_tokens,
-            cache_read_tokens: provider_usage.cached_input_tokens,
-            cache_write_tokens: provider_usage.cache_write_tokens,
-            metadata: Map::from_iter([
-                (
-                    "reasoning_tokens".to_owned(),
-                    Value::from(provider_usage.reasoning_tokens),
-                ),
-                (
-                    "tool_call_count".to_owned(),
-                    Value::from(agent.outcome.tool_call_count),
-                ),
-                (
-                    "sandbox_provider".to_owned(),
-                    Value::from(agent.sandbox_provider.clone()),
-                ),
-            ]),
-        };
         LearningDeckDispatchOutcome::Handled(HandlerExecution::with_finalizer(
             TaskResult::ok(),
             LearningDeckSuccessFinalizer::new(
@@ -325,7 +298,6 @@ impl LearningDeckTaskExecutor {
                 Some(agent.sandbox_id),
                 agent_log_object_key,
                 usage_json,
-                vendor_usage,
             ),
         ))
     }

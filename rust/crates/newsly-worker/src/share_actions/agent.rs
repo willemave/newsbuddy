@@ -28,6 +28,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::content_body_store::{ContentBodyStore, ContentBodyStoreError};
 use crate::task_sandbox::{
     AcquiredTaskSandbox, TaskSandboxConfig, TaskSandboxError, TaskSandboxOwner,
@@ -336,7 +337,7 @@ impl ShareActionAgentRuntime {
 
         let definitions = TaskToolExecutor::definitions();
         let allowed = allowed_tools(task, &definitions);
-        let events = Arc::new(ShareActionEvents::default());
+        let events = Arc::new(ShareActionEvents::new(self.pool.clone(), task));
         let request = AgentRequest {
             feature: format!("share_action.{}", task.mode),
             model_spec: self.config.model_spec.clone(),
@@ -372,6 +373,7 @@ impl ShareActionAgentRuntime {
                 result.map_err(ShareActionAgentError::Agent)
             }
         };
+        events.usage.finish().await;
         let reset = self.provider.reset_network(&sandbox.sandbox_id).await;
         let outcome = match (outcome, reset) {
             (Ok(outcome), Ok(())) => outcome,
@@ -620,12 +622,31 @@ pub struct ShareActionAgentRunResult {
     pub events: Vec<AgentEvent>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct ShareActionEvents {
     values: Mutex<Vec<AgentEvent>>,
+    usage: AgentUsageRecorder,
 }
 
 impl ShareActionEvents {
+    fn new(pool: PgPool, task: &ShareActionAgentSnapshot) -> Self {
+        Self {
+            values: Mutex::new(Vec::new()),
+            usage: AgentUsageRecorder::new(
+                pool,
+                AgentUsageAttribution {
+                    operation: "share_action.agent_response".to_owned(),
+                    source: "queue".to_owned(),
+                    task_id: task.id,
+                    content_id: None,
+                    session_id: None,
+                    message_id: None,
+                    user_id: Some(task.user_id),
+                },
+            ),
+        }
+    }
+
     fn values(&self) -> Vec<AgentEvent> {
         self.values.lock().map_or_else(
             |poisoned| poisoned.into_inner().clone(),
@@ -636,6 +657,9 @@ impl ShareActionEvents {
 
 impl AgentEventSink for ShareActionEvents {
     fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError> {
+        if let AgentEvent::Usage { observation } = &event {
+            self.usage.publish(observation.as_ref().clone())?;
+        }
         self.values
             .lock()
             .map_err(|_| {

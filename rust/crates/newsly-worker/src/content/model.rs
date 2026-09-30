@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use newsly_agent_runtime::ProviderUsage;
 use newsly_extraction::{ExtractIntent, ExtractionMethod, ExtractionTiming, UsageEvent};
 use serde_json::{Map, Value};
 use sqlx::FromRow;
@@ -79,14 +78,6 @@ pub(crate) struct FirecrawlUsage {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ModelUsageWrite {
-    pub(crate) provider: String,
-    pub(crate) model: String,
-    pub(crate) response_id: Option<String>,
-    pub(crate) usage: ProviderUsage,
-}
-
-#[derive(Debug, Clone)]
 pub(crate) struct XUsageWrite {
     pub(crate) request_id: String,
     pub(crate) operation: &'static str,
@@ -97,7 +88,6 @@ pub(crate) struct XUsageWrite {
 pub(crate) enum UsageWrite {
     Extraction(ExtractionUsageBatch),
     Firecrawl(FirecrawlUsage),
-    Model(ModelUsageWrite),
     X(XUsageWrite),
 }
 

@@ -266,18 +266,24 @@ async fn successful_naming_attempt_is_cacheable(pool: PgPool) {
     };
     let input_hash = "a".repeat(64);
     let result = json!({"categories":[{"stable_id":"news-example","title":"Example"}]});
-    record_naming_attempt(
-        &pool,
-        &context,
-        Uuid::new_v4(),
-        &input_hash,
-        Some(&result),
-        None,
-    )
-    .await
-    .unwrap();
+    let attempt_id = Uuid::new_v4();
+    for _ in 0..2 {
+        record_naming_attempt(&pool, &context, attempt_id, &input_hash, Some(&result))
+            .await
+            .unwrap();
+    }
     assert_eq!(
         cached_naming(&pool, user, &input_hash).await.unwrap(),
         Some(result)
     );
+    let (attempts, usage_rows): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*)::bigint FROM news_category_naming_attempts WHERE attempt_id=$1), (SELECT count(*)::bigint FROM vendor_usage_records WHERE task_id::bigint=$2 AND feature='briefing_lens_naming_batch')",
+    )
+    .bind(attempt_id)
+    .bind(task_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(attempts, 1);
+    assert_eq!(usage_rows, 0);
 }

@@ -1,5 +1,5 @@
 //! Naming observations are accounting/cache records, not permission to publish.
-use crate::{BriefingLensAssignmentUsage, NewsCategoryRunContext};
+use crate::NewsCategoryRunContext;
 use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -21,7 +21,6 @@ pub async fn record_naming_attempt(
     attempt_id: Uuid,
     input_hash: &str,
     result: Option<&Value>,
-    usage: Option<&BriefingLensAssignmentUsage>,
 ) -> Result<(), sqlx::Error> {
     let outcome = if result.is_some() {
         "succeeded"
@@ -35,16 +34,6 @@ pub async fn record_naming_attempt(
     if inserted == 0 {
         tx.rollback().await?;
         return Ok(());
-    }
-    if let Some(usage) = usage {
-        let count = |v: u64| i32::try_from(v).unwrap_or(i32::MAX);
-        sqlx::query("INSERT INTO vendor_usage_records(provider,model,feature,operation,source,request_id,task_id,user_id,request_count,input_tokens,cache_read_tokens,cache_write_tokens,output_tokens,total_tokens,currency,pricing_version,metadata,created_at) VALUES($1,$2,$3,$4,'queue',$5,$6,$7,$8,$9,$10,$11,$12,$13,'USD','2026-08-02',$14,timezone('UTC',clock_timestamp()))")
-            .bind(&usage.provider).bind(&usage.model).bind(&usage.feature).bind(&usage.operation).bind(&usage.provider_response_id)
-            .bind(context.task_id).bind(context.run.user_id).bind(count(usage.usage.request_count))
-            .bind(count(usage.usage.input_tokens)).bind(count(usage.usage.cached_input_tokens)).bind(count(usage.usage.cache_write_tokens))
-            .bind(count(usage.usage.output_tokens)).bind(count(usage.usage.input_tokens.saturating_add(usage.usage.output_tokens)))
-            .bind(serde_json::json!({"attempt_id":attempt_id,"input_hash":input_hash,"outcome":outcome}))
-            .execute(&mut *tx).await?;
     }
     tx.commit().await
 }

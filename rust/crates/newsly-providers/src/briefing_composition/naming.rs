@@ -1,6 +1,6 @@
 //! Bounded batch review of category profiles, separate from story composition.
 use super::{BriefingCompositionGateway, BriefingCompositionGatewayError, StructuredRunRequest};
-use newsly_agent_runtime::ProviderUsage;
+use newsly_agent_runtime::{AgentEventSink, ProviderUsage};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -82,6 +82,7 @@ impl BriefingCompositionGateway {
     pub async fn review_lens_names(
         &self,
         request: &BriefingLensNamingBatchRequest,
+        events: std::sync::Arc<dyn AgentEventSink>,
     ) -> Result<GeneratedBriefingLensNamingBatch, BriefingCompositionGatewayError> {
         validate_naming_request(request)?;
         let user_prompt = serde_json::to_string_pretty(request)?;
@@ -102,6 +103,7 @@ impl BriefingCompositionGateway {
                     validation_retries: 0,
                 },
                 &self.naming_model_spec,
+                Some(events),
             )
             .await?;
         let batch = decode_naming_output(request, outcome.structured_output, &outcome.usage)?;
@@ -237,6 +239,22 @@ fn validate_naming_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug, Default)]
+    struct RecordingEvents(std::sync::Mutex<Vec<newsly_agent_runtime::AgentModelUsageObservation>>);
+
+    impl AgentEventSink for RecordingEvents {
+        fn publish(
+            &self,
+            event: newsly_agent_runtime::AgentEvent,
+        ) -> Result<(), newsly_agent_runtime::AgentRuntimeError> {
+            if let newsly_agent_runtime::AgentEvent::Usage { observation } = event {
+                self.0.lock().unwrap().push(*observation);
+            }
+            Ok(())
+        }
+    }
+
     #[test]
     fn rejected_naming_output_preserves_observed_usage() {
         let request = BriefingLensNamingBatchRequest {
@@ -256,6 +274,50 @@ mod tests {
             let error = decode_naming_output(&request, value, &usage).unwrap_err();
             assert_eq!(error.observed_usage(), Some(&usage));
         }
+    }
+
+    #[test]
+    fn malformed_naming_output_does_not_erase_forwarded_response_observation() {
+        let forwarded = std::sync::Arc::new(RecordingEvents::default());
+        let observed = super::super::ObservedUsage::new(Some(forwarded.clone()));
+        let usage = ProviderUsage {
+            input_tokens: 125,
+            output_tokens: 17,
+            request_count: 1,
+            ..Default::default()
+        };
+        let response_id = "response-123".to_owned();
+        observed
+            .publish(newsly_agent_runtime::AgentEvent::Usage {
+                observation: Box::new(newsly_agent_runtime::AgentModelUsageObservation {
+                    run_id: uuid::Uuid::new_v4(),
+                    sequence: 1,
+                    feature: "briefing_lens_naming_batch".to_owned(),
+                    provider: "openai".to_owned(),
+                    model: "gpt-6-luna".to_owned(),
+                    endpoint: "https://api.openai.com/v1/responses".to_owned(),
+                    response_id: Some(response_id.clone()),
+                    provider_request_id: None,
+                    requested_service_tier: None,
+                    processing_tier: Some("standard".to_owned()),
+                    usage_is_observed: true,
+                    provider_reported_cost_usd: None,
+                    usage: usage.clone(),
+                }),
+            })
+            .unwrap();
+
+        let request = BriefingLensNamingBatchRequest {
+            categories: vec![naming_category("one")],
+        };
+        assert!(
+            decode_naming_output(&request, Some(serde_json::json!({"categories":[]})), &usage,)
+                .is_err()
+        );
+        let events = forwarded.0.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].response_id.as_deref(), Some(response_id.as_str()));
+        assert_eq!(events[0].usage, usage);
     }
 
     fn naming_category(stable_id: &str) -> BriefingLensNamingCategory {

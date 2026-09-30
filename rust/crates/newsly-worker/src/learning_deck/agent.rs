@@ -23,6 +23,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 use crate::content_body_store::{ContentBodyStore, ContentBodyStoreError};
 use crate::share_actions::ShareActionAgentConfig;
 use crate::task_sandbox::{
@@ -198,7 +199,7 @@ impl LearningDeckAgentRuntime {
             )
             .await?;
         let sandbox_id = acquired.sandbox.sandbox_id.as_str().to_owned();
-        let events = Arc::new(LearningDeckEvents::default());
+        let events = Arc::new(LearningDeckEvents::new(self.pool.clone(), task));
         let result = self
             .run_acquired(
                 task,
@@ -208,13 +209,14 @@ impl LearningDeckAgentRuntime {
                 cancellation,
                 Arc::clone(&events),
             )
-            .await
-            .map_err(|source| LearningDeckAgentError::SandboxExecution {
-                source: Box::new(source),
-                sandbox_provider: "e2b".to_owned(),
-                sandbox_id,
-                events: events.values(),
-            });
+            .await;
+        events.usage.finish().await;
+        let result = result.map_err(|source| LearningDeckAgentError::SandboxExecution {
+            source: Box::new(source),
+            sandbox_provider: "e2b".to_owned(),
+            sandbox_id,
+            events: events.values(),
+        });
         if let Err(error) = acquired.release().await {
             tracing::error!(
                 task_id = task.id,
@@ -746,12 +748,35 @@ pub(super) struct LearningDeckAgentRunResult {
     pub events: Vec<Value>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct LearningDeckEvents {
     values: Mutex<Vec<Value>>,
+    usage: AgentUsageRecorder,
 }
 
 impl LearningDeckEvents {
+    fn new(pool: PgPool, task: &LearningDeckTaskSnapshot) -> Self {
+        let content_id = match &task.source {
+            newsly_db::LearningDeckSourceMaterial::Content { content_id, .. } => Some(*content_id),
+            newsly_db::LearningDeckSourceMaterial::Github { .. } => None,
+        };
+        Self {
+            values: Mutex::new(Vec::new()),
+            usage: AgentUsageRecorder::new(
+                pool,
+                AgentUsageAttribution {
+                    operation: "learning_deck.generate".to_owned(),
+                    source: "queue".to_owned(),
+                    task_id: task.id,
+                    content_id,
+                    session_id: None,
+                    message_id: None,
+                    user_id: Some(task.user_id),
+                },
+            ),
+        }
+    }
+
     fn push(&self, event_type: &str, payload: Value) {
         let event = json!({
             "created_at": chrono::Utc::now().to_rfc3339(),
@@ -774,6 +799,9 @@ impl LearningDeckEvents {
 
 impl AgentEventSink for LearningDeckEvents {
     fn publish(&self, event: AgentEvent) -> Result<(), AgentRuntimeError> {
+        if let AgentEvent::Usage { observation } = &event {
+            self.usage.publish(observation.as_ref().clone())?;
+        }
         self.push(
             "agent_event",
             serde_json::to_value(event).map_err(|error| {

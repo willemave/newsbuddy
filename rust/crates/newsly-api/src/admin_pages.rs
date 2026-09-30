@@ -275,19 +275,20 @@ fn render_dashboard(snapshot: &AdminDashboardSnapshot, range: &str) -> String {
             row.count
         );
     }
-    html.push_str("</tbody></table><h2>Provider cost (30 days)</h2><table><thead><tr><th>Provider</th><th>Rows</th><th>Requests</th><th>Resources</th><th>Cost</th></tr></thead><tbody>");
+    html.push_str("</tbody></table><h2>Provider cost (30 days)</h2><table><thead><tr><th>Provider</th><th>Rows</th><th>Requests</th><th>Cost</th></tr></thead><tbody>");
     for row in &snapshot.provider_costs {
         let _ = write!(
             html,
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             escape_html(&row.provider),
             row.row_count,
             row.request_count,
-            row.resource_count,
             render_usage_cost(
                 row.cost_usd,
                 row.known_cost_usd,
                 row.public_list_estimate_usd,
+                row.provider_estimate_usd,
+                row.non_billable_record_count,
                 row.unpriced_call_count
             )
         );
@@ -365,23 +366,26 @@ fn render_vendor_usage(snapshot: &AdminVendorUsageSnapshot, query: &VendorUsageQ
             snapshot.totals.cost_usd,
             snapshot.totals.known_cost_usd,
             snapshot.totals.public_list_estimate_usd,
+            snapshot.totals.provider_estimate_usd,
+            snapshot.totals.non_billable_record_count,
             snapshot.totals.unpriced_call_count
         )
     );
-    html.push_str("<h2>Daily</h2><table><thead><tr><th>Date</th><th>Rows</th><th>Tokens</th><th>Requests</th><th>Resources</th><th>Cost</th></tr></thead><tbody>");
+    html.push_str("<h2>Daily</h2><table><thead><tr><th>Date</th><th>Rows</th><th>Tokens</th><th>Requests</th><th>Cost</th></tr></thead><tbody>");
     for row in &snapshot.daily {
         let _ = write!(
             html,
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             row.usage_day,
             row.row_count,
             row.total_tokens,
             row.request_count,
-            row.resource_count,
             render_usage_cost(
                 row.cost_usd,
                 row.known_cost_usd,
                 row.public_list_estimate_usd,
+                row.provider_estimate_usd,
+                row.non_billable_record_count,
                 row.unpriced_call_count
             )
         );
@@ -424,12 +428,14 @@ fn render_vendor_usage(snapshot: &AdminVendorUsageSnapshot, query: &VendorUsageQ
 fn render_usage_cost(
     cost: Option<f64>,
     known_cost: f64,
-    estimated_cost: f64,
+    public_list_estimate: f64,
+    provider_estimate: f64,
+    non_billable_records: i64,
     unpriced_records: i64,
 ) -> String {
     cost.map_or_else(
-        || format!("Unknown (${known_cost:.6} priced subtotal, including ${estimated_cost:.6} public-list estimates; {unpriced_records} unpriced records)"),
-        |cost| format!("${cost:.6} (including ${estimated_cost:.6} public-list estimates)"),
+        || format!("Unknown (${known_cost:.6} priced subtotal: ${public_list_estimate:.6} public-list estimates, ${provider_estimate:.6} provider estimates; {non_billable_records} non-billable, {unpriced_records} unpriced records)"),
+        |cost| format!("${cost:.6} (${public_list_estimate:.6} public-list estimates, ${provider_estimate:.6} provider estimates; {non_billable_records} non-billable records)"),
     )
 }
 
@@ -476,16 +482,18 @@ mod usage_tests {
                 cost_usd: None,
                 known_cost_usd: 0.25,
                 public_list_estimate_usd: 0.20,
+                provider_estimate_usd: 0.05,
+                non_billable_record_count: 0,
                 unpriced_call_count: 1,
             },
         };
         let query: VendorUsageQuery = serde_json::from_value(serde_json::json!({})).unwrap();
         let html = render_vendor_usage(&snapshot, &query);
-        assert!(html.contains("Unknown ($0.250000 priced subtotal, including $0.200000 public-list estimates; 1 unpriced records)"));
+        assert!(html.contains("Unknown ($0.250000 priced subtotal: $0.200000 public-list estimates, $0.050000 provider estimates; 0 non-billable, 1 unpriced records)"));
         assert!(!html.contains("<strong>$0.000000</strong>"));
         assert_eq!(
-            render_usage_cost(Some(0.0), 0.0, 0.0, 0),
-            "$0.000000 (including $0.000000 public-list estimates)"
+            render_usage_cost(Some(0.0), 0.0, 0.0, 0.0, 1, 0),
+            "$0.000000 ($0.000000 public-list estimates, $0.000000 provider estimates; 1 non-billable records)"
         );
     }
 }

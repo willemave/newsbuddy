@@ -6,7 +6,7 @@ use thiserror::Error;
 use super::input::{build_summarization_payload, input_fingerprint, runtime_metadata_view};
 use super::model::{
     AppliedSummarization, PendingChatRequest, SummarizationApplyOutcome,
-    SummarizationFinalizationPlan, SummarizationMutation, SummarizationSnapshot, SummaryUsage,
+    SummarizationFinalizationPlan, SummarizationMutation, SummarizationSnapshot,
 };
 
 const RAW_BODY_FIELDS: [&str; 6] = [
@@ -71,10 +71,9 @@ pub(super) async fn apply_summarization_state(
     }
 
     let pending_chat_requests = match &plan.mutation {
-        SummarizationMutation::Complete { summary, usage } => {
+        SummarizationMutation::Complete { summary } => {
             let pending = extract_pending_chat_requests(&content.content_metadata);
             apply_completed_summary(&mut content, plan, summary);
-            persist_usage(transaction, plan, usage).await?;
             pending
         }
         SummarizationMutation::Unchanged => {
@@ -295,71 +294,6 @@ async fn persist_locked_content(
     Ok(())
 }
 
-async fn persist_usage(
-    transaction: &mut Transaction<'static, Postgres>,
-    plan: &SummarizationFinalizationPlan,
-    usage: &SummaryUsage,
-) -> Result<(), sqlx::Error> {
-    let submitted_by = runtime_metadata_view(&plan.attempt.content.content_metadata)
-        .get("submitted_by_user_id")
-        .and_then(positive_i64);
-    let total_tokens = usage
-        .usage
-        .input_tokens
-        .saturating_add(usage.usage.output_tokens);
-    sqlx::query(
-        r"
-        INSERT INTO vendor_usage_records (
-            provider,
-            model,
-            feature,
-            operation,
-            source,
-            request_id,
-            task_id,
-            content_id,
-            user_id,
-            input_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
-            output_tokens,
-            total_tokens,
-            request_count,
-            currency,
-            metadata,
-            created_at
-        )
-        VALUES (
-            $1, $2, 'summarization', 'summarization.llm_summarization', 'queue', $3,
-            $4, $5,
-            (SELECT id FROM users WHERE id::bigint = $6 AND is_active IS TRUE),
-            $7, $8, $9, $10, $11, $12, 'USD', $13,
-            timezone('UTC', clock_timestamp())
-        )
-        ",
-    )
-    .bind(&usage.provider)
-    .bind(&usage.model)
-    .bind(&usage.provider_response_id)
-    .bind(plan.attempt.task_id)
-    .bind(plan.attempt.content.id)
-    .bind(submitted_by)
-    .bind(saturating_i32(usage.usage.input_tokens))
-    .bind(saturating_i32(usage.usage.cached_input_tokens))
-    .bind(saturating_i32(usage.usage.cache_write_tokens))
-    .bind(saturating_i32(usage.usage.output_tokens))
-    .bind(saturating_i32(total_tokens))
-    .bind(saturating_i32(usage.usage.request_count))
-    .bind(json!({
-        "content_type": plan.attempt.content.content_type,
-        "summarization_type": "longform_artifact",
-        "reasoning_tokens": usage.usage.reasoning_tokens,
-    }))
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
 fn applied_context(
     content: &LockedContent,
     pending_chat_requests: Vec<PendingChatRequest>,
@@ -477,10 +411,6 @@ fn positive_i64(value: &Value) -> Option<i64> {
         .filter(|value| *value > 0)
 }
 
-fn saturating_i32(value: u64) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
-}
-
 #[derive(Debug, Error)]
 pub(super) enum SummarizationRepositoryError {
     #[error(transparent)]
@@ -511,7 +441,6 @@ mod readiness_tests {
             let payload = build_summarization_payload(kind, &snapshot.content_metadata, None);
             let plan = SummarizationFinalizationPlan {
                 attempt: PreparedSummarizationAttempt {
-                    task_id: 1,
                     content: snapshot,
                     input_fingerprint: input_fingerprint(kind, &payload),
                 },

@@ -2,11 +2,13 @@ use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 
 use newsly_agent_runtime::{AgentEvent, AgentEventSink, AgentRuntimeError};
-use newsly_db::{ChatToolProgress, write_chat_tool_progress};
+use newsly_db::{ChatTaskSnapshot, ChatToolProgress, write_chat_tool_progress};
 use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
+
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageRecorder};
 
 const TOOL_PROGRESS_WRITE_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -20,11 +22,15 @@ pub(super) struct ChatEvents {
     sender: Mutex<Option<mpsc::UnboundedSender<AgentEvent>>>,
     task: Mutex<Option<JoinHandle<()>>>,
     tool_names: Mutex<Vec<String>>,
+    usage: AgentUsageRecorder,
 }
 
 impl ChatEvents {
-    pub(super) fn new(pool: PgPool, message_id: i64, stream_generation: i32) -> Self {
+    pub(super) fn new(pool: PgPool, snapshot: &ChatTaskSnapshot) -> Self {
+        let message_id = snapshot.message_id;
+        let stream_generation = snapshot.stream_generation;
         let (sender, mut receiver) = mpsc::unbounded_channel::<AgentEvent>();
+        let progress_pool = pool.clone();
         let task = tokio::spawn(async move {
             let mut names_by_id = HashMap::<String, String>::new();
             let mut last_progress_by_id = HashMap::<String, Instant>::new();
@@ -64,7 +70,7 @@ impl ChatEvents {
                 let Some((tool_name, status, detail)) = progress else {
                     continue;
                 };
-                let mut transaction = match pool.begin().await {
+                let mut transaction = match progress_pool.begin().await {
                     Ok(transaction) => transaction,
                     Err(error) => {
                         tracing::warn!(message_id, error = %error, "chat tool progress checkout failed");
@@ -107,6 +113,18 @@ impl ChatEvents {
             sender: Mutex::new(Some(sender)),
             task: Mutex::new(Some(task)),
             tool_names: Mutex::new(Vec::new()),
+            usage: AgentUsageRecorder::new(
+                pool,
+                AgentUsageAttribution {
+                    operation: format!("chat.{}", usage_source(snapshot)),
+                    source: usage_source(snapshot),
+                    task_id: snapshot.queue_task_id,
+                    content_id: snapshot.context.session.content_id,
+                    session_id: Some(snapshot.session_id),
+                    message_id: Some(snapshot.message_id),
+                    user_id: Some(snapshot.user_id),
+                },
+            ),
         }
     }
 
@@ -122,6 +140,7 @@ impl ChatEvents {
         {
             tracing::warn!(error = %error, "chat tool progress task failed");
         }
+        self.usage.finish().await;
     }
 }
 
@@ -133,11 +152,22 @@ impl AgentEventSink for ChatEvents {
                 names.push(name.clone());
             }
         }
+        if let AgentEvent::Usage { observation } = &event {
+            self.usage.publish(observation.as_ref().clone())?;
+        }
         lock(&self.sender)
             .as_ref()
             .ok_or_else(|| AgentRuntimeError::EventSink("chat event sink is closed".to_owned()))?
             .send(event)
             .map_err(|_| AgentRuntimeError::EventSink("chat event queue is closed".to_owned()))
+    }
+}
+
+fn usage_source(snapshot: &ChatTaskSnapshot) -> String {
+    match snapshot.context.kind {
+        newsly_db::ChatTurnKind::Article | newsly_db::ChatTurnKind::Council => "async".to_owned(),
+        newsly_db::ChatTurnKind::Assistant => snapshot.context.source.clone(),
+        newsly_db::ChatTurnKind::DeepResearch => "deep_research".to_owned(),
     }
 }
 

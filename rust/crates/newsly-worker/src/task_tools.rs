@@ -27,6 +27,9 @@ use crate::knowledge_tools::{
     read_authorized_knowledge_item, sha256_hex,
 };
 
+mod exa_usage;
+use exa_usage::{ExaSearchResponse, exa_estimated_cost_usd};
+
 const DEFAULT_FILE_LIMIT: usize = 100_000;
 const MAX_FILE_LIMIT: usize = 1_000_000;
 const MAX_WRITE_BYTES: usize = 1_000_000;
@@ -658,7 +661,7 @@ pub(crate) struct ExaSearchClient {
     endpoint: Url,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ExaSearchUsage {
     pub(crate) request_count: u64,
     pub(crate) result_count: u64,
@@ -667,6 +670,8 @@ pub(crate) struct ExaSearchUsage {
     pub(crate) summary_requested: bool,
     pub(crate) text_requested: bool,
     pub(crate) livecrawl_fallback: bool,
+    pub(crate) estimated_cost_usd: Option<f64>,
+    pub(crate) known_estimated_cost_usd: f64,
 }
 
 #[derive(Debug)]
@@ -739,6 +744,7 @@ impl ExaSearchClient {
                 published_date: nonempty(result.published_date),
             })
             .collect::<Vec<_>>();
+        let estimated_cost_usd = exa_estimated_cost_usd(body.cost_dollars.as_ref());
         Ok(ExaSearchOutcome {
             usage: ExaSearchUsage {
                 request_count: 1,
@@ -748,6 +754,8 @@ impl ExaSearchClient {
                 summary_requested: true,
                 text_requested: true,
                 livecrawl_fallback: true,
+                estimated_cost_usd,
+                known_estimated_cost_usd: estimated_cost_usd.unwrap_or_default(),
             },
             results,
         })
@@ -772,9 +780,10 @@ pub(crate) async fn record_exa_tool_usage(
         "contents_text_requested": usage.text_requested,
         "contents_summary_requested": usage.summary_requested,
         "livecrawl": if usage.livecrawl_fallback { "fallback" } else { "never" },
-        "cost_status": "unpriced",
-        "cost_reason": "Exa response does not expose every billable search, contents, summary, and livecrawl unit",
-        "cost_source_url": "https://exa.ai/pricing"
+        "cost_status": if usage.estimated_cost_usd.is_some() { "provider_estimate" } else { "unpriced" },
+        "cost_reason": usage.estimated_cost_usd.is_none().then_some("Exa response omitted a valid costDollars.total estimate"),
+        "known_provider_estimate_usd": usage.known_estimated_cost_usd,
+        "cost_source_url": "https://docs.exa.ai/reference/search"
     });
     let result = sqlx::query(
         r"
@@ -785,8 +794,8 @@ pub(crate) async fn record_exa_tool_usage(
         )
         SELECT
             'exa', 'search', 'agent_tool', $1, 'worker', $2, users.id,
-            $4, $5, NULL, 'USD', NULL,
-            'unpriced_incomplete_provider_units', $6,
+            $4, $5, $6, 'USD', $7,
+            $8, $9,
             concat('exa:', $1::text, ':', $3::text, ':', $2::text),
             timezone('UTC', clock_timestamp())
         FROM users
@@ -800,6 +809,9 @@ pub(crate) async fn record_exa_tool_usage(
     .bind(user_id)
     .bind(i32::try_from(usage.request_count).unwrap_or(i32::MAX))
     .bind(i32::try_from(usage.result_count).unwrap_or(i32::MAX))
+    .bind(usage.estimated_cost_usd)
+    .bind(usage.estimated_cost_usd.map(|_| "exa-response-estimate"))
+    .bind(usage.estimated_cost_usd.map(|_| "provider_estimate"))
     .bind(metadata)
     .execute(pool)
     .await;
@@ -814,24 +826,6 @@ pub(crate) struct ExaSearchResult {
     pub(crate) url: String,
     pub(crate) snippet: Option<String>,
     pub(crate) published_date: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExaSearchResponse {
-    #[serde(default)]
-    results: Vec<ExaSearchRow>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExaSearchRow {
-    #[serde(default)]
-    title: String,
-    #[serde(default)]
-    url: String,
-    summary: Option<String>,
-    text: Option<String>,
-    published_date: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]

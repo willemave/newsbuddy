@@ -278,7 +278,6 @@ async fn completed_naming_audit_survives_reclaim_without_a_second_old_claim_rese
         uuid::Uuid::new_v4(),
         &input_hash,
         None,
-        None,
     )
     .await
     .unwrap();

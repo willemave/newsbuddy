@@ -41,15 +41,14 @@ pub struct MediaTranscriptPointer {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MediaTranscriptionUsage {
+pub struct MediaTranscriptionChunkUsage {
     pub task_id: i64,
+    pub retry_count: i32,
     pub content_id: i64,
     pub user_id: Option<i64>,
-    pub request_id: String,
+    pub chunk_index: usize,
     pub model: String,
     pub media_kind: String,
-    pub language: Option<String>,
-    pub chunk_count: i32,
     pub prompt_chars: i32,
     pub audio_size_bytes: i64,
     pub audio_duration_ms: Option<u64>,
@@ -335,20 +334,29 @@ pub async fn apply_media_mutation(
     Ok(MediaApplyOutcome::Applied { next_task })
 }
 
-/// Records completed OpenAI media transcription usage in the same exact-lease finalization
-/// transaction as the product mutation. An inactive or deleted owner is represented as NULL
-/// rather than preventing accounting for an already-completed provider request.
-pub async fn record_media_transcription_usage(
-    transaction: &mut Transaction<'_, Postgres>,
-    usage: &MediaTranscriptionUsage,
-) -> Result<(), MediaTaskRepositoryError> {
+/// Records one successful OpenAI media-transcription chunk independently of product finalization.
+pub async fn record_media_transcription_chunk_usage(
+    pool: &sqlx::PgPool,
+    usage: &MediaTranscriptionChunkUsage,
+) -> Result<bool, MediaTaskRepositoryError> {
+    let request_id = format!(
+        "media-{}-attempt-{}-chunk-{}",
+        usage.task_id, usage.retry_count, usage.chunk_index
+    );
+    let mut transaction = pool.begin().await?;
     let priced = crate::openai_transcription_cost(
+        &mut transaction,
         &usage.model,
         usage.audio_duration_ms,
         usage.duration_source == "ffprobe",
         usage.standard_pricing,
-    );
-    sqlx::query(
+    )
+    .await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(&request_id)
+        .execute(&mut *transaction)
+        .await?;
+    let inserted = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO vendor_usage_records (
             provider,
@@ -368,7 +376,7 @@ pub async fn record_media_transcription_usage(
             cost_basis,
             metadata,
             created_at
-        ) VALUES (
+        ) SELECT
             'openai',
             $1,
             'transcription',
@@ -383,49 +391,50 @@ pub async fn record_media_transcription_usage(
                 WHERE users.id::bigint = $5
                   AND users.is_active IS TRUE
             ),
+            1,
             $6,
-            $7,
             'USD',
+            $7,
             $8,
             $9,
             $10,
-            $11,
             timezone('UTC', clock_timestamp())
+        WHERE NOT EXISTS (
+            SELECT 1 FROM vendor_usage_records WHERE request_id = $2
         )
+        RETURNING id::bigint
         "#,
     )
     .bind(&usage.model)
-    .bind(&usage.request_id)
+    .bind(&request_id)
     .bind(usage.task_id)
     .bind(usage.content_id)
     .bind(usage.user_id)
-    .bind(usage.chunk_count)
     .bind(
         usage
             .audio_duration_ms
             .map(|value| i32::try_from(value.div_ceil(1_000)).unwrap_or(i32::MAX)),
     )
-    .bind(priced.map(|value| value.pricing_version))
-    .bind(priced.map(|value| value.cost_usd))
-    .bind(priced.map(|value| value.cost_basis))
+    .bind(priced.as_ref().map(|value| value.pricing_version.as_str()))
+    .bind(priced.as_ref().map(|value| value.cost_usd))
+    .bind(priced.as_ref().map(|_| "public_list_estimate"))
     .bind(json!({
         "media_kind": usage.media_kind,
-        "language": usage.language,
-        "chunk_count": usage.chunk_count,
+        "attempt": usage.retry_count,
+        "chunk_index": usage.chunk_index,
         "prompt_chars": usage.prompt_chars,
         "audio_size_bytes": usage.audio_size_bytes,
         "audio_duration_ms": usage.audio_duration_ms,
         "audio_duration_estimate_ms": usage.audio_duration_estimate_ms,
         "duration_source": usage.duration_source,
-        "cost_rate_usd": priced.map(|value| value.rate_usd),
-        "cost_rate_unit": priced.map(|value| value.rate_unit),
-        "cost_source_url": priced.map(|value| value.source_url),
-        "cost_basis": priced.map(|value| value.cost_basis),
-        "cost_pricing_version": priced.map(|value| value.pricing_version),
+        "resource_count_unit": "audio_second",
+        "pricing": priced.as_ref().map(|cost| &cost.metadata),
+        "cost_reason": priced.is_none().then_some("missing_rate_or_unmeasured_audio_or_nonstandard_endpoint"),
     }))
-    .execute(&mut **transaction)
+    .fetch_optional(&mut *transaction)
     .await?;
-    Ok(())
+    transaction.commit().await?;
+    Ok(inserted.is_some())
 }
 
 #[derive(Debug, FromRow)]
@@ -701,8 +710,82 @@ pub enum MediaTaskRepositoryError {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
+    use sqlx::PgPool;
+    use uuid::Uuid;
 
-    use super::{build_search_text, remove_domain_field, runtime_value, set_domain_field};
+    use super::{
+        MediaTranscriptionChunkUsage, build_search_text, record_media_transcription_chunk_usage,
+        remove_domain_field, runtime_value, set_domain_field,
+    };
+
+    #[sqlx::test]
+    async fn transcription_chunk_usage_is_idempotent_before_product_finalization(pool: PgPool) {
+        let user_id = sqlx::query_scalar::<_, i32>(
+            "INSERT INTO users (apple_id, email, is_admin, is_active) VALUES ($1, $2, FALSE, TRUE) RETURNING id",
+        )
+        .bind(format!("media-usage-{}", Uuid::new_v4()))
+        .bind(format!("media-usage-{}@example.com", Uuid::new_v4()))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let content_id = sqlx::query_scalar::<_, i32>(
+            "INSERT INTO contents (content_type, url, status, is_aggregate, content_metadata) VALUES ('podcast', $1, 'processing', FALSE, '{}'::json) RETURNING id",
+        )
+        .bind(format!("https://example.com/{}", Uuid::new_v4()))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let usage = MediaTranscriptionChunkUsage {
+            task_id: 700,
+            retry_count: 2,
+            content_id: i64::from(content_id),
+            user_id: Some(i64::from(user_id)),
+            chunk_index: 1,
+            model: "gpt-transcribe".to_owned(),
+            media_kind: "podcast".to_owned(),
+            prompt_chars: 40,
+            audio_size_bytes: 4_096,
+            audio_duration_ms: Some(60_000),
+            audio_duration_estimate_ms: None,
+            duration_source: "ffprobe".to_owned(),
+            standard_pricing: true,
+        };
+
+        assert!(
+            record_media_transcription_chunk_usage(&pool, &usage)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !record_media_transcription_chunk_usage(&pool, &usage)
+                .await
+                .unwrap()
+        );
+        let row = sqlx::query_as::<_, (i64, i32, i32, String, String, f64, f64)>(
+            r#"
+            SELECT
+                count(*)::bigint,
+                max(request_count)::integer,
+                max(resource_count)::integer,
+                max(metadata->>'resource_count_unit'),
+                max(metadata#>>'{pricing,components,0,unit}'),
+                max((metadata#>>'{pricing,components,0,quantity}')::double precision),
+                max(cost_usd)::double precision
+            FROM vendor_usage_records
+            WHERE request_id = 'media-700-attempt-2-chunk-1'
+            "#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, 1);
+        assert_eq!(row.1, 1);
+        assert_eq!(row.2, 60);
+        assert_eq!(row.3, "audio_second");
+        assert_eq!(row.4, "audio_minute");
+        assert!((row.5 - 1.0).abs() < f64::EPSILON);
+        assert!((row.6 - 0.0045).abs() < 1e-12);
+    }
 
     #[test]
     fn runtime_metadata_prefers_processing_then_domain_then_flat() {

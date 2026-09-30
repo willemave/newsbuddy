@@ -8,6 +8,7 @@ use schemars::Schema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::{NewslyTranscript, ProviderUsage};
 
@@ -127,15 +128,52 @@ pub struct AgentOutcome {
     pub tool_call_count: u32,
 }
 
+/// One provider response observed at the model boundary.
+///
+/// Agent runs can make several model requests and can fail after a billable response. Keeping
+/// this per-response identity separate from the aggregate outcome lets callers account for every
+/// observed request without coupling billing to product publication.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentModelUsageObservation {
+    pub run_id: Uuid,
+    pub sequence: u32,
+    pub feature: String,
+    pub provider: String,
+    pub model: String,
+    pub endpoint: String,
+    pub response_id: Option<String>,
+    pub provider_request_id: Option<String>,
+    pub requested_service_tier: Option<String>,
+    pub processing_tier: Option<String>,
+    pub usage_is_observed: bool,
+    pub provider_reported_cost_usd: Option<f64>,
+    pub usage: ProviderUsage,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
-    ModelRequestStarted { sequence: u32 },
-    TextDelta { text: String },
-    ToolCallStarted { id: String, name: String },
-    ToolProgress { id: String, text: String },
-    ToolCallFinished { id: String, is_error: bool },
-    Usage { usage: ProviderUsage },
+    ModelRequestStarted {
+        sequence: u32,
+    },
+    TextDelta {
+        text: String,
+    },
+    ToolCallStarted {
+        id: String,
+        name: String,
+    },
+    ToolProgress {
+        id: String,
+        text: String,
+    },
+    ToolCallFinished {
+        id: String,
+        is_error: bool,
+    },
+    Usage {
+        observation: Box<AgentModelUsageObservation>,
+    },
     Completed,
 }
 

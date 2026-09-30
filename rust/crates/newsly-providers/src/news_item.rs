@@ -284,6 +284,20 @@ impl NewsItemGateway {
         &self,
         evidence: String,
     ) -> Result<GeneratedNewsSummary, NewsItemGatewayError> {
+        self.summarize_with_events(evidence, Arc::new(NoEvents))
+            .await
+    }
+
+    /// Runs summary generation while publishing per-response model observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same input, provider, and validation errors as [`Self::summarize`].
+    pub async fn summarize_with_events(
+        &self,
+        evidence: String,
+        events: Arc<dyn AgentEventSink>,
+    ) -> Result<GeneratedNewsSummary, NewsItemGatewayError> {
         if evidence.trim().is_empty() {
             return Err(NewsItemGatewayError::EmptySummaryInput);
         }
@@ -297,6 +311,7 @@ impl NewsItemGateway {
                 schemars::schema_for!(NewsSummaryOutput),
                 1_200,
                 2,
+                events,
             )
             .await?;
         let value = outcome
@@ -322,6 +337,28 @@ impl NewsItemGateway {
         article_title: Option<&str>,
         source_url: Option<&str>,
         candidates: &[LinkCandidate],
+    ) -> Result<SelectedRelevantLinks, NewsItemGatewayError> {
+        self.select_relevant_links_with_events(
+            article_title,
+            source_url,
+            candidates,
+            Arc::new(NoEvents),
+        )
+        .await
+    }
+
+    /// Runs relevant-link selection while publishing per-response model observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same candidate, provider, and validation errors as
+    /// [`Self::select_relevant_links`].
+    pub async fn select_relevant_links_with_events(
+        &self,
+        article_title: Option<&str>,
+        source_url: Option<&str>,
+        candidates: &[LinkCandidate],
+        events: Arc<dyn AgentEventSink>,
     ) -> Result<SelectedRelevantLinks, NewsItemGatewayError> {
         if candidates.is_empty() {
             return Ok(SelectedRelevantLinks {
@@ -365,6 +402,7 @@ impl NewsItemGateway {
                 schemars::schema_for!(RelevantLinksOutput),
                 1_200,
                 1,
+                events,
             )
             .await?;
         let value = outcome
@@ -483,6 +521,7 @@ impl NewsItemGateway {
         schema: schemars::Schema,
         output_tokens: u64,
         validation_retries: u16,
+        events: Arc<dyn AgentEventSink>,
     ) -> Result<newsly_agent_runtime::AgentOutcome, NewsItemGatewayError> {
         Ok(self
             .engine
@@ -514,7 +553,7 @@ impl NewsItemGateway {
                     provider_parameters: Map::new(),
                 },
                 Arc::new(NoTools),
-                Arc::new(NoEvents),
+                events,
             )
             .await?)
     }

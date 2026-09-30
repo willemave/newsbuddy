@@ -167,7 +167,7 @@ impl TaskSandboxOwner {
                         task_id,
                         user_id,
                         None,
-                        TaskSandboxEnd::TimeoutBound {
+                        TaskSandboxEnd::NotDelivered {
                             observed_at: Utc::now(),
                         },
                     )

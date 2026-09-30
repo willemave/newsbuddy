@@ -1424,38 +1424,6 @@ async fn persist_usage(
                 )
                 .await?;
             }
-            UsageWrite::Model(usage) => {
-                let total_tokens = usage
-                    .usage
-                    .input_tokens
-                    .saturating_add(usage.usage.output_tokens);
-                insert_usage(
-                    transaction,
-                    UsageInsert {
-                        provider: &usage.provider,
-                        model: &usage.model,
-                        feature: "content_analyzer",
-                        operation: "content_analyzer.analyze_url",
-                        request_id: usage.response_id.as_deref(),
-                        task_id: plan.task_id,
-                        content_id,
-                        user_id,
-                        request_count: Some(saturating_i32(usage.usage.request_count)),
-                        resource_count: None,
-                        input_tokens: Some(saturating_i32(usage.usage.input_tokens)),
-                        cache_read_tokens: Some(saturating_i32(usage.usage.cached_input_tokens)),
-                        cache_write_tokens: Some(saturating_i32(usage.usage.cache_write_tokens)),
-                        output_tokens: Some(saturating_i32(usage.usage.output_tokens)),
-                        total_tokens: Some(saturating_i32(total_tokens)),
-                        cost_usd: None,
-                        pricing_version: None,
-                        metadata: json!({
-                            "reasoning_tokens": usage.usage.reasoning_tokens,
-                        }),
-                    },
-                )
-                .await?;
-            }
             UsageWrite::X(usage) => {
                 let resource_count = i32::try_from(usage.resource_count).map_err(|_| {
                     ContentRepositoryError::XResourceCountOutOfRange(usage.resource_count)
@@ -1480,7 +1448,7 @@ async fn persist_usage(
                         total_tokens: None,
                         cost_usd: None,
                         pricing_version: None,
-                        metadata: Value::Object(Map::new()),
+                        metadata: json!({"resource_count_unit": "resource"}),
                     },
                 )
                 .await?;
@@ -1786,10 +1754,6 @@ pub(super) enum ContentRepositoryError {
         "content {content_id} submitted-user attribution changed across {attempts} lock attempts"
     )]
     ContentUserAttributionChanged { content_id: i64, attempts: usize },
-}
-
-fn saturating_i32(value: u64) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 #[cfg(test)]

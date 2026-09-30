@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
@@ -41,6 +42,7 @@ use crate::auth::AuthenticatedUser;
 use crate::content_read::presentation;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
+use crate::model_usage::ApiAgentUsageSink;
 use crate::write_support::{
     bad_request, decode_json, internal_error, require_operation, verify_stamp,
 };
@@ -424,9 +426,15 @@ pub(super) async fn get_tweet_suggestions(
         ));
     }
     let context = tweet_context(&plan);
+    let usage = Arc::new(ApiAgentUsageSink::new(
+        state.database.pool().clone(),
+        Some(current_user.id),
+        "content.tweet_suggestions",
+        Some(content_id),
+    ));
     let generated = state
         .content_misc
-        .generate_tweet_suggestions(
+        .generate_tweet_suggestions_with_events(
             &context,
             plan_guidance(payload.message.as_deref()),
             payload.creativity,
@@ -434,9 +442,11 @@ pub(super) async fn get_tweet_suggestions(
             payload
                 .llm_provider
                 .map(newsly_contracts::UserLlmProvider::as_str),
+            usage.clone(),
         )
-        .await
-        .map_err(|error| provider_bad_gateway(&error, &request_id))?;
+        .await;
+    usage.finish().await;
+    let generated = generated.map_err(|error| provider_bad_gateway(&error, &request_id))?;
     Ok(Json(TweetSuggestionsResponse {
         content_id,
         creativity: payload.creativity,

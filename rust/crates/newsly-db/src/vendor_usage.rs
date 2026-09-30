@@ -46,11 +46,13 @@ pub async fn record_transcription_usage(
     usage: &NewTranscriptionUsage<'_>,
 ) -> Result<bool, VendorUsageRepositoryError> {
     let priced = crate::openai_transcription_cost(
+        transaction,
         usage.model,
         usage.audio_duration_ms,
         usage.duration_source == "ffprobe",
         usage.standard_pricing,
-    );
+    )
+    .await?;
     let mut metadata = usage.metadata.as_object().cloned().unwrap_or_default();
     metadata.insert(
         "audio_duration_ms".to_owned(),
@@ -67,25 +69,21 @@ pub async fn record_transcription_usage(
         Value::from(usage.duration_source),
     );
     metadata.insert(
-        "cost_rate_usd".to_owned(),
-        priced.map_or(Value::Null, |value| Value::from(value.rate_usd)),
+        "resource_count_unit".to_owned(),
+        Value::from("audio_second"),
     );
     metadata.insert(
-        "cost_rate_unit".to_owned(),
-        priced.map_or(Value::Null, |value| Value::from(value.rate_unit)),
+        "pricing".to_owned(),
+        priced
+            .as_ref()
+            .map_or(Value::Null, |cost| cost.metadata.clone()),
     );
-    metadata.insert(
-        "cost_source_url".to_owned(),
-        priced.map_or(Value::Null, |value| Value::from(value.source_url)),
-    );
-    metadata.insert(
-        "cost_basis".to_owned(),
-        priced.map_or(Value::Null, |value| Value::from(value.cost_basis)),
-    );
-    metadata.insert(
-        "cost_pricing_version".to_owned(),
-        priced.map_or(Value::Null, |value| Value::from(value.pricing_version)),
-    );
+    if priced.is_none() {
+        metadata.insert(
+            "cost_reason".to_owned(),
+            Value::from("missing_rate_or_unmeasured_audio_or_nonstandard_endpoint"),
+        );
+    }
     let inserted = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO vendor_usage_records (
@@ -136,9 +134,9 @@ pub async fn record_transcription_usage(
             .audio_duration_ms
             .map(|value| i32::try_from(value.div_ceil(1_000)).unwrap_or(i32::MAX)),
     )
-    .bind(priced.map(|value| value.cost_usd))
-    .bind(priced.map(|value| value.pricing_version))
-    .bind(priced.map(|value| value.cost_basis))
+    .bind(priced.as_ref().map(|value| value.cost_usd))
+    .bind(priced.as_ref().map(|value| value.pricing_version.as_str()))
+    .bind(priced.as_ref().map(|_| "public_list_estimate"))
     .bind(Value::Object(metadata))
     .fetch_optional(&mut **transaction)
     .await?;
@@ -150,15 +148,18 @@ pub async fn record_narration_tts_usage(
     transaction: &mut Transaction<'_, Postgres>,
     usage: &NewNarrationTtsUsage<'_>,
 ) -> Result<bool, VendorUsageRepositoryError> {
-    let priced = crate::elevenlabs_tts_cost(usage.model, usage.text_chars, usage.standard_pricing);
+    let priced = crate::elevenlabs_tts_cost(
+        transaction,
+        usage.model,
+        usage.text_chars,
+        usage.standard_pricing,
+    )
+    .await?;
     let metadata = serde_json::json!({
         "text_chars": usage.text_chars,
-        "unit": "character",
-        "cost_rate_usd": priced.map(|value| value.rate_usd),
-        "cost_rate_unit": priced.map(|value| value.rate_unit),
-        "cost_source_url": priced.map(|value| value.source_url),
-        "cost_basis": priced.map(|value| value.cost_basis),
-        "cost_pricing_version": priced.map(|value| value.pricing_version),
+        "resource_count_unit": "character",
+        "pricing": priced.as_ref().map(|cost| &cost.metadata),
+        "cost_reason": priced.is_none().then_some("missing_rate_or_nonstandard_endpoint"),
     });
     let inserted = sqlx::query_scalar::<_, i64>(
         r#"
@@ -183,9 +184,9 @@ pub async fn record_narration_tts_usage(
     .bind(usage.model)
     .bind(usage.request_count)
     .bind(i32::try_from(usage.text_chars).unwrap_or(i32::MAX))
-    .bind(priced.map(|value| value.cost_usd))
-    .bind(priced.map(|value| value.pricing_version))
-    .bind(priced.map(|value| value.cost_basis))
+    .bind(priced.as_ref().map(|value| value.cost_usd))
+    .bind(priced.as_ref().map(|value| value.pricing_version.as_str()))
+    .bind(priced.as_ref().map(|_| "public_list_estimate"))
     .bind(metadata)
     .fetch_optional(&mut **transaction)
     .await?;
@@ -197,7 +198,10 @@ pub async fn record_x_user_lookup_usage(
     transaction: &mut Transaction<'_, Postgres>,
     usage: &NewXUserLookupUsage<'_>,
 ) -> Result<bool, VendorUsageRepositoryError> {
-    let metadata = serde_json::json!({"resource_ids": [usage.provider_user_id]});
+    let metadata = serde_json::json!({
+        "resource_ids": [usage.provider_user_id],
+        "resource_count_unit": "resource",
+    });
     let inserted = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO vendor_usage_records (

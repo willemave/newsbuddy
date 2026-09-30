@@ -1,5 +1,8 @@
 use std::env;
 use std::fmt::{self, Debug, Formatter};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
@@ -201,10 +204,16 @@ pub struct ImageGenerationUsage {
     pub metadata: Value,
 }
 
+pub trait ImageGenerationUsageObserver: Send + Sync {
+    fn observe(
+        &self,
+        usage: ImageGenerationUsage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneratedImage {
     pub bytes: Vec<u8>,
-    pub usage: ImageGenerationUsage,
 }
 
 #[derive(Debug, Clone)]
@@ -253,13 +262,17 @@ impl ImageGenerationGateway {
         prompt: &str,
         content_id: i64,
         task_id: i64,
+        usage_observer: Arc<dyn ImageGenerationUsageObserver>,
     ) -> Result<GeneratedImage, ImageGenerationError> {
         if prompt.trim().is_empty() {
             return Err(ImageGenerationError::InvalidPrompt);
         }
         match self.config.infographic_provider {
             InfographicProvider::Runware => {
-                match self.generate_runware(prompt, content_id, task_id).await {
+                match self
+                    .generate_runware(prompt, content_id, task_id, Arc::clone(&usage_observer))
+                    .await
+                {
                     Ok(image) => Ok(image),
                     Err(error) if error.fallback_allowed() && self.config.google_auth.is_some() => {
                         tracing::warn!(
@@ -268,12 +281,16 @@ impl ImageGenerationGateway {
                             error = %error,
                             "Runware infographic generation failed; using configured Google fallback"
                         );
-                        self.generate_google(prompt, content_id, true).await
+                        self.generate_google(prompt, content_id, true, usage_observer)
+                            .await
                     }
                     Err(error) => Err(error),
                 }
             }
-            InfographicProvider::Google => self.generate_google(prompt, content_id, false).await,
+            InfographicProvider::Google => {
+                self.generate_google(prompt, content_id, false, usage_observer)
+                    .await
+            }
         }
     }
 
@@ -282,6 +299,7 @@ impl ImageGenerationGateway {
         prompt: &str,
         content_id: i64,
         task_id: i64,
+        usage_observer: Arc<dyn ImageGenerationUsageObserver>,
     ) -> Result<GeneratedImage, ImageGenerationError> {
         let api_key = self.config.runware_api_key.as_ref().ok_or_else(|| {
             ImageGenerationError::InvalidConfiguration("RUNWARE_API_KEY is missing".to_owned())
@@ -305,7 +323,14 @@ impl ImageGenerationGateway {
                     negative_prompt: options.negative_prompt,
                 };
                 let result = self
-                    .runware_attempt(api_key, &request, content_id, task_id, inline_attempt)
+                    .runware_attempt(
+                        api_key,
+                        &request,
+                        content_id,
+                        task_id,
+                        inline_attempt,
+                        Arc::clone(&usage_observer),
+                    )
                     .await;
                 match result {
                     Ok(image) => return Ok(image),
@@ -340,6 +365,7 @@ impl ImageGenerationGateway {
         _content_id: i64,
         _task_id: i64,
         inline_attempt: usize,
+        usage_observer: Arc<dyn ImageGenerationUsageObserver>,
     ) -> Result<GeneratedImage, ImageGenerationError> {
         let response = self
             .client
@@ -376,19 +402,12 @@ impl ImageGenerationGateway {
         let image_url = result
             .image_url
             .or(result.image_url_camel)
-            .or(result.image_url_snake)
-            .ok_or_else(|| {
-                ImageGenerationError::RunwarePayload(
-                    "Runware did not return an image URL".to_owned(),
-                )
-            })?;
-        let bytes = self.download_runware_image(&image_url).await?;
-        if bytes.is_empty() {
-            return Err(ImageGenerationError::EmptyImage);
-        }
+            .or(result.image_url_snake);
         let metadata = json!({
             "image_type": "infographic",
             "provider": "runware",
+            "billable_image_count": 1,
+            "standard_pricing_endpoint": self.config.runware_api_url.as_str() == "https://api.runware.ai/v1",
             "response_cost_usd": result.cost,
             "image_url": image_url,
             "task_uuid": request.task_uuid,
@@ -396,9 +415,9 @@ impl ImageGenerationGateway {
             "width": request.width,
             "height": request.height,
         });
-        Ok(GeneratedImage {
-            bytes,
-            usage: ImageGenerationUsage {
+        observe_image_usage(
+            usage_observer,
+            ImageGenerationUsage {
                 provider: "runware".to_owned(),
                 model: request.model.to_owned(),
                 request_id: Some(request.task_uuid.to_owned()),
@@ -410,7 +429,16 @@ impl ImageGenerationGateway {
                 response_cost_usd: value_as_f64(result.cost.as_ref()),
                 metadata,
             },
-        })
+        )
+        .await?;
+        let image_url = image_url.ok_or_else(|| {
+            ImageGenerationError::RunwarePayload("Runware did not return an image URL".to_owned())
+        })?;
+        let bytes = self.download_runware_image(&image_url).await?;
+        if bytes.is_empty() {
+            return Err(ImageGenerationError::EmptyImage);
+        }
+        Ok(GeneratedImage { bytes })
     }
 
     async fn download_runware_image(&self, raw_url: &str) -> Result<Vec<u8>, ImageGenerationError> {
@@ -455,6 +483,7 @@ impl ImageGenerationGateway {
         prompt: &str,
         content_id: i64,
         fallback_from_runware: bool,
+        usage_observer: Arc<dyn ImageGenerationUsageObserver>,
     ) -> Result<GeneratedImage, ImageGenerationError> {
         let auth = self.config.google_auth.as_ref().ok_or_else(|| {
             ImageGenerationError::InvalidConfiguration(
@@ -464,7 +493,14 @@ impl ImageGenerationGateway {
         let mut last_error = None;
         for (index, model) in self.config.google_models.iter().enumerate() {
             let result = self
-                .google_attempt(auth, model, prompt, content_id, fallback_from_runware)
+                .google_attempt(
+                    auth,
+                    model,
+                    prompt,
+                    content_id,
+                    fallback_from_runware,
+                    Arc::clone(&usage_observer),
+                )
                 .await;
             match result {
                 Ok(image) => return Ok(image),
@@ -493,7 +529,9 @@ impl ImageGenerationGateway {
         prompt: &str,
         _content_id: i64,
         fallback_from_runware: bool,
+        usage_observer: Arc<dyn ImageGenerationUsageObserver>,
     ) -> Result<GeneratedImage, ImageGenerationError> {
+        let local_request_id = Uuid::new_v4().to_string();
         let endpoint = google_endpoint(&self.config.google_api_url, auth, model)?;
         let body = GoogleGenerateRequest {
             contents: [GoogleContent {
@@ -534,6 +572,31 @@ impl ImageGenerationGateway {
             return Err(ImageGenerationError::GoogleStatus { status, detail });
         }
         let payload: GoogleGenerateResponse = serde_json::from_slice(&bytes)?;
+        let usage = payload.usage_metadata.clone().unwrap_or_default();
+        let metadata = json!({
+            "image_type": "infographic",
+            "image_size": "512",
+            "provider": "google",
+            "fallback_from_runware": fallback_from_runware,
+            "model_version": payload.model_version,
+            "reasoning_tokens": usage.thoughts,
+        });
+        observe_image_usage(
+            usage_observer,
+            ImageGenerationUsage {
+                provider: "google".to_owned(),
+                model: model.to_owned(),
+                request_id: payload.response_id.clone().or(Some(local_request_id)),
+                input_tokens: usage.prompt,
+                cache_read_tokens: usage.cached_content,
+                output_tokens: usage.candidates,
+                total_tokens: usage.total,
+                request_count: 1,
+                response_cost_usd: None,
+                metadata,
+            },
+        )
+        .await?;
         let encoded = payload
             .candidates
             .iter()
@@ -555,31 +618,18 @@ impl ImageGenerationGateway {
                 limit: self.config.max_image_bytes,
             });
         }
-        let usage = payload.usage_metadata.unwrap_or_default();
-        let metadata = json!({
-            "image_type": "infographic",
-            "image_size": "512",
-            "provider": "google",
-            "fallback_from_runware": fallback_from_runware,
-            "model_version": payload.model_version,
-            "reasoning_tokens": usage.thoughts,
-        });
-        Ok(GeneratedImage {
-            bytes: image_bytes,
-            usage: ImageGenerationUsage {
-                provider: "google".to_owned(),
-                model: model.to_owned(),
-                request_id: payload.response_id,
-                input_tokens: usage.prompt,
-                cache_read_tokens: usage.cached_content,
-                output_tokens: usage.candidates,
-                total_tokens: usage.total,
-                request_count: 1,
-                response_cost_usd: None,
-                metadata,
-            },
-        })
+        Ok(GeneratedImage { bytes: image_bytes })
     }
+}
+
+async fn observe_image_usage(
+    observer: Arc<dyn ImageGenerationUsageObserver>,
+    usage: ImageGenerationUsage,
+) -> Result<(), ImageGenerationError> {
+    observer
+        .observe(usage)
+        .await
+        .map_err(ImageGenerationError::UsageObservation)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -738,7 +788,7 @@ struct GoogleInlineData {
     data: String,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 struct GoogleUsageMetadata {
     #[serde(rename = "promptTokenCount")]
     prompt: Option<i64>,
@@ -942,6 +992,8 @@ pub enum ImageGenerationError {
     Json(#[from] serde_json::Error),
     #[error("image provider returned invalid base64")]
     Base64(#[from] base64::DecodeError),
+    #[error("image usage observation failed: {0}")]
+    UsageObservation(String),
     #[error("image provider HTTP client failed")]
     Http(#[from] reqwest::Error),
 }
@@ -977,6 +1029,7 @@ impl ImageGenerationError {
             | Self::Json(_)
             | Self::Base64(_)
             | Self::RunwarePayload(_) => false,
+            Self::UsageObservation(_) => true,
         }
     }
 

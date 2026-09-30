@@ -9,13 +9,14 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
 use super::finalizer::DiscussionFinalizer;
 use super::input::{build_merge_prompt, build_summary_input, plan_summary};
 use super::model::{
     DiscussionFinalizationPlan, DiscussionMutation, DiscussionPreparation, DiscussionSnapshot,
-    DiscussionSummaryMode, DiscussionUsage, FetchedDiscussionArtifact, SummaryPublication,
+    DiscussionSummaryMode, FetchedDiscussionArtifact, SummaryPublication,
 };
 use super::repository::prepare_discussion;
 use super::storage::{DiscussionObjectStore, DiscussionObjectStoreError};
@@ -131,10 +132,10 @@ async fn execute_discussion(
         Ok(fetched) => fetched,
         Err(error) => {
             if let Some(status) = error.discussion_terminal_status() {
-                return terminal_execution(plan, snapshot, status, error.to_string());
+                return terminal_execution(snapshot, status, error.to_string());
             }
             let retryable = error.discussion_retryable();
-            return failed_execution(plan, snapshot, error.to_string(), retryable, None);
+            return failed_execution(snapshot, error.to_string(), retryable, None);
         }
     };
     if lease.ownership_lost() {
@@ -151,7 +152,7 @@ async fn execute_discussion(
         Ok(pointer) => pointer,
         Err(error) => {
             let retryable = storage_error_is_retryable(&error);
-            return failed_execution(plan, snapshot, error.to_string(), retryable, None);
+            return failed_execution(snapshot, error.to_string(), retryable, None);
         }
     };
     let fetched_at = Utc::now();
@@ -216,10 +217,12 @@ async fn execute_discussion(
                 summary_input.prompt.clone()
             };
             let first = summarize_with_lease(
-                &services.gateway,
+                services,
                 &prompt,
                 requested_mode == DiscussionSummaryMode::Merge,
                 &snapshot.discussion_url,
+                plan.task_id,
+                snapshot.owner_user_id,
                 &mut lease,
             )
             .await;
@@ -244,10 +247,12 @@ async fn execute_discussion(
                         "discussion merge failed; falling back to full summary"
                     );
                     match summarize_with_lease(
-                        &services.gateway,
+                        services,
                         &summary_input.prompt,
                         false,
                         &snapshot.discussion_url,
+                        plan.task_id,
+                        snapshot.owner_user_id,
                         &mut lease,
                     )
                     .await
@@ -263,7 +268,6 @@ async fn execute_discussion(
                         }
                         SummaryCall::Failed(error) => {
                             return failed_execution(
-                                plan,
                                 snapshot,
                                 error.to_string(),
                                 error.discussion_retryable(),
@@ -274,7 +278,6 @@ async fn execute_discussion(
                 }
                 SummaryCall::Failed(error) => {
                     return failed_execution(
-                        plan,
                         snapshot,
                         error.to_string(),
                         error.discussion_retryable(),
@@ -282,30 +285,17 @@ async fn execute_discussion(
                     );
                 }
             };
-            let usage = DiscussionUsage {
-                provider: generated.provider.clone(),
-                model: generated.model.clone(),
-                provider_response_id: generated.provider_response_id.clone(),
-                usage: generated.usage.clone(),
-                summary_mode: effective_mode,
-                summary_input_sha256: summary_input.input_sha256.clone(),
-                summary_comment_count: summary_input.comment_count,
-                changed_comment_count: i32::try_from(summary_plan.changed_comments.len())
-                    .unwrap_or(i32::MAX),
-            };
             SummaryPublication::Generated {
                 input: summary_input,
                 summary: generated.summary_json,
                 model: generated.model,
                 mode: effective_mode,
-                usage,
             }
         }
     };
     with_finalizer(
         TaskResult::ok(),
         DiscussionFinalizationPlan {
-            task_id: plan.task_id,
             snapshot,
             mutation: DiscussionMutation::Completed {
                 fetched: fetched_artifact,
@@ -323,24 +313,49 @@ enum SummaryCall {
 }
 
 async fn summarize_with_lease(
-    gateway: &ContentMiscGateway,
+    services: &DiscussionWorkerServices,
     prompt: &str,
     merge: bool,
     discussion_url: &str,
+    task_id: i64,
+    user_id: Option<i64>,
     lease: &mut LeaseHealth,
 ) -> SummaryCall {
     if lease.ownership_lost() {
         return SummaryCall::LeaseLost;
     }
-    let call = gateway.summarize_discussion(prompt, merge, Some(discussion_url));
+    let usage_sink = Arc::new(AgentUsageSink::new(
+        services.pool.clone(),
+        AgentUsageAttribution {
+            operation: if merge {
+                "news_discussions.merge_summary".to_owned()
+            } else {
+                "news_discussions.summarize".to_owned()
+            },
+            source: "discussion_scraper".to_owned(),
+            task_id,
+            content_id: None,
+            session_id: None,
+            message_id: None,
+            user_id,
+        },
+    ));
+    let call = services.gateway.summarize_discussion_with_events(
+        prompt,
+        merge,
+        Some(discussion_url),
+        usage_sink.clone(),
+    );
     tokio::pin!(call);
-    tokio::select! {
+    let result = tokio::select! {
         result = &mut call => match result {
             Ok(generated) => SummaryCall::Generated(generated),
             Err(error) => SummaryCall::Failed(error),
         },
         () = lease.wait_for_ownership_loss() => SummaryCall::LeaseLost,
-    }
+    };
+    usage_sink.finish().await;
+    result
 }
 
 fn raw_payload(result: &DiscussionRefreshResult) -> Value {
@@ -384,7 +399,6 @@ fn raw_payload(result: &DiscussionRefreshResult) -> Value {
 }
 
 fn terminal_execution(
-    plan: &OwnedWorkPlan,
     snapshot: DiscussionSnapshot,
     status: &str,
     reason: String,
@@ -392,7 +406,6 @@ fn terminal_execution(
     with_finalizer(
         TaskResult::ok(),
         DiscussionFinalizationPlan {
-            task_id: plan.task_id,
             snapshot,
             mutation: DiscussionMutation::Terminal {
                 status: status.to_owned(),
@@ -404,7 +417,6 @@ fn terminal_execution(
 }
 
 fn failed_execution(
-    plan: &OwnedWorkPlan,
     snapshot: DiscussionSnapshot,
     reason: String,
     retryable: bool,
@@ -413,7 +425,6 @@ fn failed_execution(
     with_finalizer(
         TaskResult::fail(Some(reason.clone()), retryable),
         DiscussionFinalizationPlan {
-            task_id: plan.task_id,
             snapshot,
             mutation: DiscussionMutation::Failed { reason, fetched },
             finalized_at: Utc::now(),

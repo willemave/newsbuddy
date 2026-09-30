@@ -1,16 +1,17 @@
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
-use newsly_agent_runtime::ProviderUsage;
+use newsly_agent_runtime::{AgentEventSink, ProviderUsage};
 use newsly_db::{
-    AudioEpisodeRecord, AudioEpisodeScriptUsage, AudioEpisodeTtsUsage,
-    PrepareAudioEpisodeGenerationOutcome, prepare_audio_episode_generation,
+    AudioEpisodeRecord, NewAudioEpisodeTtsChunkUsage, PrepareAudioEpisodeGenerationOutcome,
+    prepare_audio_episode_generation, record_audio_episode_tts_chunk_usage,
 };
 use newsly_domain::{BriefingNarrationMetadata, BriefingNarrationStyle};
 use newsly_providers::{
     AudioEpisodeGateway, AudioEpisodeGatewayError, AudioEpisodeScript, AudioEpisodeSpeaker,
-    AudioEpisodeTurn,
+    AudioEpisodeTtsChunkUsage, AudioEpisodeTtsUsageObserver, AudioEpisodeTurn,
 };
 use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde::Deserialize;
@@ -18,6 +19,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use tracing::info;
 
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
 use crate::{HandlerExecution, HandlerFuture, LeaseHealth, TaskHandler};
 
 use super::finalizer::AudioEpisodeFinalizer;
@@ -155,7 +157,7 @@ async fn execute_generation(
                 request_count = script.usage.as_ref().map_or(0, |usage| usage.request_count),
                 input_tokens = script.usage.as_ref().map_or(0, |usage| usage.input_tokens),
                 output_tokens = script.usage.as_ref().map_or(0, |usage| usage.output_tokens),
-                cache_read_tokens = script.usage.as_ref().map_or(0, |usage| usage.cache_read_tokens),
+                cache_read_tokens = script.usage.as_ref().map_or(0, |usage| usage.cached_input_tokens),
                 cache_write_tokens = script.usage.as_ref().map_or(0, |usage| usage.cache_write_tokens),
                 "Audio timing"
             );
@@ -198,9 +200,19 @@ async fn execute_generation(
     };
 
     let tts_started = Instant::now();
+    let usage_observer: Arc<dyn AudioEpisodeTtsUsageObserver> = Arc::new(DurableTtsUsageObserver {
+        pool: services.pool.clone(),
+        task_id: prepared.task_id,
+        retry_count: prepared.retry_count,
+        user_id: prepared.user_id,
+        audio_episode_id: prepared.audio_episode_id,
+        source_content_id: prepared.source_content_id,
+    });
     let dialogue = match provider_call(
         &mut lease,
-        services.gateway.synthesize_dialogue(&script.script.turns),
+        services
+            .gateway
+            .synthesize_dialogue(&script.script.turns, usage_observer),
     )
     .await
     {
@@ -278,12 +290,6 @@ async fn execute_generation(
     if lease.ownership_lost() {
         return lease_lost_failure();
     }
-    let tts_usage = AudioEpisodeTtsUsage {
-        model: services.gateway.tts_model().to_owned(),
-        request_count: dialogue.request_count,
-        text_chars: dialogue.text_chars,
-        standard_pricing: services.gateway.uses_standard_elevenlabs_pricing(),
-    };
     HandlerExecution::with_finalizer(
         TaskResult::ok(),
         AudioEpisodeFinalizer::new(AudioEpisodeFinalizationPlan {
@@ -291,10 +297,66 @@ async fn execute_generation(
             mutation: AudioEpisodeMutation::Complete {
                 script,
                 audio_storage_path,
-                tts_usage,
             },
         }),
     )
+}
+
+#[derive(Debug, Clone)]
+struct DurableTtsUsageObserver {
+    pool: PgPool,
+    task_id: i64,
+    retry_count: i32,
+    user_id: i64,
+    audio_episode_id: i64,
+    source_content_id: Option<i64>,
+}
+
+impl AudioEpisodeTtsUsageObserver for DurableTtsUsageObserver {
+    fn observe(
+        &self,
+        usage: AudioEpisodeTtsChunkUsage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+        let pool = self.pool.clone();
+        let task_id = self.task_id;
+        let retry_count = self.retry_count;
+        let user_id = self.user_id;
+        let audio_episode_id = self.audio_episode_id;
+        let source_content_id = self.source_content_id;
+        Box::pin(async move {
+            tokio::spawn(async move {
+                let result = record_audio_episode_tts_chunk_usage(
+                    &pool,
+                    &NewAudioEpisodeTtsChunkUsage {
+                        task_id,
+                        retry_count,
+                        user_id,
+                        audio_episode_id,
+                        source_content_id,
+                        chunk_index: usage.chunk_index,
+                        model: &usage.model,
+                        text_chars: usage.text_chars,
+                        endpoint: usage.endpoint,
+                        standard_endpoint: usage.standard_endpoint,
+                    },
+                )
+                .await;
+                if let Err(error) = &result {
+                    tracing::error!(
+                        task_id,
+                        audio_episode_id,
+                        retry_count,
+                        chunk_index = usage.chunk_index,
+                        error = %error,
+                        "Audio episode TTS usage persistence failed"
+                    );
+                }
+                result.map(|_| ()).map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| format!("TTS usage persistence task failed: {error}"))?
+        })
+    }
 }
 
 fn prepared_attempt(
@@ -381,26 +443,39 @@ async fn prepare_script(
         return prepared_script(script, text, model, "cache", None)
             .map_err(GenerationStageError::Input);
     }
-    let generated = match provider_call(
+    let usage_events = Arc::new(AgentUsageSink::new(
+        services.pool.clone(),
+        AgentUsageAttribution {
+            operation: "audio_episodes.generate_script".to_owned(),
+            source: "rust_worker".to_owned(),
+            task_id: attempt.task_id,
+            content_id: attempt.source_content_id,
+            session_id: None,
+            message_id: None,
+            user_id: Some(attempt.user_id),
+        },
+    ));
+    let events: Arc<dyn AgentEventSink> = usage_events.clone();
+    let generated = provider_call(
         lease,
         services
             .gateway
-            .generate_script(&attempt.kind, &attempt.source_snapshot),
+            .generate_script(&attempt.kind, &attempt.source_snapshot, events),
     )
-    .await
-    {
+    .await;
+    usage_events.finish().await;
+    let generated = match generated {
         Ok(Ok(generated)) => generated,
         Ok(Err(error)) => return Err(GenerationStageError::Provider(error)),
         Err(LeaseLost) => return Err(GenerationStageError::LeaseLost),
     };
-    let usage = script_usage(&generated.model, &generated.usage);
     let text = generated.script.render_text();
     prepared_script(
         generated.script,
         text,
         generated.model,
         "generated",
-        Some(usage),
+        Some(generated.usage),
     )
     .map_err(GenerationStageError::Input)
 }
@@ -410,7 +485,7 @@ fn prepared_script(
     script_text: String,
     model: String,
     mode: &'static str,
-    usage: Option<AudioEpisodeScriptUsage>,
+    usage: Option<ProviderUsage>,
 ) -> Result<PreparedScript, String> {
     if script.title.trim().is_empty() || script.turns.is_empty() || script_text.trim().is_empty() {
         return Err("Audio episode script is empty".to_owned());
@@ -436,25 +511,6 @@ fn valid_existing_script(script: &AudioEpisodeScript) -> bool {
         && !script.turns.is_empty()
         && script.turns.len() <= 100
         && script.turns.iter().all(|turn| !turn.text.trim().is_empty())
-}
-
-fn script_usage(model: &str, usage: &ProviderUsage) -> AudioEpisodeScriptUsage {
-    let provider = model
-        .split_once(':')
-        .map_or_else(|| "unknown".to_owned(), |(provider, _)| provider.to_owned());
-    AudioEpisodeScriptUsage {
-        provider,
-        model: model.to_owned(),
-        request_count: bounded_i32(usage.request_count),
-        input_tokens: bounded_i32(usage.input_tokens),
-        output_tokens: bounded_i32(usage.output_tokens),
-        cache_read_tokens: bounded_i32(usage.cached_input_tokens),
-        cache_write_tokens: bounded_i32(usage.cache_write_tokens),
-    }
-}
-
-fn bounded_i32(value: u64) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 fn elapsed_millis(started: Instant) -> u64 {

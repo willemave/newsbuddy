@@ -215,11 +215,7 @@ impl ChatAgentRuntime {
             },
             snapshot.clone(),
         ));
-        let events = Arc::new(ChatEvents::new(
-            self.pool.clone(),
-            snapshot.message_id,
-            snapshot.stream_generation,
-        ));
+        let events = Arc::new(ChatEvents::new(self.pool.clone(), snapshot));
         let definitions = ChatToolExecutor::definitions();
         validate_allowed_tools(&allowed_tools, &definitions)?;
         let system_prompt = system_prompt(snapshot, content_body.as_deref(), instruction)?;

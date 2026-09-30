@@ -1,4 +1,58 @@
 use super::*;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+
+#[derive(Debug, Default)]
+struct RecordingUsageObserver {
+    observations: Mutex<Vec<ImageGenerationUsage>>,
+}
+
+impl ImageGenerationUsageObserver for RecordingUsageObserver {
+    fn observe(
+        &self,
+        usage: ImageGenerationUsage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+        Box::pin(async move {
+            self.observations.lock().unwrap().push(usage);
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn billable_response_is_observed_before_a_later_download_failure() {
+    let observer = Arc::new(RecordingUsageObserver::default());
+    observe_image_usage(
+        Arc::clone(&observer) as Arc<dyn ImageGenerationUsageObserver>,
+        ImageGenerationUsage {
+            provider: "runware".to_owned(),
+            model: DEFAULT_RUNWARE_MODEL.to_owned(),
+            request_id: Some("task-response-1".to_owned()),
+            input_tokens: None,
+            cache_read_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            request_count: 1,
+            response_cost_usd: Some(0.035),
+            metadata: json!({"billable_image_count": 1}),
+        },
+    )
+    .await
+    .unwrap();
+
+    let later_download: Result<Vec<u8>, ImageGenerationError> = Err(
+        ImageGenerationError::RunwareImageStatus(StatusCode::BAD_GATEWAY),
+    );
+    assert!(later_download.is_err());
+    let observations = observer.observations.lock().unwrap();
+    assert_eq!(observations.len(), 1);
+    assert_eq!(
+        observations[0].request_id.as_deref(),
+        Some("task-response-1")
+    );
+    assert_eq!(observations[0].response_cost_usd, Some(0.035));
+}
 
 #[test]
 fn runware_request_uses_provider_exact_task_uuid_field() {

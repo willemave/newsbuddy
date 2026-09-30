@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use futures_util::{StreamExt, stream};
 use newsly_agent_runtime::{
-    AgentEngine, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript, ResponseContract,
-    ToolPolicy,
+    AgentEngine, AgentEventSink, AgentLimits, AgentRequest, AgentRuntimeError, NewslyTranscript,
+    ResponseContract, ToolPolicy,
 };
 use reqwest::Url;
 use rig_core::schemars::{JsonSchema, schema_for};
@@ -46,7 +46,7 @@ pub struct OnboardingProfile {
     pub candidate_sources: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OnboardingProfileOutcome {
     pub profile: OnboardingProfile,
     pub exa_usage: OnboardingExaUsage,
@@ -166,13 +166,26 @@ impl SearchManyOutcome {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct OnboardingGateway {
     client: reqwest::Client,
     exa_api_key: Option<SecretString>,
     exa_search_url: Url,
     engine: RigAgentEngine,
+    events: Arc<dyn AgentEventSink>,
     reddit: Option<lane_sources::RedditCredentials>,
+}
+
+impl std::fmt::Debug for OnboardingGateway {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OnboardingGateway")
+            .field("client", &self.client)
+            .field("exa_search_url", &self.exa_search_url)
+            .field("engine", &self.engine)
+            .field("reddit", &self.reddit)
+            .finish_non_exhaustive()
+    }
 }
 
 impl OnboardingGateway {
@@ -206,8 +219,17 @@ impl OnboardingGateway {
             exa_api_key: secret_env("EXA_API_KEY"),
             exa_search_url,
             engine,
+            events: Arc::new(NoEvents),
             reddit: lane_sources::RedditCredentials::from_env(),
         })
+    }
+
+    /// Returns a request-local clone that publishes model events to `events`.
+    #[must_use]
+    pub fn with_events(&self, events: Arc<dyn AgentEventSink>) -> Self {
+        let mut gateway = self.clone();
+        gateway.events = events;
+        gateway
     }
 
     /// Builds a grounded onboarding profile from the user's declared interests.
@@ -525,7 +547,7 @@ impl OnboardingGateway {
                     provider_parameters: onboarding_provider_parameters(),
                 },
                 Arc::new(NoTools),
-                Arc::new(NoEvents),
+                Arc::clone(&self.events),
             )
             .await?;
         let value = outcome
@@ -576,12 +598,12 @@ impl OnboardingGateway {
         };
         for (_, query, result) in grouped {
             match result {
-                Ok(results) => {
+                Ok(search) => {
                     outcome.succeeded += 1;
-                    outcome.usage.record_search(&results);
+                    outcome.usage.record_search(&search);
                     outcome
                         .results
-                        .extend(results.into_iter().map(|result| WebResult {
+                        .extend(search.results.into_iter().map(|result| WebResult {
                             title: clean(result.title).unwrap_or_else(|| "Untitled".to_owned()),
                             url: result.url,
                             snippet: clean(result.summary).or_else(|| clean(result.text)),
@@ -590,6 +612,7 @@ impl OnboardingGateway {
                         }));
                 }
                 Err(error) => {
+                    outcome.usage.record_unpriced_attempt();
                     tracing::error!(error = %error, query, "Exa onboarding search failed");
                 }
             }

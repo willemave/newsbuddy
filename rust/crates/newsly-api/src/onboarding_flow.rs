@@ -33,6 +33,7 @@ use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::feed_validation::FeedValidationError;
 use crate::gateway::RouteOwnershipStamp;
+use crate::model_usage::onboarding_gateway_with_usage;
 use crate::scraper_config_normalization::{
     apply_validated_feed_url, feed_url, normalize_create_input,
 };
@@ -113,11 +114,13 @@ pub(super) async fn build_profile(
         return Err(validation_error("interest_topics is required", &request_id));
     }
     verify_before_external(&state, &stamp, &request_id).await?;
-    let outcome = state
-        .onboarding
+    let (gateway, usage) =
+        onboarding_gateway_with_usage(&state, Some(current_user.id), "onboarding.build_profile");
+    let outcome = gateway
         .build_profile(&payload.first_name, &interest_topics)
-        .await
-        .map_err(|error| internal_error(error, &request_id))?;
+        .await;
+    usage.finish().await;
+    let outcome = outcome.map_err(|error| internal_error(error, &request_id))?;
     record_onboarding_exa_usage(
         &state,
         current_user.id,
@@ -165,11 +168,13 @@ pub(super) async fn parse_voice(
     let response = if transcript.is_empty() {
         empty_voice_response()
     } else {
-        match state
-            .onboarding
+        let (gateway, usage) =
+            onboarding_gateway_with_usage(&state, Some(current_user.id), "onboarding.voice_parse");
+        let result = gateway
             .parse_voice(transcript, payload.locale.as_deref())
-            .await
-        {
+            .await;
+        usage.finish().await;
+        match result {
             Ok(fields) => {
                 let topics = clean_topics(&fields.interest_topics, 8);
                 let mut missing_fields = Vec::new();
@@ -232,11 +237,13 @@ pub(super) async fn fast_discover(
         ));
     }
     verify_before_external(&state, &stamp, &request_id).await?;
-    let outcome = match state
-        .onboarding
+    let (gateway, usage) =
+        onboarding_gateway_with_usage(&state, Some(current_user.id), "onboarding.fast_discover");
+    let result = gateway
         .fast_discover(&payload.profile_summary, &payload.inferred_topics)
-        .await
-    {
+        .await;
+    usage.finish().await;
+    let outcome = match result {
         Ok(outcome) => outcome,
         Err(error) => {
             tracing::error!(
@@ -484,7 +491,10 @@ async fn start_audio_run(
     request_id: &str,
 ) -> Result<OnboardingAudioDiscoverResponse, ApiError> {
     verify_before_external(state, stamp, request_id).await?;
-    let plan = state.onboarding.build_audio_plan(transcript, locale).await;
+    let (gateway, usage) =
+        onboarding_gateway_with_usage(state, Some(user_id), "onboarding.audio_plan");
+    let plan = gateway.build_audio_plan(transcript, locale).await;
+    usage.finish().await;
     let mut transaction = state
         .database
         .pool()

@@ -150,6 +150,22 @@ impl ContentAnalysisGateway {
         page_text: &str,
         instruction: Option<&str>,
     ) -> Result<GeneratedContentAnalysis, ContentAnalysisGatewayError> {
+        self.analyze_with_events(url, page_text, instruction, Arc::new(NoEvents))
+            .await
+    }
+
+    /// Classifies extracted content while publishing per-response model observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same URL, provider, schema, and semantic errors as [`Self::analyze`].
+    pub async fn analyze_with_events(
+        &self,
+        url: &str,
+        page_text: &str,
+        instruction: Option<&str>,
+        events: Arc<dyn AgentEventSink>,
+    ) -> Result<GeneratedContentAnalysis, ContentAnalysisGatewayError> {
         let input_url = reqwest::Url::parse(url)
             .map_err(|_| ContentAnalysisGatewayError::InvalidUrl(url.to_owned()))?;
         if !matches!(input_url.scheme(), "http" | "https") || input_url.host().is_none() {
@@ -195,7 +211,7 @@ impl ContentAnalysisGateway {
                     provider_parameters: Map::new(),
                 },
                 Arc::new(NoTools),
-                Arc::new(NoEvents),
+                events,
             )
             .await?;
         let document = serde_json::from_value::<ContentAnalysisDocument>(

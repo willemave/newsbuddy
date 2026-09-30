@@ -1,5 +1,4 @@
 use chrono::{NaiveDateTime, Utc};
-use newsly_agent_runtime::ProviderUsage;
 use serde_json::Value;
 use sqlx::FromRow;
 
@@ -47,24 +46,14 @@ pub(super) struct SummaryBodyPointer {
 
 #[derive(Debug, Clone)]
 pub(super) struct PreparedSummarizationAttempt {
-    pub(super) task_id: i64,
     pub(super) content: SummarizationSnapshot,
     pub(super) input_fingerprint: String,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct SummaryUsage {
-    pub(super) provider: String,
-    pub(super) model: String,
-    pub(super) provider_response_id: Option<String>,
-    pub(super) usage: ProviderUsage,
 }
 
 #[derive(Debug, Clone)]
 pub(super) enum SummarizationMutation {
     Complete {
         summary: Value,
-        usage: SummaryUsage,
     },
     Unchanged,
     Failed {

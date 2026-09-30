@@ -15,6 +15,7 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
 use crate::task_tools::{ExaSearchUsage, record_exa_tool_usage};
 use crate::{
     HandlerExecution, HandlerFinalizerFuture, HandlerFuture, LeaseHealth, TaskFinalizer,
@@ -134,11 +135,26 @@ async fn execute_audio_discovery(
             return audio_failure(services, task, snapshot, error, false);
         }
     };
-    let outcome = match services
+    let usage = Arc::new(AgentUsageSink::new(
+        services.pool.clone(),
+        AgentUsageAttribution {
+            operation: "onboarding.audio_discover".to_owned(),
+            source: "rust_worker".to_owned(),
+            task_id: task.task_id,
+            content_id: None,
+            session_id: None,
+            message_id: None,
+            user_id: Some(user_id),
+        },
+    ));
+    let events: Arc<dyn newsly_agent_runtime::AgentEventSink> = usage.clone();
+    let result = services
         .provider
+        .with_events(events)
         .discover_from_lanes(&snapshot.topic_summary, &snapshot.inferred_topics, &lanes)
-        .await
-    {
+        .await;
+    usage.finish().await;
+    let outcome = match result {
         Ok(outcome) => outcome,
         Err(error) => {
             return audio_failure(services, task, snapshot, error.to_string(), true);
@@ -157,6 +173,8 @@ async fn execute_audio_discovery(
             summary_requested: false,
             text_requested: true,
             livecrawl_fallback: false,
+            estimated_cost_usd: outcome.exa_usage.estimated_cost_usd,
+            known_estimated_cost_usd: outcome.exa_usage.known_estimated_cost_usd,
         },
     )
     .await;

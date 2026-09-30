@@ -349,31 +349,10 @@ pub async fn prepare_audio_episode_generation(
     Ok(PrepareAudioEpisodeGenerationOutcome::Prepared(row.into()))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AudioEpisodeScriptUsage {
-    pub provider: String,
-    pub model: String,
-    pub request_count: i32,
-    pub input_tokens: i32,
-    pub output_tokens: i32,
-    pub cache_read_tokens: i32,
-    pub cache_write_tokens: i32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AudioEpisodeTtsUsage {
-    pub model: String,
-    pub request_count: i32,
-    pub text_chars: i32,
-    pub standard_pricing: bool,
-}
-
 #[derive(Debug)]
 pub struct CompleteAudioEpisodeGeneration<'a> {
-    pub task_id: i64,
     pub user_id: i64,
     pub audio_episode_id: i64,
-    pub source_content_id: Option<i64>,
     pub prepared_started_at: DateTime<Utc>,
     pub title: &'a str,
     pub script: &'a Value,
@@ -381,12 +360,11 @@ pub struct CompleteAudioEpisodeGeneration<'a> {
     pub model: &'a str,
     pub audio_storage_path: &'a str,
     pub duration_seconds: i32,
-    pub script_usage: Option<&'a AudioEpisodeScriptUsage>,
-    pub tts_usage: &'a AudioEpisodeTtsUsage,
 }
 
-/// Publishes a generated MP3 and its metering only when the exact prepared episode attempt still
-/// owns the product row. Queue ownership is independently fenced by the worker kernel.
+/// Publishes a generated MP3 only when the exact prepared episode attempt still owns the product
+/// row. Model responses and TTS chunks are metered independently at their provider boundaries.
+/// Queue ownership is independently fenced by the worker kernel.
 pub async fn complete_audio_episode_generation(
     transaction: &mut Transaction<'_, Postgres>,
     completed: &CompleteAudioEpisodeGeneration<'_>,
@@ -422,19 +400,92 @@ pub async fn complete_audio_episode_generation(
     if updated == 0 {
         return Ok(false);
     }
-    if let Some(usage) = completed.script_usage {
-        insert_audio_episode_script_usage(
-            transaction,
-            completed.task_id,
-            completed.user_id,
-            completed.audio_episode_id,
-            completed.source_content_id,
-            usage,
-        )
-        .await?;
-    }
-    insert_audio_episode_tts_usage(transaction, completed, completed.tts_usage).await?;
     Ok(true)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewAudioEpisodeTtsChunkUsage<'a> {
+    pub task_id: i64,
+    pub retry_count: i32,
+    pub user_id: i64,
+    pub audio_episode_id: i64,
+    pub source_content_id: Option<i64>,
+    pub chunk_index: usize,
+    pub model: &'a str,
+    pub text_chars: u64,
+    pub endpoint: &'a str,
+    pub standard_endpoint: bool,
+}
+
+/// Records one successful ElevenLabs chunk immediately after its complete audio body is observed.
+///
+/// The stable request identifier and transaction advisory lock make repeated observation of one
+/// task attempt and chunk idempotent without coupling usage durability to product finalization.
+pub async fn record_audio_episode_tts_chunk_usage(
+    pool: &PgPool,
+    usage: &NewAudioEpisodeTtsChunkUsage<'_>,
+) -> Result<bool, AudioEpisodeRepositoryError> {
+    let request_id = format!(
+        "audio-tts:{}:{}:{}",
+        usage.task_id, usage.retry_count, usage.chunk_index
+    );
+    let mut transaction = pool.begin().await?;
+    let priced = crate::elevenlabs_tts_cost(
+        &mut transaction,
+        usage.model,
+        usage.text_chars,
+        usage.standard_endpoint,
+    )
+    .await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(&request_id)
+        .execute(&mut *transaction)
+        .await?;
+    let inserted = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO vendor_usage_records (
+            provider, model, feature, operation, source, request_id, task_id, content_id, user_id,
+            request_count, resource_count, cost_usd, currency, pricing_version, cost_basis, metadata,
+            created_at
+        )
+        SELECT
+            'elevenlabs', $2, 'audio_episode_tts', 'narration.synthesize_dialogue_chunk',
+            'rust_worker', $1, $3::bigint::integer, $4::bigint::integer,
+            users.id, 1, $6, $7, 'USD', $8, $9, $10::jsonb,
+            timezone('UTC', clock_timestamp())
+        FROM users
+        WHERE users.id::bigint = $5::bigint
+          AND users.is_active IS TRUE
+          AND NOT EXISTS (
+              SELECT 1 FROM vendor_usage_records WHERE request_id = $1
+          )
+        RETURNING id::bigint
+        "#,
+    )
+    .bind(&request_id)
+    .bind(usage.model)
+    .bind(usage.task_id)
+    .bind(usage.source_content_id)
+    .bind(usage.user_id)
+    .bind(i32::try_from(usage.text_chars).unwrap_or(i32::MAX))
+    .bind(priced.as_ref().map(|value| value.cost_usd))
+    .bind(priced.as_ref().map(|value| value.pricing_version.as_str()))
+    .bind(priced.as_ref().map(|_| "public_list_estimate"))
+    .bind(serde_json::json!({
+        "audio_episode_id": usage.audio_episode_id,
+        "attempt": usage.retry_count,
+        "chunk_index": usage.chunk_index,
+        "text_chars": usage.text_chars,
+        "resource_count_unit": "character",
+        "endpoint": usage.endpoint,
+        "standard_endpoint": usage.standard_endpoint,
+        "pricing": priced.as_ref().map(|value| &value.metadata),
+        "cost_reason": priced.is_none().then_some("missing_rate_or_nonstandard_endpoint_or_invalid_quantity"),
+    }))
+    .fetch_optional(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(inserted.is_some())
 }
 
 pub async fn fail_audio_episode_generation(
@@ -470,17 +521,14 @@ pub async fn fail_audio_episode_generation(
 
 #[derive(Debug)]
 pub struct CheckpointAudioEpisodeScript<'a> {
-    pub task_id: i64,
     pub user_id: i64,
     pub audio_episode_id: i64,
-    pub source_content_id: Option<i64>,
     pub prepared_started_at: DateTime<Utc>,
     pub title: &'a str,
     pub script: &'a Value,
     pub script_text: &'a str,
     pub model: &'a str,
     pub duration_seconds: i32,
-    pub usage: &'a AudioEpisodeScriptUsage,
 }
 
 /// Persists an already-billed generated script before a retryable TTS or file failure. This lets
@@ -510,109 +558,7 @@ pub async fn checkpoint_audio_episode_script(
     .execute(&mut **transaction)
     .await?
     .rows_affected();
-    if updated == 0 {
-        return Ok(false);
-    }
-    insert_audio_episode_script_usage(
-        transaction,
-        checkpoint.task_id,
-        checkpoint.user_id,
-        checkpoint.audio_episode_id,
-        checkpoint.source_content_id,
-        checkpoint.usage,
-    )
-    .await?;
-    Ok(true)
-}
-
-async fn insert_audio_episode_script_usage(
-    transaction: &mut Transaction<'_, Postgres>,
-    task_id: i64,
-    user_id: i64,
-    audio_episode_id: i64,
-    source_content_id: Option<i64>,
-    usage: &AudioEpisodeScriptUsage,
-) -> Result<(), sqlx::Error> {
-    let total_tokens = usage.input_tokens.saturating_add(usage.output_tokens);
-    sqlx::query(
-        r#"
-        INSERT INTO vendor_usage_records (
-            provider, model, feature, operation, source, task_id, content_id, user_id,
-            input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, total_tokens,
-            request_count, currency, metadata, created_at
-        ) VALUES (
-            $1, $2, 'audio_episode_script', 'audio_episodes.generate_script', 'rust_worker',
-            $3::bigint::integer, $4::bigint::integer, $5::bigint::integer,
-            $6, $7, $8, $9, $10, $11, 'USD', $12::jsonb,
-            timezone('UTC', clock_timestamp())
-        )
-        "#,
-    )
-    .bind(&usage.provider)
-    .bind(&usage.model)
-    .bind(task_id)
-    .bind(source_content_id)
-    .bind(user_id)
-    .bind(usage.input_tokens)
-    .bind(usage.cache_read_tokens)
-    .bind(usage.cache_write_tokens)
-    .bind(usage.output_tokens)
-    .bind(total_tokens)
-    .bind(usage.request_count)
-    .bind(serde_json::json!({
-        "audio_episode_id": audio_episode_id,
-        "prompt_version": PROMPT_VERSION,
-    }))
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-async fn insert_audio_episode_tts_usage(
-    transaction: &mut Transaction<'_, Postgres>,
-    completed: &CompleteAudioEpisodeGeneration<'_>,
-    usage: &AudioEpisodeTtsUsage,
-) -> Result<(), sqlx::Error> {
-    let priced = crate::elevenlabs_tts_cost(
-        &usage.model,
-        u64::try_from(usage.text_chars).unwrap_or_default(),
-        usage.standard_pricing,
-    );
-    sqlx::query(
-        r#"
-        INSERT INTO vendor_usage_records (
-            provider, model, feature, operation, source, task_id, content_id, user_id,
-            request_count, resource_count, cost_usd, currency, pricing_version, cost_basis, metadata,
-            created_at
-        ) VALUES (
-            'elevenlabs', $1, 'audio_episode_tts', 'narration.synthesize_dialogue_mp3',
-            'rust_worker', $2::bigint::integer, $3::bigint::integer, $4::bigint::integer,
-            $5, $6, $7, 'USD', $8, $9, $10::jsonb,
-            timezone('UTC', clock_timestamp())
-        )
-        "#,
-    )
-    .bind(&usage.model)
-    .bind(completed.task_id)
-    .bind(completed.source_content_id)
-    .bind(completed.user_id)
-    .bind(usage.request_count)
-    .bind(usage.text_chars)
-    .bind(priced.map(|value| value.cost_usd))
-    .bind(priced.map(|value| value.pricing_version))
-    .bind(priced.map(|value| value.cost_basis))
-    .bind(serde_json::json!({
-        "audio_episode_id": completed.audio_episode_id,
-        "text_chars": usage.text_chars,
-        "cost_rate_usd": priced.map(|value| value.rate_usd),
-        "cost_rate_unit": priced.map(|value| value.rate_unit),
-        "cost_source_url": priced.map(|value| value.source_url),
-        "cost_basis": priced.map(|value| value.cost_basis),
-        "cost_pricing_version": priced.map(|value| value.pricing_version),
-    }))
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
+    Ok(updated > 0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

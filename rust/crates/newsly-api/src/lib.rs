@@ -38,6 +38,7 @@ mod learning_deck_artifacts;
 mod learning_deck_tokens;
 mod learning_decks;
 mod llm_tasks;
+mod model_usage;
 mod mutations;
 mod news_actions;
 mod observability;

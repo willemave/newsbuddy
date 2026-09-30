@@ -1,14 +1,17 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use chrono::Utc;
 use newsly_db::{
-    MediaContentSnapshot, MediaMutation, MediaTranscriptionUsage, prepare_media_content,
+    MediaContentSnapshot, MediaMutation, MediaTranscriptionChunkUsage, prepare_media_content,
+    record_media_transcription_chunk_usage,
 };
 use newsly_providers::{
-    MediaGateway, OpenAiTranscriptionError, OpenAiTranscriptionGateway, TranscriptionResult,
-    YtDlpTarget, is_apple_podcasts_url, is_terminal_ytdlp_error, is_youtube_url,
+    MediaGateway, OpenAiTranscriptionError, OpenAiTranscriptionGateway, TranscriptionChunkUsage,
+    TranscriptionUsageObserver, YtDlpTarget, is_apple_podcasts_url, is_terminal_ytdlp_error,
+    is_youtube_url,
 };
 use newsly_queue::{OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Map, Value};
@@ -169,7 +172,6 @@ async fn execute_podcast(
                 resolved_feed_url: None,
                 resolved_episode_title: None,
             },
-            None,
         );
     }
 
@@ -282,9 +284,11 @@ async fn execute_podcast(
         .unwrap_or("podcast-audio.mp3");
     let transcription = match lease_aware(
         &mut lease,
-        services
-            .transcription_gateway
-            .transcribe_upload(&normalized.path, filename),
+        services.transcription_gateway.transcribe_upload_observed(
+            &normalized.path,
+            filename,
+            transcription_usage_observer(services, plan, &snapshot, "podcast"),
+        ),
     )
     .await
     {
@@ -324,13 +328,6 @@ async fn execute_podcast(
     if lease.ownership_lost() {
         return lease_lost_failure();
     }
-    let usage = transcription_usage(
-        plan,
-        &snapshot,
-        "podcast",
-        &transcription,
-        normalized.size_bytes,
-    );
     completed_media(
         services,
         content_id,
@@ -344,7 +341,6 @@ async fn execute_podcast(
             resolved_feed_url,
             resolved_episode_title,
         },
-        Some(usage),
     )
 }
 
@@ -373,7 +369,6 @@ async fn execute_tweet_download(
             MediaMutation::TweetSkipped {
                 disabled: !services.tweet_video_enabled,
             },
-            None,
         );
     }
     let tweet_url = metadata_string(&metadata, "tweet_url")
@@ -443,7 +438,6 @@ async fn execute_tweet_download(
             duration_ms,
             downloaded_at: Utc::now(),
         },
-        None,
     )
 }
 
@@ -480,9 +474,11 @@ async fn execute_tweet_transcription(
     };
     let transcription = match lease_aware(
         &mut lease,
-        services
-            .transcription_gateway
-            .transcribe_upload(&audio.path, &audio.filename),
+        services.transcription_gateway.transcribe_upload_observed(
+            &audio.path,
+            &audio.filename,
+            transcription_usage_observer(services, plan, &snapshot, "tweet_video"),
+        ),
     )
     .await
     {
@@ -513,13 +509,6 @@ async fn execute_tweet_transcription(
     if lease.ownership_lost() {
         return lease_lost_failure();
     }
-    let usage = transcription_usage(
-        plan,
-        &snapshot,
-        "tweet_video",
-        &transcription,
-        audio.size_bytes,
-    );
     completed_media_with_cleanup(
         services,
         content_id,
@@ -528,7 +517,6 @@ async fn execute_tweet_transcription(
             transcription_at: Utc::now(),
             transcription_service: "openai".to_owned(),
         },
-        Some(usage),
         audio.path.parent().map(Path::to_path_buf),
     )
 }
@@ -556,16 +544,14 @@ fn completed_media(
     services: &MediaWorkerServices,
     content_id: i64,
     mutation: MediaMutation,
-    usage: Option<MediaTranscriptionUsage>,
 ) -> HandlerExecution {
-    completed_media_with_cleanup(services, content_id, mutation, usage, None)
+    completed_media_with_cleanup(services, content_id, mutation, None)
 }
 
 fn completed_media_with_cleanup(
     services: &MediaWorkerServices,
     content_id: i64,
     mutation: MediaMutation,
-    usage: Option<MediaTranscriptionUsage>,
     cleanup_tweet_attempt: Option<PathBuf>,
 ) -> HandlerExecution {
     HandlerExecution::with_finalizer(
@@ -576,7 +562,6 @@ fn completed_media_with_cleanup(
             MediaFinalizationPlan {
                 content_id,
                 mutation,
-                usage,
                 cleanup_tweet_attempt,
             },
         ),
@@ -601,7 +586,6 @@ fn podcast_failed(
                     error_message,
                     increment_retry_count,
                 },
-                usage: None,
                 cleanup_tweet_attempt: None,
             },
         ),
@@ -632,36 +616,81 @@ fn tweet_fallback_with_cleanup(
             error_message: error.to_string(),
             failed_at: Utc::now(),
         },
-        None,
         cleanup_tweet_attempt,
     )
 }
 
-fn transcription_usage(
+fn transcription_usage_observer(
+    services: &MediaWorkerServices,
     plan: &OwnedWorkPlan,
     snapshot: &MediaContentSnapshot,
     media_kind: &str,
-    result: &TranscriptionResult,
-    audio_size_bytes: u64,
-) -> MediaTranscriptionUsage {
+) -> Arc<dyn TranscriptionUsageObserver> {
     let metadata = runtime_metadata(&snapshot.content_metadata);
-    MediaTranscriptionUsage {
+    Arc::new(DurableTranscriptionUsageObserver {
+        pool: services.pool.clone(),
         task_id: plan.task_id,
+        retry_count: plan.retry_count,
         content_id: snapshot.id,
         user_id: plan
             .owner_user_id
             .or_else(|| metadata_positive_integer(&metadata, "submitted_by_user_id")),
-        request_id: format!("media-{}-attempt-{}", plan.task_id, plan.retry_count),
-        model: result.model.clone(),
         media_kind: media_kind.to_owned(),
-        language: result.language.clone(),
-        chunk_count: bounded_i32(result.chunk_count),
-        prompt_chars: bounded_i32(result.prompt_chars),
-        audio_size_bytes: i64::try_from(audio_size_bytes).unwrap_or(i64::MAX),
-        audio_duration_ms: result.audio_duration_ms,
-        audio_duration_estimate_ms: result.audio_duration_estimate_ms,
-        duration_source: result.audio_duration_source.as_str().to_owned(),
-        standard_pricing: result.standard_pricing,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct DurableTranscriptionUsageObserver {
+    pool: PgPool,
+    task_id: i64,
+    retry_count: i32,
+    content_id: i64,
+    user_id: Option<i64>,
+    media_kind: String,
+}
+
+impl TranscriptionUsageObserver for DurableTranscriptionUsageObserver {
+    fn observe(
+        &self,
+        usage: TranscriptionChunkUsage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+        let observer = self.clone();
+        Box::pin(async move {
+            tokio::spawn(async move {
+                let result = record_media_transcription_chunk_usage(
+                    &observer.pool,
+                    &MediaTranscriptionChunkUsage {
+                        task_id: observer.task_id,
+                        retry_count: observer.retry_count,
+                        content_id: observer.content_id,
+                        user_id: observer.user_id,
+                        chunk_index: usage.chunk_index,
+                        model: usage.model.to_owned(),
+                        media_kind: observer.media_kind,
+                        prompt_chars: bounded_i32(usage.prompt_chars),
+                        audio_size_bytes: i64::try_from(usage.audio_size_bytes).unwrap_or(i64::MAX),
+                        audio_duration_ms: usage.audio_duration_ms,
+                        audio_duration_estimate_ms: usage.audio_duration_estimate_ms,
+                        duration_source: usage.audio_duration_source.as_str().to_owned(),
+                        standard_pricing: usage.standard_pricing,
+                    },
+                )
+                .await;
+                if let Err(error) = &result {
+                    tracing::error!(
+                        task_id = observer.task_id,
+                        content_id = observer.content_id,
+                        retry_count = observer.retry_count,
+                        chunk_index = usage.chunk_index,
+                        error = %error,
+                        "media transcription usage persistence failed"
+                    );
+                }
+                result.map(|_| ()).map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| format!("transcription usage persistence task failed: {error}"))?
+        })
     }
 }
 

@@ -1,5 +1,6 @@
 //! Bounded nightly maintenance; external work is separate from queue finalization.
 use super::BriefingRefreshWorkerServices;
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
 use crate::{HandlerExecution, HandlerFuture, HandlerInterruptionPolicy, LeaseHealth, TaskHandler};
 use chrono::Utc;
 use newsly_db::news_category_reclustering::{
@@ -237,11 +238,6 @@ async fn execute(
             let requested_tokens = i64::try_from(serde_json::to_vec_pretty(&request)?.len())?
                 + i64::try_from(BRIEFING_LENS_NAMING_MAX_OUTPUT_TOKENS)?
                 + 8_192;
-            let (provider, configured_model) = services
-                .gateway
-                .naming_model_spec()
-                .split_once(':')
-                .unwrap_or(("openai", services.gateway.naming_model_spec()));
             for _ in 0..2 {
                 if lease.ownership_lost() {
                     return Ok(lease_lost());
@@ -260,27 +256,31 @@ async fn execute(
                     return Ok(lease_lost());
                 }
                 let attempt = uuid::Uuid::new_v4();
-                match services.gateway.review_lens_names(&request).await {
+                let usage_sink = Arc::new(AgentUsageSink::new(
+                    services.pool.clone(),
+                    AgentUsageAttribution {
+                        operation: "briefing.review_lens_names".to_owned(),
+                        source: "queue".to_owned(),
+                        task_id: plan.task_id,
+                        content_id: None,
+                        session_id: None,
+                        message_id: None,
+                        user_id: Some(user),
+                    },
+                ));
+                let generated = services
+                    .gateway
+                    .review_lens_names(&request, usage_sink.clone())
+                    .await;
+                usage_sink.finish().await;
+                match generated {
                     Ok(generated) => {
-                        let usage = newsly_db::BriefingLensAssignmentUsage {
-                            provider: provider.into(),
-                            model: if generated.model.is_empty() {
-                                configured_model.into()
-                            } else {
-                                generated.model
-                            },
-                            provider_response_id: generated.provider_response_id,
-                            usage: generated.usage,
-                            feature: "briefing_lens_naming_batch".into(),
-                            operation: "briefing.review_lens_names".into(),
-                        };
                         repository::record_naming_attempt(
                             &services.pool,
                             &context,
                             attempt,
                             &fingerprint,
                             Some(&serde_json::to_value(&generated.batch)?),
-                            Some(&usage),
                         )
                         .await?;
                         if lease.ownership_lost() {
@@ -290,23 +290,12 @@ async fn execute(
                         break;
                     }
                     Err(error) => {
-                        let usage = error.observed_usage().map(|usage| {
-                            newsly_db::BriefingLensAssignmentUsage {
-                                provider: provider.into(),
-                                model: configured_model.into(),
-                                provider_response_id: None,
-                                usage: usage.clone(),
-                                feature: "briefing_lens_naming_batch".into(),
-                                operation: "briefing.review_lens_names.observed".into(),
-                            }
-                        });
                         repository::record_naming_attempt(
                             &services.pool,
                             &context,
                             attempt,
                             &fingerprint,
                             None,
-                            usage.as_ref(),
                         )
                         .await?;
                         tracing::warn!(run_id, user_id=user,error=%error,"nightly category naming attempt failed");

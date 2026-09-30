@@ -12,6 +12,7 @@ use newsly_queue::{OwnedWorkPlan, TaskResult, TaskType};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
+use crate::agent_usage::{AgentUsageAttribution, AgentUsageSink};
 use crate::onboarding_discovery::normalize_seeds;
 use crate::task_tools::{ExaSearchUsage, record_exa_tool_usage};
 use crate::{
@@ -142,11 +143,26 @@ async fn execute_feed_discovery(
         );
     }
     let (profile_summary, inferred_topics) = discovery_context(&snapshot);
-    let outcome = match services
+    let usage = Arc::new(AgentUsageSink::new(
+        services.pool.clone(),
+        AgentUsageAttribution {
+            operation: "onboarding.fast_discover".to_owned(),
+            source: "rust_worker".to_owned(),
+            task_id: task.task_id,
+            content_id: None,
+            session_id: None,
+            message_id: None,
+            user_id: Some(request.user_id),
+        },
+    ));
+    let events: Arc<dyn newsly_agent_runtime::AgentEventSink> = usage.clone();
+    let result = services
         .provider
+        .with_events(events)
         .fast_discover(&profile_summary, &inferred_topics)
-        .await
-    {
+        .await;
+    usage.finish().await;
+    let outcome = match result {
         Ok(outcome) => outcome,
         Err(error) => {
             return failure(services, task, snapshot, error.to_string(), true);
@@ -165,6 +181,8 @@ async fn execute_feed_discovery(
             summary_requested: false,
             text_requested: true,
             livecrawl_fallback: false,
+            estimated_cost_usd: outcome.exa_usage.estimated_cost_usd,
+            known_estimated_cost_usd: outcome.exa_usage.known_estimated_cost_usd,
         },
     )
     .await;

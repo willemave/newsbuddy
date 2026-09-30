@@ -31,7 +31,8 @@ mod x_sync;
 
 pub use audio_episode::{
     AudioEpisodeGateway, AudioEpisodeGatewayConfig, AudioEpisodeGatewayError, AudioEpisodeScript,
-    AudioEpisodeSpeaker, AudioEpisodeTurn, GeneratedAudioEpisodeScript, SynthesizedDialogue,
+    AudioEpisodeSpeaker, AudioEpisodeTtsChunkUsage, AudioEpisodeTtsUsageObserver, AudioEpisodeTurn,
+    GeneratedAudioEpisodeScript, SynthesizedDialogue,
 };
 pub use briefing_composition::{
     BRIEFING_LENS_NAMING_MAX_CATEGORIES, BRIEFING_LENS_NAMING_MAX_INPUT_BYTES,
@@ -65,7 +66,8 @@ pub use feed_validation::{
 };
 pub use image_generation::{
     GeneratedImage, GoogleImageAuth, ImageGenerationError, ImageGenerationGateway,
-    ImageGenerationGatewayConfig, ImageGenerationUsage, InfographicProvider,
+    ImageGenerationGatewayConfig, ImageGenerationUsage, ImageGenerationUsageObserver,
+    InfographicProvider,
 };
 pub use media::{
     ApplePodcastResolution, DownloadedMedia, MediaGateway, MediaGatewayConfig, MediaGatewayError,
@@ -88,7 +90,8 @@ pub use openai_background::{
     OpenAiBackgroundResult, OpenAiGatewayError,
 };
 pub use openai_transcription::{
-    AudioDurationSource, OpenAiTranscriptionError, OpenAiTranscriptionGateway, TranscriptionResult,
+    AudioDurationSource, OpenAiTranscriptionError, OpenAiTranscriptionGateway,
+    TranscriptionChunkUsage, TranscriptionResult, TranscriptionUsageObserver,
 };
 pub use openrouter::{OpenRouterPrivacyPolicy, OpenRouterRoutingError};
 pub use rig_engine::{RigAgentEngine, RigAgentEngineError};

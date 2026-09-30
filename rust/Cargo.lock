@@ -2402,6 +2402,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "jsonwebtoken",
+ "newsly-agent-runtime",
  "newsly-contracts",
  "newsly-db",
  "newsly-domain",

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fmt::Write as _;
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
@@ -34,9 +34,7 @@ use newsly_db::{
     load_briefing_lens_page, load_briefing_refresh_task, mark_briefing_lens_read,
     mark_briefing_sources_read, recent_briefing_dig_count, record_briefing_dig_usage,
 };
-use newsly_providers::{
-    BriefingDigGateway, BriefingDigGatewayError, BriefingDigSummary, BriefingWebSearchResult,
-};
+use newsly_providers::{BriefingDigGateway, BriefingDigGatewayError, BriefingWebSearchResult};
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -45,6 +43,7 @@ use sha2::{Digest, Sha256};
 use crate::auth::AuthenticatedUser;
 use crate::error::ApiError;
 use crate::gateway::RouteOwnershipStamp;
+use crate::model_usage::ApiAgentUsageSink;
 use crate::write_support::{
     bad_request, decode_json, internal_error, not_found, require_operation, verify_stamp,
 };
@@ -575,12 +574,18 @@ pub(super) async fn dig_summarize(
     verify_external_operation(&state, &stamp, &request_id).await?;
     let prompt = summary_prompt(&payload);
     let started_at = Instant::now();
+    let usage = Arc::new(ApiAgentUsageSink::new(
+        state.database.pool().clone(),
+        Some(current_user.id),
+        "briefing_dig.summarize",
+        None,
+    ));
     let summary = dig_gateway(&request_id)?
-        .summarize(DIG_SYSTEM_PROMPT.to_owned(), prompt)
-        .await
-        .map_err(|error| provider_error(&error, &request_id))?;
+        .summarize_with_events(DIG_SYSTEM_PROMPT.to_owned(), prompt, usage.clone())
+        .await;
+    usage.finish().await;
+    let summary = summary.map_err(|error| provider_error(&error, &request_id))?;
     let elapsed_ms = elapsed_millis(started_at);
-    persist_summary_usage(&state, &stamp, current_user.id, &request_id, &summary).await?;
     Ok(Json(BriefingDigSummarizeResponse {
         summary: summary.text,
         model: summary.model,
@@ -1070,36 +1075,6 @@ async fn persist_dig_usage(
         .commit()
         .await
         .map_err(|error| internal_error(error, request_id))
-}
-
-async fn persist_summary_usage(
-    state: &AppState,
-    stamp: &RouteOwnershipStamp,
-    user_id: i64,
-    request_id: &str,
-    summary: &BriefingDigSummary,
-) -> Result<(), ApiError> {
-    let (provider, model) = summary
-        .model
-        .split_once(':')
-        .unwrap_or(("unknown", summary.model.as_str()));
-    persist_dig_usage(
-        state,
-        stamp,
-        user_id,
-        "briefing_dig.summarize",
-        provider,
-        model,
-        request_id,
-        i64::try_from(summary.usage.input_tokens).ok(),
-        i64::try_from(summary.usage.output_tokens).ok(),
-        json!({
-            "request_count": summary.usage.request_count,
-            "cached_input_tokens": summary.usage.cached_input_tokens,
-            "reasoning_tokens": summary.usage.reasoning_tokens,
-        }),
-    )
-    .await
 }
 
 fn dig_gateway(request_id: &str) -> Result<&'static BriefingDigGateway, ApiError> {

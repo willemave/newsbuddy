@@ -219,7 +219,7 @@ impl ChatToolExecutor {
             | "list_files"
             | "write_knowledge_items" => self.execute_sandbox(call, events).await,
             "exa_web_search" | "search_web" => self.search_web(call).await,
-            "find_feed_options" => self.find_feed_options(call).await,
+            "find_feed_options" => self.find_feed_options(call, events).await,
             "search_knowledge" => self.search_content_kind(call, SearchKind::Knowledge).await,
             "read_knowledge_item" => self.read_knowledge_item(call).await,
             "search_content" => self.search_content_kind(call, SearchKind::Content).await,
@@ -467,14 +467,23 @@ impl ChatToolExecutor {
         Ok(success(json!({"query": query, "results": outcome.results})))
     }
 
-    async fn find_feed_options(&self, call: ToolCall) -> Result<ToolOutput, AgentRuntimeError> {
+    async fn find_feed_options(
+        &self,
+        call: ToolCall,
+        events: Arc<dyn AgentEventSink>,
+    ) -> Result<ToolOutput, AgentRuntimeError> {
         let input: WebSearchInput = arguments(&call)?;
         let query = bounded_query(&input.query)?;
         let limit = input.limit.or(input.num_results).unwrap_or(5).clamp(1, 5);
         let topics = vec![query.to_owned()];
-        let outcome = Box::pin(self.dependencies.onboarding.fast_discover(query, &topics))
-            .await
-            .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
+        let outcome = Box::pin(
+            self.dependencies
+                .onboarding
+                .with_events(events)
+                .fast_discover(query, &topics),
+        )
+        .await
+        .map_err(|error| AgentRuntimeError::Tool(error.to_string()))?;
         record_exa_tool_usage(
             &self.dependencies.pool,
             self.snapshot.user_id,
@@ -488,6 +497,8 @@ impl ChatToolExecutor {
                 summary_requested: false,
                 text_requested: true,
                 livecrawl_fallback: false,
+                estimated_cost_usd: outcome.exa_usage.estimated_cost_usd,
+                known_estimated_cost_usd: outcome.exa_usage.known_estimated_cost_usd,
             },
         )
         .await;

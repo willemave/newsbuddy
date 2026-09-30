@@ -623,7 +623,11 @@ pub struct UsageTotals {
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
     pub public_list_estimate_usd: f64,
+    pub provider_estimate_usd: f64,
+    pub non_billable_record_count: i64,
     pub unpriced_call_count: i64,
+    pub unpriced_reasons: BTreeMap<String, i64>,
+    pub resource_units: BTreeMap<String, i64>,
     pub providers: BTreeMap<String, i64>,
     pub models: BTreeMap<String, i64>,
 }
@@ -633,11 +637,20 @@ impl UsageTotals {
         self.cost_usd.map_or_else(
             || {
                 format!(
-                    "cost unknown (${:.4} priced subtotal, including ${:.4} public-list estimates; {} unpriced records)",
-                    self.known_cost_usd, self.public_list_estimate_usd, self.unpriced_call_count
+                    "cost unknown (${:.4} priced subtotal: ${:.4} public-list estimates, ${:.4} provider estimates; {} non-billable, {} unpriced records)",
+                    self.known_cost_usd,
+                    self.public_list_estimate_usd,
+                    self.provider_estimate_usd,
+                    self.non_billable_record_count,
+                    self.unpriced_call_count
                 )
             },
-            |cost| format!("${cost:.4} (including ${:.4} public-list estimates)", self.public_list_estimate_usd),
+            |cost| format!(
+                "${cost:.4} (${:0.4} public-list estimates, ${:0.4} provider estimates; {} non-billable records)",
+                self.public_list_estimate_usd,
+                self.provider_estimate_usd,
+                self.non_billable_record_count
+            ),
         )
     }
 
@@ -655,8 +668,8 @@ impl UsageTotals {
         if self.request_count != 0 {
             units.push(format!("{} requests", self.request_count));
         }
-        if self.resource_count != 0 {
-            units.push(format!("{} resources", self.resource_count));
+        for (unit, count) in &self.resource_units {
+            units.push(format!("{count} {unit}"));
         }
         if units.is_empty() {
             "0 usage units".to_owned()
@@ -680,6 +693,8 @@ pub struct UsageGroup {
     pub cost_usd: Option<f64>,
     pub known_cost_usd: f64,
     pub public_list_estimate_usd: f64,
+    pub provider_estimate_usd: f64,
+    pub non_billable_record_count: i64,
     pub unpriced_call_count: i64,
 }
 
@@ -697,7 +712,11 @@ impl UsageGroup {
             cost_usd: self.cost_usd,
             known_cost_usd: self.known_cost_usd,
             public_list_estimate_usd: self.public_list_estimate_usd,
+            provider_estimate_usd: self.provider_estimate_usd,
+            non_billable_record_count: self.non_billable_record_count,
             unpriced_call_count: self.unpriced_call_count,
+            unpriced_reasons: BTreeMap::new(),
+            resource_units: BTreeMap::new(),
             providers: BTreeMap::new(),
             models: BTreeMap::new(),
         }
@@ -717,6 +736,8 @@ struct UsageTotalsRow {
     cost_usd: Option<f64>,
     known_cost_usd: f64,
     public_list_estimate_usd: f64,
+    provider_estimate_usd: f64,
+    non_billable_record_count: i64,
     unpriced_call_count: i64,
 }
 
@@ -746,6 +767,12 @@ impl UsageSummary {
             self.totals.render_units(),
             self.totals.render_cost()
         );
+        if !self.totals.unpriced_reasons.is_empty() {
+            text.push_str("\nUnpriced reasons:");
+            for (reason, count) in &self.totals.unpriced_reasons {
+                let _ = write!(text, " {reason}={count}");
+            }
+        }
         if !self.groups.is_empty() {
             text.push_str("\nGroups:");
             for row in &self.groups {
@@ -791,6 +818,8 @@ pub async fn load_usage_summary(
                 ELSE NULL END AS cost_usd,
             ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS known_cost_usd,
             ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::numeric, 8)::double precision AS public_list_estimate_usd,
+            ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::numeric, 8)::double precision AS provider_estimate_usd,
+            COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
             COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
         FROM vendor_usage_records
         WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
@@ -810,8 +839,18 @@ pub async fn load_usage_summary(
         .map(|row| (row.key.clone(), row.count))
         .collect();
     let models = dimension_counts
-        .into_iter()
+        .iter()
         .filter(|row| row.dimension == "model")
+        .map(|row| (row.key.clone(), row.count))
+        .collect();
+    let resource_units = dimension_counts
+        .iter()
+        .filter(|row| row.dimension == "resource_unit")
+        .map(|row| (row.key.clone(), row.count))
+        .collect();
+    let unpriced_reasons = dimension_counts
+        .into_iter()
+        .filter(|row| row.dimension == "unpriced_reason")
         .map(|row| (row.key, row.count))
         .collect();
     let totals = UsageTotals {
@@ -826,7 +865,11 @@ pub async fn load_usage_summary(
         cost_usd: totals.cost_usd,
         known_cost_usd: totals.known_cost_usd,
         public_list_estimate_usd: totals.public_list_estimate_usd,
+        provider_estimate_usd: totals.provider_estimate_usd,
+        non_billable_record_count: totals.non_billable_record_count,
         unpriced_call_count: totals.unpriced_call_count,
+        unpriced_reasons,
+        resource_units,
         providers,
         models,
     };
@@ -873,6 +916,8 @@ async fn load_usage_groups(
                     ELSE NULL END AS cost_usd,
                 ROUND(COALESCE(SUM(cost_usd), 0.0)::numeric, 8)::double precision AS known_cost_usd,
                 ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'public_list_estimate'), 0.0)::numeric, 8)::double precision AS public_list_estimate_usd,
+                ROUND(COALESCE(SUM(cost_usd) FILTER (WHERE cost_basis = 'provider_estimate'), 0.0)::numeric, 8)::double precision AS provider_estimate_usd,
+                COUNT(*) FILTER (WHERE cost_basis = 'non_billable')::bigint AS non_billable_record_count,
                 COUNT(*) FILTER (WHERE cost_usd IS NULL)::bigint AS unpriced_call_count
             FROM vendor_usage_records
             WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
@@ -881,7 +926,8 @@ async fn load_usage_groups(
         )
         SELECT key, call_count, input_tokens, cache_read_tokens, cache_write_tokens,
                output_tokens, total_tokens, request_count, resource_count, cost_usd,
-               known_cost_usd, public_list_estimate_usd, unpriced_call_count
+               known_cost_usd, public_list_estimate_usd, provider_estimate_usd,
+               non_billable_record_count, unpriced_call_count
         FROM grouped
         ORDER BY (key = 'unknown'), LOWER(key)
         ",
@@ -914,6 +960,26 @@ async fn load_usage_dimension_counts(
         WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
           AND created_at <= ($2::timestamptz AT TIME ZONE 'UTC')
         GROUP BY COALESCE(model, 'unknown')
+        UNION ALL
+        SELECT 'resource_unit'::text AS dimension,
+               COALESCE(metadata::jsonb ->> 'resource_count_unit',
+                        metadata::jsonb ->> 'unit', 'unknown') AS key,
+               COALESCE(SUM(resource_count), 0)::bigint AS count
+        FROM vendor_usage_records
+        WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
+          AND created_at <= ($2::timestamptz AT TIME ZONE 'UTC')
+          AND resource_count IS NOT NULL
+        GROUP BY COALESCE(metadata::jsonb ->> 'resource_count_unit',
+                          metadata::jsonb ->> 'unit', 'unknown')
+        UNION ALL
+        SELECT 'unpriced_reason'::text AS dimension,
+               COALESCE(metadata::jsonb ->> 'cost_reason', cost_basis, 'unknown') AS key,
+               COUNT(*)::bigint AS count
+        FROM vendor_usage_records
+        WHERE created_at >= ($1::timestamptz AT TIME ZONE 'UTC')
+          AND created_at <= ($2::timestamptz AT TIME ZONE 'UTC')
+          AND cost_usd IS NULL
+        GROUP BY COALESCE(metadata::jsonb ->> 'cost_reason', cost_basis, 'unknown')
         ORDER BY dimension, key
         ",
     )

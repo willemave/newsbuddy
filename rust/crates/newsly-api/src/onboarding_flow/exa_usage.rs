@@ -21,9 +21,11 @@ pub(super) async fn record_onboarding_exa_usage(
         "contents_text_requested": true,
         "contents_summary_requested": false,
         "livecrawl": false,
-        "cost_status": "unpriced",
-        "cost_reason": "Exa response does not expose all billable search and contents units or the account pricing plan",
-        "cost_source_url": "https://exa.ai/pricing"
+        "cost_status": if usage.estimated_cost_usd.is_some() { "provider_estimate" } else { "unpriced" },
+        "cost_reason": usage.estimated_cost_usd.is_none().then_some("One or more attempted Exa responses omitted a valid costDollars.total estimate"),
+        "missing_cost_estimate_count": usage.missing_cost_estimate_count,
+        "known_provider_estimate_usd": usage.known_estimated_cost_usd,
+        "cost_source_url": "https://docs.exa.ai/reference/search"
     });
     let result = sqlx::query(
         r"
@@ -33,8 +35,8 @@ pub(super) async fn record_onboarding_exa_usage(
             cost_basis, metadata, idempotency_key, created_at
         ) VALUES (
             'exa', 'search', 'onboarding', $1, 'api', $2, $3::bigint::integer,
-            $4, $5, NULL, 'USD', NULL,
-            'unpriced_incomplete_provider_units', $6,
+            $4, $5, $6, 'USD', $7,
+            $8, $9,
             concat('exa:', $1::text, ':', $2::text), timezone('UTC', clock_timestamp())
         )
         ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
@@ -45,6 +47,9 @@ pub(super) async fn record_onboarding_exa_usage(
     .bind(user_id)
     .bind(i32::try_from(usage.request_count).unwrap_or(i32::MAX))
     .bind(i32::try_from(usage.result_count).unwrap_or(i32::MAX))
+    .bind(usage.estimated_cost_usd)
+    .bind(usage.estimated_cost_usd.map(|_| "exa-response-estimate"))
+    .bind(usage.estimated_cost_usd.map(|_| "provider_estimate"))
     .bind(metadata)
     .execute(state.database.pool())
     .await;

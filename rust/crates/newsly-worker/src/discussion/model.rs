@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
-use newsly_agent_runtime::ProviderUsage;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -73,16 +72,6 @@ pub(super) enum DiscussionSummaryMode {
     Merge,
 }
 
-impl DiscussionSummaryMode {
-    pub(super) const fn usage_label(self) -> &'static str {
-        match self {
-            Self::Merge => "merge",
-            Self::Full => "full",
-            Self::None | Self::TrackSummarized | Self::TrackSeen => "none",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct DiscussionSummaryPlan {
     pub(super) mode: DiscussionSummaryMode,
@@ -129,18 +118,6 @@ pub(super) struct FetchedDiscussionArtifact {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct DiscussionUsage {
-    pub(super) provider: String,
-    pub(super) model: String,
-    pub(super) provider_response_id: Option<String>,
-    pub(super) usage: ProviderUsage,
-    pub(super) summary_mode: DiscussionSummaryMode,
-    pub(super) summary_input_sha256: String,
-    pub(super) summary_comment_count: i32,
-    pub(super) changed_comment_count: i32,
-}
-
-#[derive(Debug, Clone)]
 pub(super) enum SummaryPublication {
     Preserve,
     NotReady,
@@ -155,7 +132,6 @@ pub(super) enum SummaryPublication {
         summary: Value,
         model: String,
         mode: DiscussionSummaryMode,
-        usage: DiscussionUsage,
     },
 }
 
@@ -177,7 +153,6 @@ pub(super) enum DiscussionMutation {
 
 #[derive(Debug, Clone)]
 pub(super) struct DiscussionFinalizationPlan {
-    pub(super) task_id: i64,
     pub(super) snapshot: DiscussionSnapshot,
     pub(super) mutation: DiscussionMutation,
     pub(super) finalized_at: DateTime<Utc>,
