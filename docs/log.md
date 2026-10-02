@@ -27,6 +27,15 @@ Use this append-only log to preserve implementation context across sessions and 
 
 ## Entries
 
+### 2026-09-27 — `main` — Briefing inset figure wrap fixes
+
+- **Status:** Complete
+- **Scope:** iOS briefing floating figures (`BriefingFigureLayoutPolicy`, `BriefingPassageView`, `DigDeeperTextView`, `BriefingLensContentViews`).
+- **Decisions:** Inset figure height now snaps to a whole number of passage lines (scaled callout body line height + 2pt line spacing), so the exclusion ends exactly where the next full-width line starts. Before, a fixed 118pt exclusion left an indented line hanging under the image, which showed as a gap under left figures. Passage measurement runs on a coordinator-owned detached text view, so SwiftUI width probes no longer move the displayed view's bounds or exclusion. The exclusion is also applied before `super.layoutSubviews()` and only when its rect changes.
+- **Validation:** `BriefingFigureLayoutPolicyTests` includes a TextKit layout test that fails with the old 116/118 metrics. All 13 briefing test classes pass. Visual check on iPhone 17 Pro Max at in-app Large text with local user 41 data, for both left and right figures.
+- **Remaining:** The reported right-figure overlap (full-width lines under the image) did not reproduce in the simulator. Tried: Pro Max width, Standard/Large/XL text, lens switches, background/foreground, scroll recycling, forced TextKit 1 fallback, and stale-width probes. The measurement/ordering change removes the only code path found that could leave the displayed view with an exclusion at the wrong width. Confirm on device.
+- **Commits:** Uncommitted
+
 ### 2026-09-30 — `willem/nightly-news-categories` — Reclustering review corrections
 
 - **Status:** Corrections complete locally; main integration, commit and push authorized.
@@ -2839,3 +2848,52 @@ Use this append-only log to preserve implementation context across sessions and 
 
 - Version the Rust CLI independently at 0.2.0 and prepare the `cli-v0.2.0` source tag. Update the external Homebrew tap from Go to Cargo, preserving the executable/config names.
 - Publish the CLI tag and tap only; no backend deployment is part of this release. Validation: 50 CLI unit tests, four process-level test groups, warning-denied Clippy, formatting, and diff checks passed. Homebrew install/test proof is recorded in the external tap workflow.
+
+### 2026-10-01 — `main` — Knowledge row deep-dive swipe actions
+
+- **Status:** Complete
+- **Scope:** iOS Knowledge timeline saved rows (`KnowledgeTimelineView`, `KnowledgeView`), `KnowledgeChatViewModel`, `CustomNarrationLibraryViewModel`, `KnowledgeTimelineItem` source index, law K19.
+- **Decisions:** Swipe right on a ready saved row offers Chat · Deck · Listen, and a full swipe opens chat. Swipe left offers Remove · Council. Long press stays as it was (Remove only). Chat and council resume the source's latest listed non-council Knowledge chat, unlike detail-screen Start Chat, which always opens a fresh thread. Deck opens the existing focus sheet. Listen creates a single-source custom narration. Both join the timeline immediately with a toast, and the user stays on the list. Row markers come from a client-side index (chats by content/news ID, content-sourced decks, narration source IDs); news decks are not indexed because decks expose only `sourceContentId`. The one-time hint uses the `@AppStorage` key `knowledge.sourceSwipeHintSeen`. It plays on the newest ready saved row, waits for the first one if the list starts empty, and is skipped for E2E launches. With Reduce Motion it opens and closes without animation.
+- **Validation:** Focused iOS tests passed (45, including 7 new: source chat resume/start/failure, council prompt, news narration, derivative index, source key). Simulator check against the local API on an iPhone 17 Pro Max: the hint plays once, the swipe reveals system-style actions, and Listen, Deck, full-swipe Chat, the timeline insertions and the markers all work.
+- **Remaining:** Local DB holds test data: knowledge saves of content 181 for every local user (IDs in `/tmp/knowledge_test_save_ids.txt`), plus one deck, narration and chat created from the simulator.
+- **Commits:** Uncommitted
+
+### 2026-10-01 — `main` — arXiv and Hugging Face Papers aggregators
+
+- **Status:** Complete (not deployed)
+- **Scope:** `newsly-domain` aggregator catalog, `newsly-providers` scraping (`scraping/papers.rs`), aggregator visibility SQL in `newsly-db`, worker subscriber lookup, API config and onboarding normalization, iOS onboarding aggregator step, laws S10/P28, `docs/architecture.md`.
+- **Decisions:** Two global aggregators. `arxiv` reads `rss.arxiv.org/rss/<cat>` for cs.AI, cs.LG, cs.CL, cs.CV and stat.ML. It keeps only `Announce Type: new` entries, so each paper appears once under its primary category, which is stored as `aggregator.topic`; that was about 744 papers on 2026-10-01. `hfpapers` reads the Hugging Face Daily Papers API (50 recent papers, with upvotes and comment counts) and points at the arXiv abstract, with the HF page as the discussion URL. `AggregatorKey` moved to `newsly-domain` as the only catalog of keys, display names and offered topics. It replaces 3 Rust constants and 9 SQL key lists. Brutalist-only topic checks became catalog topic-aggregator arrays. Single queries bind the arrays; the shared fragments in `content_read` and `briefing_refresh` interpolate literals built from the catalog. Config topics are now validated against the catalog: unknown arXiv categories are rejected, and so are topics on aggregators that have none. The first-edition progress topic match is now case-insensitive.
+- **Validation:** `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -D warnings`, `cargo test --workspace --locked` (local Postgres), and `scripts/check_public_contracts.sh` all pass. New tests cover provider fixtures, PostgreSQL topic visibility and config/onboarding normalization. Parsers were checked by hand against the live cs.LG and cs.CL listings and the HF API. iOS `OnboardingStateStoreTests` pass (13).
+- **Remaining:** (1) Known issue that predates this change: global news rows dedupe by story URL across aggregators, and the last writer's `platform` wins. Papers on both lists will usually end up as `hfpapers`, and arXiv-only subscribers stop seeing them. HN and Techmeme overlap the same way. Fixing it needs platform-independent visibility, which is a separate design. (2) arXiv volume of about 740 papers per weekday costs roughly $1/day in news processing. (3) The iOS topic chips have not been checked on a simulator. (4) Not deployed.
+- **Commits:** Uncommitted
+
+### 2026-10-02 — `main` — Aggregator cleanup and code review follow-up
+
+- **Status:** Complete (not deployed)
+- **Scope:** Follow-up to the 2026-10-01 arXiv/HF Papers entry: cleanup and strict code-review findings, plus an oracle-fable design review of the visibility consolidation.
+- **Decisions:**
+  - **Visibility rule.** The about 9 hand-copied "global aggregator item visible to user" SQL predicates now call one migration-owned function, `aggregator_config_admits(config jsonb, platform text, metadata json)` (`20261002000000_aggregator_visibility.sql`). The function encodes no keys and stays inlinable. Feed, count and Briefing queries use a `MATERIALIZED` subscription CTE (Fable measured roughly 29 ms → 2 ms on the local production copy); single-item lookups call the function directly.
+  - **Topic rule.** Items without a topic, and configs without a non-empty topics array, are unfiltered, so configs written by older binaries cannot hide items.
+  - **Migration (one-way).** It lowercases and trims keys, deactivates non-catalog keys, drops topics that aren't offered, and rewrites topics to the catalog spelling, touching only rows that change. Configs now store catalog-spelled topics such as `cs.CL`.
+  - **Chat.** Chat news search and the unread count now respect subscriptions (S10). Global reddit/twitter items and unsubscribed aggregators no longer appear there.
+  - **Removed.** The catalog-in-SQL plumbing is gone: the topic-key array, the LazyLock literals and the extra binds.
+  - **Keys.** Stored keys are resolved with strict `AggregatorKey::from_key`; lenient `parse` remains only for task-payload sources.
+  - **Providers.** HF Papers now decodes entries one at a time, and unusable entries are reported instead of retried. One arXiv ID parser covers both sources. The redundant de-duplication set is removed. The topic arrays are private, and the provider re-export of `AggregatorKey` is dropped.
+  - **iOS.** The last topic chip can't be deselected (empty means "all" on the server), and restored topics are limited to each aggregator's offered list.
+  - **stats.** `regexp_replace`/`lower` order is fixed in `stats.rs`.
+- **Validation:**
+  - `cargo fmt --check`, warning-denied clippy, `cargo test --workspace --locked` (638 passed) and `scripts/check_public_contracts.sh` all pass.
+  - New database tests: parity across feed, unread count, chat, learning deck and bulk-read paths; an `EXPLAIN` guard that the function is inlined; migration normalization.
+  - iOS `OnboardingStateStoreTests`: 15 passed.
+- **Remaining:**
+  - Before deploying, run a read-only production check for non-canonical aggregator keys and global item platforms.
+  - Open product decision: arXiv and HF Papers items for the same paper cluster together (shared story URL), and visibility checks only the representative's platform. Users subscribed to just one of the two can miss papers. HN and Techmeme overlap the same way.
+  - The iOS onboarding catalog still duplicates keys and topics.
+- **Commits:** Uncommitted
+
+### 2026-10-02 — `main` — Full release preparation
+
+- Scope: release the completed aggregator/catalog and visibility migration, Knowledge row deep dives, and Briefing figure wrapping changes in topical commits.
+- Production preflight through the deployed Rust operator: the two active aggregator configs use canonical `hackernews` and `techmeme` keys; global item platforms are canonical aggregators plus legacy global reddit/twitter rows, which the subscription rule intentionally excludes. No configs will be deactivated by key normalization. Active API/extractor revision is `13754a57`; zero failing sources, overdue tasks, or terminal product mismatches before release.
+- Validation: complete canonical clean-commit gate, including paid provider/E2B live smoke, followed by exact-SHA GitHub deployment and independent runtime/ingress/migration proof. Evidence will be recorded under ignored `test-results/` directories.
+- Known remaining limitation: shared-story clustering still exposes only the representative platform; cross-aggregator overlap can hide a paper from subscribers to the other source. This pre-existing design issue remains outside this release.

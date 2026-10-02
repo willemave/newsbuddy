@@ -763,6 +763,7 @@ private struct BriefingSegmentView: View {
 
 private struct BriefingFloatingFigurePassage: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let figure: APIBriefingBlock
     let passageContent: BriefingAttributedTextBuilder.Result?
@@ -775,7 +776,10 @@ private struct BriefingFloatingFigurePassage: View {
     let onDig: (String, String) -> Void
 
     var body: some View {
-        let metrics = BriefingFigureLayoutPolicy.metrics(for: horizontalSizeClass)
+        let metrics = BriefingFigureLayoutPolicy.metrics(
+            for: horizontalSizeClass,
+            lineStep: BriefingPassageView.lineStep(for: dynamicTypeSize)
+        )
         ZStack(alignment: alignment == .left ? .topLeading : .topTrailing) {
             if let passageContent {
                 BriefingPassageView(

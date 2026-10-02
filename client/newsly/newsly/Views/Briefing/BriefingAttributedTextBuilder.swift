@@ -12,6 +12,13 @@ struct BriefingAttributedTextBuilder {
         pattern: #"\[((?:[^\[\]]|\[[^\]]*\])+)\]\(((?:newsly|news)://briefing/(content|news)/(\d+))\)"#
     )
 
+    static let passageLineSpacing: CGFloat = 2
+
+    /// Body font before Dynamic Type scaling; `BriefingPassageView` scales it.
+    static func passageBodyFont(bold: Bool = false) -> UIFont {
+        UIFont.appSans(size: 16, weight: bold ? .semibold : .regular)
+    }
+
     struct Result {
         let attributedText: NSAttributedString
         let plainText: String
@@ -25,7 +32,7 @@ struct BriefingAttributedTextBuilder {
         let output = NSMutableAttributedString()
         let baseFont = font(for: weight, bold: false)
         let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = 2
+        paragraphStyle.lineSpacing = Self.passageLineSpacing
         paragraphStyle.paragraphSpacing = 10
         var emittedChipSourceKeys = Set<String>()
 
@@ -242,7 +249,7 @@ struct BriefingAttributedTextBuilder {
     }
 
     private func font(for _: String?, bold: Bool) -> UIFont {
-        return UIFont.appSans(size: 16, weight: bold ? .semibold : .regular)
+        Self.passageBodyFont(bold: bold)
     }
 
     private func url(for sourceKey: String) -> URL? {

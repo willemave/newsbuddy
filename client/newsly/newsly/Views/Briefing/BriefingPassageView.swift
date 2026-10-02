@@ -38,6 +38,14 @@ struct BriefingPassageView: UIViewRepresentable {
         return textView
     }
 
+    fileprivate static func makeMeasuringView() -> DigDeeperTextView {
+        let textView = DigDeeperTextView()
+        textView.isScrollEnabled = false
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        return textView
+    }
+
     func updateUIView(_ uiView: DigDeeperTextView, context: Context) {
         context.coordinator.onOpenSource = onOpenSource
         context.coordinator.onOpenDiscussion = onOpenDiscussion
@@ -76,12 +84,16 @@ struct BriefingPassageView: UIViewRepresentable {
            measurement.fingerprint == measurementFingerprint {
             return measurement.size
         }
-        if abs(uiView.bounds.width - width) > .ulpOfOne {
-            uiView.bounds.size.width = width
-        }
         let signpostState = BriefingPerformance.signposter.beginInterval("passage-measurement")
-        uiView.updateFloatingExclusion(forWidth: width)
-        let fittingSize = uiView.sizeThatFits(
+        // Measure on a detached view: SwiftUI probes widths it never places, and
+        // resizing the displayed view would leave its exclusion at a probe width.
+        let measuringView = context.coordinator.measuringView
+        measuringView.attributedText = uiView.attributedText
+        measuringView.floatingExclusionSize = floatingExclusionSize
+        measuringView.floatingExclusionAlignment = floatingExclusionAlignment
+        measuringView.bounds.size.width = width
+        measuringView.updateFloatingExclusion(forWidth: width)
+        let fittingSize = measuringView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
         let minimumHeight = floatingExclusionSize?.height ?? 0
@@ -89,6 +101,18 @@ struct BriefingPassageView: UIViewRepresentable {
         BriefingPerformance.signposter.endInterval("passage-measurement", signpostState)
         context.coordinator.measurement = (measurementFingerprint, size)
         return size
+    }
+
+    /// Vertical distance between passage baselines at the given text size.
+    static func lineStep(for dynamicTypeSize: DynamicTypeSize) -> CGFloat {
+        let traits = UITraitCollection(
+            preferredContentSizeCategory: UIContentSizeCategory(dynamicTypeSize)
+        )
+        let font = UIFontMetrics(forTextStyle: .callout).scaledFont(
+            for: BriefingAttributedTextBuilder.passageBodyFont(),
+            compatibleWith: traits
+        )
+        return font.lineHeight + BriefingAttributedTextBuilder.passageLineSpacing
     }
 
     static func scaledAttributedText(
@@ -126,6 +150,7 @@ struct BriefingPassageView: UIViewRepresentable {
 
         var onOpenSource: (String) -> Void
         var onOpenDiscussion: (String) -> Void
+        let measuringView = BriefingPassageView.makeMeasuringView()
         var contentRevision = 0
         var measurement: (fingerprint: MeasurementFingerprint, size: CGSize)?
         private var renderFingerprint: RenderFingerprint?

@@ -6,17 +6,10 @@ struct BriefingFigureLayoutMetrics: Equatable {
 }
 
 enum BriefingFigureLayoutPolicy {
-    /// The exclusion keeps a horizontal gutter beside the figure but hugs its
-    /// bottom edge: any line fragment that touches the exclusion is shortened,
-    /// so extra height leaves a narrow line hanging below the image.
-    private static let compactMetrics = BriefingFigureLayoutMetrics(
-        imageSize: CGSize(width: 116, height: 116),
-        exclusionSize: CGSize(width: 128, height: 118)
-    )
-    private static let regularMetrics = BriefingFigureLayoutMetrics(
-        imageSize: CGSize(width: 148, height: 148),
-        exclusionSize: CGSize(width: 162, height: 150)
-    )
+    private static let compactSide: CGFloat = 116
+    private static let regularSide: CGFloat = 148
+    /// Horizontal gutter between the figure and the wrapped text.
+    private static let gutter: CGFloat = 12
 
     static func canonicalPlacement(
         _ placement: APIBriefingFigurePlacement?
@@ -41,9 +34,21 @@ enum BriefingFigureLayoutPolicy {
             && passageTextLength >= 240
     }
 
+    /// The figure spans a whole number of passage lines. Any line fragment
+    /// that touches the exclusion is shortened, so an exclusion ending
+    /// mid-line leaves an indented line hanging below the image. Snapping to
+    /// `lineStep` (line height plus line spacing) makes the exclusion end
+    /// exactly where the next full-width line begins.
     static func metrics(
-        for horizontalSizeClass: UserInterfaceSizeClass?
+        for horizontalSizeClass: UserInterfaceSizeClass?,
+        lineStep: CGFloat
     ) -> BriefingFigureLayoutMetrics {
-        horizontalSizeClass == .compact ? compactMetrics : regularMetrics
+        let side = horizontalSizeClass == .compact ? compactSide : regularSide
+        let lineCount = max(1, (side / lineStep).rounded())
+        let height = lineCount * lineStep - BriefingAttributedTextBuilder.passageLineSpacing
+        return BriefingFigureLayoutMetrics(
+            imageSize: CGSize(width: side, height: height),
+            exclusionSize: CGSize(width: side + gutter, height: height)
+        )
     }
 }

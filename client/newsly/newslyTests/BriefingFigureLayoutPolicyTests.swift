@@ -54,18 +54,80 @@ final class BriefingFigureLayoutPolicyTests: XCTestCase {
     }
 
     func testCompactInlineFigureIsSmallerThanRegularFigure() {
-        let compact = BriefingFigureLayoutPolicy.metrics(for: .compact)
-        let regular = BriefingFigureLayoutPolicy.metrics(for: .regular)
+        let lineStep = BriefingPassageView.lineStep(for: .large)
+        let compact = BriefingFigureLayoutPolicy.metrics(for: .compact, lineStep: lineStep)
+        let regular = BriefingFigureLayoutPolicy.metrics(for: .regular, lineStep: lineStep)
 
         XCTAssertLessThan(compact.imageSize.width, regular.imageSize.width)
         XCTAssertGreaterThan(compact.exclusionSize.width, compact.imageSize.width)
     }
 
-    func testExclusionHugsFigureBottomSoTextFlowsBackUnderIt() {
-        for sizeClass: UserInterfaceSizeClass in [.compact, .regular] {
-            let metrics = BriefingFigureLayoutPolicy.metrics(for: sizeClass)
-            XCTAssertGreaterThanOrEqual(metrics.exclusionSize.height, metrics.imageSize.height)
-            XCTAssertLessThanOrEqual(metrics.exclusionSize.height - metrics.imageSize.height, 4)
+    func testFigureSpansWholePassageLines() {
+        for size: DynamicTypeSize in [.small, .large, .xxxLarge] {
+            let lineStep = BriefingPassageView.lineStep(for: size)
+            let metrics = BriefingFigureLayoutPolicy.metrics(for: .compact, lineStep: lineStep)
+            let lines = (metrics.exclusionSize.height + BriefingAttributedTextBuilder.passageLineSpacing) / lineStep
+            XCTAssertEqual(lines, lines.rounded(), accuracy: 0.001)
+            XCTAssertEqual(metrics.imageSize.height, metrics.exclusionSize.height)
+        }
+    }
+
+    func testTextReturnsToFullWidthOnTheLineAfterTheFigure() throws {
+        let traits = UITraitCollection(preferredContentSizeCategory: .extraExtraLarge)
+        let paragraph = APIBriefingParagraph(runs: [
+            APIBriefingRun(
+                kind: .text,
+                text: String(repeating: "Research agents screened disease targets in greater depth. ", count: 10),
+                sourceKey: nil,
+                insightId: nil
+            )
+        ])
+        let content = BriefingAttributedTextBuilder().build(paragraphs: [paragraph], weight: nil)
+        let metrics = BriefingFigureLayoutPolicy.metrics(
+            for: .compact,
+            lineStep: BriefingPassageView.lineStep(for: .xxLarge)
+        )
+
+        for alignment: APIBriefingFigureAlignment in [.left, .right] {
+            let textView = DigDeeperTextView(frame: CGRect(x: 0, y: 0, width: 370, height: 800))
+            textView.textContainerInset = .zero
+            textView.textContainer.lineFragmentPadding = 0
+            textView.attributedText = BriefingPassageView.scaledAttributedText(
+                content.attributedText,
+                compatibleWith: traits
+            )
+            textView.floatingExclusionSize = metrics.exclusionSize
+            textView.floatingExclusionAlignment = alignment
+            textView.layoutIfNeeded()
+
+            let layoutManager = try XCTUnwrap(textView.textLayoutManager)
+            var lineFrames: [CGRect] = []
+            layoutManager.enumerateTextLayoutFragments(
+                from: layoutManager.documentRange.location,
+                options: [.ensuresLayout]
+            ) { fragment in
+                lineFrames += fragment.textLineFragments.map {
+                    $0.typographicBounds.offsetBy(
+                        dx: fragment.layoutFragmentFrame.minX,
+                        dy: fragment.layoutFragmentFrame.minY
+                    )
+                }
+                return true
+            }
+
+            let beside = lineFrames.filter { $0.minY < metrics.exclusionSize.height }
+            let below = try XCTUnwrap(lineFrames.first { $0.minY >= metrics.exclusionSize.height })
+            // No indented line may hang below the image.
+            XCTAssertLessThanOrEqual(try XCTUnwrap(beside.last).maxY, metrics.imageSize.height + 0.5)
+            for line in beside {
+                if alignment == .left {
+                    XCTAssertEqual(line.minX, metrics.exclusionSize.width, accuracy: 0.5)
+                } else {
+                    XCTAssertLessThanOrEqual(line.maxX, 370 - metrics.exclusionSize.width + 0.5)
+                }
+            }
+            XCTAssertEqual(below.minX, 0, accuracy: 0.5)
+            XCTAssertGreaterThan(below.width, 370 - metrics.exclusionSize.width)
         }
     }
 }

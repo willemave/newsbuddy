@@ -30,20 +30,21 @@ class DigDeeperTextView: UITextView {
     }
 
     func updateFloatingExclusion(forWidth width: CGFloat) {
-        guard let size = floatingExclusionSize, width > size.width + 40 else {
-            if !textContainer.exclusionPaths.isEmpty {
-                textContainer.exclusionPaths = []
-            }
-            return
-        }
+        let rect = floatingExclusionRect(forWidth: width)
+        guard textContainer.exclusionPaths.first?.bounds != rect else { return }
+        textContainer.exclusionPaths = rect.map { [UIBezierPath(rect: $0)] } ?? []
+    }
+
+    private func floatingExclusionRect(forWidth width: CGFloat) -> CGRect? {
+        guard let size = floatingExclusionSize, width > size.width + 40 else { return nil }
         let x = floatingExclusionAlignment == .left ? 0 : width - size.width
-        let rect = CGRect(x: x, y: 0, width: size.width, height: size.height)
-        textContainer.exclusionPaths = [UIBezierPath(rect: rect)]
+        return CGRect(x: x, y: 0, width: size.width, height: size.height)
     }
 
     override func layoutSubviews() {
-        super.layoutSubviews()
+        // Place the exclusion before UIKit lays out text for the new bounds.
         updateFloatingExclusion(forWidth: bounds.width)
+        super.layoutSubviews()
     }
 
     private func clearSelection() {
