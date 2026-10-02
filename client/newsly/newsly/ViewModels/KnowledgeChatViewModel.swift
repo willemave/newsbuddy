@@ -22,6 +22,16 @@ protocol KnowledgeChatServicing: AnyObject {
     ) async throws -> AssistantTurnResponse
 
     func deleteSession(sessionId: Int) async throws
+
+    func startArticleChat(
+        contentId: Int,
+        provider: ChatModelProvider
+    ) async throws -> ChatSessionSummary
+
+    func startNewsChat(
+        newsItemId: Int,
+        provider: ChatModelProvider
+    ) async throws -> ChatSessionSummary
 }
 
 extension ChatService: KnowledgeChatServicing {}
@@ -156,6 +166,30 @@ final class KnowledgeChatViewModel {
         await startAssistantTurn(message: message)
     }
 
+    /// Resumes the latest Knowledge chat about a saved source, or starts one.
+    func openSourceChat(for content: ContentSummary) async -> ChatSessionRoute? {
+        if let existing = existingSourceChat(for: content) {
+            return ChatSessionRoute(session: existing)
+        }
+        guard let session = await startSourceSession(for: content) else { return nil }
+        return ChatSessionRoute(session: session, focusComposerOnAppear: true)
+    }
+
+    /// Asks a council about a saved source, reusing its latest Knowledge chat.
+    func startSourceCouncil(for content: ContentSummary) async -> ChatSessionRoute? {
+        let session: ChatSessionSummary
+        if let existing = existingSourceChat(for: content) {
+            session = existing
+        } else {
+            guard let started = await startSourceSession(for: content) else { return nil }
+            session = started
+        }
+        return ChatSessionRoute(
+            session: session,
+            pendingCouncilPrompt: DetailChatCoordinator.councilPrompt(sourceTitle: content.displayTitle)
+        )
+    }
+
     func deleteSession(_ session: ChatSessionSummary) async {
         guard sessions.contains(where: { $0.id == session.id }),
               deletingSessionIDs.insert(session.id).inserted else {
@@ -231,6 +265,38 @@ final class KnowledgeChatViewModel {
                 initialUserMessageTimestamp: response.userMessage.timestamp,
                 pendingMessageId: response.messageId
             )
+        } catch where ClientFailure.classify(error) == .cancelled {
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func existingSourceChat(for content: ContentSummary) -> ChatSessionSummary? {
+        let source = KnowledgeSourceKey(content)
+        return sessions.first { session in
+            let sessionSourceID = source.isNews ? session.newsItemId : session.contentId
+            return sessionSourceID == source.id
+                && session.isKnowledgeSession
+                && !session.isCouncilMode
+        }
+    }
+
+    private func startSourceSession(for content: ContentSummary) async -> ChatSessionSummary? {
+        guard !isCreatingSession else { return nil }
+        isCreatingSession = true
+        errorMessage = nil
+        defer { isCreatingSession = false }
+
+        do {
+            let session = if content.contentType == .news {
+                try await chatService.startNewsChat(newsItemId: content.id, provider: .openai)
+            } else {
+                try await chatService.startArticleChat(contentId: content.id, provider: .openai)
+            }
+            prependSession(session)
+            return session
         } catch where ClientFailure.classify(error) == .cancelled {
             return nil
         } catch {

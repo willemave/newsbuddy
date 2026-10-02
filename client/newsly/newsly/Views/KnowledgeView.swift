@@ -169,8 +169,14 @@ struct KnowledgeSavedContentButton: View {
     let onRefresh: () -> Void
     let onReprocess: () async -> Bool
     let onRemove: () -> Void
+    var derivatives: KnowledgeSourceDerivatives = []
+    var showsSwipeHint = false
+    var onSwipeHintFinished: () -> Void = {}
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsPreparationStatus = false
+    @State private var swipeHintOffset: CGFloat = 0
+    @State private var showsSwipeHintActions = false
 
     var body: some View {
         Button {
@@ -180,9 +186,19 @@ struct KnowledgeSavedContentButton: View {
             }
             onOpen()
         } label: {
-            KnowledgeSavedRow(content: content)
+            KnowledgeSavedRow(content: content, derivatives: derivatives)
         }
         .buttonStyle(.plain)
+        .offset(x: swipeHintOffset)
+        .background(alignment: .leading) {
+            if showsSwipeHintActions {
+                KnowledgeSwipeHintActions()
+                    .frame(width: swipeHintOffset, alignment: .trailing)
+                    .clipped()
+                    .accessibilityHidden(true)
+            }
+        }
+        .task(id: showsSwipeHint) { await playSwipeHint() }
         .contextMenu {
             Button(role: .destructive, action: onRemove) {
                 Label("Remove from Knowledge", systemImage: "bookmark.slash")
@@ -203,10 +219,96 @@ struct KnowledgeSavedContentButton: View {
             )
         }
     }
+
+    /// Briefly slides the row open to reveal the leading swipe actions, then closes it.
+    private func playSwipeHint() async {
+        guard showsSwipeHint else { return }
+        let open = reduceMotion ? nil : Animation.spring(response: 0.45, dampingFraction: 0.82)
+        let close = reduceMotion ? nil : Animation.spring(response: 0.5, dampingFraction: 0.9)
+        do {
+            try await Task.sleep(for: .milliseconds(700))
+            showsSwipeHintActions = true
+            withAnimation(open) { swipeHintOffset = KnowledgeSwipeHintActions.width }
+            try await Task.sleep(for: .milliseconds(1_600))
+        } catch {
+            swipeHintOffset = 0
+            showsSwipeHintActions = false
+            return
+        }
+        withAnimation(close) {
+            swipeHintOffset = 0
+        } completion: {
+            showsSwipeHintActions = false
+        }
+        onSwipeHintFinished()
+    }
+}
+
+/// Static copy of the leading swipe actions, revealed by the one-time row hint.
+/// Mirrors the system's round swipe buttons with captions underneath.
+private struct KnowledgeSwipeHintActions: View {
+    private static let actionWidth: CGFloat = 70
+    static let width = actionWidth * CGFloat(KnowledgeSourceAction.leading.count)
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(KnowledgeSourceAction.leading, id: \.self) { action in
+                VStack(spacing: 5) {
+                    Image(systemName: action.systemImage)
+                        .font(.appSymbol(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 58, height: 40)
+                        .background(action.tint, in: Capsule())
+                    Text(action.title)
+                        .font(.appCaption2)
+                        .foregroundStyle(Color.onSurfaceSecondary)
+                }
+                .frame(width: Self.actionWidth)
+            }
+        }
+        .frame(width: Self.width)
+    }
+}
+
+/// Deep dives offered from a saved Knowledge row's swipe actions.
+enum KnowledgeSourceAction: Hashable {
+    case chat
+    case deck
+    case listen
+    case council
+
+    static let leading: [Self] = [.chat, .deck, .listen]
+
+    var title: String {
+        switch self {
+        case .chat: "Chat"
+        case .deck: "Deck"
+        case .listen: "Listen"
+        case .council: "Council"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .chat: "message"
+        case .deck: "rectangle.on.rectangle"
+        case .listen: "headphones"
+        case .council: "person.3.sequence.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .chat: Color.brandPrimary
+        case .deck: Color.onSurfaceSecondary
+        case .listen, .council: Color.onSurfaceTertiary
+        }
+    }
 }
 
 struct KnowledgeSavedRow: View {
     let content: ContentSummary
+    var derivatives: KnowledgeSourceDerivatives = []
 
     private var hasStalled: Bool {
         content.hasStalledKnowledgePreparation
@@ -260,9 +362,12 @@ struct KnowledgeSavedRow: View {
                         .truncationMode(.tail)
                 }
 
-                Text(kickerText)
-                    .kicker(color: .onSurfaceTertiary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(kickerText)
+                        .kicker(color: .onSurfaceTertiary)
+                        .lineLimit(1)
+                    derivativeMarkers
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -277,6 +382,31 @@ struct KnowledgeSavedRow: View {
         .padding(.horizontal, Spacing.appHorizontalMargin)
         .padding(.vertical, 8)
         .contentShape(Rectangle())
+    }
+
+    private static let derivativeMarkerOrder: [(KnowledgeSourceDerivatives, KnowledgeSourceAction)] = [
+        (.deck, .deck),
+        (.chat, .chat),
+        (.council, .council),
+        (.narration, .listen)
+    ]
+
+    @ViewBuilder
+    private var derivativeMarkers: some View {
+        let icons = Self.derivativeMarkerOrder
+            .filter { derivatives.contains($0.0) }
+            .map(\.1.systemImage)
+        if !icons.isEmpty {
+            HStack(spacing: 5) {
+                ForEach(icons, id: \.self) { icon in
+                    Image(systemName: icon)
+                        .font(.appSymbol(size: 9, weight: .semibold))
+                }
+            }
+            .foregroundStyle(Color.brandPrimary)
+            .fixedSize()
+            .accessibilityHidden(true)
+        }
     }
 
     private var artwork: some View {

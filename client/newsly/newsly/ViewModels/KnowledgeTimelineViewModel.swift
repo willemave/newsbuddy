@@ -82,6 +82,7 @@ final class KnowledgeTimelineViewModel {
     let narrations: CustomNarrationLibraryViewModel
     private(set) var timeline: [KnowledgeTimelineItem] = []
     private(set) var groupedTimeline: [KnowledgeTimelineDayGroup] = []
+    private(set) var sourceDerivatives: [KnowledgeSourceKey: KnowledgeSourceDerivatives] = [:]
     private(set) var automaticReadsEnabled = false
     private(set) var lastValidatedAt: Date?
     private(set) var lastHandledActivationGeneration: UInt64?
@@ -447,5 +448,10 @@ final class KnowledgeTimelineViewModel {
             narrations: narrations.episodes
         )
         groupedTimeline = KnowledgeTimelineDayGroup.group(timeline)
+        sourceDerivatives = KnowledgeSourceDerivatives.index(
+            chats: chats.sessions,
+            decks: decks.decks,
+            narrations: narrations.episodes
+        )
     }
 }

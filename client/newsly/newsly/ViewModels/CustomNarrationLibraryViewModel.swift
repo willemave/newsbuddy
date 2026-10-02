@@ -215,6 +215,28 @@ final class CustomNarrationLibraryViewModel {
         }
     }
 
+    /// Starts a narration of one saved source; the episode joins the library while it generates.
+    func narrate(_ content: ContentSummary) async -> Bool {
+        let isNews = content.contentType == .news
+        do {
+            let episode = try await audioService.createCustomNarrationEpisode(
+                contentIds: isNews ? [] : [content.id],
+                newsItemIds: isNews ? [content.id] : [],
+                title: nil,
+                markSourceContentReadOnPlay: false,
+                delivery: .background
+            )
+            upsert(episode)
+            errorMessage = nil
+            return true
+        } catch where ClientFailure.classify(error) == .cancelled {
+            return false
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func shareLinks(for episode: AudioEpisode) async -> AudioEpisodeShareResponse? {
         guard episode.isCompleted, !sharingEpisodeIds.contains(episode.id) else { return nil }
         sharingEpisodeIds.insert(episode.id)

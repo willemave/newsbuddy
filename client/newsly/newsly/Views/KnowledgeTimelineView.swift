@@ -9,6 +9,8 @@ import SwiftUI
 struct KnowledgeView: View {
     @Environment(AppLifecycle.self) private var lifecycle
     @Environment(XConnectionStore.self) private var xConnectionStore
+    @Environment(RootDependencyFactory.self) private var dependencyFactory
+    @AppStorage("knowledge.sourceSwipeHintSeen") private var hasSeenSourceSwipeHint = false
 
     let scrollToTopRequest: Int
     let isVisible: Bool
@@ -23,6 +25,7 @@ struct KnowledgeView: View {
     @State private var settings: AppSettings
     @State private var composerText = ""
     @State private var deckReaderDestination: LearningDeckReaderDestination?
+    @State private var deckSource: ContentSummary?
     @State private var showsInitialLoadingIndicator = false
     @FocusState private var isComposerFocused: Bool
 
@@ -106,6 +109,17 @@ struct KnowledgeView: View {
         .dynamicTypeSize(appTextSize)
         .background(Color.surfacePrimary.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $deckSource) { content in
+            LearningDeckCreateSheet(
+                sourceTitle: content.displayTitle,
+                requiresURL: false,
+                isSubmitting: viewModel.decks.isCreating,
+                focusRecorder: dependencyFactory.makeLearningDeckFocusRecorder(),
+                onCreate: { _, interestsPrompt in
+                    await createDeck(from: content, interestsPrompt: interestsPrompt)
+                }
+            )
+        }
         .fullScreenCover(item: $deckReaderDestination) { destination in
             LearningDeckReaderView(
                 deck: destination.deck,
@@ -342,9 +356,29 @@ struct KnowledgeView: View {
                 },
                 onRefresh: { Task { await viewModel.savedContent.loadKnowledgeLibrary() } },
                 onReprocess: { await viewModel.savedContent.reprocessKnowledgeItem(content.id) },
-                onRemove: { Task { await viewModel.savedContent.toggleKnowledgeSave(content.id) } }
+                onRemove: { removeSaved(content) },
+                derivatives: viewModel.sourceDerivatives[KnowledgeSourceKey(content)] ?? [],
+                showsSwipeHint: content.id == sourceSwipeHintContentID,
+                onSwipeHintFinished: { hasSeenSourceSwipeHint = true }
             )
             .appListRow()
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if content.savedLibraryItemState == .ready {
+                    ForEach(KnowledgeSourceAction.leading, id: \.self) { action in
+                        sourceActionButton(action, for: content)
+                    }
+                }
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) {
+                    removeSaved(content)
+                } label: {
+                    Label("Remove", systemImage: "bookmark.slash")
+                }
+                if content.savedLibraryItemState == .ready {
+                    sourceActionButton(.council, for: content)
+                }
+            }
         case .chat(let session, let preview):
             Button {
                 onSelectSession(ChatSessionRoute(session: session))
@@ -474,6 +508,76 @@ struct KnowledgeView: View {
                 isComposerFocused = true
             }
         }
+    }
+
+    /// The newest ready saved row plays the one-time swipe hint, on first view or first save.
+    /// E2E launches skip it so visual baselines never capture a half-open row.
+    private var sourceSwipeHintContentID: Int? {
+        guard !hasSeenSourceSwipeHint,
+              !E2ETestLaunch.isEnabled,
+              isVisible,
+              !viewModel.isLoading else { return nil }
+        for item in viewModel.timeline {
+            if case .saved(let content) = item, content.savedLibraryItemState == .ready {
+                return content.id
+            }
+        }
+        return nil
+    }
+
+    private func removeSaved(_ content: ContentSummary) {
+        Task { await viewModel.savedContent.toggleKnowledgeSave(content.id) }
+    }
+
+    private func sourceActionButton(
+        _ action: KnowledgeSourceAction,
+        for content: ContentSummary
+    ) -> some View {
+        Button {
+            perform(action, for: content)
+        } label: {
+            Label(action.title, systemImage: action.systemImage)
+        }
+        .tint(action.tint)
+        .accessibilityIdentifier("knowledge.saved.\(content.id).\(action.title.lowercased())")
+    }
+
+    private func perform(_ action: KnowledgeSourceAction, for content: ContentSummary) {
+        hasSeenSourceSwipeHint = true
+        switch action {
+        case .chat:
+            Task {
+                if let route = await viewModel.chats.openSourceChat(for: content) {
+                    onSelectSession(route)
+                }
+            }
+        case .council:
+            Task {
+                if let route = await viewModel.chats.startSourceCouncil(for: content) {
+                    onSelectSession(route)
+                }
+            }
+        case .deck:
+            deckSource = content
+        case .listen:
+            Task {
+                guard await viewModel.narrations.narrate(content) else { return }
+                toastPresenter.show("Narration started", type: .info, duration: 2)
+            }
+        }
+    }
+
+    @MainActor
+    private func createDeck(from content: ContentSummary, interestsPrompt: String?) async -> Bool {
+        let isNews = content.contentType == .news
+        let deck = await viewModel.decks.createDeck(
+            contentId: isNews ? nil : content.id,
+            newsItemId: isNews ? content.id : nil,
+            interestsPrompt: interestsPrompt
+        )
+        guard deck != nil else { return false }
+        toastPresenter.show("Deck started", type: .info, duration: 2)
+        return true
     }
 
     @MainActor

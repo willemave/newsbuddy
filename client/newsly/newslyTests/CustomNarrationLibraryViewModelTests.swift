@@ -119,6 +119,26 @@ final class CustomNarrationLibraryViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.episodes.map(\.id), [42])
     }
 
+    func testNarrateSavedNewsItemAddsGeneratingEpisodeToLibrary() async {
+        let created = makeEpisode(id: 51, status: .pending)
+        let service = MockCustomNarrationLibraryService(
+            listResponses: [[]],
+            fetchResponses: [makeEpisode(id: 51, status: .completed)],
+            createResponse: created
+        )
+        let viewModel = makeViewModel(service: service)
+
+        let didStart = await viewModel.narrate(
+            .knowledgeSourceFixture(id: 7, contentType: .news)
+        )
+
+        XCTAssertTrue(didStart)
+        XCTAssertEqual(service.createdContentIds, [[]])
+        XCTAssertEqual(service.createdNewsItemIds, [[7]])
+        XCTAssertEqual(service.createDeliveries, [.background])
+        XCTAssertEqual(viewModel.episodes.map(\.id), [51])
+    }
+
     private func makeViewModel(
         service: MockCustomNarrationLibraryService,
         pollingIntervalNanoseconds: UInt64 = 1_000_000,
@@ -199,6 +219,8 @@ private final class MockCustomNarrationLibraryService: CustomNarrationLibrarySer
 
     private(set) var fetchedEpisodeIDs: [Int] = []
     private(set) var createDeliveries: [AudioEpisodeDelivery] = []
+    private(set) var createdContentIds: [[Int]] = []
+    private(set) var createdNewsItemIds: [[Int]] = []
 
     var listResponsePaused: Bool {
         shouldKeepListPaused
@@ -221,7 +243,9 @@ private final class MockCustomNarrationLibraryService: CustomNarrationLibrarySer
         markSourceContentReadOnPlay: Bool,
         delivery: AudioEpisodeDelivery
     ) async throws -> AudioEpisode {
-        _ = (contentIds, newsItemIds, title, markSourceContentReadOnPlay)
+        _ = (title, markSourceContentReadOnPlay)
+        createdContentIds.append(contentIds)
+        createdNewsItemIds.append(newsItemIds)
         createDeliveries.append(delivery)
         guard let createResponse else { throw TestError.unexpectedCall }
         return createResponse

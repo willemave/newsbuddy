@@ -65,6 +65,66 @@ enum KnowledgePaginationSource: Equatable {
     }
 }
 
+/// Identifies a saved source; content and news item IDs are separate namespaces.
+struct KnowledgeSourceKey: Hashable {
+    let id: Int
+    let isNews: Bool
+
+    init(id: Int, isNews: Bool) {
+        self.id = id
+        self.isNews = isNews
+    }
+
+    init(_ content: ContentSummary) {
+        self.init(id: content.id, isNews: content.contentType == .news)
+    }
+}
+
+/// Deep dives already made from a saved source, shown as row markers.
+struct KnowledgeSourceDerivatives: OptionSet, Hashable {
+    let rawValue: Int
+
+    static let chat = Self(rawValue: 1 << 0)
+    static let council = Self(rawValue: 1 << 1)
+    static let deck = Self(rawValue: 1 << 2)
+    static let narration = Self(rawValue: 1 << 3)
+
+    static func index(
+        chats: [ChatSessionSummary],
+        decks: [LearningDeck],
+        narrations: [AudioEpisode]
+    ) -> [KnowledgeSourceKey: Self] {
+        var index: [KnowledgeSourceKey: Self] = [:]
+        func mark(_ key: KnowledgeSourceKey, _ derivative: Self) {
+            index[key, default: []].insert(derivative)
+        }
+
+        for session in chats {
+            let derivative: Self = session.isCouncilMode ? .council : .chat
+            if let contentId = session.contentId {
+                mark(KnowledgeSourceKey(id: contentId, isNews: false), derivative)
+            }
+            if let newsItemId = session.newsItemId {
+                mark(KnowledgeSourceKey(id: newsItemId, isNews: true), derivative)
+            }
+        }
+        for deck in decks where deck.sourceKind == .content {
+            if let contentId = deck.sourceContentId {
+                mark(KnowledgeSourceKey(id: contentId, isNews: false), .deck)
+            }
+        }
+        for episode in narrations {
+            for contentId in episode.sourceContentIds {
+                mark(KnowledgeSourceKey(id: contentId, isNews: false), .narration)
+            }
+            for newsItemId in episode.sourceItemIds {
+                mark(KnowledgeSourceKey(id: newsItemId, isNews: true), .narration)
+            }
+        }
+        return index
+    }
+}
+
 struct KnowledgeTimelineDayGroup: Identifiable {
     let day: Date
     let title: String

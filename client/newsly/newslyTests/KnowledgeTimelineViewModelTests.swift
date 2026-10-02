@@ -555,6 +555,14 @@ private final class KnowledgeTimelineChatService: KnowledgeChatServicing {
     func deleteSession(sessionId: Int) async throws {
         throw Failure.unavailable
     }
+
+    func startArticleChat(contentId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary {
+        throw Failure.unavailable
+    }
+
+    func startNewsChat(newsItemId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary {
+        throw Failure.unavailable
+    }
 }
 
 @MainActor

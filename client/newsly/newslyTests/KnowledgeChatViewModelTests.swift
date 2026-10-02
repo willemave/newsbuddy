@@ -546,6 +546,81 @@ final class KnowledgeChatViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.sessions.map(\.id), [91, 1])
     }
 
+    func testOpenSourceChatResumesLatestKnowledgeChatForThatSource() async {
+        let chatService = MockKnowledgeChatService(
+            pageResponses: [.success(makeSessionListResponse(
+                sessions: [
+                    makeSession(id: 3, contentId: 7, councilMode: true),
+                    makeSession(id: 4, newsItemId: 7),
+                    makeSession(id: 5, contentId: 7),
+                    makeSession(id: 6, contentId: 7)
+                ],
+                nextCursor: nil,
+                hasMore: false
+            ))],
+            turnResponses: []
+        )
+        let viewModel = KnowledgeChatViewModel(chatService: chatService)
+        await viewModel.loadChats()
+
+        let route = await viewModel.openSourceChat(for: .knowledgeSourceFixture(id: 7))
+
+        XCTAssertEqual(route?.sessionId, 5)
+        XCTAssertTrue(chatService.startedSources.isEmpty)
+    }
+
+    func testOpenSourceChatStartsNewsChatWhenSourceHasNone() async {
+        let chatService = MockKnowledgeChatService(
+            pageResponses: [.success(makeSessionListResponse(
+                sessions: [makeSession(id: 5, contentId: 7)],
+                nextCursor: nil,
+                hasMore: false
+            ))],
+            turnResponses: []
+        )
+        chatService.startResponses = [.success(makeSession(id: 9, newsItemId: 7))]
+        let viewModel = KnowledgeChatViewModel(chatService: chatService)
+        await viewModel.loadChats()
+
+        let route = await viewModel.openSourceChat(
+            for: .knowledgeSourceFixture(id: 7, contentType: .news)
+        )
+
+        XCTAssertEqual(route?.sessionId, 9)
+        XCTAssertEqual(route?.newsItemId, 7)
+        XCTAssertEqual(route?.focusComposerOnAppear, true)
+        XCTAssertEqual(chatService.startedSources, [KnowledgeSourceKey(id: 7, isNews: true)])
+        XCTAssertEqual(viewModel.sessions.map(\.id), [9, 5])
+    }
+
+    func testStartSourceCouncilQueuesCouncilPromptOnNewChat() async {
+        let chatService = MockKnowledgeChatService(turnResponses: [])
+        chatService.startResponses = [.success(makeSession(id: 10, contentId: 8))]
+        let viewModel = KnowledgeChatViewModel(chatService: chatService)
+
+        let route = await viewModel.startSourceCouncil(
+            for: .knowledgeSourceFixture(id: 8, title: "Compilers 2.0")
+        )
+
+        XCTAssertEqual(route?.sessionId, 10)
+        XCTAssertEqual(
+            route?.pendingCouncilPrompt,
+            DetailChatCoordinator.councilPrompt(sourceTitle: "Compilers 2.0")
+        )
+    }
+
+    func testOpenSourceChatSurfacesStartFailure() async {
+        let chatService = MockKnowledgeChatService(turnResponses: [])
+        chatService.startResponses = [.failure(MockKnowledgeChatService.MockError.boom)]
+        let viewModel = KnowledgeChatViewModel(chatService: chatService)
+
+        let route = await viewModel.openSourceChat(for: .knowledgeSourceFixture(id: 7))
+
+        XCTAssertNil(route)
+        XCTAssertEqual(viewModel.errorMessage, "Boom")
+        XCTAssertFalse(viewModel.isCreatingSession)
+    }
+
     private func makeAssistantTurnResponse(sessionId: Int) -> AssistantTurnResponse {
         AssistantTurnResponse(
             session: makeSession(id: sessionId),
@@ -579,12 +654,16 @@ final class KnowledgeChatViewModelTests: XCTestCase {
 
     private func makeSession(
         id: Int,
+        contentId: Int? = nil,
+        newsItemId: Int? = nil,
         sessionType: String = "knowledge_chat",
-        isWaitingForContent: Bool = false
+        isWaitingForContent: Bool = false,
+        councilMode: Bool? = nil
     ) -> ChatSessionSummary {
         ChatSessionSummary(
             id: id,
-            contentId: nil,
+            contentId: contentId,
+            newsItemId: newsItemId,
             title: "Session \(id)",
             sessionType: sessionType,
             topic: nil,
@@ -602,7 +681,8 @@ final class KnowledgeChatViewModelTests: XCTestCase {
             isSavedToKnowledge: false,
             hasMessages: true,
             lastMessagePreview: nil,
-            lastMessageRole: nil
+            lastMessageRole: nil,
+            councilMode: councilMode
         )
     }
 }
@@ -738,6 +818,8 @@ private final class MockKnowledgeChatService: KnowledgeChatServicing {
     var receivedNotes: [String?] = []
     var receivedAssistantActions: [String?] = []
     var deletedSessionIDs: [Int] = []
+    var startedSources: [KnowledgeSourceKey] = []
+    var startResponses: [Result<ChatSessionSummary, Error>] = []
 
     private var pageResponses: [Result<ChatSessionListResponse, Error>]
     private var turnResponses: [Result<AssistantTurnResponse, Error>]
@@ -810,6 +892,24 @@ private final class MockKnowledgeChatService: KnowledgeChatServicing {
         if let deleteError {
             throw deleteError
         }
+    }
+
+    func startArticleChat(contentId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary {
+        startedSources.append(KnowledgeSourceKey(id: contentId, isNews: false))
+        return try nextStartResponse()
+    }
+
+    func startNewsChat(newsItemId: Int, provider: ChatModelProvider) async throws -> ChatSessionSummary {
+        startedSources.append(KnowledgeSourceKey(id: newsItemId, isNews: true))
+        return try nextStartResponse()
+    }
+
+    private func nextStartResponse() throws -> ChatSessionSummary {
+        guard !startResponses.isEmpty else {
+            XCTFail("Missing source chat start response")
+            throw MockError.boom
+        }
+        return try startResponses.removeFirst().get()
     }
 
     func pauseNextPageResponse() {

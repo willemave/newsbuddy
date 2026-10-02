@@ -110,7 +110,7 @@ final class DetailChatCoordinator {
         content: ContentDetail,
         provider: ChatModelProvider = .openai
     ) async -> ChatSessionRoute? {
-        let prompt = councilPrompt(for: content)
+        let prompt = Self.councilPrompt(sourceTitle: content.displayTitle)
         return await performChatStart {
             let session: ChatSessionSummary
             if content.contentType == .news {
@@ -223,7 +223,7 @@ final class DetailChatCoordinator {
         }
     }
 
-    private func councilPrompt(for content: ContentDetail) -> String {
-        "Give me your perspective on \(content.displayTitle). Keep it short: 2-4 concise bullets on what matters most, what is weak or missing, and what actions or implications follow."
+    static func councilPrompt(sourceTitle: String) -> String {
+        "Give me your perspective on \(sourceTitle). Keep it short: 2-4 concise bullets on what matters most, what is weak or missing, and what actions or implications follow."
     }
 }
