@@ -11,6 +11,7 @@ use std::time::Duration;
 use crate::public_http::{MAX_SOURCE_RESPONSE_BYTES, PublicHttpError, fetch_public};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
+use newsly_domain::AggregatorKey;
 use reqwest::{StatusCode, Url};
 use scraper::{ElementRef, Html, Selector};
 use secrecy::{ExposeSecret, SecretString};
@@ -19,76 +20,12 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 mod feed;
+mod papers;
 
 pub use feed::normalize_feed_document;
 
 const MAX_HN_CONCURRENCY: usize = 8;
 const DEFAULT_USER_AGENT: &str = "newsly-scraper/2.0 (+https://newsly.app)";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum AggregatorKey {
-    HackerNews,
-    Techmeme,
-    Mediagazer,
-    Memeorandum,
-    SciUrls,
-    FinUrls,
-    Brutalist,
-}
-
-impl AggregatorKey {
-    pub const ALL: [Self; 7] = [
-        Self::HackerNews,
-        Self::Techmeme,
-        Self::Mediagazer,
-        Self::Memeorandum,
-        Self::SciUrls,
-        Self::FinUrls,
-        Self::Brutalist,
-    ];
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::HackerNews => "hackernews",
-            Self::Techmeme => "techmeme",
-            Self::Mediagazer => "mediagazer",
-            Self::Memeorandum => "memeorandum",
-            Self::SciUrls => "sciurls",
-            Self::FinUrls => "finurls",
-            Self::Brutalist => "brutalist",
-        }
-    }
-
-    pub const fn display_name(self) -> &'static str {
-        match self {
-            Self::HackerNews => "Hacker News",
-            Self::Techmeme => "Techmeme",
-            Self::Mediagazer => "Mediagazer",
-            Self::Memeorandum => "Memeorandum",
-            Self::SciUrls => "SciURLs",
-            Self::FinUrls => "FinURLs",
-            Self::Brutalist => "Brutalist Report",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        let normalized = value
-            .chars()
-            .filter(char::is_ascii_alphanumeric)
-            .flat_map(char::to_lowercase)
-            .collect::<String>();
-        match normalized.as_str() {
-            "hackernews" | "hn" => Some(Self::HackerNews),
-            "techmeme" => Some(Self::Techmeme),
-            "mediagazer" => Some(Self::Mediagazer),
-            "memeorandum" => Some(Self::Memeorandum),
-            "sciurls" => Some(Self::SciUrls),
-            "finurls" => Some(Self::FinUrls),
-            "brutalist" | "brutalistreport" => Some(Self::Brutalist),
-            _ => None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeedEntrySelection {
@@ -244,6 +181,8 @@ impl ScrapeGateway {
                     .await
             }
             AggregatorKey::Brutalist => self.fetch_brutalist().await,
+            AggregatorKey::Arxiv => self.fetch_arxiv().await,
+            AggregatorKey::HfPapers => self.fetch_hf_papers().await,
         }
     }
 
@@ -569,7 +508,7 @@ impl ScrapeGateway {
     }
 
     async fn fetch_brutalist(&self) -> Result<ScrapeProviderOutcome, ScrapeGatewayError> {
-        let topics = ["science", "business", "politics", "sports"];
+        let topics = AggregatorKey::Brutalist.topics();
         let mut items = Vec::new();
         let mut errors = Vec::new();
         let mut retryable_failure = false;

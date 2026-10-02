@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::{Duration, NaiveDateTime, Utc};
 use newsly_domain::{
-    NewsRelationDocument, RelationExactKey, aggregate_relation_representative,
+    AggregatorKey, NewsRelationDocument, RelationExactKey, aggregate_relation_representative,
     can_bridge_relation_clusters,
 };
 use newsly_queue::{EnqueueRequest, QueueKernel, TaskType};
@@ -27,15 +27,6 @@ use super::model::{
 
 const RELATED_LOOKBACK_DAYS: i64 = 14;
 const MAX_RELATED_CANDIDATES: i64 = 150;
-const SUPPORTED_AGGREGATORS: [&str; 7] = [
-    "brutalist",
-    "finurls",
-    "hackernews",
-    "mediagazer",
-    "memeorandum",
-    "sciurls",
-    "techmeme",
-];
 
 #[derive(Debug, FromRow)]
 struct NewsRow {
@@ -1505,15 +1496,9 @@ async fn visible_user_ids(
         return Ok(Vec::new());
     }
     let platform = snapshot.platform.as_deref().unwrap_or_default();
-    if !SUPPORTED_AGGREGATORS.contains(&platform.to_ascii_lowercase().as_str()) {
+    if AggregatorKey::from_key(platform).is_none() {
         return Ok(Vec::new());
     }
-    let topic = snapshot
-        .raw_metadata
-        .pointer("/aggregator/topic")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
     sqlx::query_scalar::<_, i64>(
         r#"
         SELECT DISTINCT users.id::bigint
@@ -1522,23 +1507,12 @@ async fn visible_user_ids(
         WHERE users.is_active IS TRUE
           AND config.scraper_type = 'aggregator'
           AND config.is_active IS TRUE
-          AND lower(COALESCE(config.config->>'key', '')) = lower($1)
-          AND (
-              lower($1) <> 'brutalist'
-              OR jsonb_array_length(COALESCE(config.config::jsonb->'topics', '[]'::jsonb)) = 0
-              OR EXISTS (
-                  SELECT 1
-                  FROM jsonb_array_elements_text(
-                      COALESCE(config.config::jsonb->'topics', '[]'::jsonb)
-                  ) AS selected(topic)
-                  WHERE lower(btrim(selected.topic)) = $2
-              )
-          )
+          AND aggregator_config_admits(config.config::jsonb, $1, $2::json)
         ORDER BY users.id::bigint
         "#,
     )
     .bind(platform)
-    .bind(topic)
+    .bind(&snapshot.raw_metadata)
     .fetch_all(&mut **transaction)
     .await
 }

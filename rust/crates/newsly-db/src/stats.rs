@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use newsly_domain::AGGREGATOR_KEY_NAMES;
 use sqlx::PgPool;
 use thiserror::Error;
 
@@ -16,22 +17,12 @@ pub async fn get_unread_counts(
 ) -> Result<UnreadCountsProjection, StatsRepositoryError> {
     Ok(sqlx::query_as::<_, UnreadCountsProjection>(
         r#"
-        WITH valid_aggregators AS (
-            SELECT
-                lower(btrim(config::jsonb ->> 'key')) AS source_key,
-                CASE
-                    WHEN jsonb_typeof(config::jsonb -> 'topics') = 'array'
-                    THEN config::jsonb -> 'topics'
-                    ELSE '[]'::jsonb
-                END AS topics
+        WITH subscribed_aggregators AS MATERIALIZED (
+            SELECT config::jsonb AS config
             FROM user_scraper_configs
-            WHERE user_id::bigint = $1::bigint
+            WHERE user_id = $1::bigint
               AND scraper_type = 'aggregator'
               AND is_active IS TRUE
-              AND lower(btrim(config::jsonb ->> 'key')) = ANY(ARRAY[
-                  'brutalist', 'finurls', 'hackernews', 'mediagazer',
-                  'memeorandum', 'sciurls', 'techmeme'
-              ])
         ), content_counts AS (
             SELECT c.content_type, count(*)::bigint AS item_count
             FROM contents AS c
@@ -65,18 +56,10 @@ pub async fn get_unread_counts(
                   OR (
                       n.visibility_scope = 'global'
                       AND EXISTS (
-                          SELECT 1 FROM valid_aggregators AS va
-                          WHERE lower(n.platform) = va.source_key
-                            AND (
-                                va.source_key <> 'brutalist'
-                                OR jsonb_array_length(va.topics) = 0
-                                OR EXISTS (
-                                    SELECT 1 FROM jsonb_array_elements_text(va.topics) AS topic(value)
-                                    WHERE lower(btrim(topic.value)) = lower(btrim(
-                                        n.raw_metadata::jsonb #>> '{aggregator,topic}'
-                                    ))
-                                )
-                            )
+                          SELECT 1 FROM subscribed_aggregators AS subscription
+                          WHERE aggregator_config_admits(
+                              subscription.config, n.platform, n.raw_metadata
+                          )
                       )
                   )
               )
@@ -108,22 +91,12 @@ pub async fn get_processing_counts(
     let timeout_seconds = i64::try_from(checkout_timeout.as_secs()).unwrap_or(i64::MAX);
     Ok(sqlx::query_as::<_, ProcessingCountsProjection>(
         r#"
-        WITH valid_aggregators AS (
-            SELECT
-                lower(btrim(config::jsonb ->> 'key')) AS source_key,
-                CASE
-                    WHEN jsonb_typeof(config::jsonb -> 'topics') = 'array'
-                    THEN config::jsonb -> 'topics'
-                    ELSE '[]'::jsonb
-                END AS topics
+        WITH subscribed_aggregators AS MATERIALIZED (
+            SELECT config::jsonb AS config
             FROM user_scraper_configs
-            WHERE user_id::bigint = $1::bigint
+            WHERE user_id = $1::bigint
               AND scraper_type = 'aggregator'
               AND is_active IS TRUE
-              AND lower(btrim(config::jsonb ->> 'key')) = ANY(ARRAY[
-                  'brutalist', 'finurls', 'hackernews', 'mediagazer',
-                  'memeorandum', 'sciurls', 'techmeme'
-              ])
         ), long_form AS (
             SELECT count(*)::bigint AS item_count
             FROM contents AS c
@@ -173,18 +146,10 @@ pub async fn get_processing_counts(
                   OR (
                       n.visibility_scope = 'global'
                       AND EXISTS (
-                          SELECT 1 FROM valid_aggregators AS va
-                          WHERE lower(n.platform) = va.source_key
-                            AND (
-                                va.source_key <> 'brutalist'
-                                OR jsonb_array_length(va.topics) = 0
-                                OR EXISTS (
-                                    SELECT 1 FROM jsonb_array_elements_text(va.topics) AS topic(value)
-                                    WHERE lower(btrim(topic.value)) = lower(btrim(
-                                        n.raw_metadata::jsonb #>> '{aggregator,topic}'
-                                    ))
-                                )
-                            )
+                          SELECT 1 FROM subscribed_aggregators AS subscription
+                          WHERE aggregator_config_admits(
+                              subscription.config, n.platform, n.raw_metadata
+                          )
                       )
                   )
               )
@@ -197,19 +162,16 @@ pub async fn get_processing_counts(
                   AND scraper_type = 'reddit'
                   AND is_active IS TRUE
                 UNION ALL
-                SELECT lower(regexp_replace(config::jsonb ->> 'key', '[^a-z0-9]+', '', 'g'))
+                SELECT (config::jsonb ->> 'key')
                 FROM user_scraper_configs
                 WHERE user_id::bigint = $1::bigint
                   AND scraper_type = 'aggregator'
                   AND is_active IS TRUE
-                  AND lower(regexp_replace(config::jsonb ->> 'key', '[^a-z0-9]+', '', 'g')) = ANY(ARRAY[
-                      'brutalist', 'finurls', 'hackernews', 'mediagazer',
-                      'memeorandum', 'sciurls', 'techmeme'
-                  ])
+                  AND (config::jsonb ->> 'key') = ANY($3::text[])
             ) AS configured
             WHERE source_key <> ''
         ), requested_sources AS (
-            SELECT DISTINCT lower(regexp_replace(source.value, '[^a-z0-9]+', '', 'g')) AS source_key
+            SELECT DISTINCT regexp_replace(lower(source.value), '[^a-z0-9]+', '', 'g') AS source_key
             FROM processing_tasks AS pt
             CROSS JOIN LATERAL jsonb_array_elements_text(
                 CASE
@@ -238,6 +200,7 @@ pub async fn get_processing_counts(
     )
     .bind(user_id)
     .bind(timeout_seconds)
+    .bind(AGGREGATOR_KEY_NAMES.as_slice())
     .fetch_one(pool)
     .await?)
 }

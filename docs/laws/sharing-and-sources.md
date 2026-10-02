@@ -18,7 +18,7 @@ S8. Generated actions must match the chosen mode, and approval-required actions 
 
 S9. Source subscriptions and aggregator selections belong to one user and control future visibility without rewriting history.
 
-S10. Global aggregator items appear only for users who selected that aggregator, and user-scoped sources never enter the global pool.
+S10. Global aggregator items appear only for users who selected that aggregator, and user-scoped sources never enter the global pool. Aggregators that offer topics (Brutalist Report beats, arXiv categories) show a subscriber only the topics they selected, or every offered topic when none are selected; topics outside an aggregator's offered set are rejected rather than silently hiding its items.
 
 S11. X connections belong to one user, sync incrementally, preserve provenance, and retain bounded-page continuations across retries, and advance their checkpoint only after the complete range through the previous checkpoint has been ingested.
 

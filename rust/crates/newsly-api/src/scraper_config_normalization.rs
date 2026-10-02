@@ -2,20 +2,12 @@ use std::collections::BTreeSet;
 
 use newsly_contracts::ScraperType;
 use newsly_db::canonicalize_feed_url;
+use newsly_domain::AggregatorKey;
 use serde_json::{Map, Number, Value};
 use thiserror::Error;
 
 pub(super) const DEFAULT_NEW_FEED_LIMIT: i64 = 1;
 const AGGREGATOR_FEED_URL_PREFIX: &str = "aggregator://";
-const SUPPORTED_AGGREGATOR_KEYS: [&str; 7] = [
-    "brutalist",
-    "finurls",
-    "hackernews",
-    "mediagazer",
-    "memeorandum",
-    "sciurls",
-    "techmeme",
-];
 
 pub(super) fn validate_display_name(value: Option<&str>) -> Result<(), ConfigValidationError> {
     if value.is_some_and(|value| value.chars().count() > 255) {
@@ -206,11 +198,11 @@ fn normalize_aggregator_config(
             "config.key is required for aggregator subscriptions",
         ));
     }
-    if !SUPPORTED_AGGREGATOR_KEYS.contains(&key.as_str()) {
+    let Some(catalog_key) = AggregatorKey::from_key(&key) else {
         return Err(ConfigValidationError::new(format!(
             "unsupported aggregator key: {key}"
         )));
-    }
+    };
     config.insert("key".to_owned(), Value::String(key.clone()));
     config.insert(
         "feed_url".to_owned(),
@@ -226,19 +218,24 @@ fn normalize_aggregator_config(
                 "config.topics must be a list of strings",
             ));
         }
-        let topics = topics
+        let mut normalized_topics = BTreeSet::new();
+        for topic in topics
             .iter()
             .filter_map(Value::as_str)
             .map(str::trim)
             .filter(|topic| !topic.is_empty())
-            .map(str::to_lowercase)
-            .collect::<BTreeSet<_>>();
-        if topics.is_empty() {
+        {
+            let canonical = catalog_key.canonical_topic(topic).ok_or_else(|| {
+                ConfigValidationError::new(format!("unsupported {key} topic: {topic}"))
+            })?;
+            normalized_topics.insert(canonical);
+        }
+        if normalized_topics.is_empty() {
             config.remove("topics");
         } else {
             config.insert(
                 "topics".to_owned(),
-                Value::Array(topics.into_iter().map(Value::String).collect()),
+                Value::Array(normalized_topics.into_iter().map(Value::from).collect()),
             );
         }
     }
@@ -331,5 +328,30 @@ mod tests {
             "https://www.reddit.com/r/MachineLearning/"
         );
         assert_eq!(config["limit"], DEFAULT_NEW_FEED_LIMIT);
+    }
+
+    fn aggregator(config: serde_json::Value) -> Result<Map<String, serde_json::Value>, String> {
+        let config = serde_json::from_value::<Map<String, serde_json::Value>>(config).unwrap();
+        normalize_create_input(ScraperType::Aggregator, config).map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn arxiv_topics_must_be_catalog_categories() {
+        let config =
+            aggregator(json!({"key": "ArXiv", "topics": [" CS.cl ", "stat.ML", ""]})).unwrap();
+        assert_eq!(config["key"], "arxiv");
+        assert_eq!(config["feed_url"], "aggregator://arxiv");
+        assert_eq!(config["topics"], json!(["cs.CL", "stat.ML"]));
+
+        let error = aggregator(json!({"key": "arxiv", "topics": ["physics.optics"]})).unwrap_err();
+        assert!(error.contains("unsupported arxiv topic"), "{error}");
+    }
+
+    #[test]
+    fn topics_are_rejected_for_aggregators_without_topic_filters() {
+        assert!(aggregator(json!({"key": "hfpapers"})).is_ok());
+        let error = aggregator(json!({"key": "hfpapers", "topics": ["cs.CL"]})).unwrap_err();
+        assert!(error.contains("unsupported hfpapers topic"), "{error}");
+        assert!(aggregator(json!({"key": "brutalist", "topics": ["science"]})).is_ok());
     }
 }

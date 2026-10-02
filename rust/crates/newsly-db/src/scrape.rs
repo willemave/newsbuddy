@@ -566,7 +566,7 @@ pub async fn due_discussion_refresh_ids(
                   JOIN users AS owner ON owner.id = config.user_id AND owner.is_active IS TRUE
                   WHERE config.is_active IS TRUE
                     AND config.scraper_type = 'aggregator'
-                    AND lower(config.config::jsonb ->> 'key') = lower(item.platform)
+                    AND aggregator_config_admits(config.config::jsonb, item.platform, item.raw_metadata)
               ))
           )
         ORDER BY COALESCE(item.published_at, item.ingested_at, item.created_at) DESC
@@ -601,7 +601,7 @@ pub async fn due_discussion_refresh_ids(
                   JOIN users AS owner ON owner.id = config.user_id AND owner.is_active IS TRUE
                   WHERE config.is_active IS TRUE
                     AND config.scraper_type = 'aggregator'
-                    AND lower(config.config::jsonb ->> 'key') = lower(item.platform)
+                    AND aggregator_config_admits(config.config::jsonb, item.platform, item.raw_metadata)
               ))
           )
         ORDER BY

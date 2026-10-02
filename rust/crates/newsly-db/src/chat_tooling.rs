@@ -169,6 +169,11 @@ pub async fn list_unread_chat_news(
     let mut transaction = pool.begin().await?;
     let total_count = sqlx::query_scalar::<_, i64>(
         r#"
+        WITH subscribed_aggregators AS MATERIALIZED (
+            SELECT config::jsonb AS config
+            FROM user_scraper_configs
+            WHERE user_id = $1::bigint AND scraper_type = 'aggregator' AND is_active IS TRUE
+        )
         SELECT COUNT(item.id)::bigint
         FROM news_items AS item
         JOIN users AS account ON account.id::bigint = $1 AND account.is_active = TRUE
@@ -178,7 +183,12 @@ pub async fn list_unread_chat_news(
           AND item.representative_news_item_id IS NULL
           AND read.id IS NULL
           AND (
-              item.visibility_scope = 'global'
+              (item.visibility_scope = 'global' AND EXISTS (
+                  SELECT 1 FROM subscribed_aggregators AS subscription
+                  WHERE aggregator_config_admits(
+                      subscription.config, item.platform, item.raw_metadata
+                  )
+              ))
               OR (item.visibility_scope = 'user' AND item.owner_user_id::bigint = $1)
           )
         "#,
@@ -202,6 +212,11 @@ pub async fn list_unread_chat_news(
 
 fn news_search_statement() -> &'static str {
     r#"
+        WITH subscribed_aggregators AS MATERIALIZED (
+            SELECT config::jsonb AS config
+            FROM user_scraper_configs
+            WHERE user_id = $1::bigint AND scraper_type = 'aggregator' AND is_active IS TRUE
+        )
         SELECT
             item.id::bigint AS news_item_id,
             COALESCE(
@@ -225,7 +240,12 @@ fn news_search_statement() -> &'static str {
         WHERE item.status = 'ready'
           AND item.representative_news_item_id IS NULL
           AND (
-              item.visibility_scope = 'global'
+              (item.visibility_scope = 'global' AND EXISTS (
+                  SELECT 1 FROM subscribed_aggregators AS subscription
+                  WHERE aggregator_config_admits(
+                      subscription.config, item.platform, item.raw_metadata
+                  )
+              ))
               OR (item.visibility_scope = 'user' AND item.owner_user_id::bigint = $1)
           )
           AND ($4::boolean IS FALSE OR read.id IS NULL)

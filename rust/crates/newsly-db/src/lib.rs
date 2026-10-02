@@ -387,6 +387,8 @@ pub mod first_edition_progress;
 pub mod news_lens_embeddings;
 
 #[cfg(test)]
+mod aggregator_visibility_tests;
+#[cfg(test)]
 mod warm_news_tests;
 
 pub use briefing_refresh::reclustering as news_category_reclustering;

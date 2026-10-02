@@ -379,6 +379,16 @@ atomically. News never enters the long-form generated-artwork path.
 Shared aggregator checks use `source_ingestion_health` for hourly subscribed and
 two-hour unsubscribed eligibility. Scheduler and onboarding coalesce global
 scrapes by aggregator key; workers recheck eligibility without suppressing retries.
+`newsly-domain::AggregatorKey` is the backend aggregator catalog: keys, display names,
+and offered topics, which config and onboarding normalization validate against. Configs
+store catalog-spelled keys and topics. Which global items a subscription admits is owned
+by the migration-defined SQL function `aggregator_config_admits(config, platform,
+metadata)`. Every visibility query (feeds, counts, Briefing, chat, decks, worker
+subscriber lookup) calls it, and it encodes no keys. Feed-sized queries materialize the
+user's aggregator configs once; single-item lookups call it directly. The function must
+stay one inlinable expression, which a database test guards. Changing the rule needs a
+`CREATE OR REPLACE` migration. Adding an aggregator needs a catalog entry, its provider
+fetcher, and the iOS onboarding option, which still lists keys and topics itself.
 Ready representative news schedules `prepare_news_lens`, handled by a dedicated
 `newsly-news-lens-worker` process using the existing worker binary dispatcher. `news_lens_embeddings` stores the canonical planner input hash, encoder
 version, model and dimension-validated vector. Preparation releases its database

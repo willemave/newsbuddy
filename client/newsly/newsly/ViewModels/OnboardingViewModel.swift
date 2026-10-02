@@ -39,11 +39,21 @@ enum OnboardingStep: Int, Codable {
     case reddit = 7
 }
 
+struct OnboardingTopicOption: Hashable, Identifiable {
+    /// Wire value sent to the server in `topics`.
+    let value: String
+    let label: String
+
+    var id: String { value }
+}
+
 struct OnboardingAggregatorOption: Hashable, Identifiable {
     let key: String
     let title: String
     let subtitle: String
     let icon: String
+    /// Per-user topic filters the aggregator supports; empty when it has none.
+    var topics: [OnboardingTopicOption] = []
 
     var id: String { key }
 }
@@ -89,13 +99,41 @@ let onboardingAggregatorOptions: [OnboardingAggregatorOption] = [
         key: "brutalist",
         title: "Brutalist Report",
         subtitle: "Headlines by topic — pick your beats",
-        icon: "rectangle.grid.2x2"
+        icon: "rectangle.grid.2x2",
+        topics: [
+            OnboardingTopicOption(value: "science", label: "Science"),
+            OnboardingTopicOption(value: "business", label: "Business"),
+            OnboardingTopicOption(value: "politics", label: "Politics"),
+            OnboardingTopicOption(value: "sports", label: "Sports"),
+        ]
+    ),
+    OnboardingAggregatorOption(
+        key: "arxiv",
+        title: "arXiv",
+        subtitle: "New AI & ML research, by category",
+        icon: "doc.text.magnifyingglass",
+        topics: [
+            OnboardingTopicOption(value: "cs.AI", label: "AI"),
+            OnboardingTopicOption(value: "cs.LG", label: "Machine learning"),
+            OnboardingTopicOption(value: "cs.CL", label: "Language"),
+            OnboardingTopicOption(value: "cs.CV", label: "Vision"),
+            OnboardingTopicOption(value: "stat.ML", label: "Statistical ML"),
+        ]
+    ),
+    OnboardingAggregatorOption(
+        key: "hfpapers",
+        title: "Hugging Face Papers",
+        subtitle: "Trending AI papers, community-upvoted",
+        icon: "flame"
     ),
 ]
 
-let onboardingBrutalistTopics: [String] = [
-    "science", "business", "politics", "sports",
-]
+/// Default topic selection: every topic of every aggregator that has topics.
+let onboardingDefaultAggregatorTopics: [String: Set<String>] = Dictionary(
+    uniqueKeysWithValues: onboardingAggregatorOptions
+        .filter { !$0.topics.isEmpty }
+        .map { ($0.key, Set($0.topics.map(\.value))) }
+)
 
 enum OnboardingAudioState: Equatable {
     case idle
@@ -131,7 +169,7 @@ final class OnboardingViewModel {
     var suggestions: OnboardingFastDiscoverResponse?
     var selectedSuggestionIDs: Set<Int> = []
     var selectedAggregators: Set<String> = []
-    var selectedBrutalistTopics: Set<String> = Set(onboardingBrutalistTopics)
+    var selectedAggregatorTopics: [String: Set<String>] = onboardingDefaultAggregatorTopics
     var isLoading = false
     var loadingMessage = ""
     var errorMessage: String?
@@ -407,12 +445,17 @@ final class OnboardingViewModel {
         persistProgress()
     }
 
-    func toggleBrutalistTopic(_ topic: String) {
-        if selectedBrutalistTopics.contains(topic) {
-            selectedBrutalistTopics.remove(topic)
+    /// Keeps at least one topic selected: the server reads an empty topic list as "all topics",
+    /// so an empty selection would show nothing while subscribing to everything.
+    func toggleAggregatorTopic(_ topic: String, aggregatorKey: String) {
+        guard var topics = selectedAggregatorTopics[aggregatorKey] else { return }
+        if topics.contains(topic) {
+            guard topics.count > 1 else { return }
+            topics.remove(topic)
         } else {
-            selectedBrutalistTopics.insert(topic)
+            topics.insert(topic)
         }
+        selectedAggregatorTopics[aggregatorKey] = topics
         persistProgress()
     }
 
@@ -468,13 +511,10 @@ final class OnboardingViewModel {
     private func buildSelectedAggregators() -> [OnboardingSelectedAggregator] {
         onboardingAggregatorOptions.compactMap { option in
             guard selectedAggregators.contains(option.key) else { return nil }
-            let topics: [String] = option.key == "brutalist"
-                ? Array(selectedBrutalistTopics).sorted()
-                : []
             return OnboardingSelectedAggregator(
                 key: option.key,
                 title: option.title,
-                topics: topics
+                topics: (selectedAggregatorTopics[option.key] ?? []).sorted()
             )
         }
     }
@@ -672,7 +712,7 @@ final class OnboardingViewModel {
         suggestions = nil
         selectedSuggestionIDs = []
         selectedAggregators = []
-        selectedBrutalistTopics = Set(onboardingBrutalistTopics)
+        selectedAggregatorTopics = onboardingDefaultAggregatorTopics
         isSubmittingAudioDiscovery = false
         onboardingStateStore.clearProgress(userId: user.id)
     }
@@ -796,8 +836,12 @@ final class OnboardingViewModel {
         suggestions = snapshot.suggestions
         selectedSuggestionIDs = Set(snapshot.selectedSuggestionIds)
         selectedAggregators = Set(snapshot.selectedAggregators)
-        if !snapshot.selectedBrutalistTopics.isEmpty {
-            selectedBrutalistTopics = Set(snapshot.selectedBrutalistTopics)
+        selectedAggregatorTopics = onboardingDefaultAggregatorTopics
+        for (key, topics) in snapshot.selectedAggregatorTopics {
+            let restored = Set(topics).intersection(onboardingDefaultAggregatorTopics[key] ?? [])
+            if !restored.isEmpty {
+                selectedAggregatorTopics[key] = restored
+            }
         }
         discoveryRunId = snapshot.discoveryRunId
         discoveryRunStatus = snapshot.discoveryRunStatus
@@ -831,7 +875,7 @@ final class OnboardingViewModel {
                 suggestions: suggestions,
                 selectedSuggestionIds: Array(selectedSuggestionIDs).sorted(),
                 selectedAggregators: Array(selectedAggregators).sorted(),
-                selectedBrutalistTopics: Array(selectedBrutalistTopics).sorted(),
+                selectedAggregatorTopics: selectedAggregatorTopics.mapValues { $0.sorted() },
                 discoveryRunId: discoveryRunId,
                 discoveryRunStatus: discoveryRunStatus,
                 discoveryErrorMessage: discoveryErrorMessage,

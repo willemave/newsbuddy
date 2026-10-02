@@ -1739,27 +1739,11 @@ const VISIBLE_NEWS_CLAUSE: &str = r"
             AND EXISTS (
                 SELECT 1
                 FROM user_scraper_configs config
-                WHERE config.user_id::bigint = $2
+                WHERE config.user_id = $2::bigint
                   AND config.scraper_type = 'aggregator'
                   AND config.is_active = TRUE
-                  AND lower(COALESCE(config.config::jsonb->>'key', '')) = lower(COALESCE(news_items.platform, ''))
-                  AND (
-                        lower(COALESCE(news_items.platform, '')) <> 'brutalist'
-                        OR CASE
-                            WHEN jsonb_typeof(config.config::jsonb->'topics') = 'array'
-                            THEN jsonb_array_length(config.config::jsonb->'topics') = 0
-                            ELSE TRUE
-                        END
-                        OR lower(COALESCE(news_items.raw_metadata::jsonb->'aggregator'->>'topic', '')) IN (
-                            SELECT lower(topic.value)
-                            FROM jsonb_array_elements_text(
-                                CASE
-                                    WHEN jsonb_typeof(config.config::jsonb->'topics') = 'array'
-                                    THEN config.config::jsonb->'topics'
-                                    ELSE '[]'::jsonb
-                                END
-                            ) AS topic(value)
-                        )
+                  AND aggregator_config_admits(
+                      config.config::jsonb, news_items.platform, news_items.raw_metadata
                   )
             )
         )

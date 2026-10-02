@@ -78,7 +78,7 @@ pub async fn reconcile_sources(
         AND s.status NOT IN ('processed','unavailable') AND NOT EXISTS (
           SELECT 1 FROM user_scraper_configs c WHERE c.user_id=r.user_id AND c.is_active AND (
             (s.source_kind='feed' AND s.source_key='feed:' || c.id::text)
-            OR (s.source_kind='aggregator' AND s.source_key='scraper:' || lower(c.config::jsonb->>'key'))
+            OR (s.source_kind='aggregator' AND s.source_key='scraper:' || (c.config::jsonb->>'key'))
             OR (s.source_kind NOT IN ('feed','aggregator'))))")
         .bind(user_id).execute(&mut *connection).await?;
     sqlx::query(r"UPDATE onboarding_first_edition_sources s SET check_cutoff=now()
@@ -98,9 +98,7 @@ pub async fn reconcile_sources(
           AND n.ingested_at <= timezone('UTC',s.check_cutoff)
           AND COALESCE(n.published_at,n.ingested_at) >= timezone('UTC',s.check_cutoff)-interval '24 hours'
           AND EXISTS(SELECT 1 FROM user_scraper_configs c WHERE c.user_id=r.user_id AND c.is_active AND c.scraper_type='aggregator'
-            AND lower(c.config::jsonb->>'key')=lower(n.platform)
-            AND (lower(n.platform)<>'brutalist' OR COALESCE(c.config::jsonb->'topics','[]'::jsonb)='[]'::jsonb
-              OR c.config::jsonb->'topics' ? (n.raw_metadata::jsonb #>> '{aggregator,topic}')))
+            AND aggregator_config_admits(c.config::jsonb, n.platform, n.raw_metadata))
         WHERE r.user_id::bigint=$1 AND r.status='active' AND s.source_kind='aggregator'
           AND s.status NOT IN ('processed','unavailable') AND s.check_cutoff IS NOT NULL GROUP BY s.id
     ) UPDATE onboarding_first_edition_sources s SET processed_item_count=c.ready,

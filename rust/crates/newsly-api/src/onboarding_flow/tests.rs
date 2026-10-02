@@ -33,3 +33,30 @@ fn runless_completion_cannot_name_discovered_suggestions() {
     };
     assert!(validate_completion_request(&request, "request-1").is_err());
 }
+
+#[test]
+fn onboarding_aggregators_keep_only_catalog_keys_and_their_topics() {
+    use newsly_contracts::OnboardingSelectedAggregator;
+
+    let selected = |key: &str, topics: &[&str]| OnboardingSelectedAggregator {
+        key: key.to_owned(),
+        title: None,
+        topics: topics.iter().map(|topic| (*topic).to_owned()).collect(),
+    };
+    let normalized = super::normalize_aggregators(vec![
+        selected(" ArXiv ", &["cs.CL", "physics.optics", "CS.AI", "cs.cl"]),
+        selected("hfpapers", &["cs.CL"]),
+        selected("unknown", &[]),
+    ]);
+    let summary = normalized
+        .iter()
+        .map(|aggregator| (aggregator.key.as_str(), aggregator.topics.clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        summary,
+        vec![
+            ("arxiv", vec!["cs.AI".to_owned(), "cs.CL".to_owned()]),
+            ("hfpapers", Vec::new()),
+        ]
+    );
+}

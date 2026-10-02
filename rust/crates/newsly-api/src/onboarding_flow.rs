@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, Path, State};
@@ -25,6 +25,7 @@ use newsly_db::{
     find_onboarding_discovery_status, list_existing_onboarding_feed_configs,
     load_agent_onboarding_suggestions, load_onboarding_completion_suggestions,
 };
+use newsly_domain::AggregatorKey;
 use newsly_providers::{OnboardingAudioPlan, OnboardingDiscoverySeeds, OnboardingSuggestionSeed};
 use newsly_queue::{EnqueueRequest, QueueError, QueueKernel, TaskType};
 use serde_json::{Map, Value, json};
@@ -52,15 +53,6 @@ const COMPLETE_FLOW_OPERATION_ID: &str = "completeOnboardingFlow";
 const AGENT_START_OPERATION_ID: &str = "startOnboarding";
 const AGENT_COMPLETE_OPERATION_ID: &str = "completeOnboarding";
 const INITIAL_BACKFILL_COUNT: i64 = 2;
-const SUPPORTED_AGGREGATOR_KEYS: [&str; 7] = [
-    "brutalist",
-    "finurls",
-    "hackernews",
-    "mediagazer",
-    "memeorandum",
-    "sciurls",
-    "techmeme",
-];
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -787,7 +779,7 @@ fn completion_tasks(
     }
     for source in &persisted.sources_to_scrape {
         primary_index.get_or_insert(requests.len());
-        let global = newsly_db::aggregator_corpus::is_aggregator(source);
+        let global = AggregatorKey::from_key(source).is_some();
         let mut request = EnqueueRequest::new(TaskType::Scrape);
         request.payload = object(if global {
             json!({"sources": [source], "due_only": true})
@@ -1063,17 +1055,15 @@ fn normalize_aggregators(
         .into_iter()
         .filter_map(|aggregator| {
             let key = aggregator.key.trim().to_lowercase();
-            if !SUPPORTED_AGGREGATOR_KEYS.contains(&key.as_str()) {
-                return None;
-            }
-            let mut topics = aggregator
+            let catalog_key = AggregatorKey::from_key(&key)?;
+            let topics = aggregator
                 .topics
+                .iter()
+                .filter_map(|topic| catalog_key.canonical_topic(topic))
+                .collect::<BTreeSet<_>>()
                 .into_iter()
-                .map(|topic| topic.trim().to_lowercase())
-                .filter(|topic| !topic.is_empty())
-                .collect::<Vec<_>>();
-            topics.sort();
-            topics.dedup();
+                .map(str::to_owned)
+                .collect();
             Some(OnboardingCompletionAggregator {
                 key,
                 title: aggregator.title,

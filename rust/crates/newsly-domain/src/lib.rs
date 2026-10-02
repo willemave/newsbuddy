@@ -2,6 +2,8 @@
 
 #![forbid(unsafe_code)]
 
+mod aggregators;
+pub use aggregators::{AGGREGATOR_KEY_NAMES, AggregatorKey};
 mod ids;
 mod narration;
 pub use narration::{

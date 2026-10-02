@@ -270,8 +270,8 @@ final class OnboardingStateStoreTests: XCTestCase {
                 isPersonalized: true,
                 suggestions: response,
                 selectedSuggestionIds: [441],
-                selectedAggregators: ["brutalist"],
-                selectedBrutalistTopics: ["science"],
+                selectedAggregators: ["brutalist", "arxiv"],
+                selectedAggregatorTopics: ["brutalist": ["science"], "arxiv": ["cs.CL", "cs.LG"]],
                 discoveryRunId: 123,
                 discoveryRunStatus: "completed",
                 discoveryErrorMessage: nil,
@@ -290,8 +290,106 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         XCTAssertEqual(viewModel.step, .reddit)
         XCTAssertEqual(viewModel.selectedSuggestionIDs, [441])
+        XCTAssertEqual(viewModel.selectedAggregators, ["brutalist", "arxiv"])
+        XCTAssertEqual(
+            viewModel.selectedAggregatorTopics,
+            ["brutalist": ["science"], "arxiv": ["cs.CL", "cs.LG"]]
+        )
+    }
+
+    func testAggregatorTopicsRoundTripThroughStore() {
+        let user = makeUser(id: 46)
+        let viewModel = OnboardingViewModel(
+            user: user,
+            service: OnboardingService.shared,
+            dictationService: FakeSpeechTranscriber(),
+            onboardingStateStore: store
+        )
+        viewModel.advanceToAggregators()
+        viewModel.toggleAggregatorTopic("cs.CV", aggregatorKey: "arxiv")
+        viewModel.toggleAggregatorTopic("sports", aggregatorKey: "brutalist")
+
+        let snapshot = store.progress(userId: user.id)
+        XCTAssertEqual(snapshot?.selectedAggregatorTopics["arxiv"], ["cs.AI", "cs.CL", "cs.LG", "stat.ML"])
+        XCTAssertEqual(snapshot?.selectedAggregatorTopics["brutalist"], ["business", "politics", "science"])
+    }
+
+    func testLastAggregatorTopicCannotBeDeselected() {
+        let viewModel = OnboardingViewModel(
+            user: makeUser(id: 47),
+            service: OnboardingService.shared,
+            dictationService: FakeSpeechTranscriber(),
+            onboardingStateStore: store
+        )
+        for topic in ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "stat.ML"] {
+            viewModel.toggleAggregatorTopic(topic, aggregatorKey: "arxiv")
+        }
+
+        XCTAssertEqual(viewModel.selectedAggregatorTopics["arxiv"], ["stat.ML"])
+    }
+
+    func testRestoreDropsTopicsOutsideTheAggregatorCatalog() {
+        let user = makeUser(id: 48)
+        store.saveProgress(
+            userId: user.id,
+            snapshot: OnboardingProgressSnapshot(
+                step: .aggregators,
+                isPersonalized: false,
+                suggestions: nil,
+                selectedSuggestionIds: [],
+                selectedAggregators: ["arxiv"],
+                selectedAggregatorTopics: ["arxiv": ["cs.CL", "physics.optics"], "hfpapers": ["cs.CL"]],
+                discoveryRunId: nil,
+                discoveryRunStatus: nil,
+                discoveryErrorMessage: nil,
+                hasReachedPollingLimit: false,
+                topicSummary: nil,
+                inferredTopics: []
+            )
+        )
+
+        let viewModel = OnboardingViewModel(
+            user: user,
+            service: OnboardingService.shared,
+            dictationService: FakeSpeechTranscriber(),
+            onboardingStateStore: store
+        )
+
+        XCTAssertEqual(viewModel.selectedAggregatorTopics["arxiv"], ["cs.CL"])
+        XCTAssertNil(viewModel.selectedAggregatorTopics["hfpapers"])
+    }
+
+    func testLegacyBrutalistTopicsDecodeIntoBrutalistEntry() throws {
+        let user = makeUser(id: 47)
+        let legacyJSON = """
+        {"\(user.id)": {
+            "step": 6,
+            "isPersonalized": true,
+            "selectedSuggestionIds": [],
+            "selectedAggregators": ["brutalist"],
+            "selectedBrutalistTopics": ["science", "sports"],
+            "hasReachedPollingLimit": false,
+            "inferredTopics": []
+        }}
+        """
+        defaults.set(Data(legacyJSON.utf8), forKey: "onboarding_progress")
+
+        let snapshot = try XCTUnwrap(store.progress(userId: user.id))
+        XCTAssertEqual(snapshot.selectedAggregatorTopics, ["brutalist": ["science", "sports"]])
+
+        let viewModel = OnboardingViewModel(
+            user: user,
+            service: OnboardingService.shared,
+            dictationService: FakeSpeechTranscriber(),
+            onboardingStateStore: store
+        )
+        XCTAssertEqual(viewModel.step, .aggregators)
         XCTAssertEqual(viewModel.selectedAggregators, ["brutalist"])
-        XCTAssertEqual(viewModel.selectedBrutalistTopics, ["science"])
+        XCTAssertEqual(viewModel.selectedAggregatorTopics["brutalist"], ["science", "sports"])
+        XCTAssertEqual(
+            viewModel.selectedAggregatorTopics["arxiv"],
+            ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "stat.ML"]
+        )
     }
 
     func testLegacyFastNewsSnapshotRestoresToAggregatorStep() {
@@ -353,6 +451,40 @@ final class OnboardingStateStoreTests: XCTestCase {
 
         XCTAssertEqual(service.completedRequest?.discoveryRunId, 500)
         XCTAssertEqual(service.completedRequest?.selectedSuggestionIds, [501, 503])
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testCompletionSendsSelectedTopicsForAggregatorsWithTopicCatalogs() async {
+        let service = DeferredOnboardingService()
+        let viewModel = OnboardingViewModel(
+            user: makeUser(id: 51),
+            service: service,
+            dictationService: FakeSpeechTranscriber(),
+            onboardingStateStore: store
+        )
+        viewModel.selectedAggregators = ["arxiv", "hfpapers", "brutalist", "hackernews"]
+        viewModel.toggleAggregatorTopic("cs.CV", aggregatorKey: "arxiv")
+        viewModel.toggleAggregatorTopic("stat.ML", aggregatorKey: "arxiv")
+
+        await viewModel.completeOnboarding()
+
+        XCTAssertEqual(
+            service.completedRequest?.selectedAggregators,
+            [
+                OnboardingSelectedAggregator(key: "hackernews", title: "Hacker News"),
+                OnboardingSelectedAggregator(
+                    key: "brutalist",
+                    title: "Brutalist Report",
+                    topics: ["business", "politics", "science", "sports"]
+                ),
+                OnboardingSelectedAggregator(
+                    key: "arxiv",
+                    title: "arXiv",
+                    topics: ["cs.AI", "cs.CL", "cs.LG"]
+                ),
+                OnboardingSelectedAggregator(key: "hfpapers", title: "Hugging Face Papers"),
+            ]
+        )
         XCTAssertNil(viewModel.errorMessage)
     }
 

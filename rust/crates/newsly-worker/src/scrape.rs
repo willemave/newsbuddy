@@ -10,9 +10,10 @@ use newsly_db::{
     matching_scrape_config_ids, persist_scraped_content, persist_scraped_news,
     prepare_scrape_sources, record_first_edition_scrape_result,
 };
+use newsly_domain::AggregatorKey;
 use newsly_providers::{
-    AggregatorKey, FeedEntrySelection, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure,
-    ScrapeGateway, ScrapeProviderOutcome, ScrapedItem,
+    FeedEntrySelection, FeedScrapeTarget, RedditScrapeTarget, ScrapeFailure, ScrapeGateway,
+    ScrapeProviderOutcome, ScrapedItem,
 };
 use newsly_queue::{EnqueueRequest, OwnedWorkPlan, QueueKernel, TaskResult, TaskType};
 use serde_json::{Map, Value};
@@ -121,7 +122,7 @@ async fn execute_scrape(
                 .config
                 .get("key")
                 .and_then(Value::as_str)
-                .and_then(AggregatorKey::parse)
+                .and_then(AggregatorKey::from_key)
                 .is_some_and(|key| request.sources.contains(&RequestedSource::Aggregator(key)))
     });
     if config_id.is_some() && prepared.configs.is_empty() {
@@ -411,7 +412,7 @@ fn build_source_plans(
                                 .config
                                 .get("key")
                                 .and_then(Value::as_str)
-                                .is_some_and(|value| AggregatorKey::parse(value) == Some(key))
+                                .is_some_and(|value| AggregatorKey::from_key(value) == Some(key))
                     })
                     .map(|config| config.id)
                     .collect::<Vec<_>>();
@@ -839,7 +840,7 @@ impl ScrapeFinalizer {
                     }
                     Ok(_) => None,
                 };
-                let config_ids = if AggregatorKey::parse(&outcome.source).is_some() {
+                let config_ids = if AggregatorKey::from_key(&outcome.source).is_some() {
                     vec![None]
                 } else {
                     outcome
@@ -878,7 +879,8 @@ impl ScrapeFinalizer {
                 );
             }
             if let Some(run_id) = self.request.first_edition_run_id
-                && (outcome.source == "reddit" || AggregatorKey::parse(&outcome.source).is_some())
+                && (outcome.source == "reddit"
+                    || AggregatorKey::from_key(&outcome.source).is_some())
                 && failures.configuration_is_current()
                 && !outcome.retryable_failure()
             {

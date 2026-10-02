@@ -13,7 +13,8 @@ struct OnboardingProgressSnapshot: Codable {
     var suggestions: OnboardingFastDiscoverResponse?
     var selectedSuggestionIds: [Int]
     var selectedAggregators: [String] = []
-    var selectedBrutalistTopics: [String] = []
+    /// Selected topic values keyed by aggregator key.
+    var selectedAggregatorTopics: [String: [String]] = [:]
     var discoveryRunId: Int?
     var discoveryRunStatus: String?
     var discoveryErrorMessage: String?
@@ -23,9 +24,17 @@ struct OnboardingProgressSnapshot: Codable {
 }
 
 // Backwards-compatible decoder: snapshots written before fast-news landed have
-// no `selectedAggregators`/`selectedBrutalistTopics` keys. Defining the decoder
+// no `selectedAggregators` key. Defining the decoder
 // in an extension preserves Swift's synthesized memberwise init.
 extension OnboardingProgressSnapshot {
+    // Snapshots saved before per-aggregator topics stored Brutalist topics under
+    // `selectedBrutalistTopics`. Remove this legacy key once app builds that wrote
+    // it (pre-arXiv onboarding, October 2026) can no longer have in-progress
+    // onboarding saved on device.
+    private enum LegacyCodingKeys: String, CodingKey {
+        case selectedBrutalistTopics
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         step = try container.decode(OnboardingStep.self, forKey: .step)
@@ -36,8 +45,16 @@ extension OnboardingProgressSnapshot {
             (try? container.decode([Int].self, forKey: .selectedSuggestionIds)) ?? []
         selectedAggregators =
             (try? container.decode([String].self, forKey: .selectedAggregators)) ?? []
-        selectedBrutalistTopics =
-            (try? container.decode([String].self, forKey: .selectedBrutalistTopics)) ?? []
+        if let topics = try? container.decode(
+            [String: [String]].self, forKey: .selectedAggregatorTopics)
+        {
+            selectedAggregatorTopics = topics
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            let brutalistTopics =
+                (try? legacy.decode([String].self, forKey: .selectedBrutalistTopics)) ?? []
+            selectedAggregatorTopics = brutalistTopics.isEmpty ? [:] : ["brutalist": brutalistTopics]
+        }
         discoveryRunId = try container.decodeIfPresent(Int.self, forKey: .discoveryRunId)
         discoveryRunStatus = try container.decodeIfPresent(String.self, forKey: .discoveryRunStatus)
         discoveryErrorMessage = try container.decodeIfPresent(

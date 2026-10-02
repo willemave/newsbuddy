@@ -23,10 +23,10 @@ struct OnboardingAggregatorsStep: View {
 
                     OnboardingAggregatorSection(
                         selectedAggregators: viewModel.selectedAggregators,
-                        selectedBrutalistTopics: viewModel.selectedBrutalistTopics,
+                        selectedAggregatorTopics: viewModel.selectedAggregatorTopics,
                         reduceMotion: reduceMotion,
                         onToggleAggregator: viewModel.toggleAggregator,
-                        onToggleBrutalistTopic: viewModel.toggleBrutalistTopic
+                        onToggleAggregatorTopic: viewModel.toggleAggregatorTopic
                     )
                 }
                 .padding(.horizontal, Spacing.appHorizontalMargin)
@@ -78,10 +78,10 @@ struct OnboardingAggregatorsStep: View {
 
 private struct OnboardingAggregatorSection: View {
     let selectedAggregators: Set<String>
-    let selectedBrutalistTopics: Set<String>
+    let selectedAggregatorTopics: [String: Set<String>]
     let reduceMotion: Bool
     let onToggleAggregator: (OnboardingAggregatorOption) -> Void
-    let onToggleBrutalistTopic: (String) -> Void
+    let onToggleAggregatorTopic: (_ topic: String, _ aggregatorKey: String) -> Void
 
     var body: some View {
         VStack(spacing: 8) {
@@ -93,7 +93,6 @@ private struct OnboardingAggregatorSection: View {
 
     private func aggregatorRow(option: OnboardingAggregatorOption) -> some View {
         let isSelected = selectedAggregators.contains(option.key)
-        let isBrutalist = option.key == "brutalist"
         return VStack(alignment: .leading, spacing: 10) {
             Button {
                 onToggleAggregator(option)
@@ -140,8 +139,8 @@ private struct OnboardingAggregatorSection: View {
             .buttonStyle(OnboardingTextButtonStyle())
             .accessibilityIdentifier("onboarding.fastnews.aggregator.\(option.key)")
 
-            if isBrutalist && isSelected {
-                brutalistTopicChips
+            if isSelected && !option.topics.isEmpty {
+                topicChips(for: option)
                     .padding(.leading, 48)
                     .padding(.trailing, 12)
                     .padding(.bottom, 4)
@@ -154,20 +153,21 @@ private struct OnboardingAggregatorSection: View {
         )
     }
 
-    private var brutalistTopicChips: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func topicChips(for option: OnboardingAggregatorOption) -> some View {
+        let selectedTopics = selectedAggregatorTopics[option.key] ?? []
+        return VStack(alignment: .leading, spacing: 8) {
             Text("TOPICS")
                 .font(.editorialMeta)
                 .tracking(1.4)
                 .foregroundColor(.onSurfaceTertiary)
 
             FlowLayout(spacing: 6) {
-                ForEach(onboardingBrutalistTopics, id: \.self) { topic in
-                    let isOn = selectedBrutalistTopics.contains(topic)
+                ForEach(option.topics) { topic in
+                    let isOn = selectedTopics.contains(topic.value)
                     Button {
-                        onToggleBrutalistTopic(topic)
+                        onToggleAggregatorTopic(topic.value, option.key)
                     } label: {
-                        Text(topic.capitalized)
+                        Text(topic.label)
                             .font(.appCaption.weight(.semibold))
                             .foregroundColor(
                                 isOn
@@ -195,7 +195,7 @@ private struct OnboardingAggregatorSection: View {
                             )
                     }
                     .buttonStyle(OnboardingTextButtonStyle())
-                    .accessibilityIdentifier("onboarding.fastnews.brutalist.topic.\(topic)")
+                    .accessibilityIdentifier("onboarding.fastnews.\(option.key).topic.\(topic.value)")
                 }
             }
         }

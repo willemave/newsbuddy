@@ -271,23 +271,15 @@ pub struct NewsListPage {
     pub total: i64,
 }
 
+// Subscriptions are materialized once per query; `aggregator_config_admits` (migration-owned)
+// is the single visibility rule for global aggregator items.
 const VISIBLE_NEWS_CTE: &str = r#"
-WITH valid_aggregators AS (
-    SELECT
-        lower(btrim(config::jsonb ->> 'key')) AS source_key,
-        CASE
-            WHEN jsonb_typeof(config::jsonb -> 'topics') = 'array'
-            THEN config::jsonb -> 'topics'
-            ELSE '[]'::jsonb
-        END AS topics
+WITH subscribed_aggregators AS MATERIALIZED (
+    SELECT config::jsonb AS config
     FROM user_scraper_configs
-    WHERE user_id::bigint = $1::bigint
+    WHERE user_id = $1::bigint
       AND scraper_type = 'aggregator'
       AND is_active IS TRUE
-      AND lower(btrim(config::jsonb ->> 'key')) = ANY(ARRAY[
-          'brutalist', 'finurls', 'hackernews', 'mediagazer',
-          'memeorandum', 'sciurls', 'techmeme'
-      ])
 )
 "#;
 
@@ -300,19 +292,8 @@ AND (
         news.visibility_scope = 'global'
         AND EXISTS (
             SELECT 1
-            FROM valid_aggregators AS aggregator
-            WHERE lower(news.platform) = aggregator.source_key
-              AND (
-                  aggregator.source_key <> 'brutalist'
-                  OR jsonb_array_length(aggregator.topics) = 0
-                  OR EXISTS (
-                      SELECT 1
-                      FROM jsonb_array_elements_text(aggregator.topics) AS topic(value)
-                      WHERE lower(btrim(topic.value)) = lower(btrim(
-                          news.raw_metadata::jsonb #>> '{aggregator,topic}'
-                      ))
-                  )
-              )
+            FROM subscribed_aggregators AS subscription
+            WHERE aggregator_config_admits(subscription.config, news.platform, news.raw_metadata)
         )
     )
 )

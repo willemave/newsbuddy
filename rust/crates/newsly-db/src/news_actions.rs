@@ -34,28 +34,11 @@ pub async fn mark_visible_news_items_read(
                   AND EXISTS (
                       SELECT 1
                       FROM user_scraper_configs AS config
-                      WHERE config.user_id::bigint = $1::bigint
+                      WHERE config.user_id = $1::bigint
                         AND config.scraper_type = 'aggregator'
                         AND config.is_active IS TRUE
-                        AND lower(btrim(COALESCE(config.config::jsonb ->> 'key', ''))) =
-                            lower(btrim(COALESCE(news_item.platform, '')))
-                        AND lower(btrim(COALESCE(config.config::jsonb ->> 'key', ''))) = ANY(
-                            ARRAY[
-                                'brutalist', 'finurls', 'hackernews', 'mediagazer',
-                                'memeorandum', 'sciurls', 'techmeme'
-                            ]::text[]
-                        )
-                        AND (
-                            lower(btrim(COALESCE(config.config::jsonb ->> 'key', ''))) <> 'brutalist'
-                            OR COALESCE(jsonb_typeof(config.config::jsonb -> 'topics'), 'null') <> 'array'
-                            OR jsonb_array_length(config.config::jsonb -> 'topics') = 0
-                            OR lower(btrim(COALESCE(
-                                news_item.raw_metadata::jsonb #>> '{aggregator,topic}',
-                                ''
-                            ))) IN (
-                                SELECT lower(btrim(topic))
-                                FROM jsonb_array_elements_text(config.config::jsonb -> 'topics') AS topic
-                            )
+                        AND aggregator_config_admits(
+                            config.config::jsonb, news_item.platform, news_item.raw_metadata
                         )
                   )
               )
